@@ -51,3 +51,34 @@
 下一步建议：
 - 引入 ACP 会话/消息转发 API，并与前端通信对接。
 - 加入数据库层（Drizzle + sqlite3）用于会话与消息持久化。
+
+## 会话与消息 API（SSE）
+
+### 实施前：目标与计划
+
+目标：
+- 提供创建会话、发送消息与 SSE 推送的 API，前端可直接消费。
+- 统一 ACP 会话与消息生命周期，确保连接失败可感知。
+
+计划：
+1. 扩展 `OpencodeConnection`，增加会话创建与消息发送封装。
+2. 增加 SSE 推送通道，转发 ACP `sessionUpdate` 通知。
+3. Express 新增会话/消息相关接口，支持前端接入。
+
+### 实施前：接口草案
+
+- `POST /acp/session`：创建新会话，返回 `sessionId`。
+- `POST /acp/message`：发送用户消息，返回 `stopReason` 等结果。
+- `GET /acp/session/stream`：SSE 推送 `sessionUpdate`，按 `sessionId` 过滤。
+
+### 实施后：实现记录
+
+已完成内容：
+- 扩展 `OpencodeConnection`，新增会话创建、消息发送与更新订阅能力。
+- 连接 `opencode` 时改为 `stderr` 管道输出，便于后续日志追踪。
+- 新增会话/消息 API 与 SSE 通道，对外提供最小交互能力。
+
+关键实现点：
+- SSE 接口使用 `sessionId` 过滤通知并周期性发送 `ping`。
+- 消息发送使用 ACP `prompt` 接口，正文封装为 `text` 类型 `ContentBlock`。
+- 统一错误返回结构，便于前端处理失败提示。

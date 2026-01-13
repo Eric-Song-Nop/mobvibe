@@ -1,10 +1,16 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { Readable, Writable } from "node:stream";
 import {
-	ClientSideConnection,
-	PROTOCOL_VERSION,
-	ndJsonStream,
 	type Client,
+	ClientSideConnection,
+	type ContentBlock,
+	ndJsonStream,
+	PROTOCOL_VERSION,
+	type PromptResponse,
+	type RequestPermissionRequest,
+	type RequestPermissionResponse,
+	type SessionNotification,
 } from "@agentclientprotocol/sdk";
 
 type ClientInfo = {
@@ -36,11 +42,25 @@ const getErrorMessage = (error: unknown) => {
 	return String(error);
 };
 
-const buildClient = (): Client => ({
-	async requestPermission() {
+type SessionUpdateListener = (notification: SessionNotification) => void;
+
+type ClientHandlers = {
+	onSessionUpdate: (notification: SessionNotification) => void;
+	onRequestPermission?: (
+		params: RequestPermissionRequest,
+	) => Promise<RequestPermissionResponse>;
+};
+
+const buildClient = (handlers: ClientHandlers): Client => ({
+	async requestPermission(params) {
+		if (handlers.onRequestPermission) {
+			return handlers.onRequestPermission(params);
+		}
 		return { outcome: { outcome: "cancelled" } };
 	},
-	async sessionUpdate() {},
+	async sessionUpdate(params) {
+		handlers.onSessionUpdate(params);
+	},
 });
 
 const formatExitMessage = (
@@ -64,6 +84,10 @@ export class OpencodeConnection {
 	private connectedAt?: Date;
 	private lastError?: string;
 	private sessionId?: string;
+	private readonly sessionUpdateEmitter = new EventEmitter();
+	private permissionHandler?: (
+		params: RequestPermissionRequest,
+	) => Promise<RequestPermissionResponse>;
 
 	constructor(
 		private readonly options: {
@@ -85,6 +109,21 @@ export class OpencodeConnection {
 		};
 	}
 
+	setPermissionHandler(
+		handler?: (
+			params: RequestPermissionRequest,
+		) => Promise<RequestPermissionResponse>,
+	) {
+		this.permissionHandler = handler;
+	}
+
+	onSessionUpdate(listener: SessionUpdateListener) {
+		this.sessionUpdateEmitter.on("update", listener);
+		return () => {
+			this.sessionUpdateEmitter.off("update", listener);
+		};
+	}
+
 	async connect(): Promise<void> {
 		if (this.state === "connecting" || this.state === "ready") {
 			return;
@@ -95,14 +134,25 @@ export class OpencodeConnection {
 
 		try {
 			const child = spawn(this.options.command, this.options.args, {
-				stdio: ["pipe", "pipe", "inherit"],
+				stdio: ["pipe", "pipe", "pipe"],
 			});
 			this.process = child;
+			this.sessionId = undefined;
+			child.stderr.pipe(process.stderr);
 
-			const input = Writable.toWeb(child.stdin);
-			const output = Readable.toWeb(child.stdout);
+			const input = Writable.toWeb(child.stdin) as WritableStream<Uint8Array>;
+			const output = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
 			const stream = ndJsonStream(input, output);
-			const connection = new ClientSideConnection(buildClient, stream);
+			const connection = new ClientSideConnection(
+				() =>
+					buildClient({
+						onSessionUpdate: (notification) =>
+							this.emitSessionUpdate(notification),
+						onRequestPermission: (params) =>
+							this.handlePermissionRequest(params),
+					}),
+				stream,
+			);
 			this.connection = connection;
 
 			child.once("error", (error) => {
@@ -135,12 +185,10 @@ export class OpencodeConnection {
 				clientCapabilities: {},
 			});
 
-			const session = await connection.newSession({
-				cwd: process.cwd(),
-				mcpServers: [],
-			});
-
-			this.sessionId = session.sessionId;
+			this.sessionId = await this.createSessionInternal(
+				connection,
+				process.cwd(),
+			);
 			this.connectedAt = new Date();
 			this.state = "ready";
 		} catch (error) {
@@ -149,6 +197,24 @@ export class OpencodeConnection {
 			await this.stopProcess();
 			throw error;
 		}
+	}
+
+	async createSession(options?: { cwd?: string }): Promise<string> {
+		const connection = await this.ensureReady();
+		const sessionId = await this.createSessionInternal(
+			connection,
+			options?.cwd ?? process.cwd(),
+		);
+		this.sessionId = sessionId;
+		return sessionId;
+	}
+
+	async prompt(
+		sessionId: string,
+		prompt: ContentBlock[],
+	): Promise<PromptResponse> {
+		const connection = await this.ensureReady();
+		return connection.prompt({ sessionId, prompt });
 	}
 
 	async disconnect(): Promise<void> {
@@ -161,6 +227,42 @@ export class OpencodeConnection {
 		await this.stopProcess();
 		await this.closedPromise;
 		this.connection = undefined;
+	}
+
+	private async ensureReady(): Promise<ClientSideConnection> {
+		if (this.state !== "ready" || !this.connection) {
+			await this.connect();
+		}
+
+		if (!this.connection || this.state !== "ready") {
+			throw new Error("opencode connection unavailable");
+		}
+
+		return this.connection;
+	}
+
+	private async createSessionInternal(
+		connection: ClientSideConnection,
+		cwd: string,
+	): Promise<string> {
+		const session = await connection.newSession({
+			cwd,
+			mcpServers: [],
+		});
+		return session.sessionId;
+	}
+
+	private emitSessionUpdate(notification: SessionNotification) {
+		this.sessionUpdateEmitter.emit("update", notification);
+	}
+
+	private async handlePermissionRequest(
+		params: RequestPermissionRequest,
+	): Promise<RequestPermissionResponse> {
+		if (this.permissionHandler) {
+			return this.permissionHandler(params);
+		}
+		return { outcome: { outcome: "cancelled" } };
 	}
 
 	private async stopProcess(): Promise<void> {

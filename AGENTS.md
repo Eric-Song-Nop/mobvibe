@@ -51,3 +51,10 @@ The UI, which is just an AI chat app.
 - Stick to types and design of Agent Client Protocol and corresponding SDKs.
 - For UI, always use Shadcn UI components whenever possible.
 o Mobile UI first, responsive, accessible, and with a focus on performance.
+- Always go to <https://agentclientprotocol.github.io/typescript-sdk/> for ACP SDK documentation.
+
+### Useful Commands
+
+- `pnpm dev`: Starts the backend server and frontend dev server.
+- `pnpm format`: Formats the code.
+- `pnpm lint`: Lints the code.

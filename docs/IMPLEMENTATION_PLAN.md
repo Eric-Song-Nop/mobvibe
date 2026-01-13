@@ -9,6 +9,7 @@
 
 - [x] 后端：已完成 `apps/server` 工程初始化、`opencode acp` 连接、健康检查与状态接口（详见 `docs/backend-server-setup.md`）。
 - [x] 前端：已修复初始化渲染问题（`class`/`for` 属性与 React 去重）（详见 `docs/frontend-init-fix.md`）。
+- [x] ACP：补充协议实现跟踪文档（详见 `docs/acp-protocol-implementation.md`）。
 
 ## MVP 范围
 
@@ -26,7 +27,7 @@
 
 ### M1：后端 API 与 ACP 会话能力（基础可用）
 
-- [ ] 增加后端 API：创建会话、发送消息、拉取增量/流式响应。
+- [x] 增加后端 API：创建会话、发送消息、拉取增量/流式响应。
 - [ ] 统一 ACP 连接状态与错误模型，前端可消费。
 - [ ] 确保 `opencode acp` 进程生命周期可控（断线重连、退出清理）。
 
