@@ -102,14 +102,14 @@ export function ComponentExample() {
 
 function CardExample() {
 	return (
-		<Example title="Card" class="items-center justify-center">
-			<Card class="relative w-full max-w-sm overflow-hidden pt-0">
-				<div class="bg-primary absolute inset-0 z-30 aspect-video opacity-50 mix-blend-color" />
+		<Example title="Card" className="items-center justify-center">
+			<Card className="relative w-full max-w-sm overflow-hidden pt-0">
+				<div className="bg-primary absolute inset-0 z-30 aspect-video opacity-50 mix-blend-color" />
 				<img
 					src="https://images.unsplash.com/photo-1604076850742-4c7221f3101b?q=80&w=1887&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D"
 					alt="Photo by mymind on Unsplash"
 					title="Photo by mymind on Unsplash"
-					class="relative z-20 aspect-video w-full object-cover brightness-60 grayscale"
+					className="relative z-20 aspect-video w-full object-cover brightness-60 grayscale"
 				/>
 				<CardHeader>
 					<CardTitle>Observability Plus is replacing Monitoring</CardTitle>
@@ -148,7 +148,7 @@ function CardExample() {
 							</AlertDialogFooter>
 						</AlertDialogContent>
 					</AlertDialog>
-					<Badge variant="secondary" class="ml-auto">
+					<Badge variant="secondary" className="ml-auto">
 						Warning
 					</Badge>
 				</CardFooter>
@@ -175,7 +175,7 @@ function FormExample() {
 
 	return (
 		<Example title="Form">
-			<Card class="w-full max-w-md">
+			<Card className="w-full max-w-md">
 				<CardHeader>
 					<CardTitle>User Information</CardTitle>
 					<CardDescription>Please fill in your details below</CardDescription>
@@ -187,10 +187,10 @@ function FormExample() {
 										icon={MoreVerticalCircle01Icon}
 										strokeWidth={2}
 									/>
-									<span class="sr-only">More options</span>
+									<span className="sr-only">More options</span>
 								</Button>
 							</DropdownMenuTrigger>
-							<DropdownMenuContent align="end" class="w-56">
+							<DropdownMenuContent align="end" className="w-56">
 								<DropdownMenuGroup>
 									<DropdownMenuLabel>File</DropdownMenuLabel>
 									<DropdownMenuItem>
@@ -452,9 +452,9 @@ function FormExample() {
 				<CardContent>
 					<form>
 						<FieldGroup>
-							<div class="grid grid-cols-2 gap-4">
+							<div className="grid grid-cols-2 gap-4">
 								<Field>
-									<FieldLabel for="small-form-name">Name</FieldLabel>
+									<FieldLabel htmlFor="small-form-name">Name</FieldLabel>
 									<Input
 										id="small-form-name"
 										placeholder="Enter your name"
@@ -462,7 +462,7 @@ function FormExample() {
 									/>
 								</Field>
 								<Field>
-									<FieldLabel for="small-form-role">Role</FieldLabel>
+									<FieldLabel htmlFor="small-form-role">Role</FieldLabel>
 									<Select defaultValue="">
 										<SelectTrigger id="small-form-role">
 											<SelectValue placeholder="Select a role" />
@@ -479,7 +479,9 @@ function FormExample() {
 								</Field>
 							</div>
 							<Field>
-								<FieldLabel for="small-form-framework">Framework</FieldLabel>
+								<FieldLabel htmlFor="small-form-framework">
+									Framework
+								</FieldLabel>
 								<Combobox items={frameworks}>
 									<ComboboxInput
 										id="small-form-framework"
@@ -499,7 +501,7 @@ function FormExample() {
 								</Combobox>
 							</Field>
 							<Field>
-								<FieldLabel for="small-form-comments">Comments</FieldLabel>
+								<FieldLabel htmlFor="small-form-comments">Comments</FieldLabel>
 								<Textarea
 									id="small-form-comments"
 									placeholder="Add any additional comments"
