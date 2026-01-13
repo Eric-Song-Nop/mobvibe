@@ -33,10 +33,35 @@
 
 ### M2：前端聊天体验（可交互）
 
-- [ ] 采用 Shadcn UI 组件搭建聊天布局与输入框。
-- [ ] 使用 Streamdown 渲染消息内容。
-- [ ] 集成 Tanstack Query + Zustand 管理消息与状态。
-- [ ] 展示 ACP 连接状态、错误提示与重试入口。
+- [x] 采用 Shadcn UI 组件搭建聊天布局与输入框。
+- [x] 使用 Streamdown 渲染消息内容。
+- [x] 集成 Tanstack Query + Zustand 管理消息与状态。
+- [x] 展示 ACP 连接状态、错误提示与重试入口。
+
+#### M2 前端聊天实现计划（实现前）
+
+- 目标：完成最小可用聊天页，可创建会话、发送消息、接收 SSE 流式更新。
+- 页面结构：顶部状态栏（连接状态 + 会话 ID）、中部消息流、底部输入区。
+- 状态模型：
+  - Zustand 维护 `sessionId`、消息列表、输入状态、连接状态。
+  - Tanstack Query 负责 `GET /acp/opencode` 轮询状态（默认 5s）。
+- API 调用：
+  - `POST /acp/session` 创建会话，返回 `sessionId`。
+  - `POST /acp/message` 发送消息，返回 `stopReason`。
+  - `GET /acp/session/stream` 使用 `EventSource` 订阅 `session_update`。
+- 流式渲染：
+  - 按 `sessionUpdate` 类型累计消息内容（用户/助手）。
+  - 使用 Streamdown 渲染消息正文。
+- 错误提示：统一展示请求失败与连接异常文案，并允许重试。
+
+#### M2 前端聊天实现记录（实现后）
+
+- 前端依赖：引入 `@tanstack/react-query`、`zustand`、`streamdown` 支撑状态与流式渲染。
+- API 接入：新增 `apps/web/src/lib/api.ts`，默认使用 `http://localhost:3757` 连接后端接口。
+- 状态管理：新增 `apps/web/src/lib/chat-store.ts`，维护会话、消息列表、输入与错误状态。
+- SSE 订阅：在聊天页创建 `EventSource` 监听 `session_update`，增量拼接助手消息。
+- 连接保护：仅在 ACP 状态为 `ready` 时创建会话与发送消息。
+- UI 落地：`apps/web/src/App.tsx` 完成最小聊天页布局与状态栏展示。
 
 ### M3：最小持久化（增强）
 

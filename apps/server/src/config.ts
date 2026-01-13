@@ -4,6 +4,7 @@ export type ServerConfig = {
 	opencodeArgs: string[];
 	clientName: string;
 	clientVersion: string;
+	corsOrigins: string[];
 };
 
 const parsePort = (value: string) => {
@@ -19,6 +20,16 @@ const parseArgs = (value: string) => {
 	return trimmed.length > 0 ? trimmed.split(/\s+/) : [];
 };
 
+const parseOrigins = (value: string | undefined) => {
+	if (!value) {
+		return [];
+	}
+	return value
+		.split(",")
+		.map((origin) => origin.trim())
+		.filter((origin) => origin.length > 0);
+};
+
 export const getServerConfig = (): ServerConfig => {
 	const env = process.env;
 
@@ -28,5 +39,6 @@ export const getServerConfig = (): ServerConfig => {
 		opencodeArgs: parseArgs(env.MOBVIBE_OPENCODE_ARGS ?? "acp"),
 		clientName: env.MOBVIBE_ACP_CLIENT_NAME ?? "mobvibe-backend",
 		clientVersion: env.MOBVIBE_ACP_CLIENT_VERSION ?? "0.0.0",
+		corsOrigins: parseOrigins(env.MOBVIBE_CORS_ORIGINS),
 	};
 };

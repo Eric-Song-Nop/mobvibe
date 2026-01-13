@@ -82,3 +82,23 @@
 - SSE 接口使用 `sessionId` 过滤通知并周期性发送 `ping`。
 - 消息发送使用 ACP `prompt` 接口，正文封装为 `text` 类型 `ContentBlock`。
 - 统一错误返回结构，便于前端处理失败提示。
+
+## 跨域访问支持（CORS）
+
+### 实施前：目标与计划
+
+目标：
+- 允许前端 WebUI 通过浏览器调用后端接口，解决开发阶段 CORS 报错。
+- 覆盖 REST API 与 SSE 接口的跨域请求。
+
+计划：
+1. 在 Express 中增加轻量 CORS 中间件，统一写入响应头。
+2. 允许来源默认包含 `http://localhost:5173`，并支持环境变量扩展。
+3. 处理 `OPTIONS` 预检请求，返回 204。
+
+### 实施后：实现记录
+
+已完成内容：
+- 增加 CORS 中间件，允许 `Origin` 在白名单内时放行。
+- 默认允许 `http://localhost:5173`，可通过 `MOBVIBE_CORS_ORIGINS` 追加来源。
+- 预检请求统一返回 204，SSE 也能复用同一套跨域头。

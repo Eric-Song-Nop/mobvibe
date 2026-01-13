@@ -15,6 +15,30 @@ const opencode = new OpencodeConnection({
 
 const app = express();
 
+const defaultCorsOrigins = new Set(["http://localhost:5173"]);
+const allowedCorsOrigins = new Set([
+	...defaultCorsOrigins,
+	...config.corsOrigins,
+]);
+
+app.use((request, response, next) => {
+	const origin = request.headers.origin;
+	if (origin && allowedCorsOrigins.has(origin)) {
+		response.setHeader("Access-Control-Allow-Origin", origin);
+		response.setHeader("Vary", "Origin");
+		response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+		response.setHeader(
+			"Access-Control-Allow-Headers",
+			"Content-Type, Authorization",
+		);
+	}
+	if (request.method === "OPTIONS") {
+		response.status(204).end();
+		return;
+	}
+	next();
+});
+
 app.use(express.json());
 
 const getErrorMessage = (error: unknown) => {
