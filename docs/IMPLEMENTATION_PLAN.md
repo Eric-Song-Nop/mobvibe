@@ -108,6 +108,19 @@
 - 路由更新：`session_update` 按 `sessionId` 写入对应消息与元信息。
 - 生命周期：会话离开 `ready` 或关闭时关闭对应 SSE。
 
+### M8：App 组件拆分（实现前计划）
+
+- 目标：降低 `App.tsx` 复杂度，拆分侧边栏与消息组件。
+- 拆分范围：`SessionSidebar`/`SessionListItem`/`MessageItem` 独立组件文件。
+- 依赖约束：保持现有 props 结构与行为不变。
+- 目录规划：`apps/web/src/components/session` 与 `apps/web/src/components/chat`。
+
+#### M8 App 组件拆分（实现后）
+
+- 结构调整：`SessionSidebar`/`SessionListItem` 移至 `apps/web/src/components/session/SessionSidebar.tsx`。
+- 消息渲染：`MessageItem` 移至 `apps/web/src/components/chat/MessageItem.tsx`。
+- 主入口：`App.tsx` 保留容器逻辑与状态管理。
+
 ### M3：最小持久化（增强）
 
 - [ ] 引入 SQLite + Drizzle 保存会话与消息（仅必要字段）。
