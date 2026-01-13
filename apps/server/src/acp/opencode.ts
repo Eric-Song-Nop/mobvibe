@@ -5,6 +5,8 @@ import {
 	type Client,
 	ClientSideConnection,
 	type ContentBlock,
+	type Implementation,
+	type NewSessionResponse,
 	ndJsonStream,
 	PROTOCOL_VERSION,
 	type PromptResponse,
@@ -84,6 +86,7 @@ export class OpencodeConnection {
 	private connectedAt?: Date;
 	private lastError?: string;
 	private sessionId?: string;
+	private agentInfo?: Implementation;
 	private readonly sessionUpdateEmitter = new EventEmitter();
 	private permissionHandler?: (
 		params: RequestPermissionRequest,
@@ -109,6 +112,10 @@ export class OpencodeConnection {
 		};
 	}
 
+	getAgentInfo(): Implementation | undefined {
+		return this.agentInfo;
+	}
+
 	setPermissionHandler(
 		handler?: (
 			params: RequestPermissionRequest,
@@ -131,6 +138,7 @@ export class OpencodeConnection {
 
 		this.state = "connecting";
 		this.lastError = undefined;
+		this.agentInfo = undefined;
 
 		try {
 			const child = spawn(this.options.command, this.options.args, {
@@ -176,7 +184,7 @@ export class OpencodeConnection {
 				this.lastError = getErrorMessage(error);
 			});
 
-			await connection.initialize({
+			const initializeResponse = await connection.initialize({
 				protocolVersion: PROTOCOL_VERSION,
 				clientInfo: {
 					name: this.options.client.name,
@@ -185,10 +193,7 @@ export class OpencodeConnection {
 				clientCapabilities: {},
 			});
 
-			this.sessionId = await this.createSessionInternal(
-				connection,
-				process.cwd(),
-			);
+			this.agentInfo = initializeResponse.agentInfo ?? undefined;
 			this.connectedAt = new Date();
 			this.state = "ready";
 		} catch (error) {
@@ -199,14 +204,14 @@ export class OpencodeConnection {
 		}
 	}
 
-	async createSession(options?: { cwd?: string }): Promise<string> {
+	async createSession(options?: { cwd?: string }): Promise<NewSessionResponse> {
 		const connection = await this.ensureReady();
-		const sessionId = await this.createSessionInternal(
+		const response = await this.createSessionInternal(
 			connection,
 			options?.cwd ?? process.cwd(),
 		);
-		this.sessionId = sessionId;
-		return sessionId;
+		this.sessionId = response.sessionId;
+		return response;
 	}
 
 	async prompt(
@@ -224,6 +229,7 @@ export class OpencodeConnection {
 
 		this.state = "stopped";
 		this.sessionId = undefined;
+		this.agentInfo = undefined;
 		await this.stopProcess();
 		await this.closedPromise;
 		this.connection = undefined;
@@ -244,12 +250,12 @@ export class OpencodeConnection {
 	private async createSessionInternal(
 		connection: ClientSideConnection,
 		cwd: string,
-	): Promise<string> {
+	): Promise<NewSessionResponse> {
 		const session = await connection.newSession({
 			cwd,
 			mcpServers: [],
 		});
-		return session.sessionId;
+		return session;
 	}
 
 	private emitSessionUpdate(notification: SessionNotification) {

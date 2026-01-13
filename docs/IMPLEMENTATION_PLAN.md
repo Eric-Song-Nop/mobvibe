@@ -63,6 +63,38 @@
 - 连接保护：仅在 ACP 状态为 `ready` 时创建会话与发送消息。
 - UI 落地：`apps/web/src/App.tsx` 完成最小聊天页布局与状态栏展示。
 
+### M5：多会话并发（实现前计划）
+
+- 目标：后端支持多进程多会话并行，前端支持会话列表与切换，切换不丢消息。
+- 架构：每个 session 对应一个 `opencode acp` 进程与 ACP 连接，后端维护 `sessionId -> runner` 映射。
+- 会话生命周期：支持创建、关闭、错误状态记录；不做自动过期关闭。
+- SSE 方案：单 session 单 SSE；前端仅为当前激活会话建立连接并按 `sessionId` 路由更新。
+- API 调整：新增 `GET /acp/sessions` 列表与 `POST /acp/session/close` 关闭接口，保留 `POST /acp/session`、`POST /acp/message`、`GET /acp/session/stream`。
+- 前端 UI：左侧会话列表（移动端抽屉/折叠），支持新建、切换、重命名、关闭。
+
+#### M5 多会话并发实现记录（实现后）
+
+- 后端：新增 `SessionManager` 管理多进程会话，按 `sessionId` 管理连接、状态与更新时间。
+- 接口：新增会话列表与关闭接口，并支持会话重命名。
+- SSE：切换会话时按 `sessionId` 建立单会话 SSE 订阅。
+- 前端：引入会话侧边栏 + 移动端抽屉，切换不丢消息，支持重命名与关闭。
+
+### M6：会话元信息展示（实现前计划）
+
+- 目标：在输入框下方展示 Agent 名称、模型与会话模式（Badge 形式）。
+- 数据来源：
+  - Agent 名称来自 `initialize` 的 `agentInfo`。
+  - 模型信息来自 `newSession` 的 `models`（`currentModelId` + `availableModels`）。
+  - 会话模式来自 `newSession` 的 `modes` 与后续 `current_mode_update` 更新。
+- 后端：在会话摘要中附带 `agentName`、`modelName/modelId`、`modeName/modeId`。
+- 前端：Zustand 状态存储元信息，SSE 监听 `current_mode_update` 实时更新模式。
+
+#### M6 会话元信息展示（实现后）
+
+- 后端：会话摘要返回 Agent/模型/模式字段，`current_mode_update` 更新会话模式。
+- 前端：Zustand 同步会话元信息，`session_info_update` 更新标题与时间戳。
+- UI：输入框下方使用三个 Badge 显示 Agent/Model/Mode，空值时隐藏。
+
 ### M3：最小持久化（增强）
 
 - [ ] 引入 SQLite + Drizzle 保存会话与消息（仅必要字段）。
@@ -77,9 +109,13 @@
 ## 关键接口草案（方向）
 
 - [ ] `GET /health`：服务健康状态。
-- [ ] `GET /acp/opencode`：连接状态、会话信息。
+- [ ] `GET /acp/opencode`：服务级连接状态。
+- [ ] `GET /acp/sessions`：列出当前会话列表。
 - [ ] `POST /acp/session`：创建新会话。
+- [ ] `PATCH /acp/session`：更新会话标题。
+- [ ] `POST /acp/session/close`：关闭指定会话。
 - [ ] `POST /acp/message`：发送消息（支持流式或轮询）。
+- [ ] `GET /acp/session/stream`：订阅指定会话 SSE。
 
 ## 风险与缓解
 

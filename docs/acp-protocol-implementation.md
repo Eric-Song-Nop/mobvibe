@@ -15,9 +15,9 @@
 ### 已实现
 
 - `initialize`：连接建立时完成协议版本与 Client 信息握手。
-- `newSession`：启动后默认创建会话，支持额外创建新会话。
+- `newSession`：按需创建多个会话，每个会话独立进程。
 - `prompt`：发送用户消息并等待响应完成。
-- `sessionUpdate`：接收 Agent 推送更新，转发到 SSE。
+- `sessionUpdate`：接收 Agent 推送更新，转发到 SSE，并同步 `current_mode_update`/`session_info_update` 元信息。
 
 ### 未实现
 
@@ -27,18 +27,21 @@
 
 ## 关键流程
 
-1. 后端启动后连接 `opencode acp`。
-2. `initialize` 完成协议协商。
-3. 创建会话并返回 `sessionId`。
+1. 前端请求创建会话，后端启动独立 `opencode acp` 进程。
+2. `initialize` 完成协议协商，并记录 `agentInfo`。
+3. 创建会话并返回 `sessionId` + 初始模型/模式元信息。
 4. 前端调用 `/acp/message` 发送用户消息。
-5. `sessionUpdate` 通过 SSE 推送给前端。
+5. `sessionUpdate` 通过 SSE 推送给前端，`current_mode_update` 实时更新会话模式。
 6. `prompt` 返回 `stopReason` 供前端判断完成状态。
 
 ## 后端 API 清单
 
 - `GET /health`：健康检查。
-- `GET /acp/opencode`：连接状态。
+- `GET /acp/opencode`：服务级连接状态。
+- `GET /acp/sessions`：会话列表。
 - `POST /acp/session`：创建新会话。
+- `PATCH /acp/session`：更新会话标题。
+- `POST /acp/session/close`：关闭会话。
 - `POST /acp/message`：发送消息。
 - `GET /acp/session/stream`：SSE 推送 `sessionUpdate`。
 

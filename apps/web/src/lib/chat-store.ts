@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { SessionState, SessionSummary } from "@/lib/api";
 
 export type ChatRole = "user" | "assistant";
 
@@ -10,29 +11,70 @@ export type ChatMessage = {
 	isStreaming: boolean;
 };
 
-type ChatState = {
-	sessionId?: string;
+export type ChatSession = {
+	sessionId: string;
+	title: string;
 	input: string;
 	messages: ChatMessage[];
 	streamingMessageId?: string;
 	sending: boolean;
 	error?: string;
-	setInput: (value: string) => void;
-	setSessionId: (value?: string) => void;
-	setSending: (value: boolean) => void;
-	setError: (value?: string) => void;
-	addUserMessage: (content: string) => void;
-	appendAssistantChunk: (content: string) => void;
-	finalizeAssistantMessage: () => void;
-	reset: () => void;
+	streamError?: string;
+	state?: SessionState;
+	lastError?: string;
+	createdAt?: string;
+	updatedAt?: string;
+	agentName?: string;
+	modelId?: string;
+	modelName?: string;
+	modeId?: string;
+	modeName?: string;
 };
 
-type ChatStateUpdater = (state: ChatState) => ChatState | Partial<ChatState>;
-
-type ChatStateSetter = (
-	partial: ChatState | Partial<ChatState> | ChatStateUpdater,
-	replace?: boolean,
-) => void;
+type ChatState = {
+	sessions: Record<string, ChatSession>;
+	activeSessionId?: string;
+	appError?: string;
+	setActiveSessionId: (value?: string) => void;
+	setAppError: (value?: string) => void;
+	createLocalSession: (
+		sessionId: string,
+		options?: {
+			title?: string;
+			state?: SessionState;
+			agentName?: string;
+			modelId?: string;
+			modelName?: string;
+			modeId?: string;
+			modeName?: string;
+		},
+	) => void;
+	syncSessions: (summaries: SessionSummary[]) => void;
+	removeSession: (sessionId: string) => void;
+	renameSession: (sessionId: string, title: string) => void;
+	setInput: (sessionId: string, value: string) => void;
+	setSending: (sessionId: string, value: boolean) => void;
+	setError: (sessionId: string, value?: string) => void;
+	setStreamError: (sessionId: string, value?: string) => void;
+	updateSessionMeta: (
+		sessionId: string,
+		payload: Partial<
+			Pick<
+				ChatSession,
+				| "title"
+				| "updatedAt"
+				| "agentName"
+				| "modelId"
+				| "modelName"
+				| "modeId"
+				| "modeName"
+			>
+		>,
+	) => void;
+	addUserMessage: (sessionId: string, content: string) => void;
+	appendAssistantChunk: (sessionId: string, content: string) => void;
+	finalizeAssistantMessage: (sessionId: string) => void;
+};
 
 const createMessage = (role: ChatRole, content: string): ChatMessage => ({
 	id: crypto.randomUUID(),
@@ -42,31 +84,229 @@ const createMessage = (role: ChatRole, content: string): ChatMessage => ({
 	isStreaming: true,
 });
 
-export const useChatStore = create<ChatState>((set: ChatStateSetter) => ({
-	sessionId: undefined,
+const createSessionState = (
+	sessionId: string,
+	options?: {
+		title?: string;
+		state?: SessionState;
+		agentName?: string;
+		modelId?: string;
+		modelName?: string;
+		modeId?: string;
+		modeName?: string;
+	},
+): ChatSession => ({
+	sessionId,
+	title: options?.title ?? "新对话",
 	input: "",
 	messages: [],
 	streamingMessageId: undefined,
 	sending: false,
 	error: undefined,
-	setInput: (value: string) => set({ input: value }),
-	setSessionId: (value?: string) => set({ sessionId: value }),
-	setSending: (value: boolean) => set({ sending: value }),
-	setError: (value?: string) => set({ error: value }),
-	addUserMessage: (content: string) =>
-		set((state: ChatState) => ({
-			messages: [
-				...state.messages,
-				{
-					...createMessage("user", content),
-					isStreaming: false,
+	streamError: undefined,
+	state: options?.state,
+	lastError: undefined,
+	createdAt: undefined,
+	updatedAt: undefined,
+	agentName: options?.agentName,
+	modelId: options?.modelId,
+	modelName: options?.modelName,
+	modeId: options?.modeId,
+	modeName: options?.modeName,
+});
+
+export const useChatStore = create<ChatState>((set) => ({
+	sessions: {},
+	activeSessionId: undefined,
+	appError: undefined,
+	setActiveSessionId: (value?: string) => set({ activeSessionId: value }),
+	setAppError: (value?: string) => set({ appError: value }),
+	createLocalSession: (sessionId, options) =>
+		set((state) => {
+			if (state.sessions[sessionId]) {
+				return state;
+			}
+			return {
+				sessions: {
+					...state.sessions,
+					[sessionId]: createSessionState(sessionId, options),
 				},
-			],
-		})),
-	appendAssistantChunk: (content: string) =>
+			};
+		}),
+	syncSessions: (summaries) =>
 		set((state: ChatState) => {
-			let { streamingMessageId } = state;
-			let messages = [...state.messages];
+			const nextSessions: Record<string, ChatSession> = {
+				...state.sessions,
+			};
+			const serverIds = new Set<string>();
+			summaries.forEach((summary) => {
+				serverIds.add(summary.sessionId);
+				const existing =
+					nextSessions[summary.sessionId] ??
+					createSessionState(summary.sessionId, {
+						title: summary.title,
+						state: summary.state,
+					});
+				nextSessions[summary.sessionId] = {
+					...existing,
+					title: summary.title ?? existing.title,
+					state: summary.state,
+					lastError: summary.lastError,
+					createdAt: summary.createdAt,
+					updatedAt: summary.updatedAt,
+					agentName: summary.agentName ?? existing.agentName,
+					modelId: summary.modelId ?? existing.modelId,
+					modelName: summary.modelName ?? existing.modelName,
+					modeId: summary.modeId ?? existing.modeId,
+					modeName: summary.modeName ?? existing.modeName,
+				};
+			});
+
+			Object.keys(nextSessions).forEach((sessionId) => {
+				if (!serverIds.has(sessionId)) {
+					const session = nextSessions[sessionId];
+					if (session.state !== "stopped") {
+						nextSessions[sessionId] = {
+							...session,
+							state: "stopped",
+							lastError: session.lastError ?? "会话已结束或被关闭",
+						};
+					}
+				}
+			});
+
+			return { sessions: nextSessions };
+		}),
+	removeSession: (sessionId: string) =>
+		set((state) => {
+			const { [sessionId]: _, ...rest } = state.sessions;
+			const nextActive =
+				state.activeSessionId === sessionId ? undefined : state.activeSessionId;
+			return { sessions: rest, activeSessionId: nextActive };
+		}),
+	renameSession: (sessionId, title) =>
+		set((state) => {
+			const session = state.sessions[sessionId];
+			if (!session) {
+				return state;
+			}
+			return {
+				sessions: {
+					...state.sessions,
+					[sessionId]: { ...session, title },
+				},
+			};
+		}),
+	setInput: (sessionId, value) =>
+		set((state) => {
+			const session = state.sessions[sessionId];
+			if (!session) {
+				return state;
+			}
+			return {
+				sessions: {
+					...state.sessions,
+					[sessionId]: { ...session, input: value },
+				},
+			};
+		}),
+	setSending: (sessionId, value) =>
+		set((state) => {
+			const session = state.sessions[sessionId];
+			if (!session) {
+				return state;
+			}
+			return {
+				sessions: {
+					...state.sessions,
+					[sessionId]: { ...session, sending: value },
+				},
+			};
+		}),
+	setError: (sessionId, value) =>
+		set((state) => {
+			const session = state.sessions[sessionId];
+			if (!session) {
+				return state;
+			}
+			return {
+				sessions: {
+					...state.sessions,
+					[sessionId]: { ...session, error: value },
+				},
+			};
+		}),
+	setStreamError: (sessionId, value) =>
+		set((state) => {
+			const session = state.sessions[sessionId];
+			if (!session) {
+				return state;
+			}
+			return {
+				sessions: {
+					...state.sessions,
+					[sessionId]: { ...session, streamError: value },
+				},
+			};
+		}),
+	updateSessionMeta: (sessionId, payload) =>
+		set((state) => {
+			const session = state.sessions[sessionId];
+			if (!session) {
+				return state;
+			}
+			const nextSession = { ...session };
+			if (payload.title !== undefined) {
+				nextSession.title = payload.title;
+			}
+			if (payload.updatedAt !== undefined) {
+				nextSession.updatedAt = payload.updatedAt;
+			}
+			if (payload.agentName !== undefined) {
+				nextSession.agentName = payload.agentName;
+			}
+			if (payload.modelId !== undefined) {
+				nextSession.modelId = payload.modelId;
+			}
+			if (payload.modelName !== undefined) {
+				nextSession.modelName = payload.modelName;
+			}
+			if (payload.modeId !== undefined) {
+				nextSession.modeId = payload.modeId;
+			}
+			if (payload.modeName !== undefined) {
+				nextSession.modeName = payload.modeName;
+			}
+			return {
+				sessions: {
+					...state.sessions,
+					[sessionId]: nextSession,
+				},
+			};
+		}),
+	addUserMessage: (sessionId, content) =>
+		set((state: ChatState) => {
+			const session =
+				state.sessions[sessionId] ?? createSessionState(sessionId);
+			return {
+				sessions: {
+					...state.sessions,
+					[sessionId]: {
+						...session,
+						messages: [
+							...session.messages,
+							{ ...createMessage("user", content), isStreaming: false },
+						],
+					},
+				},
+			};
+		}),
+	appendAssistantChunk: (sessionId, content) =>
+		set((state: ChatState) => {
+			const session =
+				state.sessions[sessionId] ?? createSessionState(sessionId);
+			let { streamingMessageId } = session;
+			let messages = [...session.messages];
 			if (!streamingMessageId) {
 				const message = createMessage("assistant", "");
 				streamingMessageId = message.id;
@@ -82,29 +322,36 @@ export const useChatStore = create<ChatState>((set: ChatStateSetter) => ({
 					: message,
 			);
 
-			return { messages, streamingMessageId };
+			return {
+				sessions: {
+					...state.sessions,
+					[sessionId]: {
+						...session,
+						messages,
+						streamingMessageId,
+					},
+				},
+			};
 		}),
-	finalizeAssistantMessage: () =>
+	finalizeAssistantMessage: (sessionId) =>
 		set((state: ChatState) => {
-			if (!state.streamingMessageId) {
+			const session = state.sessions[sessionId];
+			if (!session?.streamingMessageId) {
 				return state;
 			}
 			return {
-				messages: state.messages.map((message: ChatMessage) =>
-					message.id === state.streamingMessageId
-						? { ...message, isStreaming: false }
-						: message,
-				),
-				streamingMessageId: undefined,
+				sessions: {
+					...state.sessions,
+					[sessionId]: {
+						...session,
+						messages: session.messages.map((message: ChatMessage) =>
+							message.id === session.streamingMessageId
+								? { ...message, isStreaming: false }
+								: message,
+						),
+						streamingMessageId: undefined,
+					},
+				},
 			};
-		}),
-	reset: () =>
-		set({
-			sessionId: undefined,
-			input: "",
-			messages: [],
-			streamingMessageId: undefined,
-			sending: false,
-			error: undefined,
 		}),
 }));

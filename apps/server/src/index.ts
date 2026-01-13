@@ -1,10 +1,11 @@
 import express from "express";
-import { OpencodeConnection } from "./acp/opencode.js";
+import type { OpencodeConnectionState } from "./acp/opencode.js";
+import { SessionManager, type SessionSummary } from "./acp/session-manager.js";
 import { getServerConfig } from "./config.js";
 
 const config = getServerConfig();
 
-const opencode = new OpencodeConnection({
+const sessionManager = new SessionManager({
 	command: config.opencodeCommand,
 	args: config.opencodeArgs,
 	client: {
@@ -48,21 +49,97 @@ const getErrorMessage = (error: unknown) => {
 	return String(error);
 };
 
+const resolveServiceState = (
+	sessions: SessionSummary[],
+): OpencodeConnectionState => {
+	if (sessions.some((session) => session.state === "error")) {
+		return "error";
+	}
+	if (sessions.some((session) => session.state === "connecting")) {
+		return "connecting";
+	}
+	if (sessions.some((session) => session.state === "ready")) {
+		return "ready";
+	}
+	if (sessions.some((session) => session.state === "stopped")) {
+		return "stopped";
+	}
+	return "idle";
+};
+
+const buildServiceStatus = () => {
+	const sessions = sessionManager.listSessions();
+	const state = resolveServiceState(sessions);
+	const lastError = sessions.find(
+		(session) => session.state === "error",
+	)?.lastError;
+	return {
+		state,
+		command: config.opencodeCommand,
+		args: config.opencodeArgs,
+		lastError,
+		sessionId: sessions.at(0)?.sessionId,
+		pid: sessions.at(0)?.pid,
+	};
+};
+
 app.get("/health", (_request, response) => {
 	response.json({ ok: true });
 });
 
 app.get("/acp/opencode", (_request, response) => {
-	response.json(opencode.getStatus());
+	response.json(buildServiceStatus());
+});
+
+app.get("/acp/sessions", (_request, response) => {
+	response.json({ sessions: sessionManager.listSessions() });
 });
 
 app.post("/acp/session", async (request, response) => {
 	try {
-		const { cwd } = request.body ?? {};
-		const sessionId = await opencode.createSession({
+		const { cwd, title } = request.body ?? {};
+		const session = await sessionManager.createSession({
 			cwd: typeof cwd === "string" ? cwd : undefined,
+			title:
+				typeof title === "string" && title.trim().length > 0
+					? title.trim()
+					: undefined,
 		});
-		response.json({ sessionId });
+		response.json(session);
+	} catch (error) {
+		response.status(500).json({ error: getErrorMessage(error) });
+	}
+});
+
+app.patch("/acp/session", (request, response) => {
+	const { sessionId, title } = request.body ?? {};
+	if (typeof sessionId !== "string" || typeof title !== "string") {
+		response.status(400).json({ error: "sessionId and title are required" });
+		return;
+	}
+
+	try {
+		const summary = sessionManager.updateTitle(sessionId, title.trim());
+		response.json({ sessionId: summary.sessionId, title: summary.title });
+	} catch (error) {
+		response.status(404).json({ error: getErrorMessage(error) });
+	}
+});
+
+app.post("/acp/session/close", async (request, response) => {
+	const { sessionId } = request.body ?? {};
+	if (typeof sessionId !== "string") {
+		response.status(400).json({ error: "sessionId is required" });
+		return;
+	}
+
+	try {
+		const closed = await sessionManager.closeSession(sessionId);
+		if (!closed) {
+			response.status(404).json({ error: "session not found" });
+			return;
+		}
+		response.json({ ok: true });
 	} catch (error) {
 		response.status(500).json({ error: getErrorMessage(error) });
 	}
@@ -75,10 +152,24 @@ app.post("/acp/message", async (request, response) => {
 		return;
 	}
 
+	const record = sessionManager.getSession(sessionId);
+	if (!record) {
+		response.status(404).json({ error: "session not found" });
+		return;
+	}
+
+	const status = record.connection.getStatus();
+	if (status.state !== "ready") {
+		response.status(409).json({ error: "session not ready" });
+		return;
+	}
+
 	try {
-		const result = await opencode.prompt(sessionId, [
+		sessionManager.touchSession(sessionId);
+		const result = await record.connection.prompt(sessionId, [
 			{ type: "text", text: prompt },
 		]);
+		sessionManager.touchSession(sessionId);
 		response.json({ stopReason: result.stopReason });
 	} catch (error) {
 		response.status(500).json({ error: getErrorMessage(error) });
@@ -89,6 +180,18 @@ app.get("/acp/session/stream", (request, response) => {
 	const sessionId = request.query.sessionId;
 	if (typeof sessionId !== "string" || sessionId.length === 0) {
 		response.status(400).json({ error: "sessionId is required" });
+		return;
+	}
+
+	const record = sessionManager.getSession(sessionId);
+	if (!record) {
+		response.status(404).json({ error: "session not found" });
+		return;
+	}
+
+	const status = record.connection.getStatus();
+	if (status.state !== "ready") {
+		response.status(409).json({ error: "session not ready" });
 		return;
 	}
 
@@ -108,7 +211,7 @@ app.get("/acp/session/stream", (request, response) => {
 		);
 	};
 
-	const unsubscribe = opencode.onSessionUpdate(sendUpdate);
+	const unsubscribe = record.connection.onSessionUpdate(sendUpdate);
 	const ping = setInterval(() => {
 		response.write("event: ping\ndata: {}\n\n");
 	}, 15000);
@@ -122,15 +225,6 @@ app.get("/acp/session/stream", (request, response) => {
 const server = app.listen(config.port, () => {
 	console.log(`[mobvibe] backend listening on :${config.port}`);
 });
-
-const startOpencode = async () => {
-	try {
-		await opencode.connect();
-		console.log("[mobvibe] opencode ACP connected");
-	} catch (error) {
-		console.error("[mobvibe] opencode ACP connection failed", error);
-	}
-};
 
 const stopServer = async () =>
 	new Promise<void>((resolve, reject) => {
@@ -146,7 +240,7 @@ const stopServer = async () =>
 const shutdown = async (signal: string) => {
 	console.log(`[mobvibe] received ${signal}, shutting down`);
 	try {
-		await opencode.disconnect();
+		await sessionManager.closeAll();
 		await stopServer();
 	} catch (error) {
 		console.error("[mobvibe] shutdown error", error);
@@ -162,5 +256,3 @@ process.on("SIGINT", () => {
 process.on("SIGTERM", () => {
 	void shutdown("SIGTERM");
 });
-
-void startOpencode();

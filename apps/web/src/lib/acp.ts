@@ -15,10 +15,35 @@ export type SessionContent = {
 	text: string;
 };
 
-export type SessionUpdate = {
-	sessionUpdate: SessionUpdateType;
-	content?: SessionContent;
+type ContentChunk = {
+	content: SessionContent;
 };
+
+type UnknownUpdate = {
+	sessionUpdate:
+		| "tool_call"
+		| "tool_call_update"
+		| "plan"
+		| "available_commands_update"
+		| "config_option_update";
+};
+
+type CurrentModeUpdate = {
+	currentModeId: string;
+};
+
+type SessionInfoUpdate = {
+	title?: string | null;
+	updatedAt?: string | null;
+};
+
+export type SessionUpdate =
+	| (ContentChunk & { sessionUpdate: "user_message_chunk" })
+	| (ContentChunk & { sessionUpdate: "agent_message_chunk" })
+	| (ContentChunk & { sessionUpdate: "agent_thought_chunk" })
+	| (CurrentModeUpdate & { sessionUpdate: "current_mode_update" })
+	| (SessionInfoUpdate & { sessionUpdate: "session_info_update" })
+	| UnknownUpdate;
 
 export type SessionNotification = {
 	sessionId: string;
@@ -30,11 +55,26 @@ export type SessionTextChunk = {
 	text: string;
 };
 
+export type SessionModeUpdate = {
+	modeId: string;
+};
+
+export type SessionInfoPayload = {
+	title?: string;
+	updatedAt?: string;
+};
+
 export const extractTextChunk = (
 	notification: SessionNotification,
 ): SessionTextChunk | null => {
 	const { update } = notification;
-	if (!update?.content || update.content.type !== "text") {
+	if (
+		update.sessionUpdate !== "user_message_chunk" &&
+		update.sessionUpdate !== "agent_message_chunk"
+	) {
+		return null;
+	}
+	if (update.content.type !== "text") {
 		return null;
 	}
 
@@ -42,9 +82,28 @@ export const extractTextChunk = (
 		return { role: "user", text: update.content.text };
 	}
 
-	if (update.sessionUpdate === "agent_message_chunk") {
-		return { role: "assistant", text: update.content.text };
-	}
+	return { role: "assistant", text: update.content.text };
+};
 
-	return null;
+export const extractSessionModeUpdate = (
+	notification: SessionNotification,
+): SessionModeUpdate | null => {
+	if (notification.update.sessionUpdate !== "current_mode_update") {
+		return null;
+	}
+	return { modeId: notification.update.currentModeId };
+};
+
+export const extractSessionInfoUpdate = (
+	notification: SessionNotification,
+): SessionInfoPayload | null => {
+	if (notification.update.sessionUpdate !== "session_info_update") {
+		return null;
+	}
+	const title = notification.update.title ?? undefined;
+	const updatedAt = notification.update.updatedAt ?? undefined;
+	if (!title && !updatedAt) {
+		return null;
+	}
+	return { title, updatedAt };
 };
