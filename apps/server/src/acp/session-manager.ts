@@ -1,6 +1,6 @@
 import type {
-	SessionModeState,
 	SessionModelState,
+	SessionModeState,
 } from "@agentclientprotocol/sdk";
 import {
 	OpencodeConnection,

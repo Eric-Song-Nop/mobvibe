@@ -95,6 +95,19 @@
 - 前端：Zustand 同步会话元信息，`session_info_update` 更新标题与时间戳。
 - UI：输入框下方使用三个 Badge 显示 Agent/Model/Mode，空值时隐藏。
 
+### M7：多会话全量 SSE 订阅（实现前计划）
+
+- 目标：会话切换不影响正在流式回复的消息展示。
+- SSE 策略：为所有处于 `ready` 状态的会话保持 `EventSource` 连接。
+- 前端状态：每个 `sessionId` 独立接收 `session_update` 并更新对应消息。
+- 清理机制：会话关闭或状态变为 `stopped` 时释放对应 SSE。
+
+#### M7 多会话全量 SSE 订阅（实现后）
+
+- 前端：维护会话级 SSE 映射，对所有 `ready` 会话保持订阅。
+- 路由更新：`session_update` 按 `sessionId` 写入对应消息与元信息。
+- 生命周期：会话离开 `ready` 或关闭时关闭对应 SSE。
+
 ### M3：最小持久化（增强）
 
 - [ ] 引入 SQLite + Drizzle 保存会话与消息（仅必要字段）。
