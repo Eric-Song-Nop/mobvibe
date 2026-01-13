@@ -40,11 +40,13 @@
 - 增加 ACP 连接模块，使用 `opencode acp` 通过 stdio 启动并连接。
 - 提供 `/health` 与 `/acp/opencode` 状态接口，返回连接状态与错误信息。
 - 配置项集中在 `config.ts`，支持端口与 `opencode` 命令参数覆盖。
+- ACP SDK 切换为 `@agentclientprotocol/sdk`，使用 `ClientSideConnection` + `ndJsonStream` 完成初始化与会话创建。
 
 关键实现点：
 - 连接管理封装为 `OpencodeConnection`，记录 `state`、连接时间与错误信息。
 - 服务启动后尝试连接 `opencode`，失败时不中断 HTTP 服务。
 - 监听 `SIGINT/SIGTERM`，在退出时断开 ACP 连接并关闭服务。
+- 使用 `initialize` + `newSession` 完成 ACP 握手，并记录 `sessionId` 供状态查询。
 
 下一步建议：
 - 引入 ACP 会话/消息转发 API，并与前端通信对接。
