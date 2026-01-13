@@ -27,6 +27,6 @@ export const getServerConfig = (): ServerConfig => {
 		opencodeCommand: env.MOBVIBE_OPENCODE_COMMAND ?? "opencode",
 		opencodeArgs: parseArgs(env.MOBVIBE_OPENCODE_ARGS ?? "acp"),
 		clientName: env.MOBVIBE_ACP_CLIENT_NAME ?? "mobvibe-backend",
-		clientVersion: env.MOBVIBE_ACP_CLIENT_VERSION ?? "0.0.0"
+		clientVersion: env.MOBVIBE_ACP_CLIENT_VERSION ?? "0.0.0",
 	};
 };

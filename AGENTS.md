@@ -41,3 +41,13 @@ The UI, which is just an AI chat app.
 - Sqlite3: the simple db
 - [Drizzle](https://orm.drizzle.team/docs/get-started-sqlite): the ORM
   - [Better-sqlite3](https://orm.drizzle.team/docs/get-started-sqlite#better-sqlite3): Adapter
+
+## Development Guidelines
+
+- Make sure to run `pnpm format` for formatting
+- Always document your code, implementation plan and Architecture
+  in `docs` folder in Chinese, before and after implementation.
+- Do `git commit` frequently for even minor changes with message in English.
+- Stick to types and design of Agent Client Protocol and corresponding SDKs.
+- For UI, always use Shadcn UI components whenever possible.
+o Mobile UI first, responsive, accessible, and with a focus on performance.

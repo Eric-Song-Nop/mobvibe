@@ -1,6 +1,6 @@
 import express from "express";
-import { getServerConfig } from "./config.js";
 import { OpencodeConnection } from "./acp/opencode.js";
+import { getServerConfig } from "./config.js";
 
 const config = getServerConfig();
 
@@ -9,8 +9,8 @@ const opencode = new OpencodeConnection({
 	args: config.opencodeArgs,
 	client: {
 		name: config.clientName,
-		version: config.clientVersion
-	}
+		version: config.clientVersion,
+	},
 });
 
 const app = express();

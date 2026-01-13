@@ -4,7 +4,7 @@ import {
 	ClientSideConnection,
 	PROTOCOL_VERSION,
 	ndJsonStream,
-	type Client
+	type Client,
 } from "@agentclientprotocol/sdk";
 
 type ClientInfo = {
@@ -40,10 +40,13 @@ const buildClient = (): Client => ({
 	async requestPermission() {
 		return { outcome: { outcome: "cancelled" } };
 	},
-	async sessionUpdate() {}
+	async sessionUpdate() {},
 });
 
-const formatExitMessage = (code: number | null, signal: NodeJS.Signals | null) => {
+const formatExitMessage = (
+	code: number | null,
+	signal: NodeJS.Signals | null,
+) => {
 	if (signal) {
 		return `opencode exited with signal ${signal}`;
 	}
@@ -67,7 +70,7 @@ export class OpencodeConnection {
 			command: string;
 			args: string[];
 			client: ClientInfo;
-		}
+		},
 	) {}
 
 	getStatus(): OpencodeStatus {
@@ -78,7 +81,7 @@ export class OpencodeConnection {
 			connectedAt: this.connectedAt?.toISOString(),
 			lastError: this.lastError,
 			sessionId: this.sessionId,
-			pid: this.process?.pid
+			pid: this.process?.pid,
 		};
 	}
 
@@ -92,7 +95,7 @@ export class OpencodeConnection {
 
 		try {
 			const child = spawn(this.options.command, this.options.args, {
-				stdio: ["pipe", "pipe", "inherit"]
+				stdio: ["pipe", "pipe", "inherit"],
 			});
 			this.process = child;
 
@@ -127,14 +130,14 @@ export class OpencodeConnection {
 				protocolVersion: PROTOCOL_VERSION,
 				clientInfo: {
 					name: this.options.client.name,
-					version: this.options.client.version
+					version: this.options.client.version,
 				},
-				clientCapabilities: {}
+				clientCapabilities: {},
 			});
 
 			const session = await connection.newSession({
 				cwd: process.cwd(),
-				mcpServers: []
+				mcpServers: [],
 			});
 
 			this.sessionId = session.sessionId;
