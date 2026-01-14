@@ -156,18 +156,6 @@
 
 - 已引入 Vitest 与基础测试，详情见 `docs/vitest-testing.md`。
 
-## 关键接口草案（方向）
-
-- [ ] `GET /health`：服务健康状态。
-- [ ] `GET /acp/agent`：服务级连接状态。
-- [ ] `GET /acp/backends`：可用后端列表。
-- [ ] `GET /acp/sessions`：列出当前会话列表。
-- [ ] `POST /acp/session`：创建新会话（支持 `backendId`）。
-- [ ] `PATCH /acp/session`：更新会话标题。
-- [ ] `POST /acp/session/close`：关闭指定会话。
-- [ ] `POST /acp/message`：发送消息（支持流式或轮询）。
-- [ ] `GET /acp/session/stream`：订阅指定会话 SSE。
-
 ## 风险与缓解
 
 - React 多实例导致 Hook 错误：维持 `react`/`react-dom` 去重与依赖一致性。
@@ -176,6 +164,5 @@
 
 ## 验证清单（MVP 验收）
 
-- [ ] 后端服务启动后可成功连接 ACP CLI。
-- [ ] 前端能创建会话、发送消息、接收回复。
-- [ ] 断线后能提示并引导手动重启。
+- [x] 后端服务启动后可成功连接 ACP CLI。
+- [x] 前端能创建会话、发送消息、接收回复。
