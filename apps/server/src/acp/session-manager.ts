@@ -2,6 +2,7 @@ import type {
 	SessionModelState,
 	SessionModeState,
 } from "@agentclientprotocol/sdk";
+import { AppError, createErrorDetail, type ErrorDetail } from "./errors.js";
 import {
 	OpencodeConnection,
 	type OpencodeConnectionState,
@@ -26,7 +27,7 @@ export type SessionSummary = {
 	sessionId: string;
 	title: string;
 	state: OpencodeConnectionState;
-	lastError?: string;
+	error?: ErrorDetail;
 	pid?: number;
 	createdAt: string;
 	updatedAt: string;
@@ -141,7 +142,11 @@ export class SessionManager {
 			this.sessions.set(session.sessionId, record);
 			return this.buildSummary(record);
 		} catch (error) {
+			const status = connection.getStatus();
 			await connection.disconnect();
+			if (status.error) {
+				throw new AppError(status.error, 500);
+			}
 			throw error;
 		}
 	}
@@ -149,7 +154,15 @@ export class SessionManager {
 	updateTitle(sessionId: string, title: string): SessionSummary {
 		const record = this.sessions.get(sessionId);
 		if (!record) {
-			throw new Error("session not found");
+			throw new AppError(
+				createErrorDetail({
+					code: "SESSION_NOT_FOUND",
+					message: "会话不存在",
+					retryable: false,
+					scope: "session",
+				}),
+				404,
+			);
 		}
 		record.title = title;
 		record.updatedAt = new Date();
@@ -188,7 +201,7 @@ export class SessionManager {
 			sessionId: record.sessionId,
 			title: record.title,
 			state: status.state,
-			lastError: status.lastError,
+			error: status.error,
 			pid: status.pid,
 			createdAt: record.createdAt.toISOString(),
 			updatedAt: record.updatedAt.toISOString(),

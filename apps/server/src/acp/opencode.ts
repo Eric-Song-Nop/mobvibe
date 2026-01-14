@@ -14,6 +14,11 @@ import {
 	type RequestPermissionResponse,
 	type SessionNotification,
 } from "@agentclientprotocol/sdk";
+import {
+	createErrorDetail,
+	type ErrorDetail,
+	isProtocolMismatch,
+} from "./errors.js";
 
 type ClientInfo = {
 	name: string;
@@ -32,7 +37,7 @@ export type OpencodeStatus = {
 	command: string;
 	args: string[];
 	connectedAt?: string;
-	lastError?: string;
+	error?: ErrorDetail;
 	sessionId?: string;
 	pid?: number;
 };
@@ -78,16 +83,55 @@ const formatExitMessage = (
 	return "opencode exited";
 };
 
+const buildConnectError = (error: unknown): ErrorDetail => {
+	const detail = getErrorMessage(error);
+	if (isProtocolMismatch(error)) {
+		return createErrorDetail({
+			code: "ACP_PROTOCOL_MISMATCH",
+			message: "ACP 协议版本不匹配",
+			retryable: false,
+			scope: "service",
+			detail,
+		});
+	}
+	return createErrorDetail({
+		code: "ACP_CONNECT_FAILED",
+		message: "无法连接到 opencode ACP 进程",
+		retryable: true,
+		scope: "service",
+		detail,
+	});
+};
+
+const buildProcessExitError = (detail: string): ErrorDetail =>
+	createErrorDetail({
+		code: "ACP_PROCESS_EXITED",
+		message: "opencode 进程异常退出",
+		retryable: true,
+		scope: "service",
+		detail,
+	});
+
+const buildConnectionClosedError = (detail: string): ErrorDetail =>
+	createErrorDetail({
+		code: "ACP_CONNECTION_CLOSED",
+		message: "ACP 连接已断开",
+		retryable: true,
+		scope: "service",
+		detail,
+	});
+
 export class OpencodeConnection {
 	private connection?: ClientSideConnection;
 	private process?: ChildProcessWithoutNullStreams;
 	private closedPromise?: Promise<void>;
 	private state: OpencodeConnectionState = "idle";
 	private connectedAt?: Date;
-	private lastError?: string;
+	private error?: ErrorDetail;
 	private sessionId?: string;
 	private agentInfo?: Implementation;
 	private readonly sessionUpdateEmitter = new EventEmitter();
+	private readonly statusEmitter = new EventEmitter();
 	private permissionHandler?: (
 		params: RequestPermissionRequest,
 	) => Promise<RequestPermissionResponse>;
@@ -106,7 +150,7 @@ export class OpencodeConnection {
 			command: this.options.command,
 			args: [...this.options.args],
 			connectedAt: this.connectedAt?.toISOString(),
-			lastError: this.lastError,
+			error: this.error,
 			sessionId: this.sessionId,
 			pid: this.process?.pid,
 		};
@@ -131,13 +175,25 @@ export class OpencodeConnection {
 		};
 	}
 
+	onStatusChange(listener: (status: OpencodeStatus) => void) {
+		this.statusEmitter.on("status", listener);
+		return () => {
+			this.statusEmitter.off("status", listener);
+		};
+	}
+
+	private updateStatus(state: OpencodeConnectionState, error?: ErrorDetail) {
+		this.state = state;
+		this.error = error;
+		this.statusEmitter.emit("status", this.getStatus());
+	}
+
 	async connect(): Promise<void> {
 		if (this.state === "connecting" || this.state === "ready") {
 			return;
 		}
 
-		this.state = "connecting";
-		this.lastError = undefined;
+		this.updateStatus("connecting");
 		this.agentInfo = undefined;
 
 		try {
@@ -167,21 +223,24 @@ export class OpencodeConnection {
 				if (this.state === "stopped") {
 					return;
 				}
-				this.state = "error";
-				this.lastError = getErrorMessage(error);
+				this.updateStatus("error", buildConnectError(error));
 			});
 
 			child.once("exit", (code, signal) => {
 				if (this.state === "stopped") {
 					return;
 				}
-				this.state = "error";
-				this.lastError = formatExitMessage(code, signal);
+				this.updateStatus(
+					"error",
+					buildProcessExitError(formatExitMessage(code, signal)),
+				);
 			});
 
 			this.closedPromise = connection.closed.catch((error) => {
-				this.state = "error";
-				this.lastError = getErrorMessage(error);
+				this.updateStatus(
+					"error",
+					buildConnectionClosedError(getErrorMessage(error)),
+				);
 			});
 
 			const initializeResponse = await connection.initialize({
@@ -195,10 +254,9 @@ export class OpencodeConnection {
 
 			this.agentInfo = initializeResponse.agentInfo ?? undefined;
 			this.connectedAt = new Date();
-			this.state = "ready";
+			this.updateStatus("ready");
 		} catch (error) {
-			this.state = "error";
-			this.lastError = getErrorMessage(error);
+			this.updateStatus("error", buildConnectError(error));
 			await this.stopProcess();
 			throw error;
 		}
@@ -227,7 +285,7 @@ export class OpencodeConnection {
 			return;
 		}
 
-		this.state = "stopped";
+		this.updateStatus("stopped");
 		this.sessionId = undefined;
 		this.agentInfo = undefined;
 		await this.stopProcess();

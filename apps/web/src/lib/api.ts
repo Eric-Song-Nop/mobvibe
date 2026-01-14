@@ -5,12 +5,33 @@ export type OpencodeConnectionState =
 	| "error"
 	| "stopped";
 
+export type ErrorScope = "service" | "session" | "stream" | "request";
+
+export type ErrorCode =
+	| "ACP_CONNECT_FAILED"
+	| "ACP_PROCESS_EXITED"
+	| "ACP_CONNECTION_CLOSED"
+	| "ACP_PROTOCOL_MISMATCH"
+	| "SESSION_NOT_FOUND"
+	| "SESSION_NOT_READY"
+	| "REQUEST_VALIDATION_FAILED"
+	| "STREAM_DISCONNECTED"
+	| "INTERNAL_ERROR";
+
+export type ErrorDetail = {
+	code: ErrorCode;
+	message: string;
+	retryable: boolean;
+	scope: ErrorScope;
+	detail?: string;
+};
+
 export type OpencodeStatus = {
 	state: OpencodeConnectionState;
 	command: string;
 	args: string[];
 	connectedAt?: string;
-	lastError?: string;
+	error?: ErrorDetail;
 	sessionId?: string;
 	pid?: number;
 };
@@ -21,7 +42,7 @@ export type SessionSummary = {
 	sessionId: string;
 	title: string;
 	state: SessionState;
-	lastError?: string;
+	error?: ErrorDetail;
 	pid?: number;
 	createdAt: string;
 	updatedAt: string;
@@ -45,6 +66,35 @@ export type SendMessageResponse = {
 const API_BASE_URL =
 	import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3757";
 
+const isErrorDetail = (payload: unknown): payload is ErrorDetail => {
+	if (!payload || typeof payload !== "object") {
+		return false;
+	}
+	const detail = payload as ErrorDetail;
+	return (
+		typeof detail.code === "string" &&
+		typeof detail.message === "string" &&
+		typeof detail.retryable === "boolean" &&
+		typeof detail.scope === "string"
+	);
+};
+
+const buildRequestError = (message: string): ErrorDetail => ({
+	code: "INTERNAL_ERROR",
+	message,
+	retryable: true,
+	scope: "request",
+});
+
+export class ApiError extends Error {
+	readonly detail: ErrorDetail;
+
+	constructor(detail: ErrorDetail) {
+		super(detail.message);
+		this.detail = detail;
+	}
+}
+
 const requestJson = async <ResponseType>(
 	path: string,
 	options?: RequestInit,
@@ -58,14 +108,21 @@ const requestJson = async <ResponseType>(
 	});
 
 	if (!response.ok) {
-		let message = `${response.status} ${response.statusText}`;
+		let fallbackMessage = `${response.status} ${response.statusText}`;
 		try {
-			const payload = (await response.json()) as { error?: string };
-			if (payload?.error) {
-				message = payload.error;
+			const payload = (await response.json()) as { error?: unknown };
+			if (payload?.error && isErrorDetail(payload.error)) {
+				throw new ApiError(payload.error);
 			}
-		} catch {}
-		throw new Error(message);
+			if (typeof payload?.error === "string") {
+				fallbackMessage = payload.error;
+			}
+		} catch (parseError) {
+			if (parseError instanceof ApiError) {
+				throw parseError;
+			}
+		}
+		throw new ApiError(buildRequestError(fallbackMessage));
 	}
 
 	return (await response.json()) as ResponseType;

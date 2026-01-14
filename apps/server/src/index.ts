@@ -1,4 +1,11 @@
 import express from "express";
+import {
+	AppError,
+	createErrorDetail,
+	createInternalError,
+	type ErrorDetail,
+	withScope,
+} from "./acp/errors.js";
 import type { OpencodeConnectionState } from "./acp/opencode.js";
 import { SessionManager, type SessionSummary } from "./acp/session-manager.js";
 import { getServerConfig } from "./config.js";
@@ -49,6 +56,38 @@ const getErrorMessage = (error: unknown) => {
 	return String(error);
 };
 
+const respondError = (
+	response: express.Response,
+	detail: ErrorDetail,
+	status = 500,
+) => {
+	response.status(status).json({ error: detail });
+};
+
+const buildRequestValidationError = (message = "请求参数无效") =>
+	createErrorDetail({
+		code: "REQUEST_VALIDATION_FAILED",
+		message,
+		retryable: false,
+		scope: "request",
+	});
+
+const buildSessionNotFoundError = () =>
+	createErrorDetail({
+		code: "SESSION_NOT_FOUND",
+		message: "会话不存在",
+		retryable: false,
+		scope: "session",
+	});
+
+const buildSessionNotReadyError = (scope: "session" | "stream") =>
+	createErrorDetail({
+		code: "SESSION_NOT_READY",
+		message: "会话未就绪",
+		retryable: true,
+		scope,
+	});
+
 const resolveServiceState = (
 	sessions: SessionSummary[],
 ): OpencodeConnectionState => {
@@ -67,17 +106,22 @@ const resolveServiceState = (
 	return "idle";
 };
 
+const resolveServiceError = (sessions: SessionSummary[]) => {
+	const sessionError = sessions.find((session) => session.error)?.error;
+	if (!sessionError) {
+		return undefined;
+	}
+	return withScope(sessionError, "service");
+};
+
 const buildServiceStatus = () => {
 	const sessions = sessionManager.listSessions();
 	const state = resolveServiceState(sessions);
-	const lastError = sessions.find(
-		(session) => session.state === "error",
-	)?.lastError;
 	return {
 		state,
 		command: config.opencodeCommand,
 		args: config.opencodeArgs,
-		lastError,
+		error: resolveServiceError(sessions),
 		sessionId: sessions.at(0)?.sessionId,
 		pid: sessions.at(0)?.pid,
 	};
@@ -107,14 +151,25 @@ app.post("/acp/session", async (request, response) => {
 		});
 		response.json(session);
 	} catch (error) {
-		response.status(500).json({ error: getErrorMessage(error) });
+		if (error instanceof AppError) {
+			respondError(response, error.detail, error.status);
+			return;
+		}
+		respondError(
+			response,
+			createInternalError("service", getErrorMessage(error)),
+		);
 	}
 });
 
 app.patch("/acp/session", (request, response) => {
 	const { sessionId, title } = request.body ?? {};
 	if (typeof sessionId !== "string" || typeof title !== "string") {
-		response.status(400).json({ error: "sessionId and title are required" });
+		respondError(
+			response,
+			buildRequestValidationError("sessionId 和 title 必填"),
+			400,
+		);
 		return;
 	}
 
@@ -122,45 +177,60 @@ app.patch("/acp/session", (request, response) => {
 		const summary = sessionManager.updateTitle(sessionId, title.trim());
 		response.json({ sessionId: summary.sessionId, title: summary.title });
 	} catch (error) {
-		response.status(404).json({ error: getErrorMessage(error) });
+		if (error instanceof AppError) {
+			respondError(response, error.detail, error.status);
+			return;
+		}
+		respondError(
+			response,
+			createInternalError("session", getErrorMessage(error)),
+			500,
+		);
 	}
 });
 
 app.post("/acp/session/close", async (request, response) => {
 	const { sessionId } = request.body ?? {};
 	if (typeof sessionId !== "string") {
-		response.status(400).json({ error: "sessionId is required" });
+		respondError(response, buildRequestValidationError("sessionId 必填"), 400);
 		return;
 	}
 
 	try {
 		const closed = await sessionManager.closeSession(sessionId);
 		if (!closed) {
-			response.status(404).json({ error: "session not found" });
+			respondError(response, buildSessionNotFoundError(), 404);
 			return;
 		}
 		response.json({ ok: true });
 	} catch (error) {
-		response.status(500).json({ error: getErrorMessage(error) });
+		respondError(
+			response,
+			createInternalError("session", getErrorMessage(error)),
+		);
 	}
 });
 
 app.post("/acp/message", async (request, response) => {
 	const { sessionId, prompt } = request.body ?? {};
 	if (typeof sessionId !== "string" || typeof prompt !== "string") {
-		response.status(400).json({ error: "sessionId and prompt are required" });
+		respondError(
+			response,
+			buildRequestValidationError("sessionId 和 prompt 必填"),
+			400,
+		);
 		return;
 	}
 
 	const record = sessionManager.getSession(sessionId);
 	if (!record) {
-		response.status(404).json({ error: "session not found" });
+		respondError(response, buildSessionNotFoundError(), 404);
 		return;
 	}
 
 	const status = record.connection.getStatus();
 	if (status.state !== "ready") {
-		response.status(409).json({ error: "session not ready" });
+		respondError(response, buildSessionNotReadyError("session"), 409);
 		return;
 	}
 
@@ -172,26 +242,29 @@ app.post("/acp/message", async (request, response) => {
 		sessionManager.touchSession(sessionId);
 		response.json({ stopReason: result.stopReason });
 	} catch (error) {
-		response.status(500).json({ error: getErrorMessage(error) });
+		respondError(
+			response,
+			createInternalError("session", getErrorMessage(error)),
+		);
 	}
 });
 
 app.get("/acp/session/stream", (request, response) => {
 	const sessionId = request.query.sessionId;
 	if (typeof sessionId !== "string" || sessionId.length === 0) {
-		response.status(400).json({ error: "sessionId is required" });
+		respondError(response, buildRequestValidationError("sessionId 必填"), 400);
 		return;
 	}
 
 	const record = sessionManager.getSession(sessionId);
 	if (!record) {
-		response.status(404).json({ error: "session not found" });
+		respondError(response, buildSessionNotFoundError(), 404);
 		return;
 	}
 
 	const status = record.connection.getStatus();
 	if (status.state !== "ready") {
-		response.status(409).json({ error: "session not ready" });
+		respondError(response, buildSessionNotReadyError("stream"), 409);
 		return;
 	}
 
@@ -211,7 +284,21 @@ app.get("/acp/session/stream", (request, response) => {
 		);
 	};
 
+	const sendError = (detail: ErrorDetail) => {
+		response.write(
+			`event: session_error\ndata: ${JSON.stringify({
+				sessionId,
+				error: withScope(detail, "stream"),
+			})}\n\n`,
+		);
+	};
+
 	const unsubscribe = record.connection.onSessionUpdate(sendUpdate);
+	const unsubscribeStatus = record.connection.onStatusChange((nextStatus) => {
+		if (nextStatus.state === "error" && nextStatus.error) {
+			sendError(nextStatus.error);
+		}
+	});
 	const ping = setInterval(() => {
 		response.write("event: ping\ndata: {}\n\n");
 	}, 15000);
@@ -219,6 +306,7 @@ app.get("/acp/session/stream", (request, response) => {
 	request.on("close", () => {
 		clearInterval(ping);
 		unsubscribe();
+		unsubscribeStatus();
 	});
 });
 

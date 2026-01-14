@@ -150,8 +150,10 @@ const SessionListItem = ({
 					)}
 					<Badge variant={statusVariant}>{session.state ?? "idle"}</Badge>
 				</div>
-				{session.lastError ? (
-					<span className="text-destructive text-xs">{session.lastError}</span>
+				{session.error ? (
+					<span className="text-destructive text-xs">
+						{session.error.message}
+					</span>
 				) : null}
 			</div>
 			<div className="flex items-center gap-2">

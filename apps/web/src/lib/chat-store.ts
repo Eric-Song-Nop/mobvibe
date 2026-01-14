@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { SessionState, SessionSummary } from "@/lib/api";
+import type { ErrorDetail, SessionState, SessionSummary } from "@/lib/api";
 
 export type ChatRole = "user" | "assistant";
 
@@ -18,10 +18,9 @@ export type ChatSession = {
 	messages: ChatMessage[];
 	streamingMessageId?: string;
 	sending: boolean;
-	error?: string;
-	streamError?: string;
+	error?: ErrorDetail;
+	streamError?: ErrorDetail;
 	state?: SessionState;
-	lastError?: string;
 	createdAt?: string;
 	updatedAt?: string;
 	agentName?: string;
@@ -34,9 +33,9 @@ export type ChatSession = {
 type ChatState = {
 	sessions: Record<string, ChatSession>;
 	activeSessionId?: string;
-	appError?: string;
+	appError?: ErrorDetail;
 	setActiveSessionId: (value?: string) => void;
-	setAppError: (value?: string) => void;
+	setAppError: (value?: ErrorDetail) => void;
 	createLocalSession: (
 		sessionId: string,
 		options?: {
@@ -54,8 +53,8 @@ type ChatState = {
 	renameSession: (sessionId: string, title: string) => void;
 	setInput: (sessionId: string, value: string) => void;
 	setSending: (sessionId: string, value: boolean) => void;
-	setError: (sessionId: string, value?: string) => void;
-	setStreamError: (sessionId: string, value?: string) => void;
+	setError: (sessionId: string, value?: ErrorDetail) => void;
+	setStreamError: (sessionId: string, value?: ErrorDetail) => void;
 	updateSessionMeta: (
 		sessionId: string,
 		payload: Partial<
@@ -84,6 +83,13 @@ const createMessage = (role: ChatRole, content: string): ChatMessage => ({
 	isStreaming: true,
 });
 
+const createSessionClosedError = (): ErrorDetail => ({
+	code: "SESSION_NOT_FOUND",
+	message: "会话已结束或被关闭",
+	retryable: false,
+	scope: "session",
+});
+
 const createSessionState = (
 	sessionId: string,
 	options?: {
@@ -105,7 +111,6 @@ const createSessionState = (
 	error: undefined,
 	streamError: undefined,
 	state: options?.state,
-	lastError: undefined,
 	createdAt: undefined,
 	updatedAt: undefined,
 	agentName: options?.agentName,
@@ -120,7 +125,7 @@ export const useChatStore = create<ChatState>((set) => ({
 	activeSessionId: undefined,
 	appError: undefined,
 	setActiveSessionId: (value?: string) => set({ activeSessionId: value }),
-	setAppError: (value?: string) => set({ appError: value }),
+	setAppError: (value?: ErrorDetail) => set({ appError: value }),
 	createLocalSession: (sessionId, options) =>
 		set((state) => {
 			if (state.sessions[sessionId]) {
@@ -151,7 +156,7 @@ export const useChatStore = create<ChatState>((set) => ({
 					...existing,
 					title: summary.title ?? existing.title,
 					state: summary.state,
-					lastError: summary.lastError,
+					error: summary.error,
 					createdAt: summary.createdAt,
 					updatedAt: summary.updatedAt,
 					agentName: summary.agentName ?? existing.agentName,
@@ -169,7 +174,7 @@ export const useChatStore = create<ChatState>((set) => ({
 						nextSessions[sessionId] = {
 							...session,
 							state: "stopped",
-							lastError: session.lastError ?? "会话已结束或被关闭",
+							error: session.error ?? createSessionClosedError(),
 						};
 					}
 				}

@@ -13,9 +13,11 @@ import {
 	type SessionNotification,
 } from "@/lib/acp";
 import {
+	ApiError,
 	closeSession,
 	createSession,
 	createSessionEventSource,
+	type ErrorDetail,
 	fetchSessions,
 	renameSession,
 	sendMessage,
@@ -26,12 +28,56 @@ import {
 	useChatStore,
 } from "@/lib/chat-store";
 
-const buildErrorMessage = (error: unknown) => {
-	if (error instanceof Error) {
-		return error.message;
+const createFallbackError = (
+	message: string,
+	scope: ErrorDetail["scope"],
+): ErrorDetail => ({
+	code: "INTERNAL_ERROR",
+	message,
+	retryable: true,
+	scope,
+});
+
+const normalizeError = (error: unknown, fallback: ErrorDetail): ErrorDetail => {
+	if (error instanceof ApiError) {
+		return error.detail;
 	}
-	return String(error);
+	if (error instanceof Error) {
+		return {
+			...fallback,
+			message: error.message,
+			detail: error.message,
+		};
+	}
+	return fallback;
 };
+
+const isErrorDetail = (payload: unknown): payload is ErrorDetail => {
+	if (!payload || typeof payload !== "object") {
+		return false;
+	}
+	const detail = payload as ErrorDetail;
+	return (
+		typeof detail.code === "string" &&
+		typeof detail.message === "string" &&
+		typeof detail.retryable === "boolean" &&
+		typeof detail.scope === "string"
+	);
+};
+
+const buildStreamDisconnectedError = (): ErrorDetail => ({
+	code: "STREAM_DISCONNECTED",
+	message: "SSE 连接异常",
+	retryable: true,
+	scope: "stream",
+});
+
+const buildSessionNotReadyError = (): ErrorDetail => ({
+	code: "SESSION_NOT_READY",
+	message: "会话未就绪，请重新创建对话",
+	retryable: true,
+	scope: "session",
+});
 
 const getStatusVariant = (state?: string) => {
 	switch (state) {
@@ -125,14 +171,24 @@ export function App() {
 			setMobileMenuOpen(false);
 		},
 		onError: (mutationError: unknown) => {
-			setAppError(buildErrorMessage(mutationError));
+			setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError("创建会话失败", "service"),
+				),
+			);
 		},
 	});
 
 	const renameSessionMutation = useMutation({
 		mutationFn: renameSession,
 		onError: (mutationError: unknown) => {
-			setAppError(buildErrorMessage(mutationError));
+			setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError("重命名失败", "session"),
+				),
+			);
 		},
 	});
 
@@ -149,7 +205,12 @@ export function App() {
 			}
 		},
 		onError: (mutationError: unknown) => {
-			setAppError(buildErrorMessage(mutationError));
+			setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError("关闭会话失败", "session"),
+				),
+			);
 		},
 	});
 
@@ -161,7 +222,13 @@ export function App() {
 		},
 		onError: (mutationError: unknown, variables) => {
 			finalizeAssistantMessage(variables.sessionId);
-			setError(variables.sessionId, buildErrorMessage(mutationError));
+			setError(
+				variables.sessionId,
+				normalizeError(
+					mutationError,
+					createFallbackError("发送消息失败", "session"),
+				),
+			);
 		},
 		onSettled: (_data, _error, variables) => {
 			setSending(variables.sessionId, false);
@@ -208,13 +275,34 @@ export function App() {
 						updateSessionMeta(session.sessionId, infoUpdate);
 					}
 				} catch (parseError) {
-					setStreamError(session.sessionId, buildErrorMessage(parseError));
+					setStreamError(
+						session.sessionId,
+						normalizeError(
+							parseError,
+							createFallbackError("流式消息解析失败", "stream"),
+						),
+					);
 				}
 			};
 
+			const handleStreamError = (event: MessageEvent<string>) => {
+				try {
+					const payload = JSON.parse(event.data) as { error?: unknown };
+					if (isErrorDetail(payload.error)) {
+						setStreamError(session.sessionId, payload.error);
+						return;
+					}
+				} catch {}
+				setStreamError(
+					session.sessionId,
+					createFallbackError("流式错误解析失败", "stream"),
+				);
+			};
+
 			eventSource.addEventListener("session_update", handleUpdate);
+			eventSource.addEventListener("session_error", handleStreamError);
 			eventSource.addEventListener("error", () => {
-				setStreamError(session.sessionId, "SSE 连接异常");
+				setStreamError(session.sessionId, buildStreamDisconnectedError());
 			});
 
 			sources.set(session.sessionId, eventSource);
@@ -271,7 +359,7 @@ export function App() {
 			return;
 		}
 		if (activeSession.state !== "ready") {
-			setError(activeSessionId, "会话未就绪，请重新创建对话");
+			setError(activeSessionId, buildSessionNotReadyError());
 			return;
 		}
 
@@ -288,20 +376,20 @@ export function App() {
 
 	const statusMessage = useMemo(() => {
 		if (sessionsQuery.isError) {
-			return buildErrorMessage(sessionsQuery.error);
+			return normalizeError(
+				sessionsQuery.error,
+				createFallbackError("会话列表获取失败", "service"),
+			).message;
 		}
-		return appError ?? activeSession?.error ?? activeSession?.lastError;
+		return appError?.message ?? activeSession?.error?.message;
 	}, [
-		activeSession?.error,
-		activeSession?.lastError,
-		appError,
+		activeSession?.error?.message,
+		appError?.message,
 		sessionsQuery.error,
 		sessionsQuery.isError,
 	]);
 
-	const streamError = activeSession?.streamError
-		? { message: activeSession.streamError }
-		: undefined;
+	const streamError = activeSession?.streamError;
 
 	const agentLabel = activeSession?.agentName;
 	const modelLabel = activeSession?.modelName ?? activeSession?.modelId;
