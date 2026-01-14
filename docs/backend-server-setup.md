@@ -4,17 +4,17 @@
 
 目标：
 - 建立后端服务工程（Express + TypeScript），作为 ACP 连接与会话管理入口。
-- 先行接入本地 `opencode`，通过 `opencode acp` 启动 ACP 连接。
+- 先行接入本地 ACP CLI（`opencode`/`gemini-cli`），通过 CLI 启动 ACP 连接。
 - 提供最小可用的健康检查与连接状态接口，便于前端/调试使用。
 
 计划：
 1. 新建 `apps/server` 工程，补齐 `package.json`、`tsconfig.json` 与基础脚本。
-2. 编写 ACP 连接模块，使用 `opencode acp` 以 stdio 方式连接。
-3. 初始化 Express 服务，提供 `/health` 与 `/acp/opencode` 状态接口。
+2. 编写 ACP 连接模块，使用 ACP CLI 以 stdio 方式连接。
+3. 初始化 Express 服务，提供 `/health` 与 `/acp/agent` 状态接口。
 4. 收尾整理：完善配置、连接状态与错误处理。
 
 假设与边界：
-- 仅连接 `opencode`，暂不引入多 Agent 路由与持久化存储。
+- 仅连接本地 ACP CLI，暂不引入多 Agent 路由与持久化存储。
 - 仅做最小可用的 ACP 连接与状态展示，不做消息转发。
 
 ## 实施前：架构草图
@@ -22,11 +22,11 @@
 目录结构（预期）：
 - `apps/server/src/index.ts`：服务入口与启动流程
 - `apps/server/src/config.ts`：环境变量与端口配置
-- `apps/server/src/acp/opencode.ts`：`opencode acp` 连接管理
+- `apps/server/src/acp/opencode.ts`：ACP CLI 连接管理
 
 运行流程（预期）：
 1. 启动服务，加载配置。
-2. 创建并连接 ACP 客户端（`opencode acp`）。
+2. 创建并连接 ACP 客户端（ACP CLI）。
 3. Express 暴露健康检查与连接状态。
 
 关键模块职责（预期）：
@@ -37,14 +37,14 @@
 
 已完成内容：
 - 新增 `apps/server` 工程，使用 Express + TypeScript 作为后端入口。
-- 增加 ACP 连接模块，使用 `opencode acp` 通过 stdio 启动并连接。
-- 提供 `/health` 与 `/acp/opencode` 状态接口，返回连接状态与错误信息。
-- 配置项集中在 `config.ts`，支持端口与 `opencode` 命令参数覆盖。
+- 增加 ACP 连接模块，使用 ACP CLI 通过 stdio 启动并连接。
+- 提供 `/health` 与 `/acp/agent` 状态接口，返回连接状态与错误信息。
+- 配置项集中在 `config.ts`，支持端口与 ACP 后端配置覆盖。
 - ACP SDK 切换为 `@agentclientprotocol/sdk`，使用 `ClientSideConnection` + `ndJsonStream` 完成初始化与会话创建。
 
 关键实现点：
-- 连接管理封装为 `OpencodeConnection`，记录 `state`、连接时间与错误信息。
-- 服务启动后尝试连接 `opencode`，失败时不中断 HTTP 服务。
+- 连接管理封装为 `AcpConnection`，记录 `state`、连接时间与错误信息。
+- 服务启动后尝试连接 ACP CLI，失败时不中断 HTTP 服务。
 - 监听 `SIGINT/SIGTERM`，在退出时断开 ACP 连接并关闭服务。
 - 使用 `initialize` + `newSession` 完成 ACP 握手，并记录 `sessionId` 供状态查询。
 
@@ -61,7 +61,7 @@
 - 统一 ACP 会话与消息生命周期，确保连接失败可感知。
 
 计划：
-1. 扩展 `OpencodeConnection`，增加会话创建与消息发送封装。
+1. 扩展 `AcpConnection`，增加会话创建与消息发送封装。
 2. 增加 SSE 推送通道，转发 ACP `sessionUpdate` 通知。
 3. Express 新增会话/消息相关接口，支持前端接入。
 
@@ -74,8 +74,8 @@
 ### 实施后：实现记录
 
 已完成内容：
-- 扩展 `OpencodeConnection`，新增会话创建、消息发送与更新订阅能力。
-- 连接 `opencode` 时改为 `stderr` 管道输出，便于后续日志追踪。
+- 扩展 `AcpConnection`，新增会话创建、消息发送与更新订阅能力。
+- 连接 ACP CLI 时改为 `stderr` 管道输出，便于后续日志追踪。
 - 新增会话/消息 API 与 SSE 通道，对外提供最小交互能力。
 
 关键实现点：
@@ -102,3 +102,30 @@
 - 增加 CORS 中间件，允许 `Origin` 在白名单内时放行。
 - 默认允许 `http://localhost:5173`，可通过 `MOBVIBE_CORS_ORIGINS` 追加来源。
 - 预检请求统一返回 204，SSE 也能复用同一套跨域头。
+
+## ACP 后端抽象与多 CLI 支持
+
+### 实施前：目标与计划
+
+目标：
+- 从单一 ACP CLI 抽象为可切换的 ACP 后端。
+- 首先支持 `gemini --experimental-acp`，并保留统一的会话/消息接口。
+- 前端展示当前 ACP 后端类型。
+
+计划：
+1. 在服务配置中增加 `MOBVIBE_ACP_BACKEND`，内置 `opencode` 与 `gemini-cli` 映射到命令参数。
+2. 抽象连接状态返回结构为通用 ACP 后端状态（`backendId/command/args`）。
+3. 将状态接口调整为 `/acp/agent`，前端改用新接口并展示后端类型。
+
+### 实施前：架构草图
+
+- 配置层：`config.ts` 解析 `MOBVIBE_ACP_BACKEND`，返回统一的 ACP 后端配置。
+- 会话管理：`SessionManager` 使用 ACP 后端配置启动 ACP 进程。
+- 状态接口：`/acp/agent` 返回后端标识、命令与进程状态，前端据此展示当前后端。
+
+### 实施后：实现记录
+
+已完成内容：
+- 新增 `MOBVIBE_ACP_BACKEND`，内置 `opencode` 与 `gemini-cli` 命令映射。
+- ACP 连接抽象为通用后端配置，状态结构增加 `backendId/backendLabel`。
+- 状态接口调整为 `/acp/agent`，前端展示当前后端类型。

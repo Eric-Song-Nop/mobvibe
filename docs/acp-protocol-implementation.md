@@ -7,8 +7,8 @@
 
 ## 协议角色与边界
 
-- Client：Mobvibe 后端作为 ACP Client，负责连接 `opencode acp` 并转发消息。
-- Agent：`opencode acp` 作为 ACP Agent，负责会话管理与回复生成。
+- Client：Mobvibe 后端作为 ACP Client，负责连接本地 ACP CLI（`opencode`/`gemini-cli`）并转发消息。
+- Agent：ACP CLI 作为 ACP Agent，负责会话管理与回复生成。
 
 ## 当前实现范围
 
@@ -27,7 +27,7 @@
 
 ## 关键流程
 
-1. 前端请求创建会话，后端启动独立 `opencode acp` 进程。
+1. 前端请求创建会话，后端启动独立 ACP CLI 进程。
 2. `initialize` 完成协议协商，并记录 `agentInfo`。
 3. 创建会话并返回 `sessionId` + 初始模型/模式元信息。
 4. 前端调用 `/acp/message` 发送用户消息。
@@ -37,7 +37,7 @@
 ## 后端 API 清单
 
 - `GET /health`：健康检查。
-- `GET /acp/opencode`：服务级连接状态。
+- `GET /acp/agent`：服务级连接状态。
 - `GET /acp/sessions`：会话列表。
 - `POST /acp/session`：创建新会话。
 - `PATCH /acp/session`：更新会话标题。

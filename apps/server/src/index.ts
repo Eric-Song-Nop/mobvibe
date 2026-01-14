@@ -6,15 +6,19 @@ import {
 	type ErrorDetail,
 	withScope,
 } from "./acp/errors.js";
-import type { OpencodeConnectionState } from "./acp/opencode.js";
+import type { AcpConnectionState } from "./acp/opencode.js";
 import { SessionManager, type SessionSummary } from "./acp/session-manager.js";
 import { getServerConfig } from "./config.js";
 
 const config = getServerConfig();
 
 const sessionManager = new SessionManager({
-	command: config.opencodeCommand,
-	args: config.opencodeArgs,
+	backend: {
+		id: config.acpBackend.id,
+		label: config.acpBackend.label,
+	},
+	command: config.acpBackend.command,
+	args: config.acpBackend.args,
 	client: {
 		name: config.clientName,
 		version: config.clientVersion,
@@ -90,7 +94,7 @@ const buildSessionNotReadyError = (scope: "session" | "stream") =>
 
 const resolveServiceState = (
 	sessions: SessionSummary[],
-): OpencodeConnectionState => {
+): AcpConnectionState => {
 	if (sessions.some((session) => session.state === "error")) {
 		return "error";
 	}
@@ -118,9 +122,11 @@ const buildServiceStatus = () => {
 	const sessions = sessionManager.listSessions();
 	const state = resolveServiceState(sessions);
 	return {
+		backendId: config.acpBackend.id,
+		backendLabel: config.acpBackend.label,
 		state,
-		command: config.opencodeCommand,
-		args: config.opencodeArgs,
+		command: config.acpBackend.command,
+		args: config.acpBackend.args,
 		error: resolveServiceError(sessions),
 		sessionId: sessions.at(0)?.sessionId,
 		pid: sessions.at(0)?.pid,
@@ -131,7 +137,7 @@ app.get("/health", (_request, response) => {
 	response.json({ ok: true });
 });
 
-app.get("/acp/opencode", (_request, response) => {
+app.get("/acp/agent", (_request, response) => {
 	response.json(buildServiceStatus());
 });
 

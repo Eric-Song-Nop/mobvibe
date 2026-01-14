@@ -18,6 +18,7 @@ import {
 	createSession,
 	createSessionEventSource,
 	type ErrorDetail,
+	fetchAcpBackendStatus,
 	fetchSessions,
 	renameSession,
 	sendMessage,
@@ -126,6 +127,12 @@ export function App() {
 	const sessionsQuery = useQuery({
 		queryKey: ["sessions"],
 		queryFn: fetchSessions,
+		refetchInterval: 5000,
+	});
+
+	const backendStatusQuery = useQuery({
+		queryKey: ["acp-backend"],
+		queryFn: fetchAcpBackendStatus,
 		refetchInterval: 5000,
 	});
 
@@ -375,6 +382,12 @@ export function App() {
 	const statusLabel = activeSessionState ?? "idle";
 
 	const statusMessage = useMemo(() => {
+		if (backendStatusQuery.isError) {
+			return normalizeError(
+				backendStatusQuery.error,
+				createFallbackError("后端状态获取失败", "service"),
+			).message;
+		}
 		if (sessionsQuery.isError) {
 			return normalizeError(
 				sessionsQuery.error,
@@ -385,11 +398,15 @@ export function App() {
 	}, [
 		activeSession?.error?.message,
 		appError?.message,
+		backendStatusQuery.error,
+		backendStatusQuery.isError,
 		sessionsQuery.error,
 		sessionsQuery.isError,
 	]);
 
 	const streamError = activeSession?.streamError;
+	const backendLabel =
+		backendStatusQuery.data?.backendLabel ?? backendStatusQuery.data?.backendId;
 
 	const agentLabel = activeSession?.agentName;
 	const modelLabel = activeSession?.modelName ?? activeSession?.modelId;
@@ -465,6 +482,9 @@ export function App() {
 							</span>
 						</div>
 						<Badge variant={statusVariant}>{statusLabel}</Badge>
+						{backendLabel ? (
+							<Badge variant="outline">后端: {backendLabel}</Badge>
+						) : null}
 						{activeSessionId ? (
 							<Badge variant="secondary">
 								Session {activeSessionId.slice(0, 8)}

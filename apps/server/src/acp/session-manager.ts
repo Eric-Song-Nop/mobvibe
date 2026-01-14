@@ -1,17 +1,16 @@
 import type {
 	SessionModelState,
 	SessionModeState,
+	SessionNotification,
 } from "@agentclientprotocol/sdk";
+import type { AcpBackendId } from "../config.js";
 import { AppError, createErrorDetail, type ErrorDetail } from "./errors.js";
-import {
-	OpencodeConnection,
-	type OpencodeConnectionState,
-} from "./opencode.js";
+import { AcpConnection, type AcpConnectionState } from "./opencode.js";
 
 type SessionRecord = {
 	sessionId: string;
 	title: string;
-	connection: OpencodeConnection;
+	connection: AcpConnection;
 	createdAt: Date;
 	updatedAt: Date;
 	agentName?: string;
@@ -26,7 +25,7 @@ type SessionRecord = {
 export type SessionSummary = {
 	sessionId: string;
 	title: string;
-	state: OpencodeConnectionState;
+	state: AcpConnectionState;
 	error?: ErrorDetail;
 	pid?: number;
 	createdAt: string;
@@ -76,6 +75,10 @@ export class SessionManager {
 
 	constructor(
 		private readonly options: {
+			backend: {
+				id: AcpBackendId;
+				label: string;
+			};
 			command: string;
 			args: string[];
 			client: {
@@ -96,7 +99,7 @@ export class SessionManager {
 	}
 
 	async createSession(options?: { cwd?: string; title?: string }) {
-		const connection = new OpencodeConnection(this.options);
+		const connection = new AcpConnection(this.options);
 		try {
 			await connection.connect();
 			const session = await connection.createSession({ cwd: options?.cwd });
@@ -119,26 +122,28 @@ export class SessionManager {
 				modeName,
 				availableModes,
 			};
-			record.unsubscribe = connection.onSessionUpdate((notification) => {
-				this.touchSession(session.sessionId);
-				const update = notification.update;
-				if (update.sessionUpdate === "current_mode_update") {
-					record.modeId = update.currentModeId;
-					record.modeName =
-						record.availableModes?.find(
-							(mode) => mode.id === update.currentModeId,
-						)?.name ?? record.modeName;
-					return;
-				}
-				if (update.sessionUpdate === "session_info_update") {
-					if (typeof update.title === "string") {
-						record.title = update.title;
+			record.unsubscribe = connection.onSessionUpdate(
+				(notification: SessionNotification) => {
+					this.touchSession(session.sessionId);
+					const update = notification.update;
+					if (update.sessionUpdate === "current_mode_update") {
+						record.modeId = update.currentModeId;
+						record.modeName =
+							record.availableModes?.find(
+								(mode) => mode.id === update.currentModeId,
+							)?.name ?? record.modeName;
+						return;
 					}
-					if (typeof update.updatedAt === "string") {
-						record.updatedAt = new Date(update.updatedAt);
+					if (update.sessionUpdate === "session_info_update") {
+						if (typeof update.title === "string") {
+							record.title = update.title;
+						}
+						if (typeof update.updatedAt === "string") {
+							record.updatedAt = new Date(update.updatedAt);
+						}
 					}
-				}
-			});
+				},
+			);
 			this.sessions.set(session.sessionId, record);
 			return this.buildSummary(record);
 		} catch (error) {

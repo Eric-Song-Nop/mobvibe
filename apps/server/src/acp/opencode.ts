@@ -14,6 +14,7 @@ import {
 	type RequestPermissionResponse,
 	type SessionNotification,
 } from "@agentclientprotocol/sdk";
+import type { AcpBackendId } from "../config.js";
 import {
 	createErrorDetail,
 	type ErrorDetail,
@@ -25,15 +26,17 @@ type ClientInfo = {
 	version: string;
 };
 
-export type OpencodeConnectionState =
+export type AcpConnectionState =
 	| "idle"
 	| "connecting"
 	| "ready"
 	| "error"
 	| "stopped";
 
-export type OpencodeStatus = {
-	state: OpencodeConnectionState;
+export type AcpBackendStatus = {
+	backendId: AcpBackendId;
+	backendLabel: string;
+	state: AcpConnectionState;
 	command: string;
 	args: string[];
 	connectedAt?: string;
@@ -75,12 +78,12 @@ const formatExitMessage = (
 	signal: NodeJS.Signals | null,
 ) => {
 	if (signal) {
-		return `opencode exited with signal ${signal}`;
+		return `ACP 进程收到信号 ${signal}`;
 	}
 	if (code !== null) {
-		return `opencode exited with code ${code}`;
+		return `ACP 进程退出，状态码 ${code}`;
 	}
-	return "opencode exited";
+	return "ACP 进程已退出";
 };
 
 const buildConnectError = (error: unknown): ErrorDetail => {
@@ -96,7 +99,7 @@ const buildConnectError = (error: unknown): ErrorDetail => {
 	}
 	return createErrorDetail({
 		code: "ACP_CONNECT_FAILED",
-		message: "无法连接到 opencode ACP 进程",
+		message: "无法连接到 ACP 后端进程",
 		retryable: true,
 		scope: "service",
 		detail,
@@ -106,7 +109,7 @@ const buildConnectError = (error: unknown): ErrorDetail => {
 const buildProcessExitError = (detail: string): ErrorDetail =>
 	createErrorDetail({
 		code: "ACP_PROCESS_EXITED",
-		message: "opencode 进程异常退出",
+		message: "ACP 后端进程异常退出",
 		retryable: true,
 		scope: "service",
 		detail,
@@ -121,11 +124,11 @@ const buildConnectionClosedError = (detail: string): ErrorDetail =>
 		detail,
 	});
 
-export class OpencodeConnection {
+export class AcpConnection {
 	private connection?: ClientSideConnection;
 	private process?: ChildProcessWithoutNullStreams;
 	private closedPromise?: Promise<void>;
-	private state: OpencodeConnectionState = "idle";
+	private state: AcpConnectionState = "idle";
 	private connectedAt?: Date;
 	private error?: ErrorDetail;
 	private sessionId?: string;
@@ -138,14 +141,20 @@ export class OpencodeConnection {
 
 	constructor(
 		private readonly options: {
+			backend: {
+				id: AcpBackendId;
+				label: string;
+			};
 			command: string;
 			args: string[];
 			client: ClientInfo;
 		},
 	) {}
 
-	getStatus(): OpencodeStatus {
+	getStatus(): AcpBackendStatus {
 		return {
+			backendId: this.options.backend.id,
+			backendLabel: this.options.backend.label,
 			state: this.state,
 			command: this.options.command,
 			args: [...this.options.args],
@@ -175,14 +184,14 @@ export class OpencodeConnection {
 		};
 	}
 
-	onStatusChange(listener: (status: OpencodeStatus) => void) {
+	onStatusChange(listener: (status: AcpBackendStatus) => void) {
 		this.statusEmitter.on("status", listener);
 		return () => {
 			this.statusEmitter.off("status", listener);
 		};
 	}
 
-	private updateStatus(state: OpencodeConnectionState, error?: ErrorDetail) {
+	private updateStatus(state: AcpConnectionState, error?: ErrorDetail) {
 		this.state = state;
 		this.error = error;
 		this.statusEmitter.emit("status", this.getStatus());
@@ -299,7 +308,7 @@ export class OpencodeConnection {
 		}
 
 		if (!this.connection || this.state !== "ready") {
-			throw new Error("opencode connection unavailable");
+			throw new Error("ACP 连接不可用");
 		}
 
 		return this.connection;

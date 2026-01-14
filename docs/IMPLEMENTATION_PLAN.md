@@ -2,18 +2,18 @@
 
 ## 目标
 
-- 交付一个可用的 ACP 聊天 WebUI MVP：支持通过后端连接本地 `opencode acp`，前端完成基础聊天体验与状态展示。
+- 交付一个可用的 ACP 聊天 WebUI MVP：支持通过后端连接本地 ACP CLI（`opencode`/`gemini-cli`），前端完成基础聊天体验与状态展示。
 - 形成清晰的前后端边界与最小可扩展架构，为后续多 Agent/存储/插件化打基础。
 
 ## 已完成（来自现有记录）
 
-- [x] 后端：已完成 `apps/server` 工程初始化、`opencode acp` 连接、健康检查与状态接口（详见 `docs/backend-server-setup.md`）。
+- [x] 后端：已完成 `apps/server` 工程初始化、ACP CLI 连接、健康检查与状态接口（详见 `docs/backend-server-setup.md`）。
 - [x] 前端：已修复初始化渲染问题（`class`/`for` 属性与 React 去重）（详见 `docs/frontend-init-fix.md`）。
 - [x] ACP：补充协议实现跟踪文档（详见 `docs/acp-protocol-implementation.md`）。
 
 ## MVP 范围
 
-- 仅支持本地 `opencode acp` 连接，不包含多 Agent 路由。
+- 仅支持本地 ACP CLI（`opencode`/`gemini-cli`）连接，不包含多 Agent 路由。
 - 具备最小聊天 UI、消息流展示与输入发送。
 - 具备基础连接状态与错误提示。
 
@@ -29,13 +29,13 @@
 
 - [x] 增加后端 API：创建会话、发送消息、拉取增量/流式响应。
 - [x] 统一 ACP 连接状态与错误模型，前端可消费。
-- [ ] 确保 `opencode acp` 进程生命周期可控（断线重连、退出清理）。
+- [ ] 确保 ACP CLI 进程生命周期可控（断线重连、退出清理）。
 
 #### M1 状态与错误模型统一（实现前计划）
 
 - 定义统一错误结构：`{ code, message, retryable, scope, detail? }`。
 - 规划错误码：`ACP_*` / `SESSION_*` / `REQUEST_*` / `STREAM_*`。
-- 后端统一输出：`/acp/opencode` 与所有会话接口返回 `error` 字段。
+- 后端统一输出：`/acp/agent` 与所有会话接口返回 `error` 字段。
 - SSE 增加 `session_error` 事件，传递会话级错误信息。
 - 前端分别展示全局/会话/流式错误，并保留中文文案。
 
@@ -58,7 +58,7 @@
 - 页面结构：顶部状态栏（连接状态 + 会话 ID）、中部消息流、底部输入区。
 - 状态模型：
   - Zustand 维护 `sessionId`、消息列表、输入状态、连接状态。
-  - Tanstack Query 负责 `GET /acp/opencode` 轮询状态（默认 5s）。
+  - Tanstack Query 负责 `GET /acp/agent` 轮询状态（默认 5s）。
 - API 调用：
   - `POST /acp/session` 创建会话，返回 `sessionId`。
   - `POST /acp/message` 发送消息，返回 `stopReason`。
@@ -80,7 +80,7 @@
 ### M5：多会话并发（实现前计划）
 
 - 目标：后端支持多进程多会话并行，前端支持会话列表与切换，切换不丢消息。
-- 架构：每个 session 对应一个 `opencode acp` 进程与 ACP 连接，后端维护 `sessionId -> runner` 映射。
+- 架构：每个 session 对应一个 ACP CLI 进程与 ACP 连接，后端维护 `sessionId -> runner` 映射。
 - 会话生命周期：支持创建、关闭、错误状态记录；不做自动过期关闭。
 - SSE 方案：单 session 单 SSE；前端仅为当前激活会话建立连接并按 `sessionId` 路由更新。
 - API 调整：新增 `GET /acp/sessions` 列表与 `POST /acp/session/close` 关闭接口，保留 `POST /acp/session`、`POST /acp/message`、`GET /acp/session/stream`。
@@ -149,7 +149,7 @@
 ## 关键接口草案（方向）
 
 - [ ] `GET /health`：服务健康状态。
-- [ ] `GET /acp/opencode`：服务级连接状态。
+- [ ] `GET /acp/agent`：服务级连接状态。
 - [ ] `GET /acp/sessions`：列出当前会话列表。
 - [ ] `POST /acp/session`：创建新会话。
 - [ ] `PATCH /acp/session`：更新会话标题。
@@ -165,6 +165,6 @@
 
 ## 验证清单（MVP 验收）
 
-- [ ] 后端服务启动后可成功连接 `opencode acp`。
+- [ ] 后端服务启动后可成功连接 ACP CLI。
 - [ ] 前端能创建会话、发送消息、接收回复。
 - [ ] 断线后能提示并允许重连。

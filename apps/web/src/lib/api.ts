@@ -1,4 +1,4 @@
-export type OpencodeConnectionState =
+export type AcpConnectionState =
 	| "idle"
 	| "connecting"
 	| "ready"
@@ -26,8 +26,10 @@ export type ErrorDetail = {
 	detail?: string;
 };
 
-export type OpencodeStatus = {
-	state: OpencodeConnectionState;
+export type AcpBackendStatus = {
+	backendId: string;
+	backendLabel: string;
+	state: AcpConnectionState;
 	command: string;
 	args: string[];
 	connectedAt?: string;
@@ -36,7 +38,7 @@ export type OpencodeStatus = {
 	pid?: number;
 };
 
-export type SessionState = OpencodeConnectionState;
+export type SessionState = AcpConnectionState;
 
 export type SessionSummary = {
 	sessionId: string;
@@ -128,8 +130,8 @@ const requestJson = async <ResponseType>(
 	return (await response.json()) as ResponseType;
 };
 
-export const fetchOpencodeStatus = async (): Promise<OpencodeStatus> =>
-	requestJson<OpencodeStatus>("/acp/opencode");
+export const fetchAcpBackendStatus = async (): Promise<AcpBackendStatus> =>
+	requestJson<AcpBackendStatus>("/acp/agent");
 
 export const fetchSessions = async (): Promise<SessionsResponse> =>
 	requestJson<SessionsResponse>("/acp/sessions");
