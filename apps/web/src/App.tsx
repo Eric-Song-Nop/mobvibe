@@ -2,8 +2,27 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MessageItem } from "@/components/chat/MessageItem";
 import { SessionSidebar } from "@/components/session/SessionSidebar";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -18,7 +37,7 @@ import {
 	createSession,
 	createSessionEventSource,
 	type ErrorDetail,
-	fetchAcpBackendStatus,
+	fetchAcpBackends,
 	fetchSessions,
 	renameSession,
 	sendMessage,
@@ -122,6 +141,9 @@ export function App() {
 	const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 	const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
 	const [editingTitle, setEditingTitle] = useState("");
+	const [createDialogOpen, setCreateDialogOpen] = useState(false);
+	const [draftTitle, setDraftTitle] = useState("");
+	const [draftBackendId, setDraftBackendId] = useState<string | undefined>();
 	const sessionEventSourcesRef = useRef<Map<string, EventSource>>(new Map());
 
 	const sessionsQuery = useQuery({
@@ -130,11 +152,14 @@ export function App() {
 		refetchInterval: 5000,
 	});
 
-	const backendStatusQuery = useQuery({
-		queryKey: ["acp-backend"],
-		queryFn: fetchAcpBackendStatus,
-		refetchInterval: 5000,
+	const backendsQuery = useQuery({
+		queryKey: ["acp-backends"],
+		queryFn: fetchAcpBackends,
 	});
+
+	const availableBackends = backendsQuery.data?.backends ?? [];
+	const defaultBackendId =
+		backendsQuery.data?.defaultBackendId ?? availableBackends[0]?.backendId;
 
 	useEffect(() => {
 		if (sessionsQuery.data?.sessions) {
@@ -157,6 +182,15 @@ export function App() {
 		setActiveSessionId(sessionList[0].sessionId);
 	}, [activeSessionId, sessionList, setActiveSessionId]);
 
+	useEffect(() => {
+		if (!createDialogOpen) {
+			return;
+		}
+		if (!draftBackendId && defaultBackendId) {
+			setDraftBackendId(defaultBackendId);
+		}
+	}, [createDialogOpen, defaultBackendId, draftBackendId]);
+
 	const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
 
 	const activeSessionState = activeSession?.state;
@@ -167,6 +201,8 @@ export function App() {
 			createLocalSession(data.sessionId, {
 				title: data.title,
 				state: data.state,
+				backendId: data.backendId,
+				backendLabel: data.backendLabel,
 				agentName: data.agentName,
 				modelId: data.modelId,
 				modelName: data.modelName,
@@ -175,6 +211,7 @@ export function App() {
 			});
 			setActiveSessionId(data.sessionId);
 			setAppError(undefined);
+			setCreateDialogOpen(false);
 			setMobileMenuOpen(false);
 		},
 		onError: (mutationError: unknown) => {
@@ -323,11 +360,24 @@ export function App() {
 		}
 	}, [appendAssistantChunk, sessions, setStreamError, updateSessionMeta]);
 
+	const handleOpenCreateDialog = () => {
+		setDraftTitle(buildSessionTitle(sessionList));
+		setDraftBackendId(defaultBackendId);
+		setCreateDialogOpen(true);
+	};
+
 	const handleCreateSession = async () => {
-		const title = buildSessionTitle(sessionList);
+		if (!draftBackendId) {
+			setAppError(createFallbackError("请选择后端", "request"));
+			return;
+		}
+		const title = draftTitle.trim();
 		setAppError(undefined);
 		try {
-			await createSessionMutation.mutateAsync({ title });
+			await createSessionMutation.mutateAsync({
+				backendId: draftBackendId,
+				title: title.length > 0 ? title : undefined,
+			});
 		} catch {
 			return;
 		}
@@ -382,10 +432,10 @@ export function App() {
 	const statusLabel = activeSessionState ?? "idle";
 
 	const statusMessage = useMemo(() => {
-		if (backendStatusQuery.isError) {
+		if (backendsQuery.isError) {
 			return normalizeError(
-				backendStatusQuery.error,
-				createFallbackError("后端状态获取失败", "service"),
+				backendsQuery.error,
+				createFallbackError("后端列表获取失败", "service"),
 			).message;
 		}
 		if (sessionsQuery.isError) {
@@ -398,29 +448,90 @@ export function App() {
 	}, [
 		activeSession?.error?.message,
 		appError?.message,
-		backendStatusQuery.error,
-		backendStatusQuery.isError,
+		backendsQuery.error,
+		backendsQuery.isError,
 		sessionsQuery.error,
 		sessionsQuery.isError,
 	]);
 
 	const streamError = activeSession?.streamError;
-	const backendLabel =
-		backendStatusQuery.data?.backendLabel ?? backendStatusQuery.data?.backendId;
+	const backendLabel = activeSession?.backendLabel ?? activeSession?.backendId;
 
 	const agentLabel = activeSession?.agentName;
+
 	const modelLabel = activeSession?.modelName ?? activeSession?.modelId;
 	const modeLabel = activeSession?.modeName ?? activeSession?.modeId;
 
 	return (
 		<div className="bg-muted/40 text-foreground flex min-h-screen flex-col md:flex-row">
+			<AlertDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+				<AlertDialogContent size="sm">
+					<AlertDialogHeader>
+						<AlertDialogTitle>新建对话</AlertDialogTitle>
+						<AlertDialogDescription>
+							选择后端并设置对话标题。
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<div className="flex flex-col gap-3">
+						<div className="flex flex-col gap-2">
+							<Label htmlFor="session-title">标题</Label>
+							<Input
+								id="session-title"
+								value={draftTitle}
+								onChange={(event) => setDraftTitle(event.target.value)}
+								placeholder="可选标题"
+							/>
+						</div>
+						<div className="flex flex-col gap-2">
+							<Label htmlFor="session-backend">后端</Label>
+							<Select
+								value={draftBackendId}
+								onValueChange={setDraftBackendId}
+								disabled={availableBackends.length === 0}
+							>
+								<SelectTrigger id="session-backend">
+									<SelectValue
+										placeholder={
+											availableBackends.length === 0
+												? "暂无可用后端"
+												: "选择后端"
+										}
+									/>
+								</SelectTrigger>
+								<SelectContent>
+									{availableBackends.map((backend) => (
+										<SelectItem
+											key={backend.backendId}
+											value={backend.backendId}
+										>
+											{backend.backendLabel || backend.backendId}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</div>
+					</div>
+					<AlertDialogFooter>
+						<AlertDialogCancel>取消</AlertDialogCancel>
+						<AlertDialogAction
+							disabled={createSessionMutation.isPending || !draftBackendId}
+							onClick={(event) => {
+								event.preventDefault();
+								void handleCreateSession();
+							}}
+						>
+							{createSessionMutation.isPending ? "创建中..." : "创建"}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 			<aside className="bg-background/80 border-r hidden w-64 flex-col px-4 py-4 md:flex">
 				<SessionSidebar
 					sessions={sessionList}
 					activeSessionId={activeSessionId}
 					editingSessionId={editingSessionId}
 					editingTitle={editingTitle}
-					onCreateSession={handleCreateSession}
+					onCreateSession={handleOpenCreateDialog}
 					onSelectSession={(sessionId) => setActiveSessionId(sessionId)}
 					onEditSession={handleRenameStart}
 					onEditCancel={handleRenameCancel}
@@ -440,7 +551,7 @@ export function App() {
 							activeSessionId={activeSessionId}
 							editingSessionId={editingSessionId}
 							editingTitle={editingTitle}
-							onCreateSession={handleCreateSession}
+							onCreateSession={handleOpenCreateDialog}
 							onSelectSession={(sessionId) => {
 								setActiveSessionId(sessionId);
 								setMobileMenuOpen(false);
@@ -491,7 +602,7 @@ export function App() {
 							</Badge>
 						) : null}
 						<Button
-							onClick={() => void handleCreateSession()}
+							onClick={() => handleOpenCreateDialog()}
 							disabled={createSessionMutation.isPending}
 						>
 							新对话

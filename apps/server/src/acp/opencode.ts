@@ -147,6 +147,7 @@ export class AcpConnection {
 			};
 			command: string;
 			args: string[];
+			envOverrides?: Record<string, string>;
 			client: ClientInfo;
 		},
 	) {}
@@ -206,8 +207,12 @@ export class AcpConnection {
 		this.agentInfo = undefined;
 
 		try {
+			const env = this.options.envOverrides
+				? { ...process.env, ...this.options.envOverrides }
+				: process.env;
 			const child = spawn(this.options.command, this.options.args, {
 				stdio: ["pipe", "pipe", "pipe"],
+				env,
 			});
 			this.process = child;
 			this.sessionId = undefined;

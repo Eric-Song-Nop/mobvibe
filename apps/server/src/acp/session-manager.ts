@@ -3,13 +3,15 @@ import type {
 	SessionModeState,
 	SessionNotification,
 } from "@agentclientprotocol/sdk";
-import type { AcpBackendId } from "../config.js";
+import type { AcpBackendConfig, AcpBackendId } from "../config.js";
 import { AppError, createErrorDetail, type ErrorDetail } from "./errors.js";
 import { AcpConnection, type AcpConnectionState } from "./opencode.js";
 
 type SessionRecord = {
 	sessionId: string;
 	title: string;
+	backendId: AcpBackendId;
+	backendLabel: string;
 	connection: AcpConnection;
 	createdAt: Date;
 	updatedAt: Date;
@@ -25,6 +27,8 @@ type SessionRecord = {
 export type SessionSummary = {
 	sessionId: string;
 	title: string;
+	backendId: AcpBackendId;
+	backendLabel: string;
 	state: AcpConnectionState;
 	error?: ErrorDetail;
 	pid?: number;
@@ -72,21 +76,24 @@ const resolveModeState = (modes?: SessionModeState | null) => {
 
 export class SessionManager {
 	private sessions = new Map<string, SessionRecord>();
+	private backendById: Map<AcpBackendId, AcpBackendConfig>;
+	private defaultBackendId: AcpBackendId;
 
 	constructor(
 		private readonly options: {
-			backend: {
-				id: AcpBackendId;
-				label: string;
-			};
-			command: string;
-			args: string[];
+			backends: AcpBackendConfig[];
+			defaultBackendId: AcpBackendId;
 			client: {
 				name: string;
 				version: string;
 			};
 		},
-	) {}
+	) {
+		this.backendById = new Map(
+			options.backends.map((backend) => [backend.id, backend]),
+		);
+		this.defaultBackendId = options.defaultBackendId;
+	}
 
 	listSessions(): SessionSummary[] {
 		return Array.from(this.sessions.values()).map((record) =>
@@ -98,8 +105,43 @@ export class SessionManager {
 		return this.sessions.get(sessionId);
 	}
 
-	async createSession(options?: { cwd?: string; title?: string }) {
-		const connection = new AcpConnection(this.options);
+	private resolveBackend(backendId?: string) {
+		const normalized = backendId?.trim();
+		const resolvedId =
+			normalized && normalized.length > 0
+				? (normalized as AcpBackendId)
+				: this.defaultBackendId;
+		const backend = this.backendById.get(resolvedId);
+		if (!backend) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "backendId 不可用",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		return backend;
+	}
+
+	async createSession(options?: {
+		cwd?: string;
+		title?: string;
+		backendId?: string;
+	}) {
+		const backend = this.resolveBackend(options?.backendId);
+		const connection = new AcpConnection({
+			backend: {
+				id: backend.id,
+				label: backend.label,
+			},
+			command: backend.command,
+			args: backend.args,
+			envOverrides: backend.envOverrides,
+			client: this.options.client,
+		});
 		try {
 			await connection.connect();
 			const session = await connection.createSession({ cwd: options?.cwd });
@@ -112,6 +154,8 @@ export class SessionManager {
 			const record: SessionRecord = {
 				sessionId: session.sessionId,
 				title: options?.title ?? `对话 ${this.sessions.size + 1}`,
+				backendId: backend.id,
+				backendLabel: backend.label,
 				connection,
 				createdAt: now,
 				updatedAt: now,
@@ -205,6 +249,8 @@ export class SessionManager {
 		return {
 			sessionId: record.sessionId,
 			title: record.title,
+			backendId: record.backendId,
+			backendLabel: record.backendLabel,
 			state: status.state,
 			error: status.error,
 			pid: status.pid,

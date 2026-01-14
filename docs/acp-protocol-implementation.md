@@ -27,8 +27,8 @@
 
 ## 关键流程
 
-1. 前端请求创建会话，后端启动独立 ACP CLI 进程。
-2. `initialize` 完成协议协商，并记录 `agentInfo`。
+1. 前端拉取 `/acp/backends`，选择目标后端并请求创建会话。
+2. 后端启动对应 ACP CLI 进程，`initialize` 完成协议协商并记录 `agentInfo`。
 3. 创建会话并返回 `sessionId` + 初始模型/模式元信息。
 4. 前端调用 `/acp/message` 发送用户消息。
 5. `sessionUpdate` 通过 SSE 推送给前端，`current_mode_update` 实时更新会话模式。
@@ -38,8 +38,9 @@
 
 - `GET /health`：健康检查。
 - `GET /acp/agent`：服务级连接状态。
+- `GET /acp/backends`：可用后端列表。
 - `GET /acp/sessions`：会话列表。
-- `POST /acp/session`：创建新会话。
+- `POST /acp/session`：创建新会话（支持 `backendId`）。
 - `PATCH /acp/session`：更新会话标题。
 - `POST /acp/session/close`：关闭会话。
 - `POST /acp/message`：发送消息。

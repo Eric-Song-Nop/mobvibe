@@ -29,6 +29,7 @@
 
 - [x] 增加后端 API：创建会话、发送消息、拉取增量/流式响应。
 - [x] 统一 ACP 连接状态与错误模型，前端可消费。
+- [x] 支持会话级后端选择，新增 `/acp/backends` 列表接口。
 - [ ] 确保 ACP CLI 进程生命周期可控（断线重连、退出清理）。
 
 #### M1 状态与错误模型统一（实现前计划）
@@ -150,8 +151,9 @@
 
 - [ ] `GET /health`：服务健康状态。
 - [ ] `GET /acp/agent`：服务级连接状态。
+- [ ] `GET /acp/backends`：可用后端列表。
 - [ ] `GET /acp/sessions`：列出当前会话列表。
-- [ ] `POST /acp/session`：创建新会话。
+- [ ] `POST /acp/session`：创建新会话（支持 `backendId`）。
 - [ ] `PATCH /acp/session`：更新会话标题。
 - [ ] `POST /acp/session/close`：关闭指定会话。
 - [ ] `POST /acp/message`：发送消息（支持流式或轮询）。

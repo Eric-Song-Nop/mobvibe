@@ -13,12 +13,8 @@ import { getServerConfig } from "./config.js";
 const config = getServerConfig();
 
 const sessionManager = new SessionManager({
-	backend: {
-		id: config.acpBackend.id,
-		label: config.acpBackend.label,
-	},
-	command: config.acpBackend.command,
-	args: config.acpBackend.args,
+	backends: config.acpBackends,
+	defaultBackendId: config.defaultAcpBackendId,
 	client: {
 		name: config.clientName,
 		version: config.clientVersion,
@@ -122,12 +118,13 @@ const buildServiceStatus = () => {
 	const sessions = sessionManager.listSessions();
 	const state = resolveServiceState(sessions);
 	return {
-		backendId: config.acpBackend.id,
-		backendLabel: config.acpBackend.label,
 		state,
-		command: config.acpBackend.command,
-		args: config.acpBackend.args,
 		error: resolveServiceError(sessions),
+		backends: config.acpBackends.map((backend) => ({
+			backendId: backend.id,
+			backendLabel: backend.label,
+		})),
+		defaultBackendId: config.defaultAcpBackendId,
 		sessionId: sessions.at(0)?.sessionId,
 		pid: sessions.at(0)?.pid,
 	};
@@ -141,19 +138,30 @@ app.get("/acp/agent", (_request, response) => {
 	response.json(buildServiceStatus());
 });
 
+app.get("/acp/backends", (_request, response) => {
+	response.json({
+		defaultBackendId: config.defaultAcpBackendId,
+		backends: config.acpBackends.map((backend) => ({
+			backendId: backend.id,
+			backendLabel: backend.label,
+		})),
+	});
+});
+
 app.get("/acp/sessions", (_request, response) => {
 	response.json({ sessions: sessionManager.listSessions() });
 });
 
 app.post("/acp/session", async (request, response) => {
 	try {
-		const { cwd, title } = request.body ?? {};
+		const { cwd, title, backendId } = request.body ?? {};
 		const session = await sessionManager.createSession({
 			cwd: typeof cwd === "string" ? cwd : undefined,
 			title:
 				typeof title === "string" && title.trim().length > 0
 					? title.trim()
 					: undefined,
+			backendId: typeof backendId === "string" ? backendId : undefined,
 		});
 		response.json(session);
 	} catch (error) {

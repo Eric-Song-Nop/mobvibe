@@ -26,16 +26,14 @@ export type ErrorDetail = {
 	detail?: string;
 };
 
-export type AcpBackendStatus = {
+export type AcpBackendSummary = {
 	backendId: string;
 	backendLabel: string;
-	state: AcpConnectionState;
-	command: string;
-	args: string[];
-	connectedAt?: string;
-	error?: ErrorDetail;
-	sessionId?: string;
-	pid?: number;
+};
+
+export type AcpBackendsResponse = {
+	defaultBackendId: string;
+	backends: AcpBackendSummary[];
 };
 
 export type SessionState = AcpConnectionState;
@@ -43,6 +41,8 @@ export type SessionState = AcpConnectionState;
 export type SessionSummary = {
 	sessionId: string;
 	title: string;
+	backendId: string;
+	backendLabel: string;
 	state: SessionState;
 	error?: ErrorDetail;
 	pid?: number;
@@ -130,8 +130,8 @@ const requestJson = async <ResponseType>(
 	return (await response.json()) as ResponseType;
 };
 
-export const fetchAcpBackendStatus = async (): Promise<AcpBackendStatus> =>
-	requestJson<AcpBackendStatus>("/acp/agent");
+export const fetchAcpBackends = async (): Promise<AcpBackendsResponse> =>
+	requestJson<AcpBackendsResponse>("/acp/backends");
 
 export const fetchSessions = async (): Promise<SessionsResponse> =>
 	requestJson<SessionsResponse>("/acp/sessions");
@@ -139,6 +139,7 @@ export const fetchSessions = async (): Promise<SessionsResponse> =>
 export const createSession = async (payload?: {
 	cwd?: string;
 	title?: string;
+	backendId?: string;
 }): Promise<CreateSessionResponse> =>
 	requestJson<CreateSessionResponse>("/acp/session", {
 		method: "POST",

@@ -113,19 +113,74 @@
 - 前端展示当前 ACP 后端类型。
 
 计划：
-1. 在服务配置中增加 `MOBVIBE_ACP_BACKEND`，内置 `opencode` 与 `gemini-cli` 映射到命令参数。
+1. 在服务配置中增加 `MOBVIBE_ACP_BACKENDS`（逗号分隔），默认启用全部内置后端。
 2. 抽象连接状态返回结构为通用 ACP 后端状态（`backendId/command/args`）。
 3. 将状态接口调整为 `/acp/agent`，前端改用新接口并展示后端类型。
 
 ### 实施前：架构草图
 
-- 配置层：`config.ts` 解析 `MOBVIBE_ACP_BACKEND`，返回统一的 ACP 后端配置。
+- 配置层：`config.ts` 解析 `MOBVIBE_ACP_BACKENDS`，生成可用后端列表与默认后端。
 - 会话管理：`SessionManager` 使用 ACP 后端配置启动 ACP 进程。
 - 状态接口：`/acp/agent` 返回后端标识、命令与进程状态，前端据此展示当前后端。
 
 ### 实施后：实现记录
 
 已完成内容：
-- 新增 `MOBVIBE_ACP_BACKEND`，内置 `opencode` 与 `gemini-cli` 命令映射。
+- 新增 `MOBVIBE_ACP_BACKENDS`，内置 `opencode` 与 `gemini-cli` 命令映射。
 - ACP 连接抽象为通用后端配置，状态结构增加 `backendId/backendLabel`。
 - 状态接口调整为 `/acp/agent`，前端展示当前后端类型。
+
+## 会话级 ACP 后端选择与多后端并行
+
+### 实施前：目标与计划
+
+目标：
+- 支持同时启用多个 ACP CLI 后端，并在创建会话时选择使用的后端。
+- 后端会话记录持久保留 `backendId`，前端侧边栏显示会话后端标签。
+- 新增后端列表接口，前端据此渲染可选后端。
+
+计划：
+1. 配置层增加 `MOBVIBE_ACP_BACKENDS`（逗号分隔），默认启用全部内置后端。
+2. `SessionManager` 支持按 `backendId` 创建连接，`SessionSummary` 附带后端字段。
+3. 新增 `GET /acp/backends` 返回可用后端列表，`POST /acp/session` 支持 `backendId` 参数。
+4. 前端新建会话弹窗包含后端选择，下拉列表来自 `/acp/backends`。
+
+### 实施前：架构草图
+
+- 配置层：解析 `MOBVIBE_ACP_BACKENDS` 生成可用后端列表与默认后端。
+- 会话创建：前端传入 `backendId`，后端根据后端配置启动对应 ACP CLI。
+- 会话展示：会话列表与顶部栏展示会话后端标签，便于区分并行会话。
+
+### 实施后：实现记录
+
+已完成内容：
+- 配置改为 `MOBVIBE_ACP_BACKENDS`，后端维护可用后端列表与默认后端。
+- 会话创建支持 `backendId`，会话摘要包含 `backendId/backendLabel`。
+- 新增 `GET /acp/backends`，前端新建对话弹窗支持后端选择。
+
+## Claude Code ACP 适配器接入
+
+### 实施前：目标与计划
+
+目标：
+- 新增 `claude-code-acp` 作为可选 ACP 后端。
+- 支持从环境变量读取 `ANTHROPIC_AUTH_TOKEN` 与 `ANTHROPIC_BASE_URL`。
+- 若仅提供 `ANTHROPIC_AUTH_TOKEN`，自动映射为 `ANTHROPIC_API_KEY` 传给子进程。
+
+计划：
+1. 配置层注册 `claude-code` 后端（命令 `claude-code-acp`）。
+2. 连接启动时合并环境变量，补齐 `ANTHROPIC_API_KEY`。
+3. 文档说明 Claude Code 的环境变量要求。
+
+### 实施前：架构草图
+
+- 后端配置：`ACP_BACKENDS` 增加 `claude-code`。
+- 进程启动：子进程继承服务端环境并注入 token/base url。
+- 前端 UI：后端列表自动新增 `claude-code`。
+
+### 实施后：实现记录
+
+已完成内容：
+- 新增 `claude-code` 后端，命令为 `claude-code-acp`。
+- 支持 `ANTHROPIC_AUTH_TOKEN` 自动映射到 `ANTHROPIC_API_KEY`。
+- 透传 `ANTHROPIC_BASE_URL` 到 Claude Code 子进程。

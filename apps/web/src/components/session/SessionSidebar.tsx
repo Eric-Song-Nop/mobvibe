@@ -118,6 +118,7 @@ const SessionListItem = ({
 	onClose,
 }: SessionListItemProps) => {
 	const statusVariant = getStatusVariant(session.state);
+	const backendLabel = session.backendLabel ?? session.backendId;
 	return (
 		<div
 			className={cn(
@@ -148,7 +149,12 @@ const SessionListItem = ({
 					) : (
 						<span className="text-sm font-medium">{session.title}</span>
 					)}
-					<Badge variant={statusVariant}>{session.state ?? "idle"}</Badge>
+					<div className="flex items-center gap-2">
+						<Badge variant={statusVariant}>{session.state ?? "idle"}</Badge>
+						{backendLabel ? (
+							<Badge variant="outline">{backendLabel}</Badge>
+						) : null}
+					</div>
 				</div>
 				{session.error ? (
 					<span className="text-destructive text-xs">

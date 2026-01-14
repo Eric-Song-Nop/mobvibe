@@ -23,6 +23,8 @@ export type ChatSession = {
 	state?: SessionState;
 	createdAt?: string;
 	updatedAt?: string;
+	backendId?: string;
+	backendLabel?: string;
 	agentName?: string;
 	modelId?: string;
 	modelName?: string;
@@ -41,6 +43,8 @@ type ChatState = {
 		options?: {
 			title?: string;
 			state?: SessionState;
+			backendId?: string;
+			backendLabel?: string;
 			agentName?: string;
 			modelId?: string;
 			modelName?: string;
@@ -95,6 +99,8 @@ const createSessionState = (
 	options?: {
 		title?: string;
 		state?: SessionState;
+		backendId?: string;
+		backendLabel?: string;
 		agentName?: string;
 		modelId?: string;
 		modelName?: string;
@@ -113,6 +119,8 @@ const createSessionState = (
 	state: options?.state,
 	createdAt: undefined,
 	updatedAt: undefined,
+	backendId: options?.backendId,
+	backendLabel: options?.backendLabel,
 	agentName: options?.agentName,
 	modelId: options?.modelId,
 	modelName: options?.modelName,
@@ -151,6 +159,8 @@ export const useChatStore = create<ChatState>((set) => ({
 					createSessionState(summary.sessionId, {
 						title: summary.title,
 						state: summary.state,
+						backendId: summary.backendId,
+						backendLabel: summary.backendLabel,
 					});
 				nextSessions[summary.sessionId] = {
 					...existing,
@@ -159,6 +169,8 @@ export const useChatStore = create<ChatState>((set) => ({
 					error: summary.error,
 					createdAt: summary.createdAt,
 					updatedAt: summary.updatedAt,
+					backendId: summary.backendId ?? existing.backendId,
+					backendLabel: summary.backendLabel ?? existing.backendLabel,
 					agentName: summary.agentName ?? existing.agentName,
 					modelId: summary.modelId ?? existing.modelId,
 					modelName: summary.modelName ?? existing.modelName,
