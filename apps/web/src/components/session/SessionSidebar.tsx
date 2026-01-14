@@ -119,20 +119,21 @@ const SessionListItem = ({
 }: SessionListItemProps) => {
 	const statusVariant = getStatusVariant(session.state);
 	const backendLabel = session.backendLabel ?? session.backendId;
+	const handleSelect = () => onSelect(session.sessionId);
 	return (
 		<div
 			className={cn(
-				"border-border bg-background hover:bg-muted flex flex-col gap-2 rounded-none border p-2 text-left",
+				"border-border bg-background hover:bg-muted flex flex-col gap-2 rounded-none border p-2 text-left cursor-pointer",
 				isActive ? "border-primary/40" : "",
 			)}
+			onClick={handleSelect}
 		>
 			<div
 				role="button"
 				tabIndex={0}
-				onClick={() => onSelect(session.sessionId)}
 				onKeyDown={(event) => {
 					if (event.key === "Enter") {
-						onSelect(session.sessionId);
+						handleSelect();
 					}
 				}}
 				className="flex flex-1 flex-col gap-1"
@@ -162,7 +163,10 @@ const SessionListItem = ({
 					</span>
 				) : null}
 			</div>
-			<div className="flex items-center gap-2">
+			<div
+				className="flex items-center gap-2"
+				onClick={(event) => event.stopPropagation()}
+			>
 				{isEditing ? (
 					<>
 						<Button size="xs" onClick={onEditSubmit}>
