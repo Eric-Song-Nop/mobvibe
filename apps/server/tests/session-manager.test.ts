@@ -1,12 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
 import type {
 	Implementation,
 	NewSessionResponse,
-	SessionModeState,
 	SessionModelState,
+	SessionModeState,
 } from "@agentclientprotocol/sdk";
-import type { AcpBackendConfig } from "../src/config.js";
+import { describe, expect, it, vi } from "vitest";
 import { AppError } from "../src/acp/errors.js";
+import type { AcpBackendConfig } from "../src/config.js";
 
 const sessionModels: SessionModelState = {
 	currentModelId: "model-1",

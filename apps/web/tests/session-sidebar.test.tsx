@@ -4,6 +4,44 @@ import { describe, expect, it, vi } from "vitest";
 import { SessionSidebar } from "../src/components/session/SessionSidebar";
 import type { ChatSession } from "../src/lib/chat-store";
 
+vi.mock("../src/components/ui/alert-dialog", () => ({
+	AlertDialog: ({ children }: { children: React.ReactNode }) => (
+		<div>{children}</div>
+	),
+	AlertDialogTrigger: ({ children }: { children: React.ReactNode }) => (
+		<div>{children}</div>
+	),
+	AlertDialogContent: ({ children }: { children: React.ReactNode }) => (
+		<div>{children}</div>
+	),
+	AlertDialogHeader: ({ children }: { children: React.ReactNode }) => (
+		<div>{children}</div>
+	),
+	AlertDialogTitle: ({ children }: { children: React.ReactNode }) => (
+		<div>{children}</div>
+	),
+	AlertDialogDescription: ({ children }: { children: React.ReactNode }) => (
+		<div>{children}</div>
+	),
+	AlertDialogFooter: ({ children }: { children: React.ReactNode }) => (
+		<div>{children}</div>
+	),
+	AlertDialogAction: ({
+		children,
+		...props
+	}: {
+		children: React.ReactNode;
+		[key: string]: unknown;
+	}) => <button {...props}>{children}</button>,
+	AlertDialogCancel: ({
+		children,
+		...props
+	}: {
+		children: React.ReactNode;
+		[key: string]: unknown;
+	}) => <button {...props}>{children}</button>,
+}));
+
 const buildSession = (overrides?: Partial<ChatSession>): ChatSession => ({
 	sessionId: "session-1",
 	title: "对话 1",
@@ -14,7 +52,10 @@ const buildSession = (overrides?: Partial<ChatSession>): ChatSession => ({
 	...overrides,
 });
 
-const renderSidebar = (sessions: ChatSession[], options?: Partial<Parameters<typeof SessionSidebar>[0]>) =>
+const renderSidebar = (
+	sessions: ChatSession[],
+	options?: Partial<Parameters<typeof SessionSidebar>[0]>,
+) =>
 	render(
 		<SessionSidebar
 			sessions={sessions}
@@ -29,7 +70,7 @@ const renderSidebar = (sessions: ChatSession[], options?: Partial<Parameters<typ
 			onEditingTitleChange={options?.onEditingTitleChange ?? (() => {})}
 			onCloseSession={options?.onCloseSession ?? (() => {})}
 			isCreating={options?.isCreating ?? false}
-		/>
+		/>,
 	);
 
 describe("SessionSidebar", () => {
