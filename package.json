@@ -1,11 +1,12 @@
 {
-  "packageManager": "pnpm@10.27.0",
+	"packageManager": "pnpm@10.27.0",
 	"devDependencies": {
 		"turbo": "^2.7.4"
 	},
-  "scripts": {
-    "dev": "turbo dev",
-    "format": "turbo format",
-    "lint": "turbo lint"
-  }
+	"scripts": {
+		"dev": "turbo dev",
+		"format": "turbo format",
+		"lint": "turbo lint",
+		"test": "turbo test"
+	}
 }
