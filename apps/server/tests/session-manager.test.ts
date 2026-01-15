@@ -7,8 +7,8 @@ import type {
 	SessionModeState,
 } from "@agentclientprotocol/sdk";
 import { describe, expect, it, vi } from "vitest";
-import type { PermissionResultPayload } from "../src/acp/session-manager.js";
 import { AppError } from "../src/acp/errors.js";
+import type { PermissionResultPayload } from "../src/acp/session-manager.js";
 import type { AcpBackendConfig } from "../src/config.js";
 
 const sessionModels: SessionModelState = {
