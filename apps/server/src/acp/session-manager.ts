@@ -1,4 +1,8 @@
+import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
 import type {
+	RequestPermissionRequest,
+	RequestPermissionResponse,
 	SessionModelState,
 	SessionModeState,
 	SessionNotification,
@@ -24,6 +28,27 @@ type SessionRecord = {
 	unsubscribe?: () => void;
 };
 
+export type PermissionRequestPayload = {
+	sessionId: string;
+	requestId: string;
+	options: RequestPermissionRequest["options"];
+	toolCall?: RequestPermissionRequest["toolCall"];
+};
+
+export type PermissionResultPayload = {
+	sessionId: string;
+	requestId: string;
+	outcome: RequestPermissionResponse["outcome"];
+};
+
+type PermissionRequestRecord = {
+	sessionId: string;
+	requestId: string;
+	params: RequestPermissionRequest;
+	promise: Promise<RequestPermissionResponse>;
+	resolve: (response: RequestPermissionResponse) => void;
+};
+
 export type SessionSummary = {
 	sessionId: string;
 	title: string;
@@ -40,6 +65,9 @@ export type SessionSummary = {
 	modeId?: string;
 	modeName?: string;
 };
+
+const buildPermissionKey = (sessionId: string, requestId: string) =>
+	`${sessionId}:${requestId}`;
 
 const resolveModelState = (models?: SessionModelState | null) => {
 	if (!models) {
@@ -78,6 +106,9 @@ export class SessionManager {
 	private sessions = new Map<string, SessionRecord>();
 	private backendById: Map<AcpBackendId, AcpBackendConfig>;
 	private defaultBackendId: AcpBackendId;
+	private permissionRequests = new Map<string, PermissionRequestRecord>();
+	private permissionRequestEmitter = new EventEmitter();
+	private permissionResultEmitter = new EventEmitter();
 
 	constructor(
 		private readonly options: {
@@ -103,6 +134,52 @@ export class SessionManager {
 
 	getSession(sessionId: string): SessionRecord | undefined {
 		return this.sessions.get(sessionId);
+	}
+
+	onPermissionRequest(listener: (payload: PermissionRequestPayload) => void) {
+		this.permissionRequestEmitter.on("request", listener);
+		return () => {
+			this.permissionRequestEmitter.off("request", listener);
+		};
+	}
+
+	onPermissionResult(listener: (payload: PermissionResultPayload) => void) {
+		this.permissionResultEmitter.on("result", listener);
+		return () => {
+			this.permissionResultEmitter.off("result", listener);
+		};
+	}
+
+	listPendingPermissions(sessionId: string): PermissionRequestPayload[] {
+		return Array.from(this.permissionRequests.values())
+			.filter((record) => record.sessionId === sessionId)
+			.map((record) => this.buildPermissionRequestPayload(record));
+	}
+
+	resolvePermissionRequest(
+		sessionId: string,
+		requestId: string,
+		outcome: RequestPermissionResponse["outcome"],
+	): PermissionResultPayload {
+		const key = buildPermissionKey(sessionId, requestId);
+		const record = this.permissionRequests.get(key);
+		if (!record) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "权限请求不存在",
+					retryable: false,
+					scope: "request",
+				}),
+				404,
+			);
+		}
+		const response: RequestPermissionResponse = { outcome };
+		record.resolve(response);
+		this.permissionRequests.delete(key);
+		const payload: PermissionResultPayload = { sessionId, requestId, outcome };
+		this.permissionResultEmitter.emit("result", payload);
+		return payload;
 	}
 
 	private resolveBackend(backendId?: string) {
@@ -145,6 +222,9 @@ export class SessionManager {
 		try {
 			await connection.connect();
 			const session = await connection.createSession({ cwd: options?.cwd });
+			connection.setPermissionHandler((params) =>
+				this.handlePermissionRequest(session.sessionId, params),
+			);
 			const now = new Date();
 			const agentInfo = connection.getAgentInfo();
 			const { modelId, modelName } = resolveModelState(session.models);
@@ -200,6 +280,64 @@ export class SessionManager {
 		}
 	}
 
+	private buildPermissionRequestPayload(
+		record: PermissionRequestRecord,
+	): PermissionRequestPayload {
+		return {
+			sessionId: record.sessionId,
+			requestId: record.requestId,
+			options: record.params.options,
+			toolCall: record.params.toolCall,
+		};
+	}
+
+	private handlePermissionRequest(
+		sessionId: string,
+		params: RequestPermissionRequest,
+	): Promise<RequestPermissionResponse> {
+		const requestId = params.toolCall?.toolCallId ?? randomUUID();
+		const key = buildPermissionKey(sessionId, requestId);
+		const existing = this.permissionRequests.get(key);
+		if (existing) {
+			return existing.promise;
+		}
+		let resolver: (response: RequestPermissionResponse) => void = () => {};
+		const promise = new Promise<RequestPermissionResponse>((resolve) => {
+			resolver = resolve;
+		});
+		const record: PermissionRequestRecord = {
+			sessionId,
+			requestId,
+			params,
+			promise,
+			resolve: resolver,
+		};
+		this.permissionRequests.set(key, record);
+		this.permissionRequestEmitter.emit(
+			"request",
+			this.buildPermissionRequestPayload(record),
+		);
+		return promise;
+	}
+
+	private cancelPermissionRequests(sessionId: string) {
+		const cancelledOutcome: RequestPermissionResponse["outcome"] = {
+			outcome: "cancelled",
+		};
+		for (const [key, record] of this.permissionRequests.entries()) {
+			if (record.sessionId !== sessionId) {
+				continue;
+			}
+			record.resolve({ outcome: cancelledOutcome });
+			this.permissionRequests.delete(key);
+			this.permissionResultEmitter.emit("result", {
+				sessionId,
+				requestId: record.requestId,
+				outcome: cancelledOutcome,
+			});
+		}
+	}
+
 	updateTitle(sessionId: string, title: string): SessionSummary {
 		const record = this.sessions.get(sessionId);
 		if (!record) {
@@ -232,6 +370,7 @@ export class SessionManager {
 			return false;
 		}
 		record.unsubscribe?.();
+		this.cancelPermissionRequests(sessionId);
 		await record.connection.disconnect();
 		this.sessions.delete(sessionId);
 		return true;

@@ -1,3 +1,4 @@
+import type { RequestPermissionResponse } from "@agentclientprotocol/sdk";
 import express from "express";
 import {
 	AppError,
@@ -7,7 +8,12 @@ import {
 	withScope,
 } from "./acp/errors.js";
 import type { AcpConnectionState } from "./acp/opencode.js";
-import { SessionManager, type SessionSummary } from "./acp/session-manager.js";
+import {
+	type PermissionRequestPayload,
+	type PermissionResultPayload,
+	SessionManager,
+	type SessionSummary,
+} from "./acp/session-manager.js";
 import { getServerConfig } from "./config.js";
 
 const config = getServerConfig();
@@ -87,6 +93,25 @@ const buildSessionNotReadyError = (scope: "session" | "stream") =>
 		retryable: true,
 		scope,
 	});
+
+const parsePermissionOutcome = (
+	payload: unknown,
+): RequestPermissionResponse["outcome"] | null => {
+	if (!payload || typeof payload !== "object") {
+		return null;
+	}
+	const outcome = (payload as { outcome?: unknown }).outcome;
+	if (outcome === "cancelled") {
+		return { outcome: "cancelled" };
+	}
+	if (outcome === "selected") {
+		const optionId = (payload as { optionId?: unknown }).optionId;
+		if (typeof optionId === "string" && optionId.length > 0) {
+			return { outcome: "selected", optionId };
+		}
+	}
+	return null;
+};
 
 const resolveServiceState = (
 	sessions: SessionSummary[],
@@ -263,6 +288,42 @@ app.post("/acp/message", async (request, response) => {
 	}
 });
 
+app.post("/acp/permission/decision", (request, response) => {
+	const { sessionId, requestId, outcome } = request.body ?? {};
+	if (typeof sessionId !== "string" || typeof requestId !== "string") {
+		respondError(
+			response,
+			buildRequestValidationError("sessionId 和 requestId 必填"),
+			400,
+		);
+		return;
+	}
+	const parsedOutcome = parsePermissionOutcome(outcome);
+	if (!parsedOutcome) {
+		respondError(response, buildRequestValidationError("outcome 不合法"), 400);
+		return;
+	}
+
+	try {
+		const result = sessionManager.resolvePermissionRequest(
+			sessionId,
+			requestId,
+			parsedOutcome,
+		);
+		response.json(result);
+	} catch (error) {
+		if (error instanceof AppError) {
+			respondError(response, error.detail, error.status);
+			return;
+		}
+		respondError(
+			response,
+			createInternalError("session", getErrorMessage(error)),
+			500,
+		);
+	}
+});
+
 app.get("/acp/session/stream", (request, response) => {
 	const sessionId = request.query.sessionId;
 	if (typeof sessionId !== "string" || sessionId.length === 0) {
@@ -307,11 +368,38 @@ app.get("/acp/session/stream", (request, response) => {
 		);
 	};
 
+	const sendPermissionRequest = (payload: PermissionRequestPayload) => {
+		if (payload.sessionId !== sessionId) {
+			return;
+		}
+		response.write(
+			`event: permission_request\ndata: ${JSON.stringify(payload)}\n\n`,
+		);
+	};
+
+	const sendPermissionResult = (payload: PermissionResultPayload) => {
+		if (payload.sessionId !== sessionId) {
+			return;
+		}
+		response.write(
+			`event: permission_result\ndata: ${JSON.stringify(payload)}\n\n`,
+		);
+	};
+
 	const unsubscribe = record.connection.onSessionUpdate(sendUpdate);
 	const unsubscribeStatus = record.connection.onStatusChange((nextStatus) => {
 		if (nextStatus.state === "error" && nextStatus.error) {
 			sendError(nextStatus.error);
 		}
+	});
+	const unsubscribePermissionRequest = sessionManager.onPermissionRequest(
+		sendPermissionRequest,
+	);
+	const unsubscribePermissionResult =
+		sessionManager.onPermissionResult(sendPermissionResult);
+	const pendingPermissions = sessionManager.listPendingPermissions(sessionId);
+	pendingPermissions.forEach((payload) => {
+		sendPermissionRequest(payload);
 	});
 	const ping = setInterval(() => {
 		response.write("event: ping\ndata: {}\n\n");
@@ -321,6 +409,8 @@ app.get("/acp/session/stream", (request, response) => {
 		clearInterval(ping);
 		unsubscribe();
 		unsubscribeStatus();
+		unsubscribePermissionRequest();
+		unsubscribePermissionResult();
 	});
 });
 

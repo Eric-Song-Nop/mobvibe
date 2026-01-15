@@ -29,6 +29,8 @@ import {
 	extractSessionInfoUpdate,
 	extractSessionModeUpdate,
 	extractTextChunk,
+	type PermissionRequestNotification,
+	type PermissionResultNotification,
 	type SessionNotification,
 } from "@/lib/acp";
 import {
@@ -41,6 +43,7 @@ import {
 	fetchSessions,
 	renameSession,
 	sendMessage,
+	sendPermissionDecision,
 } from "@/lib/api";
 import {
 	type ChatMessage,
@@ -136,6 +139,9 @@ export function App() {
 		updateSessionMeta,
 		addUserMessage,
 		appendAssistantChunk,
+		addPermissionRequest,
+		setPermissionDecisionState,
+		setPermissionOutcome,
 		finalizeAssistantMessage,
 	} = useChatStore();
 	const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -279,6 +285,34 @@ export function App() {
 		},
 	});
 
+	const permissionDecisionMutation = useMutation({
+		mutationFn: sendPermissionDecision,
+		onMutate: (variables) => {
+			setPermissionDecisionState(
+				variables.sessionId,
+				variables.requestId,
+				"submitting",
+			);
+		},
+		onSuccess: (data) => {
+			setPermissionOutcome(data.sessionId, data.requestId, data.outcome);
+			setPermissionDecisionState(data.sessionId, data.requestId, "idle");
+		},
+		onError: (mutationError: unknown, variables) => {
+			setPermissionDecisionState(
+				variables.sessionId,
+				variables.requestId,
+				"idle",
+			);
+			setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError("权限处理失败", "session"),
+				),
+			);
+		},
+	});
+
 	useEffect(() => {
 		return () => {
 			for (const source of sessionEventSourcesRef.current.values()) {
@@ -329,6 +363,53 @@ export function App() {
 				}
 			};
 
+			const handlePermissionRequest = (event: MessageEvent<string>) => {
+				try {
+					const payload = JSON.parse(
+						event.data,
+					) as PermissionRequestNotification;
+					addPermissionRequest(payload.sessionId, {
+						requestId: payload.requestId,
+						toolCall: payload.toolCall,
+						options: payload.options ?? [],
+					});
+				} catch (parseError) {
+					setStreamError(
+						session.sessionId,
+						normalizeError(
+							parseError,
+							createFallbackError("权限请求解析失败", "stream"),
+						),
+					);
+				}
+			};
+
+			const handlePermissionResult = (event: MessageEvent<string>) => {
+				try {
+					const payload = JSON.parse(
+						event.data,
+					) as PermissionResultNotification;
+					setPermissionOutcome(
+						payload.sessionId,
+						payload.requestId,
+						payload.outcome,
+					);
+					setPermissionDecisionState(
+						payload.sessionId,
+						payload.requestId,
+						"idle",
+					);
+				} catch (parseError) {
+					setStreamError(
+						session.sessionId,
+						normalizeError(
+							parseError,
+							createFallbackError("权限结果解析失败", "stream"),
+						),
+					);
+				}
+			};
+
 			const handleStreamError = (event: MessageEvent<string>) => {
 				try {
 					const payload = JSON.parse(event.data) as { error?: unknown };
@@ -344,6 +425,11 @@ export function App() {
 			};
 
 			eventSource.addEventListener("session_update", handleUpdate);
+			eventSource.addEventListener(
+				"permission_request",
+				handlePermissionRequest,
+			);
+			eventSource.addEventListener("permission_result", handlePermissionResult);
 			eventSource.addEventListener("session_error", handleStreamError);
 			eventSource.addEventListener("error", () => {
 				setStreamError(session.sessionId, buildStreamDisconnectedError());
@@ -358,7 +444,15 @@ export function App() {
 				sources.delete(sessionId);
 			}
 		}
-	}, [appendAssistantChunk, sessions, setStreamError, updateSessionMeta]);
+	}, [
+		addPermissionRequest,
+		appendAssistantChunk,
+		sessions,
+		setPermissionDecisionState,
+		setPermissionOutcome,
+		setStreamError,
+		updateSessionMeta,
+	]);
 
 	const handleOpenCreateDialog = () => {
 		setDraftTitle(buildSessionTitle(sessionList));
@@ -405,6 +499,24 @@ export function App() {
 		renameSessionMutation.mutate({ sessionId: editingSessionId, title });
 		setEditingSessionId(null);
 		setEditingTitle("");
+	};
+
+	const handlePermissionDecision = (payload: {
+		requestId: string;
+		outcome: PermissionResultNotification["outcome"];
+	}) => {
+		if (!activeSessionId || !activeSession) {
+			return;
+		}
+		if (activeSession.state !== "ready") {
+			setError(activeSessionId, buildSessionNotReadyError());
+			return;
+		}
+		permissionDecisionMutation.mutate({
+			sessionId: activeSessionId,
+			requestId: payload.requestId,
+			outcome: payload.outcome,
+		});
 	};
 
 	const handleSend = async () => {
@@ -635,7 +747,11 @@ export function App() {
 							) : null}
 							<div className="flex flex-1 flex-col gap-3 overflow-y-auto pb-4">
 								{activeSession?.messages.map((message: ChatMessage) => (
-									<MessageItem key={message.id} message={message} />
+									<MessageItem
+										key={message.id}
+										message={message}
+										onPermissionDecision={handlePermissionDecision}
+									/>
 								))}
 							</div>
 						</div>

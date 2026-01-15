@@ -50,6 +50,38 @@ export type SessionNotification = {
 	update: SessionUpdate;
 };
 
+export type PermissionOption = {
+	optionId: string;
+	label?: string | null;
+	description?: string | null;
+};
+
+export type PermissionOutcome =
+	| { outcome: "selected"; optionId: string }
+	| { outcome: "cancelled" };
+
+export type PermissionToolCall = {
+	toolCallId?: string;
+	name?: string;
+	title?: string;
+	command?: string;
+	args?: string[];
+	[key: string]: unknown;
+};
+
+export type PermissionRequestNotification = {
+	sessionId: string;
+	requestId: string;
+	options: PermissionOption[];
+	toolCall?: PermissionToolCall;
+};
+
+export type PermissionResultNotification = {
+	sessionId: string;
+	requestId: string;
+	outcome: PermissionOutcome;
+};
+
 export type SessionTextChunk = {
 	role: "user" | "assistant";
 	text: string;

@@ -1,16 +1,39 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import type {
+	PermissionOption,
+	PermissionOutcome,
+	PermissionToolCall,
+} from "@/lib/acp";
 import type { ErrorDetail, SessionState, SessionSummary } from "@/lib/api";
 
 export type ChatRole = "user" | "assistant";
 
-export type ChatMessage = {
+type TextMessage = {
 	id: string;
 	role: ChatRole;
+	kind?: "text";
 	content: string;
 	createdAt: string;
 	isStreaming: boolean;
 };
+
+export type PermissionDecisionState = "idle" | "submitting";
+
+export type PermissionMessage = {
+	id: string;
+	role: "assistant";
+	kind: "permission";
+	requestId: string;
+	toolCall?: PermissionToolCall;
+	options: PermissionOption[];
+	outcome?: PermissionOutcome;
+	decisionState: PermissionDecisionState;
+	createdAt: string;
+	isStreaming: false;
+};
+
+export type ChatMessage = TextMessage | PermissionMessage;
 
 export type ChatSession = {
 	sessionId: string;
@@ -77,17 +100,60 @@ type ChatState = {
 	) => void;
 	addUserMessage: (sessionId: string, content: string) => void;
 	appendAssistantChunk: (sessionId: string, content: string) => void;
+	addPermissionRequest: (
+		sessionId: string,
+		payload: {
+			requestId: string;
+			toolCall?: PermissionToolCall;
+			options: PermissionOption[];
+		},
+	) => void;
+	setPermissionDecisionState: (
+		sessionId: string,
+		requestId: string,
+		decisionState: PermissionDecisionState,
+	) => void;
+	setPermissionOutcome: (
+		sessionId: string,
+		requestId: string,
+		outcome: PermissionOutcome,
+	) => void;
 	finalizeAssistantMessage: (sessionId: string) => void;
 };
 
 type PersistedChatState = Pick<ChatState, "sessions" | "activeSessionId">;
 
-const createMessage = (role: ChatRole, content: string): ChatMessage => ({
+const createMessage = (role: ChatRole, content: string): TextMessage => ({
 	id: crypto.randomUUID(),
 	role,
+	kind: "text",
 	content,
 	createdAt: new Date().toISOString(),
 	isStreaming: true,
+});
+
+const isTextMessage = (message: ChatMessage): message is TextMessage =>
+	message.kind !== "permission";
+
+const isPermissionMessage = (
+	message: ChatMessage,
+): message is PermissionMessage => message.kind === "permission";
+
+const createPermissionMessage = (payload: {
+	requestId: string;
+	toolCall?: PermissionToolCall;
+	options: PermissionOption[];
+}): PermissionMessage => ({
+	id: crypto.randomUUID(),
+	role: "assistant",
+	kind: "permission",
+	requestId: payload.requestId,
+	toolCall: payload.toolCall,
+	options: payload.options,
+	outcome: undefined,
+	decisionState: "idle" as PermissionDecisionState,
+	createdAt: new Date().toISOString(),
+	isStreaming: false,
 });
 
 const createSessionClosedError = (): ErrorDetail => ({
@@ -133,10 +199,15 @@ const createSessionState = (
 
 const STORAGE_KEY = "mobvibe.chat-store";
 
-const sanitizeMessageForPersist = (message: ChatMessage): ChatMessage => ({
-	...message,
-	isStreaming: false,
-});
+const sanitizeMessageForPersist = (message: ChatMessage): ChatMessage => {
+	if (message.kind === "permission") {
+		return message;
+	}
+	return {
+		...message,
+		isStreaming: false,
+	};
+};
 
 const sanitizeSessionForPersist = (session: ChatSession): ChatSession => ({
 	...session,
@@ -366,7 +437,7 @@ export const useChatStore = create<ChatState>()(
 					}
 
 					messages = messages.map((message: ChatMessage) =>
-						message.id === streamingMessageId
+						message.id === streamingMessageId && isTextMessage(message)
 							? {
 									...message,
 									content: `${message.content}${content}`,
@@ -385,6 +456,88 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
+			addPermissionRequest: (sessionId, payload) =>
+				set((state) => {
+					const session =
+						state.sessions[sessionId] ?? createSessionState(sessionId);
+					const exists = session.messages.some(
+						(message) =>
+							message.kind === "permission" &&
+							message.requestId === payload.requestId,
+					);
+					if (exists) {
+						return state;
+					}
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: {
+								...session,
+								messages: [
+									...session.messages,
+									createPermissionMessage(payload),
+								],
+							},
+						},
+					};
+				}),
+			setPermissionDecisionState: (sessionId, requestId, decisionState) =>
+				set((state) => {
+					const session = state.sessions[sessionId];
+					if (!session) {
+						return state;
+					}
+					const messages = session.messages.map((message) => {
+						if (!isPermissionMessage(message)) {
+							return message;
+						}
+						if (message.requestId !== requestId) {
+							return message;
+						}
+						return {
+							...message,
+							decisionState: decisionState as PermissionDecisionState,
+						} as PermissionMessage;
+					});
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: {
+								...session,
+								messages,
+							},
+						},
+					};
+				}),
+			setPermissionOutcome: (sessionId, requestId, outcome) =>
+				set((state) => {
+					const session = state.sessions[sessionId];
+					if (!session) {
+						return state;
+					}
+					const messages = session.messages.map((message) => {
+						if (!isPermissionMessage(message)) {
+							return message;
+						}
+						if (message.requestId !== requestId) {
+							return message;
+						}
+						return {
+							...message,
+							outcome,
+							decisionState: "idle" as PermissionDecisionState,
+						} as PermissionMessage;
+					});
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: {
+								...session,
+								messages,
+							},
+						},
+					};
+				}),
 			finalizeAssistantMessage: (sessionId) =>
 				set((state: ChatState) => {
 					const session = state.sessions[sessionId];
@@ -397,10 +550,12 @@ export const useChatStore = create<ChatState>()(
 							[sessionId]: {
 								...session,
 								messages: session.messages.map((message: ChatMessage) =>
-									message.id === session.streamingMessageId
+									message.id === session.streamingMessageId &&
+									isTextMessage(message)
 										? { ...message, isStreaming: false }
 										: message,
 								),
+
 								streamingMessageId: undefined,
 							},
 						},

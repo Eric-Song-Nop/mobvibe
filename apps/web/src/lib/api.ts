@@ -1,3 +1,5 @@
+import type { PermissionOutcome } from "./acp";
+
 export type AcpConnectionState =
 	| "idle"
 	| "connecting"
@@ -63,6 +65,18 @@ export type CreateSessionResponse = SessionSummary;
 
 export type SendMessageResponse = {
 	stopReason: string;
+};
+
+export type PermissionDecisionPayload = {
+	sessionId: string;
+	requestId: string;
+	outcome: PermissionOutcome;
+};
+
+export type PermissionDecisionResponse = {
+	sessionId: string;
+	requestId: string;
+	outcome: PermissionOutcome;
 };
 
 const API_BASE_URL =
@@ -168,6 +182,14 @@ export const sendMessage = async (payload: {
 	prompt: string;
 }): Promise<SendMessageResponse> =>
 	requestJson<SendMessageResponse>("/acp/message", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+
+export const sendPermissionDecision = async (
+	payload: PermissionDecisionPayload,
+): Promise<PermissionDecisionResponse> =>
+	requestJson<PermissionDecisionResponse>("/acp/permission/decision", {
 		method: "POST",
 		body: JSON.stringify(payload),
 	});
