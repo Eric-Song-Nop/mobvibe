@@ -364,6 +364,17 @@ export class SessionManager {
 		record.updatedAt = new Date();
 	}
 
+	async cancelSession(sessionId: string): Promise<boolean> {
+		const record = this.sessions.get(sessionId);
+		if (!record) {
+			return false;
+		}
+		this.cancelPermissionRequests(sessionId);
+		await record.connection.cancel(sessionId);
+		this.touchSession(sessionId);
+		return true;
+	}
+
 	async closeSession(sessionId: string): Promise<boolean> {
 		const record = this.sessions.get(sessionId);
 		if (!record) {

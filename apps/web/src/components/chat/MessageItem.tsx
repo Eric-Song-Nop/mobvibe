@@ -21,6 +21,35 @@ export const MessageItem = ({
 	onPermissionDecision,
 }: MessageItemProps) => {
 	const isUser = message.role === "user";
+	if (message.kind === "status") {
+		const badgeVariant =
+			message.variant === "success"
+				? "default"
+				: message.variant === "warning"
+					? "secondary"
+					: message.variant === "error"
+						? "destructive"
+						: "outline";
+		return (
+			<div className="flex flex-col gap-1 items-start">
+				<Card size="sm" className="max-w-[85%] border-border bg-background">
+					<CardContent className="flex flex-col gap-2 text-sm">
+						<div className="flex flex-wrap items-center gap-2 text-xs">
+							<Badge variant={badgeVariant}>状态</Badge>
+							<span className="text-foreground font-medium">
+								{message.title}
+							</span>
+						</div>
+						{message.description ? (
+							<div className="text-muted-foreground text-xs">
+								{message.description}
+							</div>
+						) : null}
+					</CardContent>
+				</Card>
+			</div>
+		);
+	}
 	if (message.kind === "permission") {
 		const toolLabel =
 			message.toolCall?.title ?? message.toolCall?.name ?? "工具调用";

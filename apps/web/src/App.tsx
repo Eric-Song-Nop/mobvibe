@@ -35,6 +35,7 @@ import {
 } from "@/lib/acp";
 import {
 	ApiError,
+	cancelSession,
 	closeSession,
 	createSession,
 	createSessionEventSource,
@@ -134,10 +135,12 @@ export function App() {
 		renameSession: renameSessionLocal,
 		setInput,
 		setSending,
+		setCanceling,
 		setError,
 		setStreamError,
 		updateSessionMeta,
 		addUserMessage,
+		addStatusMessage,
 		appendAssistantChunk,
 		addPermissionRequest,
 		setPermissionDecisionState,
@@ -264,6 +267,29 @@ export function App() {
 		},
 	});
 
+	const cancelSessionMutation = useMutation({
+		mutationFn: cancelSession,
+		onMutate: (variables) => {
+			setCanceling(variables.sessionId, true);
+		},
+		onSuccess: (_data, variables) => {
+			addStatusMessage(variables.sessionId, {
+				title: "已取消本次生成",
+				variant: "warning",
+			});
+			setAppError(undefined);
+		},
+		onError: (mutationError: unknown, variables) => {
+			setCanceling(variables.sessionId, false);
+			setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError("取消会话失败", "session"),
+				),
+			);
+		},
+	});
+
 	const sendMessageMutation = useMutation({
 		mutationFn: sendMessage,
 		onSuccess: (_data, variables) => {
@@ -282,6 +308,7 @@ export function App() {
 		},
 		onSettled: (_data, _error, variables) => {
 			setSending(variables.sessionId, false);
+			setCanceling(variables.sessionId, false);
 		},
 	});
 
@@ -519,6 +546,20 @@ export function App() {
 		});
 	};
 
+	const handleCancel = () => {
+		if (!activeSessionId || !activeSession) {
+			return;
+		}
+		if (!activeSession.sending || activeSession.canceling) {
+			return;
+		}
+		if (activeSession.state !== "ready") {
+			setError(activeSessionId, buildSessionNotReadyError());
+			return;
+		}
+		cancelSessionMutation.mutate({ sessionId: activeSessionId });
+	};
+
 	const handleSend = async () => {
 		if (!activeSessionId || !activeSession) {
 			return;
@@ -533,6 +574,7 @@ export function App() {
 		}
 
 		setSending(activeSessionId, true);
+		setCanceling(activeSessionId, false);
 		setError(activeSessionId, undefined);
 		addUserMessage(activeSessionId, prompt);
 		setInput(activeSessionId, "");
@@ -795,17 +837,32 @@ export function App() {
 							<span className="text-muted-foreground text-xs">
 								{activeSession?.sending ? "正在发送中..." : ""}
 							</span>
-							<Button
-								onClick={() => void handleSend()}
-								disabled={
-									!activeSessionId ||
-									!activeSession?.input.trim() ||
-									activeSession?.sending ||
-									activeSession?.state !== "ready"
-								}
-							>
-								发送
-							</Button>
+							<div className="flex items-center gap-2">
+								{activeSession?.sending ? (
+									<Button
+										variant="outline"
+										onClick={() => handleCancel()}
+										disabled={
+											!activeSessionId ||
+											activeSession?.canceling ||
+											activeSession?.state !== "ready"
+										}
+									>
+										{activeSession?.canceling ? "停止中..." : "停止"}
+									</Button>
+								) : null}
+								<Button
+									onClick={() => void handleSend()}
+									disabled={
+										!activeSessionId ||
+										!activeSession?.input.trim() ||
+										activeSession?.sending ||
+										activeSession?.state !== "ready"
+									}
+								>
+									发送
+								</Button>
+							</div>
 						</div>
 					</div>
 				</footer>

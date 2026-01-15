@@ -67,6 +67,10 @@ export type SendMessageResponse = {
 	stopReason: string;
 };
 
+export type CancelSessionResponse = {
+	ok: boolean;
+};
+
 export type PermissionDecisionPayload = {
 	sessionId: string;
 	requestId: string;
@@ -173,6 +177,14 @@ export const closeSession = async (payload: {
 	sessionId: string;
 }): Promise<{ ok: boolean }> =>
 	requestJson<{ ok: boolean }>("/acp/session/close", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+
+export const cancelSession = async (payload: {
+	sessionId: string;
+}): Promise<CancelSessionResponse> =>
+	requestJson<CancelSessionResponse>("/acp/session/cancel", {
 		method: "POST",
 		body: JSON.stringify(payload),
 	});

@@ -294,6 +294,11 @@ export class AcpConnection {
 		return connection.prompt({ sessionId, prompt });
 	}
 
+	async cancel(sessionId: string): Promise<void> {
+		const connection = await this.ensureReady();
+		await connection.cancel({ sessionId });
+	}
+
 	async disconnect(): Promise<void> {
 		if (this.state === "stopped") {
 			return;

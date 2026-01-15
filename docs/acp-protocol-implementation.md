@@ -17,13 +17,14 @@
 - `initialize`：连接建立时完成协议版本与 Client 信息握手。
 - `newSession`：按需创建多个会话，每个会话独立进程。
 - `prompt`：发送用户消息并等待响应完成。
+- `cancel`：支持取消当前 prompt。
+- `requestPermission`：权限请求闭环已接入。
 - `sessionUpdate`：接收 Agent 推送更新，转发到 SSE，并同步 `current_mode_update`/`session_info_update` 元信息。
 
 ### 未实现
 
 - `loadSession` / `resumeSession`：会话恢复能力尚未接入。
 - `setSessionMode` / `setSessionModel`：会话模式与模型切换未接入。
-- 权限请求交互：当前默认拒绝所有权限请求。
 
 ## 关键流程
 
@@ -43,7 +44,9 @@
 - `POST /acp/session`：创建新会话（支持 `backendId`）。
 - `PATCH /acp/session`：更新会话标题。
 - `POST /acp/session/close`：关闭会话。
+- `POST /acp/session/cancel`：取消当前会话 prompt。
 - `POST /acp/message`：发送消息。
+- `POST /acp/permission/decision`：提交权限决策。
 - `GET /acp/session/stream`：SSE 推送 `sessionUpdate`。
 
 ## ACP SDK 对照矩阵（v0.13.0）
@@ -63,10 +66,10 @@
 | `unstable_setSessionModel` | `models` | 切换会话模型 | ❌ 未接入 |
 | `unstable_setSessionConfigOption` | `configOptions` | 配置项切换 | ❌ 未接入 |
 | `prompt` | 必备 | 发送消息 + 流式更新 | ✅ 已实现 |
-| `cancel` | 必备 | 取消当前 prompt | ❌ 未接入 |
+| `cancel` | 必备 | 取消当前 prompt | ✅ 已实现 |
 | `extMethod` / `extNotification` | 扩展 | 非规范扩展 | ⏸️ 不在范围 |
 | `sessionUpdate` (notification) | 必备 | SSE 推送更新 | ✅ 已实现 |
-| `requestPermission` (callback) | 权限请求 | 需要用户决策 | ❌ 未接入（默认 cancelled） |
+| `requestPermission` (callback) | 权限请求 | 需要用户决策 | ✅ 已实现 |
 
 ### SessionUpdate 类型支持情况
 
@@ -90,9 +93,7 @@
 
 ### 缺口汇总（本阶段优先补齐）
 
-- 权限请求闭环：`requestPermission` 事件 + 决策回传。
 - 会话控制：`setSessionMode` / `unstable_setSessionModel`。
-- 取消流程：`cancel` 通知。
 - 能力映射：`agentCapabilities` 与 `promptCapabilities` 的 UI 表达。
 
 ## 后续计划
@@ -116,6 +117,7 @@
 - `initialize`
 - `newSession`
 - `prompt`
+- `cancel`
 - `sessionUpdate`
 - `setSessionMode`
 - `setSessionModel`
@@ -138,6 +140,8 @@
 | P0：权限请求全链路 | 后端接入 `requestPermission` 并透传 SSE | 已完成 | 新增 `permission_request` 事件 |
 | P0：权限请求全链路 | 新增权限决策接口与结果回传 | 已完成 | `POST /acp/permission/decision` + `permission_result` |
 | P0：权限请求全链路 | 前端权限卡片与结果展示 | 已完成 | 消息流内展示 + 当前会话处理 |
+| P0：会话取消流程 | 后端接入 `session/cancel` 并联动权限取消 | 已完成 | API `POST /acp/session/cancel` |
+| P0：会话取消流程 | 前端停止按钮与取消提示 | 已完成 | 输入框右侧按钮 + 状态消息 |
 | P1：会话模型/模式切换 | 后端接入 `setSessionMode`/`setSessionModel` | 未开始 | |
 | P1：会话模型/模式切换 | 前端模式/模型切换 UI | 未开始 | |
 | P1：会话模型/模式切换 | 不支持能力的错误提示 | 未开始 | |
@@ -183,6 +187,19 @@
   - 监听 `permission_request`/`permission_result`，将请求存入对应会话消息流。
   - 在消息列表中渲染工具权限请求卡片，展示 toolCall 摘要与选项按钮。
   - 仅渲染当前会话的请求，其他会话待用户切换后处理。
+
+### 会话取消实现计划（实现前）
+
+- 目标：提供 `session/cancel` 入口，支持用户中断当前 prompt，并在 UI 中确认取消结果。
+- 后端：
+  - `SessionManager.cancelSession` 调用 ACP `cancel` 通知，并自动取消未决权限请求。
+  - 新增 `POST /acp/session/cancel`，校验会话与状态后返回 `ok`。
+- 前端：
+  - 发送中在输入框右侧显示“停止”按钮，触发 `session/cancel`。
+  - 取消成功后追加一条状态消息，提示“已取消本次生成”。
+  - 取消中保持按钮禁用，等待 prompt 返回 stopReason。
+- 流程：
+  - 用户点击停止 → `POST /acp/session/cancel` → ACP CLI 停止生成 → `prompt` 返回 `stopReason=cancelled`。
 
 ### 后端实现设计（协议补齐）
 
@@ -233,7 +250,7 @@
 #### 取消与状态
 
 - 当会话处于流式输出时显示“停止”按钮，触发 `session/cancel`。
-- 停止成功后提示 `stopReason=Cancelled`。
+- 停止成功后在对话流中提示“已取消本次生成”。
 
 #### 其他 SessionUpdate 可视化
 
@@ -263,6 +280,12 @@
 - 后端：`SessionManager` 缓存待处理权限请求，API 接收决策并回传 `permission_result`。
 - SSE：会话建立时补发未处理请求，保证切换会话不丢失。
 - 前端：消息流内渲染权限卡片，按钮提交决策并显示结果。
+
+### 会话取消实现记录（实现后）
+
+- 后端：新增 `POST /acp/session/cancel`，调用 ACP `cancel` 通知并同步取消未决权限请求。
+- 前端：发送中显示“停止”按钮，触发取消后追加状态消息提示“已取消本次生成”。
+- 交互：停止中按钮禁用，等待 `prompt` 返回 `stopReason=cancelled` 收尾。
 
 ### 验证与测试
 

@@ -12,13 +12,15 @@ export type ChatRole = "user" | "assistant";
 type TextMessage = {
 	id: string;
 	role: ChatRole;
-	kind?: "text";
+	kind: "text";
 	content: string;
 	createdAt: string;
 	isStreaming: boolean;
 };
 
 export type PermissionDecisionState = "idle" | "submitting";
+
+export type StatusVariant = "info" | "success" | "warning" | "error";
 
 export type PermissionMessage = {
 	id: string;
@@ -33,7 +35,18 @@ export type PermissionMessage = {
 	isStreaming: false;
 };
 
-export type ChatMessage = TextMessage | PermissionMessage;
+export type StatusMessage = {
+	id: string;
+	role: "assistant";
+	kind: "status";
+	variant: StatusVariant;
+	title: string;
+	description?: string;
+	createdAt: string;
+	isStreaming: false;
+};
+
+export type ChatMessage = TextMessage | PermissionMessage | StatusMessage;
 
 export type ChatSession = {
 	sessionId: string;
@@ -42,6 +55,7 @@ export type ChatSession = {
 	messages: ChatMessage[];
 	streamingMessageId?: string;
 	sending: boolean;
+	canceling: boolean;
 	error?: ErrorDetail;
 	streamError?: ErrorDetail;
 	state?: SessionState;
@@ -81,6 +95,7 @@ type ChatState = {
 	renameSession: (sessionId: string, title: string) => void;
 	setInput: (sessionId: string, value: string) => void;
 	setSending: (sessionId: string, value: boolean) => void;
+	setCanceling: (sessionId: string, value: boolean) => void;
 	setError: (sessionId: string, value?: ErrorDetail) => void;
 	setStreamError: (sessionId: string, value?: ErrorDetail) => void;
 	updateSessionMeta: (
@@ -99,6 +114,14 @@ type ChatState = {
 		>,
 	) => void;
 	addUserMessage: (sessionId: string, content: string) => void;
+	addStatusMessage: (
+		sessionId: string,
+		payload: {
+			title: string;
+			description?: string;
+			variant?: StatusVariant;
+		},
+	) => void;
 	appendAssistantChunk: (sessionId: string, content: string) => void;
 	addPermissionRequest: (
 		sessionId: string,
@@ -133,7 +156,7 @@ const createMessage = (role: ChatRole, content: string): TextMessage => ({
 });
 
 const isTextMessage = (message: ChatMessage): message is TextMessage =>
-	message.kind !== "permission";
+	message.kind === "text" || message.kind === undefined;
 
 const isPermissionMessage = (
 	message: ChatMessage,
@@ -152,6 +175,21 @@ const createPermissionMessage = (payload: {
 	options: payload.options,
 	outcome: undefined,
 	decisionState: "idle" as PermissionDecisionState,
+	createdAt: new Date().toISOString(),
+	isStreaming: false,
+});
+
+const createStatusMessage = (payload: {
+	title: string;
+	description?: string;
+	variant?: StatusVariant;
+}): StatusMessage => ({
+	id: crypto.randomUUID(),
+	role: "assistant",
+	kind: "status",
+	variant: payload.variant ?? "info",
+	title: payload.title,
+	description: payload.description,
 	createdAt: new Date().toISOString(),
 	isStreaming: false,
 });
@@ -183,6 +221,7 @@ const createSessionState = (
 	messages: [],
 	streamingMessageId: undefined,
 	sending: false,
+	canceling: false,
 	error: undefined,
 	streamError: undefined,
 	state: options?.state,
@@ -213,6 +252,7 @@ const sanitizeSessionForPersist = (session: ChatSession): ChatSession => ({
 	...session,
 	input: "",
 	sending: false,
+	canceling: false,
 	error: undefined,
 	streamError: undefined,
 	streamingMessageId: undefined,
@@ -346,6 +386,19 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
+			setCanceling: (sessionId, value) =>
+				set((state) => {
+					const session = state.sessions[sessionId];
+					if (!session) {
+						return state;
+					}
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: { ...session, canceling: value },
+						},
+					};
+				}),
 			setError: (sessionId, value) =>
 				set((state) => {
 					const session = state.sessions[sessionId];
@@ -420,6 +473,20 @@ export const useChatStore = create<ChatState>()(
 									...session.messages,
 									{ ...createMessage("user", content), isStreaming: false },
 								],
+							},
+						},
+					};
+				}),
+			addStatusMessage: (sessionId, payload) =>
+				set((state: ChatState) => {
+					const session =
+						state.sessions[sessionId] ?? createSessionState(sessionId);
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: {
+								...session,
+								messages: [...session.messages, createStatusMessage(payload)],
 							},
 						},
 					};

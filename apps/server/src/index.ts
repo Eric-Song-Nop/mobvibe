@@ -250,6 +250,40 @@ app.post("/acp/session/close", async (request, response) => {
 	}
 });
 
+app.post("/acp/session/cancel", async (request, response) => {
+	const { sessionId } = request.body ?? {};
+	if (typeof sessionId !== "string") {
+		respondError(response, buildRequestValidationError("sessionId 必填"), 400);
+		return;
+	}
+
+	const record = sessionManager.getSession(sessionId);
+	if (!record) {
+		respondError(response, buildSessionNotFoundError(), 404);
+		return;
+	}
+
+	const status = record.connection.getStatus();
+	if (status.state !== "ready") {
+		respondError(response, buildSessionNotReadyError("session"), 409);
+		return;
+	}
+
+	try {
+		const cancelled = await sessionManager.cancelSession(sessionId);
+		if (!cancelled) {
+			respondError(response, buildSessionNotFoundError(), 404);
+			return;
+		}
+		response.json({ ok: true });
+	} catch (error) {
+		respondError(
+			response,
+			createInternalError("session", getErrorMessage(error)),
+		);
+	}
+});
+
 app.post("/acp/message", async (request, response) => {
 	const { sessionId, prompt } = request.body ?? {};
 	if (typeof sessionId !== "string" || typeof prompt !== "string") {
