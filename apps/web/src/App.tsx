@@ -1,3 +1,5 @@
+import { ComputerIcon, SettingsIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MessageItem } from "@/components/chat/MessageItem";
@@ -722,8 +724,6 @@ export function App() {
 	const streamError = activeSession?.streamError;
 	const backendLabel = activeSession?.backendLabel ?? activeSession?.backendId;
 
-	const agentLabel = activeSession?.agentName;
-
 	const availableModels = activeSession?.availableModels ?? [];
 	const availableModes = activeSession?.availableModes ?? [];
 	const modelLabel = activeSession?.modelName ?? activeSession?.modelId;
@@ -734,9 +734,12 @@ export function App() {
 	const isModelSwitching =
 		setSessionModelMutation.isPending &&
 		setSessionModelMutation.variables?.sessionId === activeSessionId;
+	const showFooterMeta = Boolean(
+		activeSession && (modelLabel || modeLabel || activeSession.sending),
+	);
 
 	return (
-		<div className="bg-muted/40 text-foreground flex min-h-screen flex-col md:flex-row">
+		<div className="bg-muted/40 text-foreground flex h-screen flex-col overflow-hidden md:flex-row">
 			<AlertDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
 				<AlertDialogContent size="sm">
 					<AlertDialogHeader>
@@ -798,7 +801,7 @@ export function App() {
 					</AlertDialogFooter>
 				</AlertDialogContent>
 			</AlertDialog>
-			<aside className="bg-background/80 border-r hidden w-64 flex-col px-4 py-4 md:flex">
+			<aside className="bg-background/80 border-r hidden w-64 flex-col px-4 py-4 md:flex min-h-0 overflow-hidden">
 				<SessionSidebar
 					sessions={sessionList}
 					activeSessionId={activeSessionId}
@@ -818,7 +821,7 @@ export function App() {
 			</aside>
 			{mobileMenuOpen ? (
 				<div className="fixed inset-0 z-50 flex md:hidden">
-					<div className="bg-background/90 border-r w-72 p-4">
+					<div className="bg-background/90 border-r w-72 p-4 flex h-full flex-col overflow-hidden">
 						<SessionSidebar
 							sessions={sessionList}
 							activeSessionId={activeSessionId}
@@ -846,9 +849,9 @@ export function App() {
 					/>
 				</div>
 			) : null}
-			<div className="flex min-h-screen flex-1 flex-col">
+			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
 				<header className="bg-background/80 border-b px-4 py-3 backdrop-blur">
-					<div className="mx-auto flex w-full max-w-5xl items-center gap-3">
+					<div className="mx-auto flex w-full max-w-5xl items-center gap-2">
 						<Button
 							variant="outline"
 							size="icon"
@@ -857,30 +860,18 @@ export function App() {
 						>
 							☰
 						</Button>
-						<div className="flex flex-1 flex-col">
-							<span className="text-xs font-semibold tracking-wide">
-								Mobvibe
-							</span>
-							<span className="text-muted-foreground text-xs">
-								ACP 多会话 Chat UI
-							</span>
-						</div>
-						<Badge variant={statusVariant}>{statusLabel}</Badge>
-						{backendLabel ? (
-							<Badge variant="outline">后端: {backendLabel}</Badge>
-						) : null}
-						{activeSessionId ? (
-							<Badge variant="secondary">
-								Session {activeSessionId.slice(0, 8)}
+						<div className="flex flex-1 flex-wrap items-center gap-2">
+							<Badge variant={statusVariant} className="shrink-0">
+								{statusLabel}
 							</Badge>
-						) : null}
-						<Button
-							onClick={() => handleOpenCreateDialog()}
-							disabled={createSessionMutation.isPending}
-						>
-							新对话
-						</Button>
+							{backendLabel ? (
+								<Badge variant="outline" className="shrink-0">
+									后端: {backendLabel}
+								</Badge>
+							) : null}
+						</div>
 					</div>
+
 					{statusMessage ? (
 						<div className="text-muted-foreground mx-auto mt-2 w-full max-w-5xl text-xs">
 							{statusMessage}
@@ -893,9 +884,9 @@ export function App() {
 					) : null}
 				</header>
 
-				<main className="flex flex-1 flex-col">
-					<div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-4 py-6">
-						<div className="flex flex-1 flex-col gap-4 overflow-hidden">
+				<main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+					<div className="mx-auto flex w-full max-w-5xl flex-1 min-h-0 flex-col gap-4 px-4 py-6">
+						<div className="flex min-h-0 flex-1 flex-col gap-4">
 							{!activeSession ? (
 								<div className="text-muted-foreground mt-8 text-center text-sm">
 									请选择或新建对话开始使用。
@@ -906,7 +897,7 @@ export function App() {
 									开始对话以验证后端连接。
 								</div>
 							) : null}
-							<div className="flex flex-1 flex-col gap-3 overflow-y-auto pb-4">
+							<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-4">
 								{activeSession?.messages.map((message: ChatMessage) => (
 									<MessageItem
 										key={message.id}
@@ -920,87 +911,31 @@ export function App() {
 				</main>
 
 				<Separator />
-				<footer className="bg-background/90 px-4 py-4">
+				<footer className="bg-background/90 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shrink-0">
 					<div className="mx-auto flex w-full max-w-5xl flex-col gap-3">
-						<Textarea
-							value={activeSession?.input ?? ""}
-							onChange={(event) =>
-								activeSessionId
-									? setInput(activeSessionId, event.target.value)
-									: undefined
-							}
-							onKeyDown={(event) => {
-								if (event.key === "Enter" && !event.shiftKey) {
-									event.preventDefault();
-									void handleSend();
+						<div className="flex items-end gap-2">
+							<Textarea
+								className="flex-1"
+								value={activeSession?.input ?? ""}
+								onChange={(event) =>
+									activeSessionId
+										? setInput(activeSessionId, event.target.value)
+										: undefined
 								}
-							}}
-							placeholder="输入消息，Enter 发送，Shift+Enter 换行"
-							rows={3}
-							disabled={!activeSessionId}
-						/>
-						{activeSession && (agentLabel || modelLabel || modeLabel) ? (
-							<div className="flex flex-wrap items-center gap-2 text-xs">
-								{agentLabel ? (
-									<Badge variant="outline">Agent: {agentLabel}</Badge>
-								) : null}
-								{availableModels.length > 0 ? (
-									<Select
-										value={activeSession.modelId ?? ""}
-										onValueChange={handleModelChange}
-										disabled={
-											!activeSessionId ||
-											activeSession.state !== "ready" ||
-											isModelSwitching
-										}
-									>
-										<SelectTrigger className="h-7 w-auto gap-1 px-2 text-xs">
-											<SelectValue placeholder="Model" />
-										</SelectTrigger>
-										<SelectContent>
-											{availableModels.map((model) => (
-												<SelectItem key={model.id} value={model.id}>
-													Model: {model.name}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								) : modelLabel ? (
-									<Badge variant="outline">Model: {modelLabel}</Badge>
-								) : null}
-								{availableModes.length > 0 ? (
-									<Select
-										value={activeSession.modeId ?? ""}
-										onValueChange={handleModeChange}
-										disabled={
-											!activeSessionId ||
-											activeSession.state !== "ready" ||
-											isModeSwitching
-										}
-									>
-										<SelectTrigger className="h-7 w-auto gap-1 px-2 text-xs">
-											<SelectValue placeholder="Mode" />
-										</SelectTrigger>
-										<SelectContent>
-											{availableModes.map((mode) => (
-												<SelectItem key={mode.id} value={mode.id}>
-													Mode: {mode.name}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								) : modeLabel ? (
-									<Badge variant="outline">Mode: {modeLabel}</Badge>
-								) : null}
-							</div>
-						) : null}
-						<div className="flex items-center justify-between">
-							<span className="text-muted-foreground text-xs">
-								{activeSession?.sending ? "正在发送中..." : ""}
-							</span>
+								onKeyDown={(event) => {
+									if (event.key === "Enter" && !event.shiftKey) {
+										event.preventDefault();
+										void handleSend();
+									}
+								}}
+								placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+								rows={2}
+								disabled={!activeSessionId}
+							/>
 							<div className="flex items-center gap-2">
 								{activeSession?.sending ? (
 									<Button
+										size="sm"
 										variant="outline"
 										onClick={() => handleCancel()}
 										disabled={
@@ -1013,6 +948,7 @@ export function App() {
 									</Button>
 								) : null}
 								<Button
+									size="sm"
 									onClick={() => void handleSend()}
 									disabled={
 										!activeSessionId ||
@@ -1025,6 +961,111 @@ export function App() {
 								</Button>
 							</div>
 						</div>
+						{showFooterMeta ? (
+							<div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+								<div className="flex flex-wrap items-center gap-2">
+									{availableModels.length > 0 ? (
+										<Select
+											value={activeSession?.modelId ?? ""}
+											onValueChange={handleModelChange}
+											disabled={
+												!activeSessionId ||
+												activeSession?.state !== "ready" ||
+												isModelSwitching
+											}
+										>
+											<SelectTrigger
+												size="sm"
+												className="h-7 w-11 px-1 md:w-auto md:px-2"
+											>
+												<HugeiconsIcon
+													icon={ComputerIcon}
+													strokeWidth={2}
+													className="size-4"
+												/>
+												<SelectValue
+													placeholder="Model"
+													className="sr-only md:not-sr-only"
+												/>
+											</SelectTrigger>
+											<SelectContent>
+												{availableModels.map((model) => (
+													<SelectItem key={model.id} value={model.id}>
+														Model: {model.name}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									) : modelLabel ? (
+										<Badge
+											variant="outline"
+											className="flex items-center gap-1"
+										>
+											<HugeiconsIcon
+												icon={ComputerIcon}
+												strokeWidth={2}
+												className="size-4"
+											/>
+											<span className="sr-only md:not-sr-only">
+												Model: {modelLabel}
+											</span>
+										</Badge>
+									) : null}
+									{availableModes.length > 0 ? (
+										<Select
+											value={activeSession?.modeId ?? ""}
+											onValueChange={handleModeChange}
+											disabled={
+												!activeSessionId ||
+												activeSession?.state !== "ready" ||
+												isModeSwitching
+											}
+										>
+											<SelectTrigger
+												size="sm"
+												className="h-7 w-11 px-1 md:w-auto md:px-2"
+											>
+												<HugeiconsIcon
+													icon={SettingsIcon}
+													strokeWidth={2}
+													className="size-4"
+												/>
+												<SelectValue
+													placeholder="Mode"
+													className="sr-only md:not-sr-only"
+												/>
+											</SelectTrigger>
+											<SelectContent>
+												{availableModes.map((mode) => (
+													<SelectItem key={mode.id} value={mode.id}>
+														Mode: {mode.name}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									) : modeLabel ? (
+										<Badge
+											variant="outline"
+											className="flex items-center gap-1"
+										>
+											<HugeiconsIcon
+												icon={SettingsIcon}
+												strokeWidth={2}
+												className="size-4"
+											/>
+											<span className="sr-only md:not-sr-only">
+												Mode: {modeLabel}
+											</span>
+										</Badge>
+									) : null}
+								</div>
+								{activeSession?.sending ? (
+									<span className="text-muted-foreground text-xs">
+										正在发送中...
+									</span>
+								) : null}
+							</div>
+						) : null}
 					</div>
 				</footer>
 			</div>

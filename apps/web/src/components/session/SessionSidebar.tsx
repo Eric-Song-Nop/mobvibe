@@ -61,14 +61,14 @@ export const SessionSidebar = ({
 	isCreating,
 }: SessionSidebarProps) => {
 	return (
-		<div className="flex h-full flex-col gap-4">
+		<div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden">
 			<div className="flex items-center justify-between">
 				<div className="text-sm font-semibold">对话</div>
 				<Button onClick={onCreateSession} size="sm" disabled={isCreating}>
 					新建
 				</Button>
 			</div>
-			<div className="flex flex-1 flex-col gap-2 overflow-y-auto">
+			<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
 				{sessions.length === 0 ? (
 					<div className="text-muted-foreground text-xs">暂无对话</div>
 				) : null}
