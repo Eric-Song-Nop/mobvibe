@@ -1,7 +1,7 @@
 import { ComputerIcon, SettingsIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MessageItem } from "@/components/chat/MessageItem";
 import { SessionSidebar } from "@/components/session/SessionSidebar";
 import {
@@ -160,6 +160,11 @@ export function App() {
 	const [draftTitle, setDraftTitle] = useState("");
 	const [draftBackendId, setDraftBackendId] = useState<string | undefined>();
 	const sessionEventSourcesRef = useRef<Map<string, EventSource>>(new Map());
+	const messageListRef = useRef<HTMLDivElement | null>(null);
+	const endOfMessagesRef = useRef<HTMLDivElement | null>(null);
+	const isAtBottomRef = useRef(true);
+	const lastSessionIdRef = useRef<string | null>(null);
+	const lastScrollTopRef = useRef(0);
 
 	const applySessionSummary = (summary: SessionSummary) => {
 		updateSessionMeta(summary.sessionId, {
@@ -737,6 +742,53 @@ export function App() {
 	const showFooterMeta = Boolean(
 		activeSession && (modelLabel || modeLabel || activeSession.sending),
 	);
+	const autoScrollThreshold = 80;
+
+	const handleMessagesScroll = () => {
+		const container = messageListRef.current;
+		if (!container) {
+			return;
+		}
+		const currentScrollTop = container.scrollTop;
+		const distanceToBottom =
+			container.scrollHeight - currentScrollTop - container.clientHeight;
+		const isNearBottom = distanceToBottom <= autoScrollThreshold;
+		const isScrollingUp = currentScrollTop < lastScrollTopRef.current;
+		lastScrollTopRef.current = currentScrollTop;
+		if (isScrollingUp && !isNearBottom) {
+			isAtBottomRef.current = false;
+			return;
+		}
+		if (isNearBottom) {
+			isAtBottomRef.current = true;
+		}
+	};
+
+	useLayoutEffect(() => {
+		const messages = activeSession?.messages ?? [];
+		const sessionChanged = lastSessionIdRef.current !== activeSessionId;
+		if (sessionChanged) {
+			lastSessionIdRef.current = activeSessionId ?? null;
+			isAtBottomRef.current = true;
+		}
+		const endNode = endOfMessagesRef.current;
+		if (!activeSessionId || !endNode) {
+			return;
+		}
+		if (!sessionChanged && !isAtBottomRef.current && messages.length > 0) {
+			return;
+		}
+		requestAnimationFrame(() => {
+			const nextEndNode = endOfMessagesRef.current;
+			if (!nextEndNode) {
+				return;
+			}
+			nextEndNode.scrollIntoView({ block: "end" });
+			requestAnimationFrame(() => {
+				nextEndNode.scrollIntoView({ block: "end" });
+			});
+		});
+	}, [activeSessionId, activeSession?.messages]);
 
 	return (
 		<div className="bg-muted/40 text-foreground flex h-screen flex-col overflow-hidden md:flex-row">
@@ -897,7 +949,11 @@ export function App() {
 									开始对话以验证后端连接。
 								</div>
 							) : null}
-							<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-4">
+							<div
+								className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-4"
+								ref={messageListRef}
+								onScroll={handleMessagesScroll}
+							>
 								{activeSession?.messages.map((message: ChatMessage) => (
 									<MessageItem
 										key={message.id}
@@ -905,6 +961,7 @@ export function App() {
 										onPermissionDecision={handlePermissionDecision}
 									/>
 								))}
+								<div ref={endOfMessagesRef} />
 							</div>
 						</div>
 					</div>
@@ -976,7 +1033,7 @@ export function App() {
 										>
 											<SelectTrigger
 												size="sm"
-												className="h-7 w-11 px-1 md:w-auto md:px-2"
+												className="h-7 w-12 justify-center px-1 md:w-auto md:justify-between md:px-2"
 											>
 												<HugeiconsIcon
 													icon={ComputerIcon}
@@ -1023,7 +1080,7 @@ export function App() {
 										>
 											<SelectTrigger
 												size="sm"
-												className="h-7 w-11 px-1 md:w-auto md:px-2"
+												className="h-7 w-12 justify-center px-1 md:w-auto md:justify-between md:px-2"
 											>
 												<HugeiconsIcon
 													icon={SettingsIcon}
