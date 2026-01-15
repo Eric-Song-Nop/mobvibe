@@ -797,7 +797,7 @@ export function App() {
 	}, [activeSessionId, activeSession?.messages]);
 
 	return (
-		<div className="bg-muted/40 text-foreground flex h-screen flex-col overflow-hidden md:flex-row">
+		<div className="app-root bg-muted/40 text-foreground flex flex-col overflow-hidden md:flex-row">
 			<AlertDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
 				<AlertDialogContent size="sm">
 					<AlertDialogHeader>
@@ -908,7 +908,7 @@ export function App() {
 				</div>
 			) : null}
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-				<header className="bg-background/80 border-b px-4 py-3 backdrop-blur">
+				<header className="bg-background/80 border-b px-4 py-3 backdrop-blur shrink-0">
 					<div className="mx-auto flex w-full max-w-5xl items-center gap-2">
 						<Button
 							variant="outline"

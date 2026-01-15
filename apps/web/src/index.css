@@ -5,6 +5,11 @@
 
 @custom-variant dark (&:is(.dark *));
 
+.app-root {
+	height: 100vh;
+	height: 100dvh;
+}
+
 :root {
 	--background: oklch(1 0 0);
 	--foreground: oklch(0.145 0 0);
