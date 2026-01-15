@@ -1,10 +1,13 @@
 import type {
 	Implementation,
 	NewSessionResponse,
+	RequestPermissionRequest,
+	RequestPermissionResponse,
 	SessionModelState,
 	SessionModeState,
 } from "@agentclientprotocol/sdk";
 import { describe, expect, it, vi } from "vitest";
+import type { PermissionResultPayload } from "../src/acp/session-manager.js";
 import { AppError } from "../src/acp/errors.js";
 import type { AcpBackendConfig } from "../src/config.js";
 
@@ -37,6 +40,10 @@ vi.mock("../src/acp/opencode.js", () => {
 				command: string;
 				args: string[];
 			};
+			private permissionHandler?: (
+				params: RequestPermissionRequest,
+			) => Promise<RequestPermissionResponse>;
+			cancel = vi.fn(async () => undefined);
 
 			constructor(options: {
 				backend: { id: string; label: string };
@@ -66,6 +73,19 @@ vi.mock("../src/acp/opencode.js", () => {
 					error: undefined,
 					pid: 100,
 				};
+			}
+			setPermissionHandler(
+				handler: (
+					params: RequestPermissionRequest,
+				) => Promise<RequestPermissionResponse>,
+			) {
+				this.permissionHandler = handler;
+			}
+			triggerPermission(params: RequestPermissionRequest) {
+				if (!this.permissionHandler) {
+					throw new Error("permission handler not set");
+				}
+				return this.permissionHandler(params);
 			}
 			async disconnect() {}
 		},
@@ -134,5 +154,63 @@ describe("SessionManager", () => {
 			expect(appError.detail.code).toBe("SESSION_NOT_FOUND");
 			return;
 		}
+	});
+
+	it("cancels sessions and pending permissions", async () => {
+		const manager = new SessionManager({
+			backends: [backend],
+			defaultBackendId: "opencode",
+			client: { name: "mobvibe", version: "0.0.0" },
+		});
+
+		await manager.createSession({ title: "初始" });
+
+		const results: PermissionResultPayload[] = [];
+		manager.onPermissionResult((payload) => {
+			results.push(payload);
+		});
+
+		const record = manager.getSession("session-1");
+		expect(record).toBeDefined();
+
+		const connection = record?.connection as unknown as {
+			cancel: ReturnType<typeof vi.fn>;
+			triggerPermission: (
+				params: RequestPermissionRequest,
+			) => Promise<RequestPermissionResponse>;
+		};
+
+		const permissionRequest: RequestPermissionRequest = {
+			sessionId: "session-1",
+			options: [
+				{
+					optionId: "allow",
+					kind: "allow_once",
+					name: "允许一次",
+				},
+			],
+			toolCall: {
+				toolCallId: "tool-1",
+				title: "Mock Tool",
+			},
+		};
+
+		const pending = connection.triggerPermission(permissionRequest);
+		const cancelled = await manager.cancelSession("session-1");
+
+		expect(cancelled).toBe(true);
+		await expect(pending).resolves.toEqual({
+			outcome: { outcome: "cancelled" },
+		});
+		expect(connection.cancel).toHaveBeenCalledWith("session-1");
+		expect(results).toEqual([
+			{
+				sessionId: "session-1",
+				requestId: "tool-1",
+				outcome: { outcome: "cancelled" },
+			},
+		]);
+		expect(manager.listPendingPermissions("session-1")).toHaveLength(0);
+		expect(await manager.cancelSession("missing")).toBe(false);
 	});
 });

@@ -287,6 +287,17 @@
 - 前端：发送中显示“停止”按钮，触发取消后追加状态消息提示“已取消本次生成”。
 - 交互：停止中按钮禁用，等待 `prompt` 返回 `stopReason=cancelled` 收尾。
 
+### 会话取消测试补充计划（实现前）
+
+- 覆盖 `cancelSession` 成功/失败返回值。
+- 校验取消时触发 `connection.cancel` 调用。
+- 模拟未决权限请求，验证取消会回收并触发 `permission_result`。
+
+### 会话取消测试补充记录（实现后）
+
+- 增加 `cancelSession` 分支与权限取消回收的测试用例。
+- Mock `AcpConnection` 以暴露 `setPermissionHandler`/`cancel`/`triggerPermission`。
+
 ### 验证与测试
 
 - 契约测试：ACP SDK mock 触发 `permission_request`/`session_update` 顺序校验。
