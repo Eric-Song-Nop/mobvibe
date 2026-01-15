@@ -227,3 +227,18 @@
 
 - [x] 后端服务启动后可成功连接 ACP CLI。
 - [x] 前端能创建会话、发送消息、接收回复。
+
+## M9 App.tsx 深度拆分（实现前计划 - 2026-01-16）
+
+- 目标：让 `App.tsx` 专注布局与数据编排，抽离副作用与 UI 子区块。
+- 拆分组件：`CreateSessionDialog`、`AppHeader`、`AppSidebar`、`ChatMessageList`、`ChatFooter`。
+- 拆分 hooks：`useSessionEventSources`（SSE）、`useMessageAutoScroll`（滚动与 refs）。
+- 依赖策略：保留现有 Zustand 状态与 Tanstack Query hooks，避免修改业务行为。
+- 目录规划：`apps/web/src/components/app` 与 `apps/web/src/hooks`。
+
+## M9 App.tsx 深度拆分（实现后记录 - 2026-01-16）
+
+- 新增 `components/app` 下的布局组件：`CreateSessionDialog`、`AppHeader`、`AppSidebar`、`ChatMessageList`、`ChatFooter`。
+- 新增 hooks：`useSessionEventSources` 负责 SSE 订阅，`useMessageAutoScroll` 负责滚动与 refs。
+- `App.tsx` 改为组合式布局，只保留状态编排与事件处理。
+- 会话流错误解析由 hook 统一处理并保留原有提示文案。

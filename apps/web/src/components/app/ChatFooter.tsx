@@ -1,0 +1,267 @@
+import { ComputerIcon, SettingsIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import type { ChatSession } from "@/lib/chat-store";
+import { MESSAGE_INPUT_ROWS } from "@/lib/ui-config";
+
+export type ChatFooterProps = {
+	activeSession?: ChatSession;
+	activeSessionId: string | undefined;
+	isModeSwitching: boolean;
+	isModelSwitching: boolean;
+	onModeChange: (modeId: string) => void;
+	onModelChange: (modelId: string) => void;
+	onSend: () => void;
+	onCancel: () => void;
+	onInputChange: (value: string) => void;
+};
+
+export function ChatFooter({
+	activeSession,
+	activeSessionId,
+	isModeSwitching,
+	isModelSwitching,
+	onModeChange,
+	onModelChange,
+	onSend,
+	onCancel,
+	onInputChange,
+}: ChatFooterProps) {
+	const availableModels = activeSession?.availableModels ?? [];
+	const availableModes = activeSession?.availableModes ?? [];
+	const modelLabel = activeSession?.modelName ?? activeSession?.modelId;
+	const modeLabel = activeSession?.modeName ?? activeSession?.modeId;
+	const isReady = activeSession?.state === "ready";
+	const showModelModeControls = Boolean(
+		availableModels.length > 0 ||
+			modelLabel ||
+			availableModes.length > 0 ||
+			modeLabel,
+	);
+	const showFooterMeta = Boolean(
+		activeSession && (showModelModeControls || activeSession.sending),
+	);
+
+	return (
+		<footer className="bg-background/90 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shrink-0">
+			<div className="mx-auto flex w-full max-w-5xl flex-col gap-3">
+				<div className="flex w-full items-end gap-2">
+					{showModelModeControls ? (
+						<div className="flex flex-col gap-2 md:hidden">
+							{availableModels.length > 0 ? (
+								<Select
+									value={activeSession?.modelId ?? ""}
+									onValueChange={onModelChange}
+									disabled={!activeSessionId || !isReady || isModelSwitching}
+								>
+									<SelectTrigger
+										size="sm"
+										className="h-7 w-12 justify-center px-1"
+									>
+										<HugeiconsIcon
+											icon={ComputerIcon}
+											strokeWidth={2}
+											className="size-4"
+										/>
+										<SelectValue placeholder="Model" className="sr-only" />
+									</SelectTrigger>
+									<SelectContent>
+										{availableModels.map((model) => (
+											<SelectItem key={model.id} value={model.id}>
+												Model: {model.name}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							) : modelLabel ? (
+								<Badge variant="outline" className="flex items-center gap-1">
+									<HugeiconsIcon
+										icon={ComputerIcon}
+										strokeWidth={2}
+										className="size-4"
+									/>
+									<span className="sr-only">Model: {modelLabel}</span>
+								</Badge>
+							) : null}
+							{availableModes.length > 0 ? (
+								<Select
+									value={activeSession?.modeId ?? ""}
+									onValueChange={onModeChange}
+									disabled={!activeSessionId || !isReady || isModeSwitching}
+								>
+									<SelectTrigger
+										size="sm"
+										className="h-7 w-12 justify-center px-1"
+									>
+										<HugeiconsIcon
+											icon={SettingsIcon}
+											strokeWidth={2}
+											className="size-4"
+										/>
+										<SelectValue placeholder="Mode" className="sr-only" />
+									</SelectTrigger>
+									<SelectContent>
+										{availableModes.map((mode) => (
+											<SelectItem key={mode.id} value={mode.id}>
+												Mode: {mode.name}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							) : modeLabel ? (
+								<Badge variant="outline" className="flex items-center gap-1">
+									<HugeiconsIcon
+										icon={SettingsIcon}
+										strokeWidth={2}
+										className="size-4"
+									/>
+									<span className="sr-only">Mode: {modeLabel}</span>
+								</Badge>
+							) : null}
+						</div>
+					) : null}
+					<Textarea
+						className="flex-1 h-10 md:h-auto"
+						value={activeSession?.input ?? ""}
+						onChange={(event) => onInputChange(event.target.value)}
+						onKeyDown={(event) => {
+							if (event.key === "Enter" && !event.shiftKey) {
+								event.preventDefault();
+								onSend();
+							}
+						}}
+						placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+						rows={MESSAGE_INPUT_ROWS}
+						disabled={!activeSessionId}
+					/>
+					<div className="flex flex-col gap-2 md:flex-row md:items-center">
+						{activeSession?.sending ? (
+							<Button
+								size="sm"
+								variant="outline"
+								onClick={onCancel}
+								disabled={
+									!activeSessionId || activeSession.canceling || !isReady
+								}
+							>
+								{activeSession.canceling ? "停止中..." : "停止"}
+							</Button>
+						) : null}
+						<Button
+							size="sm"
+							onClick={onSend}
+							disabled={
+								!activeSessionId ||
+								!activeSession?.input.trim() ||
+								activeSession.sending ||
+								!isReady
+							}
+						>
+							发送
+						</Button>
+					</div>
+				</div>
+				{showFooterMeta ? (
+					<div className="hidden flex-wrap items-center justify-between gap-2 text-xs md:flex">
+						<div className="flex flex-wrap items-center gap-2">
+							{availableModels.length > 0 ? (
+								<Select
+									value={activeSession?.modelId ?? ""}
+									onValueChange={onModelChange}
+									disabled={!activeSessionId || !isReady || isModelSwitching}
+								>
+									<SelectTrigger
+										size="sm"
+										className="h-7 w-12 justify-center px-1 md:w-auto md:justify-between md:px-2"
+									>
+										<HugeiconsIcon
+											icon={ComputerIcon}
+											strokeWidth={2}
+											className="size-4"
+										/>
+										<SelectValue
+											placeholder="Model"
+											className="sr-only md:not-sr-only"
+										/>
+									</SelectTrigger>
+									<SelectContent>
+										{availableModels.map((model) => (
+											<SelectItem key={model.id} value={model.id}>
+												Model: {model.name}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							) : modelLabel ? (
+								<Badge variant="outline" className="flex items-center gap-1">
+									<HugeiconsIcon
+										icon={ComputerIcon}
+										strokeWidth={2}
+										className="size-4"
+									/>
+									<span className="sr-only md:not-sr-only">
+										Model: {modelLabel}
+									</span>
+								</Badge>
+							) : null}
+							{availableModes.length > 0 ? (
+								<Select
+									value={activeSession?.modeId ?? ""}
+									onValueChange={onModeChange}
+									disabled={!activeSessionId || !isReady || isModeSwitching}
+								>
+									<SelectTrigger
+										size="sm"
+										className="h-7 w-12 justify-center px-1 md:w-auto md:justify-between md:px-2"
+									>
+										<HugeiconsIcon
+											icon={SettingsIcon}
+											strokeWidth={2}
+											className="size-4"
+										/>
+										<SelectValue
+											placeholder="Mode"
+											className="sr-only md:not-sr-only"
+										/>
+									</SelectTrigger>
+									<SelectContent>
+										{availableModes.map((mode) => (
+											<SelectItem key={mode.id} value={mode.id}>
+												Mode: {mode.name}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							) : modeLabel ? (
+								<Badge variant="outline" className="flex items-center gap-1">
+									<HugeiconsIcon
+										icon={SettingsIcon}
+										strokeWidth={2}
+										className="size-4"
+									/>
+									<span className="sr-only md:not-sr-only">
+										Mode: {modeLabel}
+									</span>
+								</Badge>
+							) : null}
+						</div>
+						{activeSession?.sending ? (
+							<span className="text-muted-foreground text-xs">
+								正在发送中...
+							</span>
+						) : null}
+					</div>
+				) : null}
+			</div>
+		</footer>
+	);
+}
