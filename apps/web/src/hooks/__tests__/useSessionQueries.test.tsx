@@ -1,0 +1,253 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { renderHook, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as api from "@/lib/api";
+import { useSessionQueries } from "../useSessionQueries";
+
+// Mock the API module
+vi.mock("@/lib/api", () => ({
+	fetchSessions: vi.fn(),
+	fetchAcpBackends: vi.fn(),
+}));
+
+describe("useSessionQueries", () => {
+	let queryClient: QueryClient;
+
+	const wrapper = ({ children }: { children: ReactNode }) => (
+		<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+	);
+
+	beforeEach(() => {
+		queryClient = new QueryClient({
+			defaultOptions: {
+				queries: {
+					retry: false,
+				},
+			},
+		});
+		vi.clearAllMocks();
+	});
+
+	it("should initialize with loading state", () => {
+		vi.mocked(api.fetchSessions).mockImplementation(
+			() => new Promise(() => {}), // Never resolves
+		);
+		vi.mocked(api.fetchAcpBackends).mockImplementation(
+			() => new Promise(() => {}), // Never resolves
+		);
+
+		const { result } = renderHook(() => useSessionQueries(), { wrapper });
+
+		expect(result.current.sessionsQuery.isLoading).toBe(true);
+		expect(result.current.backendsQuery.isLoading).toBe(true);
+	});
+
+	it("should fetch sessions successfully", async () => {
+		const mockSessions: api.SessionsResponse = {
+			sessions: [
+				{
+					sessionId: "session-1",
+					title: "Test Session",
+					state: "ready",
+					backendId: "backend-1",
+					backendLabel: "Backend 1",
+					createdAt: "2025-01-01T00:00:00Z",
+					updatedAt: "2025-01-01T00:00:00Z",
+				},
+			],
+		};
+
+		vi.mocked(api.fetchSessions).mockResolvedValue(mockSessions);
+		vi.mocked(api.fetchAcpBackends).mockResolvedValue({
+			defaultBackendId: "backend-1",
+			backends: [],
+		});
+
+		const { result } = renderHook(() => useSessionQueries(), { wrapper });
+
+		await waitFor(() => {
+			expect(result.current.sessionsQuery.isSuccess).toBe(true);
+		});
+
+		expect(result.current.sessionsQuery.data).toEqual(mockSessions);
+		expect(api.fetchSessions).toHaveBeenCalledTimes(1);
+	});
+
+	it("should fetch backends successfully", async () => {
+		const mockBackends = {
+			defaultBackendId: "backend-1",
+			backends: [
+				{
+					backendId: "backend-1",
+					backendLabel: "Backend 1",
+				},
+				{
+					backendId: "backend-2",
+					backendLabel: "Backend 2",
+				},
+			],
+		};
+
+		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
+		vi.mocked(api.fetchAcpBackends).mockResolvedValue(mockBackends);
+
+		const { result } = renderHook(() => useSessionQueries(), { wrapper });
+
+		await waitFor(() => {
+			expect(result.current.backendsQuery.isSuccess).toBe(true);
+		});
+
+		expect(result.current.backendsQuery.data).toEqual(mockBackends);
+		expect(api.fetchAcpBackends).toHaveBeenCalledTimes(1);
+	});
+
+	it("should extract availableBackends from data", async () => {
+		const mockBackends = {
+			defaultBackendId: "backend-1",
+			backends: [
+				{
+					backendId: "backend-1",
+					backendLabel: "Backend 1",
+				},
+				{
+					backendId: "backend-2",
+					backendLabel: "Backend 2",
+				},
+			],
+		};
+
+		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
+		vi.mocked(api.fetchAcpBackends).mockResolvedValue(mockBackends);
+
+		const { result } = renderHook(() => useSessionQueries(), { wrapper });
+
+		await waitFor(() => {
+			expect(result.current.backendsQuery.isSuccess).toBe(true);
+		});
+
+		expect(result.current.availableBackends).toEqual(mockBackends.backends);
+	});
+
+	it("should extract defaultBackendId from data", async () => {
+		const mockBackends = {
+			defaultBackendId: "backend-1",
+			backends: [
+				{
+					backendId: "backend-1",
+					backendLabel: "Backend 1",
+				},
+			],
+		};
+
+		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
+		vi.mocked(api.fetchAcpBackends).mockResolvedValue(mockBackends);
+
+		const { result } = renderHook(() => useSessionQueries(), { wrapper });
+
+		await waitFor(() => {
+			expect(result.current.backendsQuery.isSuccess).toBe(true);
+		});
+
+		expect(result.current.defaultBackendId).toBe("backend-1");
+	});
+
+	it("should use first backend as default if defaultBackendId is missing", async () => {
+		const mockBackends = {
+			defaultBackendId: "",
+			backends: [
+				{
+					backendId: "backend-2",
+					backendLabel: "Backend 2",
+				},
+			],
+		};
+
+		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
+		vi.mocked(api.fetchAcpBackends).mockResolvedValue(mockBackends);
+
+		const { result } = renderHook(() => useSessionQueries(), { wrapper });
+
+		await waitFor(() => {
+			expect(result.current.backendsQuery.isSuccess).toBe(true);
+		});
+
+		expect(result.current.defaultBackendId).toBe("backend-2");
+	});
+
+	it("should return undefined defaultBackendId when no backends available", async () => {
+		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
+		vi.mocked(api.fetchAcpBackends).mockResolvedValue({
+			defaultBackendId: "",
+			backends: [],
+		});
+
+		const { result } = renderHook(() => useSessionQueries(), { wrapper });
+
+		await waitFor(() => {
+			expect(result.current.backendsQuery.isSuccess).toBe(true);
+		});
+
+		expect(result.current.defaultBackendId).toBeUndefined();
+		expect(result.current.availableBackends).toEqual([]);
+	});
+
+	it("should handle fetchSessions errors", async () => {
+		vi.mocked(api.fetchSessions).mockRejectedValue(
+			new Error("Failed to fetch sessions"),
+		);
+		vi.mocked(api.fetchAcpBackends).mockResolvedValue({
+			defaultBackendId: "backend-1",
+			backends: [],
+		});
+
+		const { result } = renderHook(() => useSessionQueries(), { wrapper });
+
+		await waitFor(() => {
+			expect(result.current.sessionsQuery.isError).toBe(true);
+		});
+
+		expect(result.current.sessionsQuery.error).toBeDefined();
+	});
+
+	it("should handle fetchAcpBackends errors", async () => {
+		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
+		vi.mocked(api.fetchAcpBackends).mockRejectedValue(
+			new Error("Failed to fetch backends"),
+		);
+
+		const { result } = renderHook(() => useSessionQueries(), { wrapper });
+
+		await waitFor(() => {
+			expect(result.current.backendsQuery.isError).toBe(true);
+		});
+
+		expect(result.current.backendsQuery.error).toBeDefined();
+	});
+
+	it("should use correct query keys", async () => {
+		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
+		vi.mocked(api.fetchAcpBackends).mockResolvedValue({
+			defaultBackendId: "backend-1",
+			backends: [],
+		});
+
+		renderHook(() => useSessionQueries(), { wrapper });
+
+		await waitFor(() => {
+			expect(api.fetchSessions).toHaveBeenCalled();
+		});
+
+		// Check query keys are set correctly
+		const queryCache = queryClient.getQueryCache();
+		const queries = queryCache.getAll();
+
+		const sessionQuery = queries.find((q) => q.queryKey.includes("sessions"));
+		const backendsQuery = queries.find((q) =>
+			q.queryKey.includes("acp-backends"),
+		);
+
+		expect(sessionQuery).toBeDefined();
+		expect(backendsQuery).toBeDefined();
+	});
+});

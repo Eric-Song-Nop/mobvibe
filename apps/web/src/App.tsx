@@ -36,13 +36,11 @@ import {
 	type SessionNotification,
 } from "@/lib/acp";
 import {
-	ApiError,
 	cancelSession,
 	closeSession,
 	createMessageId,
 	createSession,
 	createSessionEventSource,
-	type ErrorDetail,
 	fetchAcpBackends,
 	fetchSessions,
 	renameSession,
@@ -62,77 +60,15 @@ import {
 	type ChatSession,
 	useChatStore,
 } from "@/lib/chat-store";
+import {
+	buildSessionNotReadyError,
+	buildStreamDisconnectedError,
+	createFallbackError,
+	isErrorDetail,
+	normalizeError,
+} from "@/lib/error-utils";
 import { AUTO_SCROLL_THRESHOLD, MESSAGE_INPUT_ROWS } from "@/lib/ui-config";
-
-const createFallbackError = (
-	message: string,
-	scope: ErrorDetail["scope"],
-): ErrorDetail => ({
-	code: "INTERNAL_ERROR",
-	message,
-	retryable: true,
-	scope,
-});
-
-const normalizeError = (error: unknown, fallback: ErrorDetail): ErrorDetail => {
-	if (error instanceof ApiError) {
-		return error.detail;
-	}
-	if (error instanceof Error) {
-		return {
-			...fallback,
-			message: error.message,
-			detail: error.message,
-		};
-	}
-	return fallback;
-};
-
-const isErrorDetail = (payload: unknown): payload is ErrorDetail => {
-	if (!payload || typeof payload !== "object") {
-		return false;
-	}
-	const detail = payload as ErrorDetail;
-	return (
-		typeof detail.code === "string" &&
-		typeof detail.message === "string" &&
-		typeof detail.retryable === "boolean" &&
-		typeof detail.scope === "string"
-	);
-};
-
-const buildStreamDisconnectedError = (): ErrorDetail => ({
-	code: "STREAM_DISCONNECTED",
-	message: "SSE 连接异常",
-	retryable: true,
-	scope: "stream",
-});
-
-const buildSessionNotReadyError = (): ErrorDetail => ({
-	code: "SESSION_NOT_READY",
-	message: "会话未就绪，请重新创建对话",
-	retryable: true,
-	scope: "session",
-});
-
-const getStatusVariant = (state?: string) => {
-	switch (state) {
-		case "ready":
-			return "default";
-		case "error":
-			return "destructive";
-		case "connecting":
-			return "secondary";
-		case "stopped":
-		case "idle":
-			return "outline";
-		default:
-			return "outline";
-	}
-};
-
-const buildSessionTitle = (sessions: ChatSession[]) =>
-	`对话 ${sessions.length + 1}`;
+import { buildSessionTitle, getStatusVariant } from "@/lib/ui-utils";
 
 export function App() {
 	const {
@@ -198,7 +134,7 @@ export function App() {
 
 	const availableBackends = backendsQuery.data?.backends ?? [];
 	const defaultBackendId =
-		backendsQuery.data?.defaultBackendId ?? availableBackends[0]?.backendId;
+		backendsQuery.data?.defaultBackendId || availableBackends[0]?.backendId;
 
 	useEffect(() => {
 		if (sessionsQuery.data?.sessions) {

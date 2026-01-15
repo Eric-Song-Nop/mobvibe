@@ -13,23 +13,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { type ChatSession } from "@/lib/chat-store";
+import { getStatusVariant } from "@/lib/ui-utils";
 import { cn } from "@/lib/utils";
-
-const getStatusVariant = (state?: string) => {
-	switch (state) {
-		case "ready":
-			return "default";
-		case "error":
-			return "destructive";
-		case "connecting":
-			return "secondary";
-		case "stopped":
-		case "idle":
-			return "outline";
-		default:
-			return "outline";
-	}
-};
 
 type SessionSidebarProps = {
 	sessions: ChatSession[];
