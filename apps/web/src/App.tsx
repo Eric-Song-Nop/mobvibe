@@ -53,10 +53,16 @@ import {
 	setSessionModel,
 } from "@/lib/api";
 import {
+	createAutoScrollState,
+	shouldAutoScroll,
+	updateAutoScrollState,
+} from "@/lib/auto-scroll";
+import {
 	type ChatMessage,
 	type ChatSession,
 	useChatStore,
 } from "@/lib/chat-store";
+import { AUTO_SCROLL_THRESHOLD, MESSAGE_INPUT_ROWS } from "@/lib/ui-config";
 
 const createFallbackError = (
 	message: string,
@@ -162,9 +168,8 @@ export function App() {
 	const sessionEventSourcesRef = useRef<Map<string, EventSource>>(new Map());
 	const messageListRef = useRef<HTMLDivElement | null>(null);
 	const endOfMessagesRef = useRef<HTMLDivElement | null>(null);
-	const isAtBottomRef = useRef(true);
+	const autoScrollStateRef = useRef(createAutoScrollState());
 	const lastSessionIdRef = useRef<string | null>(null);
-	const lastScrollTopRef = useRef(0);
 
 	const applySessionSummary = (summary: SessionSummary) => {
 		updateSessionMeta(summary.sessionId, {
@@ -748,40 +753,62 @@ export function App() {
 	const showFooterMeta = Boolean(
 		activeSession && (showModelModeControls || activeSession.sending),
 	);
-	const autoScrollThreshold = 80;
 
 	const handleMessagesScroll = () => {
 		const container = messageListRef.current;
 		if (!container) {
 			return;
 		}
-		const currentScrollTop = container.scrollTop;
-		const distanceToBottom =
-			container.scrollHeight - currentScrollTop - container.clientHeight;
-		const isNearBottom = distanceToBottom <= autoScrollThreshold;
-		const isScrollingUp = currentScrollTop < lastScrollTopRef.current;
-		lastScrollTopRef.current = currentScrollTop;
-		if (isScrollingUp && !isNearBottom) {
-			isAtBottomRef.current = false;
-			return;
-		}
-		if (isNearBottom) {
-			isAtBottomRef.current = true;
-		}
+		autoScrollStateRef.current = updateAutoScrollState(
+			autoScrollStateRef.current,
+			{
+				scrollTop: container.scrollTop,
+				scrollHeight: container.scrollHeight,
+				clientHeight: container.clientHeight,
+				threshold: AUTO_SCROLL_THRESHOLD,
+			},
+		);
 	};
 
 	useLayoutEffect(() => {
 		const messages = activeSession?.messages ?? [];
 		const sessionChanged = lastSessionIdRef.current !== activeSessionId;
+		const container = messageListRef.current;
+
 		if (sessionChanged) {
 			lastSessionIdRef.current = activeSessionId ?? null;
-			isAtBottomRef.current = true;
+			if (container) {
+				autoScrollStateRef.current = updateAutoScrollState(
+					{
+						...autoScrollStateRef.current,
+						hasUserScrolled: false,
+						lastScrollTop: container.scrollTop,
+					},
+					{
+						scrollTop: container.scrollTop,
+						scrollHeight: container.scrollHeight,
+						clientHeight: container.clientHeight,
+						threshold: AUTO_SCROLL_THRESHOLD,
+					},
+				);
+			} else {
+				autoScrollStateRef.current = {
+					...autoScrollStateRef.current,
+					hasUserScrolled: false,
+				};
+			}
 		}
+
 		const endNode = endOfMessagesRef.current;
 		if (!activeSessionId || !endNode) {
 			return;
 		}
-		if (!sessionChanged && !isAtBottomRef.current && messages.length > 0) {
+		if (
+			!shouldAutoScroll(autoScrollStateRef.current, {
+				sessionChanged,
+				hasMessages: messages.length > 0,
+			})
+		) {
 			return;
 		}
 		requestAnimationFrame(() => {
@@ -1080,7 +1107,7 @@ export function App() {
 									}
 								}}
 								placeholder="输入消息，Enter 发送，Shift+Enter 换行"
-								rows={2}
+								rows={MESSAGE_INPUT_ROWS}
 								disabled={!activeSessionId}
 							/>
 							<div className="flex flex-col gap-2 md:flex-row md:items-center">
