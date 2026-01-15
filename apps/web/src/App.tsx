@@ -739,8 +739,14 @@ export function App() {
 	const isModelSwitching =
 		setSessionModelMutation.isPending &&
 		setSessionModelMutation.variables?.sessionId === activeSessionId;
+	const showModelModeControls = Boolean(
+		availableModels.length > 0 ||
+			modelLabel ||
+			availableModes.length > 0 ||
+			modeLabel,
+	);
 	const showFooterMeta = Boolean(
-		activeSession && (modelLabel || modeLabel || activeSession.sending),
+		activeSession && (showModelModeControls || activeSession.sending),
 	);
 	const autoScrollThreshold = 80;
 
@@ -970,9 +976,97 @@ export function App() {
 				<Separator />
 				<footer className="bg-background/90 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shrink-0">
 					<div className="mx-auto flex w-full max-w-5xl flex-col gap-3">
-						<div className="flex items-end gap-2">
+						<div className="flex w-full items-end gap-2">
+							{showModelModeControls ? (
+								<div className="flex flex-col gap-2 md:hidden">
+									{availableModels.length > 0 ? (
+										<Select
+											value={activeSession?.modelId ?? ""}
+											onValueChange={handleModelChange}
+											disabled={
+												!activeSessionId ||
+												activeSession?.state !== "ready" ||
+												isModelSwitching
+											}
+										>
+											<SelectTrigger
+												size="sm"
+												className="h-7 w-12 justify-center px-1"
+											>
+												<HugeiconsIcon
+													icon={ComputerIcon}
+													strokeWidth={2}
+													className="size-4"
+												/>
+												<SelectValue placeholder="Model" className="sr-only" />
+											</SelectTrigger>
+											<SelectContent>
+												{availableModels.map((model) => (
+													<SelectItem key={model.id} value={model.id}>
+														Model: {model.name}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									) : modelLabel ? (
+										<Badge
+											variant="outline"
+											className="flex items-center gap-1"
+										>
+											<HugeiconsIcon
+												icon={ComputerIcon}
+												strokeWidth={2}
+												className="size-4"
+											/>
+											<span className="sr-only">Model: {modelLabel}</span>
+										</Badge>
+									) : null}
+									{availableModes.length > 0 ? (
+										<Select
+											value={activeSession?.modeId ?? ""}
+											onValueChange={handleModeChange}
+											disabled={
+												!activeSessionId ||
+												activeSession?.state !== "ready" ||
+												isModeSwitching
+											}
+										>
+											<SelectTrigger
+												size="sm"
+												className="h-7 w-12 justify-center px-1"
+											>
+												<HugeiconsIcon
+													icon={SettingsIcon}
+													strokeWidth={2}
+													className="size-4"
+												/>
+												<SelectValue placeholder="Mode" className="sr-only" />
+											</SelectTrigger>
+											<SelectContent>
+												{availableModes.map((mode) => (
+													<SelectItem key={mode.id} value={mode.id}>
+														Mode: {mode.name}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									) : modeLabel ? (
+										<Badge
+											variant="outline"
+											className="flex items-center gap-1"
+										>
+											<HugeiconsIcon
+												icon={SettingsIcon}
+												strokeWidth={2}
+												className="size-4"
+											/>
+											<span className="sr-only">Mode: {modeLabel}</span>
+										</Badge>
+									) : null}
+								</div>
+							) : null}
 							<Textarea
-								className="flex-1"
+								className="flex-1 h-10 md:h-auto"
 								value={activeSession?.input ?? ""}
 								onChange={(event) =>
 									activeSessionId
@@ -989,7 +1083,7 @@ export function App() {
 								rows={2}
 								disabled={!activeSessionId}
 							/>
-							<div className="flex items-center gap-2">
+							<div className="flex flex-col gap-2 md:flex-row md:items-center">
 								{activeSession?.sending ? (
 									<Button
 										size="sm"
@@ -1019,7 +1113,7 @@ export function App() {
 							</div>
 						</div>
 						{showFooterMeta ? (
-							<div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+							<div className="hidden flex-wrap items-center justify-between gap-2 text-xs md:flex">
 								<div className="flex flex-wrap items-center gap-2">
 									{availableModels.length > 0 ? (
 										<Select
