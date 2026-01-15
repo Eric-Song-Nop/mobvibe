@@ -299,6 +299,16 @@ export class AcpConnection {
 		await connection.cancel({ sessionId });
 	}
 
+	async setSessionMode(sessionId: string, modeId: string): Promise<void> {
+		const connection = await this.ensureReady();
+		await connection.setSessionMode({ sessionId, modeId });
+	}
+
+	async setSessionModel(sessionId: string, modelId: string): Promise<void> {
+		const connection = await this.ensureReady();
+		await connection.unstable_setSessionModel({ sessionId, modelId });
+	}
+
 	async disconnect(): Promise<void> {
 		if (this.state === "stopped") {
 			return;

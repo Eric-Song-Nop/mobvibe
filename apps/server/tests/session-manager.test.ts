@@ -44,6 +44,8 @@ vi.mock("../src/acp/opencode.js", () => {
 				params: RequestPermissionRequest,
 			) => Promise<RequestPermissionResponse>;
 			cancel = vi.fn(async () => undefined);
+			setSessionMode = vi.fn(async () => undefined);
+			setSessionModel = vi.fn(async () => undefined);
 
 			constructor(options: {
 				backend: { id: string; label: string };
@@ -212,5 +214,73 @@ describe("SessionManager", () => {
 		]);
 		expect(manager.listPendingPermissions("session-1")).toHaveLength(0);
 		expect(await manager.cancelSession("missing")).toBe(false);
+	});
+
+	it("updates session mode and model", async () => {
+		const manager = new SessionManager({
+			backends: [backend],
+			defaultBackendId: "opencode",
+			client: { name: "mobvibe", version: "0.0.0" },
+		});
+
+		await manager.createSession({ title: "初始" });
+
+		const record = manager.getSession("session-1");
+		expect(record).toBeDefined();
+
+		const connection = record?.connection as unknown as {
+			setSessionMode: ReturnType<typeof vi.fn>;
+			setSessionModel: ReturnType<typeof vi.fn>;
+		};
+
+		const modeSummary = await manager.setSessionMode("session-1", "mode-1");
+		expect(modeSummary.modeId).toBe("mode-1");
+		expect(modeSummary.modeName).toBe("Mode One");
+		expect(connection.setSessionMode).toHaveBeenCalledWith(
+			"session-1",
+			"mode-1",
+		);
+
+		const modelSummary = await manager.setSessionModel("session-1", "model-1");
+		expect(modelSummary.modelId).toBe("model-1");
+		expect(modelSummary.modelName).toBe("Model One");
+		expect(connection.setSessionModel).toHaveBeenCalledWith(
+			"session-1",
+			"model-1",
+		);
+	});
+
+	it("rejects mode/model when capability missing", async () => {
+		const manager = new SessionManager({
+			backends: [backend],
+			defaultBackendId: "opencode",
+			client: { name: "mobvibe", version: "0.0.0" },
+		});
+
+		await manager.createSession({ title: "初始" });
+
+		const record = manager.getSession("session-1");
+		expect(record).toBeDefined();
+		if (!record) {
+			return;
+		}
+		record.availableModes = undefined;
+		record.availableModels = undefined;
+
+		try {
+			await manager.setSessionMode("session-1", "mode-1");
+			throw new Error("should not reach");
+		} catch (error) {
+			const appError = error as AppError;
+			expect(appError.detail.code).toBe("CAPABILITY_NOT_SUPPORTED");
+		}
+
+		try {
+			await manager.setSessionModel("session-1", "model-1");
+			throw new Error("should not reach");
+		} catch (error) {
+			const appError = error as AppError;
+			expect(appError.detail.code).toBe("CAPABILITY_NOT_SUPPORTED");
+		}
 	});
 });

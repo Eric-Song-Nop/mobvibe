@@ -20,11 +20,11 @@
 - `cancel`：支持取消当前 prompt。
 - `requestPermission`：权限请求闭环已接入。
 - `sessionUpdate`：接收 Agent 推送更新，转发到 SSE，并同步 `current_mode_update`/`session_info_update` 元信息。
+- `setSessionMode` / `unstable_setSessionModel`：支持会话模式与模型切换。
 
 ### 未实现
 
 - `loadSession` / `resumeSession`：会话恢复能力尚未接入。
-- `setSessionMode` / `setSessionModel`：会话模式与模型切换未接入。
 
 ## 关键流程
 
@@ -45,6 +45,8 @@
 - `PATCH /acp/session`：更新会话标题。
 - `POST /acp/session/close`：关闭会话。
 - `POST /acp/session/cancel`：取消当前会话 prompt。
+- `POST /acp/session/mode`：切换会话模式。
+- `POST /acp/session/model`：切换会话模型。
 - `POST /acp/message`：发送消息。
 - `POST /acp/permission/decision`：提交权限决策。
 - `GET /acp/session/stream`：SSE 推送 `sessionUpdate`。
@@ -62,8 +64,8 @@
 | `unstable_resumeSession` | `sessionCapabilities.resume` | 恢复会话（不回放） | ⏸️ 本阶段不做 |
 | `unstable_listSessions` | `sessionCapabilities.list` | 列出会话 | ⏸️ 本阶段不做 |
 | `unstable_forkSession` | `sessionCapabilities.fork` | 会话分叉 | ⏸️ 本阶段不做 |
-| `setSessionMode` | `modes`/`current_mode_update` | 切换会话模式 | ❌ 未接入 |
-| `unstable_setSessionModel` | `models` | 切换会话模型 | ❌ 未接入 |
+| `setSessionMode` | `modes`/`current_mode_update` | 切换会话模式 | ✅ 已实现 |
+| `unstable_setSessionModel` | `models` | 切换会话模型 | ✅ 已实现 |
 | `unstable_setSessionConfigOption` | `configOptions` | 配置项切换 | ❌ 未接入 |
 | `prompt` | 必备 | 发送消息 + 流式更新 | ✅ 已实现 |
 | `cancel` | 必备 | 取消当前 prompt | ✅ 已实现 |
@@ -93,14 +95,12 @@
 
 ### 缺口汇总（本阶段优先补齐）
 
-- 会话控制：`setSessionMode` / `unstable_setSessionModel`。
 - 能力映射：`agentCapabilities` 与 `promptCapabilities` 的 UI 表达。
 
 ## 后续计划
 
 - 补充权限请求处理策略与用户确认入口。
 - 接入会话恢复与持久化（SQLite + Drizzle）。
-- 补齐 `setSessionMode` 等扩展能力。
 
 ## 下一阶段协议优先级路线图（Post-MVP）
 
@@ -142,9 +142,9 @@
 | P0：权限请求全链路 | 前端权限卡片与结果展示 | 已完成 | 消息流内展示 + 当前会话处理 |
 | P0：会话取消流程 | 后端接入 `session/cancel` 并联动权限取消 | 已完成 | API `POST /acp/session/cancel` |
 | P0：会话取消流程 | 前端停止按钮与取消提示 | 已完成 | 输入框右侧按钮 + 状态消息 |
-| P1：会话模型/模式切换 | 后端接入 `setSessionMode`/`setSessionModel` | 未开始 | |
-| P1：会话模型/模式切换 | 前端模式/模型切换 UI | 未开始 | |
-| P1：会话模型/模式切换 | 不支持能力的错误提示 | 未开始 | |
+| P1：会话模型/模式切换 | 后端接入 `setSessionMode`/`setSessionModel` | 已完成 | |
+| P1：会话模型/模式切换 | 前端模式/模型切换 UI | 已完成 | |
+| P1：会话模型/模式切换 | 不支持能力的错误提示 | 已完成 | |
 | P1：自定义 Agent 启动配置 | 新会话创建传入 `command`/`args`/`env` | 未开始 | |
 | P1：自定义 Agent 启动配置 | 前端表单与校验 | 未开始 | |
 
@@ -200,6 +200,31 @@
   - 取消中保持按钮禁用，等待 prompt 返回 stopReason。
 - 流程：
   - 用户点击停止 → `POST /acp/session/cancel` → ACP CLI 停止生成 → `prompt` 返回 `stopReason=cancelled`。
+
+### 会话模式/模型切换实现计划（实现前）
+
+- 目标：将现有 Mode/Model 状态 Badge 升级为可交互下拉，允许在发送中切换。
+- 后端：
+  - `AcpConnection` 新增 `setSessionMode` / `unstable_setSessionModel` 封装。
+  - `SessionManager` 保存 `availableModes`/`availableModels` 与当前 `modeId`/`modelId`。
+  - 新增 API：`POST /acp/session/mode`（`sessionId` + `modeId`）与 `POST /acp/session/model`（`sessionId` + `modelId`）。
+  - 若 Agent 不支持能力，返回 `CAPABILITY_NOT_SUPPORTED` 错误码。
+  - 切换成功后更新会话元信息并返回最新 summary。
+- 前端：
+  - 会话摘要包含可选 mode/model 列表，保存在 `chat-store`。
+  - Badge 区域改为 `Select` 选择器，切换时显示 loading，允许发送中操作。
+  - 失败时统一展示错误提示。
+- 同步策略：
+  - `current_mode_update` 继续由 SSE 推送更新。
+  - 模型切换依赖接口回包刷新（协议暂无模型更新事件）。
+
+### 会话模式/模型切换实现说明（实现后）
+
+- 后端新增 `POST /acp/session/mode` 与 `POST /acp/session/model`，返回完整会话摘要。
+- `SessionManager` 记录 `availableModes`/`availableModels` 并在切换后刷新 `modeId`/`modelId` 与 `updatedAt`。
+- 当会话缺少可选项时返回 `CAPABILITY_NOT_SUPPORTED` 错误码（scope= `session`）。
+- 前端在输入区状态栏将 Mode/Model Badge 替换为下拉 Select，可在发送中切换。
+- `current_mode_update` 持续同步 mode，模型切换依赖接口回包刷新。
 
 ### 后端实现设计（协议补齐）
 

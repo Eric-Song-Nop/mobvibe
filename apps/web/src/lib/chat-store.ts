@@ -5,7 +5,13 @@ import type {
 	PermissionOutcome,
 	PermissionToolCall,
 } from "@/lib/acp";
-import type { ErrorDetail, SessionState, SessionSummary } from "@/lib/api";
+import type {
+	ErrorDetail,
+	SessionModelOption,
+	SessionModeOption,
+	SessionState,
+	SessionSummary,
+} from "@/lib/api";
 
 export type ChatRole = "user" | "assistant";
 
@@ -68,6 +74,8 @@ export type ChatSession = {
 	modelName?: string;
 	modeId?: string;
 	modeName?: string;
+	availableModes?: SessionModeOption[];
+	availableModels?: SessionModelOption[];
 };
 
 type ChatState = {
@@ -88,6 +96,8 @@ type ChatState = {
 			modelName?: string;
 			modeId?: string;
 			modeName?: string;
+			availableModes?: SessionModeOption[];
+			availableModels?: SessionModelOption[];
 		},
 	) => void;
 	syncSessions: (summaries: SessionSummary[]) => void;
@@ -110,10 +120,16 @@ type ChatState = {
 				| "modelName"
 				| "modeId"
 				| "modeName"
+				| "availableModes"
+				| "availableModels"
 			>
 		>,
 	) => void;
-	addUserMessage: (sessionId: string, content: string) => void;
+	addUserMessage: (
+		sessionId: string,
+		content: string,
+		options?: { messageId?: string },
+	) => void;
 	addStatusMessage: (
 		sessionId: string,
 		payload: {
@@ -146,8 +162,25 @@ type ChatState = {
 
 type PersistedChatState = Pick<ChatState, "sessions" | "activeSessionId">;
 
+const createLocalId = () => {
+	const cryptoRef = globalThis.crypto;
+	if (cryptoRef?.randomUUID) {
+		return cryptoRef.randomUUID();
+	}
+	if (cryptoRef?.getRandomValues) {
+		const bytes = new Uint8Array(16);
+		cryptoRef.getRandomValues(bytes);
+		bytes[6] = (bytes[6] & 0x0f) | 0x40;
+		bytes[8] = (bytes[8] & 0x3f) | 0x80;
+		const toHex = (value: number) => value.toString(16).padStart(2, "0");
+		const hex = Array.from(bytes, toHex);
+		return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+	}
+	return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
+};
+
 const createMessage = (role: ChatRole, content: string): TextMessage => ({
-	id: crypto.randomUUID(),
+	id: createLocalId(),
 	role,
 	kind: "text",
 	content,
@@ -167,7 +200,7 @@ const createPermissionMessage = (payload: {
 	toolCall?: PermissionToolCall;
 	options: PermissionOption[];
 }): PermissionMessage => ({
-	id: crypto.randomUUID(),
+	id: createLocalId(),
 	role: "assistant",
 	kind: "permission",
 	requestId: payload.requestId,
@@ -184,7 +217,7 @@ const createStatusMessage = (payload: {
 	description?: string;
 	variant?: StatusVariant;
 }): StatusMessage => ({
-	id: crypto.randomUUID(),
+	id: createLocalId(),
 	role: "assistant",
 	kind: "status",
 	variant: payload.variant ?? "info",
@@ -213,6 +246,8 @@ const createSessionState = (
 		modelName?: string;
 		modeId?: string;
 		modeName?: string;
+		availableModes?: SessionModeOption[];
+		availableModels?: SessionModelOption[];
 	},
 ): ChatSession => ({
 	sessionId,
@@ -234,6 +269,8 @@ const createSessionState = (
 	modelName: options?.modelName,
 	modeId: options?.modeId,
 	modeName: options?.modeName,
+	availableModes: options?.availableModes,
+	availableModels: options?.availableModels,
 });
 
 const STORAGE_KEY = "mobvibe.chat-store";
@@ -305,6 +342,8 @@ export const useChatStore = create<ChatState>()(
 								state: summary.state,
 								backendId: summary.backendId,
 								backendLabel: summary.backendLabel,
+								availableModes: summary.availableModes,
+								availableModels: summary.availableModels,
 							});
 						nextSessions[summary.sessionId] = {
 							...existing,
@@ -320,6 +359,9 @@ export const useChatStore = create<ChatState>()(
 							modelName: summary.modelName ?? existing.modelName,
 							modeId: summary.modeId ?? existing.modeId,
 							modeName: summary.modeName ?? existing.modeName,
+							availableModes: summary.availableModes ?? existing.availableModes,
+							availableModels:
+								summary.availableModels ?? existing.availableModels,
 						};
 					});
 
@@ -453,6 +495,12 @@ export const useChatStore = create<ChatState>()(
 					if (payload.modeName !== undefined) {
 						nextSession.modeName = payload.modeName;
 					}
+					if (payload.availableModes !== undefined) {
+						nextSession.availableModes = payload.availableModes;
+					}
+					if (payload.availableModels !== undefined) {
+						nextSession.availableModels = payload.availableModels;
+					}
 					return {
 						sessions: {
 							...state.sessions,
@@ -460,19 +508,21 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
-			addUserMessage: (sessionId, content) =>
-				set((state: ChatState) => {
+			addUserMessage: (sessionId, content, options) =>
+				set((state) => {
 					const session =
 						state.sessions[sessionId] ?? createSessionState(sessionId);
+					const nextMessage = {
+						...createMessage("user", content),
+						id: options?.messageId ?? createLocalId(),
+						isStreaming: false,
+					};
 					return {
 						sessions: {
 							...state.sessions,
 							[sessionId]: {
 								...session,
-								messages: [
-									...session.messages,
-									{ ...createMessage("user", content), isStreaming: false },
-								],
+								messages: [...session.messages, nextMessage],
 							},
 						},
 					};

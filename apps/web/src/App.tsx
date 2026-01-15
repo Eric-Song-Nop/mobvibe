@@ -37,14 +37,18 @@ import {
 	ApiError,
 	cancelSession,
 	closeSession,
+	createMessageId,
 	createSession,
 	createSessionEventSource,
 	type ErrorDetail,
 	fetchAcpBackends,
 	fetchSessions,
 	renameSession,
+	type SessionSummary,
 	sendMessage,
 	sendPermissionDecision,
+	setSessionMode,
+	setSessionModel,
 } from "@/lib/api";
 import {
 	type ChatMessage,
@@ -155,6 +159,20 @@ export function App() {
 	const [draftBackendId, setDraftBackendId] = useState<string | undefined>();
 	const sessionEventSourcesRef = useRef<Map<string, EventSource>>(new Map());
 
+	const applySessionSummary = (summary: SessionSummary) => {
+		updateSessionMeta(summary.sessionId, {
+			title: summary.title,
+			updatedAt: summary.updatedAt,
+			agentName: summary.agentName,
+			modelId: summary.modelId,
+			modelName: summary.modelName,
+			modeId: summary.modeId,
+			modeName: summary.modeName,
+			availableModes: summary.availableModes,
+			availableModels: summary.availableModels,
+		});
+	};
+
 	const sessionsQuery = useQuery({
 		queryKey: ["sessions"],
 		queryFn: fetchSessions,
@@ -217,6 +235,8 @@ export function App() {
 				modelName: data.modelName,
 				modeId: data.modeId,
 				modeName: data.modeName,
+				availableModes: data.availableModes,
+				availableModels: data.availableModels,
 			});
 			setActiveSessionId(data.sessionId);
 			setAppError(undefined);
@@ -277,6 +297,9 @@ export function App() {
 				title: "已取消本次生成",
 				variant: "warning",
 			});
+			finalizeAssistantMessage(variables.sessionId);
+			setSending(variables.sessionId, false);
+			setCanceling(variables.sessionId, false);
 			setAppError(undefined);
 		},
 		onError: (mutationError: unknown, variables) => {
@@ -290,25 +313,69 @@ export function App() {
 		},
 	});
 
-	const sendMessageMutation = useMutation({
-		mutationFn: sendMessage,
-		onSuccess: (_data, variables) => {
-			finalizeAssistantMessage(variables.sessionId);
-			setError(variables.sessionId, undefined);
+	const setSessionModeMutation = useMutation({
+		mutationFn: setSessionMode,
+		onSuccess: (summary) => {
+			applySessionSummary(summary);
+			setAppError(undefined);
 		},
-		onError: (mutationError: unknown, variables) => {
-			finalizeAssistantMessage(variables.sessionId);
-			setError(
-				variables.sessionId,
+		onError: (mutationError: unknown) => {
+			setAppError(
 				normalizeError(
 					mutationError,
-					createFallbackError("发送消息失败", "session"),
+					createFallbackError("切换模式失败", "session"),
+				),
+			);
+		},
+	});
+
+	const setSessionModelMutation = useMutation({
+		mutationFn: setSessionModel,
+		onSuccess: (summary) => {
+			applySessionSummary(summary);
+			setAppError(undefined);
+		},
+		onError: (mutationError: unknown) => {
+			setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError("切换模型失败", "session"),
+				),
+			);
+		},
+	});
+
+	const sendMessageMutation = useMutation({
+		mutationFn: sendMessage,
+		onError: (mutationError: unknown) => {
+			setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError("发送失败", "session"),
 				),
 			);
 		},
 		onSettled: (_data, _error, variables) => {
+			if (!variables) {
+				return;
+			}
+			finalizeAssistantMessage(variables.sessionId);
 			setSending(variables.sessionId, false);
 			setCanceling(variables.sessionId, false);
+		},
+	});
+
+	const createMessageIdMutation = useMutation({
+		mutationFn: createMessageId,
+		onError: (mutationError: unknown, variables) => {
+			setSending(variables.sessionId, false);
+			setCanceling(variables.sessionId, false);
+			setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError("获取消息 ID 失败", "session"),
+				),
+			);
 		},
 	});
 
@@ -371,8 +438,12 @@ export function App() {
 					}
 					const modeUpdate = extractSessionModeUpdate(payload);
 					if (modeUpdate) {
+						const modeName = session.availableModes?.find(
+							(mode) => mode.id === modeUpdate.modeId,
+						)?.name;
 						updateSessionMeta(session.sessionId, {
 							modeId: modeUpdate.modeId,
+							modeName,
 						});
 					}
 					const infoUpdate = extractSessionInfoUpdate(payload);
@@ -546,6 +617,36 @@ export function App() {
 		});
 	};
 
+	const handleModeChange = (modeId: string) => {
+		if (!activeSessionId || !activeSession) {
+			return;
+		}
+		if (activeSession.state !== "ready") {
+			setError(activeSessionId, buildSessionNotReadyError());
+			return;
+		}
+		if (modeId === activeSession.modeId) {
+			return;
+		}
+		setError(activeSessionId, undefined);
+		setSessionModeMutation.mutate({ sessionId: activeSessionId, modeId });
+	};
+
+	const handleModelChange = (modelId: string) => {
+		if (!activeSessionId || !activeSession) {
+			return;
+		}
+		if (activeSession.state !== "ready") {
+			setError(activeSessionId, buildSessionNotReadyError());
+			return;
+		}
+		if (modelId === activeSession.modelId) {
+			return;
+		}
+		setError(activeSessionId, undefined);
+		setSessionModelMutation.mutate({ sessionId: activeSessionId, modelId });
+	};
+
 	const handleCancel = () => {
 		if (!activeSessionId || !activeSession) {
 			return;
@@ -576,9 +677,19 @@ export function App() {
 		setSending(activeSessionId, true);
 		setCanceling(activeSessionId, false);
 		setError(activeSessionId, undefined);
-		addUserMessage(activeSessionId, prompt);
 		setInput(activeSessionId, "");
 
+		let messageId: string;
+		try {
+			const response = await createMessageIdMutation.mutateAsync({
+				sessionId: activeSessionId,
+			});
+			messageId = response.messageId;
+		} catch {
+			return;
+		}
+
+		addUserMessage(activeSessionId, prompt, { messageId });
 		sendMessageMutation.mutate({ sessionId: activeSessionId, prompt });
 	};
 
@@ -613,8 +724,16 @@ export function App() {
 
 	const agentLabel = activeSession?.agentName;
 
+	const availableModels = activeSession?.availableModels ?? [];
+	const availableModes = activeSession?.availableModes ?? [];
 	const modelLabel = activeSession?.modelName ?? activeSession?.modelId;
 	const modeLabel = activeSession?.modeName ?? activeSession?.modeId;
+	const isModeSwitching =
+		setSessionModeMutation.isPending &&
+		setSessionModeMutation.variables?.sessionId === activeSessionId;
+	const isModelSwitching =
+		setSessionModelMutation.isPending &&
+		setSessionModelMutation.variables?.sessionId === activeSessionId;
 
 	return (
 		<div className="bg-muted/40 text-foreground flex min-h-screen flex-col md:flex-row">
@@ -825,10 +944,52 @@ export function App() {
 								{agentLabel ? (
 									<Badge variant="outline">Agent: {agentLabel}</Badge>
 								) : null}
-								{modelLabel ? (
+								{availableModels.length > 0 ? (
+									<Select
+										value={activeSession.modelId ?? ""}
+										onValueChange={handleModelChange}
+										disabled={
+											!activeSessionId ||
+											activeSession.state !== "ready" ||
+											isModelSwitching
+										}
+									>
+										<SelectTrigger className="h-7 w-auto gap-1 px-2 text-xs">
+											<SelectValue placeholder="Model" />
+										</SelectTrigger>
+										<SelectContent>
+											{availableModels.map((model) => (
+												<SelectItem key={model.id} value={model.id}>
+													Model: {model.name}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								) : modelLabel ? (
 									<Badge variant="outline">Model: {modelLabel}</Badge>
 								) : null}
-								{modeLabel ? (
+								{availableModes.length > 0 ? (
+									<Select
+										value={activeSession.modeId ?? ""}
+										onValueChange={handleModeChange}
+										disabled={
+											!activeSessionId ||
+											activeSession.state !== "ready" ||
+											isModeSwitching
+										}
+									>
+										<SelectTrigger className="h-7 w-auto gap-1 px-2 text-xs">
+											<SelectValue placeholder="Mode" />
+										</SelectTrigger>
+										<SelectContent>
+											{availableModes.map((mode) => (
+												<SelectItem key={mode.id} value={mode.id}>
+													Mode: {mode.name}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								) : modeLabel ? (
 									<Badge variant="outline">Mode: {modeLabel}</Badge>
 								) : null}
 							</div>

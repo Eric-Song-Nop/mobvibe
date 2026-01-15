@@ -25,6 +25,11 @@ type SessionRecord = {
 	modeId?: string;
 	modeName?: string;
 	availableModes?: Array<{ id: string; name: string }>;
+	availableModels?: Array<{
+		id: string;
+		name: string;
+		description?: string | null;
+	}>;
 	unsubscribe?: () => void;
 };
 
@@ -64,6 +69,12 @@ export type SessionSummary = {
 	modelName?: string;
 	modeId?: string;
 	modeName?: string;
+	availableModes?: Array<{ id: string; name: string }>;
+	availableModels?: Array<{
+		id: string;
+		name: string;
+		description?: string | null;
+	}>;
 };
 
 const buildPermissionKey = (sessionId: string, requestId: string) =>
@@ -71,13 +82,22 @@ const buildPermissionKey = (sessionId: string, requestId: string) =>
 
 const resolveModelState = (models?: SessionModelState | null) => {
 	if (!models) {
-		return { modelId: undefined, modelName: undefined };
+		return {
+			modelId: undefined,
+			modelName: undefined,
+			availableModels: undefined,
+		};
 	}
+	const availableModels = models.availableModels?.map((model) => ({
+		id: model.modelId,
+		name: model.name,
+		description: model.description ?? undefined,
+	}));
 	const modelId = models.currentModelId ?? undefined;
-	const modelName = models.availableModels?.find(
-		(model) => model.modelId === modelId,
+	const modelName = availableModels?.find(
+		(model) => model.id === modelId,
 	)?.name;
-	return { modelId, modelName };
+	return { modelId, modelName, availableModels };
 };
 
 const resolveModeState = (modes?: SessionModeState | null) => {
@@ -101,6 +121,17 @@ const resolveModeState = (modes?: SessionModeState | null) => {
 		})),
 	};
 };
+
+const createCapabilityNotSupportedError = (message: string) =>
+	new AppError(
+		createErrorDetail({
+			code: "CAPABILITY_NOT_SUPPORTED",
+			message,
+			retryable: false,
+			scope: "session",
+		}),
+		409,
+	);
 
 export class SessionManager {
 	private sessions = new Map<string, SessionRecord>();
@@ -227,7 +258,9 @@ export class SessionManager {
 			);
 			const now = new Date();
 			const agentInfo = connection.getAgentInfo();
-			const { modelId, modelName } = resolveModelState(session.models);
+			const { modelId, modelName, availableModels } = resolveModelState(
+				session.models,
+			);
 			const { modeId, modeName, availableModes } = resolveModeState(
 				session.modes,
 			);
@@ -245,6 +278,7 @@ export class SessionManager {
 				modeId,
 				modeName,
 				availableModes,
+				availableModels,
 			};
 			record.unsubscribe = connection.onSessionUpdate(
 				(notification: SessionNotification) => {
@@ -364,6 +398,84 @@ export class SessionManager {
 		record.updatedAt = new Date();
 	}
 
+	async setSessionMode(
+		sessionId: string,
+		modeId: string,
+	): Promise<SessionSummary> {
+		const record = this.sessions.get(sessionId);
+		if (!record) {
+			throw new AppError(
+				createErrorDetail({
+					code: "SESSION_NOT_FOUND",
+					message: "会话不存在",
+					retryable: false,
+					scope: "session",
+				}),
+				404,
+			);
+		}
+		if (!record.availableModes || record.availableModes.length === 0) {
+			throw createCapabilityNotSupportedError("当前 Agent 不支持会话模式切换");
+		}
+		const selected = record.availableModes.find((mode) => mode.id === modeId);
+		if (!selected) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "modeId 不合法",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		await record.connection.setSessionMode(sessionId, modeId);
+		record.modeId = selected.id;
+		record.modeName = selected.name;
+		record.updatedAt = new Date();
+		return this.buildSummary(record);
+	}
+
+	async setSessionModel(
+		sessionId: string,
+		modelId: string,
+	): Promise<SessionSummary> {
+		const record = this.sessions.get(sessionId);
+		if (!record) {
+			throw new AppError(
+				createErrorDetail({
+					code: "SESSION_NOT_FOUND",
+					message: "会话不存在",
+					retryable: false,
+					scope: "session",
+				}),
+				404,
+			);
+		}
+		if (!record.availableModels || record.availableModels.length === 0) {
+			throw createCapabilityNotSupportedError("当前 Agent 不支持会话模型切换");
+		}
+		const selected = record.availableModels.find(
+			(model) => model.id === modelId,
+		);
+		if (!selected) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "modelId 不合法",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		await record.connection.setSessionModel(sessionId, modelId);
+		record.modelId = selected.id;
+		record.modelName = selected.name;
+		record.updatedAt = new Date();
+		return this.buildSummary(record);
+	}
+
 	async cancelSession(sessionId: string): Promise<boolean> {
 		const record = this.sessions.get(sessionId);
 		if (!record) {
@@ -411,6 +523,8 @@ export class SessionManager {
 			modelName: record.modelName,
 			modeId: record.modeId,
 			modeName: record.modeName,
+			availableModes: record.availableModes,
+			availableModels: record.availableModels,
 		};
 	}
 }

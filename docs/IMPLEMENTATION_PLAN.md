@@ -18,10 +18,26 @@
 - 移除 ACP CLI 断线重连/退出清理能力的计划。
 - 更新里程碑结构，保持后续增强任务清晰。
 
+## 本次调整（实现前计划 - 2026-01-15）
+
+- 新增后端 `/acp/message/id`，用于生成消息 ID，解决前端 `crypto.randomUUID` 不可用问题。
+- 前端发送消息改为：先请求 `messageId` → 插入用户消息 → 再调用 `/acp/message`。
+- 修复流式消息合并：生成结束或取消时结束 streaming 消息。
+- API 基础地址按 `window.location.protocol + hostname` 生成，避免移动端跨域失败。
+- 在文档中补充 CORS 环境变量示例，便于局域网访问配置。
+
 ## 本次调整（实现后记录）
 
 - 已将 M3 从 MVP 里程碑中移至“后续增强”，并在 MVP 非目标中注明不包含本地持久化。
 - 已从 M1 任务中移除 ACP CLI 断线重连与退出清理。
+
+## 本次调整（实现后记录 - 2026-01-15）
+
+- 新增 `POST /acp/message/id`，由后端生成消息 ID，避免前端 `crypto.randomUUID` 依赖。
+- 前端发送流程调整为“先取消息 ID → 写入消息 → 调用 `/acp/message`”。
+- 流式回复结束/取消后强制收敛 streaming 消息，避免多轮合并。
+- API 基础地址改为使用 `window.location.protocol + hostname`，避免移动端跨域失败。
+- 文档补充局域网 CORS 配置示例。
 
 ## MVP 范围
 
@@ -57,6 +73,12 @@
 - 后端新增统一错误结构与错误码映射，服务/会话/请求统一输出 `error`。
 - SSE 增加 `session_error` 事件，流式异常会独立提示。
 - 前端统一 `ErrorDetail` 结构，错误分区显示（顶部/会话/流式）。
+
+#### M1 访问与 CORS 配置（新增）
+
+- 远程访问时需保证前端与后端同协议（`http`/`https`）一致。
+- 推荐在 `.env` 中设置：`MOBVIBE_CORS_ORIGINS=http://192.168.5.72:5173`。
+- 若使用自定义域名，需将对应 origin 追加到 `MOBVIBE_CORS_ORIGINS`。
 
 ### M2：前端聊天体验（可交互）
 

@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import type { RequestPermissionResponse } from "@agentclientprotocol/sdk";
 import express from "express";
 import {
@@ -35,9 +36,51 @@ const allowedCorsOrigins = new Set([
 	...config.corsOrigins,
 ]);
 
+const isPrivateIpv4 = (hostname: string) => {
+	const parts = hostname.split(".");
+	if (parts.length !== 4) {
+		return false;
+	}
+	const numbers = parts.map((part) => Number.parseInt(part, 10));
+	if (
+		numbers.some((value) => Number.isNaN(value) || value < 0 || value > 255)
+	) {
+		return false;
+	}
+	const [first, second] = numbers;
+	if (first === 10) {
+		return true;
+	}
+	if (first === 127) {
+		return true;
+	}
+	if (first === 192 && second === 168) {
+		return true;
+	}
+	if (first === 172 && second >= 16 && second <= 31) {
+		return true;
+	}
+	return false;
+};
+
+const isAllowedCorsOrigin = (origin: string) => {
+	if (allowedCorsOrigins.has(origin)) {
+		return true;
+	}
+	try {
+		const { hostname } = new URL(origin);
+		if (hostname === "localhost" || hostname === "::1") {
+			return true;
+		}
+		return isPrivateIpv4(hostname);
+	} catch (error) {
+		return false;
+	}
+};
+
 app.use((request, response, next) => {
 	const origin = request.headers.origin;
-	if (origin && allowedCorsOrigins.has(origin)) {
+	if (origin && isAllowedCorsOrigin(origin)) {
 		response.setHeader("Access-Control-Allow-Origin", origin);
 		response.setHeader("Vary", "Origin");
 		response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
@@ -284,13 +327,110 @@ app.post("/acp/session/cancel", async (request, response) => {
 	}
 });
 
+app.post("/acp/session/mode", async (request, response) => {
+	const { sessionId, modeId } = request.body ?? {};
+	if (typeof sessionId !== "string" || typeof modeId !== "string") {
+		respondError(
+			response,
+			buildRequestValidationError("sessionId 和 modeId 必填"),
+			400,
+		);
+		return;
+	}
+
+	const record = sessionManager.getSession(sessionId);
+	if (!record) {
+		respondError(response, buildSessionNotFoundError(), 404);
+		return;
+	}
+
+	const status = record.connection.getStatus();
+	if (status.state !== "ready") {
+		respondError(response, buildSessionNotReadyError("session"), 409);
+		return;
+	}
+
+	try {
+		const summary = await sessionManager.setSessionMode(sessionId, modeId);
+		response.json(summary);
+	} catch (error) {
+		if (error instanceof AppError) {
+			respondError(response, error.detail, error.status);
+			return;
+		}
+		respondError(
+			response,
+			createInternalError("session", getErrorMessage(error)),
+		);
+	}
+});
+
+app.post("/acp/session/model", async (request, response) => {
+	const { sessionId, modelId } = request.body ?? {};
+	if (typeof sessionId !== "string" || typeof modelId !== "string") {
+		respondError(
+			response,
+			buildRequestValidationError("sessionId 和 modelId 必填"),
+			400,
+		);
+		return;
+	}
+
+	const record = sessionManager.getSession(sessionId);
+	if (!record) {
+		respondError(response, buildSessionNotFoundError(), 404);
+		return;
+	}
+
+	const status = record.connection.getStatus();
+	if (status.state !== "ready") {
+		respondError(response, buildSessionNotReadyError("session"), 409);
+		return;
+	}
+
+	try {
+		const summary = await sessionManager.setSessionModel(sessionId, modelId);
+		response.json(summary);
+	} catch (error) {
+		if (error instanceof AppError) {
+			respondError(response, error.detail, error.status);
+			return;
+		}
+		respondError(
+			response,
+			createInternalError("session", getErrorMessage(error)),
+		);
+	}
+});
+
+app.post("/acp/message/id", async (request, response) => {
+	const { sessionId } = request.body ?? {};
+	if (typeof sessionId !== "string") {
+		respondError(response, buildRequestValidationError("sessionId 必填"), 400);
+		return;
+	}
+
+	const record = sessionManager.getSession(sessionId);
+	if (!record) {
+		respondError(response, buildSessionNotFoundError(), 404);
+		return;
+	}
+
+	const status = record.connection.getStatus();
+	if (status.state !== "ready") {
+		respondError(response, buildSessionNotReadyError("session"), 409);
+		return;
+	}
+
+	response.json({ messageId: crypto.randomUUID() });
+});
+
 app.post("/acp/message", async (request, response) => {
 	const { sessionId, prompt } = request.body ?? {};
 	if (typeof sessionId !== "string" || typeof prompt !== "string") {
 		respondError(
 			response,
 			buildRequestValidationError("sessionId 和 prompt 必填"),
-			400,
 		);
 		return;
 	}

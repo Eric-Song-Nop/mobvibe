@@ -16,6 +16,7 @@ export type ErrorCode =
 	| "ACP_PROTOCOL_MISMATCH"
 	| "SESSION_NOT_FOUND"
 	| "SESSION_NOT_READY"
+	| "CAPABILITY_NOT_SUPPORTED"
 	| "REQUEST_VALIDATION_FAILED"
 	| "STREAM_DISCONNECTED"
 	| "INTERNAL_ERROR";
@@ -40,6 +41,17 @@ export type AcpBackendsResponse = {
 
 export type SessionState = AcpConnectionState;
 
+export type SessionModeOption = {
+	id: string;
+	name: string;
+};
+
+export type SessionModelOption = {
+	id: string;
+	name: string;
+	description?: string | null;
+};
+
 export type SessionSummary = {
 	sessionId: string;
 	title: string;
@@ -55,6 +67,8 @@ export type SessionSummary = {
 	modelName?: string;
 	modeId?: string;
 	modeName?: string;
+	availableModes?: SessionModeOption[];
+	availableModels?: SessionModelOption[];
 };
 
 export type SessionsResponse = {
@@ -83,8 +97,19 @@ export type PermissionDecisionResponse = {
 	outcome: PermissionOutcome;
 };
 
+export type MessageIdResponse = {
+	messageId: string;
+};
+
+const resolveDefaultApiBaseUrl = () => {
+	if (typeof window === "undefined") {
+		return "http://localhost:3757";
+	}
+	return `${window.location.protocol}//${window.location.hostname}:3757`;
+};
+
 const API_BASE_URL =
-	import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3757";
+	import.meta.env.VITE_API_BASE_URL ?? resolveDefaultApiBaseUrl();
 
 const isErrorDetail = (payload: unknown): payload is ErrorDetail => {
 	if (!payload || typeof payload !== "object") {
@@ -185,6 +210,32 @@ export const cancelSession = async (payload: {
 	sessionId: string;
 }): Promise<CancelSessionResponse> =>
 	requestJson<CancelSessionResponse>("/acp/session/cancel", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+
+export const createMessageId = async (payload: {
+	sessionId: string;
+}): Promise<MessageIdResponse> =>
+	requestJson<MessageIdResponse>("/acp/message/id", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+
+export const setSessionMode = async (payload: {
+	sessionId: string;
+	modeId: string;
+}): Promise<SessionSummary> =>
+	requestJson<SessionSummary>("/acp/session/mode", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+
+export const setSessionModel = async (payload: {
+	sessionId: string;
+	modelId: string;
+}): Promise<SessionSummary> =>
+	requestJson<SessionSummary>("/acp/session/model", {
 		method: "POST",
 		body: JSON.stringify(payload),
 	});
