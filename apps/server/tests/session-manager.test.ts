@@ -140,6 +140,38 @@ describe("SessionManager", () => {
 		expect(await manager.closeSession("session-1")).toBe(false);
 	});
 
+	it("removes session even if disconnect fails", async () => {
+		const manager = new SessionManager({
+			backends: [backend],
+			defaultBackendId: "opencode",
+			client: { name: "mobvibe", version: "0.0.0" },
+		});
+
+		await manager.createSession({ title: "初始" });
+
+		const record = manager.getSession("session-1");
+		expect(record).toBeDefined();
+
+		const connection = record?.connection as unknown as {
+			disconnect: ReturnType<typeof vi.fn>;
+		};
+		connection.disconnect = vi.fn(async () => {
+			throw new Error("disconnect failed");
+		});
+
+		const consoleSpy = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => undefined);
+		const closed = await manager.closeSession("session-1");
+
+		expect(closed).toBe(true);
+		expect(manager.listSessions()).toHaveLength(0);
+		expect(connection.disconnect).toHaveBeenCalled();
+		expect(consoleSpy).toHaveBeenCalled();
+
+		consoleSpy.mockRestore();
+	});
+
 	it("throws when updating a missing session", () => {
 		const manager = new SessionManager({
 			backends: [backend],

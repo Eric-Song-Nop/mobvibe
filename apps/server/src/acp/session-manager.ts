@@ -492,9 +492,20 @@ export class SessionManager {
 		if (!record) {
 			return false;
 		}
-		record.unsubscribe?.();
+		try {
+			record.unsubscribe?.();
+		} catch (error) {
+			console.error(
+				`[mobvibe] session unsubscribe failed: ${sessionId}`,
+				error,
+			);
+		}
 		this.cancelPermissionRequests(sessionId);
-		await record.connection.disconnect();
+		try {
+			await record.connection.disconnect();
+		} catch (error) {
+			console.error(`[mobvibe] session disconnect failed: ${sessionId}`, error);
+		}
 		this.sessions.delete(sessionId);
 		return true;
 	}

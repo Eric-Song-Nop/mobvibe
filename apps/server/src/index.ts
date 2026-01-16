@@ -427,11 +427,7 @@ app.post("/acp/session/close", async (request, response) => {
 	}
 
 	try {
-		const closed = await sessionManager.closeSession(sessionId);
-		if (!closed) {
-			respondError(response, buildSessionNotFoundError(), 404);
-			return;
-		}
+		await sessionManager.closeSession(sessionId);
 		response.json({ ok: true });
 	} catch (error) {
 		respondError(
