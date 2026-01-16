@@ -1,4 +1,6 @@
-import { WorkingDirectoryPicker } from "@/components/app/WorkingDirectoryPicker";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { WorkingDirectoryDialog } from "@/components/app/WorkingDirectoryDialog";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -10,6 +12,12 @@ import {
 	AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
+import {
+	InputGroup,
+	InputGroupAddon,
+	InputGroupButton,
+	InputGroupInput,
+} from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
 import {
 	Select,
@@ -18,7 +26,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import type { AcpBackendSummary } from "@/lib/api";
+import { type AcpBackendSummary, fetchFsRoots } from "@/lib/api";
 
 export type CreateSessionDialogProps = {
 	open: boolean;
@@ -47,6 +55,29 @@ export function CreateSessionDialog({
 	isCreating,
 	onCreate,
 }: CreateSessionDialogProps) {
+	const [directoryDialogOpen, setDirectoryDialogOpen] = useState(false);
+	const rootsQuery = useQuery({
+		queryKey: ["fs-roots"],
+		queryFn: fetchFsRoots,
+		enabled: open,
+	});
+
+	useEffect(() => {
+		if (!open) {
+			setDirectoryDialogOpen(false);
+		}
+	}, [open]);
+
+	useEffect(() => {
+		if (!open || draftCwd) {
+			return;
+		}
+		const homePath = rootsQuery.data?.homePath;
+		if (homePath) {
+			onDraftCwdChange(homePath);
+		}
+	}, [draftCwd, onDraftCwdChange, open, rootsQuery.data?.homePath]);
+
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
 			<AlertDialogContent size="default" className="sm:max-w-2xl">
@@ -89,8 +120,28 @@ export function CreateSessionDialog({
 							</SelectContent>
 						</Select>
 					</div>
-					<WorkingDirectoryPicker
-						open={open}
+					<div className="flex flex-col gap-2">
+						<Label htmlFor="session-cwd">工作目录</Label>
+						<InputGroup>
+							<InputGroupInput
+								id="session-cwd"
+								value={draftCwd ?? ""}
+								onChange={(event) => onDraftCwdChange(event.target.value)}
+								placeholder="输入或粘贴 Home 内路径"
+							/>
+							<InputGroupAddon align="inline-end">
+								<InputGroupButton
+									type="button"
+									onClick={() => setDirectoryDialogOpen(true)}
+								>
+									浏览
+								</InputGroupButton>
+							</InputGroupAddon>
+						</InputGroup>
+					</div>
+					<WorkingDirectoryDialog
+						open={directoryDialogOpen}
+						onOpenChange={setDirectoryDialogOpen}
 						value={draftCwd}
 						onChange={onDraftCwdChange}
 					/>

@@ -62,12 +62,18 @@ export type WorkingDirectoryPickerProps = {
 	open: boolean;
 	value: string | undefined;
 	onChange: (nextPath: string) => void;
+	onSelect?: (nextPath: string) => void;
+	browserClassName?: string;
+	inputId?: string;
 };
 
 export function WorkingDirectoryPicker({
 	open,
 	value,
 	onChange,
+	onSelect,
+	browserClassName,
+	inputId = "session-cwd",
 }: WorkingDirectoryPickerProps) {
 	const [columns, setColumns] = useState<DirectoryColumn[]>([]);
 	const [inputValue, setInputValue] = useState("");
@@ -103,7 +109,7 @@ export function WorkingDirectoryPicker({
 	}, []);
 
 	const buildColumnsForPath = useCallback(
-		async (targetPath: string) => {
+		async (targetPath: string, notifySelect = false) => {
 			if (!homePath) {
 				return;
 			}
@@ -133,13 +139,16 @@ export function WorkingDirectoryPicker({
 				if (targetResponse.path !== value) {
 					onChange(targetResponse.path);
 				}
+				if (notifySelect) {
+					onSelect?.(targetResponse.path);
+				}
 			} catch (error) {
 				setPathError(normalizeErrorMessage(error));
 			} finally {
 				setIsLoading(false);
 			}
 		},
-		[homeLabel, homePath, normalizeErrorMessage, onChange, value],
+		[homeLabel, homePath, normalizeErrorMessage, onChange, onSelect, value],
 	);
 
 	const handleSubmitPath = useCallback(() => {
@@ -147,7 +156,7 @@ export function WorkingDirectoryPicker({
 		if (!nextPath) {
 			return;
 		}
-		void buildColumnsForPath(nextPath);
+		void buildColumnsForPath(nextPath, true);
 	}, [buildColumnsForPath, inputValue]);
 
 	const handleEntrySelect = useCallback(
@@ -170,13 +179,14 @@ export function WorkingDirectoryPicker({
 				if (response.path !== value) {
 					onChange(response.path);
 				}
+				onSelect?.(response.path);
 			} catch (error) {
 				setPathError(normalizeErrorMessage(error));
 			} finally {
 				setIsLoading(false);
 			}
 		},
-		[columns, normalizeErrorMessage, onChange, value],
+		[columns, normalizeErrorMessage, onChange, onSelect, value],
 	);
 
 	const handleColumnSelect = useCallback(
@@ -191,8 +201,9 @@ export function WorkingDirectoryPicker({
 			if (column.path !== value) {
 				onChange(column.path);
 			}
+			onSelect?.(column.path);
 		},
-		[columns, onChange, value],
+		[columns, onChange, onSelect, value],
 	);
 
 	useLayoutEffect(() => {
@@ -242,10 +253,10 @@ export function WorkingDirectoryPicker({
 
 	return (
 		<div className="flex min-w-0 flex-col gap-2">
-			<Label htmlFor="session-cwd">工作目录</Label>
+			<Label htmlFor={inputId}>工作目录</Label>
 			<InputGroup>
 				<InputGroupInput
-					id="session-cwd"
+					id={inputId}
 					value={inputValue}
 					onChange={(event) => setInputValue(event.target.value)}
 					onKeyDown={(event) => {
@@ -264,7 +275,12 @@ export function WorkingDirectoryPicker({
 			{pathError ? (
 				<div className="text-destructive text-xs">{pathError}</div>
 			) : null}
-			<div className="border-input bg-muted/30 h-56 min-w-0 overflow-hidden rounded-none border p-2 sm:h-64">
+			<div
+				className={cn(
+					"border-input bg-muted/30 h-56 min-w-0 overflow-hidden rounded-none border p-2 sm:h-64",
+					browserClassName,
+				)}
+			>
 				<div
 					ref={scrollContainerRef}
 					className="h-full w-full overflow-x-auto overflow-y-hidden"
