@@ -736,12 +736,15 @@ app.get("/acp/session/stream", (request, response) => {
 	});
 });
 
-const server = app.listen(config.port, () => {
-	console.log(`[mobvibe] backend listening on :${config.port}`);
-});
+const shouldStartServer = process.env.NODE_ENV !== "test";
+let server: ReturnType<typeof app.listen> | undefined;
 
 const stopServer = async () =>
 	new Promise<void>((resolve, reject) => {
+		if (!server) {
+			resolve();
+			return;
+		}
 		server.close((error) => {
 			if (error) {
 				reject(error);
@@ -758,15 +761,21 @@ const shutdown = async (signal: string) => {
 		await stopServer();
 	} catch (error) {
 		console.error("[mobvibe] shutdown error", error);
-	} finally {
-		process.exit(0);
 	}
 };
 
-process.on("SIGINT", () => {
-	void shutdown("SIGINT");
-});
+if (shouldStartServer) {
+	server = app.listen(config.port, () => {
+		console.log(`[mobvibe] backend listening on :${config.port}`);
+	});
 
-process.on("SIGTERM", () => {
-	void shutdown("SIGTERM");
-});
+	process.on("SIGINT", () => {
+		void shutdown("SIGINT");
+	});
+
+	process.on("SIGTERM", () => {
+		void shutdown("SIGTERM");
+	});
+}
+
+export { app };

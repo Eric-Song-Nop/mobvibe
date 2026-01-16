@@ -33,6 +33,12 @@
 - 列表展示隐藏项（以 `.` 开头的目录/文件）。
 - 选中目录高亮，顶部显示当前选中路径。
 
+### 测试计划
+
+- 后端：覆盖 `/fs/roots`、`/fs/entries` 路径校验、越界、非目录与不存在情况。
+- 前端：覆盖 `WorkingDirectoryPicker` 目录过滤、列更新与居中滚动。
+- 流程：覆盖新建对话未选目录禁用与选中目录后可创建。
+
 ### 影响范围
 
 - 后端：新增文件浏览 API、路径校验工具函数。
@@ -58,7 +64,49 @@
 - 仅展示可进入的目录，不再显示文件条目。
 - 每列目录列表固定高度并支持纵向滚动。
 
+### 测试补充
+
+- 后端新增 `fs-routes` 测试覆盖根目录、越界、非目录与缺失路径。
+- 前端新增 `WorkingDirectoryPicker` 测试覆盖目录过滤、列更新与居中滚动。
+- 新建会话流程测试覆盖未选目录禁用与选中目录后创建。
+
 ### 使用说明
 
 - 打开“新建对话”弹窗，输入或选择工作目录后再创建会话。
 - 若路径不在 Home 内或无权限，会提示错误并阻止创建。
+
+## 测试修复（2026-01-16）
+
+### 实现前计划
+
+- 统一前端测试的模块导入方式，避免 React 重复实例。
+- 精简 `vite.config.ts` 的 React 相关别名与 `preserveSymlinks` 设置。
+- 清理 `setup-tests.ts` 重复导入，补齐测试所需依赖。
+- 运行 `pnpm test --filter web` 复核测试结果。
+
+### 架构与影响
+
+- Vitest 测试依赖 `apps/web/src` 与 `vite.config.ts` 的模块解析结果。
+- React 依赖需要在测试进程中保持单实例，避免 hook 运行时错误。
+- `setup-tests.ts` 负责统一测试运行环境的全局补丁。
+
+## 测试回滚（2026-01-16）
+
+### 实现前计划
+
+- 恢复 `apps/web/vite.config.ts` 的 React 相关 alias 与 `preserveSymlinks` 设置。
+- 还原 `apps/web/src/setup-tests.ts` 的原始导入结构。
+- 删除工作目录相关的两份前端测试用例内容。
+- 如需验证，再单独运行 `pnpm test --filter web`。
+
+### 架构与影响
+
+- 仅影响前端测试与 Vite 测试解析配置，不改动业务逻辑。
+- 移除测试用例后，工作目录选择器与创建流程将不再被自动化覆盖。
+
+### 实现后记录
+
+- 恢复 `apps/web/vite.config.ts` 的 React alias 与 `preserveSymlinks` 配置为原始状态。
+- `apps/web/src/setup-tests.ts` 回滚为原始双重导入结构。
+- 删除 `apps/web/tests/working-directory-picker.test.tsx` 与 `apps/web/tests/create-session-flow.test.tsx` 测试文件。
+- 未重新运行前端测试。
