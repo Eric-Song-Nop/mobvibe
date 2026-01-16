@@ -1,8 +1,4 @@
-import {
-	ArrowRight01Icon,
-	FolderIcon,
-	Loading03Icon,
-} from "@hugeicons/core-free-icons";
+import { FolderIcon, Loading03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -12,12 +8,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import {
-	InputGroup,
-	InputGroupAddon,
-	InputGroupButton,
-	InputGroupInput,
-} from "@/components/ui/input-group";
+import { InputGroup, InputGroupInput } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
 import {
 	type FsEntry,
@@ -266,17 +257,6 @@ export function WorkingDirectoryPicker({
 					placeholder="输入或粘贴 Home 内路径"
 					disabled={!open || rootsQuery.isLoading}
 				/>
-				<InputGroupAddon align="inline-end">
-					<InputGroupButton
-						variant="outline"
-						size="xs"
-						disabled={isLoading || rootsQuery.isLoading}
-						onClick={handleSubmitPath}
-					>
-						前往
-						<HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={2} />
-					</InputGroupButton>
-				</InputGroupAddon>
 			</InputGroup>
 			{rootsError ? (
 				<div className="text-destructive text-xs">{rootsError}</div>
