@@ -1,4 +1,7 @@
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import type { RequestPermissionResponse } from "@agentclientprotocol/sdk";
 import express from "express";
 import {
@@ -137,6 +140,116 @@ const buildSessionNotReadyError = (scope: "session" | "stream") =>
 		scope,
 	});
 
+type FsEntry = {
+	name: string;
+	path: string;
+	type: "directory" | "file";
+	hidden: boolean;
+};
+
+type FsRoot = {
+	name: string;
+	path: string;
+};
+
+const HOME_ROOT_NAME = "Home";
+let cachedHomePath: string | undefined;
+
+const resolveHomePath = async () => {
+	if (!cachedHomePath) {
+		cachedHomePath = await fs.realpath(os.homedir());
+	}
+	return cachedHomePath;
+};
+
+const createFsRequestError = (message: string, status = 400) =>
+	new AppError(buildRequestValidationError(message), status);
+
+const resolveFsError = (error: unknown, fallbackMessage: string) => {
+	if (error instanceof AppError) {
+		return error;
+	}
+	if (error && typeof error === "object" && "code" in error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code === "ENOENT") {
+			return createFsRequestError("路径不存在", 404);
+		}
+		if (code === "EACCES") {
+			return createFsRequestError("没有权限访问该路径", 403);
+		}
+	}
+	return createFsRequestError(fallbackMessage);
+};
+
+const resolveFsPath = async (input?: string) => {
+	const homePath = await resolveHomePath();
+	const normalized = typeof input === "string" ? input.trim() : "";
+	const candidate =
+		normalized.length > 0
+			? path.isAbsolute(normalized)
+				? normalized
+				: path.join(homePath, normalized)
+			: homePath;
+	try {
+		const resolved = await fs.realpath(candidate);
+		const relative = path.relative(homePath, resolved);
+		if (relative.startsWith("..") || path.isAbsolute(relative)) {
+			throw createFsRequestError("路径必须位于 Home 目录内", 403);
+		}
+		return resolved;
+	} catch (error) {
+		throw resolveFsError(error, "路径不可用");
+	}
+};
+
+const resolveFsDirectory = async (input?: string) => {
+	const resolved = await resolveFsPath(input);
+	try {
+		const stats = await fs.stat(resolved);
+		if (!stats.isDirectory()) {
+			throw createFsRequestError("路径必须是目录");
+		}
+		return resolved;
+	} catch (error) {
+		throw resolveFsError(error, "路径不可用");
+	}
+};
+
+const readDirectoryEntries = async (dirPath: string): Promise<FsEntry[]> => {
+	try {
+		const entries = await fs.readdir(dirPath, { withFileTypes: true });
+		const resolvedEntries = await Promise.all(
+			entries.map(async (entry) => {
+				const entryPath = path.join(dirPath, entry.name);
+				let isDirectory = entry.isDirectory();
+				if (!isDirectory && entry.isSymbolicLink()) {
+					try {
+						const stats = await fs.stat(entryPath);
+						isDirectory = stats.isDirectory();
+					} catch {
+						// ignore broken symlink
+					}
+				}
+				const entryType: FsEntry["type"] = isDirectory ? "directory" : "file";
+				return {
+					name: entry.name,
+					path: entryPath,
+					type: entryType,
+					hidden: entry.name.startsWith("."),
+				};
+			}),
+		);
+		return resolvedEntries.sort((left, right) => {
+			if (left.type !== right.type) {
+				return left.type === "directory" ? -1 : 1;
+			}
+			return left.name.localeCompare(right.name);
+		});
+	} catch (error) {
+		throw resolveFsError(error, "读取目录失败");
+	}
+};
+
 const parsePermissionOutcome = (
 	payload: unknown,
 ): RequestPermissionResponse["outcome"] | null => {
@@ -216,6 +329,38 @@ app.get("/acp/backends", (_request, response) => {
 	});
 });
 
+app.get("/fs/roots", async (_request, response) => {
+	try {
+		const homePath = await resolveHomePath();
+		const roots: FsRoot[] = [{ name: HOME_ROOT_NAME, path: homePath }];
+		response.json({ homePath, roots });
+	} catch (error) {
+		respondError(
+			response,
+			createInternalError("request", getErrorMessage(error)),
+		);
+	}
+});
+
+app.get("/fs/entries", async (request, response) => {
+	const queryPath = request.query.path;
+	const requestPath = typeof queryPath === "string" ? queryPath : undefined;
+	try {
+		const resolvedPath = await resolveFsDirectory(requestPath);
+		const entries = await readDirectoryEntries(resolvedPath);
+		response.json({ path: resolvedPath, entries });
+	} catch (error) {
+		if (error instanceof AppError) {
+			respondError(response, error.detail, error.status);
+			return;
+		}
+		respondError(
+			response,
+			createInternalError("request", getErrorMessage(error)),
+		);
+	}
+});
+
 app.get("/acp/sessions", (_request, response) => {
 	response.json({ sessions: sessionManager.listSessions() });
 });
@@ -223,8 +368,11 @@ app.get("/acp/sessions", (_request, response) => {
 app.post("/acp/session", async (request, response) => {
 	try {
 		const { cwd, title, backendId } = request.body ?? {};
+		const rawCwd =
+			typeof cwd === "string" && cwd.trim().length > 0 ? cwd : undefined;
+		const resolvedCwd = rawCwd ? await resolveFsDirectory(rawCwd) : undefined;
 		const session = await sessionManager.createSession({
-			cwd: typeof cwd === "string" ? cwd : undefined,
+			cwd: resolvedCwd,
 			title:
 				typeof title === "string" && title.trim().length > 0
 					? title.trim()

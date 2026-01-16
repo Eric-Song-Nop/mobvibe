@@ -39,6 +39,28 @@ export type AcpBackendsResponse = {
 	backends: AcpBackendSummary[];
 };
 
+export type FsRoot = {
+	name: string;
+	path: string;
+};
+
+export type FsRootsResponse = {
+	homePath: string;
+	roots: FsRoot[];
+};
+
+export type FsEntry = {
+	name: string;
+	path: string;
+	type: "directory" | "file";
+	hidden: boolean;
+};
+
+export type FsEntriesResponse = {
+	path: string;
+	entries: FsEntry[];
+};
+
 export type SessionState = AcpConnectionState;
 
 export type SessionModeOption = {
@@ -178,6 +200,17 @@ export const fetchAcpBackends = async (): Promise<AcpBackendsResponse> =>
 
 export const fetchSessions = async (): Promise<SessionsResponse> =>
 	requestJson<SessionsResponse>("/acp/sessions");
+
+const buildFsEntriesPath = (pathValue: string) =>
+	`/fs/entries?path=${encodeURIComponent(pathValue)}`;
+
+export const fetchFsRoots = async (): Promise<FsRootsResponse> =>
+	requestJson<FsRootsResponse>("/fs/roots");
+
+export const fetchFsEntries = async (payload: {
+	path: string;
+}): Promise<FsEntriesResponse> =>
+	requestJson<FsEntriesResponse>(buildFsEntriesPath(payload.path));
 
 export const createSession = async (payload?: {
 	cwd?: string;

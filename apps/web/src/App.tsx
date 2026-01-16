@@ -50,6 +50,7 @@ export function App() {
 	const [createDialogOpen, setCreateDialogOpen] = useState(false);
 	const [draftTitle, setDraftTitle] = useState("");
 	const [draftBackendId, setDraftBackendId] = useState<string | undefined>();
+	const [draftCwd, setDraftCwd] = useState<string | undefined>();
 
 	const { sessionsQuery, backendsQuery, availableBackends, defaultBackendId } =
 		useSessionQueries();
@@ -135,6 +136,7 @@ export function App() {
 	const handleOpenCreateDialog = () => {
 		setDraftTitle(buildSessionTitle(sessionList));
 		setDraftBackendId(defaultBackendId);
+		setDraftCwd(undefined);
 		setCreateDialogOpen(true);
 	};
 
@@ -143,11 +145,16 @@ export function App() {
 			setAppError(createFallbackError("请选择后端", "request"));
 			return;
 		}
+		if (!draftCwd) {
+			setAppError(createFallbackError("请选择工作目录", "request"));
+			return;
+		}
 		const title = draftTitle.trim();
 		setAppError(undefined);
 		try {
 			await createSessionMutation.mutateAsync({
 				backendId: draftBackendId,
+				cwd: draftCwd,
 				title: title.length > 0 ? title : undefined,
 			});
 			setCreateDialogOpen(false);
@@ -340,10 +347,13 @@ export function App() {
 				onDraftTitleChange={setDraftTitle}
 				draftBackendId={draftBackendId}
 				onDraftBackendChange={setDraftBackendId}
+				draftCwd={draftCwd}
+				onDraftCwdChange={setDraftCwd}
 				availableBackends={availableBackends}
 				isCreating={createSessionMutation.isPending}
 				onCreate={handleCreateSession}
 			/>
+
 			<AppSidebar
 				sessions={sessionList}
 				activeSessionId={activeSessionId}

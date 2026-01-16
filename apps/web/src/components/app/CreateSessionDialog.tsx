@@ -1,3 +1,4 @@
+import { WorkingDirectoryPicker } from "@/components/app/WorkingDirectoryPicker";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -26,6 +27,8 @@ export type CreateSessionDialogProps = {
 	onDraftTitleChange: (value: string) => void;
 	draftBackendId: string | undefined;
 	onDraftBackendChange: (value: string) => void;
+	draftCwd: string | undefined;
+	onDraftCwdChange: (value: string) => void;
 	availableBackends: AcpBackendSummary[];
 	isCreating: boolean;
 	onCreate: () => void;
@@ -38,20 +41,22 @@ export function CreateSessionDialog({
 	onDraftTitleChange,
 	draftBackendId,
 	onDraftBackendChange,
+	draftCwd,
+	onDraftCwdChange,
 	availableBackends,
 	isCreating,
 	onCreate,
 }: CreateSessionDialogProps) {
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
-			<AlertDialogContent size="sm">
+			<AlertDialogContent size="default" className="sm:max-w-2xl">
 				<AlertDialogHeader>
 					<AlertDialogTitle>新建对话</AlertDialogTitle>
 					<AlertDialogDescription>
-						选择后端并设置对话标题。
+						选择后端并设置对话标题与工作目录。
 					</AlertDialogDescription>
 				</AlertDialogHeader>
-				<div className="flex flex-col gap-3">
+				<div className="flex min-w-0 flex-col gap-3">
 					<div className="flex flex-col gap-2">
 						<Label htmlFor="session-title">标题</Label>
 						<Input
@@ -84,11 +89,16 @@ export function CreateSessionDialog({
 							</SelectContent>
 						</Select>
 					</div>
+					<WorkingDirectoryPicker
+						open={open}
+						value={draftCwd}
+						onChange={onDraftCwdChange}
+					/>
 				</div>
 				<AlertDialogFooter>
 					<AlertDialogCancel>取消</AlertDialogCancel>
 					<AlertDialogAction
-						disabled={isCreating || !draftBackendId}
+						disabled={isCreating || !draftBackendId || !draftCwd}
 						onClick={(event) => {
 							event.preventDefault();
 							onCreate();
