@@ -1,0 +1,336 @@
+import {
+	File01Icon,
+	FolderIcon,
+	FolderOpenIcon,
+	Loading03Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ReactElement } from "react";
+import {
+	AlertDialog,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import type {
+	FsEntry,
+	SessionFsFilePreviewResponse,
+	SessionFsFilePreviewType,
+} from "@/lib/api";
+import {
+	fetchSessionFsEntries,
+	fetchSessionFsFile,
+	fetchSessionFsRoots,
+} from "@/lib/api";
+import { createFallbackError, normalizeError } from "@/lib/error-utils";
+import { cn } from "@/lib/utils";
+
+const normalizePath = (value: string) => value.replace(/\/+$/, "");
+
+type PreviewRenderer = (payload: SessionFsFilePreviewResponse) => ReactElement;
+
+const previewRenderers: Record<SessionFsFilePreviewType, PreviewRenderer> = {
+	code: (payload) => (
+		<pre className="bg-muted/30 text-foreground h-full w-full overflow-auto whitespace-pre p-3 text-xs leading-relaxed">
+			{payload.content}
+		</pre>
+	),
+};
+
+export type FileExplorerDialogProps = {
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
+	sessionId?: string;
+};
+
+export function FileExplorerDialog({
+	open,
+	onOpenChange,
+	sessionId,
+}: FileExplorerDialogProps) {
+	const [currentPath, setCurrentPath] = useState<string | undefined>();
+	const [selectedFilePath, setSelectedFilePath] = useState<
+		string | undefined
+	>();
+	const [activePane, setActivePane] = useState<"browser" | "preview">(
+		"browser",
+	);
+
+	const rootsQuery = useQuery({
+		queryKey: ["session-fs-roots", sessionId],
+		queryFn: () => {
+			if (!sessionId) {
+				throw createFallbackError("会话不可用", "request");
+			}
+			return fetchSessionFsRoots({ sessionId });
+		},
+		enabled: open && !!sessionId,
+	});
+
+	const root = rootsQuery.data?.root;
+	const rootPath = root?.path;
+
+	const entriesQuery = useQuery({
+		queryKey: ["session-fs-entries", sessionId, currentPath],
+		queryFn: () => {
+			if (!sessionId || !currentPath) {
+				throw createFallbackError("路径不可用", "request");
+			}
+			return fetchSessionFsEntries({ sessionId, path: currentPath });
+		},
+		enabled: open && !!sessionId && !!currentPath,
+	});
+
+	const previewQuery = useQuery({
+		queryKey: ["session-fs-file", sessionId, selectedFilePath],
+		queryFn: () => {
+			if (!sessionId || !selectedFilePath) {
+				throw createFallbackError("路径不可用", "request");
+			}
+			return fetchSessionFsFile({ sessionId, path: selectedFilePath });
+		},
+		enabled: open && !!sessionId && !!selectedFilePath,
+	});
+
+	const resetState = useCallback(() => {
+		setCurrentPath(undefined);
+		setSelectedFilePath(undefined);
+		setActivePane("browser");
+	}, []);
+
+	useEffect(() => {
+		if (!open) {
+			resetState();
+			return;
+		}
+		if (sessionId === undefined) {
+			resetState();
+			return;
+		}
+		resetState();
+	}, [open, resetState, sessionId]);
+
+	useEffect(() => {
+		if (!open || !rootPath) {
+			return;
+		}
+		setCurrentPath((prev) => prev ?? rootPath);
+	}, [open, rootPath]);
+
+	const entries = entriesQuery.data?.entries ?? [];
+	const normalizedRoot = rootPath ? normalizePath(rootPath) : undefined;
+	const normalizedCurrent = currentPath
+		? normalizePath(currentPath)
+		: undefined;
+	const canNavigateUp =
+		!!normalizedRoot &&
+		!!normalizedCurrent &&
+		normalizedCurrent !== normalizedRoot;
+
+	const handleNavigateUp = () => {
+		if (!normalizedRoot || !normalizedCurrent) {
+			return;
+		}
+		if (normalizedCurrent === normalizedRoot) {
+			return;
+		}
+		const lastSlash = normalizedCurrent.lastIndexOf("/");
+		const parentPath =
+			lastSlash > 0 ? normalizedCurrent.slice(0, lastSlash) : "";
+		const nextPath = parentPath.length > 0 ? parentPath : normalizedRoot;
+		if (!nextPath.startsWith(normalizedRoot)) {
+			return;
+		}
+		setCurrentPath(nextPath);
+		setSelectedFilePath(undefined);
+		setActivePane("browser");
+	};
+
+	const handleEntrySelect = (entry: FsEntry) => {
+		if (entry.type === "directory") {
+			setCurrentPath(entry.path);
+			setSelectedFilePath(undefined);
+			setActivePane("browser");
+			return;
+		}
+		setSelectedFilePath(entry.path);
+		setActivePane("preview");
+	};
+
+	const entriesError = entriesQuery.isError
+		? normalizeError(
+				entriesQuery.error,
+				createFallbackError("目录加载失败", "request"),
+			).message
+		: undefined;
+	const rootsError = rootsQuery.isError
+		? normalizeError(
+				rootsQuery.error,
+				createFallbackError("根目录加载失败", "request"),
+			).message
+		: undefined;
+	const previewError = previewQuery.isError
+		? normalizeError(
+				previewQuery.error,
+				createFallbackError("预览加载失败", "request"),
+			).message
+		: undefined;
+
+	const previewRenderer = useMemo(() => {
+		if (!previewQuery.data) {
+			return undefined;
+		}
+		return previewRenderers[previewQuery.data.previewType];
+	}, [previewQuery.data]);
+
+	const browserPaneClassName = cn(
+		"min-h-0 flex-col gap-2",
+		activePane === "browser" ? "flex" : "hidden",
+		"sm:flex",
+	);
+	const previewPaneClassName = cn(
+		"min-h-0 flex-col gap-2",
+		activePane === "preview" ? "flex" : "hidden",
+		"sm:flex",
+	);
+
+	return (
+		<AlertDialog open={open} onOpenChange={onOpenChange}>
+			<AlertDialogContent className="grid h-[80vh] max-w-[95vw] grid-rows-[auto_1fr_auto] sm:h-[70vh] sm:max-w-5xl">
+				<AlertDialogHeader className="gap-3">
+					<div className="flex w-full items-center justify-between gap-3">
+						<AlertDialogTitle className="flex items-center gap-2">
+							<HugeiconsIcon icon={FolderOpenIcon} strokeWidth={2} />
+							会话文件
+						</AlertDialogTitle>
+						<div className="flex items-center gap-2 sm:hidden">
+							<Button
+								variant={activePane === "browser" ? "secondary" : "outline"}
+								size="sm"
+								onClick={() => setActivePane("browser")}
+							>
+								目录
+							</Button>
+							<Button
+								variant={activePane === "preview" ? "secondary" : "outline"}
+								size="sm"
+								onClick={() => setActivePane("preview")}
+								disabled={!selectedFilePath}
+							>
+								预览
+							</Button>
+						</div>
+					</div>
+				</AlertDialogHeader>
+
+				<div className="flex min-h-0 flex-1 flex-col gap-4 sm:flex-row">
+					<section className={cn("sm:w-72", browserPaneClassName)}>
+						<div className="flex items-center justify-between gap-2">
+							<div className="text-xs font-medium">
+								{root?.name ?? "工作目录"}
+							</div>
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={handleNavigateUp}
+								disabled={!canNavigateUp}
+							>
+								返回上级
+							</Button>
+						</div>
+						<div className="border-input bg-muted/30 flex min-h-0 flex-1 flex-col overflow-hidden rounded-none border">
+							{rootsQuery.isLoading || entriesQuery.isLoading ? (
+								<div className="text-muted-foreground flex flex-1 items-center justify-center gap-2 text-xs">
+									<HugeiconsIcon
+										icon={Loading03Icon}
+										strokeWidth={2}
+										className="animate-spin"
+									/>
+									加载中...
+								</div>
+							) : rootsError || entriesError ? (
+								<div className="text-destructive px-3 py-2 text-xs">
+									{rootsError ?? entriesError}
+								</div>
+							) : entries.length === 0 ? (
+								<div className="text-muted-foreground px-3 py-2 text-xs">
+									暂无内容
+								</div>
+							) : (
+								<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+									{entries.map((entry) => {
+										const isSelected = selectedFilePath === entry.path;
+										const icon =
+											entry.type === "directory" ? FolderIcon : File01Icon;
+										return (
+											<button
+												key={entry.path}
+												type="button"
+												className={cn(
+													"hover:bg-muted flex w-full items-center gap-2 px-3 py-2 text-left text-xs",
+													isSelected && "bg-muted",
+												)}
+												onClick={() => handleEntrySelect(entry)}
+											>
+												<HugeiconsIcon icon={icon} strokeWidth={2} />
+												<span className="truncate">{entry.name}</span>
+											</button>
+										);
+									})}
+								</div>
+							)}
+						</div>
+					</section>
+
+					<section className={cn("flex min-h-0 flex-1", previewPaneClassName)}>
+						<div className="flex min-h-0 flex-1 flex-col gap-2">
+							<div className="flex items-center justify-between gap-2">
+								<div className="text-xs font-medium">预览</div>
+								{selectedFilePath ? (
+									<span className="text-muted-foreground text-xs">
+										代码模式
+									</span>
+								) : null}
+							</div>
+							<div className="border-input bg-background flex min-h-0 flex-1 overflow-hidden rounded-none border">
+								{!selectedFilePath ? (
+									<div className="text-muted-foreground flex flex-1 items-center justify-center px-3 text-xs">
+										选择文件后查看预览
+									</div>
+								) : previewQuery.isLoading ? (
+									<div className="text-muted-foreground flex flex-1 items-center justify-center gap-2 text-xs">
+										<HugeiconsIcon
+											icon={Loading03Icon}
+											strokeWidth={2}
+											className="animate-spin"
+										/>
+										加载预览中...
+									</div>
+								) : previewError ? (
+									<div className="text-destructive flex flex-1 items-center justify-center px-3 text-xs">
+										{previewError}
+									</div>
+								) : previewQuery.data && previewRenderer ? (
+									previewRenderer(previewQuery.data)
+								) : (
+									<div className="text-muted-foreground flex flex-1 items-center justify-center px-3 text-xs">
+										当前格式暂不支持
+									</div>
+								)}
+							</div>
+						</div>
+					</section>
+				</div>
+
+				<AlertDialogFooter>
+					<AlertDialogCancel>关闭</AlertDialogCancel>
+				</AlertDialogFooter>
+			</AlertDialogContent>
+		</AlertDialog>
+	);
+}

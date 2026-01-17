@@ -61,6 +61,23 @@ export type FsEntriesResponse = {
 	entries: FsEntry[];
 };
 
+export type SessionFsRoot = {
+	name: string;
+	path: string;
+};
+
+export type SessionFsRootsResponse = {
+	root: SessionFsRoot;
+};
+
+export type SessionFsFilePreviewType = "code";
+
+export type SessionFsFilePreviewResponse = {
+	path: string;
+	previewType: SessionFsFilePreviewType;
+	content: string;
+};
+
 export type SessionState = AcpConnectionState;
 
 export type SessionModeOption = {
@@ -84,6 +101,7 @@ export type SessionSummary = {
 	pid?: number;
 	createdAt: string;
 	updatedAt: string;
+	cwd?: string;
 	agentName?: string;
 	modelId?: string;
 	modelName?: string;
@@ -204,6 +222,22 @@ export const fetchSessions = async (): Promise<SessionsResponse> =>
 const buildFsEntriesPath = (pathValue: string) =>
 	`/fs/entries?path=${encodeURIComponent(pathValue)}`;
 
+const buildSessionFsRootsPath = (sessionId: string) =>
+	`/fs/session/roots?sessionId=${encodeURIComponent(sessionId)}`;
+
+const buildSessionFsEntriesPath = (sessionId: string, pathValue?: string) => {
+	const params = new URLSearchParams({ sessionId });
+	if (pathValue) {
+		params.set("path", pathValue);
+	}
+	return `/fs/session/entries?${params.toString()}`;
+};
+
+const buildSessionFsFilePath = (sessionId: string, pathValue: string) => {
+	const params = new URLSearchParams({ sessionId, path: pathValue });
+	return `/fs/session/file?${params.toString()}`;
+};
+
 export const fetchFsRoots = async (): Promise<FsRootsResponse> =>
 	requestJson<FsRootsResponse>("/fs/roots");
 
@@ -211,6 +245,29 @@ export const fetchFsEntries = async (payload: {
 	path: string;
 }): Promise<FsEntriesResponse> =>
 	requestJson<FsEntriesResponse>(buildFsEntriesPath(payload.path));
+
+export const fetchSessionFsRoots = async (payload: {
+	sessionId: string;
+}): Promise<SessionFsRootsResponse> =>
+	requestJson<SessionFsRootsResponse>(
+		buildSessionFsRootsPath(payload.sessionId),
+	);
+
+export const fetchSessionFsEntries = async (payload: {
+	sessionId: string;
+	path?: string;
+}): Promise<FsEntriesResponse> =>
+	requestJson<FsEntriesResponse>(
+		buildSessionFsEntriesPath(payload.sessionId, payload.path),
+	);
+
+export const fetchSessionFsFile = async (payload: {
+	sessionId: string;
+	path: string;
+}): Promise<SessionFsFilePreviewResponse> =>
+	requestJson<SessionFsFilePreviewResponse>(
+		buildSessionFsFilePath(payload.sessionId, payload.path),
+	);
 
 export const createSession = async (payload?: {
 	cwd?: string;

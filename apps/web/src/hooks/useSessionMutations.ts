@@ -30,6 +30,7 @@ type SessionMetadata = Partial<
 		| "state"
 		| "backendId"
 		| "backendLabel"
+		| "cwd"
 		| "agentName"
 		| "modelId"
 		| "modelName"
@@ -100,6 +101,7 @@ const applySessionSummary = (
 	store.updateSessionMeta(summary.sessionId, {
 		title: summary.title,
 		updatedAt: summary.updatedAt,
+		cwd: summary.cwd,
 		agentName: summary.agentName,
 		modelId: summary.modelId,
 		modelName: summary.modelName,
@@ -124,6 +126,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 				state: data.state,
 				backendId: data.backendId,
 				backendLabel: data.backendLabel,
+				cwd: data.cwd,
 				agentName: data.agentName,
 				modelId: data.modelId,
 				modelName: data.modelName,

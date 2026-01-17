@@ -69,6 +69,7 @@ export type ChatSession = {
 	updatedAt?: string;
 	backendId?: string;
 	backendLabel?: string;
+	cwd?: string;
 	agentName?: string;
 	modelId?: string;
 	modelName?: string;
@@ -91,6 +92,7 @@ type ChatState = {
 			state?: SessionState;
 			backendId?: string;
 			backendLabel?: string;
+			cwd?: string;
 			agentName?: string;
 			modelId?: string;
 			modelName?: string;
@@ -115,6 +117,7 @@ type ChatState = {
 				ChatSession,
 				| "title"
 				| "updatedAt"
+				| "cwd"
 				| "agentName"
 				| "modelId"
 				| "modelName"
@@ -241,6 +244,7 @@ const createSessionState = (
 		state?: SessionState;
 		backendId?: string;
 		backendLabel?: string;
+		cwd?: string;
 		agentName?: string;
 		modelId?: string;
 		modelName?: string;
@@ -264,6 +268,7 @@ const createSessionState = (
 	updatedAt: undefined,
 	backendId: options?.backendId,
 	backendLabel: options?.backendLabel,
+	cwd: options?.cwd,
 	agentName: options?.agentName,
 	modelId: options?.modelId,
 	modelName: options?.modelName,
@@ -342,6 +347,7 @@ export const useChatStore = create<ChatState>()(
 								state: summary.state,
 								backendId: summary.backendId,
 								backendLabel: summary.backendLabel,
+								cwd: summary.cwd,
 								availableModes: summary.availableModes,
 								availableModels: summary.availableModels,
 							});
@@ -354,6 +360,7 @@ export const useChatStore = create<ChatState>()(
 							updatedAt: summary.updatedAt,
 							backendId: summary.backendId ?? existing.backendId,
 							backendLabel: summary.backendLabel ?? existing.backendLabel,
+							cwd: summary.cwd ?? existing.cwd,
 							agentName: summary.agentName ?? existing.agentName,
 							modelId: summary.modelId ?? existing.modelId,
 							modelName: summary.modelName ?? existing.modelName,

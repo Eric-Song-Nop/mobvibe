@@ -19,6 +19,7 @@ type SessionRecord = {
 	connection: AcpConnection;
 	createdAt: Date;
 	updatedAt: Date;
+	cwd?: string;
 	agentName?: string;
 	modelId?: string;
 	modelName?: string;
@@ -64,6 +65,7 @@ export type SessionSummary = {
 	pid?: number;
 	createdAt: string;
 	updatedAt: string;
+	cwd?: string;
 	agentName?: string;
 	modelId?: string;
 	modelName?: string;
@@ -272,6 +274,7 @@ export class SessionManager {
 				connection,
 				createdAt: now,
 				updatedAt: now,
+				cwd: options?.cwd,
 				agentName: agentInfo?.title ?? agentInfo?.name,
 				modelId,
 				modelName,
@@ -529,6 +532,7 @@ export class SessionManager {
 			pid: status.pid,
 			createdAt: record.createdAt.toISOString(),
 			updatedAt: record.updatedAt.toISOString(),
+			cwd: record.cwd,
 			agentName: record.agentName,
 			modelId: record.modelId,
 			modelName: record.modelName,

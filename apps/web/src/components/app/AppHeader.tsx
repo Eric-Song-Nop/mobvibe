@@ -1,3 +1,5 @@
+import { FolderOpenIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { ChatSession } from "@/lib/chat-store";
@@ -9,6 +11,9 @@ export type AppHeaderProps = {
 	statusMessage?: string;
 	streamError?: ChatSession["streamError"];
 	onOpenMobileMenu: () => void;
+	onOpenFileExplorer?: () => void;
+	showFileExplorer?: boolean;
+	fileExplorerDisabled?: boolean;
 };
 
 export function AppHeader({
@@ -18,6 +23,9 @@ export function AppHeader({
 	statusMessage,
 	streamError,
 	onOpenMobileMenu,
+	onOpenFileExplorer,
+	showFileExplorer = false,
+	fileExplorerDisabled = false,
 }: AppHeaderProps) {
 	return (
 		<header className="bg-background/80 border-b px-4 py-3 backdrop-blur shrink-0">
@@ -40,6 +48,17 @@ export function AppHeader({
 						</Badge>
 					) : null}
 				</div>
+				{showFileExplorer ? (
+					<Button
+						variant="outline"
+						size="icon-sm"
+						aria-label="打开文件浏览器"
+						disabled={fileExplorerDisabled}
+						onClick={() => onOpenFileExplorer?.()}
+					>
+						<HugeiconsIcon icon={FolderOpenIcon} strokeWidth={2} />
+					</Button>
+				) : null}
 			</div>
 
 			{statusMessage ? (

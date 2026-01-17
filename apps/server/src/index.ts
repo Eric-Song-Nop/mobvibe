@@ -152,7 +152,23 @@ type FsRoot = {
 	path: string;
 };
 
+type FsFilePreview = {
+	path: string;
+	previewType: "code";
+	content: string;
+};
+
+type SessionFsRoot = {
+	name: string;
+	path: string;
+};
+
+type SessionFsRootsResponse = {
+	root: SessionFsRoot;
+};
+
 const HOME_ROOT_NAME = "Home";
+const SESSION_ROOT_NAME = "工作目录";
 let cachedHomePath: string | undefined;
 
 const resolveHomePath = async () => {
@@ -212,6 +228,88 @@ const resolveFsDirectory = async (input?: string) => {
 		return resolved;
 	} catch (error) {
 		throw resolveFsError(error, "路径不可用");
+	}
+};
+
+const createSessionFsRequestError = (message: string, status = 400) =>
+	new AppError(buildRequestValidationError(message), status);
+
+const resolveSessionRoot = (sessionId?: string) => {
+	if (!sessionId) {
+		throw createSessionFsRequestError("sessionId 必填");
+	}
+	const session = sessionManager.getSession(sessionId);
+	if (!session) {
+		throw new AppError(buildSessionNotFoundError(), 404);
+	}
+	if (!session.cwd) {
+		throw createSessionFsRequestError("会话未配置工作目录");
+	}
+	return session.cwd;
+};
+
+const resolveSessionFsError = (error: unknown, fallbackMessage: string) => {
+	if (error instanceof AppError) {
+		return error;
+	}
+	if (error && typeof error === "object" && "code" in error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code === "ENOENT") {
+			return createSessionFsRequestError("路径不存在", 404);
+		}
+		if (code === "EACCES") {
+			return createSessionFsRequestError("没有权限访问该路径", 403);
+		}
+	}
+	return createSessionFsRequestError(fallbackMessage);
+};
+
+const resolveSessionPath = async (rootPath: string, input?: string) => {
+	const normalized = typeof input === "string" ? input.trim() : "";
+	const candidate =
+		normalized.length > 0
+			? path.isAbsolute(normalized)
+				? normalized
+				: path.join(rootPath, normalized)
+			: rootPath;
+	try {
+		const resolved = await fs.realpath(candidate);
+		const relative = path.relative(rootPath, resolved);
+		if (relative.startsWith("..") || path.isAbsolute(relative)) {
+			throw createSessionFsRequestError("路径必须位于工作目录内", 403);
+		}
+		return resolved;
+	} catch (error) {
+		throw resolveSessionFsError(error, "路径不可用");
+	}
+};
+
+const resolveSessionDirectory = async (rootPath: string, input?: string) => {
+	const resolved = await resolveSessionPath(rootPath, input);
+	try {
+		const stats = await fs.stat(resolved);
+		if (!stats.isDirectory()) {
+			throw createSessionFsRequestError("路径必须是目录");
+		}
+		return resolved;
+	} catch (error) {
+		throw resolveSessionFsError(error, "路径不可用");
+	}
+};
+
+const resolveSessionFile = async (rootPath: string, input?: string) => {
+	if (!input) {
+		throw createSessionFsRequestError("path 必填");
+	}
+	const resolved = await resolveSessionPath(rootPath, input);
+	try {
+		const stats = await fs.stat(resolved);
+		if (!stats.isFile()) {
+			throw createSessionFsRequestError("路径必须是文件");
+		}
+		return resolved;
+	} catch (error) {
+		throw resolveSessionFsError(error, "路径不可用");
 	}
 };
 
@@ -349,6 +447,85 @@ app.get("/fs/entries", async (request, response) => {
 		const resolvedPath = await resolveFsDirectory(requestPath);
 		const entries = await readDirectoryEntries(resolvedPath);
 		response.json({ path: resolvedPath, entries });
+	} catch (error) {
+		if (error instanceof AppError) {
+			respondError(response, error.detail, error.status);
+			return;
+		}
+		respondError(
+			response,
+			createInternalError("request", getErrorMessage(error)),
+		);
+	}
+});
+
+app.get("/fs/session/roots", (request, response) => {
+	const sessionId =
+		typeof request.query.sessionId === "string"
+			? request.query.sessionId
+			: undefined;
+	try {
+		const rootPath = resolveSessionRoot(sessionId);
+		const payload: SessionFsRootsResponse = {
+			root: {
+				name: SESSION_ROOT_NAME,
+				path: rootPath,
+			},
+		};
+		response.json(payload);
+	} catch (error) {
+		if (error instanceof AppError) {
+			respondError(response, error.detail, error.status);
+			return;
+		}
+		respondError(
+			response,
+			createInternalError("request", getErrorMessage(error)),
+		);
+	}
+});
+
+app.get("/fs/session/entries", async (request, response) => {
+	const sessionId =
+		typeof request.query.sessionId === "string"
+			? request.query.sessionId
+			: undefined;
+	const queryPath = request.query.path;
+	const requestPath = typeof queryPath === "string" ? queryPath : undefined;
+	try {
+		const rootPath = resolveSessionRoot(sessionId);
+		const resolvedPath = await resolveSessionDirectory(rootPath, requestPath);
+		const entries = await readDirectoryEntries(resolvedPath);
+		response.json({ path: resolvedPath, entries });
+	} catch (error) {
+		if (error instanceof AppError) {
+			respondError(response, error.detail, error.status);
+			return;
+		}
+		respondError(
+			response,
+			createInternalError("request", getErrorMessage(error)),
+		);
+	}
+});
+
+app.get("/fs/session/file", async (request, response) => {
+	const sessionId =
+		typeof request.query.sessionId === "string"
+			? request.query.sessionId
+			: undefined;
+	const queryPath = request.query.path;
+	const requestPath = typeof queryPath === "string" ? queryPath : undefined;
+	try {
+		const rootPath = resolveSessionRoot(sessionId);
+		const resolvedPath = await resolveSessionFile(rootPath, requestPath);
+		const content = await fs.readFile(resolvedPath, "utf8");
+		const payload: FsFilePreview = {
+			path: resolvedPath,
+			previewType: "code",
+			content,
+		};
+		response.json(payload);
 	} catch (error) {
 		if (error instanceof AppError) {
 			respondError(response, error.detail, error.status);

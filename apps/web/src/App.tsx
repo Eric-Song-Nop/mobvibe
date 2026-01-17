@@ -4,6 +4,7 @@ import { AppSidebar } from "@/components/app/AppSidebar";
 import { ChatFooter } from "@/components/app/ChatFooter";
 import { ChatMessageList } from "@/components/app/ChatMessageList";
 import { CreateSessionDialog } from "@/components/app/CreateSessionDialog";
+import { FileExplorerDialog } from "@/components/app/FileExplorerDialog";
 import { Separator } from "@/components/ui/separator";
 import { useMessageAutoScroll } from "@/hooks/useMessageAutoScroll";
 import { useSessionEventSources } from "@/hooks/useSessionEventSources";
@@ -48,6 +49,7 @@ export function App() {
 	const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
 	const [editingTitle, setEditingTitle] = useState("");
 	const [createDialogOpen, setCreateDialogOpen] = useState(false);
+	const [fileExplorerOpen, setFileExplorerOpen] = useState(false);
 	const [draftTitle, setDraftTitle] = useState("");
 	const [draftBackendId, setDraftBackendId] = useState<string | undefined>();
 	const [draftCwd, setDraftCwd] = useState<string | undefined>();
@@ -129,6 +131,14 @@ export function App() {
 
 	const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
 	const activeSessionState = activeSession?.state;
+	const fileExplorerAvailable = Boolean(activeSessionId && activeSession?.cwd);
+
+	useEffect(() => {
+		if (fileExplorerAvailable) {
+			return;
+		}
+		setFileExplorerOpen(false);
+	}, [fileExplorerAvailable]);
 
 	const { messageListRef, endOfMessagesRef, handleMessagesScroll } =
 		useMessageAutoScroll(activeSessionId, activeSession?.messages ?? []);
@@ -353,6 +363,11 @@ export function App() {
 				isCreating={createSessionMutation.isPending}
 				onCreate={handleCreateSession}
 			/>
+			<FileExplorerDialog
+				open={fileExplorerOpen && fileExplorerAvailable}
+				onOpenChange={setFileExplorerOpen}
+				sessionId={activeSessionId}
+			/>
 
 			<AppSidebar
 				sessions={sessionList}
@@ -380,6 +395,8 @@ export function App() {
 					statusMessage={statusMessage}
 					streamError={streamError}
 					onOpenMobileMenu={() => setMobileMenuOpen(true)}
+					onOpenFileExplorer={() => setFileExplorerOpen(true)}
+					showFileExplorer={fileExplorerAvailable}
 				/>
 				<ChatMessageList
 					activeSession={activeSession}
