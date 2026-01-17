@@ -1,12 +1,12 @@
 import { FolderOpenIcon, Loading03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
-import type { ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
 	ColumnFileBrowser,
 	useColumnFileBrowser,
 } from "@/components/app/ColumnFileBrowser";
+import { previewRenderers } from "@/components/app/file-preview-renderers";
 import {
 	AlertDialog,
 	AlertDialogCancel,
@@ -16,11 +16,7 @@ import {
 	AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import type {
-	FsEntry,
-	SessionFsFilePreviewResponse,
-	SessionFsFilePreviewType,
-} from "@/lib/api";
+import type { FsEntry } from "@/lib/api";
 import {
 	fetchSessionFsEntries,
 	fetchSessionFsFile,
@@ -28,16 +24,6 @@ import {
 } from "@/lib/api";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { cn } from "@/lib/utils";
-
-const previewRenderers: Record<SessionFsFilePreviewType, PreviewRenderer> = {
-	code: (payload) => (
-		<pre className="bg-muted/30 text-foreground h-full w-full overflow-auto whitespace-pre p-3 text-xs leading-relaxed">
-			{payload.content}
-		</pre>
-	),
-};
-
-type PreviewRenderer = (payload: SessionFsFilePreviewResponse) => ReactElement;
 
 export type FileExplorerDialogProps = {
 	open: boolean;
@@ -250,7 +236,9 @@ export function FileExplorerDialog({
 								<div className="text-xs font-medium">预览</div>
 								{selectedFilePath ? (
 									<span className="text-muted-foreground text-xs">
-										代码模式
+										{previewQuery.data?.previewType === "image"
+											? "图片模式"
+											: "代码模式"}
 									</span>
 								) : null}
 							</div>

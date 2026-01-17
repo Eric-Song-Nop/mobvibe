@@ -236,6 +236,20 @@
 - 依赖策略：保留现有 Zustand 状态与 Tanstack Query hooks，避免修改业务行为。
 - 目录规划：`apps/web/src/components/app` 与 `apps/web/src/hooks`。
 
+## 本次调整（实现前计划 - 2026-01-17 文件预览增强）
+
+- 目标：文件预览支持代码高亮、行号、自动换行与图片预览。
+- 前端：使用 `prism-react-renderer`，高亮主题采用 gruvboxMaterialLight/gruvboxMaterialDark。
+- 后端：根据文件扩展名返回 `previewType: "code" | "image"`，图片返回 data URL。
+- 样式：补充代码/图片预览布局样式，保证软换行时行号对齐。
+
+## 本次调整（实现后记录 - 2026-01-17 文件预览增强）
+
+- 后端支持图片识别并返回 base64 data URL。
+- 前端高亮替换为 `prism-react-renderer`，使用 gruvboxMaterialLight/gruvboxMaterialDark 主题。
+- 代码预览使用软换行 + 固定宽度行号布局，确保多行对齐。
+- 预览类型结构保持可扩展，便于后续补充更多类型。
+
 ## M9 App.tsx 深度拆分（实现后记录 - 2026-01-16）
 
 - 新增 `components/app` 下的布局组件：`CreateSessionDialog`、`AppHeader`、`AppSidebar`、`ChatMessageList`、`ChatFooter`。

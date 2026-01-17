@@ -154,8 +154,9 @@ type FsRoot = {
 
 type FsFilePreview = {
 	path: string;
-	previewType: "code";
+	previewType: "code" | "image";
 	content: string;
+	mimeType?: string;
 };
 
 type SessionFsRoot = {
@@ -310,6 +311,30 @@ const resolveSessionFile = async (rootPath: string, input?: string) => {
 		return resolved;
 	} catch (error) {
 		throw resolveSessionFsError(error, "路径不可用");
+	}
+};
+
+const resolveImageMimeType = (filePath: string) => {
+	const extension = path.extname(filePath).toLowerCase();
+	switch (extension) {
+		case ".apng":
+			return "image/apng";
+		case ".avif":
+			return "image/avif";
+		case ".gif":
+			return "image/gif";
+		case ".jpeg":
+			return "image/jpeg";
+		case ".jpg":
+			return "image/jpeg";
+		case ".png":
+			return "image/png";
+		case ".svg":
+			return "image/svg+xml";
+		case ".webp":
+			return "image/webp";
+		default:
+			return undefined;
 	}
 };
 
@@ -519,6 +544,18 @@ app.get("/fs/session/file", async (request, response) => {
 	try {
 		const rootPath = resolveSessionRoot(sessionId);
 		const resolvedPath = await resolveSessionFile(rootPath, requestPath);
+		const mimeType = resolveImageMimeType(resolvedPath);
+		if (mimeType) {
+			const buffer = await fs.readFile(resolvedPath);
+			const payload: FsFilePreview = {
+				path: resolvedPath,
+				previewType: "image",
+				content: `data:${mimeType};base64,${buffer.toString("base64")}`,
+				mimeType,
+			};
+			response.json(payload);
+			return;
+		}
 		const content = await fs.readFile(resolvedPath, "utf8");
 		const payload: FsFilePreview = {
 			path: resolvedPath,

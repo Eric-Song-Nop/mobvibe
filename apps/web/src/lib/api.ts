@@ -70,12 +70,13 @@ export type SessionFsRootsResponse = {
 	root: SessionFsRoot;
 };
 
-export type SessionFsFilePreviewType = "code";
+export type SessionFsFilePreviewType = "code" | "image";
 
 export type SessionFsFilePreviewResponse = {
 	path: string;
 	previewType: SessionFsFilePreviewType;
 	content: string;
+	mimeType?: string;
 };
 
 export type SessionState = AcpConnectionState;

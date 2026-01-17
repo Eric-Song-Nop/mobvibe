@@ -1,0 +1,129 @@
+.file-preview-code {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	height: 100%;
+	width: 100%;
+	min-height: 0;
+}
+
+.file-preview-code__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem;
+	font-size: 0.75rem;
+	color: hsl(var(--muted-foreground));
+}
+
+.file-preview-code__badge {
+	border: 1px solid hsl(var(--border));
+	background: hsl(var(--muted));
+	color: hsl(var(--foreground));
+	font-size: 0.7rem;
+	padding: 0.1rem 0.45rem;
+	border-radius: 0.25rem;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+
+.file-preview-code__meta {
+	font-size: 0.7rem;
+	color: hsl(var(--muted-foreground));
+}
+
+.file-preview-code__body {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	min-height: 0;
+	flex: 1;
+	border: 1px solid hsl(var(--border));
+	background: color-mix(in oklab, hsl(var(--muted)) 35%, transparent);
+	border-radius: 0.25rem;
+	padding: 0.75rem 0.5rem;
+}
+
+.file-preview-code__content {
+	min-height: 0;
+	min-width: 0;
+	overflow: auto;
+	font-size: 0.75rem;
+	line-height: 1.5;
+	color: hsl(var(--foreground));
+}
+
+.file-preview-code__pre {
+	margin: 0;
+	padding: 0;
+	background: transparent;
+	font-family: "JetBrains Mono Variable", monospace;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.file-preview-code__line {
+	display: grid;
+	grid-template-columns: 3.5rem 1fr;
+	align-items: flex-start;
+	column-gap: 0.75rem;
+	line-height: 1.5;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.file-preview-code__line-number,
+.file-preview-code__line-content {
+	align-self: flex-start;
+}
+
+.file-preview-code__line-number {
+	display: inline-flex;
+	justify-content: flex-end;
+	padding-right: 0.5rem;
+	color: hsl(var(--muted-foreground));
+	font-size: 0.7rem;
+	font-variant-numeric: tabular-nums;
+	font-feature-settings: "tnum";
+}
+
+.file-preview-code__line-content {
+	min-width: 0;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.file-preview-code__content--loading {
+	opacity: 0.6;
+}
+
+.file-preview-code__line-content > span {
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.file-preview-image {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	width: 100%;
+	min-height: 0;
+}
+
+.file-preview-image__container {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1rem;
+	background: color-mix(in oklab, hsl(var(--muted)) 35%, transparent);
+	border: 1px solid hsl(var(--border));
+	border-radius: 0.25rem;
+}
+
+.file-preview-image__content {
+	max-width: 100%;
+	max-height: 100%;
+	object-fit: contain;
+}
