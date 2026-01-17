@@ -24,7 +24,7 @@ export function WorkingDirectoryDialog({
 }: WorkingDirectoryDialogProps) {
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
-			<AlertDialogContent size="default" className="max-w-[90vw] sm:max-w-4xl">
+			<AlertDialogContent className="flex h-[100svh] w-[100vw] max-w-none min-h-0 min-w-0 flex-col gap-4 overflow-hidden translate-x-0 translate-y-0 rounded-none p-4 sm:h-[80vh] sm:max-w-5xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-none top-0 left-0 sm:top-1/2 sm:left-1/2">
 				<AlertDialogHeader>
 					<AlertDialogTitle>选择工作目录</AlertDialogTitle>
 					<AlertDialogDescription>
@@ -35,8 +35,9 @@ export function WorkingDirectoryDialog({
 					open={open}
 					value={value}
 					onChange={onChange}
-					browserClassName="h-[20rem] sm:h-[28rem]"
+					browserClassName="flex-1 min-h-0 h-auto sm:h-auto"
 					inputId="session-cwd-dialog"
+					className="flex-1 min-h-0"
 				/>
 				<AlertDialogFooter>
 					<AlertDialogCancel>关闭</AlertDialogCancel>

@@ -1,13 +1,12 @@
-import {
-	File01Icon,
-	FolderIcon,
-	FolderOpenIcon,
-	Loading03Icon,
-} from "@hugeicons/core-free-icons";
+import { FolderOpenIcon, Loading03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+	ColumnFileBrowser,
+	useColumnFileBrowser,
+} from "@/components/app/ColumnFileBrowser";
 import {
 	AlertDialog,
 	AlertDialogCancel,
@@ -30,10 +29,6 @@ import {
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { cn } from "@/lib/utils";
 
-const normalizePath = (value: string) => value.replace(/\/+$/, "");
-
-type PreviewRenderer = (payload: SessionFsFilePreviewResponse) => ReactElement;
-
 const previewRenderers: Record<SessionFsFilePreviewType, PreviewRenderer> = {
 	code: (payload) => (
 		<pre className="bg-muted/30 text-foreground h-full w-full overflow-auto whitespace-pre p-3 text-xs leading-relaxed">
@@ -41,6 +36,8 @@ const previewRenderers: Record<SessionFsFilePreviewType, PreviewRenderer> = {
 		</pre>
 	),
 };
+
+type PreviewRenderer = (payload: SessionFsFilePreviewResponse) => ReactElement;
 
 export type FileExplorerDialogProps = {
 	open: boolean;
@@ -74,16 +71,46 @@ export function FileExplorerDialog({
 
 	const root = rootsQuery.data?.root;
 	const rootPath = root?.path;
+	const rootLabel = root?.name ?? "工作目录";
 
-	const entriesQuery = useQuery({
-		queryKey: ["session-fs-entries", sessionId, currentPath],
-		queryFn: () => {
-			if (!sessionId || !currentPath) {
-				throw createFallbackError("路径不可用", "request");
+	const fetchEntries = useCallback(
+		async (payload: { path: string }) => {
+			if (!sessionId) {
+				throw createFallbackError("会话不可用", "request");
 			}
-			return fetchSessionFsEntries({ sessionId, path: currentPath });
+			return fetchSessionFsEntries({ sessionId, path: payload.path });
 		},
-		enabled: open && !!sessionId && !!currentPath,
+		[sessionId],
+	);
+
+	const handleDirectorySelect = useCallback((_nextPath: string) => {
+		setSelectedFilePath(undefined);
+		setActivePane("browser");
+	}, []);
+
+	const handleFileSelect = useCallback((entry: FsEntry) => {
+		setSelectedFilePath(entry.path);
+		setActivePane("preview");
+	}, []);
+
+	const {
+		columns,
+		isLoading: entriesLoading,
+		pathError,
+		handleEntrySelect,
+		handleColumnSelect,
+		scrollContainerRef,
+		columnRefs,
+	} = useColumnFileBrowser({
+		open,
+		rootPath,
+		rootLabel,
+		value: currentPath,
+		onChange: setCurrentPath,
+		onSelect: handleDirectorySelect,
+		onFileSelect: handleFileSelect,
+		fetchEntries,
+		errorMessage: "目录加载失败",
 	});
 
 	const previewQuery = useQuery({
@@ -115,59 +142,6 @@ export function FileExplorerDialog({
 		resetState();
 	}, [open, resetState, sessionId]);
 
-	useEffect(() => {
-		if (!open || !rootPath) {
-			return;
-		}
-		setCurrentPath((prev) => prev ?? rootPath);
-	}, [open, rootPath]);
-
-	const entries = entriesQuery.data?.entries ?? [];
-	const normalizedRoot = rootPath ? normalizePath(rootPath) : undefined;
-	const normalizedCurrent = currentPath
-		? normalizePath(currentPath)
-		: undefined;
-	const canNavigateUp =
-		!!normalizedRoot &&
-		!!normalizedCurrent &&
-		normalizedCurrent !== normalizedRoot;
-
-	const handleNavigateUp = () => {
-		if (!normalizedRoot || !normalizedCurrent) {
-			return;
-		}
-		if (normalizedCurrent === normalizedRoot) {
-			return;
-		}
-		const lastSlash = normalizedCurrent.lastIndexOf("/");
-		const parentPath =
-			lastSlash > 0 ? normalizedCurrent.slice(0, lastSlash) : "";
-		const nextPath = parentPath.length > 0 ? parentPath : normalizedRoot;
-		if (!nextPath.startsWith(normalizedRoot)) {
-			return;
-		}
-		setCurrentPath(nextPath);
-		setSelectedFilePath(undefined);
-		setActivePane("browser");
-	};
-
-	const handleEntrySelect = (entry: FsEntry) => {
-		if (entry.type === "directory") {
-			setCurrentPath(entry.path);
-			setSelectedFilePath(undefined);
-			setActivePane("browser");
-			return;
-		}
-		setSelectedFilePath(entry.path);
-		setActivePane("preview");
-	};
-
-	const entriesError = entriesQuery.isError
-		? normalizeError(
-				entriesQuery.error,
-				createFallbackError("目录加载失败", "request"),
-			).message
-		: undefined;
 	const rootsError = rootsQuery.isError
 		? normalizeError(
 				rootsQuery.error,
@@ -199,9 +173,12 @@ export function FileExplorerDialog({
 		"sm:flex",
 	);
 
+	const browserError = rootsError ?? pathError;
+	const isBrowserLoading = rootsQuery.isLoading || entriesLoading;
+
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
-			<AlertDialogContent className="grid h-[80vh] max-w-[95vw] grid-rows-[auto_1fr_auto] sm:h-[70vh] sm:max-w-5xl">
+			<AlertDialogContent className="grid h-[100svh] w-[100vw] !max-w-none min-h-0 min-w-0 grid-rows-[auto_1fr_auto] overflow-hidden translate-x-0 translate-y-0 rounded-none p-4 sm:h-[82vh] sm:!w-[98vw] sm:!max-w-[98vw] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-none top-0 left-0 sm:top-1/2 sm:left-1/2">
 				<AlertDialogHeader className="gap-3">
 					<div className="flex w-full items-center justify-between gap-3">
 						<AlertDialogTitle className="flex items-center gap-2">
@@ -228,66 +205,46 @@ export function FileExplorerDialog({
 					</div>
 				</AlertDialogHeader>
 
-				<div className="flex min-h-0 flex-1 flex-col gap-4 sm:flex-row">
-					<section className={cn("sm:w-72", browserPaneClassName)}>
+				<div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden sm:flex-row">
+					<section
+						className={cn(
+							"flex-1 min-h-0 min-w-0 overflow-hidden sm:flex-none sm:w-[28rem]",
+							browserPaneClassName,
+						)}
+					>
 						<div className="flex items-center justify-between gap-2">
-							<div className="text-xs font-medium">
-								{root?.name ?? "工作目录"}
+							<div className="text-xs font-medium">{rootLabel}</div>
+							{currentPath ? (
+								<span className="text-muted-foreground text-xs">
+									{currentPath.replace(rootPath ?? "", "") || "/"}
+								</span>
+							) : null}
+						</div>
+						{browserError ? (
+							<div className="text-destructive border-input bg-muted/30 flex min-h-0 flex-1 items-center justify-center rounded-none border text-xs">
+								{browserError}
 							</div>
-							<Button
-								variant="ghost"
-								size="sm"
-								onClick={handleNavigateUp}
-								disabled={!canNavigateUp}
-							>
-								返回上级
-							</Button>
-						</div>
-						<div className="border-input bg-muted/30 flex min-h-0 flex-1 flex-col overflow-hidden rounded-none border">
-							{rootsQuery.isLoading || entriesQuery.isLoading ? (
-								<div className="text-muted-foreground flex flex-1 items-center justify-center gap-2 text-xs">
-									<HugeiconsIcon
-										icon={Loading03Icon}
-										strokeWidth={2}
-										className="animate-spin"
-									/>
-									加载中...
-								</div>
-							) : rootsError || entriesError ? (
-								<div className="text-destructive px-3 py-2 text-xs">
-									{rootsError ?? entriesError}
-								</div>
-							) : entries.length === 0 ? (
-								<div className="text-muted-foreground px-3 py-2 text-xs">
-									暂无内容
-								</div>
-							) : (
-								<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-									{entries.map((entry) => {
-										const isSelected = selectedFilePath === entry.path;
-										const icon =
-											entry.type === "directory" ? FolderIcon : File01Icon;
-										return (
-											<button
-												key={entry.path}
-												type="button"
-												className={cn(
-													"hover:bg-muted flex w-full items-center gap-2 px-3 py-2 text-left text-xs",
-													isSelected && "bg-muted",
-												)}
-												onClick={() => handleEntrySelect(entry)}
-											>
-												<HugeiconsIcon icon={icon} strokeWidth={2} />
-												<span className="truncate">{entry.name}</span>
-											</button>
-										);
-									})}
-								</div>
-							)}
-						</div>
+						) : (
+							<ColumnFileBrowser
+								columns={columns}
+								currentPath={currentPath}
+								highlightedEntryPath={selectedFilePath ?? currentPath}
+								onColumnSelect={handleColumnSelect}
+								onEntrySelect={handleEntrySelect}
+								isLoading={isBrowserLoading}
+								scrollContainerRef={scrollContainerRef}
+								columnRefs={columnRefs}
+								className="min-h-0 min-w-0 flex-1"
+							/>
+						)}
 					</section>
 
-					<section className={cn("flex min-h-0 flex-1", previewPaneClassName)}>
+					<section
+						className={cn(
+							"flex min-h-0 min-w-0 flex-1 overflow-hidden",
+							previewPaneClassName,
+						)}
+					>
 						<div className="flex min-h-0 flex-1 flex-col gap-2">
 							<div className="flex items-center justify-between gap-2">
 								<div className="text-xs font-medium">预览</div>
@@ -297,7 +254,7 @@ export function FileExplorerDialog({
 									</span>
 								) : null}
 							</div>
-							<div className="border-input bg-background flex min-h-0 flex-1 overflow-hidden rounded-none border">
+							<div className="border-input bg-background flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-none border">
 								{!selectedFilePath ? (
 									<div className="text-muted-foreground flex flex-1 items-center justify-center px-3 text-xs">
 										选择文件后查看预览
