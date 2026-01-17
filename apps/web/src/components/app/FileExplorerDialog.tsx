@@ -161,6 +161,13 @@ export function FileExplorerDialog({
 
 	const browserError = rootsError ?? pathError;
 	const isBrowserLoading = rootsQuery.isLoading || entriesLoading;
+	const selectedFileName = useMemo(() => {
+		if (!selectedFilePath) {
+			return undefined;
+		}
+		const segments = selectedFilePath.split(/[/\\]/).filter(Boolean);
+		return segments.at(-1) ?? selectedFilePath;
+	}, [selectedFilePath]);
 
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -233,7 +240,9 @@ export function FileExplorerDialog({
 					>
 						<div className="flex min-h-0 flex-1 flex-col gap-2">
 							<div className="flex items-center justify-between gap-2">
-								<div className="text-xs font-medium">预览</div>
+								<div className="text-xs font-medium">
+									{selectedFileName ?? "预览"}
+								</div>
 								{selectedFilePath ? (
 									<span className="text-muted-foreground text-xs">
 										{previewQuery.data?.previewType === "image"

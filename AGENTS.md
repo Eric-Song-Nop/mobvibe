@@ -50,8 +50,9 @@ The UI, which is just an AI chat app.
 - Do `git commit` frequently for even minor changes with message in English.
 - Stick to types and design of Agent Client Protocol and corresponding SDKs.
 - For UI, always use Shadcn UI components whenever possible.
-o Mobile UI first, responsive, accessible, and with a focus on performance.
+- Mobile UI first, responsive, accessible, and with a focus on performance.
 - Always go to <https://agentclientprotocol.github.io/typescript-sdk/> for ACP SDK documentation.
+- UI text is important, don't add useless text which just repeat the UI itself to the UI.
 
 ### Useful Commands
 
