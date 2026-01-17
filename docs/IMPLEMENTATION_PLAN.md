@@ -261,6 +261,31 @@
 - 预览栏标题在选中文件后展示文件名，未选择时继续显示“预览”。
 - 标题从完整路径中提取文件名，避免移动端视图过长。
 
+## 本次调整（实现前计划 - 2026-01-17 预览系统单元测试）
+
+- 目标：补齐文件预览相关单元测试，覆盖工具函数与预览组件核心渲染。
+- 范围：`file-preview-utils`、`file-preview-renderers`、`CodePreview`、`ImagePreview`、`FileExplorerDialog` 预览标题展示。
+- 测试位置：按就近风格放置在对应模块的 `__tests__` 目录。
+- 依赖：继续使用 Vitest + Testing Library，必要时 mock 预览 API 与浏览器对象。
+
+## 本次调整（实现后记录 - 2026-01-17 预览系统单元测试）
+
+- 新增 `file-preview-utils` 测试，覆盖语言识别与文件名解析逻辑。
+- 新增 `file-preview-renderers`、`CodePreview`、`ImagePreview` 的基础渲染测试。
+- 新增 `FileExplorerDialog` 预览标题测试，验证选中文件名展示。
+- 抽离 `resolveFileNameFromPath` 便于复用与测试。
+
+## 本次调整（实现前计划 - 2026-01-17 Vitest React 实例一致性修复）
+
+- 目标：修复 Vitest 报 `useState` 为空的 Hook 错误。
+- 范围：统一测试环境中 `react`/`react-dom` 解析路径，避免多实例。
+- 手段：调整 Vite/Vitest alias 指向根目录依赖并移除 `preserveSymlinks`。
+
+## 本次调整（实现后记录 - 2026-01-17 Vitest React 实例一致性修复）
+
+- `react`/`react-dom` alias 统一指向根目录 `node_modules`，避免测试加载多份 React。
+- 移除 `preserveSymlinks`，确保 Vitest 与 Testing Library 使用同一份 React。
+
 ## M9 App.tsx 深度拆分（实现后记录 - 2026-01-16）
 
 - 新增 `components/app` 下的布局组件：`CreateSessionDialog`、`AppHeader`、`AppSidebar`、`ChatMessageList`、`ChatFooter`。

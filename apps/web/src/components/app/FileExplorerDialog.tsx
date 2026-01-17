@@ -23,6 +23,7 @@ import {
 	fetchSessionFsRoots,
 } from "@/lib/api";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
+import { resolveFileNameFromPath } from "@/lib/file-preview-utils";
 import { cn } from "@/lib/utils";
 
 export type FileExplorerDialogProps = {
@@ -161,13 +162,10 @@ export function FileExplorerDialog({
 
 	const browserError = rootsError ?? pathError;
 	const isBrowserLoading = rootsQuery.isLoading || entriesLoading;
-	const selectedFileName = useMemo(() => {
-		if (!selectedFilePath) {
-			return undefined;
-		}
-		const segments = selectedFilePath.split(/[/\\]/).filter(Boolean);
-		return segments.at(-1) ?? selectedFilePath;
-	}, [selectedFilePath]);
+	const selectedFileName = useMemo(
+		() => resolveFileNameFromPath(selectedFilePath),
+		[selectedFilePath],
+	);
 
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>

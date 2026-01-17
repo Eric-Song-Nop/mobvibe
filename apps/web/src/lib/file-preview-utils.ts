@@ -53,3 +53,11 @@ export const resolveLanguageFromPath = (pathValue: string) => {
 	const extension = normalizeExtension(pathValue.split(".").pop());
 	return languageByExtension[extension] ?? "text";
 };
+
+export const resolveFileNameFromPath = (pathValue?: string) => {
+	if (!pathValue) {
+		return undefined;
+	}
+	const segments = pathValue.split(/[/\\]/).filter(Boolean);
+	return segments.at(-1) ?? pathValue;
+};
