@@ -15,17 +15,60 @@ export type SessionContent = {
 	text: string;
 };
 
+export type ToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
+
+export type ToolCallKind =
+	| "read"
+	| "edit"
+	| "delete"
+	| "move"
+	| "search"
+	| "execute"
+	| "think"
+	| "fetch"
+	| "other";
+
+export type ToolCallContentPayload = SessionContent | Record<string, unknown>;
+
+export type ToolCallContent =
+	| {
+			type: "content";
+			content: ToolCallContentPayload;
+	  }
+	| {
+			type: "diff";
+			path: string;
+			oldText?: string | null;
+			newText: string;
+	  }
+	| {
+			type: "terminal";
+			terminalId: string;
+	  };
+
+export type ToolCallLocation = {
+	path: string;
+	line?: number;
+};
+
+export type ToolCallUpdate = {
+	sessionUpdate: "tool_call" | "tool_call_update";
+	toolCallId: string;
+	title?: string;
+	kind?: ToolCallKind;
+	status?: ToolCallStatus;
+	content?: ToolCallContent[];
+	locations?: ToolCallLocation[];
+	rawInput?: Record<string, unknown>;
+	rawOutput?: Record<string, unknown>;
+};
+
 type ContentChunk = {
 	content: SessionContent;
 };
 
 type UnknownUpdate = {
-	sessionUpdate:
-		| "tool_call"
-		| "tool_call_update"
-		| "plan"
-		| "available_commands_update"
-		| "config_option_update";
+	sessionUpdate: "plan" | "available_commands_update" | "config_option_update";
 };
 
 type CurrentModeUpdate = {
@@ -41,6 +84,7 @@ export type SessionUpdate =
 	| (ContentChunk & { sessionUpdate: "user_message_chunk" })
 	| (ContentChunk & { sessionUpdate: "agent_message_chunk" })
 	| (ContentChunk & { sessionUpdate: "agent_thought_chunk" })
+	| ToolCallUpdate
 	| (CurrentModeUpdate & { sessionUpdate: "current_mode_update" })
 	| (SessionInfoUpdate & { sessionUpdate: "session_info_update" })
 	| UnknownUpdate;
@@ -48,6 +92,18 @@ export type SessionUpdate =
 export type SessionNotification = {
 	sessionId: string;
 	update: SessionUpdate;
+};
+
+export type TerminalOutputEvent = {
+	sessionId: string;
+	terminalId: string;
+	delta: string;
+	truncated: boolean;
+	output?: string;
+	exitStatus?: {
+		exitCode?: number | null;
+		signal?: string | null;
+	} | null;
 };
 
 export type PermissionOption = {
@@ -138,4 +194,17 @@ export const extractSessionInfoUpdate = (
 		return null;
 	}
 	return { title, updatedAt };
+};
+
+export const extractToolCallUpdate = (
+	notification: SessionNotification,
+): ToolCallUpdate | null => {
+	const { update } = notification;
+	if (
+		update.sessionUpdate !== "tool_call" &&
+		update.sessionUpdate !== "tool_call_update"
+	) {
+		return null;
+	}
+	return update;
 };

@@ -4,9 +4,11 @@ import {
 	extractSessionInfoUpdate,
 	extractSessionModeUpdate,
 	extractTextChunk,
+	extractToolCallUpdate,
 	type PermissionRequestNotification,
 	type PermissionResultNotification,
 	type SessionNotification,
+	type TerminalOutputEvent,
 } from "@/lib/acp";
 import { createSessionEventSource } from "@/lib/api";
 import type { ChatSession } from "@/lib/chat-store";
@@ -27,6 +29,9 @@ type SessionEventSourceOptions = {
 	| "addPermissionRequest"
 	| "setPermissionDecisionState"
 	| "setPermissionOutcome"
+	| "addToolCall"
+	| "updateToolCall"
+	| "appendTerminalOutput"
 >;
 
 export function useSessionEventSources({
@@ -37,6 +42,9 @@ export function useSessionEventSources({
 	addPermissionRequest,
 	setPermissionDecisionState,
 	setPermissionOutcome,
+	addToolCall,
+	updateToolCall,
+	appendTerminalOutput,
 }: SessionEventSourceOptions) {
 	const sessionEventSourcesRef = useRef<Map<string, EventSource>>(new Map());
 
@@ -82,6 +90,14 @@ export function useSessionEventSources({
 					const infoUpdate = extractSessionInfoUpdate(payload);
 					if (infoUpdate) {
 						updateSessionMeta(session.sessionId, infoUpdate);
+					}
+					const toolCallUpdate = extractToolCallUpdate(payload);
+					if (toolCallUpdate) {
+						if (toolCallUpdate.sessionUpdate === "tool_call") {
+							addToolCall(session.sessionId, toolCallUpdate);
+						} else {
+							updateToolCall(session.sessionId, toolCallUpdate);
+						}
 					}
 				} catch (parseError) {
 					setStreamError(
@@ -141,6 +157,27 @@ export function useSessionEventSources({
 				}
 			};
 
+			const handleTerminalOutput = (event: MessageEvent<string>) => {
+				try {
+					const payload = JSON.parse(event.data) as TerminalOutputEvent;
+					appendTerminalOutput(payload.sessionId, {
+						terminalId: payload.terminalId,
+						delta: payload.delta,
+						truncated: payload.truncated,
+						output: payload.output,
+						exitStatus: payload.exitStatus ?? undefined,
+					});
+				} catch (parseError) {
+					setStreamError(
+						session.sessionId,
+						normalizeError(
+							parseError,
+							createFallbackError("终端输出解析失败", "stream"),
+						),
+					);
+				}
+			};
+
 			const handleStreamError = (event: MessageEvent<string>) => {
 				try {
 					const payload = JSON.parse(event.data) as { error?: unknown };
@@ -169,6 +206,7 @@ export function useSessionEventSources({
 				handlePermissionRequest,
 			);
 			eventSource.addEventListener("permission_result", handlePermissionResult);
+			eventSource.addEventListener("terminal_output", handleTerminalOutput);
 			eventSource.addEventListener("session_error", handleStreamError);
 			eventSource.addEventListener("error", () => {
 				setStreamError(session.sessionId, buildStreamDisconnectedError());
@@ -185,11 +223,14 @@ export function useSessionEventSources({
 		}
 	}, [
 		addPermissionRequest,
+		addToolCall,
 		appendAssistantChunk,
+		appendTerminalOutput,
 		sessions,
 		setPermissionDecisionState,
 		setPermissionOutcome,
 		setStreamError,
 		updateSessionMeta,
+		updateToolCall,
 	]);
 }

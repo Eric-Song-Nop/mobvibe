@@ -30,12 +30,14 @@ export type FileExplorerDialogProps = {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	sessionId?: string;
+	initialFilePath?: string;
 };
 
 export function FileExplorerDialog({
 	open,
 	onOpenChange,
 	sessionId,
+	initialFilePath,
 }: FileExplorerDialogProps) {
 	const [currentPath, setCurrentPath] = useState<string | undefined>();
 	const [selectedFilePath, setSelectedFilePath] = useState<
@@ -84,6 +86,7 @@ export function FileExplorerDialog({
 		columns,
 		isLoading: entriesLoading,
 		pathError,
+		buildColumnsForPath,
 		handleEntrySelect,
 		handleColumnSelect,
 		scrollContainerRef,
@@ -99,6 +102,20 @@ export function FileExplorerDialog({
 		fetchEntries,
 		errorMessage: "目录加载失败",
 	});
+
+	useEffect(() => {
+		if (!open || !initialFilePath || !rootPath) {
+			return;
+		}
+		if (!initialFilePath.startsWith(rootPath)) {
+			return;
+		}
+		const parentPath = initialFilePath.split(/[/\\]/).slice(0, -1).join("/");
+		if (parentPath) {
+			setCurrentPath(parentPath);
+			void buildColumnsForPath(parentPath, true);
+		}
+	}, [buildColumnsForPath, initialFilePath, open, rootPath]);
 
 	const previewQuery = useQuery({
 		queryKey: ["session-fs-file", sessionId, selectedFilePath],
@@ -127,7 +144,12 @@ export function FileExplorerDialog({
 			return;
 		}
 		resetState();
-	}, [open, resetState, sessionId]);
+		if (initialFilePath) {
+			setSelectedFilePath(initialFilePath);
+			setActivePane("preview");
+			return;
+		}
+	}, [initialFilePath, open, resetState, sessionId]);
 
 	const rootsError = rootsQuery.isError
 		? normalizeError(

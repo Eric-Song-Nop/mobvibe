@@ -9,6 +9,7 @@ export type ChatMessageListProps = {
 		requestId: string;
 		outcome: PermissionResultNotification["outcome"];
 	}) => void;
+	onOpenFilePreview?: (path: string) => void;
 	messageListRef: RefObject<HTMLDivElement | null>;
 	endOfMessagesRef: RefObject<HTMLDivElement | null>;
 	onMessagesScroll: () => void;
@@ -17,6 +18,7 @@ export type ChatMessageListProps = {
 export function ChatMessageList({
 	activeSession,
 	onPermissionDecision,
+	onOpenFilePreview,
 	messageListRef,
 	endOfMessagesRef,
 	onMessagesScroll,
@@ -45,6 +47,7 @@ export function ChatMessageList({
 								key={message.id}
 								message={message}
 								onPermissionDecision={onPermissionDecision}
+								onOpenFilePreview={onOpenFilePreview}
 							/>
 						))}
 						<div ref={endOfMessagesRef} />

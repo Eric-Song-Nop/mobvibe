@@ -3,6 +3,7 @@ import type {
 	PermissionOption,
 	PermissionOutcome,
 	PermissionToolCall,
+	ToolCallUpdate,
 } from "@/lib/acp";
 import {
 	cancelSession,
@@ -91,6 +92,18 @@ export interface ChatStoreActions {
 		sessionId: string,
 		requestId: string,
 		outcome: PermissionOutcome,
+	) => void;
+	addToolCall: (sessionId: string, payload: ToolCallUpdate) => void;
+	updateToolCall: (sessionId: string, payload: ToolCallUpdate) => void;
+	appendTerminalOutput: (
+		sessionId: string,
+		payload: {
+			terminalId: string;
+			delta: string;
+			truncated: boolean;
+			output?: string;
+			exitStatus?: { exitCode?: number | null; signal?: string | null };
+		},
 	) => void;
 }
 

@@ -43,6 +43,9 @@ export function App() {
 		addPermissionRequest,
 		setPermissionDecisionState,
 		setPermissionOutcome,
+		addToolCall,
+		updateToolCall,
+		appendTerminalOutput,
 		finalizeAssistantMessage,
 	} = useChatStore();
 	const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -50,6 +53,7 @@ export function App() {
 	const [editingTitle, setEditingTitle] = useState("");
 	const [createDialogOpen, setCreateDialogOpen] = useState(false);
 	const [fileExplorerOpen, setFileExplorerOpen] = useState(false);
+	const [filePreviewPath, setFilePreviewPath] = useState<string | undefined>();
 	const [draftTitle, setDraftTitle] = useState("");
 	const [draftBackendId, setDraftBackendId] = useState<string | undefined>();
 	const [draftCwd, setDraftCwd] = useState<string | undefined>();
@@ -87,6 +91,9 @@ export function App() {
 		addPermissionRequest,
 		setPermissionDecisionState,
 		setPermissionOutcome,
+		addToolCall,
+		updateToolCall,
+		appendTerminalOutput,
 	});
 
 	useSessionEventSources({
@@ -97,6 +104,9 @@ export function App() {
 		addPermissionRequest,
 		setPermissionDecisionState,
 		setPermissionOutcome,
+		addToolCall,
+		updateToolCall,
+		appendTerminalOutput,
 	});
 
 	const sessionList = useMemo(() => {
@@ -138,6 +148,7 @@ export function App() {
 			return;
 		}
 		setFileExplorerOpen(false);
+		setFilePreviewPath(undefined);
 	}, [fileExplorerAvailable]);
 
 	const { messageListRef, endOfMessagesRef, handleMessagesScroll } =
@@ -148,6 +159,14 @@ export function App() {
 		setDraftBackendId(defaultBackendId);
 		setDraftCwd(undefined);
 		setCreateDialogOpen(true);
+	};
+
+	const handleOpenFilePreview = (path: string) => {
+		if (!fileExplorerAvailable) {
+			return;
+		}
+		setFilePreviewPath(path);
+		setFileExplorerOpen(true);
 	};
 
 	const handleCreateSession = async () => {
@@ -365,8 +384,14 @@ export function App() {
 			/>
 			<FileExplorerDialog
 				open={fileExplorerOpen && fileExplorerAvailable}
-				onOpenChange={setFileExplorerOpen}
+				onOpenChange={(isOpen) => {
+					setFileExplorerOpen(isOpen);
+					if (!isOpen) {
+						setFilePreviewPath(undefined);
+					}
+				}}
 				sessionId={activeSessionId}
+				initialFilePath={filePreviewPath}
 			/>
 
 			<AppSidebar
@@ -401,6 +426,7 @@ export function App() {
 				<ChatMessageList
 					activeSession={activeSession}
 					onPermissionDecision={handlePermissionDecision}
+					onOpenFilePreview={handleOpenFilePreview}
 					messageListRef={messageListRef}
 					endOfMessagesRef={endOfMessagesRef}
 					onMessagesScroll={handleMessagesScroll}

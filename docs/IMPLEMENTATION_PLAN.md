@@ -286,6 +286,34 @@
 - `react`/`react-dom` alias 统一指向根目录 `node_modules`，避免测试加载多份 React。
 - 移除 `preserveSymlinks`，确保 Vitest 与 Testing Library 使用同一份 React。
 
+## 本次调整（实现前计划 - 2026-01-17 工具调用展示）
+
+- 目标：展示 ACP `tool_call`/`tool_call_update` 事件，补齐会话内工具调用信息。
+- 展示形式：消息流内独立卡片，默认折叠，仅显示摘要。
+- 展示字段：`name`/`title`/`command`/`args`/`duration`/`error`/`status`。
+- 文件预览：若工具调用包含路径（`locations`/`content`/`rawInput`），显示可点击文件名并打开预览。
+
+## 本次调整（实现前计划 - 2026-01-17 终端输出）
+
+- 目标：按 ACP 终端规范展示工具调用输出。
+- 服务端实现 terminal 能力并通过现有 SSE 推送 `terminal_output`。
+- 前端在 tool call 详情展示终端输出增量与退出状态。
+- 输出区域默认折叠，超出限制标记截断。
+
+## 本次调整（实现后记录 - 2026-01-17 终端输出）
+
+- 服务端实现 ACP terminal 生命周期管理，缓存输出并推送 `terminal_output` SSE。
+- 前端 SSE 接收增量输出，详情区展示终端输出与退出状态。
+- 输出截断遵循 byte limit 并保持字符边界。
+
+## 本次调整（实现后记录 - 2026-01-17 工具调用展示）
+
+- 新增 tool call 类型解析与状态管理，流式更新支持增量合并。
+- 消息流新增工具调用卡片，默认折叠展示摘要与状态徽章。
+- 命令/参数/错误信息在折叠区展示，支持展示执行时长。
+- 摘要区支持展示多路径文件名（超出显示 +N）。
+- 路径信息渲染为摘要内可点击文件名，直连会话文件预览。
+
 ## M9 App.tsx 深度拆分（实现后记录 - 2026-01-16）
 
 - 新增 `components/app` 下的布局组件：`CreateSessionDialog`、`AppHeader`、`AppSidebar`、`ChatMessageList`、`ChatFooter`。

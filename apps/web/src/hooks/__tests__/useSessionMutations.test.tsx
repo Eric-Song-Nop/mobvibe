@@ -46,6 +46,9 @@ describe("useSessionMutations", () => {
 		addPermissionRequest: vi.fn(),
 		setPermissionDecisionState: vi.fn(),
 		setPermissionOutcome: vi.fn(),
+		addToolCall: vi.fn(),
+		updateToolCall: vi.fn(),
+		appendTerminalOutput: vi.fn(),
 	});
 
 	const wrapper = ({ children }: { children: ReactNode }) => (

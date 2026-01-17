@@ -1,18 +1,30 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { Readable, Writable } from "node:stream";
 import {
 	type Client,
 	ClientSideConnection,
 	type ContentBlock,
+	type CreateTerminalRequest,
+	type CreateTerminalResponse,
 	type Implementation,
+	type KillTerminalCommandRequest,
+	type KillTerminalCommandResponse,
 	type NewSessionResponse,
 	ndJsonStream,
 	PROTOCOL_VERSION,
 	type PromptResponse,
+	type ReleaseTerminalRequest,
+	type ReleaseTerminalResponse,
 	type RequestPermissionRequest,
 	type RequestPermissionResponse,
 	type SessionNotification,
+	type TerminalExitStatus,
+	type TerminalOutputRequest,
+	type TerminalOutputResponse,
+	type WaitForTerminalExitRequest,
+	type WaitForTerminalExitResponse,
 } from "@agentclientprotocol/sdk";
 import type { AcpBackendId } from "../config.js";
 import {
@@ -54,22 +66,93 @@ const getErrorMessage = (error: unknown) => {
 
 type SessionUpdateListener = (notification: SessionNotification) => void;
 
+type TerminalOutputSnapshot = {
+	output: string;
+	truncated: boolean;
+	exitStatus?: TerminalExitStatus | null;
+};
+
+type TerminalRecord = {
+	sessionId: string;
+	command: string;
+	args: string[];
+	outputByteLimit: number;
+	output: TerminalOutputSnapshot;
+	process?: ChildProcessWithoutNullStreams;
+	onExit?: Promise<WaitForTerminalExitResponse>;
+	resolveExit?: (response: WaitForTerminalExitResponse) => void;
+};
+
+type TerminalOutputEvent = {
+	sessionId: string;
+	terminalId: string;
+	delta: string;
+	truncated: boolean;
+	output?: string;
+	exitStatus?: TerminalExitStatus | null;
+};
+
 type ClientHandlers = {
 	onSessionUpdate: (notification: SessionNotification) => void;
 	onRequestPermission?: (
 		params: RequestPermissionRequest,
 	) => Promise<RequestPermissionResponse>;
+	onCreateTerminal?: (
+		params: CreateTerminalRequest,
+	) => Promise<CreateTerminalResponse>;
+	onTerminalOutput?: (
+		params: TerminalOutputRequest,
+	) => Promise<TerminalOutputResponse>;
+	onWaitForTerminalExit?: (
+		params: WaitForTerminalExitRequest,
+	) => Promise<WaitForTerminalExitResponse>;
+	onKillTerminal?: (
+		params: KillTerminalCommandRequest,
+	) => Promise<KillTerminalCommandResponse>;
+	onReleaseTerminal?: (
+		params: ReleaseTerminalRequest,
+	) => Promise<ReleaseTerminalResponse>;
 };
 
 const buildClient = (handlers: ClientHandlers): Client => ({
-	async requestPermission(params) {
+	async requestPermission(params: RequestPermissionRequest) {
 		if (handlers.onRequestPermission) {
 			return handlers.onRequestPermission(params);
 		}
 		return { outcome: { outcome: "cancelled" } };
 	},
-	async sessionUpdate(params) {
+	async sessionUpdate(params: SessionNotification) {
 		handlers.onSessionUpdate(params);
+	},
+	async createTerminal(params: CreateTerminalRequest) {
+		if (!handlers.onCreateTerminal) {
+			throw new Error("Terminal create handler not configured");
+		}
+		return handlers.onCreateTerminal(params);
+	},
+	async terminalOutput(params: TerminalOutputRequest) {
+		if (!handlers.onTerminalOutput) {
+			return { output: "", truncated: false };
+		}
+		return handlers.onTerminalOutput(params);
+	},
+	async waitForTerminalExit(params: WaitForTerminalExitRequest) {
+		if (!handlers.onWaitForTerminalExit) {
+			return { exitCode: null, signal: null };
+		}
+		return handlers.onWaitForTerminalExit(params);
+	},
+	async killTerminal(params: KillTerminalCommandRequest) {
+		if (!handlers.onKillTerminal) {
+			return {};
+		}
+		return handlers.onKillTerminal(params);
+	},
+	async releaseTerminal(params: ReleaseTerminalRequest) {
+		if (!handlers.onReleaseTerminal) {
+			return {};
+		}
+		return handlers.onReleaseTerminal(params);
 	},
 });
 
@@ -124,6 +207,24 @@ const buildConnectionClosedError = (detail: string): ErrorDetail =>
 		detail,
 	});
 
+const normalizeOutputText = (value: string) => value.normalize("NFC");
+
+const isOutputOverLimit = (value: string, limit: number) =>
+	Buffer.byteLength(value, "utf8") > limit;
+
+const sliceOutputToLimit = (value: string, limit: number) => {
+	const buffer = Buffer.from(value, "utf8");
+	if (buffer.byteLength <= limit) {
+		return value;
+	}
+	const sliced = buffer.subarray(buffer.byteLength - limit);
+	let start = 0;
+	while (start < sliced.length && (sliced[start] & 0b11000000) === 0b10000000) {
+		start += 1;
+	}
+	return sliced.subarray(start).toString("utf8");
+};
+
 export class AcpConnection {
 	private connection?: ClientSideConnection;
 	private process?: ChildProcessWithoutNullStreams;
@@ -135,9 +236,11 @@ export class AcpConnection {
 	private agentInfo?: Implementation;
 	private readonly sessionUpdateEmitter = new EventEmitter();
 	private readonly statusEmitter = new EventEmitter();
+	private readonly terminalOutputEmitter = new EventEmitter();
 	private permissionHandler?: (
 		params: RequestPermissionRequest,
 	) => Promise<RequestPermissionResponse>;
+	private terminals = new Map<string, TerminalRecord>();
 
 	constructor(
 		private readonly options: {
@@ -176,6 +279,13 @@ export class AcpConnection {
 		) => Promise<RequestPermissionResponse>,
 	) {
 		this.permissionHandler = handler;
+	}
+
+	onTerminalOutput(listener: (payload: TerminalOutputEvent) => void) {
+		this.terminalOutputEmitter.on("output", listener);
+		return () => {
+			this.terminalOutputEmitter.off("output", listener);
+		};
 	}
 
 	onSessionUpdate(listener: SessionUpdateListener) {
@@ -228,6 +338,11 @@ export class AcpConnection {
 							this.emitSessionUpdate(notification),
 						onRequestPermission: (params) =>
 							this.handlePermissionRequest(params),
+						onCreateTerminal: (params) => this.createTerminal(params),
+						onTerminalOutput: (params) => this.getTerminalOutput(params),
+						onWaitForTerminalExit: (params) => this.waitForTerminalExit(params),
+						onKillTerminal: (params) => this.killTerminal(params),
+						onReleaseTerminal: (params) => this.releaseTerminal(params),
 					}),
 				stream,
 			);
@@ -263,7 +378,7 @@ export class AcpConnection {
 					name: this.options.client.name,
 					version: this.options.client.version,
 				},
-				clientCapabilities: {},
+				clientCapabilities: { terminal: true },
 			});
 
 			this.agentInfo = initializeResponse.agentInfo ?? undefined;
@@ -307,6 +422,149 @@ export class AcpConnection {
 	async setSessionModel(sessionId: string, modelId: string): Promise<void> {
 		const connection = await this.ensureReady();
 		await connection.unstable_setSessionModel({ sessionId, modelId });
+	}
+
+	async createTerminal(
+		params: CreateTerminalRequest,
+	): Promise<CreateTerminalResponse> {
+		const outputLimit =
+			typeof params.outputByteLimit === "number" && params.outputByteLimit > 0
+				? Math.floor(params.outputByteLimit)
+				: 1024 * 1024;
+		const resolvedEnv = params.env
+			? Object.fromEntries(
+					params.env.map((envVar) => [envVar.name, envVar.value]),
+				)
+			: undefined;
+		const terminalId = randomUUID();
+		const record: TerminalRecord = {
+			sessionId: params.sessionId,
+			command: params.command,
+			args: params.args ?? [],
+			outputByteLimit: outputLimit,
+			output: {
+				output: "",
+				truncated: false,
+				exitStatus: null,
+			},
+		};
+		this.terminals.set(terminalId, record);
+
+		const child = spawn(params.command, params.args ?? [], {
+			cwd: params.cwd ?? undefined,
+			env: resolvedEnv ? { ...process.env, ...resolvedEnv } : process.env,
+		});
+		child.once("error", (error) => {
+			record.output.exitStatus = {
+				exitCode: null,
+				signal: null,
+			};
+			record.resolveExit?.({ exitCode: null, signal: null });
+			this.terminalOutputEmitter.emit("output", {
+				sessionId: record.sessionId,
+				terminalId,
+				delta: `\n[terminal error] ${String(error)}`,
+				truncated: record.output.truncated,
+				output: record.output.output,
+				exitStatus: record.output.exitStatus,
+			} satisfies TerminalOutputEvent);
+		});
+		record.process = child;
+		let resolveExit: (response: WaitForTerminalExitResponse) => void = () => {};
+		record.onExit = new Promise<WaitForTerminalExitResponse>((resolve) => {
+			resolveExit = resolve;
+		});
+		record.resolveExit = resolveExit;
+
+		const handleChunk = (chunk: Buffer) => {
+			const delta = normalizeOutputText(chunk.toString("utf8"));
+			if (!delta) {
+				return;
+			}
+			const combinedOutput = record.output.output + delta;
+			record.output.truncated = isOutputOverLimit(
+				combinedOutput,
+				record.outputByteLimit,
+			);
+			record.output.output = sliceOutputToLimit(
+				combinedOutput,
+				record.outputByteLimit,
+			);
+
+			this.terminalOutputEmitter.emit("output", {
+				sessionId: record.sessionId,
+				terminalId,
+				delta,
+				truncated: record.output.truncated,
+				output: record.output.truncated ? record.output.output : undefined,
+				exitStatus: record.output.exitStatus,
+			} satisfies TerminalOutputEvent);
+		};
+
+		child.stdout?.on("data", handleChunk);
+		child.stderr?.on("data", handleChunk);
+		child.on("exit", (code, signal) => {
+			record.output.exitStatus = {
+				exitCode: code ?? null,
+				signal: signal ?? null,
+			};
+			record.resolveExit?.({
+				exitCode: code ?? null,
+				signal: signal ?? null,
+			});
+			this.terminalOutputEmitter.emit("output", {
+				sessionId: record.sessionId,
+				terminalId,
+				delta: "",
+				truncated: record.output.truncated,
+				output: record.output.output,
+				exitStatus: record.output.exitStatus,
+			} satisfies TerminalOutputEvent);
+		});
+
+		return { terminalId };
+	}
+
+	async getTerminalOutput(
+		params: TerminalOutputRequest,
+	): Promise<TerminalOutputResponse> {
+		const record = this.terminals.get(params.terminalId);
+		if (!record || record.sessionId !== params.sessionId) {
+			return { output: "", truncated: false };
+		}
+		return record.output;
+	}
+
+	async waitForTerminalExit(
+		params: WaitForTerminalExitRequest,
+	): Promise<WaitForTerminalExitResponse> {
+		const record = this.terminals.get(params.terminalId);
+		if (!record || record.sessionId !== params.sessionId) {
+			return Promise.resolve({ exitCode: null, signal: null });
+		}
+		return record.onExit ?? Promise.resolve({ exitCode: null, signal: null });
+	}
+
+	async killTerminal(
+		params: KillTerminalCommandRequest,
+	): Promise<KillTerminalCommandResponse> {
+		const record = this.terminals.get(params.terminalId);
+		if (!record || record.sessionId !== params.sessionId) {
+			return {};
+		}
+		record.process?.kill("SIGTERM");
+		return {};
+	}
+
+	async releaseTerminal(
+		params: ReleaseTerminalRequest,
+	): Promise<ReleaseTerminalResponse> {
+		const record = this.terminals.get(params.terminalId);
+		if (record?.process && record.process.exitCode === null) {
+			record.process.kill("SIGTERM");
+		}
+		this.terminals.delete(params.terminalId);
+		return {};
 	}
 
 	async disconnect(): Promise<void> {

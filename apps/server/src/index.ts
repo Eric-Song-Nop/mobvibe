@@ -918,6 +918,22 @@ app.get("/acp/session/stream", (request, response) => {
 		);
 	};
 
+	const sendTerminalOutput = (payload: {
+		sessionId: string;
+		terminalId: string;
+		delta: string;
+		truncated: boolean;
+		output?: string;
+		exitStatus?: { exitCode?: number | null; signal?: string | null } | null;
+	}) => {
+		if (payload.sessionId !== sessionId) {
+			return;
+		}
+		response.write(
+			`event: terminal_output\ndata: ${JSON.stringify(payload)}\n\n`,
+		);
+	};
+
 	const unsubscribe = record.connection.onSessionUpdate(sendUpdate);
 	const unsubscribeStatus = record.connection.onStatusChange((nextStatus) => {
 		if (nextStatus.state === "error" && nextStatus.error) {
@@ -929,6 +945,8 @@ app.get("/acp/session/stream", (request, response) => {
 	);
 	const unsubscribePermissionResult =
 		sessionManager.onPermissionResult(sendPermissionResult);
+	const unsubscribeTerminalOutput =
+		record.connection.onTerminalOutput(sendTerminalOutput);
 	const pendingPermissions = sessionManager.listPendingPermissions(sessionId);
 	pendingPermissions.forEach((payload) => {
 		sendPermissionRequest(payload);
@@ -943,6 +961,7 @@ app.get("/acp/session/stream", (request, response) => {
 		unsubscribeStatus();
 		unsubscribePermissionRequest();
 		unsubscribePermissionResult();
+		unsubscribeTerminalOutput();
 	});
 });
 

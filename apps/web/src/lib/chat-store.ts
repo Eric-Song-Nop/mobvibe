@@ -4,6 +4,10 @@ import type {
 	PermissionOption,
 	PermissionOutcome,
 	PermissionToolCall,
+	ToolCallContent,
+	ToolCallLocation,
+	ToolCallStatus,
+	ToolCallUpdate,
 } from "@/lib/acp";
 import type {
 	ErrorDetail,
@@ -41,6 +45,27 @@ export type PermissionMessage = {
 	isStreaming: false;
 };
 
+export type ToolCallMessage = {
+	id: string;
+	role: "assistant";
+	kind: "tool_call";
+	sessionId: string;
+	toolCallId: string;
+	status?: ToolCallStatus;
+	title?: string;
+	name?: string;
+	command?: string;
+	args?: string[];
+	duration?: number;
+	error?: string;
+	content?: ToolCallContent[];
+	locations?: ToolCallLocation[];
+	rawInput?: Record<string, unknown>;
+	rawOutput?: Record<string, unknown>;
+	createdAt: string;
+	isStreaming: false;
+};
+
 export type StatusMessage = {
 	id: string;
 	role: "assistant";
@@ -52,13 +77,25 @@ export type StatusMessage = {
 	isStreaming: false;
 };
 
-export type ChatMessage = TextMessage | PermissionMessage | StatusMessage;
+export type ChatMessage =
+	| TextMessage
+	| PermissionMessage
+	| ToolCallMessage
+	| StatusMessage;
+
+export type TerminalOutputSnapshot = {
+	terminalId: string;
+	output: string;
+	truncated: boolean;
+	exitStatus?: { exitCode?: number | null; signal?: string | null };
+};
 
 export type ChatSession = {
 	sessionId: string;
 	title: string;
 	input: string;
 	messages: ChatMessage[];
+	terminalOutputs: Record<string, TerminalOutputSnapshot>;
 	streamingMessageId?: string;
 	sending: boolean;
 	canceling: boolean;
@@ -160,6 +197,18 @@ type ChatState = {
 		requestId: string,
 		outcome: PermissionOutcome,
 	) => void;
+	addToolCall: (sessionId: string, payload: ToolCallUpdate) => void;
+	updateToolCall: (sessionId: string, payload: ToolCallUpdate) => void;
+	appendTerminalOutput: (
+		sessionId: string,
+		payload: {
+			terminalId: string;
+			delta: string;
+			truncated: boolean;
+			output?: string;
+			exitStatus?: { exitCode?: number | null; signal?: string | null };
+		},
+	) => void;
 	finalizeAssistantMessage: (sessionId: string) => void;
 };
 
@@ -194,10 +243,6 @@ const createMessage = (role: ChatRole, content: string): TextMessage => ({
 const isTextMessage = (message: ChatMessage): message is TextMessage =>
 	message.kind === "text" || message.kind === undefined;
 
-const isPermissionMessage = (
-	message: ChatMessage,
-): message is PermissionMessage => message.kind === "permission";
-
 const createPermissionMessage = (payload: {
 	requestId: string;
 	toolCall?: PermissionToolCall;
@@ -214,6 +259,86 @@ const createPermissionMessage = (payload: {
 	createdAt: new Date().toISOString(),
 	isStreaming: false,
 });
+
+const resolveToolCallSnapshot = (payload: ToolCallUpdate) => {
+	const rawInput = payload.rawInput ?? {};
+	const rawOutput = payload.rawOutput ?? {};
+	const name =
+		(typeof rawInput.name === "string" && rawInput.name) ||
+		(typeof rawInput.tool === "string" && rawInput.tool) ||
+		undefined;
+	const command =
+		(typeof rawInput.command === "string" && rawInput.command) || undefined;
+	const args = Array.isArray(rawInput.args)
+		? rawInput.args.filter((arg): arg is string => typeof arg === "string")
+		: undefined;
+	const duration =
+		typeof rawInput.duration === "number"
+			? rawInput.duration
+			: typeof rawOutput.duration === "number"
+				? rawOutput.duration
+				: undefined;
+	const error =
+		(typeof rawInput.error === "string" && rawInput.error) ||
+		(typeof rawOutput.error === "string" && rawOutput.error) ||
+		(typeof rawOutput.message === "string" && rawOutput.message) ||
+		undefined;
+	return {
+		name,
+		command,
+		args,
+		duration,
+		error,
+	};
+};
+
+const createToolCallMessage = (
+	sessionId: string,
+	payload: ToolCallUpdate,
+): ToolCallMessage => {
+	const snapshot = resolveToolCallSnapshot(payload);
+	return {
+		id: createLocalId(),
+		role: "assistant",
+		kind: "tool_call",
+		sessionId,
+		toolCallId: payload.toolCallId,
+		status: payload.status,
+		title: payload.title,
+		name: snapshot.name,
+		command: snapshot.command,
+		args: snapshot.args,
+		duration: snapshot.duration,
+		error: snapshot.error,
+		content: payload.content,
+		locations: payload.locations,
+		rawInput: payload.rawInput,
+		rawOutput: payload.rawOutput,
+		createdAt: new Date().toISOString(),
+		isStreaming: false,
+	};
+};
+
+const mergeToolCallMessage = (
+	message: ToolCallMessage,
+	payload: ToolCallUpdate,
+): ToolCallMessage => {
+	const snapshot = resolveToolCallSnapshot(payload);
+	return {
+		...message,
+		status: payload.status ?? message.status,
+		title: payload.title ?? message.title,
+		name: snapshot.name ?? message.name,
+		command: snapshot.command ?? message.command,
+		args: snapshot.args ?? message.args,
+		duration: snapshot.duration ?? message.duration,
+		error: snapshot.error ?? message.error,
+		content: payload.content ?? message.content,
+		locations: payload.locations ?? message.locations,
+		rawInput: payload.rawInput ?? message.rawInput,
+		rawOutput: payload.rawOutput ?? message.rawOutput,
+	};
+};
 
 const createStatusMessage = (payload: {
 	title: string;
@@ -258,8 +383,10 @@ const createSessionState = (
 	title: options?.title ?? "新对话",
 	input: "",
 	messages: [],
+	terminalOutputs: {},
 	streamingMessageId: undefined,
 	sending: false,
+
 	canceling: false,
 	error: undefined,
 	streamError: undefined,
@@ -611,24 +738,17 @@ export const useChatStore = create<ChatState>()(
 					if (!session) {
 						return state;
 					}
-					const messages = session.messages.map((message) => {
-						if (!isPermissionMessage(message)) {
-							return message;
-						}
-						if (message.requestId !== requestId) {
-							return message;
-						}
-						return {
-							...message,
-							decisionState: decisionState as PermissionDecisionState,
-						} as PermissionMessage;
-					});
 					return {
 						sessions: {
 							...state.sessions,
 							[sessionId]: {
 								...session,
-								messages,
+								messages: session.messages.map((message) =>
+									message.kind === "permission" &&
+									message.requestId === requestId
+										? { ...message, decisionState }
+										: message,
+								),
 							},
 						},
 					};
@@ -639,25 +759,116 @@ export const useChatStore = create<ChatState>()(
 					if (!session) {
 						return state;
 					}
-					const messages = session.messages.map((message) => {
-						if (!isPermissionMessage(message)) {
-							return message;
-						}
-						if (message.requestId !== requestId) {
-							return message;
-						}
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: {
+								...session,
+								messages: session.messages.map((message) =>
+									message.kind === "permission" &&
+									message.requestId === requestId
+										? { ...message, outcome }
+										: message,
+								),
+							},
+						},
+					};
+				}),
+			addToolCall: (sessionId, payload) =>
+				set((state) => {
+					const session =
+						state.sessions[sessionId] ?? createSessionState(sessionId);
+					const existingIndex = session.messages.findIndex(
+						(message) =>
+							message.kind === "tool_call" &&
+							message.toolCallId === payload.toolCallId,
+					);
+					if (existingIndex >= 0) {
+						const messages = session.messages.map((message) =>
+							message.kind === "tool_call" &&
+							message.toolCallId === payload.toolCallId
+								? mergeToolCallMessage(message, payload)
+								: message,
+						);
 						return {
-							...message,
-							outcome,
-							decisionState: "idle" as PermissionDecisionState,
-						} as PermissionMessage;
+							sessions: {
+								...state.sessions,
+								[sessionId]: {
+									...session,
+									messages,
+								},
+							},
+						};
+					}
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: {
+								...session,
+								messages: [
+									...session.messages,
+									createToolCallMessage(sessionId, payload),
+								],
+							},
+						},
+					};
+				}),
+			updateToolCall: (sessionId, payload) =>
+				set((state) => {
+					const session = state.sessions[sessionId];
+					if (!session) {
+						return state;
+					}
+					let found = false;
+					const messages = session.messages.map((message) => {
+						if (
+							message.kind !== "tool_call" ||
+							message.toolCallId !== payload.toolCallId
+						) {
+							return message;
+						}
+						found = true;
+						return mergeToolCallMessage(message, payload);
 					});
+					if (!found) {
+						messages.push(createToolCallMessage(sessionId, payload));
+					}
 					return {
 						sessions: {
 							...state.sessions,
 							[sessionId]: {
 								...session,
 								messages,
+							},
+						},
+					};
+				}),
+			appendTerminalOutput: (sessionId, payload) =>
+				set((state) => {
+					const session = state.sessions[sessionId];
+					if (!session) {
+						return state;
+					}
+					const existing = session.terminalOutputs[payload.terminalId];
+					const nextOutput = payload.truncated
+						? (payload.output ?? payload.delta)
+						: existing
+							? existing.output + payload.delta
+							: payload.delta;
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: {
+								...session,
+								terminalOutputs: {
+									...session.terminalOutputs,
+									[payload.terminalId]: {
+										terminalId: payload.terminalId,
+										output: nextOutput,
+										truncated: payload.truncated,
+										exitStatus: payload.exitStatus,
+									},
+								},
 							},
 						},
 					};
