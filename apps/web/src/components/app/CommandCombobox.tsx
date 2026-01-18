@@ -1,5 +1,5 @@
-import type { AvailableCommand } from "@/lib/acp";
 import { useEffect, useRef } from "react";
+import type { AvailableCommand } from "@/lib/acp";
 import { cn } from "@/lib/utils";
 
 export type CommandComboboxProps = {
@@ -55,13 +55,12 @@ export function CommandCombobox({
 					{commands.map((command, index) => {
 						const isHighlighted = index === highlightedIndex;
 						return (
-						<button
-							type="button"
-							key={command.name}
-							ref={(node) => {
-								itemRefs.current[index] = node;
-							}}
-
+							<button
+								type="button"
+								key={command.name}
+								ref={(node) => {
+									itemRefs.current[index] = node;
+								}}
 								className={cn(
 									"flex w-full cursor-default items-start gap-2 px-2 py-2 text-left text-xs outline-none",
 									isHighlighted

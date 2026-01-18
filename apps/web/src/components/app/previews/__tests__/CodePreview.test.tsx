@@ -120,7 +120,12 @@ const restoreTreeSitterSupport = () => {
 	setTreeSitterTestFlag(false);
 };
 
-const buildNode = (text: string, startIndex: number, endIndex: number, row: number): TestNode => ({
+const buildNode = (
+	text: string,
+	startIndex: number,
+	endIndex: number,
+	row: number,
+): TestNode => ({
 	startIndex,
 	endIndex,
 	startPosition: { row, column: 0 },

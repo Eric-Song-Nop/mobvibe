@@ -381,7 +381,7 @@ const createSessionState = (
 		modeName?: string;
 		availableModes?: SessionModeOption[];
 		availableModels?: SessionModelOption[];
-	availableCommands?: AvailableCommand[];
+		availableCommands?: AvailableCommand[];
 	},
 ): ChatSession => ({
 	sessionId,

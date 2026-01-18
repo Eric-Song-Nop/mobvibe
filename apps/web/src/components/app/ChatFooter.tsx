@@ -1,5 +1,7 @@
 import { ComputerIcon, SettingsIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useEffect, useMemo, useState } from "react";
+import { CommandCombobox } from "@/components/app/CommandCombobox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,8 +11,6 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { useEffect, useMemo, useState } from "react";
-import { CommandCombobox } from "@/components/app/CommandCombobox";
 import { Textarea } from "@/components/ui/textarea";
 import type { AvailableCommand } from "@/lib/acp";
 import type { ChatSession } from "@/lib/chat-store";
@@ -75,7 +75,6 @@ export function ChatFooter({
 	const effectiveCommandHighlight =
 		commandHighlight >= commandMatches.length ? 0 : commandHighlight;
 
-
 	const handleCommandClick = (command: AvailableCommand) => {
 		const nextValue = `/${command.name}`;
 		onInputChange(nextValue);
@@ -95,14 +94,12 @@ export function ChatFooter({
 		}
 	}, [hasSlashPrefix, rawInput]);
 
-
 	const handleCommandNavigate = (direction: "next" | "prev") => {
 		setCommandHighlight((previous) => {
 			if (commandMatches.length === 0) {
 				return 0;
 			}
-			const nextIndex =
-				direction === "next" ? previous + 1 : previous - 1;
+			const nextIndex = direction === "next" ? previous + 1 : previous - 1;
 			if (nextIndex < 0) {
 				return commandMatches.length - 1;
 			}
