@@ -13,7 +13,20 @@ export type CodePreviewProps = {
 	payload: SessionFsFilePreviewResponse;
 };
 
-type OutlineLanguage = "javascript" | "typescript" | "tsx";
+type OutlineLanguage =
+	| "bash"
+	| "c"
+	| "cpp"
+	| "csharp"
+	| "go"
+	| "java"
+	| "javascript"
+	| "php"
+	| "python"
+	| "ruby"
+	| "rust"
+	| "typescript"
+	| "tsx";
 
 type OutlineKind =
 	| "class"
@@ -23,7 +36,12 @@ type OutlineKind =
 	| "type"
 	| "enum"
 	| "module"
-	| "constant";
+	| "constant"
+	| "property"
+	| "field"
+	| "constructor"
+	| "variable"
+	| "struct";
 
 type OutlineItem = {
 	id: string;
@@ -46,6 +64,11 @@ const OUTLINE_KIND_LABELS: Record<OutlineKind, string> = {
 	enum: "Enum",
 	module: "Module",
 	constant: "Const",
+	property: "Property",
+	field: "Field",
+	constructor: "Constructor",
+	variable: "Variable",
+	struct: "Struct",
 };
 
 const JAVASCRIPT_OUTLINE_QUERY = String.raw`
@@ -121,13 +144,305 @@ ${JAVASCRIPT_OUTLINE_QUERY}
   name: (identifier) @name) @definition.module
 `;
 
+const BASH_OUTLINE_QUERY = String.raw`
+(function_definition
+  name: (word) @name) @definition.function
+`;
+
+const C_OUTLINE_QUERY = String.raw`
+(type_definition
+  type: (enum_specifier) @definition.enum
+  declarator: (type_identifier) @name)
+
+(type_definition
+  type: (struct_specifier) @definition.struct
+  declarator: (type_identifier) @name)
+
+(struct_specifier
+  name: (type_identifier) @name
+  body: (field_declaration_list)) @definition.struct
+
+(function_definition
+  declarator: (function_declarator
+    declarator: (identifier) @name)) @definition.function
+
+(function_definition
+  declarator: (pointer_declarator
+    declarator: (function_declarator
+      declarator: (identifier) @name))) @definition.function
+`;
+
+const CPP_OUTLINE_QUERY = String.raw`
+(struct_specifier
+  name: (type_identifier) @name
+  body: (field_declaration_list)) @definition.struct
+
+(declaration
+  (struct_specifier
+    body: (field_declaration_list))
+  declarator: (identifier) @name) @definition.struct
+
+(function_declarator
+  declarator: (_) @name) @definition.function
+
+(enum_specifier
+  name: (type_identifier) @name) @definition.enum
+
+(class_specifier
+  name: (type_identifier) @name) @definition.class
+`;
+
+const CSHARP_OUTLINE_QUERY = String.raw`
+(interface_declaration
+  name: (identifier) @name) @definition.interface
+
+(class_declaration
+  name: (identifier) @name) @definition.class
+
+(struct_declaration
+  name: (identifier) @name) @definition.struct
+
+(method_declaration
+  name: (identifier) @name) @definition.method
+
+(enum_declaration
+  name: (identifier) @name) @definition.enum
+
+(constructor_declaration
+  name: (identifier) @name) @definition.constructor
+
+(property_declaration
+  name: (identifier) @name) @definition.property
+
+(field_declaration
+  (variable_declaration
+    (variable_declarator
+      (identifier) @name))) @definition.field
+`;
+
+const GO_OUTLINE_QUERY = String.raw`
+(function_declaration
+  name: (identifier) @name) @definition.function
+
+(type_declaration
+  (type_spec
+    name: (type_identifier) @name
+    type: (struct_type)) @definition.struct)
+
+(type_declaration
+  (type_spec
+    name: (type_identifier) @name
+    type: (interface_type)) @definition.interface)
+
+(method_declaration
+  receiver: (_)
+  name: (field_identifier) @name) @definition.method
+`;
+
+const JAVA_OUTLINE_QUERY = String.raw`
+(interface_declaration
+  name: (identifier) @name) @definition.interface
+
+(method_declaration
+  name: (identifier) @name) @definition.method
+
+(constructor_declaration
+  name: (identifier) @name) @definition.constructor
+
+(class_declaration
+  name: (identifier) @name) @definition.class
+
+(enum_declaration
+  name: (identifier) @name) @definition.enum
+
+(field_declaration
+  declarator: (variable_declarator
+    name: (identifier) @name)) @definition.field
+`;
+
+const PHP_OUTLINE_QUERY = String.raw`
+(function_definition
+  name: (name) @name) @definition.function
+
+(expression_statement
+  (assignment_expression
+    left: (variable_name) @name
+    right: (anonymous_function))) @definition.function
+
+(class_declaration
+  name: (name) @name) @definition.class
+
+(method_declaration
+  name: (name) @name) @definition.method
+
+(interface_declaration
+  name: (name) @name) @definition.interface
+
+(trait_declaration
+  name: (name) @name) @definition.class
+`;
+
+const PYTHON_OUTLINE_QUERY = String.raw`
+(function_definition
+  name: (identifier) @name) @definition.function
+
+(class_definition
+  name: (identifier) @name) @definition.class
+
+(assignment
+  left: (_) @name) @definition.variable
+`;
+
+const RUBY_OUTLINE_QUERY = String.raw`
+(class
+  name: [
+    (constant)
+    (scope_resolution)
+  ] @name) @definition.class
+
+(call
+  ((identifier) @scope
+    (#any-of? @scope "private" "protected" "public"))?
+  .
+  (argument_list
+    (method
+      name: (_) @name) )) @definition.method
+
+(body_statement
+  [
+    (_)
+    ((identifier) @scope
+      (#any-of? @scope "private" "protected" "public"))
+  ]*
+  .
+  (method
+    name: (_) @name)) @definition.method
+
+(body_statement
+  (method
+    name: (_) @name)) @definition.method
+
+(singleton_method
+  object: [
+    (constant)
+    (self)
+    (identifier)
+  ]
+  ([
+    "."
+    "::"
+  ])?
+  name: [
+    (operator)
+    (identifier)
+  ] @name) @definition.method
+
+(singleton_class
+  value: (_) @name) @definition.class
+
+(module
+  name: [
+    (constant)
+    (scope_resolution)
+  ] @name) @definition.module
+
+(call
+  method: (identifier) @method @name
+  (#any-of? @method
+    "describe" "it" "before" "after"
+    "namespace" "task" "multitask" "file"
+    "setup" "teardown" "should" "should_not" "should_eventually" "context")
+  arguments: (argument_list
+    [
+      (string
+        (string_content) @name)
+      (simple_symbol) @name
+      (pair
+        key: [
+          (string
+            (string_content) @name)
+          (hash_key_symbol) @name
+        ])
+      (call) @name
+    ])?) @definition.method
+`;
+
+const RUST_OUTLINE_QUERY = String.raw`
+(mod_item
+  name: (identifier) @name) @definition.module
+
+(enum_item
+  name: (type_identifier) @name) @definition.enum
+
+(struct_item
+  name: (type_identifier) @name) @definition.struct
+
+(function_item
+  name: (identifier) @name) @definition.function
+
+(function_signature_item
+  name: (identifier) @name) @definition.function
+
+(trait_item
+  name: (type_identifier) @name) @definition.interface
+
+(impl_item
+  trait: (type_identifier)?
+  type: (type_identifier) @name) @definition.class
+
+(impl_item
+  trait: (type_identifier)?
+  type: (generic_type
+    type: (type_identifier) @name)) @definition.class
+`;
+
 const OUTLINE_LANGUAGE_CONFIG: Record<
 	OutlineLanguage,
 	{ wasmPath: string; query: string }
 > = {
+	bash: {
+		wasmPath: "/tree-sitter-bash.wasm",
+		query: BASH_OUTLINE_QUERY,
+	},
+	c: {
+		wasmPath: "/tree-sitter-c.wasm",
+		query: C_OUTLINE_QUERY,
+	},
+	cpp: {
+		wasmPath: "/tree-sitter-cpp.wasm",
+		query: CPP_OUTLINE_QUERY,
+	},
+	csharp: {
+		wasmPath: "/tree-sitter-c_sharp.wasm",
+		query: CSHARP_OUTLINE_QUERY,
+	},
+	go: {
+		wasmPath: "/tree-sitter-go.wasm",
+		query: GO_OUTLINE_QUERY,
+	},
+	java: {
+		wasmPath: "/tree-sitter-java.wasm",
+		query: JAVA_OUTLINE_QUERY,
+	},
 	javascript: {
 		wasmPath: "/tree-sitter-javascript.wasm",
 		query: JAVASCRIPT_OUTLINE_QUERY,
+	},
+	php: {
+		wasmPath: "/tree-sitter-php.wasm",
+		query: PHP_OUTLINE_QUERY,
+	},
+	python: {
+		wasmPath: "/tree-sitter-python.wasm",
+		query: PYTHON_OUTLINE_QUERY,
+	},
+	ruby: {
+		wasmPath: "/tree-sitter-ruby.wasm",
+		query: RUBY_OUTLINE_QUERY,
+	},
+	rust: {
+		wasmPath: "/tree-sitter-rust.wasm",
+		query: RUST_OUTLINE_QUERY,
 	},
 	typescript: {
 		wasmPath: "/tree-sitter-typescript.wasm",
@@ -141,9 +456,29 @@ const OUTLINE_LANGUAGE_CONFIG: Record<
 
 const resolveOutlineLanguage = (language: string): OutlineLanguage | null => {
 	switch (language) {
+		case "bash":
+			return "bash";
+		case "c":
+			return "c";
+		case "cpp":
+			return "cpp";
+		case "csharp":
+			return "csharp";
+		case "go":
+			return "go";
+		case "java":
+			return "java";
 		case "javascript":
 		case "jsx":
 			return "javascript";
+		case "php":
+			return "php";
+		case "python":
+			return "python";
+		case "ruby":
+			return "ruby";
+		case "rust":
+			return "rust";
 		case "typescript":
 			return "typescript";
 		case "tsx":
@@ -212,6 +547,16 @@ const resolveOutlineKind = (captureName: string): OutlineKind | null => {
 			return "module";
 		case "constant":
 			return "constant";
+		case "property":
+			return "property";
+		case "field":
+			return "field";
+		case "constructor":
+			return "constructor";
+		case "variable":
+			return "variable";
+		case "struct":
+			return "struct";
 		default:
 			return null;
 	}
@@ -380,8 +725,10 @@ export function CodePreview({ payload }: CodePreviewProps) {
 		typeof window.fetch === "function" &&
 		typeof window.WebAssembly !== "undefined" &&
 		(import.meta.env.MODE !== "test" ||
-			Boolean((globalThis as { __ENABLE_TREESITTER_TESTS__?: boolean })
-				.__ENABLE_TREESITTER_TESTS__));
+			Boolean(
+				(globalThis as { __ENABLE_TREESITTER_TESTS__?: boolean })
+					.__ENABLE_TREESITTER_TESTS__,
+			));
 
 	const outlineSnapshotRef = useRef<{ path: string; content: string } | null>(
 		null,
@@ -419,7 +766,16 @@ export function CodePreview({ payload }: CodePreviewProps) {
 				}
 				const parser = parserRef.current ?? new Parser();
 				parserRef.current = parser;
-				const languageInstance = await loadOutlineLanguage(outlineLanguage);
+				let languageInstance: TreeSitterLanguage;
+				try {
+					languageInstance = await loadOutlineLanguage(outlineLanguage);
+				} catch (error) {
+					if (!cancelled) {
+						setOutlineItems([]);
+						setOutlineStatus("unsupported");
+					}
+					return;
+				}
 				const query = await loadOutlineQuery(outlineLanguage, languageInstance);
 				parser.setLanguage(languageInstance);
 				const tree = parser.parse(code);
