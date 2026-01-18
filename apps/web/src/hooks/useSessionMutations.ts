@@ -61,6 +61,7 @@ type PermissionRequestPayload = {
 
 export interface ChatStoreActions {
 	setActiveSessionId: (id: string | undefined) => void;
+	setLastCreatedCwd: (value?: string) => void;
 	createLocalSession: (sessionId: string, metadata?: SessionMetadata) => void;
 	syncSessions: (sessions: SessionSummary[]) => void;
 	removeSession: (sessionId: string) => void;
@@ -153,8 +154,10 @@ export function useSessionMutations(store: ChatStoreActions) {
 			});
 
 			store.setActiveSessionId(data.sessionId);
+			store.setLastCreatedCwd(data.cwd);
 			store.setAppError(undefined);
 		},
+
 		onError: (mutationError: unknown) => {
 			store.setAppError(
 				normalizeError(

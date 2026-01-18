@@ -25,8 +25,10 @@ export function App() {
 		sessions,
 		activeSessionId,
 		appError,
+		lastCreatedCwd,
 		setActiveSessionId,
 		setAppError,
+		setLastCreatedCwd,
 		createLocalSession,
 		syncSessions,
 		removeSession,
@@ -73,6 +75,7 @@ export function App() {
 		permissionDecisionMutation,
 	} = useSessionMutations({
 		setActiveSessionId,
+		setLastCreatedCwd,
 		createLocalSession,
 		syncSessions,
 		removeSession,
@@ -157,7 +160,7 @@ export function App() {
 	const handleOpenCreateDialog = () => {
 		setDraftTitle(buildSessionTitle(sessionList));
 		setDraftBackendId(defaultBackendId);
-		setDraftCwd(undefined);
+		setDraftCwd(lastCreatedCwd);
 		setCreateDialogOpen(true);
 	};
 

@@ -122,8 +122,10 @@ type ChatState = {
 	sessions: Record<string, ChatSession>;
 	activeSessionId?: string;
 	appError?: ErrorDetail;
+	lastCreatedCwd?: string;
 	setActiveSessionId: (value?: string) => void;
 	setAppError: (value?: ErrorDetail) => void;
+	setLastCreatedCwd: (value?: string) => void;
 	createLocalSession: (
 		sessionId: string,
 		options?: {
@@ -216,7 +218,10 @@ type ChatState = {
 	finalizeAssistantMessage: (sessionId: string) => void;
 };
 
-type PersistedChatState = Pick<ChatState, "sessions" | "activeSessionId">;
+type PersistedChatState = Pick<
+	ChatState,
+	"sessions" | "activeSessionId" | "lastCreatedCwd"
+>;
 
 const createLocalId = () => {
 	const cryptoRef = globalThis.crypto;
@@ -447,6 +452,7 @@ const partializeChatState = (state: ChatState): PersistedChatState => ({
 		{},
 	),
 	activeSessionId: state.activeSessionId,
+	lastCreatedCwd: state.lastCreatedCwd,
 });
 
 export const useChatStore = create<ChatState>()(
@@ -457,6 +463,7 @@ export const useChatStore = create<ChatState>()(
 			appError: undefined,
 			setActiveSessionId: (value?: string) => set({ activeSessionId: value }),
 			setAppError: (value?: ErrorDetail) => set({ appError: value }),
+			setLastCreatedCwd: (value?: string) => set({ lastCreatedCwd: value }),
 			createLocalSession: (sessionId, options) =>
 				set((state) => {
 					if (state.sessions[sessionId]) {

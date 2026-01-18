@@ -28,6 +28,7 @@ describe("useSessionMutations", () => {
 
 	const createMockStore = () => ({
 		setActiveSessionId: vi.fn(),
+		setLastCreatedCwd: vi.fn(),
 		createLocalSession: vi.fn(),
 		syncSessions: vi.fn(),
 		removeSession: vi.fn(),
@@ -77,6 +78,7 @@ describe("useSessionMutations", () => {
 				backendLabel: "Backend 1",
 				createdAt: "2025-01-01T00:00:00Z",
 				updatedAt: "2025-01-01T00:00:00Z",
+				cwd: "/home/user/project",
 				agentName: "Agent",
 				modelId: "model-1",
 				modelName: "Model 1",
@@ -102,6 +104,7 @@ describe("useSessionMutations", () => {
 				state: "ready",
 				backendId: "backend-1",
 				backendLabel: "Backend 1",
+				cwd: mockSession.cwd,
 				agentName: mockSession.agentName,
 				modelId: mockSession.modelId,
 				modelName: mockSession.modelName,
@@ -113,6 +116,7 @@ describe("useSessionMutations", () => {
 			});
 
 			expect(mockStore.setActiveSessionId).toHaveBeenCalledWith("new-session");
+			expect(mockStore.setLastCreatedCwd).toHaveBeenCalledWith(mockSession.cwd);
 			expect(mockStore.setAppError).toHaveBeenCalledWith(undefined);
 		});
 
