@@ -4,3 +4,5 @@ packages:
 onlyBuiltDependencies:
   - esbuild
   - msw
+  - tree-sitter-javascript
+  - tree-sitter-typescript

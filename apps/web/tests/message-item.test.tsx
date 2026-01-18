@@ -1,9 +1,9 @@
 import "@testing-library/jest-dom/vitest";
 import { render } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { useChatStore } from "../src/lib/chat-store";
 import { MessageItem } from "../src/components/chat/MessageItem";
 import type { ChatMessage, ChatSession } from "../src/lib/chat-store";
+import { useChatStore } from "../src/lib/chat-store";
 
 const buildMessage = (overrides?: Partial<ChatMessage>): ChatMessage => {
 	const base: ChatMessage = {

@@ -90,9 +90,18 @@ importers:
       tailwindcss:
         specifier: ^4.1.17
         version: 4.1.18
+      tree-sitter-javascript:
+        specifier: ^0.25.0
+        version: 0.25.0
+      tree-sitter-typescript:
+        specifier: ^0.23.2
+        version: 0.23.2
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0
+      web-tree-sitter:
+        specifier: ^0.26.3
+        version: 0.26.3
       zustand:
         specifier: ^5.0.8
         version: 5.0.10(@types/react@19.2.8)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
@@ -3237,6 +3246,10 @@ packages:
     resolution: {integrity: sha512-8Ofs/AUQh8MaEcrlq5xOX0CQ9ypTF5dl78mjlMNfOK08fzpgTHQRQPBxcPlEtIw0yRpws+Zo/3r+5WRby7u3Gg==, tarball: https://registry.npmjs.org/negotiator/-/negotiator-1.0.0.tgz}
     engines: {node: '>= 0.6'}
 
+  node-addon-api@8.5.0:
+    resolution: {integrity: sha512-/bRZty2mXUIFY/xU5HLvveNHlswNJej+RnxBjOMkidWfwZzgTbPG1E3K5TOxRLOR+5hX7bSofy8yf1hZevMS8A==, tarball: https://registry.npmjs.org/node-addon-api/-/node-addon-api-8.5.0.tgz}
+    engines: {node: ^18 || ^20 || >= 21}
+
   node-domexception@1.0.0:
     resolution: {integrity: sha512-/jKZoMpw0F8GRwl4/eLROPA3cfcXtLApP0QzLmUT/HuPCZWyB7IY9ZrMeKw2O/nFIqPQB3PVM9aYm0F312AXDQ==, tarball: https://registry.npmjs.org/node-domexception/-/node-domexception-1.0.0.tgz}
     engines: {node: '>=10.5.0'}
@@ -3245,6 +3258,10 @@ packages:
   node-fetch@3.3.2:
     resolution: {integrity: sha512-dRB78srN/l6gqWulah9SrxeYnxeddIG30+GOqK/9OlLVyLg3HPnr6SqOWTWOXKRwC2eGYCkZ59NNuSgvSrpgOA==, tarball: https://registry.npmjs.org/node-fetch/-/node-fetch-3.3.2.tgz}
     engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
+
+  node-gyp-build@4.8.4:
+    resolution: {integrity: sha512-LA4ZjwlnUblHVgq0oBF3Jl/6h/Nvs5fzBLwdEF4nuxnFdsfajde4WfxtJr3CaiH+F6ewcIB/q4jQ4UzPyid+CQ==, tarball: https://registry.npmjs.org/node-gyp-build/-/node-gyp-build-4.8.4.tgz}
+    hasBin: true
 
   node-releases@2.0.27:
     resolution: {integrity: sha512-nmh3lCkYZ3grZvqcCH+fjmQ7X+H0OeZgP40OierEaAptX4XofMh5kwNbWh7lBduUzCcV/8kZ+NDLCwm2iorIlA==, tarball: https://registry.npmjs.org/node-releases/-/node-releases-2.0.27.tgz}
@@ -3850,6 +3867,30 @@ packages:
     resolution: {integrity: sha512-hdF5ZgjTqgAntKkklYw0R03MG2x/bSzTtkxmIRw/sTNV8YXsCJ1tfLAX23lhxhHJlEf3CRCOCGGWw3vI3GaSPw==, tarball: https://registry.npmjs.org/tr46/-/tr46-5.1.1.tgz}
     engines: {node: '>=18'}
 
+  tree-sitter-javascript@0.23.1:
+    resolution: {integrity: sha512-/bnhbrTD9frUYHQTiYnPcxyHORIw157ERBa6dqzaKxvR/x3PC4Yzd+D1pZIMS6zNg2v3a8BZ0oK7jHqsQo9fWA==, tarball: https://registry.npmjs.org/tree-sitter-javascript/-/tree-sitter-javascript-0.23.1.tgz}
+    peerDependencies:
+      tree-sitter: ^0.21.1
+    peerDependenciesMeta:
+      tree-sitter:
+        optional: true
+
+  tree-sitter-javascript@0.25.0:
+    resolution: {integrity: sha512-1fCbmzAskZkxcZzN41sFZ2br2iqTYP3tKls1b/HKGNPQUVOpsUxpmGxdN/wMqAk3jYZnYBR1dd/y/0avMeU7dw==, tarball: https://registry.npmjs.org/tree-sitter-javascript/-/tree-sitter-javascript-0.25.0.tgz}
+    peerDependencies:
+      tree-sitter: ^0.25.0
+    peerDependenciesMeta:
+      tree-sitter:
+        optional: true
+
+  tree-sitter-typescript@0.23.2:
+    resolution: {integrity: sha512-e04JUUKxTT53/x3Uq1zIL45DoYKVfHH4CZqwgZhPg5qYROl5nQjV+85ruFzFGZxu+QeFVbRTPDRnqL9UbU4VeA==, tarball: https://registry.npmjs.org/tree-sitter-typescript/-/tree-sitter-typescript-0.23.2.tgz}
+    peerDependencies:
+      tree-sitter: ^0.21.0
+    peerDependenciesMeta:
+      tree-sitter:
+        optional: true
+
   trim-lines@3.0.1:
     resolution: {integrity: sha512-kRj8B+YHZCc9kQYdWfJB2/oUl9rA99qbowYYBtr4ui4mZyAQ2JpvVBd/6U2YloATfqBhBTSMhTpgBHtU0Mf3Rg==, tarball: https://registry.npmjs.org/trim-lines/-/trim-lines-3.0.1.tgz}
 
@@ -4140,6 +4181,9 @@ packages:
   web-streams-polyfill@3.3.3:
     resolution: {integrity: sha512-d2JWLCivmZYTSIoge9MsgFCZrt571BikcWGYkjC1khllbTeDlGqZ2D8vD8E/lJa8WGWbb7Plm8/XJYV7IJHZZw==, tarball: https://registry.npmjs.org/web-streams-polyfill/-/web-streams-polyfill-3.3.3.tgz}
     engines: {node: '>= 8'}
+
+  web-tree-sitter@0.26.3:
+    resolution: {integrity: sha512-JIVgIKFS1w6lejxSntCtsS/QsE/ecTS00en809cMxMPxaor6MvUnQ+ovG8uTTTvQCFosSh4MeDdI5bSGw5SoBw==, tarball: https://registry.npmjs.org/web-tree-sitter/-/web-tree-sitter-0.26.3.tgz}
 
   webidl-conversions@7.0.0:
     resolution: {integrity: sha512-VwddBukDzu71offAQR975unBIGqfKZpM+8ZX6ySk8nYhVoo5CYaZyzt3YBvYtRtO+aoGlqxPg/B87NGVZ/fu6g==, tarball: https://registry.npmjs.org/webidl-conversions/-/webidl-conversions-7.0.0.tgz}
@@ -7565,6 +7609,8 @@ snapshots:
 
   negotiator@1.0.0: {}
 
+  node-addon-api@8.5.0: {}
+
   node-domexception@1.0.0: {}
 
   node-fetch@3.3.2:
@@ -7572,6 +7618,8 @@ snapshots:
       data-uri-to-buffer: 4.0.1
       fetch-blob: 3.2.0
       formdata-polyfill: 4.0.10
+
+  node-gyp-build@4.8.4: {}
 
   node-releases@2.0.27: {}
 
@@ -8367,6 +8415,22 @@ snapshots:
     dependencies:
       punycode: 2.3.1
 
+  tree-sitter-javascript@0.23.1:
+    dependencies:
+      node-addon-api: 8.5.0
+      node-gyp-build: 4.8.4
+
+  tree-sitter-javascript@0.25.0:
+    dependencies:
+      node-addon-api: 8.5.0
+      node-gyp-build: 4.8.4
+
+  tree-sitter-typescript@0.23.2:
+    dependencies:
+      node-addon-api: 8.5.0
+      node-gyp-build: 4.8.4
+      tree-sitter-javascript: 0.23.1
+
   trim-lines@3.0.1: {}
 
   trough@2.2.0: {}
@@ -8631,6 +8695,8 @@ snapshots:
   web-namespaces@2.0.1: {}
 
   web-streams-polyfill@3.3.3: {}
+
+  web-tree-sitter@0.26.3: {}
 
   webidl-conversions@7.0.0: {}
 
