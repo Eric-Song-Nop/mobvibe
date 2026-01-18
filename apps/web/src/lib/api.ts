@@ -1,4 +1,4 @@
-import type { PermissionOutcome } from "./acp";
+import type { AvailableCommand, PermissionOutcome } from "./acp";
 
 export type AcpConnectionState =
 	| "idle"
@@ -110,6 +110,7 @@ export type SessionSummary = {
 	modeName?: string;
 	availableModes?: SessionModeOption[];
 	availableModels?: SessionModelOption[];
+	availableCommands?: AvailableCommand[];
 };
 
 export type SessionsResponse = {

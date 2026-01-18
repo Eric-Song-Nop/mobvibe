@@ -84,8 +84,8 @@ describe("useSessionMutations", () => {
 				modeName: "Mode 1",
 				availableModes: [],
 				availableModels: [],
+				availableCommands: [],
 			};
-
 			vi.mocked(apiModule.createSession).mockResolvedValue(mockSession);
 
 			const { result } = renderHook(() => useSessionMutations(mockStore), {
@@ -109,7 +109,9 @@ describe("useSessionMutations", () => {
 				modeName: mockSession.modeName,
 				availableModes: mockSession.availableModes,
 				availableModels: mockSession.availableModels,
+				availableCommands: mockSession.availableCommands,
 			});
+
 			expect(mockStore.setActiveSessionId).toHaveBeenCalledWith("new-session");
 			expect(mockStore.setAppError).toHaveBeenCalledWith(undefined);
 		});

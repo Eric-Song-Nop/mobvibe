@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type {
+	AvailableCommand,
 	PermissionOption,
 	PermissionOutcome,
 	PermissionToolCall,
@@ -114,6 +115,7 @@ export type ChatSession = {
 	modeName?: string;
 	availableModes?: SessionModeOption[];
 	availableModels?: SessionModelOption[];
+	availableCommands?: AvailableCommand[];
 };
 
 type ChatState = {
@@ -137,6 +139,7 @@ type ChatState = {
 			modeName?: string;
 			availableModes?: SessionModeOption[];
 			availableModels?: SessionModelOption[];
+			availableCommands?: AvailableCommand[];
 		},
 	) => void;
 	syncSessions: (summaries: SessionSummary[]) => void;
@@ -162,6 +165,7 @@ type ChatState = {
 				| "modeName"
 				| "availableModes"
 				| "availableModels"
+				| "availableCommands"
 			>
 		>,
 	) => void;
@@ -377,6 +381,7 @@ const createSessionState = (
 		modeName?: string;
 		availableModes?: SessionModeOption[];
 		availableModels?: SessionModelOption[];
+	availableCommands?: AvailableCommand[];
 	},
 ): ChatSession => ({
 	sessionId,
@@ -403,6 +408,7 @@ const createSessionState = (
 	modeName: options?.modeName,
 	availableModes: options?.availableModes,
 	availableModels: options?.availableModels,
+	availableCommands: options?.availableCommands,
 });
 
 const STORAGE_KEY = "mobvibe.chat-store";
@@ -431,7 +437,11 @@ const sanitizeSessionForPersist = (session: ChatSession): ChatSession => ({
 const partializeChatState = (state: ChatState): PersistedChatState => ({
 	sessions: Object.keys(state.sessions).reduce<Record<string, ChatSession>>(
 		(acc, sessionId) => {
-			acc[sessionId] = sanitizeSessionForPersist(state.sessions[sessionId]);
+			const session = sanitizeSessionForPersist(state.sessions[sessionId]);
+			acc[sessionId] = {
+				...session,
+				availableCommands: undefined,
+			};
 			return acc;
 		},
 		{},
@@ -477,7 +487,9 @@ export const useChatStore = create<ChatState>()(
 								cwd: summary.cwd,
 								availableModes: summary.availableModes,
 								availableModels: summary.availableModels,
+								availableCommands: summary.availableCommands,
 							});
+
 						nextSessions[summary.sessionId] = {
 							...existing,
 							title: summary.title ?? existing.title,
@@ -496,6 +508,8 @@ export const useChatStore = create<ChatState>()(
 							availableModes: summary.availableModes ?? existing.availableModes,
 							availableModels:
 								summary.availableModels ?? existing.availableModels,
+							availableCommands:
+								summary.availableCommands ?? existing.availableCommands,
 						};
 					});
 
@@ -634,6 +648,9 @@ export const useChatStore = create<ChatState>()(
 					}
 					if (payload.availableModels !== undefined) {
 						nextSession.availableModels = payload.availableModels;
+					}
+					if (payload.availableCommands !== undefined) {
+						nextSession.availableCommands = payload.availableCommands;
 					}
 					return {
 						sessions: {

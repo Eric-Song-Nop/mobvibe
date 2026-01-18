@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type {
+	AvailableCommand,
 	RequestPermissionRequest,
 	RequestPermissionResponse,
 	SessionModelState,
@@ -31,6 +32,7 @@ type SessionRecord = {
 		name: string;
 		description?: string | null;
 	}>;
+	availableCommands?: AvailableCommand[];
 	unsubscribe?: () => void;
 };
 
@@ -77,6 +79,7 @@ export type SessionSummary = {
 		name: string;
 		description?: string | null;
 	}>;
+	availableCommands?: AvailableCommand[];
 };
 
 const buildPermissionKey = (sessionId: string, requestId: string) =>
@@ -282,6 +285,7 @@ export class SessionManager {
 				modeName,
 				availableModes,
 				availableModels,
+				availableCommands: undefined,
 			};
 			record.unsubscribe = connection.onSessionUpdate(
 				(notification: SessionNotification) => {
@@ -301,6 +305,11 @@ export class SessionManager {
 						}
 						if (typeof update.updatedAt === "string") {
 							record.updatedAt = new Date(update.updatedAt);
+						}
+					}
+					if (update.sessionUpdate === "available_commands_update") {
+						if (update.availableCommands) {
+							record.availableCommands = update.availableCommands;
 						}
 					}
 				},
@@ -540,6 +549,7 @@ export class SessionManager {
 			modeName: record.modeName,
 			availableModes: record.availableModes,
 			availableModels: record.availableModels,
+			availableCommands: record.availableCommands,
 		};
 	}
 }

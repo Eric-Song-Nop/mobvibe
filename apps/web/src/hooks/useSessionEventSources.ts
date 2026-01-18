@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { ChatStoreActions } from "@/hooks/useSessionMutations";
 import {
+	extractAvailableCommandsUpdate,
 	extractSessionInfoUpdate,
 	extractSessionModeUpdate,
 	extractTextChunk,
@@ -90,6 +91,12 @@ export function useSessionEventSources({
 					const infoUpdate = extractSessionInfoUpdate(payload);
 					if (infoUpdate) {
 						updateSessionMeta(session.sessionId, infoUpdate);
+					}
+					const availableCommands = extractAvailableCommandsUpdate(payload);
+					if (availableCommands !== null) {
+						updateSessionMeta(session.sessionId, {
+							availableCommands,
+						});
 					}
 					const toolCallUpdate = extractToolCallUpdate(payload);
 					if (toolCallUpdate) {

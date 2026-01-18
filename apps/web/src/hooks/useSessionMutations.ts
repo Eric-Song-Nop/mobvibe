@@ -39,6 +39,7 @@ type SessionMetadata = Partial<
 		| "modeName"
 		| "availableModes"
 		| "availableModels"
+		| "availableCommands"
 	>
 >;
 
@@ -122,6 +123,7 @@ const applySessionSummary = (
 		modeName: summary.modeName,
 		availableModes: summary.availableModes,
 		availableModels: summary.availableModels,
+		availableCommands: summary.availableCommands,
 	});
 };
 
@@ -147,7 +149,9 @@ export function useSessionMutations(store: ChatStoreActions) {
 				modeName: data.modeName,
 				availableModes: data.availableModes,
 				availableModels: data.availableModels,
+				availableCommands: data.availableCommands,
 			});
+
 			store.setActiveSessionId(data.sessionId);
 			store.setAppError(undefined);
 		},

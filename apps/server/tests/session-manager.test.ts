@@ -120,6 +120,7 @@ describe("SessionManager", () => {
 		expect(summary.agentName).toBe("Mock Agent");
 		expect(summary.modelName).toBe("Model One");
 		expect(summary.modeName).toBe("Mode One");
+		expect(summary.availableCommands).toBeUndefined();
 		expect(manager.listSessions()).toHaveLength(1);
 	});
 

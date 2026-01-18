@@ -1,3 +1,10 @@
+export type AvailableCommand = {
+	name: string;
+	description: string;
+	input?: { hint: string } | null;
+	_meta?: Record<string, unknown> | null;
+};
+
 export type SessionUpdateType =
 	| "user_message_chunk"
 	| "agent_message_chunk"
@@ -110,8 +117,13 @@ type ContentChunk = {
 	content: ContentBlock;
 };
 
+type AvailableCommandsUpdate = {
+	sessionUpdate: "available_commands_update";
+	availableCommands: AvailableCommand[];
+};
+
 type UnknownUpdate = {
-	sessionUpdate: "plan" | "available_commands_update" | "config_option_update";
+	sessionUpdate: "plan" | "config_option_update";
 };
 
 type CurrentModeUpdate = {
@@ -130,6 +142,7 @@ export type SessionUpdate =
 	| ToolCallUpdate
 	| (CurrentModeUpdate & { sessionUpdate: "current_mode_update" })
 	| (SessionInfoUpdate & { sessionUpdate: "session_info_update" })
+	| AvailableCommandsUpdate
 	| UnknownUpdate;
 
 export type SessionNotification = {
@@ -250,4 +263,13 @@ export const extractToolCallUpdate = (
 		return null;
 	}
 	return update;
+};
+
+export const extractAvailableCommandsUpdate = (
+	notification: SessionNotification,
+): AvailableCommand[] | null => {
+	if (notification.update.sessionUpdate !== "available_commands_update") {
+		return null;
+	}
+	return notification.update.availableCommands ?? [];
 };

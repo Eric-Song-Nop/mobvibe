@@ -9,8 +9,15 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { useEffect, useMemo, useState } from "react";
+import { CommandCombobox } from "@/components/app/CommandCombobox";
 import { Textarea } from "@/components/ui/textarea";
+import type { AvailableCommand } from "@/lib/acp";
 import type { ChatSession } from "@/lib/chat-store";
+import {
+	buildCommandSearchItems,
+	filterCommandItems,
+} from "@/lib/command-utils";
 import { MESSAGE_INPUT_ROWS } from "@/lib/ui-config";
 
 export type ChatFooterProps = {
@@ -38,9 +45,86 @@ export function ChatFooter({
 }: ChatFooterProps) {
 	const availableModels = activeSession?.availableModels ?? [];
 	const availableModes = activeSession?.availableModes ?? [];
+	const availableCommands = activeSession?.availableCommands ?? [];
 	const modelLabel = activeSession?.modelName ?? activeSession?.modelId;
 	const modeLabel = activeSession?.modeName ?? activeSession?.modeId;
 	const isReady = activeSession?.state === "ready";
+	const searchItems = useMemo(
+		() => buildCommandSearchItems(availableCommands),
+		[availableCommands],
+	);
+	const rawInput = activeSession?.input ?? "";
+	const hasSlashPrefix = rawInput.startsWith("/");
+	const slashInput = hasSlashPrefix ? rawInput.slice(1) : "";
+	const commandQuery = hasSlashPrefix
+		? (slashInput.trim().split(/\s+/)[0] ?? "")
+		: "";
+	const commandMatches = useMemo(
+		() => filterCommandItems(searchItems, commandQuery),
+		[commandQuery, searchItems],
+	);
+	const commandPickerDisabled = !activeSessionId || !isReady;
+	const [commandHighlight, setCommandHighlight] = useState(0);
+	const [commandPickerSuppressed, setCommandPickerSuppressed] = useState(false);
+	const shouldShowCommandPicker =
+		!commandPickerDisabled &&
+		!commandPickerSuppressed &&
+		availableCommands.length > 0 &&
+		hasSlashPrefix;
+
+	const effectiveCommandHighlight =
+		commandHighlight >= commandMatches.length ? 0 : commandHighlight;
+
+
+	const handleCommandClick = (command: AvailableCommand) => {
+		const nextValue = `/${command.name}`;
+		onInputChange(nextValue);
+		setCommandHighlight(0);
+		setCommandPickerSuppressed(true);
+	};
+
+	useEffect(() => {
+		if (!hasSlashPrefix) {
+			setCommandPickerSuppressed(false);
+			setCommandHighlight(0);
+			return;
+		}
+		if (rawInput === "/") {
+			setCommandPickerSuppressed(false);
+			setCommandHighlight(0);
+		}
+	}, [hasSlashPrefix, rawInput]);
+
+
+	const handleCommandNavigate = (direction: "next" | "prev") => {
+		setCommandHighlight((previous) => {
+			if (commandMatches.length === 0) {
+				return 0;
+			}
+			const nextIndex =
+				direction === "next" ? previous + 1 : previous - 1;
+			if (nextIndex < 0) {
+				return commandMatches.length - 1;
+			}
+			if (nextIndex >= commandMatches.length) {
+				return 0;
+			}
+			return nextIndex;
+		});
+	};
+
+	const handleCommandSelect = () => {
+		if (commandMatches.length === 0) {
+			return false;
+		}
+		const target = commandMatches[effectiveCommandHighlight];
+		if (!target) {
+			return false;
+		}
+		handleCommandClick(target);
+		return true;
+	};
+
 	const showModelModeControls = Boolean(
 		availableModels.length > 0 ||
 			modelLabel ||
@@ -54,7 +138,17 @@ export function ChatFooter({
 	return (
 		<footer className="bg-background/90 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shrink-0">
 			<div className="mx-auto flex w-full max-w-5xl flex-col gap-3">
-				<div className="flex w-full items-end gap-2">
+				<div className="relative flex w-full items-end gap-2">
+					{shouldShowCommandPicker ? (
+						<CommandCombobox
+							commands={commandMatches}
+							open={shouldShowCommandPicker}
+							highlightedIndex={effectiveCommandHighlight}
+							onHighlightChange={setCommandHighlight}
+							onSelect={handleCommandClick}
+							className="absolute bottom-full left-0 mb-2"
+						/>
+					) : null}
 					{showModelModeControls ? (
 						<div className="flex flex-col gap-2 md:hidden">
 							{availableModels.length > 0 ? (
@@ -134,6 +228,29 @@ export function ChatFooter({
 						value={activeSession?.input ?? ""}
 						onChange={(event) => onInputChange(event.target.value)}
 						onKeyDown={(event) => {
+							if (shouldShowCommandPicker) {
+								if (event.key === "ArrowDown") {
+									event.preventDefault();
+									handleCommandNavigate("next");
+									return;
+								}
+								if (event.key === "ArrowUp") {
+									event.preventDefault();
+									handleCommandNavigate("prev");
+									return;
+								}
+								if (event.key === "Enter" && !event.shiftKey) {
+									event.preventDefault();
+									handleCommandSelect();
+									return;
+								}
+								if (event.key === "Escape") {
+									event.preventDefault();
+									onInputChange("");
+									setCommandPickerSuppressed(false);
+									return;
+								}
+							}
 							if (event.key === "Enter" && !event.shiftKey) {
 								event.preventDefault();
 								onSend();
