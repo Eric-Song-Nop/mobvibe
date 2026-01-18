@@ -404,3 +404,14 @@
 - App 启动时读取偏好，system 模式清理存储并监听系统主题变化。
 - 主题切换由 `App.tsx` 控制 `document.documentElement` 的 `dark` class。
 - 侧边栏顶部新增主题下拉入口，支持浅色/深色/跟随系统。
+
+## 本次调整（实现前计划 - 2026-01-19 主题切换单元测试）
+
+- 目标：补齐主题偏好存储与 system 模式行为的单元测试。
+- 范围：`App` 初始化读取/写入 `localStorage`，system 模式监听 `prefers-color-scheme`。
+- 方式：mock `AppSidebar` 触发主题切换回调，使用 `matchMedia` 事件模拟系统主题变化。
+
+## 本次调整（实现后记录 - 2026-01-19 主题切换单元测试）
+
+- 新增 `App` 主题单测，覆盖存储读取、system 模式与侧边栏触发切换。
+- 使用 mock `matchMedia` 触发系统主题变化断言 `dark` class 切换。
