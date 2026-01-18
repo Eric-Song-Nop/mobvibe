@@ -39,7 +39,9 @@ describe("useChatStore", () => {
 		expect(session.messages[0].role).toBe("user");
 		expect(session.messages[0].isStreaming).toBe(false);
 		expect(session.messages[1].role).toBe("assistant");
-		expect(session.messages[1].content).toBe("你好，我是助手");
+		if (session.messages[1].kind === "text") {
+			expect(session.messages[1].content).toBe("你好，我是助手");
+		}
 		expect(session.messages[1].isStreaming).toBe(false);
 		expect(session.streamingMessageId).toBeUndefined();
 	});

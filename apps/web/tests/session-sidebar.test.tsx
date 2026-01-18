@@ -47,7 +47,9 @@ const buildSession = (overrides?: Partial<ChatSession>): ChatSession => ({
 	title: "对话 1",
 	input: "",
 	messages: [],
+	terminalOutputs: {},
 	sending: false,
+	canceling: false,
 	streamingMessageId: undefined,
 	...overrides,
 });

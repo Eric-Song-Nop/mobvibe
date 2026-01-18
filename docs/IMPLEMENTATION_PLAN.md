@@ -345,3 +345,15 @@
 - 新增 hooks：`useSessionEventSources` 负责 SSE 订阅，`useMessageAutoScroll` 负责滚动与 refs。
 - `App.tsx` 改为组合式布局，只保留状态编排与事件处理。
 - 会话流错误解析由 hook 统一处理并保留原有提示文案。
+
+## 本次调整（实现前计划 - 2026-01-18 工具调用渲染单元测试）
+
+- 前端：补充 `MessageItem` 工具调用渲染测试，覆盖 `content.text` 纯文本展示与换行保留。
+- 前端：验证 `image`/`audio`/`resource`/`resource_link`/`diff`/`terminal` 的输出卡片渲染。
+- 后端：通过 mock `spawn` + `EventEmitter` 模拟终端输出，验证截断逻辑与退出状态事件。
+
+## 本次调整（实现后记录 - 2026-01-18 工具调用渲染单元测试）
+
+- 前端：新增 `MessageItem` 测试，覆盖工具输出纯文本与多类型内容卡片渲染。
+- 前端：补充终端输出状态渲染测试，验证输出折叠区展示。
+- 后端：新增终端输出单测，覆盖输出截断与退出状态快照。
