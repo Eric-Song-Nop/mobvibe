@@ -8,6 +8,12 @@ An vibe coding WebUI utilizing the [Agent Client Protocol](https://agentclientpr
 
 Directly connects to and manages ACP sessions, also provide extra info about the local machine for the web frontend to use.
 
+#### Structure
+
+- `apps/server/src/acp/acp-connection.ts`: ACP CLI 连接与终端管理（通用实现）。
+- `apps/server/src/acp/session-manager.ts`: 多会话管理与权限请求分发。
+- `apps/server/src/acp/errors.ts`: ACP 相关错误模型与转换。
+
 ### Frontend
 
 The UI, which is just an AI chat app.

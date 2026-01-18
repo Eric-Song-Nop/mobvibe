@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import type { RequestPermissionResponse } from "@agentclientprotocol/sdk";
 import express from "express";
+import type { AcpConnectionState } from "./acp/acp-connection.js";
 import {
 	AppError,
 	createErrorDetail,
@@ -11,7 +12,6 @@ import {
 	type ErrorDetail,
 	withScope,
 } from "./acp/errors.js";
-import type { AcpConnectionState } from "./acp/opencode.js";
 import {
 	type PermissionRequestPayload,
 	type PermissionResultPayload,

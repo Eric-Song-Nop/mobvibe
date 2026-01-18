@@ -32,7 +32,7 @@ const agentInfo = {
 	title: "Mock Agent",
 } as unknown as Implementation;
 
-vi.mock("../src/acp/opencode.js", () => {
+vi.mock("../src/acp/acp-connection.js", () => {
 	return {
 		AcpConnection: class {
 			private options: {

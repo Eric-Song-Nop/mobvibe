@@ -8,8 +8,8 @@ import type {
 	SessionNotification,
 } from "@agentclientprotocol/sdk";
 import type { AcpBackendConfig, AcpBackendId } from "../config.js";
+import { AcpConnection, type AcpConnectionState } from "./acp-connection.js";
 import { AppError, createErrorDetail, type ErrorDetail } from "./errors.js";
-import { AcpConnection, type AcpConnectionState } from "./opencode.js";
 
 type SessionRecord = {
 	sessionId: string;

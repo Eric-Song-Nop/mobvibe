@@ -376,3 +376,16 @@
 - 支持长按大纲项复制语义块内容，复制内容不包含行号。
 - 行号区域设置为不可选中，避免复制时混入行号。
 - 增加 `postinstall` 拷贝 wasm 到 `public/`，确保前端可加载。
+
+## 本次调整（实现前计划 - 2026-01-18 ACP 连接命名统一）
+
+- 目标：后端 ACP 连接实现改为通用命名，避免绑定具体 agent 名称。
+- 重命名 `apps/server/src/acp/opencode.ts` 为 `apps/server/src/acp/acp-connection.ts`，保持 `AcpConnection` API 不变。
+- 更新后端引用路径与单元测试 import。
+- 更新根 `AGENTS.md` 的项目结构说明。
+
+## 本次调整（实现后记录 - 2026-01-18 ACP 连接命名统一）
+
+- `apps/server/src/acp/opencode.ts` 改名为 `apps/server/src/acp/acp-connection.ts`，连接实现不再绑定具体 agent 名称。
+- 后端与测试引用路径同步更新为 `acp-connection`。
+- 根 `AGENTS.md` 补充新的后端结构说明。

@@ -25,7 +25,7 @@ vi.mock("node:child_process", () => ({
 	spawn: spawnMock,
 }));
 
-const { AcpConnection } = await import("../src/acp/opencode.js");
+const { AcpConnection } = await import("../src/acp/acp-connection.js");
 
 const buildConnection = () =>
 	new AcpConnection({
