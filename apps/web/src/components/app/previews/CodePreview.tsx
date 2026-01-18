@@ -379,7 +379,9 @@ export function CodePreview({ payload }: CodePreviewProps) {
 		typeof window !== "undefined" &&
 		typeof window.fetch === "function" &&
 		typeof window.WebAssembly !== "undefined" &&
-		import.meta.env.MODE !== "test";
+		(import.meta.env.MODE !== "test" ||
+			Boolean((globalThis as { __ENABLE_TREESITTER_TESTS__?: boolean })
+				.__ENABLE_TREESITTER_TESTS__));
 
 	const outlineSnapshotRef = useRef<{ path: string; content: string } | null>(
 		null,
