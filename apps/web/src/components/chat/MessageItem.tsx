@@ -2,7 +2,16 @@ import { Streamdown } from "streamdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import type { PermissionOutcome } from "@/lib/acp";
+import type {
+	AudioContent,
+	ContentBlock,
+	ImageContent,
+	PermissionOutcome,
+	ResourceContent,
+	ResourceLinkContent,
+	ToolCallContent,
+	ToolCallContentPayload,
+} from "@/lib/acp";
 import { type ChatMessage, useChatStore } from "@/lib/chat-store";
 import { cn } from "@/lib/utils";
 
@@ -54,6 +63,306 @@ const TerminalOutputBlock = ({
 const resolveFileName = (pathValue: string) => {
 	const parts = pathValue.split(/[/\\]/).filter(Boolean);
 	return parts.at(-1) ?? pathValue;
+};
+
+const resolveFilePathFromUri = (uri: string) => {
+	if (uri.startsWith("file://")) {
+		return decodeURIComponent(uri.slice("file://".length));
+	}
+	if (uri.startsWith("/")) {
+		return uri;
+	}
+	return null;
+};
+
+const resolveResourceLabel = (
+	uri: string,
+	name?: string | null,
+	title?: string | null,
+) => {
+	if (title && title.trim().length > 0) {
+		return title;
+	}
+	if (name && name.trim().length > 0) {
+		return name;
+	}
+	const normalized = uri.startsWith("file://")
+		? uri.slice("file://".length)
+		: uri;
+	return resolveFileName(normalized);
+};
+
+const formatBytes = (value: number) => {
+	if (!Number.isFinite(value)) {
+		return `${value}`;
+	}
+	if (value < 1024) {
+		return `${value} B`;
+	}
+	const kb = value / 1024;
+	if (kb < 1024) {
+		return `${kb.toFixed(1)} KB`;
+	}
+	return `${(kb / 1024).toFixed(1)} MB`;
+};
+
+const buildDataUri = (mimeType: string, data: string) =>
+	`data:${mimeType};base64,${data}`;
+
+const renderResourceLabel = (
+	label: string,
+	uri: string,
+	onOpenFilePreview?: (path: string) => void,
+) => {
+	const filePath = resolveFilePathFromUri(uri);
+	if (filePath && onOpenFilePreview) {
+		return (
+			<button
+				type="button"
+				className="text-xs text-primary hover:underline"
+				onClick={(event) => {
+					event.preventDefault();
+					onOpenFilePreview(filePath);
+				}}
+			>
+				{label}
+			</button>
+		);
+	}
+	if (uri.startsWith("http://") || uri.startsWith("https://")) {
+		return (
+			<a
+				href={uri}
+				target="_blank"
+				rel="noreferrer"
+				className="text-xs text-primary hover:underline"
+			>
+				{label}
+			</a>
+		);
+	}
+	return <span className="text-xs text-foreground">{label}</span>;
+};
+
+const renderTextContent = (text: string, key: string) => (
+	<div key={key}>
+		<Streamdown>{text}</Streamdown>
+	</div>
+);
+
+const renderUnknownContent = (payload: ToolCallContentPayload, key: string) => (
+	<pre
+		key={key}
+		className="max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-muted-foreground"
+	>
+		{JSON.stringify(payload, null, 2)}
+	</pre>
+);
+
+const renderImageContent = (
+	content: ImageContent,
+	key: string,
+	onOpenFilePreview?: (path: string) => void,
+) => {
+	const label = resolveResourceLabel(content.uri ?? "image");
+	const source = content.data
+		? buildDataUri(content.mimeType, content.data)
+		: content.uri;
+	const canPreviewInline =
+		source !== undefined &&
+		(source.startsWith("data:") ||
+			source.startsWith("http://") ||
+			source.startsWith("https://"));
+	return (
+		<div
+			key={key}
+			className="rounded border border-border bg-background/80 px-2 py-1 text-xs text-muted-foreground"
+		>
+			<div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+				<span>图片</span>
+				{content.uri ? (
+					renderResourceLabel(label, content.uri, onOpenFilePreview)
+				) : (
+					<span className="text-xs text-foreground">{label}</span>
+				)}
+				<span>{content.mimeType}</span>
+			</div>
+			{canPreviewInline ? (
+				<img
+					src={source}
+					alt={label}
+					className="mt-2 max-h-48 rounded border border-border"
+				/>
+			) : (
+				<div className="mt-2 text-[11px] text-muted-foreground">
+					无法直接预览
+				</div>
+			)}
+		</div>
+	);
+};
+
+const renderAudioContent = (content: AudioContent, key: string) => {
+	const source = buildDataUri(content.mimeType, content.data);
+	return (
+		<div
+			key={key}
+			className="rounded border border-border bg-background/80 px-2 py-1 text-xs text-muted-foreground"
+		>
+			<div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+				<span>音频</span>
+				<span>{content.mimeType}</span>
+			</div>
+			<audio controls className="mt-2 w-full">
+				<source src={source} type={content.mimeType} />
+			</audio>
+		</div>
+	);
+};
+
+const renderResourceContent = (
+	content: ResourceContent,
+	key: string,
+	onOpenFilePreview?: (path: string) => void,
+) => {
+	const label = resolveResourceLabel(content.resource.uri);
+	return (
+		<div
+			key={key}
+			className="rounded border border-border bg-background/80 px-2 py-1 text-xs text-muted-foreground"
+		>
+			<div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+				<span>资源</span>
+				{renderResourceLabel(label, content.resource.uri, onOpenFilePreview)}
+				{content.resource.mimeType ? (
+					<span>{content.resource.mimeType}</span>
+				) : null}
+			</div>
+			{content.resource.text ? (
+				<pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-foreground">
+					{content.resource.text}
+				</pre>
+			) : content.resource.blob ? (
+				<div className="mt-2 text-[11px] text-muted-foreground">二进制资源</div>
+			) : (
+				<div className="mt-2 text-[11px] text-muted-foreground">
+					资源内容不可用
+				</div>
+			)}
+		</div>
+	);
+};
+
+const renderResourceLinkContent = (
+	content: ResourceLinkContent,
+	key: string,
+	onOpenFilePreview?: (path: string) => void,
+) => {
+	const label = resolveResourceLabel(content.uri, content.name, content.title);
+	const meta = [
+		content.mimeType,
+		content.size !== undefined ? formatBytes(content.size) : null,
+	]
+		.filter((item): item is string => Boolean(item))
+		.join(" · ");
+	return (
+		<div
+			key={key}
+			className="rounded border border-border bg-background/80 px-2 py-1 text-xs text-muted-foreground"
+		>
+			<div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+				<span>资源链接</span>
+				{renderResourceLabel(label, content.uri, onOpenFilePreview)}
+				{meta ? <span>{meta}</span> : null}
+			</div>
+			{content.description ? (
+				<div className="mt-1 text-[11px] text-muted-foreground">
+					{content.description}
+				</div>
+			) : null}
+		</div>
+	);
+};
+
+const renderContentBlock = (
+	content: ContentBlock,
+	key: string,
+	onOpenFilePreview?: (path: string) => void,
+) => {
+	switch (content.type) {
+		case "text":
+			return renderTextContent(content.text, key);
+		case "image":
+			return renderImageContent(content, key, onOpenFilePreview);
+		case "audio":
+			return renderAudioContent(content, key);
+		case "resource":
+			return renderResourceContent(content, key, onOpenFilePreview);
+		case "resource_link":
+			return renderResourceLinkContent(content, key, onOpenFilePreview);
+		default:
+			return renderUnknownContent(content, key);
+	}
+};
+
+const renderToolCallContentPayload = (
+	payload: ToolCallContentPayload,
+	key: string,
+	onOpenFilePreview?: (path: string) => void,
+) => {
+	if (typeof payload === "string") {
+		return renderTextContent(payload, key);
+	}
+	if (payload && typeof payload === "object" && "type" in payload) {
+		return renderContentBlock(payload as ContentBlock, key, onOpenFilePreview);
+	}
+	return renderUnknownContent(payload, key);
+};
+
+const renderDiffBlock = (
+	content: Extract<ToolCallContent, { type: "diff" }>,
+	key: string,
+	onOpenFilePreview?: (path: string) => void,
+) => {
+	const label = resolveFileName(content.path);
+	return (
+		<div
+			key={key}
+			className="rounded border border-border bg-background/80 px-2 py-1 text-xs text-muted-foreground"
+		>
+			<div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+				<span>差异</span>
+				{onOpenFilePreview ? (
+					<button
+						type="button"
+						className="text-xs text-primary hover:underline"
+						onClick={(event) => {
+							event.preventDefault();
+							onOpenFilePreview(content.path);
+						}}
+					>
+						{label}
+					</button>
+				) : (
+					<span className="text-xs text-foreground">{label}</span>
+				)}
+			</div>
+			<div className="mt-2 space-y-2">
+				<div>
+					<div className="text-[11px] text-muted-foreground">原始</div>
+					<pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-foreground">
+						{content.oldText ?? "(新文件)"}
+					</pre>
+				</div>
+				<div>
+					<div className="text-[11px] text-muted-foreground">更新</div>
+					<pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-foreground">
+						{content.newText}
+					</pre>
+				</div>
+			</div>
+		</div>
+	);
 };
 
 const parseRawInputValue = <T,>(
@@ -247,25 +556,19 @@ export const MessageItem = ({
 			0,
 			displayPaths.length - summaryPaths.length,
 		);
-		const textOutputs = message.content?.flatMap((contentBlock) => {
-			if (contentBlock.type !== "content") {
-				return [];
+		const outputBlocks = message.content?.map((contentBlock, index) => {
+			const key = `${message.toolCallId}-content-${index}`;
+			if (contentBlock.type === "content") {
+				return renderToolCallContentPayload(
+					contentBlock.content,
+					key,
+					onOpenFilePreview,
+				);
 			}
-			const content = contentBlock.content;
-			if (typeof content === "string") {
-				return [content];
+			if (contentBlock.type === "diff") {
+				return renderDiffBlock(contentBlock, key, onOpenFilePreview);
 			}
-			if (
-				content &&
-				typeof content === "object" &&
-				"type" in content &&
-				content.type === "text" &&
-				"text" in content &&
-				typeof content.text === "string"
-			) {
-				return [content.text];
-			}
-			return [];
+			return null;
 		});
 		const terminalIds = message.content?.flatMap((contentBlock) =>
 			contentBlock.type === "terminal" ? [contentBlock.terminalId] : [],
@@ -274,7 +577,7 @@ export const MessageItem = ({
 			? terminalOutputs[message.sessionId]?.terminalOutputs
 			: undefined;
 		const hasOutputs = Boolean(
-			(textOutputs && textOutputs.length > 0) ||
+			(outputBlocks && outputBlocks.some(Boolean)) ||
 				(terminalIds && terminalIds.length > 0) ||
 				message.rawOutput,
 		);
@@ -329,11 +632,8 @@ export const MessageItem = ({
 											输出
 										</summary>
 										<div className="mt-2 flex flex-col gap-2 text-xs">
-											{textOutputs?.map((text, index) => (
-												<Streamdown key={`${message.toolCallId}-text-${index}`}>
-													{text}
-												</Streamdown>
-											))}
+											{outputBlocks?.filter(Boolean)}
+
 											{terminalIds?.map((terminalId) => {
 												const output = terminalOutputMap?.[terminalId];
 												return (

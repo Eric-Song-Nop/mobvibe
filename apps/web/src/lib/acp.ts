@@ -15,6 +15,46 @@ export type SessionContent = {
 	text: string;
 };
 
+export type ImageContent = {
+	type: "image";
+	data: string;
+	mimeType: string;
+	uri?: string;
+};
+
+export type AudioContent = {
+	type: "audio";
+	data: string;
+	mimeType: string;
+};
+
+export type ResourceContent = {
+	type: "resource";
+	resource: {
+		uri: string;
+		mimeType?: string;
+		text?: string;
+		blob?: string;
+	};
+};
+
+export type ResourceLinkContent = {
+	type: "resource_link";
+	uri: string;
+	name: string;
+	mimeType?: string;
+	title?: string;
+	description?: string;
+	size?: number;
+};
+
+export type ContentBlock =
+	| SessionContent
+	| ImageContent
+	| AudioContent
+	| ResourceContent
+	| ResourceLinkContent;
+
 export type ToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
 
 export type ToolCallKind =
@@ -28,7 +68,10 @@ export type ToolCallKind =
 	| "fetch"
 	| "other";
 
-export type ToolCallContentPayload = SessionContent | Record<string, unknown>;
+export type ToolCallContentPayload =
+	| ContentBlock
+	| Record<string, unknown>
+	| string;
 
 export type ToolCallContent =
 	| {
@@ -64,7 +107,7 @@ export type ToolCallUpdate = {
 };
 
 type ContentChunk = {
-	content: SessionContent;
+	content: ContentBlock;
 };
 
 type UnknownUpdate = {

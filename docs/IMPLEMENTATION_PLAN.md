@@ -306,6 +306,20 @@
 - 前端 SSE 接收增量输出，详情区展示终端输出与退出状态。
 - 输出截断遵循 byte limit 并保持字符边界。
 
+## 本次调整（实现前计划 - 2026-01-18 ACP 内容渲染策略）
+
+- 目标：根据 ACP Content/Tool Call 规范，统一内容渲染策略与可扩展结构。
+- 会话消息与工具调用的 `content.type=text` 默认使用 Markdown 渲染（Streamdown）。
+- 工具调用内容按类型分流：`text` 用 Markdown，`image/audio/resource/resource_link` 使用专用组件或占位卡片。
+- `diff` 与 `terminal` 继续使用已有差异/终端组件；`rawOutput` 仅用于调试折叠区。
+- 未识别的内容类型统一降级为 JSON 预览，保证信息不丢失。
+
+## 本次调整（实现后记录 - 2026-01-18 ACP 内容渲染策略）
+
+- 工具调用输出按 `ToolCallContent` 类型渲染：`content.text` 走 Streamdown，`diff` 走差异块，`terminal` 继续走终端输出卡片。
+- 新增 `image/audio/resource/resource_link` 的基础展示卡片，支持本地文件预览跳转与外链打开。
+- 工具输出中未知内容统一以 JSON 折叠展示，避免信息丢失。
+
 ## 本次调整（实现后记录 - 2026-01-17 工具调用展示）
 
 - 新增 tool call 类型解析与状态管理，流式更新支持增量合并。
