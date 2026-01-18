@@ -1,4 +1,11 @@
 import {
+	ComputerIcon,
+	MoonIcon,
+	PaintBoardIcon,
+	SunIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import {
 	AlertDialog,
 	AlertDialogAction,
 	AlertDialogCancel,
@@ -11,6 +18,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuLabel,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { type ChatSession } from "@/lib/chat-store";
 import { getStatusVariant } from "@/lib/ui-utils";
@@ -29,6 +44,8 @@ type SessionSidebarProps = {
 	onEditingTitleChange: (value: string) => void;
 	onCloseSession: (sessionId: string) => void;
 	isCreating: boolean;
+	themePreference: "light" | "dark" | "system";
+	onThemePreferenceChange: (value: "light" | "dark" | "system") => void;
 };
 
 export const SessionSidebar = ({
@@ -44,14 +61,45 @@ export const SessionSidebar = ({
 	onEditingTitleChange,
 	onCloseSession,
 	isCreating,
+	themePreference,
+	onThemePreferenceChange,
 }: SessionSidebarProps) => {
 	return (
 		<div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden">
 			<div className="flex items-center justify-between">
 				<div className="text-sm font-semibold">对话</div>
-				<Button onClick={onCreateSession} size="sm" disabled={isCreating}>
-					新建
-				</Button>
+				<div className="flex items-center gap-2">
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild>
+							<Button variant="outline" size="icon-sm" aria-label="切换主题">
+								<HugeiconsIcon icon={PaintBoardIcon} strokeWidth={2} />
+							</Button>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end" className="w-40">
+							<DropdownMenuLabel>主题</DropdownMenuLabel>
+							<DropdownMenuRadioGroup
+								value={themePreference}
+								onValueChange={onThemePreferenceChange}
+							>
+								<DropdownMenuRadioItem value="light">
+									<HugeiconsIcon icon={SunIcon} strokeWidth={2} />
+									浅色
+								</DropdownMenuRadioItem>
+								<DropdownMenuRadioItem value="dark">
+									<HugeiconsIcon icon={MoonIcon} strokeWidth={2} />
+									深色
+								</DropdownMenuRadioItem>
+								<DropdownMenuRadioItem value="system">
+									<HugeiconsIcon icon={ComputerIcon} strokeWidth={2} />
+									跟随系统
+								</DropdownMenuRadioItem>
+							</DropdownMenuRadioGroup>
+						</DropdownMenuContent>
+					</DropdownMenu>
+					<Button onClick={onCreateSession} size="sm" disabled={isCreating}>
+						新建
+					</Button>
+				</div>
 			</div>
 			<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
 				{sessions.length === 0 ? (

@@ -18,6 +18,7 @@ import {
 	createFallbackError,
 	normalizeError,
 } from "@/lib/error-utils";
+import { THEME_STORAGE_KEY, type ThemePreference } from "@/lib/ui-config";
 import { buildSessionTitle, getStatusVariant } from "@/lib/ui-utils";
 
 export function App() {
@@ -51,6 +52,8 @@ export function App() {
 		finalizeAssistantMessage,
 	} = useChatStore();
 	const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+	const [themePreference, setThemePreference] =
+		useState<ThemePreference>("system");
 	const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
 	const [editingTitle, setEditingTitle] = useState("");
 	const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -125,6 +128,57 @@ export function App() {
 			syncSessions(sessionsQuery.data.sessions);
 		}
 	}, [sessionsQuery.data?.sessions, syncSessions]);
+
+	useEffect(() => {
+		if (typeof window === "undefined") {
+			return;
+		}
+		const storedPreference = window.localStorage.getItem(THEME_STORAGE_KEY);
+		if (storedPreference === "light" || storedPreference === "dark") {
+			setThemePreference(storedPreference);
+			return;
+		}
+		setThemePreference("system");
+	}, []);
+
+	useEffect(() => {
+		if (typeof window === "undefined") {
+			return;
+		}
+		if (themePreference === "system") {
+			window.localStorage.removeItem(THEME_STORAGE_KEY);
+		} else {
+			window.localStorage.setItem(THEME_STORAGE_KEY, themePreference);
+		}
+	}, [themePreference]);
+
+	useEffect(() => {
+		if (typeof window === "undefined") {
+			return;
+		}
+		const root = document.documentElement;
+		const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+
+		const applyTheme = (prefersDark: boolean) => {
+			const useDark =
+				themePreference === "dark" ||
+				(themePreference === "system" && prefersDark);
+			root.classList.toggle("dark", useDark);
+		};
+
+		applyTheme(mediaQuery.matches);
+
+		const handleChange = (event: MediaQueryListEvent) => {
+			if (themePreference === "system") {
+				applyTheme(event.matches);
+			}
+		};
+
+		mediaQuery.addEventListener("change", handleChange);
+		return () => {
+			mediaQuery.removeEventListener("change", handleChange);
+		};
+	}, [themePreference]);
 
 	useEffect(() => {
 		if (activeSessionId || sessionList.length === 0) {
@@ -414,7 +468,10 @@ export function App() {
 				isCreating={createSessionMutation.isPending}
 				mobileOpen={mobileMenuOpen}
 				onMobileOpenChange={setMobileMenuOpen}
+				themePreference={themePreference}
+				onThemePreferenceChange={setThemePreference}
 			/>
+
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
 				<AppHeader
 					statusVariant={statusVariant}

@@ -389,3 +389,18 @@
 - `apps/server/src/acp/opencode.ts` 改名为 `apps/server/src/acp/acp-connection.ts`，连接实现不再绑定具体 agent 名称。
 - 后端与测试引用路径同步更新为 `acp-connection`。
 - 根 `AGENTS.md` 补充新的后端结构说明。
+
+## 本次调整（实现前计划 - 2026-01-19 主题切换）
+
+- 目标：在侧边栏顶部提供 light/dark/system 主题切换入口，默认跟随系统。
+- 状态：主题偏好写入 `localStorage`（`mobvibe-theme`），启动时读取。
+- 行为：根据偏好更新 `document.documentElement` 的 `dark` class；system 模式监听 `prefers-color-scheme` 变化。
+- UI：使用 Shadcn `DropdownMenu` + `DropdownMenuRadioGroup`，提供图标与中文文案。
+- 影响范围：`App.tsx` 管理主题状态与 class 切换，`AppSidebar`/`SessionSidebar` 负责展示入口。
+
+## 本次调整（实现后记录 - 2026-01-19 主题切换）
+
+- 新增主题偏好常量与类型，`localStorage` 使用 `mobvibe-theme` 保存 light/dark。
+- App 启动时读取偏好，system 模式清理存储并监听系统主题变化。
+- 主题切换由 `App.tsx` 控制 `document.documentElement` 的 `dark` class。
+- 侧边栏顶部新增主题下拉入口，支持浅色/深色/跟随系统。
