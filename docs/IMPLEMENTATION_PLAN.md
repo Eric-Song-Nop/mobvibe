@@ -314,11 +314,22 @@
 - `diff` 与 `terminal` 继续使用已有差异/终端组件；`rawOutput` 仅用于调试折叠区。
 - 未识别的内容类型统一降级为 JSON 预览，保证信息不丢失。
 
+## 本次调整（实现前计划 - 2026-01-18 工具输出纯文本）
+
+- 目标：工具调用 `content.text` 不再使用 Markdown，改为纯文本展示，保留原始换行。
+- 范围：仅影响工具调用输出区，不改变聊天消息流的 Markdown 渲染。
+- 兼容：继续保留 `diff`/`terminal`/`resource` 等类型化展示逻辑。
+
 ## 本次调整（实现后记录 - 2026-01-18 ACP 内容渲染策略）
 
 - 工具调用输出按 `ToolCallContent` 类型渲染：`content.text` 走 Streamdown，`diff` 走差异块，`terminal` 继续走终端输出卡片。
 - 新增 `image/audio/resource/resource_link` 的基础展示卡片，支持本地文件预览跳转与外链打开。
 - 工具输出中未知内容统一以 JSON 折叠展示，避免信息丢失。
+
+## 本次调整（实现后记录 - 2026-01-18 工具输出纯文本）
+
+- 工具调用 `content.text` 改为纯文本展示，保留换行与原始格式。
+- 聊天消息区域仍继续使用 Streamdown 渲染 Markdown。
 
 ## 本次调整（实现后记录 - 2026-01-17 工具调用展示）
 

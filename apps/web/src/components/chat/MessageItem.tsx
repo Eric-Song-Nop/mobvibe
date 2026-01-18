@@ -145,9 +145,12 @@ const renderResourceLabel = (
 };
 
 const renderTextContent = (text: string, key: string) => (
-	<div key={key}>
-		<Streamdown>{text}</Streamdown>
-	</div>
+	<pre
+		key={key}
+		className="whitespace-pre-wrap break-words text-xs text-foreground"
+	>
+		{text}
+	</pre>
 );
 
 const renderUnknownContent = (payload: ToolCallContentPayload, key: string) => (
