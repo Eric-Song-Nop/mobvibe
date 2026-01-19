@@ -1,4 +1,5 @@
 import { ApiError, type ErrorDetail } from "./api";
+import i18n from "@/i18n";
 
 /**
  * Creates a fallback error object with the given message and scope.
@@ -57,7 +58,7 @@ export const isErrorDetail = (payload: unknown): payload is ErrorDetail => {
  */
 export const buildStreamDisconnectedError = (): ErrorDetail => ({
 	code: "STREAM_DISCONNECTED",
-	message: "SSE 连接异常",
+	message: i18n.t("errors.streamDisconnected"),
 	retryable: true,
 	scope: "stream",
 });
@@ -67,7 +68,7 @@ export const buildStreamDisconnectedError = (): ErrorDetail => ({
  */
 export const buildSessionNotReadyError = (): ErrorDetail => ({
 	code: "SESSION_NOT_READY",
-	message: "会话未就绪，请重新创建对话",
+	message: i18n.t("errors.sessionNotReady"),
 	retryable: true,
 	scope: "session",
 });

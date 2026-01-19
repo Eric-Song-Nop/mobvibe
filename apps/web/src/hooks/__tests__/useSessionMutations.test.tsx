@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import i18n from "@/i18n";
 import * as apiModule from "@/lib/api";
 import { useSessionMutations } from "../useSessionMutations";
 
@@ -246,7 +247,7 @@ describe("useSessionMutations", () => {
 
 			expect(mockStore.setCanceling).toHaveBeenCalledWith("session-1", true);
 			expect(mockStore.addStatusMessage).toHaveBeenCalledWith("session-1", {
-				title: "已取消本次生成",
+				title: i18n.t("statusMessages.cancelled"),
 				variant: "warning",
 			});
 			expect(mockStore.finalizeAssistantMessage).toHaveBeenCalledWith(

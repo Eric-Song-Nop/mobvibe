@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
 	ColumnFileBrowser,
 	useColumnFileBrowser,
@@ -31,6 +32,7 @@ export function WorkingDirectoryPicker({
 	inputId = "session-cwd",
 	className,
 }: WorkingDirectoryPickerProps) {
+	const { t } = useTranslation();
 	const [inputValue, setInputValue] = useState("");
 
 	const rootsQuery = useQuery<FsRootsResponse>({
@@ -40,7 +42,11 @@ export function WorkingDirectoryPicker({
 	});
 
 	const homePath = rootsQuery.data?.homePath;
-	const homeLabel = rootsQuery.data?.roots[0]?.name ?? HOME_LABEL_FALLBACK;
+	const homeLabel =
+		rootsQuery.data?.roots[0]?.name ??
+		t("workingDirectory.homeLabel", {
+			defaultValue: HOME_LABEL_FALLBACK,
+		});
 
 	const {
 		columns,
@@ -59,7 +65,7 @@ export function WorkingDirectoryPicker({
 		onChange,
 		onSelect,
 		fetchEntries: fetchFsEntries,
-		errorMessage: "路径加载失败",
+		errorMessage: t("errors.pathLoadFailed"),
 	});
 
 	const handleSubmitPath = useCallback(() => {
@@ -84,13 +90,13 @@ export function WorkingDirectoryPicker({
 	const rootsError = rootsQuery.isError
 		? normalizeError(
 				rootsQuery.error,
-				createFallbackError("路径加载失败", "request"),
+				createFallbackError(t("errors.pathLoadFailed"), "request"),
 			).message
 		: undefined;
 
 	return (
 		<div className={cn("flex min-w-0 flex-col gap-2", className)}>
-			<Label htmlFor={inputId}>工作目录</Label>
+			<Label htmlFor={inputId}>{t("session.cwdLabel")}</Label>
 			<InputGroup>
 				<InputGroupInput
 					id={inputId}
@@ -102,7 +108,7 @@ export function WorkingDirectoryPicker({
 							handleSubmitPath();
 						}
 					}}
-					placeholder="输入或粘贴 Home 内路径"
+					placeholder={t("session.cwdPlaceholder")}
 					disabled={!open || rootsQuery.isLoading}
 				/>
 			</InputGroup>
@@ -119,7 +125,7 @@ export function WorkingDirectoryPicker({
 				onColumnSelect={handleColumnSelect}
 				onEntrySelect={handleEntrySelect}
 				filterEntry={(entry) => entry.type === "directory"}
-				emptyLabel="无子目录"
+				emptyLabel={t("workingDirectory.emptyDirectory")}
 				isLoading={isLoading}
 				scrollContainerRef={scrollContainerRef}
 				columnRefs={columnRefs}

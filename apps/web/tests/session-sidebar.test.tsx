@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import i18n from "../src/i18n";
 import { SessionSidebar } from "../src/components/session/SessionSidebar";
 import type { ChatSession } from "../src/lib/chat-store";
 
@@ -42,9 +43,29 @@ vi.mock("../src/components/ui/alert-dialog", () => ({
 	}) => <button {...props}>{children}</button>,
 }));
 
+vi.mock("../src/components/ui/select", () => ({
+	Select: ({ children }: { children: React.ReactNode }) => (
+		<div>{children}</div>
+	),
+	SelectTrigger: ({ children, ...props }: { children: React.ReactNode }) => (
+		<button type="button" {...props}>
+			{children}
+		</button>
+	),
+	SelectValue: ({ placeholder }: { placeholder?: string }) => (
+		<span>{placeholder}</span>
+	),
+	SelectContent: ({ children }: { children: React.ReactNode }) => (
+		<div>{children}</div>
+	),
+	SelectItem: ({ children }: { children: React.ReactNode }) => (
+		<div>{children}</div>
+	),
+}));
+
 const buildSession = (overrides?: Partial<ChatSession>): ChatSession => ({
 	sessionId: "session-1",
-	title: "对话 1",
+	title: i18n.t("session.newTitle", { count: 1 }),
 	input: "",
 	messages: [],
 	terminalOutputs: {},
@@ -78,7 +99,7 @@ const renderSidebar = (
 describe("SessionSidebar", () => {
 	it("shows empty state when no sessions", () => {
 		renderSidebar([]);
-		expect(screen.getByText("暂无对话")).toBeInTheDocument();
+		expect(screen.getByText(i18n.t("session.empty"))).toBeInTheDocument();
 	});
 
 	it("selects a session when clicked", async () => {
@@ -86,7 +107,7 @@ describe("SessionSidebar", () => {
 		const user = userEvent.setup();
 		renderSidebar([buildSession()], { onSelectSession });
 
-		await user.click(screen.getByText("对话 1"));
+		await user.click(screen.getByText(i18n.t("session.newTitle", { count: 1 })));
 
 		expect(onSelectSession).toHaveBeenCalledWith("session-1");
 	});
@@ -94,11 +115,11 @@ describe("SessionSidebar", () => {
 	it("renders editing input when in edit mode", () => {
 		renderSidebar([buildSession()], {
 			editingSessionId: "session-1",
-			editingTitle: "新的标题",
+			editingTitle: "Updated title",
 		});
 
-		const input = screen.getByDisplayValue("新的标题");
+		const input = screen.getByDisplayValue("Updated title");
 		expect(input).toBeInTheDocument();
-		expect(screen.getByText("保存")).toBeInTheDocument();
+		expect(screen.getByText(i18n.t("common.save"))).toBeInTheDocument();
 	});
 });

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import type { AvailableCommand } from "@/lib/acp";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +22,7 @@ export function CommandCombobox({
 	onSelect,
 	className,
 }: CommandComboboxProps) {
+	const { t } = useTranslation();
 	const listRef = useRef<HTMLDivElement | null>(null);
 	const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -48,7 +50,7 @@ export function CommandCombobox({
 		>
 			{commands.length === 0 ? (
 				<div className="text-muted-foreground px-2 py-2 text-xs">
-					没有匹配的命令
+					{t("chat.noMatchingCommand")}
 				</div>
 			) : (
 				<div className="max-h-72 overflow-y-auto" ref={listRef}>

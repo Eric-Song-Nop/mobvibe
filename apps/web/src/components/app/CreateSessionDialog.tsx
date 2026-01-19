@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { WorkingDirectoryDialog } from "@/components/app/WorkingDirectoryDialog";
 import {
 	AlertDialog,
@@ -55,6 +56,7 @@ export function CreateSessionDialog({
 	isCreating,
 	onCreate,
 }: CreateSessionDialogProps) {
+	const { t } = useTranslation();
 	const [directoryDialogOpen, setDirectoryDialogOpen] = useState(false);
 	const rootsQuery = useQuery({
 		queryKey: ["fs-roots"],
@@ -82,23 +84,23 @@ export function CreateSessionDialog({
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
 			<AlertDialogContent size="default" className="sm:max-w-2xl">
 				<AlertDialogHeader>
-					<AlertDialogTitle>新建对话</AlertDialogTitle>
+					<AlertDialogTitle>{t("session.createTitle")}</AlertDialogTitle>
 					<AlertDialogDescription>
-						选择后端并设置对话标题与工作目录。
+						{t("session.createDescription")}
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 				<div className="flex min-w-0 flex-col gap-3">
 					<div className="flex flex-col gap-2">
-						<Label htmlFor="session-title">标题</Label>
+						<Label htmlFor="session-title">{t("session.titleLabel")}</Label>
 						<Input
 							id="session-title"
 							value={draftTitle}
 							onChange={(event) => onDraftTitleChange(event.target.value)}
-							placeholder="可选标题"
+							placeholder={t("session.titlePlaceholder")}
 						/>
 					</div>
 					<div className="flex flex-col gap-2">
-						<Label htmlFor="session-backend">后端</Label>
+						<Label htmlFor="session-backend">{t("session.backendLabel")}</Label>
 						<Select
 							value={draftBackendId}
 							onValueChange={onDraftBackendChange}
@@ -107,7 +109,9 @@ export function CreateSessionDialog({
 							<SelectTrigger id="session-backend">
 								<SelectValue
 									placeholder={
-										availableBackends.length === 0 ? "暂无可用后端" : "选择后端"
+										availableBackends.length === 0
+											? t("session.backendEmpty")
+											: t("session.backendPlaceholder")
 									}
 								/>
 							</SelectTrigger>
@@ -121,20 +125,20 @@ export function CreateSessionDialog({
 						</Select>
 					</div>
 					<div className="flex flex-col gap-2">
-						<Label htmlFor="session-cwd">工作目录</Label>
+						<Label htmlFor="session-cwd">{t("session.cwdLabel")}</Label>
 						<InputGroup>
 							<InputGroupInput
 								id="session-cwd"
 								value={draftCwd ?? ""}
 								onChange={(event) => onDraftCwdChange(event.target.value)}
-								placeholder="输入或粘贴 Home 内路径"
+								placeholder={t("session.cwdPlaceholder")}
 							/>
 							<InputGroupAddon align="inline-end">
 								<InputGroupButton
 									type="button"
 									onClick={() => setDirectoryDialogOpen(true)}
 								>
-									浏览
+									{t("session.browse")}
 								</InputGroupButton>
 							</InputGroupAddon>
 						</InputGroup>
@@ -147,7 +151,7 @@ export function CreateSessionDialog({
 					/>
 				</div>
 				<AlertDialogFooter>
-					<AlertDialogCancel>取消</AlertDialogCancel>
+					<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
 					<AlertDialogAction
 						disabled={isCreating || !draftBackendId || !draftCwd}
 						onClick={(event) => {
@@ -155,7 +159,7 @@ export function CreateSessionDialog({
 							onCreate();
 						}}
 					>
-						{isCreating ? "创建中..." : "创建"}
+						{isCreating ? t("common.creating") : t("common.create")}
 					</AlertDialogAction>
 				</AlertDialogFooter>
 			</AlertDialogContent>

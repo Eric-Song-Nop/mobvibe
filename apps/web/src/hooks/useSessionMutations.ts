@@ -22,6 +22,7 @@ import type {
 	PermissionDecisionState,
 	StatusVariant,
 } from "@/lib/chat-store";
+import { useTranslation } from "react-i18next";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 
 type SessionMetadata = Partial<
@@ -134,6 +135,7 @@ const applySessionSummary = (
  * as well as setting mode, model, sending messages, and handling permissions.
  */
 export function useSessionMutations(store: ChatStoreActions) {
+	const { t } = useTranslation();
 	const createSessionMutation = useMutation({
 		mutationFn: createSession,
 		onSuccess: (data) => {
@@ -162,7 +164,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 			store.setAppError(
 				normalizeError(
 					mutationError,
-					createFallbackError("创建会话失败", "service"),
+					createFallbackError(t("errors.createSessionFailed"), "service"),
 				),
 			);
 		},
@@ -174,7 +176,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 			store.setAppError(
 				normalizeError(
 					mutationError,
-					createFallbackError("重命名失败", "session"),
+					createFallbackError(t("errors.renameSessionFailed"), "session"),
 				),
 			);
 		},
@@ -190,7 +192,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 			store.setAppError(
 				normalizeError(
 					mutationError,
-					createFallbackError("关闭会话失败", "session"),
+					createFallbackError(t("errors.closeSessionFailed"), "session"),
 				),
 			);
 		},
@@ -203,7 +205,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 		},
 		onSuccess: (_data, variables) => {
 			store.addStatusMessage(variables.sessionId, {
-				title: "已取消本次生成",
+				title: t("statusMessages.cancelled"),
 				variant: "warning",
 			});
 			store.finalizeAssistantMessage(variables.sessionId);
@@ -216,7 +218,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 			store.setAppError(
 				normalizeError(
 					mutationError,
-					createFallbackError("取消会话失败", "session"),
+					createFallbackError(t("errors.cancelSessionFailed"), "session"),
 				),
 			);
 		},
@@ -232,7 +234,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 			store.setAppError(
 				normalizeError(
 					mutationError,
-					createFallbackError("切换模式失败", "session"),
+					createFallbackError(t("errors.switchModeFailed"), "session"),
 				),
 			);
 		},
@@ -248,7 +250,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 			store.setAppError(
 				normalizeError(
 					mutationError,
-					createFallbackError("切换模型失败", "session"),
+					createFallbackError(t("errors.switchModelFailed"), "session"),
 				),
 			);
 		},
@@ -260,7 +262,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 			store.setAppError(
 				normalizeError(
 					mutationError,
-					createFallbackError("发送失败", "session"),
+					createFallbackError(t("errors.sendFailed"), "session"),
 				),
 			);
 		},
@@ -282,7 +284,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 			store.setAppError(
 				normalizeError(
 					mutationError,
-					createFallbackError("获取消息 ID 失败", "session"),
+					createFallbackError(t("errors.messageIdFailed"), "session"),
 				),
 			);
 		},
@@ -310,7 +312,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 			store.setAppError(
 				normalizeError(
 					mutationError,
-					createFallbackError("权限处理失败", "session"),
+					createFallbackError(t("errors.permissionDecisionFailed"), "session"),
 				),
 			);
 		},

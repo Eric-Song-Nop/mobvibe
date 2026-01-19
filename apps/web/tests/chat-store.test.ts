@@ -17,21 +17,21 @@ describe("useChatStore", () => {
 
 	it("creates a local session when missing", () => {
 		useChatStore.getState().createLocalSession("session-1", {
-			title: "测试对话",
+			title: "Test conversation",
 			state: "ready",
 		});
 
 		const session = useChatStore.getState().sessions["session-1"];
 		expect(session).toBeTruthy();
-		expect(session.title).toBe("测试对话");
+		expect(session.title).toBe("Test conversation");
 		expect(session.state).toBe("ready");
 	});
 
 	it("streams assistant messages and finalizes", () => {
 		const store = useChatStore.getState();
-		store.addUserMessage("session-1", "你好");
-		store.appendAssistantChunk("session-1", "你好，我是");
-		store.appendAssistantChunk("session-1", "助手");
+		store.addUserMessage("session-1", "Hello");
+		store.appendAssistantChunk("session-1", "Hello, I am ");
+		store.appendAssistantChunk("session-1", "your assistant");
 		store.finalizeAssistantMessage("session-1");
 
 		const session = useChatStore.getState().sessions["session-1"];
@@ -40,7 +40,7 @@ describe("useChatStore", () => {
 		expect(session.messages[0].isStreaming).toBe(false);
 		expect(session.messages[1].role).toBe("assistant");
 		if (session.messages[1].kind === "text") {
-			expect(session.messages[1].content).toBe("你好，我是助手");
+			expect(session.messages[1].content).toBe("Hello, I am your assistant");
 		}
 		expect(session.messages[1].isStreaming).toBe(false);
 		expect(session.streamingMessageId).toBeUndefined();
@@ -48,7 +48,7 @@ describe("useChatStore", () => {
 
 	it("marks missing sessions as stopped", () => {
 		useChatStore.getState().createLocalSession("session-1", {
-			title: "旧对话",
+			title: "Old conversation",
 			state: "ready",
 		});
 

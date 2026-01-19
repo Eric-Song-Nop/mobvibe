@@ -1,6 +1,7 @@
 import { ComputerIcon, SettingsIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { CommandCombobox } from "@/components/app/CommandCombobox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,6 +44,7 @@ export function ChatFooter({
 	onCancel,
 	onInputChange,
 }: ChatFooterProps) {
+	const { t } = useTranslation();
 	const availableModels = activeSession?.availableModels ?? [];
 	const availableModes = activeSession?.availableModes ?? [];
 	const availableCommands = activeSession?.availableCommands ?? [];
@@ -163,12 +165,12 @@ export function ChatFooter({
 											strokeWidth={2}
 											className="size-4"
 										/>
-										<SelectValue placeholder="Model" className="sr-only" />
+										<SelectValue placeholder={t("chat.modelLabel")} className="sr-only" />
 									</SelectTrigger>
 									<SelectContent>
 										{availableModels.map((model) => (
 											<SelectItem key={model.id} value={model.id}>
-												Model: {model.name}
+												{t("chat.modelLabelWithValue", { value: model.name })}
 											</SelectItem>
 										))}
 									</SelectContent>
@@ -180,7 +182,7 @@ export function ChatFooter({
 										strokeWidth={2}
 										className="size-4"
 									/>
-									<span className="sr-only">Model: {modelLabel}</span>
+									<span className="sr-only">{t("chat.modelLabelWithValue", { value: modelLabel })}</span>
 								</Badge>
 							) : null}
 							{availableModes.length > 0 ? (
@@ -198,12 +200,12 @@ export function ChatFooter({
 											strokeWidth={2}
 											className="size-4"
 										/>
-										<SelectValue placeholder="Mode" className="sr-only" />
+										<SelectValue placeholder={t("chat.modeLabel")} className="sr-only" />
 									</SelectTrigger>
 									<SelectContent>
 										{availableModes.map((mode) => (
 											<SelectItem key={mode.id} value={mode.id}>
-												Mode: {mode.name}
+												{t("chat.modeLabelWithValue", { value: mode.name })}
 											</SelectItem>
 										))}
 									</SelectContent>
@@ -215,7 +217,7 @@ export function ChatFooter({
 										strokeWidth={2}
 										className="size-4"
 									/>
-									<span className="sr-only">Mode: {modeLabel}</span>
+									<span className="sr-only">{t("chat.modeLabelWithValue", { value: modeLabel })}</span>
 								</Badge>
 							) : null}
 						</div>
@@ -253,7 +255,7 @@ export function ChatFooter({
 								onSend();
 							}
 						}}
-						placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+						placeholder={t("chat.placeholder")}
 						rows={MESSAGE_INPUT_ROWS}
 						disabled={!activeSessionId}
 					/>
@@ -267,7 +269,9 @@ export function ChatFooter({
 									!activeSessionId || activeSession.canceling || !isReady
 								}
 							>
-								{activeSession.canceling ? "停止中..." : "停止"}
+								{activeSession.canceling
+									? t("chat.stopping")
+									: t("chat.stop")}
 							</Button>
 						) : null}
 						<Button
@@ -280,7 +284,7 @@ export function ChatFooter({
 								!isReady
 							}
 						>
-							发送
+							{t("chat.send")}
 						</Button>
 					</div>
 				</div>
@@ -303,14 +307,14 @@ export function ChatFooter({
 											className="size-4"
 										/>
 										<SelectValue
-											placeholder="Model"
+											placeholder={t("chat.modelLabel")}
 											className="sr-only md:not-sr-only"
 										/>
 									</SelectTrigger>
 									<SelectContent>
 										{availableModels.map((model) => (
 											<SelectItem key={model.id} value={model.id}>
-												Model: {model.name}
+												{t("chat.modelLabelWithValue", { value: model.name })}
 											</SelectItem>
 										))}
 									</SelectContent>
@@ -323,7 +327,7 @@ export function ChatFooter({
 										className="size-4"
 									/>
 									<span className="sr-only md:not-sr-only">
-										Model: {modelLabel}
+										{t("chat.modelLabelWithValue", { value: modelLabel })}
 									</span>
 								</Badge>
 							) : null}
@@ -343,14 +347,14 @@ export function ChatFooter({
 											className="size-4"
 										/>
 										<SelectValue
-											placeholder="Mode"
+											placeholder={t("chat.modeLabel")}
 											className="sr-only md:not-sr-only"
 										/>
 									</SelectTrigger>
 									<SelectContent>
 										{availableModes.map((mode) => (
 											<SelectItem key={mode.id} value={mode.id}>
-												Mode: {mode.name}
+												{t("chat.modeLabelWithValue", { value: mode.name })}
 											</SelectItem>
 										))}
 									</SelectContent>
@@ -363,14 +367,14 @@ export function ChatFooter({
 										className="size-4"
 									/>
 									<span className="sr-only md:not-sr-only">
-										Mode: {modeLabel}
+										{t("chat.modeLabelWithValue", { value: modeLabel })}
 									</span>
 								</Badge>
 							) : null}
 						</div>
 						{activeSession?.sending ? (
 							<span className="text-muted-foreground text-xs">
-								正在发送中...
+								{t("chat.sending")}
 							</span>
 						) : null}
 					</div>

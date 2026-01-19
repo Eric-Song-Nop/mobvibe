@@ -2,6 +2,7 @@ import { FolderOpenIcon, Loading03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
 	ColumnFileBrowser,
 	useColumnFileBrowser,
@@ -39,6 +40,7 @@ export function FileExplorerDialog({
 	sessionId,
 	initialFilePath,
 }: FileExplorerDialogProps) {
+	const { t } = useTranslation();
 	const [currentPath, setCurrentPath] = useState<string | undefined>();
 	const [selectedFilePath, setSelectedFilePath] = useState<
 		string | undefined
@@ -51,7 +53,7 @@ export function FileExplorerDialog({
 		queryKey: ["session-fs-roots", sessionId],
 		queryFn: () => {
 			if (!sessionId) {
-				throw createFallbackError("会话不可用", "request");
+				throw createFallbackError(t("errors.sessionUnavailable"), "request");
 			}
 			return fetchSessionFsRoots({ sessionId });
 		},
@@ -60,16 +62,16 @@ export function FileExplorerDialog({
 
 	const root = rootsQuery.data?.root;
 	const rootPath = root?.path;
-	const rootLabel = root?.name ?? "工作目录";
+	const rootLabel = root?.name ?? t("session.cwdLabel");
 
 	const fetchEntries = useCallback(
 		async (payload: { path: string }) => {
 			if (!sessionId) {
-				throw createFallbackError("会话不可用", "request");
+				throw createFallbackError(t("errors.sessionUnavailable"), "request");
 			}
 			return fetchSessionFsEntries({ sessionId, path: payload.path });
 		},
-		[sessionId],
+		[sessionId, t],
 	);
 
 	const handleDirectorySelect = useCallback((_nextPath: string) => {
@@ -100,7 +102,7 @@ export function FileExplorerDialog({
 		onSelect: handleDirectorySelect,
 		onFileSelect: handleFileSelect,
 		fetchEntries,
-		errorMessage: "目录加载失败",
+		errorMessage: t("errors.directoryLoadFailed"),
 	});
 
 	useEffect(() => {
@@ -121,7 +123,7 @@ export function FileExplorerDialog({
 		queryKey: ["session-fs-file", sessionId, selectedFilePath],
 		queryFn: () => {
 			if (!sessionId || !selectedFilePath) {
-				throw createFallbackError("路径不可用", "request");
+				throw createFallbackError(t("errors.pathUnavailable"), "request");
 			}
 			return fetchSessionFsFile({ sessionId, path: selectedFilePath });
 		},
@@ -154,13 +156,13 @@ export function FileExplorerDialog({
 	const rootsError = rootsQuery.isError
 		? normalizeError(
 				rootsQuery.error,
-				createFallbackError("根目录加载失败", "request"),
+				createFallbackError(t("errors.rootLoadFailed"), "request"),
 			).message
 		: undefined;
 	const previewError = previewQuery.isError
 		? normalizeError(
 				previewQuery.error,
-				createFallbackError("预览加载失败", "request"),
+				createFallbackError(t("errors.previewLoadFailed"), "request"),
 			).message
 		: undefined;
 
@@ -196,7 +198,7 @@ export function FileExplorerDialog({
 					<div className="flex w-full items-center justify-between gap-3">
 						<AlertDialogTitle className="flex items-center gap-2">
 							<HugeiconsIcon icon={FolderOpenIcon} strokeWidth={2} />
-							会话文件
+							{t("fileExplorer.sessionFiles")}
 						</AlertDialogTitle>
 						<div className="flex items-center gap-2 sm:hidden">
 							<Button
@@ -204,7 +206,7 @@ export function FileExplorerDialog({
 								size="sm"
 								onClick={() => setActivePane("browser")}
 							>
-								目录
+								{t("fileExplorer.directories")}
 							</Button>
 							<Button
 								variant={activePane === "preview" ? "secondary" : "outline"}
@@ -212,7 +214,7 @@ export function FileExplorerDialog({
 								onClick={() => setActivePane("preview")}
 								disabled={!selectedFilePath}
 							>
-								预览
+								{t("fileExplorer.preview")}
 							</Button>
 						</div>
 					</div>
@@ -261,20 +263,20 @@ export function FileExplorerDialog({
 						<div className="flex min-h-0 flex-1 flex-col gap-2">
 							<div className="flex items-center justify-between gap-2">
 								<div className="text-xs font-medium">
-									{selectedFileName ?? "预览"}
+									{selectedFileName ?? t("fileExplorer.previewTitleFallback")}
 								</div>
 								{selectedFilePath ? (
 									<span className="text-muted-foreground text-xs">
 										{previewQuery.data?.previewType === "image"
-											? "图片模式"
-											: "代码模式"}
+											? t("fileExplorer.imageMode")
+											: t("fileExplorer.codeMode")}
 									</span>
 								) : null}
 							</div>
 							<div className="border-input bg-background flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-none border">
 								{!selectedFilePath ? (
 									<div className="text-muted-foreground flex flex-1 items-center justify-center px-3 text-xs">
-										选择文件后查看预览
+										{t("fileExplorer.selectFileHint")}
 									</div>
 								) : previewQuery.isLoading ? (
 									<div className="text-muted-foreground flex flex-1 items-center justify-center gap-2 text-xs">
@@ -283,7 +285,7 @@ export function FileExplorerDialog({
 											strokeWidth={2}
 											className="animate-spin"
 										/>
-										加载预览中...
+										{t("fileExplorer.loadingPreview")}
 									</div>
 								) : previewError ? (
 									<div className="text-destructive flex flex-1 items-center justify-center px-3 text-xs">
@@ -293,7 +295,7 @@ export function FileExplorerDialog({
 									previewRenderer(previewQuery.data)
 								) : (
 									<div className="text-muted-foreground flex flex-1 items-center justify-center px-3 text-xs">
-										当前格式暂不支持
+										{t("fileExplorer.unsupportedFormat")}
 									</div>
 								)}
 							</div>
@@ -302,9 +304,10 @@ export function FileExplorerDialog({
 				</div>
 
 				<AlertDialogFooter>
-					<AlertDialogCancel>关闭</AlertDialogCancel>
+					<AlertDialogCancel>{t("common.close")}</AlertDialogCancel>
 				</AlertDialogFooter>
 			</AlertDialogContent>
 		</AlertDialog>
 	);
 }
+

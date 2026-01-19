@@ -1,4 +1,5 @@
 import { Streamdown } from "streamdown";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -31,6 +32,7 @@ type TerminalOutputBlockProps = {
 	output?: string;
 	truncated?: boolean;
 	exitStatus?: { exitCode?: number | null; signal?: string | null };
+	getLabel: (key: string, options?: Record<string, unknown>) => string;
 };
 
 const TerminalOutputBlock = ({
@@ -38,23 +40,30 @@ const TerminalOutputBlock = ({
 	output,
 	truncated,
 	exitStatus,
+	getLabel,
 }: TerminalOutputBlockProps) => (
 	<div className="rounded border border-border bg-background/80 px-2 py-1 text-xs text-muted-foreground">
 		<pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words">
-			{output && output.length > 0 ? output : "(无输出)"}
+			{output && output.length > 0
+				? output
+				: getLabel("toolCall.noOutput")}
 		</pre>
 		{exitStatus ? (
 			<div className="mt-1 text-[11px] text-muted-foreground">
-				结束: {exitStatus.exitCode ?? "-"}
+				{getLabel("toolCall.exitStatus", {
+					code: exitStatus.exitCode ?? "-",
+				})}
 				{exitStatus.signal ? ` (${exitStatus.signal})` : ""}
 			</div>
 		) : null}
 		{truncated ? (
-			<div className="mt-1 text-[11px] text-muted-foreground">输出已截断</div>
+			<div className="mt-1 text-[11px] text-muted-foreground">
+				{getLabel("toolCall.outputTruncated")}
+			</div>
 		) : null}
 		{!output ? (
 			<div className="mt-1 text-[11px] text-muted-foreground">
-				终端输出等待中（{terminalId}）
+				{getLabel("toolCall.terminalWaiting", { terminalId })}
 			</div>
 		) : null}
 	</div>
@@ -165,9 +174,12 @@ const renderUnknownContent = (payload: ToolCallContentPayload, key: string) => (
 const renderImageContent = (
 	content: ImageContent,
 	key: string,
+	getLabel: (key: string, options?: Record<string, unknown>) => string,
 	onOpenFilePreview?: (path: string) => void,
 ) => {
-	const label = resolveResourceLabel(content.uri ?? "image");
+	const label = resolveResourceLabel(
+		content.uri ?? getLabel("toolCall.image"),
+	);
 	const source = content.data
 		? buildDataUri(content.mimeType, content.data)
 		: content.uri;
@@ -182,7 +194,7 @@ const renderImageContent = (
 			className="rounded border border-border bg-background/80 px-2 py-1 text-xs text-muted-foreground"
 		>
 			<div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-				<span>图片</span>
+				<span>{getLabel("toolCall.image")}</span>
 				{content.uri ? (
 					renderResourceLabel(label, content.uri, onOpenFilePreview)
 				) : (
@@ -198,14 +210,18 @@ const renderImageContent = (
 				/>
 			) : (
 				<div className="mt-2 text-[11px] text-muted-foreground">
-					无法直接预览
+					{getLabel("toolCall.imagePreviewUnavailable")}
 				</div>
 			)}
 		</div>
 	);
 };
 
-const renderAudioContent = (content: AudioContent, key: string) => {
+const renderAudioContent = (
+	content: AudioContent,
+	key: string,
+	getLabel: (key: string, options?: Record<string, unknown>) => string,
+) => {
 	const source = buildDataUri(content.mimeType, content.data);
 	return (
 		<div
@@ -213,7 +229,7 @@ const renderAudioContent = (content: AudioContent, key: string) => {
 			className="rounded border border-border bg-background/80 px-2 py-1 text-xs text-muted-foreground"
 		>
 			<div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-				<span>音频</span>
+				<span>{getLabel("toolCall.audio")}</span>
 				<span>{content.mimeType}</span>
 			</div>
 			<audio controls className="mt-2 w-full">
@@ -226,6 +242,7 @@ const renderAudioContent = (content: AudioContent, key: string) => {
 const renderResourceContent = (
 	content: ResourceContent,
 	key: string,
+	getLabel: (key: string, options?: Record<string, unknown>) => string,
 	onOpenFilePreview?: (path: string) => void,
 ) => {
 	const label = resolveResourceLabel(content.resource.uri);
@@ -235,7 +252,7 @@ const renderResourceContent = (
 			className="rounded border border-border bg-background/80 px-2 py-1 text-xs text-muted-foreground"
 		>
 			<div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-				<span>资源</span>
+				<span>{getLabel("toolCall.resource")}</span>
 				{renderResourceLabel(label, content.resource.uri, onOpenFilePreview)}
 				{content.resource.mimeType ? (
 					<span>{content.resource.mimeType}</span>
@@ -246,10 +263,12 @@ const renderResourceContent = (
 					{content.resource.text}
 				</pre>
 			) : content.resource.blob ? (
-				<div className="mt-2 text-[11px] text-muted-foreground">二进制资源</div>
+				<div className="mt-2 text-[11px] text-muted-foreground">
+					{getLabel("toolCall.binaryResource")}
+				</div>
 			) : (
 				<div className="mt-2 text-[11px] text-muted-foreground">
-					资源内容不可用
+					{getLabel("toolCall.resourceUnavailable")}
 				</div>
 			)}
 		</div>
@@ -259,6 +278,7 @@ const renderResourceContent = (
 const renderResourceLinkContent = (
 	content: ResourceLinkContent,
 	key: string,
+	getLabel: (key: string, options?: Record<string, unknown>) => string,
 	onOpenFilePreview?: (path: string) => void,
 ) => {
 	const label = resolveResourceLabel(content.uri, content.name, content.title);
@@ -274,7 +294,7 @@ const renderResourceLinkContent = (
 			className="rounded border border-border bg-background/80 px-2 py-1 text-xs text-muted-foreground"
 		>
 			<div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-				<span>资源链接</span>
+				<span>{getLabel("toolCall.resourceLink")}</span>
 				{renderResourceLabel(label, content.uri, onOpenFilePreview)}
 				{meta ? <span>{meta}</span> : null}
 			</div>
@@ -290,19 +310,30 @@ const renderResourceLinkContent = (
 const renderContentBlock = (
 	content: ContentBlock,
 	key: string,
+	getLabel: (key: string, options?: Record<string, unknown>) => string,
 	onOpenFilePreview?: (path: string) => void,
 ) => {
 	switch (content.type) {
 		case "text":
 			return renderTextContent(content.text, key);
 		case "image":
-			return renderImageContent(content, key, onOpenFilePreview);
+			return renderImageContent(content, key, getLabel, onOpenFilePreview);
 		case "audio":
-			return renderAudioContent(content, key);
+			return renderAudioContent(content, key, getLabel);
 		case "resource":
-			return renderResourceContent(content, key, onOpenFilePreview);
+			return renderResourceContent(
+				content,
+				key,
+				getLabel,
+				onOpenFilePreview,
+			);
 		case "resource_link":
-			return renderResourceLinkContent(content, key, onOpenFilePreview);
+			return renderResourceLinkContent(
+				content,
+				key,
+				getLabel,
+				onOpenFilePreview,
+			);
 		default:
 			return renderUnknownContent(content, key);
 	}
@@ -311,13 +342,19 @@ const renderContentBlock = (
 const renderToolCallContentPayload = (
 	payload: ToolCallContentPayload,
 	key: string,
+	getLabel: (key: string, options?: Record<string, unknown>) => string,
 	onOpenFilePreview?: (path: string) => void,
 ) => {
 	if (typeof payload === "string") {
 		return renderTextContent(payload, key);
 	}
 	if (payload && typeof payload === "object" && "type" in payload) {
-		return renderContentBlock(payload as ContentBlock, key, onOpenFilePreview);
+		return renderContentBlock(
+			payload as ContentBlock,
+			key,
+			getLabel,
+			onOpenFilePreview,
+		);
 	}
 	return renderUnknownContent(payload, key);
 };
@@ -325,6 +362,7 @@ const renderToolCallContentPayload = (
 const renderDiffBlock = (
 	content: Extract<ToolCallContent, { type: "diff" }>,
 	key: string,
+	getLabel: (key: string, options?: Record<string, unknown>) => string,
 	onOpenFilePreview?: (path: string) => void,
 ) => {
 	const label = resolveFileName(content.path);
@@ -334,7 +372,7 @@ const renderDiffBlock = (
 			className="rounded border border-border bg-background/80 px-2 py-1 text-xs text-muted-foreground"
 		>
 			<div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-				<span>差异</span>
+				<span>{getLabel("toolCall.diff")}</span>
 				{onOpenFilePreview ? (
 					<button
 						type="button"
@@ -352,13 +390,17 @@ const renderDiffBlock = (
 			</div>
 			<div className="mt-2 space-y-2">
 				<div>
-					<div className="text-[11px] text-muted-foreground">原始</div>
+					<div className="text-[11px] text-muted-foreground">
+						{getLabel("toolCall.original")}
+					</div>
 					<pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-foreground">
-						{content.oldText ?? "(新文件)"}
+						{content.oldText ?? getLabel("toolCall.newFile")}
 					</pre>
 				</div>
 				<div>
-					<div className="text-[11px] text-muted-foreground">更新</div>
+					<div className="text-[11px] text-muted-foreground">
+						{getLabel("toolCall.updated")}
+					</div>
 					<pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-foreground">
 						{content.newText}
 					</pre>
@@ -405,21 +447,24 @@ const collectToolCallPaths = (
 	return Array.from(paths);
 };
 
-const resolveStatusLabel = (status?: string) => {
+const resolveStatusLabel = (
+	status: string | undefined,
+	getLabel: (key: string, options?: Record<string, unknown>) => string,
+) => {
 	if (!status) {
-		return "未知";
+		return getLabel("toolCall.statusUnknown");
 	}
 	switch (status) {
 		case "pending":
-			return "等待";
+			return getLabel("toolCall.statusPending");
 		case "in_progress":
-			return "进行中";
+			return getLabel("toolCall.statusInProgress");
 		case "completed":
-			return "完成";
+			return getLabel("toolCall.statusCompleted");
 		case "failed":
-			return "失败";
+			return getLabel("toolCall.statusFailed");
 		default:
-			return "未知";
+			return getLabel("toolCall.statusUnknown");
 	}
 };
 
@@ -430,6 +475,9 @@ export const MessageItem = ({
 	onPermissionDecision,
 	onOpenFilePreview,
 }: MessageItemProps) => {
+	const { t } = useTranslation();
+	const getLabel = (key: string, options?: Record<string, unknown>) =>
+		t(key, { defaultValue: key, ...options });
 	const isUser = message.role === "user";
 	const terminalOutputs = useChatStore((state) => state.sessions);
 	if (message.kind === "status") {
@@ -446,7 +494,7 @@ export const MessageItem = ({
 				<Card size="sm" className="max-w-[85%] border-border bg-background">
 					<CardContent className="flex flex-col gap-2 text-sm">
 						<div className="flex flex-wrap items-center gap-2 text-xs">
-							<Badge variant={badgeVariant}>状态</Badge>
+							<Badge variant={badgeVariant}>{getLabel("toolCall.status")}</Badge>
 							<span className="text-foreground font-medium">
 								{message.title}
 							</span>
@@ -463,7 +511,7 @@ export const MessageItem = ({
 	}
 	if (message.kind === "permission") {
 		const toolLabel =
-			message.toolCall?.title ?? message.toolCall?.name ?? "工具调用";
+			message.toolCall?.title ?? message.toolCall?.name ?? getLabel("toolCall.toolCall");
 		const toolId = message.toolCall?.toolCallId ?? message.requestId;
 		const toolCommand = message.toolCall?.command;
 		const toolArgs = message.toolCall?.args?.join(" ");
@@ -474,7 +522,9 @@ export const MessageItem = ({
 				<Card size="sm" className="max-w-[85%] border-border bg-background">
 					<CardContent className="flex flex-col gap-3 text-sm">
 						<div className="flex flex-wrap items-center gap-2 text-xs">
-							<Badge variant="outline">权限请求</Badge>
+							<Badge variant="outline">
+								{getLabel("toolCall.permissionRequest")}
+							</Badge>
 							<span className="text-foreground font-medium">{toolLabel}</span>
 							{toolId ? (
 								<span className="text-muted-foreground">
@@ -518,19 +568,21 @@ export const MessageItem = ({
 									})
 								}
 							>
-								拒绝
+								{getLabel("toolCall.permissionDenied")}
 							</Button>
 						</div>
 						{message.decisionState === "submitting" ? (
 							<div className="text-muted-foreground text-xs">
-								正在提交权限选择...
+								{getLabel("toolCall.permissionSubmitting")}
 							</div>
 						) : null}
 						{message.outcome ? (
 							<div className="text-muted-foreground text-xs">
 								{message.outcome.outcome === "cancelled"
-									? "已拒绝"
-									: `已允许: ${message.outcome.optionId}`}
+									? getLabel("toolCall.permissionDenied")
+									: getLabel("toolCall.permissionAllowed", {
+											optionId: message.outcome.optionId,
+										})}
 							</div>
 						) : null}
 					</CardContent>
@@ -539,8 +591,8 @@ export const MessageItem = ({
 		);
 	}
 	if (message.kind === "tool_call") {
-		const label = message.title ?? message.name ?? "工具调用";
-		const statusLabel = resolveStatusLabel(message.status);
+		const label = message.title ?? message.name ?? getLabel("toolCall.toolCall");
+		const statusLabel = resolveStatusLabel(message.status, getLabel);
 		const durationLabel =
 			message.duration !== undefined ? `${message.duration}ms` : undefined;
 		const statusBadgeVariant =
@@ -565,11 +617,12 @@ export const MessageItem = ({
 				return renderToolCallContentPayload(
 					contentBlock.content,
 					key,
+					getLabel,
 					onOpenFilePreview,
 				);
 			}
 			if (contentBlock.type === "diff") {
-				return renderDiffBlock(contentBlock, key, onOpenFilePreview);
+				return renderDiffBlock(contentBlock, key, getLabel, onOpenFilePreview);
 			}
 			return null;
 		});
@@ -590,7 +643,7 @@ export const MessageItem = ({
 					<CardContent className="flex flex-col gap-3 text-sm">
 						<details className="group">
 							<summary className="flex flex-wrap items-center gap-2 text-xs cursor-pointer list-none">
-								<Badge variant="outline">工具调用</Badge>
+								<Badge variant="outline">{getLabel("toolCall.toolCall")}</Badge>
 								<span className="text-foreground font-medium">{label}</span>
 								{message.status ? (
 									<Badge variant={statusBadgeVariant}>{statusLabel}</Badge>
@@ -632,7 +685,7 @@ export const MessageItem = ({
 								{hasOutputs ? (
 									<details className="rounded border border-border bg-muted/30 px-2 py-1">
 										<summary className="cursor-pointer text-xs text-muted-foreground">
-											输出
+											{getLabel("toolCall.output")}
 										</summary>
 										<div className="mt-2 flex flex-col gap-2 text-xs">
 											{outputBlocks?.filter(Boolean)}
@@ -646,13 +699,14 @@ export const MessageItem = ({
 														output={output?.output}
 														truncated={output?.truncated}
 														exitStatus={output?.exitStatus}
+														getLabel={getLabel}
 													/>
 												);
 											})}
 											{message.rawOutput ? (
 												<details className="rounded border border-border bg-background/80 px-2 py-1">
 													<summary className="cursor-pointer text-xs text-muted-foreground">
-														原始输出
+														{getLabel("toolCall.rawOutput")}
 													</summary>
 													<pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-muted-foreground">
 														{JSON.stringify(message.rawOutput, null, 2)}

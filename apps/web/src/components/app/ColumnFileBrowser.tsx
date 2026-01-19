@@ -11,6 +11,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import type { FsEntriesResponse, FsEntry } from "@/lib/api";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { cn } from "@/lib/utils";
@@ -291,7 +292,7 @@ export function ColumnFileBrowser({
 	currentPath,
 	highlightedEntryPath,
 	isLoading = false,
-	emptyLabel = "暂无内容",
+	emptyLabel,
 	onColumnSelect,
 	onEntrySelect,
 	filterEntry,
@@ -299,6 +300,9 @@ export function ColumnFileBrowser({
 	scrollContainerRef,
 	columnRefs,
 }: ColumnFileBrowserProps) {
+	const { t } = useTranslation();
+	const resolvedEmptyLabel = emptyLabel ?? t("fileBrowser.empty");
+
 	return (
 		<div
 			className={cn(
@@ -340,10 +344,11 @@ export function ColumnFileBrowser({
 									<span className="truncate">{column.name}</span>
 								</button>
 								<div className="flex min-h-0 flex-col overflow-y-auto">
-									{entries.length === 0 ? (
-										<div className="text-muted-foreground px-2 py-3 text-xs">
-											{emptyLabel}
-										</div>
+								{entries.length === 0 ? (
+									<div className="text-muted-foreground px-2 py-3 text-xs">
+										{resolvedEmptyLabel}
+									</div>
+
 									) : (
 										entries.map((entry) => {
 											const isSelected =
@@ -381,7 +386,7 @@ export function ColumnFileBrowser({
 								strokeWidth={2}
 								className="animate-spin"
 							/>
-							加载中...
+							{t("fileBrowser.loading")}
 						</div>
 					) : null}
 				</div>

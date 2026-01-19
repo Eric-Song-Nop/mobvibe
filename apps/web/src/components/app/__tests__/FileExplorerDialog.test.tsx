@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FsEntry, SessionFsFilePreviewResponse } from "@/lib/api";
+import i18n from "@/i18n";
 import * as api from "@/lib/api";
 import { FileExplorerDialog } from "../FileExplorerDialog";
 
@@ -50,23 +51,23 @@ vi.mock("@/components/ui/button", () => ({
 }));
 
 vi.mock("@/components/app/ColumnFileBrowser", () => {
-	const fileEntry: FsEntry = {
-		name: "notes.md",
-		path: "/workspace/notes.md",
-		type: "file",
-		hidden: false,
-	};
+		const fileEntry: FsEntry = {
+			name: "notes.md",
+			path: "/workspace/notes.md",
+			type: "file",
+			hidden: false,
+		};
 
-	return {
-		ColumnFileBrowser: ({
-			onEntrySelect,
-		}: {
-			onEntrySelect: (entry: FsEntry, columnIndex: number) => void;
-		}) => (
-			<button type="button" onClick={() => onEntrySelect(fileEntry, 0)}>
-				选择文件
-			</button>
-		),
+		return {
+			ColumnFileBrowser: ({
+				onEntrySelect,
+			}: {
+				onEntrySelect: (entry: FsEntry, columnIndex: number) => void;
+			}) => (
+				<button type="button" onClick={() => onEntrySelect(fileEntry, 0)}>
+					Select file
+				</button>
+			),
 		useColumnFileBrowser: ({
 			onFileSelect,
 		}: {
@@ -120,7 +121,7 @@ describe("FileExplorerDialog", () => {
 		vi.clearAllMocks();
 		vi.mocked(api.fetchSessionFsRoots).mockResolvedValue({
 			root: {
-				name: "工作目录",
+				name: i18n.t("session.cwdLabel"),
 				path: "/workspace",
 			},
 		});
@@ -139,18 +140,20 @@ describe("FileExplorerDialog", () => {
 	it("shows fallback title when no file selected", () => {
 		renderDialog();
 
-		expect(screen.getByText("预览", { selector: "div" })).toBeInTheDocument();
+		expect(
+			screen.getByText(i18n.t("fileExplorer.preview"), { selector: "div" }),
+		).toBeInTheDocument();
 	});
 
 	it("renders file name after selecting a file", async () => {
 		const user = userEvent.setup();
 		renderDialog();
 
-		await user.click(screen.getByRole("button", { name: "选择文件" }));
+		await user.click(screen.getByRole("button", { name: "Select file" }));
 
 		expect(screen.getByText("notes.md")).toBeInTheDocument();
 		expect(
-			screen.queryByText("预览", { selector: "div" }),
+			screen.queryByText(i18n.t("fileExplorer.preview"), { selector: "div" }),
 		).not.toBeInTheDocument();
 	});
 });

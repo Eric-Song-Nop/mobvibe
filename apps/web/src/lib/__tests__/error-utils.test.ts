@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import i18n from "@/i18n";
 import { ApiError, type ErrorDetail } from "../api";
 import {
 	buildSessionNotReadyError,
@@ -210,7 +211,7 @@ describe("error-utils", () => {
 
 		it("should have appropriate message", () => {
 			const error = buildStreamDisconnectedError();
-			expect(error.message).toBe("SSE 连接异常");
+			expect(error.message).toBe(i18n.t("errors.streamDisconnected"));
 		});
 
 		it("should mark as retryable", () => {
@@ -232,7 +233,7 @@ describe("error-utils", () => {
 
 		it("should have appropriate message", () => {
 			const error = buildSessionNotReadyError();
-			expect(error.message).toBe("会话未就绪，请重新创建对话");
+			expect(error.message).toBe(i18n.t("errors.sessionNotReady"));
 		});
 
 		it("should mark as retryable", () => {

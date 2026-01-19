@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionFsFilePreviewResponse } from "@/lib/api";
+import i18n from "@/i18n";
 import { CodePreview } from "../CodePreview";
 
 type TreeSitterTestFlag = { __ENABLE_TREESITTER_TESTS__?: boolean };
@@ -177,24 +178,32 @@ describe("CodePreview", () => {
 		render(<CodePreview payload={buildPayload()} />);
 
 		expect(screen.getByText("typescript")).toBeInTheDocument();
-		expect(screen.getByText("2 行")).toBeInTheDocument();
+		expect(
+			screen.getByText(i18n.t("codePreview.lineCount", { count: 2 })),
+		).toBeInTheDocument();
 	});
 
 	it("renders at least one line for empty content", () => {
 		render(<CodePreview payload={buildPayload({ content: "" })} />);
 
-		expect(screen.getByText("1 行")).toBeInTheDocument();
+		expect(
+			screen.getByText(i18n.t("codePreview.lineCount", { count: 1 })),
+		).toBeInTheDocument();
 	});
 
 	it("disables outline when tree-sitter unsupported", async () => {
 		setTreeSitterSupport(false);
 		render(<CodePreview payload={buildPayload()} />);
 
-		const outlineButton = screen.getByRole("button", { name: "大纲" });
+		const outlineButton = screen.getByRole("button", {
+			name: i18n.t("codePreview.outline"),
+		});
 		expect(outlineButton).toBeDisabled();
 
 		await waitFor(() => {
-			expect(screen.getByText("当前语言暂无大纲")).toBeInTheDocument();
+			expect(
+				screen.getByText(i18n.t("codePreview.outlineUnsupported")),
+			).toBeInTheDocument();
 		});
 	});
 

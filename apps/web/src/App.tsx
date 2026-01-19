@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AppHeader } from "@/components/app/AppHeader";
 import { AppSidebar } from "@/components/app/AppSidebar";
 import { ChatFooter } from "@/components/app/ChatFooter";
@@ -22,6 +23,7 @@ import { THEME_STORAGE_KEY, type ThemePreference } from "@/lib/ui-config";
 import { buildSessionTitle, getStatusVariant } from "@/lib/ui-utils";
 
 export function App() {
+	const { t } = useTranslation();
 	const {
 		sessions,
 		activeSessionId,
@@ -212,7 +214,7 @@ export function App() {
 		useMessageAutoScroll(activeSessionId, activeSession?.messages ?? []);
 
 	const handleOpenCreateDialog = () => {
-		setDraftTitle(buildSessionTitle(sessionList));
+		setDraftTitle(buildSessionTitle(sessionList, t));
 		setDraftBackendId(defaultBackendId);
 		setDraftCwd(lastCreatedCwd);
 		setCreateDialogOpen(true);
@@ -228,11 +230,11 @@ export function App() {
 
 	const handleCreateSession = async () => {
 		if (!draftBackendId) {
-			setAppError(createFallbackError("请选择后端", "request"));
+			setAppError(createFallbackError(t("errors.selectBackend"), "request"));
 			return;
 		}
 		if (!draftCwd) {
-			setAppError(createFallbackError("请选择工作目录", "request"));
+			setAppError(createFallbackError(t("errors.selectDirectory"), "request"));
 			return;
 		}
 		const title = draftTitle.trim();
@@ -390,19 +392,21 @@ export function App() {
 	};
 
 	const statusVariant = getStatusVariant(activeSessionState);
-	const statusLabel = activeSessionState ?? "idle";
+	const statusLabel = t(`status.${activeSessionState ?? "idle"}`, {
+		defaultValue: activeSessionState ?? "idle",
+	});
 
 	const statusMessage = useMemo(() => {
 		if (backendsQuery.isError) {
 			return normalizeError(
 				backendsQuery.error,
-				createFallbackError("后端列表获取失败", "service"),
+				createFallbackError(t("errors.backendsFetchFailed"), "service"),
 			).message;
 		}
 		if (sessionsQuery.isError) {
 			return normalizeError(
 				sessionsQuery.error,
-				createFallbackError("会话列表获取失败", "service"),
+				createFallbackError(t("errors.sessionsFetchFailed"), "service"),
 			).message;
 		}
 		return appError?.message ?? activeSession?.error?.message;
@@ -413,6 +417,7 @@ export function App() {
 		backendsQuery.isError,
 		sessionsQuery.error,
 		sessionsQuery.isError,
+		t,
 	]);
 
 	const streamError = activeSession?.streamError;

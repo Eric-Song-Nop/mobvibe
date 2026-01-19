@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import {
 	ComputerIcon,
 	MoonIcon,
@@ -16,6 +17,14 @@ import {
 	AlertDialogTitle,
 	AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import i18n, { supportedLanguages } from "@/i18n";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +39,17 @@ import { Input } from "@/components/ui/input";
 import { type ChatSession } from "@/lib/chat-store";
 import { getStatusVariant } from "@/lib/ui-utils";
 import { cn } from "@/lib/utils";
+
+const toThemePreference = (value: string): "light" | "dark" | "system" => {
+	switch (value) {
+		case "light":
+		case "dark":
+		case "system":
+			return value;
+		default:
+			return "system";
+	}
+};
 
 type SessionSidebarProps = {
 	sessions: ChatSession[];
@@ -64,48 +84,84 @@ export const SessionSidebar = ({
 	themePreference,
 	onThemePreferenceChange,
 }: SessionSidebarProps) => {
-	return (
-		<div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden">
-			<div className="flex items-center justify-between">
-				<div className="text-sm font-semibold">对话</div>
-				<div className="flex items-center gap-2">
-					<DropdownMenu>
-						<DropdownMenuTrigger asChild>
-							<Button variant="outline" size="icon-sm" aria-label="切换主题">
-								<HugeiconsIcon icon={PaintBoardIcon} strokeWidth={2} />
-							</Button>
-						</DropdownMenuTrigger>
+	const { t } = useTranslation();
+
+		return (
+			<div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden">
+				<div className="flex items-center justify-between">
+					<div className="flex items-center gap-2">
+						<div className="text-sm font-semibold">{t("session.title")}</div>
+						<div className="flex items-center">
+							<Select
+								value={i18n.resolvedLanguage ?? "en"}
+								onValueChange={(value) => i18n.changeLanguage(value)}
+							>
+								<SelectTrigger
+									size="sm"
+									className="h-7 w-20 justify-between px-2 text-xs"
+									aria-label={t("languageSwitcher.label")}
+									title={t("languageSwitcher.chooseLanguage")}
+								>
+									<SelectValue
+										placeholder={t("languageSwitcher.placeholder")}
+									/>
+								</SelectTrigger>
+								<SelectContent>
+									{supportedLanguages.map((lang) => (
+										<SelectItem key={lang} value={lang}>
+											{t(`common.languages.${lang}`)}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</div>
+					</div>
+					<div className="flex items-center gap-2">
+						<DropdownMenu>
+							<DropdownMenuTrigger asChild>
+								<Button
+									variant="outline"
+									size="icon-sm"
+									aria-label={t("theme.toggle")}
+								>
+									<HugeiconsIcon icon={PaintBoardIcon} strokeWidth={2} />
+								</Button>
+							</DropdownMenuTrigger>
 						<DropdownMenuContent align="end" className="w-40">
-							<DropdownMenuLabel>主题</DropdownMenuLabel>
+							<DropdownMenuLabel>{t("theme.label")}</DropdownMenuLabel>
 							<DropdownMenuRadioGroup
 								value={themePreference}
-								onValueChange={onThemePreferenceChange}
+								onValueChange={(value) =>
+									onThemePreferenceChange(toThemePreference(value))
+								}
 							>
 								<DropdownMenuRadioItem value="light">
 									<HugeiconsIcon icon={SunIcon} strokeWidth={2} />
-									浅色
+									{t("theme.light")}
 								</DropdownMenuRadioItem>
 								<DropdownMenuRadioItem value="dark">
 									<HugeiconsIcon icon={MoonIcon} strokeWidth={2} />
-									深色
+									{t("theme.dark")}
 								</DropdownMenuRadioItem>
 								<DropdownMenuRadioItem value="system">
 									<HugeiconsIcon icon={ComputerIcon} strokeWidth={2} />
-									跟随系统
+									{t("theme.system")}
 								</DropdownMenuRadioItem>
 							</DropdownMenuRadioGroup>
 						</DropdownMenuContent>
-					</DropdownMenu>
-					<Button onClick={onCreateSession} size="sm" disabled={isCreating}>
-						新建
-					</Button>
+						</DropdownMenu>
+						<Button onClick={onCreateSession} size="sm" disabled={isCreating}>
+							{t("common.new")}
+						</Button>
+					</div>
 				</div>
-			</div>
-			<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
-				{sessions.length === 0 ? (
-					<div className="text-muted-foreground text-xs">暂无对话</div>
-				) : null}
-				{sessions.map((session) => (
+				<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+					{sessions.length === 0 ? (
+						<div className="text-muted-foreground text-xs">
+							{t("session.empty")}
+						</div>
+					) : null}
+					{sessions.map((session) => (
 					<SessionListItem
 						key={session.sessionId}
 						session={session}
@@ -150,8 +206,12 @@ const SessionListItem = ({
 	onEditingTitleChange,
 	onClose,
 }: SessionListItemProps) => {
+	const { t } = useTranslation();
 	const statusVariant = getStatusVariant(session.state);
 	const backendLabel = session.backendLabel ?? session.backendId;
+	const statusLabel = t(`status.${session.state ?? "idle"}`, {
+		defaultValue: session.state ?? "idle",
+	});
 	const handleSelect = () => onSelect(session.sessionId);
 	return (
 		<div
@@ -184,7 +244,7 @@ const SessionListItem = ({
 						<span className="text-sm font-medium">{session.title}</span>
 					)}
 					<div className="flex items-center gap-2">
-						<Badge variant={statusVariant}>{session.state ?? "idle"}</Badge>
+						<Badge variant={statusVariant}>{statusLabel}</Badge>
 						{backendLabel ? (
 							<Badge variant="outline">{backendLabel}</Badge>
 						) : null}
@@ -203,37 +263,37 @@ const SessionListItem = ({
 				{isEditing ? (
 					<>
 						<Button size="xs" onClick={onEditSubmit}>
-							保存
+							{t("common.save")}
 						</Button>
 						<Button size="xs" variant="outline" onClick={onEditCancel}>
-							取消
+							{t("common.cancel")}
 						</Button>
 					</>
 				) : (
 					<Button size="xs" variant="ghost" onClick={() => onEdit(session)}>
-						改名
+						{t("common.rename")}
 					</Button>
 				)}
 				<AlertDialog>
 					<AlertDialogTrigger asChild>
 						<Button size="xs" variant="destructive">
-							关闭
+							{t("common.close")}
 						</Button>
 					</AlertDialogTrigger>
 					<AlertDialogContent size="sm">
 						<AlertDialogHeader>
-							<AlertDialogTitle>关闭对话？</AlertDialogTitle>
+							<AlertDialogTitle>{t("session.closeTitle")}</AlertDialogTitle>
 							<AlertDialogDescription>
-								关闭后将断开后端会话进程，前端仍保留消息记录。
+								{t("session.closeDescription")}
 							</AlertDialogDescription>
 						</AlertDialogHeader>
 						<AlertDialogFooter>
-							<AlertDialogCancel>取消</AlertDialogCancel>
+							<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
 							<AlertDialogAction
 								variant="destructive"
 								onClick={() => onClose(session.sessionId)}
 							>
-								确认关闭
+								{t("session.closeConfirm")}
 							</AlertDialogAction>
 						</AlertDialogFooter>
 					</AlertDialogContent>

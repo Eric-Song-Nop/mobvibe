@@ -2,6 +2,7 @@ import type { Language, RenderProps, Token } from "prism-react-renderer";
 import { Highlight, themes } from "prism-react-renderer";
 import type { CSSProperties, PointerEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Node, QueryCapture, QueryMatch } from "web-tree-sitter";
 import { Parser, Query, Language as TreeSitterLanguage } from "web-tree-sitter";
 import { Button } from "@/components/ui/button";
@@ -674,6 +675,7 @@ const getTextSlice = (
 };
 
 export function CodePreview({ payload }: CodePreviewProps) {
+	const { t } = useTranslation();
 	const themeMode = useResolvedTheme();
 	const parserRef = useRef<Parser | null>(null);
 	const codeContainerRef = useRef<HTMLDivElement | null>(null);
@@ -929,8 +931,16 @@ export function CodePreview({ payload }: CodePreviewProps) {
 											event.stopPropagation();
 											handleToggleCollapse(item.id);
 										}}
-										aria-label={isCollapsed ? "展开" : "折叠"}
-										title={isCollapsed ? "展开" : "折叠"}
+										aria-label={
+											isCollapsed
+												? t("codePreview.expand")
+												: t("codePreview.collapse")
+										}
+										title={
+											isCollapsed
+												? t("codePreview.expand")
+												: t("codePreview.collapse")
+										}
 									>
 										<span aria-hidden="true">{isCollapsed ? "▸" : "▾"}</span>
 									</Button>
@@ -950,7 +960,7 @@ export function CodePreview({ payload }: CodePreviewProps) {
 									onPointerUp={handlePressEnd}
 									onPointerLeave={handlePressEnd}
 									onPointerCancel={handlePressEnd}
-									title={`${item.label} · ${OUTLINE_KIND_LABELS[item.kind]} (长按复制)`}
+									title={`${item.label} · ${OUTLINE_KIND_LABELS[item.kind]} (${t("codePreview.longPressCopy")})`}
 									aria-label={`${item.label} · ${OUTLINE_KIND_LABELS[item.kind]}`}
 								>
 									<span className="file-preview-outline__label">
@@ -974,22 +984,38 @@ export function CodePreview({ payload }: CodePreviewProps) {
 	const renderOutlineBody = () => {
 		switch (outlineStatus) {
 			case "loading":
-				return <div className="file-preview-outline__empty">解析大纲中...</div>;
+				return (
+					<div className="file-preview-outline__empty">
+						{t("codePreview.outlineLoading")}
+					</div>
+				);
 			case "unsupported":
 				return (
-					<div className="file-preview-outline__empty">当前语言暂无大纲</div>
+					<div className="file-preview-outline__empty">
+						{t("codePreview.outlineUnsupported")}
+					</div>
 				);
 			case "error":
-				return <div className="file-preview-outline__empty">大纲解析失败</div>;
+				return (
+					<div className="file-preview-outline__empty">
+						{t("codePreview.outlineFailed")}
+					</div>
+				);
 			case "ready":
 				return outlineItems.length > 0 ? (
 					renderOutlineItems(outlineItems)
 				) : (
-					<div className="file-preview-outline__empty">暂无可用符号</div>
+					<div className="file-preview-outline__empty">
+						{t("codePreview.outlineEmpty")}
+					</div>
 				);
 			case "idle":
 			default:
-				return <div className="file-preview-outline__empty">暂无可用符号</div>;
+				return (
+					<div className="file-preview-outline__empty">
+						{t("codePreview.outlineEmpty")}
+					</div>
+				);
 		}
 	};
 
@@ -997,7 +1023,9 @@ export function CodePreview({ payload }: CodePreviewProps) {
 		<div className="file-preview-code">
 			<div className="file-preview-code__header">
 				<span className="file-preview-code__badge">{language}</span>
-				<span className="file-preview-code__meta">{`${lineCount} 行`}</span>
+				<span className="file-preview-code__meta">
+					{t("codePreview.lineCount", { count: lineCount })}
+				</span>
 			</div>
 			<div className="file-preview-code__body">
 				<div className="file-preview-code__toolbar">
@@ -1006,7 +1034,7 @@ export function CodePreview({ payload }: CodePreviewProps) {
 						size="sm"
 						onClick={() => setActivePane("code")}
 					>
-						代码
+						{t("codePreview.code")}
 					</Button>
 					<Button
 						variant={activePane === "outline" ? "secondary" : "outline"}
@@ -1014,7 +1042,7 @@ export function CodePreview({ payload }: CodePreviewProps) {
 						onClick={() => setActivePane("outline")}
 						disabled={outlineStatus === "unsupported"}
 					>
-						大纲
+						{t("codePreview.outline")}
 					</Button>
 				</div>
 				<div className="file-preview-code__layout">
@@ -1104,8 +1132,12 @@ export function CodePreview({ payload }: CodePreviewProps) {
 					>
 						<div className="file-preview-outline">
 							<div className="file-preview-outline__header">
-								<span className="file-preview-outline__title">代码大纲</span>
-								<span className="file-preview-outline__hint">长按复制</span>
+								<span className="file-preview-outline__title">
+									{t("codePreview.outlineTitle")}
+								</span>
+								<span className="file-preview-outline__hint">
+									{t("codePreview.outlineHint")}
+								</span>
 							</div>
 							<div className="file-preview-outline__body">
 								{renderOutlineBody()}

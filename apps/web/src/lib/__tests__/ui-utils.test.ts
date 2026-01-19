@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatSession } from "../chat-store";
+import i18n from "@/i18n";
 import { buildSessionTitle, getStatusVariant } from "../ui-utils";
 
 describe("ui-utils", () => {
@@ -49,18 +50,24 @@ describe("ui-utils", () => {
 				{ sessionId: "2" } as ChatSession,
 			];
 
-			expect(buildSessionTitle(sessions)).toBe("对话 3");
+			expect(buildSessionTitle(sessions, i18n.t)).toBe(
+				i18n.t("session.newTitle", { count: 3 }),
+			);
 		});
 
-		it("should return '对话 1' for empty sessions array", () => {
+		it("should return title for empty sessions array", () => {
 			const sessions: ChatSession[] = [];
-			expect(buildSessionTitle(sessions)).toBe("对话 1");
+			expect(buildSessionTitle(sessions, i18n.t)).toBe(
+				i18n.t("session.newTitle", { count: 1 }),
+			);
 		});
 
-		it("should return '对话 2' for single session", () => {
+		it("should return title for single session", () => {
 			const sessions: ChatSession[] = [{ sessionId: "1" } as ChatSession];
 
-			expect(buildSessionTitle(sessions)).toBe("对话 2");
+			expect(buildSessionTitle(sessions, i18n.t)).toBe(
+				i18n.t("session.newTitle", { count: 2 }),
+			);
 		});
 
 		it("should handle large session counts", () => {
@@ -68,7 +75,9 @@ describe("ui-utils", () => {
 				sessionId: String(i),
 			})) as ChatSession[];
 
-			expect(buildSessionTitle(sessions)).toBe("对话 101");
+			expect(buildSessionTitle(sessions, i18n.t)).toBe(
+				i18n.t("session.newTitle", { count: 101 }),
+			);
 		});
 	});
 });

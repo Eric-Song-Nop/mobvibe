@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { render } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
+import i18n from "../src/i18n";
 import { MessageItem } from "../src/components/chat/MessageItem";
 import type { ChatMessage, ChatSession } from "../src/lib/chat-store";
 import { useChatStore } from "../src/lib/chat-store";
@@ -19,7 +20,7 @@ const buildMessage = (overrides?: Partial<ChatMessage>): ChatMessage => {
 
 const buildSession = (overrides?: Partial<ChatSession>): ChatSession => ({
 	sessionId: "session-1",
-	title: "测试会话",
+	title: "Test session",
 	input: "",
 	messages: [],
 	terminalOutputs: {},
@@ -44,15 +45,15 @@ describe("MessageItem", () => {
 	});
 
 	it("renders user messages on the right", () => {
-		const message = buildMessage({ role: "user", content: "你好" });
+		const message = buildMessage({ role: "user", content: "Hello" });
 		const { container } = render(<MessageItem message={message} />);
 		expect(container.firstChild).toHaveClass("items-end");
 	});
 
 	it("renders assistant content with streaming opacity", () => {
-		const message = buildMessage({ isStreaming: true, content: "流式" });
+		const message = buildMessage({ isStreaming: true, content: "Streaming" });
 		const { container, getByText } = render(<MessageItem message={message} />);
-		expect(getByText("流式")).toBeInTheDocument();
+		expect(getByText("Streaming")).toBeInTheDocument();
 		expect(container.querySelector(".opacity-90")).toBeTruthy();
 	});
 
@@ -73,12 +74,16 @@ describe("MessageItem", () => {
 		const { container, getAllByText, getByText } = render(
 			<MessageItem message={message} />,
 		);
-		const details = getAllByText("工具调用")[0]?.closest("details");
+		const details = getAllByText(i18n.t("toolCall.toolCall"))[0]?.closest(
+			"details",
+		);
 		expect(details).toBeTruthy();
 		if (details) {
 			details.open = true;
 		}
-		const outputDetails = getByText("输出").closest("details");
+		const outputDetails = getByText(i18n.t("toolCall.output")).closest(
+			"details",
+		);
 		expect(outputDetails).toBeTruthy();
 		if (outputDetails) {
 			outputDetails.open = true;
@@ -166,23 +171,27 @@ describe("MessageItem", () => {
 		const { getAllByText, getByText, getByRole } = render(
 			<MessageItem message={message} />,
 		);
-		const details = getAllByText("工具调用")[0]?.closest("details");
+		const details = getAllByText(i18n.t("toolCall.toolCall"))[0]?.closest(
+			"details",
+		);
 		expect(details).toBeTruthy();
 		if (details) {
 			details.open = true;
 		}
-		const outputDetails = getByText("输出").closest("details");
+		const outputDetails = getByText(i18n.t("toolCall.output")).closest(
+			"details",
+		);
 		expect(outputDetails).toBeTruthy();
 		if (outputDetails) {
 			outputDetails.open = true;
 		}
-		expect(getByText("图片")).toBeInTheDocument();
-		expect(getByText("音频")).toBeInTheDocument();
-		expect(getByText("资源")).toBeInTheDocument();
-		expect(getByText("资源链接")).toBeInTheDocument();
-		expect(getByText("差异")).toBeInTheDocument();
-		expect(getByText("原始")).toBeInTheDocument();
-		expect(getByText("更新")).toBeInTheDocument();
+		expect(getAllByText(i18n.t("toolCall.image")).length).toBeGreaterThan(0);
+		expect(getAllByText(i18n.t("toolCall.audio")).length).toBeGreaterThan(0);
+		expect(getAllByText(i18n.t("toolCall.resource")).length).toBeGreaterThan(0);
+		expect(getAllByText(i18n.t("toolCall.resourceLink")).length).toBeGreaterThan(0);
+		expect(getAllByText(i18n.t("toolCall.diff")).length).toBeGreaterThan(0);
+		expect(getAllByText(i18n.t("toolCall.original")).length).toBeGreaterThan(0);
+		expect(getAllByText(i18n.t("toolCall.updated")).length).toBeGreaterThan(0);
 		expect(getByText("terminal output")).toBeInTheDocument();
 		const link = getByRole("link", { name: "resource" });
 		expect(link).toHaveAttribute("href", "https://example.com/resource");

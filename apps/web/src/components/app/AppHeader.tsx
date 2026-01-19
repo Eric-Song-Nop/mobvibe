@@ -1,5 +1,6 @@
 import { FolderOpenIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { ChatSession } from "@/lib/chat-store";
@@ -27,6 +28,8 @@ export function AppHeader({
 	showFileExplorer = false,
 	fileExplorerDisabled = false,
 }: AppHeaderProps) {
+	const { t } = useTranslation();
+
 	return (
 		<header className="bg-background/80 border-b px-4 py-3 backdrop-blur shrink-0">
 			<div className="mx-auto flex w-full max-w-5xl items-center gap-2">
@@ -44,7 +47,7 @@ export function AppHeader({
 					</Badge>
 					{backendLabel ? (
 						<Badge variant="outline" className="shrink-0">
-							后端: {backendLabel}
+							{t("status.backend")}: {backendLabel}
 						</Badge>
 					) : null}
 				</div>
@@ -52,7 +55,7 @@ export function AppHeader({
 					<Button
 						variant="outline"
 						size="icon-sm"
-						aria-label="打开文件浏览器"
+						aria-label={t("fileExplorer.openFileExplorer")}
 						disabled={fileExplorerDisabled}
 						onClick={() => onOpenFileExplorer?.()}
 					>

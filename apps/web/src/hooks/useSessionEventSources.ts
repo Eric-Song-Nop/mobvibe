@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { ChatStoreActions } from "@/hooks/useSessionMutations";
+import { useTranslation } from "react-i18next";
 import {
 	extractAvailableCommandsUpdate,
 	extractSessionInfoUpdate,
@@ -47,6 +48,7 @@ export function useSessionEventSources({
 	updateToolCall,
 	appendTerminalOutput,
 }: SessionEventSourceOptions) {
+	const { t } = useTranslation();
 	const sessionEventSourcesRef = useRef<Map<string, EventSource>>(new Map());
 
 	useEffect(() => {
@@ -111,7 +113,7 @@ export function useSessionEventSources({
 						session.sessionId,
 						normalizeError(
 							parseError,
-							createFallbackError("流式消息解析失败", "stream"),
+							createFallbackError(t("errors.streamParseFailed"), "stream"),
 						),
 					);
 				}
@@ -132,7 +134,7 @@ export function useSessionEventSources({
 						session.sessionId,
 						normalizeError(
 							parseError,
-							createFallbackError("权限请求解析失败", "stream"),
+							createFallbackError(t("errors.permissionRequestParseFailed"), "stream"),
 						),
 					);
 				}
@@ -158,7 +160,7 @@ export function useSessionEventSources({
 						session.sessionId,
 						normalizeError(
 							parseError,
-							createFallbackError("权限结果解析失败", "stream"),
+							createFallbackError(t("errors.permissionResultParseFailed"), "stream"),
 						),
 					);
 				}
@@ -179,7 +181,7 @@ export function useSessionEventSources({
 						session.sessionId,
 						normalizeError(
 							parseError,
-							createFallbackError("终端输出解析失败", "stream"),
+							createFallbackError(t("errors.terminalOutputParseFailed"), "stream"),
 						),
 					);
 				}
@@ -194,14 +196,14 @@ export function useSessionEventSources({
 					}
 					setStreamError(
 						session.sessionId,
-						createFallbackError("流式错误解析失败", "stream"),
+						createFallbackError(t("errors.streamErrorParseFailed"), "stream"),
 					);
 				} catch (parseError) {
 					setStreamError(
 						session.sessionId,
 						normalizeError(
 							parseError,
-							createFallbackError("流式错误解析失败", "stream"),
+							createFallbackError(t("errors.streamErrorParseFailed"), "stream"),
 						),
 					);
 				}
@@ -237,6 +239,7 @@ export function useSessionEventSources({
 		setPermissionDecisionState,
 		setPermissionOutcome,
 		setStreamError,
+		t,
 		updateSessionMeta,
 		updateToolCall,
 	]);

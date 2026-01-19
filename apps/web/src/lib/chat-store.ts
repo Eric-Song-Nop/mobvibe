@@ -17,6 +17,7 @@ import type {
 	SessionState,
 	SessionSummary,
 } from "@/lib/api";
+import i18n from "@/i18n";
 
 export type ChatRole = "user" | "assistant";
 
@@ -366,7 +367,7 @@ const createStatusMessage = (payload: {
 
 const createSessionClosedError = (): ErrorDetail => ({
 	code: "SESSION_NOT_FOUND",
-	message: "会话已结束或被关闭",
+	message: i18n.t("session.sessionClosed"),
 	retryable: false,
 	scope: "session",
 });
@@ -390,7 +391,7 @@ const createSessionState = (
 	},
 ): ChatSession => ({
 	sessionId,
-	title: options?.title ?? "新对话",
+	title: options?.title ?? i18n.t("session.defaultTitle"),
 	input: "",
 	messages: [],
 	terminalOutputs: {},
