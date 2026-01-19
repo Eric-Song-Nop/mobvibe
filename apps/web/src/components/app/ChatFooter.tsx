@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { AvailableCommand } from "@/lib/acp";
-import type { ChatSession } from "@/lib/chat-store";
+import { type ChatSession, useChatStore } from "@/lib/chat-store";
 import {
 	buildCommandSearchItems,
 	filterCommandItems,
@@ -30,7 +30,6 @@ export type ChatFooterProps = {
 	onModelChange: (modelId: string) => void;
 	onSend: () => void;
 	onCancel: () => void;
-	onInputChange: (value: string) => void;
 };
 
 export function ChatFooter({
@@ -42,8 +41,8 @@ export function ChatFooter({
 	onModelChange,
 	onSend,
 	onCancel,
-	onInputChange,
 }: ChatFooterProps) {
+	const { setInput } = useChatStore();
 	const { t } = useTranslation();
 	const availableModels = activeSession?.availableModels ?? [];
 	const availableModes = activeSession?.availableModes ?? [];
@@ -79,7 +78,9 @@ export function ChatFooter({
 
 	const handleCommandClick = (command: AvailableCommand) => {
 		const nextValue = `/${command.name}`;
-		onInputChange(nextValue);
+		if (activeSessionId) {
+			setInput(activeSessionId, nextValue);
+		}
 		setCommandHighlight(0);
 		setCommandPickerSuppressed(true);
 	};
@@ -235,7 +236,12 @@ export function ChatFooter({
 					<Textarea
 						className="flex-1 h-10 md:h-auto"
 						value={activeSession?.input ?? ""}
-						onChange={(event) => onInputChange(event.target.value)}
+						onChange={(event) => {
+							if (!activeSessionId) {
+								return;
+							}
+							setInput(activeSessionId, event.target.value);
+						}}
 						onKeyDown={(event) => {
 							if (shouldShowCommandPicker) {
 								if (event.key === "ArrowDown") {
@@ -255,7 +261,9 @@ export function ChatFooter({
 								}
 								if (event.key === "Escape") {
 									event.preventDefault();
-									onInputChange("");
+									if (activeSessionId) {
+										setInput(activeSessionId, "");
+									}
 									setCommandPickerSuppressed(false);
 									return;
 								}

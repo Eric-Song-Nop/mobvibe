@@ -1,10 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionSidebar } from "../src/components/session/SessionSidebar";
 import { ThemeProvider } from "../src/components/theme-provider";
 import i18n from "../src/i18n";
 import type { ChatSession } from "../src/lib/chat-store";
+import { useUiStore } from "../src/lib/ui-store";
 
 vi.mock("../src/components/ui/alert-dialog", () => ({
 	AlertDialog: ({ children }: { children: React.ReactNode }) => (
@@ -106,14 +107,9 @@ const renderSidebar = (
 			<SessionSidebar
 				sessions={sessions}
 				activeSessionId={options?.activeSessionId}
-				editingSessionId={options?.editingSessionId ?? null}
-				editingTitle={options?.editingTitle ?? ""}
 				onCreateSession={options?.onCreateSession ?? (() => {})}
 				onSelectSession={options?.onSelectSession ?? (() => {})}
-				onEditSession={options?.onEditSession ?? (() => {})}
-				onEditCancel={options?.onEditCancel ?? (() => {})}
 				onEditSubmit={options?.onEditSubmit ?? (() => {})}
-				onEditingTitleChange={options?.onEditingTitleChange ?? (() => {})}
 				onCloseSession={options?.onCloseSession ?? (() => {})}
 				isCreating={options?.isCreating ?? false}
 			/>
@@ -121,6 +117,20 @@ const renderSidebar = (
 	);
 
 describe("SessionSidebar", () => {
+	beforeEach(() => {
+		useUiStore.setState({
+			mobileMenuOpen: false,
+			createDialogOpen: false,
+			fileExplorerOpen: false,
+			filePreviewPath: undefined,
+			editingSessionId: null,
+			editingTitle: "",
+			draftTitle: "",
+			draftBackendId: undefined,
+			draftCwd: undefined,
+		});
+	});
+
 	it("shows empty state when no sessions", () => {
 		renderSidebar([]);
 		expect(screen.getByText(i18n.t("session.empty"))).toBeInTheDocument();
@@ -139,10 +149,11 @@ describe("SessionSidebar", () => {
 	});
 
 	it("renders editing input when in edit mode", () => {
-		renderSidebar([buildSession()], {
+		useUiStore.setState({
 			editingSessionId: "session-1",
 			editingTitle: "Updated title",
 		});
+		renderSidebar([buildSession()]);
 
 		const input = screen.getByDisplayValue("Updated title");
 		expect(input).toBeInTheDocument();

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { AppHeader } from "@/components/app/AppHeader";
 import { AppSidebar } from "@/components/app/AppSidebar";
@@ -13,13 +13,13 @@ import { useSessionEventSources } from "@/hooks/useSessionEventSources";
 import { useSessionMutations } from "@/hooks/useSessionMutations";
 import { useSessionQueries } from "@/hooks/useSessionQueries";
 import type { PermissionResultNotification } from "@/lib/acp";
-import type { ChatSession } from "@/lib/chat-store";
 import { useChatStore } from "@/lib/chat-store";
 import {
 	buildSessionNotReadyError,
 	createFallbackError,
 	normalizeError,
 } from "@/lib/error-utils";
+import { useUiStore } from "@/lib/ui-store";
 import { buildSessionTitle, getStatusVariant } from "@/lib/ui-utils";
 
 export function App() {
@@ -53,15 +53,24 @@ export function App() {
 		appendTerminalOutput,
 		finalizeAssistantMessage,
 	} = useChatStore();
-	const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-	const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
-	const [editingTitle, setEditingTitle] = useState("");
-	const [createDialogOpen, setCreateDialogOpen] = useState(false);
-	const [fileExplorerOpen, setFileExplorerOpen] = useState(false);
-	const [filePreviewPath, setFilePreviewPath] = useState<string | undefined>();
-	const [draftTitle, setDraftTitle] = useState("");
-	const [draftBackendId, setDraftBackendId] = useState<string | undefined>();
-	const [draftCwd, setDraftCwd] = useState<string | undefined>();
+	const {
+		createDialogOpen,
+		fileExplorerOpen,
+		filePreviewPath,
+		editingSessionId,
+		editingTitle,
+		draftTitle,
+		draftBackendId,
+		draftCwd,
+		setMobileMenuOpen,
+		setCreateDialogOpen,
+		setFileExplorerOpen,
+		setFilePreviewPath,
+		clearEditingSession,
+		setDraftTitle,
+		setDraftBackendId,
+		setDraftCwd,
+	} = useUiStore();
 
 	const { sessionsQuery, backendsQuery, availableBackends, defaultBackendId } =
 		useSessionQueries();
@@ -143,7 +152,7 @@ export function App() {
 		if (!draftBackendId && defaultBackendId) {
 			setDraftBackendId(defaultBackendId);
 		}
-	}, [createDialogOpen, defaultBackendId, draftBackendId]);
+	}, [createDialogOpen, defaultBackendId, draftBackendId, setDraftBackendId]);
 
 	const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
 	const activeSessionState = activeSession?.state;
@@ -155,7 +164,7 @@ export function App() {
 		}
 		setFileExplorerOpen(false);
 		setFilePreviewPath(undefined);
-	}, [fileExplorerAvailable]);
+	}, [fileExplorerAvailable, setFileExplorerOpen, setFilePreviewPath]);
 
 	const { messageListRef, endOfMessagesRef, handleMessagesScroll } =
 		useMessageAutoScroll(activeSessionId, activeSession?.messages ?? []);
@@ -165,14 +174,6 @@ export function App() {
 		setDraftBackendId(defaultBackendId);
 		setDraftCwd(lastCreatedCwd);
 		setCreateDialogOpen(true);
-	};
-
-	const handleOpenFilePreview = (path: string) => {
-		if (!fileExplorerAvailable) {
-			return;
-		}
-		setFilePreviewPath(path);
-		setFileExplorerOpen(true);
 	};
 
 	const handleCreateSession = async () => {
@@ -199,16 +200,6 @@ export function App() {
 		}
 	};
 
-	const handleRenameStart = (session: ChatSession) => {
-		setEditingSessionId(session.sessionId);
-		setEditingTitle(session.title);
-	};
-
-	const handleRenameCancel = () => {
-		setEditingSessionId(null);
-		setEditingTitle("");
-	};
-
 	const handleRenameSubmit = () => {
 		if (!editingSessionId) {
 			return;
@@ -219,8 +210,7 @@ export function App() {
 		}
 		renameSessionLocal(editingSessionId, title);
 		renameSessionMutation.mutate({ sessionId: editingSessionId, title });
-		setEditingSessionId(null);
-		setEditingTitle("");
+		clearEditingSession();
 	};
 
 	const handleCloseSession = async (sessionId: string) => {
@@ -331,13 +321,6 @@ export function App() {
 		sendMessageMutation.mutate({ sessionId: activeSessionId, prompt });
 	};
 
-	const handleInputChange = (value: string) => {
-		if (!activeSessionId) {
-			return;
-		}
-		setInput(activeSessionId, value);
-	};
-
 	const statusVariant = getStatusVariant(activeSessionState);
 	const statusLabel = t(`status.${activeSessionState ?? "idle"}`, {
 		defaultValue: activeSessionState ?? "idle",
@@ -382,12 +365,6 @@ export function App() {
 				<CreateSessionDialog
 					open={createDialogOpen}
 					onOpenChange={setCreateDialogOpen}
-					draftTitle={draftTitle}
-					onDraftTitleChange={setDraftTitle}
-					draftBackendId={draftBackendId}
-					onDraftBackendChange={setDraftBackendId}
-					draftCwd={draftCwd}
-					onDraftCwdChange={setDraftCwd}
 					availableBackends={availableBackends}
 					isCreating={createSessionMutation.isPending}
 					onCreate={handleCreateSession}
@@ -407,20 +384,13 @@ export function App() {
 				<AppSidebar
 					sessions={sessionList}
 					activeSessionId={activeSessionId}
-					editingSessionId={editingSessionId}
-					editingTitle={editingTitle}
 					onCreateSession={handleOpenCreateDialog}
 					onSelectSession={setActiveSessionId}
-					onEditSession={handleRenameStart}
-					onEditCancel={handleRenameCancel}
 					onEditSubmit={handleRenameSubmit}
-					onEditingTitleChange={setEditingTitle}
 					onCloseSession={(sessionId) => {
 						void handleCloseSession(sessionId);
 					}}
 					isCreating={createSessionMutation.isPending}
-					mobileOpen={mobileMenuOpen}
-					onMobileOpenChange={setMobileMenuOpen}
 				/>
 
 				<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -437,7 +407,6 @@ export function App() {
 					<ChatMessageList
 						activeSession={activeSession}
 						onPermissionDecision={handlePermissionDecision}
-						onOpenFilePreview={handleOpenFilePreview}
 						messageListRef={messageListRef}
 						endOfMessagesRef={endOfMessagesRef}
 						onMessagesScroll={handleMessagesScroll}
@@ -452,7 +421,6 @@ export function App() {
 						onModelChange={handleModelChange}
 						onSend={handleSend}
 						onCancel={handleCancel}
-						onInputChange={handleInputChange}
 					/>
 				</div>
 			</div>

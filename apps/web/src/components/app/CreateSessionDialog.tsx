@@ -28,16 +28,11 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { type AcpBackendSummary, fetchFsRoots } from "@/lib/api";
+import { useUiStore } from "@/lib/ui-store";
 
 export type CreateSessionDialogProps = {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	draftTitle: string;
-	onDraftTitleChange: (value: string) => void;
-	draftBackendId: string | undefined;
-	onDraftBackendChange: (value: string) => void;
-	draftCwd: string | undefined;
-	onDraftCwdChange: (value: string) => void;
 	availableBackends: AcpBackendSummary[];
 	isCreating: boolean;
 	onCreate: () => void;
@@ -46,18 +41,20 @@ export type CreateSessionDialogProps = {
 export function CreateSessionDialog({
 	open,
 	onOpenChange,
-	draftTitle,
-	onDraftTitleChange,
-	draftBackendId,
-	onDraftBackendChange,
-	draftCwd,
-	onDraftCwdChange,
 	availableBackends,
 	isCreating,
 	onCreate,
 }: CreateSessionDialogProps) {
 	const { t } = useTranslation();
 	const [directoryDialogOpen, setDirectoryDialogOpen] = useState(false);
+	const {
+		draftTitle,
+		draftBackendId,
+		draftCwd,
+		setDraftTitle,
+		setDraftBackendId,
+		setDraftCwd,
+	} = useUiStore();
 	const rootsQuery = useQuery({
 		queryKey: ["fs-roots"],
 		queryFn: fetchFsRoots,
@@ -76,9 +73,9 @@ export function CreateSessionDialog({
 		}
 		const homePath = rootsQuery.data?.homePath;
 		if (homePath) {
-			onDraftCwdChange(homePath);
+			setDraftCwd(homePath);
 		}
-	}, [draftCwd, onDraftCwdChange, open, rootsQuery.data?.homePath]);
+	}, [draftCwd, open, rootsQuery.data?.homePath, setDraftCwd]);
 
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -95,7 +92,7 @@ export function CreateSessionDialog({
 						<Input
 							id="session-title"
 							value={draftTitle}
-							onChange={(event) => onDraftTitleChange(event.target.value)}
+							onChange={(event) => setDraftTitle(event.target.value)}
 							placeholder={t("session.titlePlaceholder")}
 						/>
 					</div>
@@ -103,7 +100,7 @@ export function CreateSessionDialog({
 						<Label htmlFor="session-backend">{t("session.backendLabel")}</Label>
 						<Select
 							value={draftBackendId}
-							onValueChange={onDraftBackendChange}
+							onValueChange={setDraftBackendId}
 							disabled={availableBackends.length === 0}
 						>
 							<SelectTrigger id="session-backend">
@@ -130,7 +127,7 @@ export function CreateSessionDialog({
 							<InputGroupInput
 								id="session-cwd"
 								value={draftCwd ?? ""}
-								onChange={(event) => onDraftCwdChange(event.target.value)}
+								onChange={(event) => setDraftCwd(event.target.value)}
 								placeholder={t("session.cwdPlaceholder")}
 							/>
 							<InputGroupAddon align="inline-end">
@@ -147,7 +144,7 @@ export function CreateSessionDialog({
 						open={directoryDialogOpen}
 						onOpenChange={setDirectoryDialogOpen}
 						value={draftCwd}
-						onChange={onDraftCwdChange}
+						onChange={setDraftCwd}
 					/>
 				</div>
 				<AlertDialogFooter>

@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/select";
 import i18n, { supportedLanguages } from "@/i18n";
 import { type ChatSession } from "@/lib/chat-store";
+import { useUiStore } from "@/lib/ui-store";
 import { getStatusVariant } from "@/lib/ui-utils";
 import { cn } from "@/lib/utils";
 
@@ -55,14 +56,9 @@ const toThemePreference = (value: string): "light" | "dark" | "system" => {
 type SessionSidebarProps = {
 	sessions: ChatSession[];
 	activeSessionId?: string;
-	editingSessionId: string | null;
-	editingTitle: string;
 	onCreateSession: () => void;
 	onSelectSession: (sessionId: string) => void;
-	onEditSession: (session: ChatSession) => void;
-	onEditCancel: () => void;
 	onEditSubmit: () => void;
-	onEditingTitleChange: (value: string) => void;
 	onCloseSession: (sessionId: string) => void;
 	isCreating: boolean;
 };
@@ -70,19 +66,21 @@ type SessionSidebarProps = {
 export const SessionSidebar = ({
 	sessions,
 	activeSessionId,
-	editingSessionId,
-	editingTitle,
 	onCreateSession,
 	onSelectSession,
-	onEditSession,
-	onEditCancel,
 	onEditSubmit,
-	onEditingTitleChange,
 	onCloseSession,
 	isCreating,
 }: SessionSidebarProps) => {
 	const { t } = useTranslation();
 	const { theme, setTheme } = useTheme();
+	const {
+		editingSessionId,
+		editingTitle,
+		startEditingSession,
+		setEditingTitle,
+		clearEditingSession,
+	} = useUiStore();
 
 	return (
 		<div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden">
@@ -165,10 +163,10 @@ export const SessionSidebar = ({
 						isEditing={session.sessionId === editingSessionId}
 						editingTitle={editingTitle}
 						onSelect={onSelectSession}
-						onEdit={onEditSession}
-						onEditCancel={onEditCancel}
+						onEdit={() => startEditingSession(session.sessionId, session.title)}
+						onEditCancel={clearEditingSession}
 						onEditSubmit={onEditSubmit}
-						onEditingTitleChange={onEditingTitleChange}
+						onEditingTitleChange={setEditingTitle}
 						onClose={onCloseSession}
 					/>
 				))}
@@ -183,7 +181,7 @@ type SessionListItemProps = {
 	isEditing: boolean;
 	editingTitle: string;
 	onSelect: (sessionId: string) => void;
-	onEdit: (session: ChatSession) => void;
+	onEdit: () => void;
 	onEditCancel: () => void;
 	onEditSubmit: () => void;
 	onEditingTitleChange: (value: string) => void;
@@ -266,7 +264,7 @@ const SessionListItem = ({
 						</Button>
 					</>
 				) : (
-					<Button size="xs" variant="ghost" onClick={() => onEdit(session)}>
+					<Button size="xs" variant="ghost" onClick={onEdit}>
 						{t("common.rename")}
 					</Button>
 				)}

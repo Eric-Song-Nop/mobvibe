@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { MessageItem } from "@/components/chat/MessageItem";
 import type { PermissionResultNotification } from "@/lib/acp";
 import type { ChatSession } from "@/lib/chat-store";
+import { useUiStore } from "@/lib/ui-store";
 
 export type ChatMessageListProps = {
 	activeSession?: ChatSession;
@@ -10,7 +11,6 @@ export type ChatMessageListProps = {
 		requestId: string;
 		outcome: PermissionResultNotification["outcome"];
 	}) => void;
-	onOpenFilePreview?: (path: string) => void;
 	messageListRef: RefObject<HTMLDivElement | null>;
 	endOfMessagesRef: RefObject<HTMLDivElement | null>;
 	onMessagesScroll: () => void;
@@ -19,12 +19,19 @@ export type ChatMessageListProps = {
 export function ChatMessageList({
 	activeSession,
 	onPermissionDecision,
-	onOpenFilePreview,
 	messageListRef,
 	endOfMessagesRef,
 	onMessagesScroll,
 }: ChatMessageListProps) {
+	const { setFileExplorerOpen, setFilePreviewPath } = useUiStore();
 	const { t } = useTranslation();
+	const handleOpenFilePreview = (path: string) => {
+		if (!activeSession?.cwd) {
+			return;
+		}
+		setFilePreviewPath(path);
+		setFileExplorerOpen(true);
+	};
 
 	return (
 		<main className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -50,7 +57,7 @@ export function ChatMessageList({
 								key={message.id}
 								message={message}
 								onPermissionDecision={onPermissionDecision}
-								onOpenFilePreview={onOpenFilePreview}
+								onOpenFilePreview={handleOpenFilePreview}
 							/>
 						))}
 						<div ref={endOfMessagesRef} />
