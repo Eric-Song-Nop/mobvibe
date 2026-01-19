@@ -63,6 +63,27 @@ vi.mock("../src/components/ui/select", () => ({
 	),
 }));
 
+vi.mock("../src/components/ui/dropdown-menu", () => ({
+	DropdownMenu: ({ children }: { children: React.ReactNode }) => (
+		<div>{children}</div>
+	),
+	DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => (
+		<div>{children}</div>
+	),
+	DropdownMenuContent: ({ children }: { children: React.ReactNode }) => (
+		<div>{children}</div>
+	),
+	DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => (
+		<div>{children}</div>
+	),
+	DropdownMenuRadioGroup: ({ children }: { children: React.ReactNode }) => (
+		<div>{children}</div>
+	),
+	DropdownMenuRadioItem: ({ children }: { children: React.ReactNode }) => (
+		<div>{children}</div>
+	),
+}));
+
 const buildSession = (overrides?: Partial<ChatSession>): ChatSession => ({
 	sessionId: "session-1",
 	title: i18n.t("session.newTitle", { count: 1 }),
@@ -92,6 +113,10 @@ const renderSidebar = (
 			onEditSubmit={options?.onEditSubmit ?? (() => {})}
 			onEditingTitleChange={options?.onEditingTitleChange ?? (() => {})}
 			onCloseSession={options?.onCloseSession ?? (() => {})}
+			themePreference={options?.themePreference ?? "system"}
+			onThemePreferenceChange={
+				options?.onThemePreferenceChange ?? (() => {})
+			}
 			isCreating={options?.isCreating ?? false}
 		/>,
 	);
