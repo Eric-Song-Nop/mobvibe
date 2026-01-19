@@ -1,12 +1,12 @@
 {
 	"common": {
-	"appName": "Mobvibe",
-	"language": "Language",
-	"languages": {
-		"zh": "Chinese",
-		"en": "English"
-	},
-	"loading": "Loading...",
+		"appName": "Mobvibe",
+		"language": "Language",
+		"languages": {
+			"zh": "Chinese",
+			"en": "English"
+		},
+		"loading": "Loading...",
 		"close": "Close",
 		"cancel": "Cancel",
 		"confirm": "Confirm",

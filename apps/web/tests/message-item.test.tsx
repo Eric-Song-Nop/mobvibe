@@ -1,8 +1,8 @@
 import "@testing-library/jest-dom/vitest";
 import { render } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import i18n from "../src/i18n";
 import { MessageItem } from "../src/components/chat/MessageItem";
+import i18n from "../src/i18n";
 import type { ChatMessage, ChatSession } from "../src/lib/chat-store";
 import { useChatStore } from "../src/lib/chat-store";
 
@@ -188,7 +188,9 @@ describe("MessageItem", () => {
 		expect(getAllByText(i18n.t("toolCall.image")).length).toBeGreaterThan(0);
 		expect(getAllByText(i18n.t("toolCall.audio")).length).toBeGreaterThan(0);
 		expect(getAllByText(i18n.t("toolCall.resource")).length).toBeGreaterThan(0);
-		expect(getAllByText(i18n.t("toolCall.resourceLink")).length).toBeGreaterThan(0);
+		expect(
+			getAllByText(i18n.t("toolCall.resourceLink")).length,
+		).toBeGreaterThan(0);
 		expect(getAllByText(i18n.t("toolCall.diff")).length).toBeGreaterThan(0);
 		expect(getAllByText(i18n.t("toolCall.original")).length).toBeGreaterThan(0);
 		expect(getAllByText(i18n.t("toolCall.updated")).length).toBeGreaterThan(0);

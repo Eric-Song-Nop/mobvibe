@@ -1,4 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import type {
 	PermissionOption,
 	PermissionOutcome,
@@ -22,7 +23,6 @@ import type {
 	PermissionDecisionState,
 	StatusVariant,
 } from "@/lib/chat-store";
-import { useTranslation } from "react-i18next";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 
 type SessionMetadata = Partial<

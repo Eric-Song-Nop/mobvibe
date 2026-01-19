@@ -165,7 +165,10 @@ export function ChatFooter({
 											strokeWidth={2}
 											className="size-4"
 										/>
-										<SelectValue placeholder={t("chat.modelLabel")} className="sr-only" />
+										<SelectValue
+											placeholder={t("chat.modelLabel")}
+											className="sr-only"
+										/>
 									</SelectTrigger>
 									<SelectContent>
 										{availableModels.map((model) => (
@@ -182,7 +185,9 @@ export function ChatFooter({
 										strokeWidth={2}
 										className="size-4"
 									/>
-									<span className="sr-only">{t("chat.modelLabelWithValue", { value: modelLabel })}</span>
+									<span className="sr-only">
+										{t("chat.modelLabelWithValue", { value: modelLabel })}
+									</span>
 								</Badge>
 							) : null}
 							{availableModes.length > 0 ? (
@@ -200,7 +205,10 @@ export function ChatFooter({
 											strokeWidth={2}
 											className="size-4"
 										/>
-										<SelectValue placeholder={t("chat.modeLabel")} className="sr-only" />
+										<SelectValue
+											placeholder={t("chat.modeLabel")}
+											className="sr-only"
+										/>
 									</SelectTrigger>
 									<SelectContent>
 										{availableModes.map((mode) => (
@@ -217,7 +225,9 @@ export function ChatFooter({
 										strokeWidth={2}
 										className="size-4"
 									/>
-									<span className="sr-only">{t("chat.modeLabelWithValue", { value: modeLabel })}</span>
+									<span className="sr-only">
+										{t("chat.modeLabelWithValue", { value: modeLabel })}
+									</span>
 								</Badge>
 							) : null}
 						</div>
@@ -269,9 +279,7 @@ export function ChatFooter({
 									!activeSessionId || activeSession.canceling || !isReady
 								}
 							>
-								{activeSession.canceling
-									? t("chat.stopping")
-									: t("chat.stop")}
+								{activeSession.canceling ? t("chat.stopping") : t("chat.stop")}
 							</Button>
 						) : null}
 						<Button

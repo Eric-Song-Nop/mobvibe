@@ -1,5 +1,5 @@
-import { ApiError, type ErrorDetail } from "./api";
 import i18n from "@/i18n";
+import { ApiError, type ErrorDetail } from "./api";
 
 /**
  * Creates a fallback error object with the given message and scope.

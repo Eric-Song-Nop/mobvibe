@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { FsEntry, SessionFsFilePreviewResponse } from "@/lib/api";
 import i18n from "@/i18n";
+import type { FsEntry, SessionFsFilePreviewResponse } from "@/lib/api";
 import * as api from "@/lib/api";
 import { FileExplorerDialog } from "../FileExplorerDialog";
 
@@ -51,23 +51,23 @@ vi.mock("@/components/ui/button", () => ({
 }));
 
 vi.mock("@/components/app/ColumnFileBrowser", () => {
-		const fileEntry: FsEntry = {
-			name: "notes.md",
-			path: "/workspace/notes.md",
-			type: "file",
-			hidden: false,
-		};
+	const fileEntry: FsEntry = {
+		name: "notes.md",
+		path: "/workspace/notes.md",
+		type: "file",
+		hidden: false,
+	};
 
-		return {
-			ColumnFileBrowser: ({
-				onEntrySelect,
-			}: {
-				onEntrySelect: (entry: FsEntry, columnIndex: number) => void;
-			}) => (
-				<button type="button" onClick={() => onEntrySelect(fileEntry, 0)}>
-					Select file
-				</button>
-			),
+	return {
+		ColumnFileBrowser: ({
+			onEntrySelect,
+		}: {
+			onEntrySelect: (entry: FsEntry, columnIndex: number) => void;
+		}) => (
+			<button type="button" onClick={() => onEntrySelect(fileEntry, 0)}>
+				Select file
+			</button>
+		),
 		useColumnFileBrowser: ({
 			onFileSelect,
 		}: {

@@ -16,8 +16,6 @@ export type AppSidebarProps = {
 	isCreating: boolean;
 	mobileOpen: boolean;
 	onMobileOpenChange: (open: boolean) => void;
-	themePreference: "light" | "dark" | "system";
-	onThemePreferenceChange: (value: "light" | "dark" | "system") => void;
 };
 
 export function AppSidebar({
@@ -35,8 +33,6 @@ export function AppSidebar({
 	isCreating,
 	mobileOpen,
 	onMobileOpenChange,
-	themePreference,
-	onThemePreferenceChange,
 }: AppSidebarProps) {
 	return (
 		<>
@@ -54,8 +50,6 @@ export function AppSidebar({
 					onEditingTitleChange={onEditingTitleChange}
 					onCloseSession={onCloseSession}
 					isCreating={isCreating}
-					themePreference={themePreference}
-					onThemePreferenceChange={onThemePreferenceChange}
 				/>
 			</aside>
 			{mobileOpen ? (
@@ -77,11 +71,6 @@ export function AppSidebar({
 							onEditingTitleChange={onEditingTitleChange}
 							onCloseSession={onCloseSession}
 							isCreating={isCreating}
-							themePreference={themePreference}
-							onThemePreferenceChange={(value) => {
-								onThemePreferenceChange(value);
-								onMobileOpenChange(false);
-							}}
 						/>
 					</div>
 					<button

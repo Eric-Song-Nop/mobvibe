@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ChatSession } from "../chat-store";
 import i18n from "@/i18n";
+import type { ChatSession } from "../chat-store";
 import { buildSessionTitle, getStatusVariant } from "../ui-utils";
 
 describe("ui-utils", () => {

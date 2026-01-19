@@ -6,6 +6,7 @@ import { ChatFooter } from "@/components/app/ChatFooter";
 import { ChatMessageList } from "@/components/app/ChatMessageList";
 import { CreateSessionDialog } from "@/components/app/CreateSessionDialog";
 import { FileExplorerDialog } from "@/components/app/FileExplorerDialog";
+import { ThemeProvider } from "@/components/theme-provider";
 import { Separator } from "@/components/ui/separator";
 import { useMessageAutoScroll } from "@/hooks/useMessageAutoScroll";
 import { useSessionEventSources } from "@/hooks/useSessionEventSources";
@@ -19,7 +20,6 @@ import {
 	createFallbackError,
 	normalizeError,
 } from "@/lib/error-utils";
-import { THEME_STORAGE_KEY, type ThemePreference } from "@/lib/ui-config";
 import { buildSessionTitle, getStatusVariant } from "@/lib/ui-utils";
 
 export function App() {
@@ -54,8 +54,6 @@ export function App() {
 		finalizeAssistantMessage,
 	} = useChatStore();
 	const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-	const [themePreference, setThemePreference] =
-		useState<ThemePreference>("system");
 	const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
 	const [editingTitle, setEditingTitle] = useState("");
 	const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -130,57 +128,6 @@ export function App() {
 			syncSessions(sessionsQuery.data.sessions);
 		}
 	}, [sessionsQuery.data?.sessions, syncSessions]);
-
-	useEffect(() => {
-		if (typeof window === "undefined") {
-			return;
-		}
-		const storedPreference = window.localStorage.getItem(THEME_STORAGE_KEY);
-		if (storedPreference === "light" || storedPreference === "dark") {
-			setThemePreference(storedPreference);
-			return;
-		}
-		setThemePreference("system");
-	}, []);
-
-	useEffect(() => {
-		if (typeof window === "undefined") {
-			return;
-		}
-		if (themePreference === "system") {
-			window.localStorage.removeItem(THEME_STORAGE_KEY);
-		} else {
-			window.localStorage.setItem(THEME_STORAGE_KEY, themePreference);
-		}
-	}, [themePreference]);
-
-	useEffect(() => {
-		if (typeof window === "undefined") {
-			return;
-		}
-		const root = document.documentElement;
-		const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-
-		const applyTheme = (prefersDark: boolean) => {
-			const useDark =
-				themePreference === "dark" ||
-				(themePreference === "system" && prefersDark);
-			root.classList.toggle("dark", useDark);
-		};
-
-		applyTheme(mediaQuery.matches);
-
-		const handleChange = (event: MediaQueryListEvent) => {
-			if (themePreference === "system") {
-				applyTheme(event.matches);
-			}
-		};
-
-		mediaQuery.addEventListener("change", handleChange);
-		return () => {
-			mediaQuery.removeEventListener("change", handleChange);
-		};
-	}, [themePreference]);
 
 	useEffect(() => {
 		if (activeSessionId || sessionList.length === 0) {
@@ -430,86 +377,86 @@ export function App() {
 		setSessionModelMutation.variables?.sessionId === activeSessionId;
 
 	return (
-		<div className="app-root bg-muted/40 text-foreground flex flex-col overflow-hidden md:flex-row">
-			<CreateSessionDialog
-				open={createDialogOpen}
-				onOpenChange={setCreateDialogOpen}
-				draftTitle={draftTitle}
-				onDraftTitleChange={setDraftTitle}
-				draftBackendId={draftBackendId}
-				onDraftBackendChange={setDraftBackendId}
-				draftCwd={draftCwd}
-				onDraftCwdChange={setDraftCwd}
-				availableBackends={availableBackends}
-				isCreating={createSessionMutation.isPending}
-				onCreate={handleCreateSession}
-			/>
-			<FileExplorerDialog
-				open={fileExplorerOpen && fileExplorerAvailable}
-				onOpenChange={(isOpen) => {
-					setFileExplorerOpen(isOpen);
-					if (!isOpen) {
-						setFilePreviewPath(undefined);
-					}
-				}}
-				sessionId={activeSessionId}
-				initialFilePath={filePreviewPath}
-			/>
-
-			<AppSidebar
-				sessions={sessionList}
-				activeSessionId={activeSessionId}
-				editingSessionId={editingSessionId}
-				editingTitle={editingTitle}
-				onCreateSession={handleOpenCreateDialog}
-				onSelectSession={setActiveSessionId}
-				onEditSession={handleRenameStart}
-				onEditCancel={handleRenameCancel}
-				onEditSubmit={handleRenameSubmit}
-				onEditingTitleChange={setEditingTitle}
-				onCloseSession={(sessionId) => {
-					void handleCloseSession(sessionId);
-				}}
-				isCreating={createSessionMutation.isPending}
-				mobileOpen={mobileMenuOpen}
-				onMobileOpenChange={setMobileMenuOpen}
-				themePreference={themePreference}
-				onThemePreferenceChange={setThemePreference}
-			/>
-
-			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-				<AppHeader
-					statusVariant={statusVariant}
-					statusLabel={statusLabel}
-					backendLabel={backendLabel}
-					statusMessage={statusMessage}
-					streamError={streamError}
-					onOpenMobileMenu={() => setMobileMenuOpen(true)}
-					onOpenFileExplorer={() => setFileExplorerOpen(true)}
-					showFileExplorer={fileExplorerAvailable}
+		<ThemeProvider>
+			<div className="app-root bg-muted/40 text-foreground flex flex-col overflow-hidden md:flex-row">
+				<CreateSessionDialog
+					open={createDialogOpen}
+					onOpenChange={setCreateDialogOpen}
+					draftTitle={draftTitle}
+					onDraftTitleChange={setDraftTitle}
+					draftBackendId={draftBackendId}
+					onDraftBackendChange={setDraftBackendId}
+					draftCwd={draftCwd}
+					onDraftCwdChange={setDraftCwd}
+					availableBackends={availableBackends}
+					isCreating={createSessionMutation.isPending}
+					onCreate={handleCreateSession}
 				/>
-				<ChatMessageList
-					activeSession={activeSession}
-					onPermissionDecision={handlePermissionDecision}
-					onOpenFilePreview={handleOpenFilePreview}
-					messageListRef={messageListRef}
-					endOfMessagesRef={endOfMessagesRef}
-					onMessagesScroll={handleMessagesScroll}
+				<FileExplorerDialog
+					open={fileExplorerOpen && fileExplorerAvailable}
+					onOpenChange={(isOpen) => {
+						setFileExplorerOpen(isOpen);
+						if (!isOpen) {
+							setFilePreviewPath(undefined);
+						}
+					}}
+					sessionId={activeSessionId}
+					initialFilePath={filePreviewPath}
 				/>
-				<Separator />
-				<ChatFooter
-					activeSession={activeSession}
+
+				<AppSidebar
+					sessions={sessionList}
 					activeSessionId={activeSessionId}
-					isModeSwitching={isModeSwitching}
-					isModelSwitching={isModelSwitching}
-					onModeChange={handleModeChange}
-					onModelChange={handleModelChange}
-					onSend={handleSend}
-					onCancel={handleCancel}
-					onInputChange={handleInputChange}
+					editingSessionId={editingSessionId}
+					editingTitle={editingTitle}
+					onCreateSession={handleOpenCreateDialog}
+					onSelectSession={setActiveSessionId}
+					onEditSession={handleRenameStart}
+					onEditCancel={handleRenameCancel}
+					onEditSubmit={handleRenameSubmit}
+					onEditingTitleChange={setEditingTitle}
+					onCloseSession={(sessionId) => {
+						void handleCloseSession(sessionId);
+					}}
+					isCreating={createSessionMutation.isPending}
+					mobileOpen={mobileMenuOpen}
+					onMobileOpenChange={setMobileMenuOpen}
 				/>
+
+				<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+					<AppHeader
+						statusVariant={statusVariant}
+						statusLabel={statusLabel}
+						backendLabel={backendLabel}
+						statusMessage={statusMessage}
+						streamError={streamError}
+						onOpenMobileMenu={() => setMobileMenuOpen(true)}
+						onOpenFileExplorer={() => setFileExplorerOpen(true)}
+						showFileExplorer={fileExplorerAvailable}
+					/>
+					<ChatMessageList
+						activeSession={activeSession}
+						onPermissionDecision={handlePermissionDecision}
+						onOpenFilePreview={handleOpenFilePreview}
+						messageListRef={messageListRef}
+						endOfMessagesRef={endOfMessagesRef}
+						onMessagesScroll={handleMessagesScroll}
+					/>
+					<Separator />
+					<ChatFooter
+						activeSession={activeSession}
+						activeSessionId={activeSessionId}
+						isModeSwitching={isModeSwitching}
+						isModelSwitching={isModelSwitching}
+						onModeChange={handleModeChange}
+						onModelChange={handleModelChange}
+						onSend={handleSend}
+						onCancel={handleCancel}
+						onInputChange={handleInputChange}
+					/>
+				</div>
 			</div>
-		</div>
+		</ThemeProvider>
 	);
 }
 

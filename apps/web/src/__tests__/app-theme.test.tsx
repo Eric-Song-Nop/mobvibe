@@ -1,12 +1,19 @@
-import { act, render, waitFor } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ThemePreference } from "@/lib/ui-config";
+import { ThemeProvider, useTheme } from "@/components/theme-provider";
 import { THEME_STORAGE_KEY } from "@/lib/ui-config";
 
-const sidebarThemeValue = vi.hoisted(() => ({ value: "system" }));
-const sidebarChangeHandler = vi.hoisted(() => ({
-	current: null as ((value: ThemePreference) => void) | null,
-}));
+const ThemeSetter = ({ theme }: { theme: "light" | "dark" | "system" }) => {
+	const { setTheme } = useTheme();
+
+	useEffect(() => {
+		setTheme(theme);
+	}, [setTheme, theme]);
+
+	return null;
+};
+
 const mockChatStore = vi.hoisted(() => ({
 	value: {
 		sessions: {},
@@ -95,17 +102,7 @@ vi.mock("@/components/app/ChatFooter", () => ({
 }));
 
 vi.mock("@/components/app/AppSidebar", () => ({
-	AppSidebar: ({
-		themePreference,
-		onThemePreferenceChange,
-	}: {
-		themePreference: ThemePreference;
-		onThemePreferenceChange: (value: ThemePreference) => void;
-	}) => {
-		sidebarThemeValue.value = themePreference;
-		sidebarChangeHandler.current = onThemePreferenceChange;
-		return <button type="button">sidebar</button>;
-	},
+	AppSidebar: () => <button type="button">sidebar</button>,
 }));
 
 vi.mock("@/components/app/CreateSessionDialog", () => ({
@@ -151,8 +148,6 @@ const setMatchMedia = (matches: boolean) => {
 beforeEach(() => {
 	localStorage.clear();
 	document.documentElement.classList.remove("dark");
-	sidebarThemeValue.value = "system";
-	sidebarChangeHandler.current = null;
 });
 
 describe("App theme preference", () => {
@@ -163,9 +158,6 @@ describe("App theme preference", () => {
 		const { default: App } = await import("../App");
 		render(<App />);
 
-		await waitFor(() => {
-			expect(sidebarThemeValue.value).toBe("dark");
-		});
 		expect(document.documentElement.classList.contains("dark")).toBe(true);
 	});
 
@@ -175,29 +167,24 @@ describe("App theme preference", () => {
 		const { default: App } = await import("../App");
 		render(<App />);
 
-		await waitFor(() => {
-			expect(sidebarThemeValue.value).toBe("system");
-		});
 		expect(document.documentElement.classList.contains("dark")).toBe(false);
 
 		mediaQueryList.dispatch(true);
 		expect(document.documentElement.classList.contains("dark")).toBe(true);
 	});
 
-	it("updates preference when sidebar triggers change", async () => {
+	it("updates preference when theme changes", async () => {
 		setMatchMedia(true);
 
-		const { default: App } = await import("../App");
-		render(<App />);
-
-		act(() => {
-			sidebarChangeHandler.current?.("light");
-		});
+		render(
+			<ThemeProvider>
+				<ThemeSetter theme="light" />
+			</ThemeProvider>,
+		);
 
 		await waitFor(() => {
-			expect(sidebarThemeValue.value).toBe("light");
+			expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("light");
+			expect(document.documentElement.classList.contains("dark")).toBe(false);
 		});
-		expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("light");
-		expect(document.documentElement.classList.contains("dark")).toBe(false);
 	});
 });

@@ -1,5 +1,5 @@
-import { Streamdown } from "streamdown";
 import { useTranslation } from "react-i18next";
+import { Streamdown } from "streamdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -44,9 +44,7 @@ const TerminalOutputBlock = ({
 }: TerminalOutputBlockProps) => (
 	<div className="rounded border border-border bg-background/80 px-2 py-1 text-xs text-muted-foreground">
 		<pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words">
-			{output && output.length > 0
-				? output
-				: getLabel("toolCall.noOutput")}
+			{output && output.length > 0 ? output : getLabel("toolCall.noOutput")}
 		</pre>
 		{exitStatus ? (
 			<div className="mt-1 text-[11px] text-muted-foreground">
@@ -177,9 +175,7 @@ const renderImageContent = (
 	getLabel: (key: string, options?: Record<string, unknown>) => string,
 	onOpenFilePreview?: (path: string) => void,
 ) => {
-	const label = resolveResourceLabel(
-		content.uri ?? getLabel("toolCall.image"),
-	);
+	const label = resolveResourceLabel(content.uri ?? getLabel("toolCall.image"));
 	const source = content.data
 		? buildDataUri(content.mimeType, content.data)
 		: content.uri;
@@ -321,12 +317,7 @@ const renderContentBlock = (
 		case "audio":
 			return renderAudioContent(content, key, getLabel);
 		case "resource":
-			return renderResourceContent(
-				content,
-				key,
-				getLabel,
-				onOpenFilePreview,
-			);
+			return renderResourceContent(content, key, getLabel, onOpenFilePreview);
 		case "resource_link":
 			return renderResourceLinkContent(
 				content,
@@ -494,7 +485,9 @@ export const MessageItem = ({
 				<Card size="sm" className="max-w-[85%] border-border bg-background">
 					<CardContent className="flex flex-col gap-2 text-sm">
 						<div className="flex flex-wrap items-center gap-2 text-xs">
-							<Badge variant={badgeVariant}>{getLabel("toolCall.status")}</Badge>
+							<Badge variant={badgeVariant}>
+								{getLabel("toolCall.status")}
+							</Badge>
 							<span className="text-foreground font-medium">
 								{message.title}
 							</span>
@@ -511,7 +504,9 @@ export const MessageItem = ({
 	}
 	if (message.kind === "permission") {
 		const toolLabel =
-			message.toolCall?.title ?? message.toolCall?.name ?? getLabel("toolCall.toolCall");
+			message.toolCall?.title ??
+			message.toolCall?.name ??
+			getLabel("toolCall.toolCall");
 		const toolId = message.toolCall?.toolCallId ?? message.requestId;
 		const toolCommand = message.toolCall?.command;
 		const toolArgs = message.toolCall?.args?.join(" ");
@@ -591,7 +586,8 @@ export const MessageItem = ({
 		);
 	}
 	if (message.kind === "tool_call") {
-		const label = message.title ?? message.name ?? getLabel("toolCall.toolCall");
+		const label =
+			message.title ?? message.name ?? getLabel("toolCall.toolCall");
 		const statusLabel = resolveStatusLabel(message.status, getLabel);
 		const durationLabel =
 			message.duration !== undefined ? `${message.duration}ms` : undefined;

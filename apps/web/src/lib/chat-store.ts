@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import i18n from "@/i18n";
 import type {
 	AvailableCommand,
 	PermissionOption,
@@ -17,7 +18,6 @@ import type {
 	SessionState,
 	SessionSummary,
 } from "@/lib/api";
-import i18n from "@/i18n";
 
 export type ChatRole = "user" | "assistant";
 

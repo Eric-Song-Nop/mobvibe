@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
-import type { ChatStoreActions } from "@/hooks/useSessionMutations";
 import { useTranslation } from "react-i18next";
+import type { ChatStoreActions } from "@/hooks/useSessionMutations";
 import {
 	extractAvailableCommandsUpdate,
 	extractSessionInfoUpdate,
@@ -134,7 +134,10 @@ export function useSessionEventSources({
 						session.sessionId,
 						normalizeError(
 							parseError,
-							createFallbackError(t("errors.permissionRequestParseFailed"), "stream"),
+							createFallbackError(
+								t("errors.permissionRequestParseFailed"),
+								"stream",
+							),
 						),
 					);
 				}
@@ -160,7 +163,10 @@ export function useSessionEventSources({
 						session.sessionId,
 						normalizeError(
 							parseError,
-							createFallbackError(t("errors.permissionResultParseFailed"), "stream"),
+							createFallbackError(
+								t("errors.permissionResultParseFailed"),
+								"stream",
+							),
 						),
 					);
 				}
@@ -181,7 +187,10 @@ export function useSessionEventSources({
 						session.sessionId,
 						normalizeError(
 							parseError,
-							createFallbackError(t("errors.terminalOutputParseFailed"), "stream"),
+							createFallbackError(
+								t("errors.terminalOutputParseFailed"),
+								"stream",
+							),
 						),
 					);
 				}

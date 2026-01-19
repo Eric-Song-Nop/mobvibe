@@ -1,8 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionFsFilePreviewResponse } from "@/lib/api";
 import i18n from "@/i18n";
+import type { SessionFsFilePreviewResponse } from "@/lib/api";
 import { CodePreview } from "../CodePreview";
 
 type TreeSitterTestFlag = { __ENABLE_TREESITTER_TESTS__?: boolean };

@@ -1,12 +1,12 @@
 {
 	"common": {
-	"appName": "Mobvibe",
-	"language": "语言",
-	"languages": {
-		"zh": "中文",
-		"en": "英文"
-	},
-	"loading": "加载中...",
+		"appName": "Mobvibe",
+		"language": "语言",
+		"languages": {
+			"zh": "中文",
+			"en": "英文"
+		},
+		"loading": "加载中...",
 		"close": "关闭",
 		"cancel": "取消",
 		"confirm": "确认",

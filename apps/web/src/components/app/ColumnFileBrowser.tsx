@@ -344,11 +344,10 @@ export function ColumnFileBrowser({
 									<span className="truncate">{column.name}</span>
 								</button>
 								<div className="flex min-h-0 flex-col overflow-y-auto">
-								{entries.length === 0 ? (
-									<div className="text-muted-foreground px-2 py-3 text-xs">
-										{resolvedEmptyLabel}
-									</div>
-
+									{entries.length === 0 ? (
+										<div className="text-muted-foreground px-2 py-3 text-xs">
+											{resolvedEmptyLabel}
+										</div>
 									) : (
 										entries.map((entry) => {
 											const isSelected =

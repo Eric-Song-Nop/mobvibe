@@ -1,4 +1,3 @@
-import { useTranslation } from "react-i18next";
 import {
 	ComputerIcon,
 	MoonIcon,
@@ -6,6 +5,8 @@ import {
 	SunIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useTranslation } from "react-i18next";
+import { useTheme } from "@/components/theme-provider";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -17,14 +18,6 @@ import {
 	AlertDialogTitle,
 	AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import i18n, { supportedLanguages } from "@/i18n";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,6 +29,14 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import i18n, { supportedLanguages } from "@/i18n";
 import { type ChatSession } from "@/lib/chat-store";
 import { getStatusVariant } from "@/lib/ui-utils";
 import { cn } from "@/lib/utils";
@@ -64,8 +65,6 @@ type SessionSidebarProps = {
 	onEditingTitleChange: (value: string) => void;
 	onCloseSession: (sessionId: string) => void;
 	isCreating: boolean;
-	themePreference: "light" | "dark" | "system";
-	onThemePreferenceChange: (value: "light" | "dark" | "system") => void;
 };
 
 export const SessionSidebar = ({
@@ -81,59 +80,55 @@ export const SessionSidebar = ({
 	onEditingTitleChange,
 	onCloseSession,
 	isCreating,
-	themePreference,
-	onThemePreferenceChange,
 }: SessionSidebarProps) => {
 	const { t } = useTranslation();
+	const { theme, setTheme } = useTheme();
 
-		return (
-			<div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden">
-				<div className="flex items-center justify-between">
-					<div className="flex items-center gap-2">
-						<div className="text-sm font-semibold">{t("session.title")}</div>
-						<div className="flex items-center">
-							<Select
-								value={i18n.resolvedLanguage ?? "en"}
-								onValueChange={(value) => i18n.changeLanguage(value)}
+	return (
+		<div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden">
+			<div className="flex items-center justify-between">
+				<div className="flex items-center gap-2">
+					<div className="text-sm font-semibold">{t("session.title")}</div>
+					<div className="flex items-center">
+						<Select
+							value={i18n.resolvedLanguage ?? "en"}
+							onValueChange={(value) => i18n.changeLanguage(value)}
+						>
+							<SelectTrigger
+								size="sm"
+								className="h-7 w-20 justify-between px-2 text-xs"
+								aria-label={t("languageSwitcher.label")}
+								title={t("languageSwitcher.chooseLanguage")}
 							>
-								<SelectTrigger
-									size="sm"
-									className="h-7 w-20 justify-between px-2 text-xs"
-									aria-label={t("languageSwitcher.label")}
-									title={t("languageSwitcher.chooseLanguage")}
-								>
-									<SelectValue
-										placeholder={t("languageSwitcher.placeholder")}
-									/>
-								</SelectTrigger>
-								<SelectContent>
-									{supportedLanguages.map((lang) => (
-										<SelectItem key={lang} value={lang}>
-											{t(`common.languages.${lang}`)}
-										</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
-						</div>
+								<SelectValue placeholder={t("languageSwitcher.placeholder")} />
+							</SelectTrigger>
+							<SelectContent>
+								{supportedLanguages.map((lang) => (
+									<SelectItem key={lang} value={lang}>
+										{t(`common.languages.${lang}`)}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
 					</div>
-					<div className="flex items-center gap-2">
-						<DropdownMenu>
-							<DropdownMenuTrigger asChild>
-								<Button
-									variant="outline"
-									size="icon-sm"
-									aria-label={t("theme.toggle")}
-								>
-									<HugeiconsIcon icon={PaintBoardIcon} strokeWidth={2} />
-								</Button>
-							</DropdownMenuTrigger>
+				</div>
+
+				<div className="flex items-center gap-2">
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild>
+							<Button
+								variant="outline"
+								size="icon-sm"
+								aria-label={t("theme.toggle")}
+							>
+								<HugeiconsIcon icon={PaintBoardIcon} strokeWidth={2} />
+							</Button>
+						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end" className="w-40">
 							<DropdownMenuLabel>{t("theme.label")}</DropdownMenuLabel>
 							<DropdownMenuRadioGroup
-								value={themePreference}
-								onValueChange={(value) =>
-									onThemePreferenceChange(toThemePreference(value))
-								}
+								value={theme}
+								onValueChange={(value) => setTheme(toThemePreference(value))}
 							>
 								<DropdownMenuRadioItem value="light">
 									<HugeiconsIcon icon={SunIcon} strokeWidth={2} />
@@ -149,19 +144,20 @@ export const SessionSidebar = ({
 								</DropdownMenuRadioItem>
 							</DropdownMenuRadioGroup>
 						</DropdownMenuContent>
-						</DropdownMenu>
-						<Button onClick={onCreateSession} size="sm" disabled={isCreating}>
-							{t("common.new")}
-						</Button>
-					</div>
+					</DropdownMenu>
+
+					<Button onClick={onCreateSession} size="sm" disabled={isCreating}>
+						{t("common.new")}
+					</Button>
 				</div>
-				<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
-					{sessions.length === 0 ? (
-						<div className="text-muted-foreground text-xs">
-							{t("session.empty")}
-						</div>
-					) : null}
-					{sessions.map((session) => (
+			</div>
+			<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+				{sessions.length === 0 ? (
+					<div className="text-muted-foreground text-xs">
+						{t("session.empty")}
+					</div>
+				) : null}
+				{sessions.map((session) => (
 					<SessionListItem
 						key={session.sessionId}
 						session={session}
