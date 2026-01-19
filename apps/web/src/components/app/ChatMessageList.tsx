@@ -43,7 +43,7 @@ export function ChatMessageList({
 						</div>
 					) : null}
 					{activeSession && activeSession.messages.length === 0 ? (
-						<div className="text-muted-foreground mt-8 text-center text-sm">
+						<div className="text-muted-foreground mt-8 text-center text-sm whitespace-pre font-mono">
 							{t("chat.startConversation")}
 						</div>
 					) : null}

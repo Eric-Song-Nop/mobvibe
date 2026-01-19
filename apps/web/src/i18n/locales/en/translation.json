@@ -33,7 +33,7 @@
 		"stopping": "Stopping...",
 		"sending": "Sending...",
 		"selectSession": "Select or create a conversation to get started.",
-		"startConversation": "Start a coding session.",
+		"startConversation": "██   ██  █████  ██████  ██   ██  ███████  ██████  ███████\n███ ███  ██   ██  ██   ██  ██   ██   ███   ██   ██  ██     \n██ █ ██  ██   ██  ██████  ██   ██   ███   ██████  ██████ \n██   ██  ██   ██  ██   ██   ██ ██    ███   ██   ██  ██     \n██   ██   █████   ██████    ███   ███████  ██████  ███████\n ░░░░░░   ░░░░░   ░░░░░░     ░░     ░░░░░░   ░░░░░   ░░░░  ",
 		"noMatchingCommand": "No matching commands",
 		"modeLabel": "Mode",
 		"modelLabel": "Model",
