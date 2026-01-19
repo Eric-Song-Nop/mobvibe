@@ -40,4 +40,14 @@
 
 ## 实现后记录
 
-- 待实现后补充。
+- 后端新增 `/fs/session/resources`，优先通过 `git ls-files` 获取未被忽略的文件，失败时递归扫描工作目录（包含隐藏文件）。
+- `/acp/message` 改为直接接收 `ContentBlock[]`，避免发送时再解析 `@`。
+- 前端新增 `inputContents` 与 `contentBlocks`，统一维护结构化内容（`content-block-utils.ts`）。
+- `ChatFooter` 负责 `@` 触发与 `ResourceCombobox` 展示；选择后插入 `@filename` 并追加 `resource_link`，编辑触碰 token 时整段删除。
+- 用户消息渲染使用 `contentBlocks`，`@filename` 可点击打开文件预览。
+
+### 使用方式
+
+- 输入 `@` 触发文件列表，输入关键字筛选。
+- 使用方向键选择，回车插入；按 `ESC` 关闭列表。
+- 资源 token 不支持局部编辑，需整段删除后再重新选择。

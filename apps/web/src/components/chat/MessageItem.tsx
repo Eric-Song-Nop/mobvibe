@@ -313,9 +313,7 @@ const renderUserContent = (
 	}
 	const parts = contentBlocks.map((block, index) => {
 		if (block.type === "text") {
-			return (
-				<Streamdown key={`text-${index}`}>{block.text}</Streamdown>
-			);
+			return <Streamdown key={`text-${index}`}>{block.text}</Streamdown>;
 		}
 		if (block.type === "resource_link") {
 			const label = `@${block.name}`;

@@ -33,7 +33,6 @@ type TextMessage = {
 	isStreaming: boolean;
 };
 
-
 export type PermissionDecisionState = "idle" | "submitting";
 
 export type StatusVariant = "info" | "success" | "warning" | "error";

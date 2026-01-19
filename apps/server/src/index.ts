@@ -1,9 +1,12 @@
+import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
-import type { ContentBlock, RequestPermissionResponse } from "@agentclientprotocol/sdk";
+import type {
+	ContentBlock,
+	RequestPermissionResponse,
+} from "@agentclientprotocol/sdk";
 import express from "express";
 import type { AcpConnectionState } from "./acp/acp-connection.js";
 import {
@@ -332,10 +335,7 @@ type GitExecResult = {
 	stderr: string;
 };
 
-const runGit = async (
-	cwd: string,
-	args: string[],
-): Promise<GitExecResult> =>
+const runGit = async (cwd: string, args: string[]): Promise<GitExecResult> =>
 	new Promise((resolve) => {
 		const child = spawn("git", args, {
 			cwd,

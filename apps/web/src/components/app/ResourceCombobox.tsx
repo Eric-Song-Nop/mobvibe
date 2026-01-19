@@ -77,9 +77,7 @@ export function ResourceCombobox({
 							>
 								<HugeiconsIcon icon={File01Icon} strokeWidth={2} />
 								<div className="flex min-w-0 flex-1 flex-col gap-1">
-									<span className="font-medium">
-										{resource.relativePath}
-									</span>
+									<span className="font-medium">{resource.relativePath}</span>
 								</div>
 							</button>
 						);

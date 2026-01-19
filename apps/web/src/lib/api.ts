@@ -1,9 +1,4 @@
-import type {
-	AvailableCommand,
-	ContentBlock,
-	PermissionOutcome,
-} from "./acp";
-
+import type { AvailableCommand, ContentBlock, PermissionOutcome } from "./acp";
 
 export type AcpConnectionState =
 	| "idle"

@@ -1,7 +1,7 @@
 import { ComputerIcon, SettingsIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CommandCombobox } from "@/components/app/CommandCombobox";
 import { ResourceCombobox } from "@/components/app/ResourceCombobox";
@@ -20,13 +20,16 @@ import type {
 	ContentBlock,
 	ResourceLinkContent,
 } from "@/lib/acp";
-import { fetchSessionFsResources } from "@/lib/api";
+import {
+	fetchSessionFsResources,
+	type SessionFsResourceEntry,
+} from "@/lib/api";
 import { type ChatSession, useChatStore } from "@/lib/chat-store";
-import { createDefaultContentBlocks } from "@/lib/content-block-utils";
 import {
 	buildCommandSearchItems,
 	filterCommandItems,
 } from "@/lib/command-utils";
+import { createDefaultContentBlocks } from "@/lib/content-block-utils";
 import {
 	buildResourceSearchItems,
 	filterResourceItems,
@@ -158,7 +161,9 @@ const findResourceTrigger = (
 		return null;
 	}
 	if (
-		resourceTokens.some((token) => atIndex >= token.start && atIndex < token.end)
+		resourceTokens.some(
+			(token) => atIndex >= token.start && atIndex < token.end,
+		)
 	) {
 		return null;
 	}
@@ -205,16 +210,100 @@ const removeRanges = (value: string, ranges: RemovalRange[]) => {
 	return output;
 };
 
-const findTokensInSelection = (
-	tokens: ResourceToken[],
-	selectionStart: number,
-	selectionEnd: number,
-) =>
-	tokens.filter((token) =>
-		selectionStart === selectionEnd
-			? selectionStart > token.start && selectionStart < token.end
-			: selectionStart < token.end && selectionEnd > token.start,
+type EditRange = {
+	oldStart: number;
+	oldEnd: number;
+	newStart: number;
+	newEnd: number;
+	delta: number;
+};
+
+const calculateEditRange = (previous: string, next: string): EditRange => {
+	let prefixLength = 0;
+	const previousLength = previous.length;
+	const nextLength = next.length;
+	while (
+		prefixLength < previousLength &&
+		prefixLength < nextLength &&
+		previous[prefixLength] === next[prefixLength]
+	) {
+		prefixLength += 1;
+	}
+	let previousEnd = previousLength;
+	let nextEnd = nextLength;
+	while (
+		previousEnd > prefixLength &&
+		nextEnd > prefixLength &&
+		previous[previousEnd - 1] === next[nextEnd - 1]
+	) {
+		previousEnd -= 1;
+		nextEnd -= 1;
+	}
+	return {
+		oldStart: prefixLength,
+		oldEnd: previousEnd,
+		newStart: prefixLength,
+		newEnd: nextEnd,
+		delta: nextLength - previousLength,
+	};
+};
+
+const findTokensInEdit = (tokens: ResourceToken[], range: EditRange) => {
+	if (range.oldStart === range.oldEnd) {
+		return tokens.filter(
+			(token) => range.oldStart > token.start && range.oldStart < token.end,
+		);
+	}
+	return tokens.filter(
+		(token) => range.oldStart < token.end && range.oldEnd > token.start,
 	);
+};
+
+const mapPositionAfterRemoval = (position: number, tokens: ResourceToken[]) => {
+	let removedLength = 0;
+	for (const token of tokens) {
+		if (position < token.start) {
+			break;
+		}
+		if (position <= token.end) {
+			return token.start - removedLength;
+		}
+		removedLength += token.end - token.start;
+	}
+	return position - removedLength;
+};
+
+const applyTokenRemovalEdit = (
+	previous: string,
+	next: string,
+	range: EditRange,
+	tokens: ResourceToken[],
+) => {
+	const orderedTokens = [...tokens].sort(
+		(left, right) => left.start - right.start,
+	);
+	const removalRanges = orderedTokens.map((token) => ({
+		start: token.start,
+		end: token.end,
+	}));
+	const cleanedInput = removeRanges(previous, removalRanges);
+	const insertedText = next.slice(range.newStart, range.newEnd);
+	const cleanStart = mapPositionAfterRemoval(range.oldStart, orderedTokens);
+	const cleanEnd = mapPositionAfterRemoval(range.oldEnd, orderedTokens);
+	const clampedStart = Math.max(0, Math.min(cleanStart, cleanedInput.length));
+	const clampedEnd = Math.max(
+		clampedStart,
+		Math.min(cleanEnd, cleanedInput.length),
+	);
+	const value =
+		cleanedInput.slice(0, clampedStart) +
+		insertedText +
+		cleanedInput.slice(clampedEnd);
+	return {
+		value,
+		cursor: clampedStart + insertedText.length,
+	};
+};
 
 export function ChatFooter({
 	activeSession,
@@ -276,18 +365,20 @@ export function ChatFooter({
 		[activeSession?.inputContents],
 	);
 	const [resourceHighlight, setResourceHighlight] = useState(0);
-	const [resourcePickerSuppressed, setResourcePickerSuppressed] = useState(false);
+	const [resourcePickerSuppressed, setResourcePickerSuppressed] =
+		useState(false);
 	const [inputCursor, setInputCursor] = useState(rawInput.length);
-	const resourceTrigger = useMemo(
-		() =>
-			resourcePickerSuppressed
-				? null
-				: findResourceTrigger(rawInput, inputCursor, resourceTokens),
-		[rawInput, inputCursor, resourceTokens, resourcePickerSuppressed],
+	const resourceTriggerCandidate = useMemo(
+		() => findResourceTrigger(rawInput, inputCursor, resourceTokens),
+		[rawInput, inputCursor, resourceTokens],
 	);
-	const previousResourceTrigger = useRef<number | null>(
-		resourceTrigger?.start ?? null,
-	);
+	const resourceTrigger = resourcePickerSuppressed
+		? null
+		: resourceTriggerCandidate;
+	const previousResourceTrigger = useRef<{
+		start: number;
+		query: string;
+	} | null>(null);
 	const resourceMatches = useMemo(
 		() =>
 			resourceTrigger
@@ -310,10 +401,9 @@ export function ChatFooter({
 	const handleCommandClick = (command: AvailableCommand) => {
 		const nextValue = `/${command.name}`;
 		if (activeSessionId) {
-		setInput(activeSessionId, nextValue);
-		setInputContents(activeSessionId, createDefaultContentBlocks(nextValue));
-		setInputCursor(nextValue.length);
-
+			setInput(activeSessionId, nextValue);
+			setInputContents(activeSessionId, createDefaultContentBlocks(nextValue));
+			setInputCursor(nextValue.length);
 		}
 		setCommandHighlight(0);
 		setCommandPickerSuppressed(true);
@@ -335,24 +425,22 @@ export function ChatFooter({
 		});
 	};
 
-	const handleResourceSelect = () => {
-		const target = resourceMatches[effectiveResourceHighlight];
-		if (!target || !activeSessionId) {
+	const applyResourceSelection = (resource: SessionFsResourceEntry) => {
+		if (!activeSessionId) {
 			return false;
 		}
 		if (!resourceTrigger) {
 			return false;
 		}
-		const filename = target.name;
+		const filename = resource.name;
 		const tokenLabel = `@${filename}`;
 		const nextInput =
 			rawInput.slice(0, resourceTrigger.start) +
 			tokenLabel +
 			rawInput.slice(resourceTrigger.end);
-		setInputCursor(resourceTrigger.start + tokenLabel.length);
 		const nextResource: ResourceLinkContent = {
 			type: "resource_link",
-			uri: buildFileUri(target.path),
+			uri: buildFileUri(resource.path),
 			name: filename,
 		};
 		const nextResources = [...resourceTokens.map((token) => token.resource)];
@@ -360,21 +448,42 @@ export function ChatFooter({
 		const nextContents = buildContentsFromInput(nextInput, nextResources);
 		setInput(activeSessionId, nextInput);
 		setInputContents(activeSessionId, nextContents);
+		setInputCursor(resourceTrigger.start + tokenLabel.length);
 		setResourceHighlight(0);
 		setResourcePickerSuppressed(true);
 		return true;
 	};
 
-	useEffect(() => {
-		const currentStart = resourceTrigger?.start ?? null;
-		if (previousResourceTrigger.current !== currentStart) {
-			setResourceHighlight(0);
-			previousResourceTrigger.current = currentStart;
+	const handleResourceSelect = () => {
+		const target = resourceMatches[effectiveResourceHighlight];
+		if (!target) {
+			return false;
 		}
-		if (!resourceTrigger) {
+		return applyResourceSelection(target);
+	};
+
+	const handleResourceClick = (resource: SessionFsResourceEntry) => {
+		applyResourceSelection(resource);
+	};
+
+	useEffect(() => {
+		const nextKey = resourceTrigger
+			? { start: resourceTrigger.start, query: resourceTrigger.query }
+			: null;
+		const previousKey = previousResourceTrigger.current;
+		const isSameTrigger =
+			nextKey &&
+			previousKey &&
+			nextKey.start === previousKey.start &&
+			nextKey.query === previousKey.query;
+		if (!isSameTrigger) {
+			setResourceHighlight(0);
+		}
+		previousResourceTrigger.current = nextKey;
+		if (!resourceTriggerCandidate) {
 			setResourcePickerSuppressed(false);
 		}
-	}, [resourceTrigger]);
+	}, [resourceTrigger, resourceTriggerCandidate]);
 
 	useEffect(() => {
 		if (!hasSlashPrefix) {
@@ -436,7 +545,7 @@ export function ChatFooter({
 							open={shouldShowResourcePicker}
 							highlightedIndex={effectiveResourceHighlight}
 							onHighlightChange={setResourceHighlight}
-							onSelect={handleResourceSelect}
+							onSelect={handleResourceClick}
 							className="absolute bottom-full left-0 mb-2"
 						/>
 					) : null}
@@ -541,38 +650,38 @@ export function ChatFooter({
 							if (!activeSessionId) {
 								return;
 							}
+							setResourcePickerSuppressed(false);
 							const target = event.target;
 							const nextValue = target.value;
 							const selectionStart = target.selectionStart ?? nextValue.length;
-							const selectionEnd = target.selectionEnd ?? nextValue.length;
+							const range = calculateEditRange(rawInput, nextValue);
 							setInputCursor(selectionStart);
-							const touchedTokens = findTokensInSelection(
-								resourceTokens,
-								selectionStart,
-								selectionEnd,
+							const touchedTokens = findTokensInEdit(resourceTokens, range);
+							if (touchedTokens.length === 0) {
+								const nextContents = buildContentsFromInput(
+									nextValue,
+									resourceTokens.map((token) => token.resource),
+								);
+								setInput(activeSessionId, nextValue);
+								setInputContents(activeSessionId, nextContents);
+								return;
+							}
+							const { value: sanitizedValue, cursor } = applyTokenRemovalEdit(
+								rawInput,
+								nextValue,
+								range,
+								touchedTokens,
 							);
-							const sanitizedValue =
-								touchedTokens.length > 0
-									? removeRanges(
-										nextValue,
-										touchedTokens.map((token) => ({
-											start: token.start,
-											end: token.end,
-										})),
-									)
-									: nextValue;
-							const remainingResources =
-								touchedTokens.length > 0
-									? resourceTokens
-										.filter((token) => !touchedTokens.includes(token))
-										.map((token) => token.resource)
-									: resourceTokens.map((token) => token.resource);
+							const remainingResources = resourceTokens
+								.filter((token) => !touchedTokens.includes(token))
+								.map((token) => token.resource);
 							const nextContents = buildContentsFromInput(
 								sanitizedValue,
 								remainingResources,
 							);
 							setInput(activeSessionId, sanitizedValue);
 							setInputContents(activeSessionId, nextContents);
+							setInputCursor(cursor);
 						}}
 						onKeyDown={(event) => {
 							if (shouldShowResourcePicker) {
