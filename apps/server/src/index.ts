@@ -2,7 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { RequestPermissionResponse } from "@agentclientprotocol/sdk";
+import { spawn } from "node:child_process";
+import type { ContentBlock, RequestPermissionResponse } from "@agentclientprotocol/sdk";
 import express from "express";
 import type { AcpConnectionState } from "./acp/acp-connection.js";
 import {
@@ -168,6 +169,17 @@ type SessionFsRootsResponse = {
 	root: SessionFsRoot;
 };
 
+type SessionFsResourceEntry = {
+	name: string;
+	path: string;
+	relativePath: string;
+};
+
+type SessionFsResourcesResponse = {
+	rootPath: string;
+	entries: SessionFsResourceEntry[];
+};
+
 const HOME_ROOT_NAME = "Home";
 const SESSION_ROOT_NAME = "工作目录";
 let cachedHomePath: string | undefined;
@@ -312,6 +324,104 @@ const resolveSessionFile = async (rootPath: string, input?: string) => {
 	} catch (error) {
 		throw resolveSessionFsError(error, "路径不可用");
 	}
+};
+
+type GitExecResult = {
+	code: number | null;
+	stdout: string;
+	stderr: string;
+};
+
+const runGit = async (
+	cwd: string,
+	args: string[],
+): Promise<GitExecResult> =>
+	new Promise((resolve) => {
+		const child = spawn("git", args, {
+			cwd,
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		let stdout = "";
+		let stderr = "";
+		child.stdout.on("data", (chunk) => {
+			stdout += chunk.toString();
+		});
+		child.stderr.on("data", (chunk) => {
+			stderr += chunk.toString();
+		});
+		child.on("close", (code) => {
+			resolve({ code, stdout, stderr });
+		});
+		child.on("error", (error) => {
+			resolve({ code: 1, stdout, stderr: `${stderr}\n${String(error)}` });
+		});
+	});
+
+const normalizeGitPaths = (raw: string) =>
+	raw
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter(Boolean);
+
+const listGitTrackedFiles = async (cwd: string) => {
+	const result = await runGit(cwd, [
+		"ls-files",
+		"-c",
+		"-o",
+		"--exclude-standard",
+	]);
+	if (result.code !== 0) {
+		return null;
+	}
+	return normalizeGitPaths(result.stdout);
+};
+
+const listAllFiles = async (rootPath: string): Promise<string[]> => {
+	const files: string[] = [];
+	const entries = await fs.readdir(rootPath, { withFileTypes: true });
+	await Promise.all(
+		entries.map(async (entry) => {
+			const entryPath = path.join(rootPath, entry.name);
+			if (entry.isDirectory()) {
+				files.push(...(await listAllFiles(entryPath)));
+				return;
+			}
+			if (entry.isFile()) {
+				files.push(entryPath);
+			}
+			if (entry.isSymbolicLink()) {
+				try {
+					const stats = await fs.stat(entryPath);
+					if (stats.isDirectory()) {
+						files.push(...(await listAllFiles(entryPath)));
+					}
+					if (stats.isFile()) {
+						files.push(entryPath);
+					}
+				} catch {
+					// ignore broken symlink
+				}
+			}
+		}),
+	);
+	return files;
+};
+
+const listSessionResources = async (rootPath: string) => {
+	const gitFiles = await listGitTrackedFiles(rootPath);
+	if (gitFiles) {
+		return gitFiles.map((relativePath) => ({
+			name: path.basename(relativePath),
+			relativePath,
+			path: path.join(rootPath, relativePath),
+		}));
+	}
+	const allFiles = await listAllFiles(rootPath);
+	return allFiles.map((filePath) => ({
+		name: path.basename(filePath),
+		relativePath: path.relative(rootPath, filePath),
+		path: filePath,
+	}));
 };
 
 const resolveImageMimeType = (filePath: string) => {
@@ -575,6 +685,31 @@ app.get("/fs/session/file", async (request, response) => {
 	}
 });
 
+app.get("/fs/session/resources", async (request, response) => {
+	const sessionId =
+		typeof request.query.sessionId === "string"
+			? request.query.sessionId
+			: undefined;
+	try {
+		const rootPath = resolveSessionRoot(sessionId);
+		const entries = await listSessionResources(rootPath);
+		const payload: SessionFsResourcesResponse = {
+			rootPath,
+			entries,
+		};
+		response.json(payload);
+	} catch (error) {
+		if (error instanceof AppError) {
+			respondError(response, error.detail, error.status);
+			return;
+		}
+		respondError(
+			response,
+			createInternalError("request", getErrorMessage(error)),
+		);
+	}
+});
+
 app.get("/acp/sessions", (_request, response) => {
 	response.json({ sessions: sessionManager.listSessions() });
 });
@@ -785,7 +920,7 @@ app.post("/acp/message/id", async (request, response) => {
 
 app.post("/acp/message", async (request, response) => {
 	const { sessionId, prompt } = request.body ?? {};
-	if (typeof sessionId !== "string" || typeof prompt !== "string") {
+	if (typeof sessionId !== "string" || !Array.isArray(prompt)) {
 		respondError(
 			response,
 			buildRequestValidationError("sessionId 和 prompt 必填"),
@@ -807,9 +942,10 @@ app.post("/acp/message", async (request, response) => {
 
 	try {
 		sessionManager.touchSession(sessionId);
-		const result = await record.connection.prompt(sessionId, [
-			{ type: "text", text: prompt },
-		]);
+		const result = await record.connection.prompt(
+			sessionId,
+			prompt as ContentBlock[],
+		);
 		sessionManager.touchSession(sessionId);
 		response.json({ stopReason: result.stopReason });
 	} catch (error) {

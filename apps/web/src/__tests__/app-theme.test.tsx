@@ -26,6 +26,7 @@ const mockChatStore = vi.hoisted(() => ({
 		removeSession: vi.fn(),
 		renameSession: vi.fn(),
 		setInput: vi.fn(),
+		setInputContents: vi.fn(),
 		setSending: vi.fn(),
 		setCanceling: vi.fn(),
 		setError: vi.fn(),

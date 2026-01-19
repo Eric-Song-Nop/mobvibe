@@ -3,8 +3,10 @@ import { renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
+import type { ContentBlock } from "@/lib/acp";
 import * as apiModule from "@/lib/api";
 import { useSessionMutations } from "../useSessionMutations";
+
 
 // Mock the API module
 vi.mock("@/lib/api", async () => {
@@ -37,6 +39,7 @@ describe("useSessionMutations", () => {
 		setError: vi.fn(),
 		setAppError: vi.fn(),
 		setInput: vi.fn(),
+		setInputContents: vi.fn(),
 		setSending: vi.fn(),
 		setCanceling: vi.fn(),
 		setStreamError: vi.fn(),
@@ -429,7 +432,7 @@ describe("useSessionMutations", () => {
 
 			await result.current.sendMessageMutation.mutateAsync({
 				sessionId: "session-1",
-				prompt: "Hello",
+				prompt: [{ type: "text", text: "Hello" }],
 			});
 
 			expect(mockStore.finalizeAssistantMessage).toHaveBeenCalledWith(
@@ -448,7 +451,7 @@ describe("useSessionMutations", () => {
 			});
 
 			await result.current.sendMessageMutation.mutateAsync(
-				undefined as unknown as { sessionId: string; prompt: string },
+				undefined as unknown as { sessionId: string; prompt: ContentBlock[] },
 			);
 
 			// Should not call finalizeAssistantMessage with undefined

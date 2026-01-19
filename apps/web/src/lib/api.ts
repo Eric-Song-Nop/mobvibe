@@ -1,4 +1,9 @@
-import type { AvailableCommand, PermissionOutcome } from "./acp";
+import type {
+	AvailableCommand,
+	ContentBlock,
+	PermissionOutcome,
+} from "./acp";
+
 
 export type AcpConnectionState =
 	| "idle"
@@ -77,6 +82,17 @@ export type SessionFsFilePreviewResponse = {
 	previewType: SessionFsFilePreviewType;
 	content: string;
 	mimeType?: string;
+};
+
+export type SessionFsResourceEntry = {
+	name: string;
+	path: string;
+	relativePath: string;
+};
+
+export type SessionFsResourcesResponse = {
+	rootPath: string;
+	entries: SessionFsResourceEntry[];
 };
 
 export type SessionState = AcpConnectionState;
@@ -240,6 +256,9 @@ const buildSessionFsFilePath = (sessionId: string, pathValue: string) => {
 	return `/fs/session/file?${params.toString()}`;
 };
 
+const buildSessionFsResourcesPath = (sessionId: string) =>
+	`/fs/session/resources?sessionId=${encodeURIComponent(sessionId)}`;
+
 export const fetchFsRoots = async (): Promise<FsRootsResponse> =>
 	requestJson<FsRootsResponse>("/fs/roots");
 
@@ -269,6 +288,13 @@ export const fetchSessionFsFile = async (payload: {
 }): Promise<SessionFsFilePreviewResponse> =>
 	requestJson<SessionFsFilePreviewResponse>(
 		buildSessionFsFilePath(payload.sessionId, payload.path),
+	);
+
+export const fetchSessionFsResources = async (payload: {
+	sessionId: string;
+}): Promise<SessionFsResourcesResponse> =>
+	requestJson<SessionFsResourcesResponse>(
+		buildSessionFsResourcesPath(payload.sessionId),
 	);
 
 export const createSession = async (payload?: {
@@ -334,7 +360,7 @@ export const setSessionModel = async (payload: {
 
 export const sendMessage = async (payload: {
 	sessionId: string;
-	prompt: string;
+	prompt: ContentBlock[];
 }): Promise<SendMessageResponse> =>
 	requestJson<SendMessageResponse>("/acp/message", {
 		method: "POST",

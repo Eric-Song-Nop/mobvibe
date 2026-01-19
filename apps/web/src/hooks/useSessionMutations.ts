@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type {
+	ContentBlock,
 	PermissionOption,
 	PermissionOutcome,
 	PermissionToolCall,
@@ -70,6 +71,7 @@ export interface ChatStoreActions {
 	setError: (sessionId: string, error?: SessionError) => void;
 	setAppError: (error?: SessionError) => void;
 	setInput: (sessionId: string, input: string) => void;
+	setInputContents: (sessionId: string, contents: ContentBlock[]) => void;
 	setSending: (sessionId: string, sending: boolean) => void;
 	setCanceling: (sessionId: string, canceling: boolean) => void;
 	setStreamError: (sessionId: string, error?: StreamError) => void;
@@ -77,7 +79,7 @@ export interface ChatStoreActions {
 	addUserMessage: (
 		sessionId: string,
 		content: string,
-		meta?: { messageId?: string },
+		meta?: { messageId?: string; contentBlocks?: ContentBlock[] },
 	) => void;
 	addStatusMessage: (sessionId: string, status: StatusPayload) => void;
 	appendAssistantChunk: (sessionId: string, text: string) => void;

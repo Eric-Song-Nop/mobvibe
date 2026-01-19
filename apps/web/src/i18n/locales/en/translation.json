@@ -35,6 +35,7 @@
 		"selectSession": "Select or create a conversation to get started.",
 		"startConversation": "██   ██  █████  ██████  ██   ██  ███████  ██████  ███████\n███ ███  ██   ██  ██   ██  ██   ██   ███   ██   ██  ██     \n██ █ ██  ██   ██  ██████  ██   ██   ███   ██████  ██████ \n██   ██  ██   ██  ██   ██   ██ ██    ███   ██   ██  ██     \n██   ██   █████   ██████    ███   ███████  ██████  ███████\n ░░░░░░   ░░░░░   ░░░░░░     ░░     ░░░░░░   ░░░░░   ░░░░  ",
 		"noMatchingCommand": "No matching commands",
+		"noMatchingResource": "No matching files",
 		"modeLabel": "Mode",
 		"modelLabel": "Model",
 		"modeLabelWithValue": "Mode: {{value}}",

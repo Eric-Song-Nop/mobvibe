@@ -303,6 +303,49 @@ const renderResourceLinkContent = (
 	);
 };
 
+const renderUserContent = (
+	message: Extract<ChatMessage, { kind: "text" }>,
+	onOpenFilePreview?: (path: string) => void,
+) => {
+	const contentBlocks = message.contentBlocks ?? [];
+	if (contentBlocks.length === 0) {
+		return <Streamdown>{message.content}</Streamdown>;
+	}
+	const parts = contentBlocks.map((block, index) => {
+		if (block.type === "text") {
+			return (
+				<Streamdown key={`text-${index}`}>{block.text}</Streamdown>
+			);
+		}
+		if (block.type === "resource_link") {
+			const label = `@${block.name}`;
+			const filePath = resolveFilePathFromUri(block.uri);
+			if (filePath && onOpenFilePreview) {
+				return (
+					<button
+						key={`resource-${index}`}
+						type="button"
+						className="text-primary hover:underline"
+						onClick={(event) => {
+							event.preventDefault();
+							onOpenFilePreview(filePath);
+						}}
+					>
+						{label}
+					</button>
+				);
+			}
+			return (
+				<span key={`resource-${index}`} className="text-foreground">
+					{label}
+				</span>
+			);
+		}
+		return null;
+	});
+	return <div className="flex flex-wrap gap-1">{parts}</div>;
+};
+
 const renderContentBlock = (
 	content: ContentBlock,
 	key: string,
@@ -737,7 +780,7 @@ export const MessageItem = ({
 				)}
 			>
 				<CardContent className="text-sm">
-					<Streamdown>{message.content}</Streamdown>
+					{renderUserContent(message, onOpenFilePreview)}
 				</CardContent>
 			</Card>
 		</div>

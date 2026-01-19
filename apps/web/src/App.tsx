@@ -37,6 +37,7 @@ export function App() {
 		removeSession,
 		renameSession: renameSessionLocal,
 		setInput,
+		setInputContents,
 		setSending,
 		setCanceling,
 		setError,
@@ -95,6 +96,7 @@ export function App() {
 		setError,
 		setAppError,
 		setInput,
+		setInputContents,
 		setSending,
 		setCanceling,
 		setStreamError,
@@ -293,8 +295,8 @@ export function App() {
 		if (!activeSessionId || !activeSession) {
 			return;
 		}
-		const prompt = activeSession.input.trim();
-		if (!prompt || activeSession.sending) {
+		const promptContents = activeSession.inputContents;
+		if (!promptContents.length || activeSession.sending) {
 			return;
 		}
 		if (activeSession.state !== "ready") {
@@ -306,6 +308,7 @@ export function App() {
 		setCanceling(activeSessionId, false);
 		setError(activeSessionId, undefined);
 		setInput(activeSessionId, "");
+		setInputContents(activeSessionId, [{ type: "text", text: "" }]);
 
 		let messageId: string;
 		try {
@@ -317,8 +320,14 @@ export function App() {
 			return;
 		}
 
-		addUserMessage(activeSessionId, prompt, { messageId });
-		sendMessageMutation.mutate({ sessionId: activeSessionId, prompt });
+		addUserMessage(activeSessionId, activeSession.input ?? "", {
+			messageId,
+			contentBlocks: promptContents,
+		});
+		sendMessageMutation.mutate({
+			sessionId: activeSessionId,
+			prompt: promptContents,
+		});
 	};
 
 	const statusVariant = getStatusVariant(activeSessionState);

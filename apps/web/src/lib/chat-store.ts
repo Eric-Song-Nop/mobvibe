@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 import i18n from "@/i18n";
 import type {
 	AvailableCommand,
+	ContentBlock,
 	PermissionOption,
 	PermissionOutcome,
 	PermissionToolCall,
@@ -18,6 +19,7 @@ import type {
 	SessionState,
 	SessionSummary,
 } from "@/lib/api";
+import { createDefaultContentBlocks } from "@/lib/content-block-utils";
 
 export type ChatRole = "user" | "assistant";
 
@@ -26,9 +28,11 @@ type TextMessage = {
 	role: ChatRole;
 	kind: "text";
 	content: string;
+	contentBlocks: ContentBlock[];
 	createdAt: string;
 	isStreaming: boolean;
 };
+
 
 export type PermissionDecisionState = "idle" | "submitting";
 
@@ -96,6 +100,7 @@ export type ChatSession = {
 	sessionId: string;
 	title: string;
 	input: string;
+	inputContents: ContentBlock[];
 	messages: ChatMessage[];
 	terminalOutputs: Record<string, TerminalOutputSnapshot>;
 	streamingMessageId?: string;
@@ -149,6 +154,7 @@ type ChatState = {
 	removeSession: (sessionId: string) => void;
 	renameSession: (sessionId: string, title: string) => void;
 	setInput: (sessionId: string, value: string) => void;
+	setInputContents: (sessionId: string, contents: ContentBlock[]) => void;
 	setSending: (sessionId: string, value: boolean) => void;
 	setCanceling: (sessionId: string, value: boolean) => void;
 	setError: (sessionId: string, value?: ErrorDetail) => void;
@@ -175,7 +181,7 @@ type ChatState = {
 	addUserMessage: (
 		sessionId: string,
 		content: string,
-		options?: { messageId?: string },
+		options?: { messageId?: string; contentBlocks?: ContentBlock[] },
 	) => void;
 	addStatusMessage: (
 		sessionId: string,
@@ -246,6 +252,7 @@ const createMessage = (role: ChatRole, content: string): TextMessage => ({
 	role,
 	kind: "text",
 	content,
+	contentBlocks: createDefaultContentBlocks(content),
 	createdAt: new Date().toISOString(),
 	isStreaming: true,
 });
@@ -393,6 +400,7 @@ const createSessionState = (
 	sessionId,
 	title: options?.title ?? i18n.t("session.defaultTitle"),
 	input: "",
+	inputContents: createDefaultContentBlocks(""),
 	messages: [],
 	terminalOutputs: {},
 	streamingMessageId: undefined,
@@ -432,6 +440,7 @@ const sanitizeMessageForPersist = (message: ChatMessage): ChatMessage => {
 const sanitizeSessionForPersist = (session: ChatSession): ChatSession => ({
 	...session,
 	input: "",
+	inputContents: createDefaultContentBlocks(""),
 	sending: false,
 	canceling: false,
 	error: undefined,
@@ -571,6 +580,22 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
+			setInputContents: (sessionId, contents) =>
+				set((state) => {
+					const session = state.sessions[sessionId];
+					if (!session) {
+						return state;
+					}
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: {
+								...session,
+								inputContents: contents,
+							},
+						},
+					};
+				}),
 			setSending: (sessionId, value) =>
 				set((state) => {
 					const session = state.sessions[sessionId];
@@ -675,6 +700,8 @@ export const useChatStore = create<ChatState>()(
 						...createMessage("user", content),
 						id: options?.messageId ?? createLocalId(),
 						isStreaming: false,
+						contentBlocks:
+							options?.contentBlocks ?? createDefaultContentBlocks(content),
 					};
 					return {
 						sessions: {
@@ -712,14 +739,20 @@ export const useChatStore = create<ChatState>()(
 						messages = [...messages, message];
 					}
 
-					messages = messages.map((message: ChatMessage) =>
-						message.id === streamingMessageId && isTextMessage(message)
-							? {
-									...message,
-									content: `${message.content}${content}`,
-								}
-							: message,
-					);
+					messages = messages.map((message: ChatMessage) => {
+						if (message.id !== streamingMessageId || !isTextMessage(message)) {
+							return message;
+						}
+						const nextContent = `${message.content}${content}`;
+						const nextBlocks = message.contentBlocks.map((block) =>
+							block.type === "text" ? { ...block, text: nextContent } : block,
+						);
+						return {
+							...message,
+							content: nextContent,
+							contentBlocks: nextBlocks,
+						};
+					});
 
 					return {
 						sessions: {
