@@ -132,7 +132,3 @@ When accessing Mobvibe from a phone/tablet on the same network, make sure the ba
 - ACP protocol: https://agentclientprotocol.com/
 - ACP SDK docs: https://agentclientprotocol.github.io/typescript-sdk/
 - Project docs: =docs/=
-
-** License
-
-TBD

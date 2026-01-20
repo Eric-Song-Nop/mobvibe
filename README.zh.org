@@ -132,7 +132,3 @@ Mobvibe 以移动端为优先：
 - ACP 协议：https://agentclientprotocol.com/
 - ACP SDK 文档：https://agentclientprotocol.github.io/typescript-sdk/
 - 项目文档：=docs/=
-
-** License
-
-待定
