@@ -1,0 +1,138 @@
+# Mobvibe
+
+Mobvibe 是面向移动端优先的 ACP（Agent Client Protocol）WebUI，用于本地 Agent 工作流。它连接 ACP 兼容 CLI，管理多会话对话，并在桌面与移动端提供快速、触控友好的体验。
+
+- ACP 协议：https://agentclientprotocol.com/
+- ACP TypeScript SDK 文档：https://agentclientprotocol.github.io/typescript-sdk/
+
+## 亮点
+
+- 移动端优先布局：响应式侧边栏、底部固定输入与安全区适配。
+- 多会话聊天，支持快速切换与会话级流式更新。
+- 会话级 ACP 后端选择（opencode、gemini-cli、claude-code-acp）。
+- SSE 实时推送消息、模式更新与会话元信息。
+- Slash 命令选择器（`/`）与文件资源选择器（`@`）。
+- 会话限定文件浏览器，支持代码/图片预览与 Tree-sitter 大纲。
+- 权限请求卡片与用户决策闭环。
+- 本地会话持久化，刷新后可恢复。
+- 主题切换、中文/英文 i18n、Shadcn UI 体系。
+
+## 移动端体验
+
+Mobvibe 以移动端为优先：
+
+- 单列聊天布局，顶部状态栏 + 底部输入固定。
+- 小屏幕精简状态栏、触控友好控件。
+- 安全区 padding 与动态视口高度适配。
+- 文件浏览与预览在移动端提供切换视图。
+
+## 功能一览
+
+### 聊天与会话
+
+- 创建、重命名、关闭会话，并提供幂等清理。
+- SSE 流式回复与会话更新。
+- 生成中可取消并展示停止状态。
+- 会话元信息徽章：Agent / Model / Mode。
+- 会话列表展示后端标签与状态徽章。
+
+### ACP 协议支持
+
+- 协议握手与会话生命周期：`initialize`、`newSession`。
+- 消息发送与取消：`prompt`、`cancel`。
+- 模式/模型切换：`setSessionMode`、`unstable_setSessionModel`。
+- 权限请求流程：`requestPermission` 与决策回传。
+- SSE 推送：`sessionUpdate`、`current_mode_update`、`session_info_update`。
+
+### 工具与资源
+
+- Slash 命令模糊选择器（`/`）。
+- 文件资源选择器（`@`）与结构化内容块。
+- 会话限定文件浏览器，Finder 风格列式浏览。
+- 代码预览高亮、行号与软换行。
+- 图片预览（base64 data URL）。
+- Tree-sitter 代码大纲面板（多语言）。
+
+### UI 与体验
+
+- Shadcn UI + Tailwind CSS。
+- Streamdown 渲染流式 Markdown。
+- 自动滚动策略优化，便于阅读历史。
+- 主题切换（浅色/深色/跟随系统），偏好持久化。
+- 国际化（中英双语），语言偏好持久化。
+
+## 架构
+
+### 前端
+
+- React + Vite + TypeScript
+- Zustand 状态管理，TanStack Query API 调用
+- Streamdown 渲染流式 Markdown
+- Shadcn UI + Tailwind CSS
+
+### 后端
+
+- Express + TypeScript ACP 适配器
+- ACP TypeScript SDK 协议连接
+- 多进程 ACP CLI 会话管理
+- SQLite + Drizzle（预留持久化能力）
+
+## API 列表（节选）
+
+- `GET /health`
+- `GET /acp/agent`
+- `GET /acp/backends`
+- `GET /acp/sessions`
+- `POST /acp/session`
+- `PATCH /acp/session`
+- `POST /acp/session/close`
+- `POST /acp/session/cancel`
+- `POST /acp/session/mode`
+- `POST /acp/session/model`
+- `POST /acp/message`
+- `POST /acp/permission/decision`
+- `GET /acp/session/stream`
+- `GET /fs/roots`
+- `GET /fs/entries`
+- `GET /fs/session/roots`
+- `GET /fs/session/entries`
+- `GET /fs/session/file`
+- `GET /fs/session/resources`
+
+## 开发
+
+### 环境要求
+
+- Node.js（使用 `pnpm`）
+- 本地 ACP CLI：`opencode`、`gemini-cli` 或 `claude-code-acp`
+
+### 脚本
+
+- `pnpm dev`: 启动后端与前端
+- `pnpm format`: Biome 格式化
+- `pnpm lint`: Biome lint
+- `pnpm test`: 运行测试（Vitest）
+
+### 环境变量
+
+- `MOBVIBE_PORT`: 后端端口（默认 3757）
+- `MOBVIBE_ACP_BACKENDS`: 可用后端列表（逗号分隔）
+- `MOBVIBE_CORS_ORIGINS`: 追加 CORS 来源
+- `ANTHROPIC_AUTH_TOKEN`: Claude Code 后端必需
+- `ANTHROPIC_BASE_URL`: Claude Code 可选
+
+## 局域网移动端访问
+
+手机/平板访问时，请在后端允许前端 origin：
+
+- 示例：`MOBVIBE_CORS_ORIGINS=http://192.168.1.20:5173`
+
+## 文档
+
+- ACP 协议：https://agentclientprotocol.com/
+- ACP SDK 文档：https://agentclientprotocol.github.io/typescript-sdk/
+- 项目文档：`docs/`
+
+## License
+
+待定

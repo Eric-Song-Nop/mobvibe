@@ -1,0 +1,138 @@
+# Mobvibe
+
+Mobvibe is a mobile-first ACP (Agent Client Protocol) WebUI for local agent workflows. It connects to ACP-compatible CLIs, manages multi-session chat, and delivers a fast, touch-friendly experience across desktop and mobile.
+
+- ACP protocol: https://agentclientprotocol.com/
+- ACP TypeScript SDK docs: https://agentclientprotocol.github.io/typescript-sdk/
+
+## Highlights
+
+- Mobile-first layout with responsive sidebar, fixed input, and safe-area support.
+- Multi-session chat with fast switching and per-session streaming updates.
+- ACP backend selection per session (opencode, gemini-cli, claude-code-acp).
+- Real-time SSE updates for messages, mode updates, and session metadata.
+- Slash command picker (`/`) and file resource picker (`@`) for structured inputs.
+- Session-scoped file explorer with code/image preview and Tree-sitter outline.
+- Permission request handling with inline decision cards.
+- Local session persistence and recovery after refresh.
+- Light/dark/system themes, i18n (Chinese/English), and Shadcn UI.
+
+## Mobile Experience
+
+Mobvibe is designed for mobile first:
+
+- Single-column chat layout with fixed header/footer.
+- Touch-friendly controls and condensed status bar on small screens.
+- Safe-area padding and dynamic viewport height handling.
+- File browser and preview optimized for mobile with view toggles.
+
+## Features
+
+### Chat & Sessions
+
+- Create, rename, and close sessions with resilient cleanup.
+- Streamed assistant responses via SSE (`sessionUpdate`).
+- Cancel in-flight generations and show stop status.
+- Session metadata badges for agent, model, and mode.
+- Session list shows backend labels and status badges.
+
+### ACP Protocol Support
+
+- Handshake and session lifecycle: `initialize`, `newSession`.
+- Prompting and cancel: `prompt`, `cancel`.
+- Mode/model switching: `setSessionMode`, `unstable_setSessionModel`.
+- Permission workflow: `requestPermission` with decision responses.
+- Streaming updates: `sessionUpdate` with mode and session info updates.
+
+### Tools & Resources
+
+- Slash command fuzzy finder for ACP commands (`/`).
+- Embedded resource picker for files (`@`) with content blocks.
+- Session-scoped file explorer with Finder-style column browsing.
+- Code preview with syntax highlighting, line numbers, and soft wrapping.
+- Image preview with base64 data URL rendering.
+- Tree-sitter outline panel for supported languages.
+
+### UI & UX
+
+- Shadcn UI components with Tailwind CSS.
+- Streamed Markdown rendering via Streamdown.
+- Auto-scroll behavior tuned for reading history.
+- Theme switching (light/dark/system) with persisted preference.
+- Internationalization (English/Chinese) with persisted language choice.
+
+## Architecture
+
+### Frontend
+
+- React + Vite + TypeScript
+- Zustand for state, TanStack Query for API calls
+- Streamdown for streamed Markdown rendering
+- Shadcn UI + Tailwind CSS
+
+### Backend
+
+- Express + TypeScript ACP adapter
+- ACP TypeScript SDK for protocol connections
+- Session manager with multi-process ACP CLI support
+- SQLite + Drizzle ready for future persistence
+
+## API Surface (Selected)
+
+- `GET /health`
+- `GET /acp/agent`
+- `GET /acp/backends`
+- `GET /acp/sessions`
+- `POST /acp/session`
+- `PATCH /acp/session`
+- `POST /acp/session/close`
+- `POST /acp/session/cancel`
+- `POST /acp/session/mode`
+- `POST /acp/session/model`
+- `POST /acp/message`
+- `POST /acp/permission/decision`
+- `GET /acp/session/stream`
+- `GET /fs/roots`
+- `GET /fs/entries`
+- `GET /fs/session/roots`
+- `GET /fs/session/entries`
+- `GET /fs/session/file`
+- `GET /fs/session/resources`
+
+## Development
+
+### Requirements
+
+- Node.js (use `pnpm`)
+- Local ACP CLI(s): `opencode`, `gemini-cli`, or `claude-code-acp`
+
+### Scripts
+
+- `pnpm dev`: start server + web app
+- `pnpm format`: format with Biome
+- `pnpm lint`: lint with Biome
+- `pnpm test`: run tests (Vitest)
+
+### Environment
+
+- `MOBVIBE_PORT`: backend port (default 3757)
+- `MOBVIBE_ACP_BACKENDS`: comma-separated backend IDs
+- `MOBVIBE_CORS_ORIGINS`: extra CORS origins (comma-separated)
+- `ANTHROPIC_AUTH_TOKEN`: required for Claude Code backend
+- `ANTHROPIC_BASE_URL`: optional for Claude Code backend
+
+## Local Network (Mobile Access)
+
+When accessing Mobvibe from a phone/tablet on the same network, make sure the backend allows the web origin:
+
+- Example: `MOBVIBE_CORS_ORIGINS=http://192.168.1.20:5173`
+
+## Documentation
+
+- ACP protocol: https://agentclientprotocol.com/
+- ACP SDK docs: https://agentclientprotocol.github.io/typescript-sdk/
+- Project docs: `docs/`
+
+## License
+
+TBD
