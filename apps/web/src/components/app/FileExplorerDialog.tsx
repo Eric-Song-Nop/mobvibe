@@ -115,7 +115,7 @@ export function FileExplorerDialog({
 		const parentPath = initialFilePath.split(/[/\\]/).slice(0, -1).join("/");
 		if (parentPath) {
 			setCurrentPath(parentPath);
-			void buildColumnsForPath(parentPath, true);
+			void buildColumnsForPath(parentPath);
 		}
 	}, [buildColumnsForPath, initialFilePath, open, rootPath]);
 
