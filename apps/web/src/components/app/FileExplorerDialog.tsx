@@ -1,7 +1,7 @@
 import { FolderOpenIcon, Loading03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	ColumnFileBrowser,
@@ -48,6 +48,7 @@ export function FileExplorerDialog({
 	const [activePane, setActivePane] = useState<"browser" | "preview">(
 		"browser",
 	);
+	const previousPreviewPathRef = useRef<string | undefined>(undefined);
 
 	const rootsQuery = useQuery({
 		queryKey: ["session-fs-roots", sessionId],
@@ -112,11 +113,12 @@ export function FileExplorerDialog({
 		if (!initialFilePath.startsWith(rootPath)) {
 			return;
 		}
-		const parentPath = initialFilePath.split(/[/\\]/).slice(0, -1).join("/");
-		if (parentPath) {
-			setCurrentPath(parentPath);
-			void buildColumnsForPath(parentPath);
+		if (previousPreviewPathRef.current === initialFilePath) {
+			return;
 		}
+		previousPreviewPathRef.current = initialFilePath;
+		const parentPath = initialFilePath.split(/[/\\]/).slice(0, -1).join("/");
+		void buildColumnsForPath(parentPath || rootPath);
 	}, [buildColumnsForPath, initialFilePath, open, rootPath]);
 
 	const previewQuery = useQuery({
@@ -139,10 +141,12 @@ export function FileExplorerDialog({
 	useEffect(() => {
 		if (!open) {
 			resetState();
+			previousPreviewPathRef.current = undefined;
 			return;
 		}
 		if (sessionId === undefined) {
 			resetState();
+			previousPreviewPathRef.current = undefined;
 			return;
 		}
 		resetState();

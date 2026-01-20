@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import type { FsEntry, SessionFsFilePreviewResponse } from "@/lib/api";
 import * as api from "@/lib/api";
+import type { FileExplorerDialogProps } from "../FileExplorerDialog";
 import { FileExplorerDialog } from "../FileExplorerDialog";
 
 vi.mock("@/components/ui/alert-dialog", () => ({
@@ -57,6 +58,7 @@ vi.mock("@/components/app/ColumnFileBrowser", () => {
 		type: "file",
 		hidden: false,
 	};
+	const buildColumnsForPath = vi.fn().mockResolvedValue(undefined);
 
 	return {
 		ColumnFileBrowser: ({
@@ -68,21 +70,20 @@ vi.mock("@/components/app/ColumnFileBrowser", () => {
 				Select file
 			</button>
 		),
-		useColumnFileBrowser: ({
-			onFileSelect,
-		}: {
-			onFileSelect?: (entry: FsEntry) => void;
-		}) => ({
-			columns: [],
-			isLoading: false,
-			pathError: undefined,
-			handleEntrySelect: async (entry: FsEntry) => {
-				onFileSelect?.(entry);
-			},
-			handleColumnSelect: () => {},
-			scrollContainerRef: { current: null },
-			columnRefs: { current: {} },
-		}),
+		useColumnFileBrowser: vi.fn(
+			({ onFileSelect }: { onFileSelect?: (entry: FsEntry) => void }) => ({
+				columns: [],
+				isLoading: false,
+				pathError: undefined,
+				buildColumnsForPath,
+				handleEntrySelect: async (entry: FsEntry) => {
+					onFileSelect?.(entry);
+				},
+				handleColumnSelect: () => {},
+				scrollContainerRef: { current: null },
+				columnRefs: { current: {} },
+			}),
+		),
 	};
 });
 
@@ -99,16 +100,18 @@ vi.mock("@/lib/api", async (importOriginal) => {
 describe("FileExplorerDialog", () => {
 	let queryClient: QueryClient;
 
-	const renderDialog = () =>
+	const renderDialog = (props?: Partial<FileExplorerDialogProps>) => {
 		render(
 			<QueryClientProvider client={queryClient}>
 				<FileExplorerDialog
 					open={true}
 					onOpenChange={() => {}}
 					sessionId="session-1"
+					{...props}
 				/>
 			</QueryClientProvider>,
 		);
+	};
 
 	beforeEach(() => {
 		queryClient = new QueryClient({
@@ -127,6 +130,10 @@ describe("FileExplorerDialog", () => {
 		});
 		vi.mocked(api.fetchSessionFsEntries).mockResolvedValue({
 			path: "/workspace",
+			entries: [],
+		});
+		vi.mocked(api.fetchSessionFsEntries).mockResolvedValueOnce({
+			path: "/workspace/apps/server",
 			entries: [],
 		});
 		const previewResponse: SessionFsFilePreviewResponse = {
@@ -155,5 +162,22 @@ describe("FileExplorerDialog", () => {
 		expect(
 			screen.queryByText(i18n.t("fileExplorer.preview"), { selector: "div" }),
 		).not.toBeInTheDocument();
+	});
+
+	it("builds columns when previewing a path", async () => {
+		renderDialog({ initialFilePath: "/workspace/apps/server/package.json" });
+
+		const { useColumnFileBrowser } = await import(
+			"@/components/app/ColumnFileBrowser"
+		);
+		const buildColumnsForPath = vi.mocked(useColumnFileBrowser).mock.results[0]
+			?.value.buildColumnsForPath as ReturnType<typeof vi.fn>;
+
+		await waitFor(() => {
+			expect(buildColumnsForPath).toHaveBeenCalledWith(
+				"/workspace/apps/server",
+			);
+		});
+		expect(buildColumnsForPath).not.toHaveBeenCalledWith("/workspace");
 	});
 });
