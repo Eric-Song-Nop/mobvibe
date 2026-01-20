@@ -1,11 +1,19 @@
 import { ComputerIcon, SettingsIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import type { ClipboardEvent, FormEvent, KeyboardEvent } from "react";
+import {
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { CommandCombobox } from "@/components/app/CommandCombobox";
 import { ResourceCombobox } from "@/components/app/ResourceCombobox";
-import { Badge } from "@/components/ui/badge";
+import { Badge, badgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
 	Select,
@@ -14,7 +22,6 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import type {
 	AvailableCommand,
 	ContentBlock,
@@ -34,7 +41,8 @@ import {
 	buildResourceSearchItems,
 	filterResourceItems,
 } from "@/lib/resource-utils";
-import { MESSAGE_INPUT_ROWS } from "@/lib/ui-config";
+import { useUiStore } from "@/lib/ui-store";
+import { cn } from "@/lib/utils";
 
 export type ChatFooterProps = {
 	activeSession?: ChatSession;
@@ -179,130 +187,207 @@ const buildFileUri = (filePath: string) => {
 	return `file://${encoded}`;
 };
 
-type RemovalRange = { start: number; end: number };
+const buildInputValueFromContents = (contents: ContentBlock[]) =>
+	contents
+		.map((block) => {
+			if (block.type === "text") {
+				return block.text;
+			}
+			if (block.type === "resource_link") {
+				return buildResourceTokenLabel(block);
+			}
+			return "";
+		})
+		.join("");
 
-const mergeRanges = (ranges: RemovalRange[]): RemovalRange[] => {
-	if (ranges.length === 0) {
-		return [];
-	}
-	const sorted = [...ranges].sort((left, right) => left.start - right.start);
-	const merged: RemovalRange[] = [sorted[0]!];
-	sorted.slice(1).forEach((range) => {
-		const last = merged[merged.length - 1];
-		if (range.start <= last.end) {
-			last.end = Math.max(last.end, range.end);
+const parseEditorContents = (root: HTMLElement): ContentBlock[] => {
+	const blocks: ContentBlock[] = [];
+	const pushText = (text: string) => {
+		if (!text) {
 			return;
 		}
-		merged.push({ ...range });
-	});
-	return merged;
-};
-
-const removeRanges = (value: string, ranges: RemovalRange[]) => {
-	const merged = mergeRanges(ranges);
-	let cursor = 0;
-	let output = "";
-	merged.forEach((range) => {
-		output += value.slice(cursor, range.start);
-		cursor = range.end;
-	});
-	output += value.slice(cursor);
-	return output;
-};
-
-type EditRange = {
-	oldStart: number;
-	oldEnd: number;
-	newStart: number;
-	newEnd: number;
-	delta: number;
-};
-
-const calculateEditRange = (previous: string, next: string): EditRange => {
-	let prefixLength = 0;
-	const previousLength = previous.length;
-	const nextLength = next.length;
-	while (
-		prefixLength < previousLength &&
-		prefixLength < nextLength &&
-		previous[prefixLength] === next[prefixLength]
-	) {
-		prefixLength += 1;
-	}
-	let previousEnd = previousLength;
-	let nextEnd = nextLength;
-	while (
-		previousEnd > prefixLength &&
-		nextEnd > prefixLength &&
-		previous[previousEnd - 1] === next[nextEnd - 1]
-	) {
-		previousEnd -= 1;
-		nextEnd -= 1;
-	}
-	return {
-		oldStart: prefixLength,
-		oldEnd: previousEnd,
-		newStart: prefixLength,
-		newEnd: nextEnd,
-		delta: nextLength - previousLength,
-	};
-};
-
-const findTokensInEdit = (tokens: ResourceToken[], range: EditRange) => {
-	if (range.oldStart === range.oldEnd) {
-		return tokens.filter(
-			(token) => range.oldStart > token.start && range.oldStart < token.end,
-		);
-	}
-	return tokens.filter(
-		(token) => range.oldStart < token.end && range.oldEnd > token.start,
-	);
-};
-
-const mapPositionAfterRemoval = (position: number, tokens: ResourceToken[]) => {
-	let removedLength = 0;
-	for (const token of tokens) {
-		if (position < token.start) {
-			break;
+		const last = blocks.at(-1);
+		if (last?.type === "text") {
+			last.text = `${last.text}${text}`;
+			return;
 		}
-		if (position <= token.end) {
-			return token.start - removedLength;
+		blocks.push({ type: "text", text });
+	};
+	const walkNode = (node: Node) => {
+		if (node.nodeType === Node.TEXT_NODE) {
+			pushText(node.textContent ?? "");
+			return;
 		}
-		removedLength += token.end - token.start;
-	}
-	return position - removedLength;
+		if (!(node instanceof HTMLElement)) {
+			return;
+		}
+		if (node.dataset.resourceLink === "true") {
+			const uri = node.dataset.resourceUri ?? "";
+			const name = node.dataset.resourceName ?? "";
+			if (uri && name) {
+				blocks.push({ type: "resource_link", uri, name });
+			}
+			return;
+		}
+		if (node.tagName === "BR") {
+			pushText("\n");
+			return;
+		}
+		const isBlock = node.tagName === "DIV" || node.tagName === "P";
+		if (isBlock && blocks.length > 0) {
+			pushText("\n");
+		}
+		node.childNodes.forEach(walkNode);
+	};
+	root.childNodes.forEach(walkNode);
+	return coalesceTextBlocks(blocks);
 };
 
-const applyTokenRemovalEdit = (
-	previous: string,
-	next: string,
-	range: EditRange,
-	tokens: ResourceToken[],
-) => {
-	const orderedTokens = [...tokens].sort(
-		(left, right) => left.start - right.start,
+const findResourceNode = (node: Node | null): HTMLElement | null => {
+	let current = node;
+	while (current) {
+		if (
+			current instanceof HTMLElement &&
+			current.dataset.resourceLink === "true"
+		) {
+			return current;
+		}
+		current = current.parentNode;
+	}
+	return null;
+};
+
+const collectTokensInRange = (root: HTMLElement, range: Range): HTMLElement[] =>
+	Array.from(root.querySelectorAll<HTMLElement>("[data-resource-link='true']"))
+		.filter((node) => range.intersectsNode(node))
+		.map((node) => node);
+
+const resolveAdjacentToken = (
+	root: HTMLElement,
+	range: Range,
+	direction: "backward" | "forward",
+): HTMLElement | null => {
+	if (!range.collapsed) {
+		return null;
+	}
+	const { startContainer, startOffset } = range;
+	const isBackward = direction === "backward";
+	if (startContainer.nodeType === Node.TEXT_NODE) {
+		const text = startContainer.textContent ?? "";
+		if (isBackward && startOffset === 0) {
+			return findResourceNode(startContainer.previousSibling);
+		}
+		if (!isBackward && startOffset === text.length) {
+			return findResourceNode(startContainer.nextSibling);
+		}
+		return null;
+	}
+	if (startContainer === root) {
+		const index = isBackward ? startOffset - 1 : startOffset;
+		return findResourceNode(root.childNodes[index] ?? null);
+	}
+	const siblings = Array.from(startContainer.childNodes);
+	const index = isBackward ? startOffset - 1 : startOffset;
+	return findResourceNode(siblings[index] ?? null);
+};
+
+const getSelectionOffset = (root: HTMLElement) => {
+	const selection = window.getSelection();
+	if (!selection || selection.rangeCount === 0) {
+		return 0;
+	}
+	const range = selection.getRangeAt(0);
+	if (!root.contains(range.startContainer)) {
+		return 0;
+	}
+	const prefixRange = range.cloneRange();
+	prefixRange.selectNodeContents(root);
+	prefixRange.setEnd(range.startContainer, range.startOffset);
+	return prefixRange.toString().length;
+};
+
+const setSelectionOffset = (root: HTMLElement, offset: number) => {
+	const selection = window.getSelection();
+	if (!selection) {
+		return;
+	}
+	const walker = document.createTreeWalker(
+		root,
+		NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
+		{
+			acceptNode: (node) => {
+				if (node.nodeType === Node.TEXT_NODE) {
+					const parent = node.parentNode;
+					if (
+						parent instanceof HTMLElement &&
+						parent.dataset.resourceLink === "true"
+					) {
+						return NodeFilter.FILTER_SKIP;
+					}
+					return NodeFilter.FILTER_ACCEPT;
+				}
+				if (
+					node instanceof HTMLElement &&
+					node.dataset.resourceLink === "true"
+				) {
+					return NodeFilter.FILTER_ACCEPT;
+				}
+				return NodeFilter.FILTER_SKIP;
+			},
+		},
 	);
-	const removalRanges = orderedTokens.map((token) => ({
-		start: token.start,
-		end: token.end,
-	}));
-	const cleanedInput = removeRanges(previous, removalRanges);
-	const insertedText = next.slice(range.newStart, range.newEnd);
-	const cleanStart = mapPositionAfterRemoval(range.oldStart, orderedTokens);
-	const cleanEnd = mapPositionAfterRemoval(range.oldEnd, orderedTokens);
-	const clampedStart = Math.max(0, Math.min(cleanStart, cleanedInput.length));
-	const clampedEnd = Math.max(
-		clampedStart,
-		Math.min(cleanEnd, cleanedInput.length),
-	);
-	const value =
-		cleanedInput.slice(0, clampedStart) +
-		insertedText +
-		cleanedInput.slice(clampedEnd);
-	return {
-		value,
-		cursor: clampedStart + insertedText.length,
-	};
+	let remaining = Math.max(0, offset);
+	while (walker.nextNode()) {
+		const node = walker.currentNode;
+		if (node.nodeType === Node.TEXT_NODE) {
+			const text = node.textContent ?? "";
+			if (remaining <= text.length) {
+				const range = document.createRange();
+				range.setStart(node, remaining);
+				range.collapse(true);
+				selection.removeAllRanges();
+				selection.addRange(range);
+				return;
+			}
+			remaining -= text.length;
+			continue;
+		}
+		if (node instanceof HTMLElement && node.dataset.resourceLink === "true") {
+			const label = node.dataset.resourceLabel ?? node.textContent ?? "";
+			const length = label.length;
+			const parent = node.parentNode;
+			if (!parent) {
+				remaining -= length;
+				continue;
+			}
+			if (remaining <= length) {
+				const index = Array.from(parent.childNodes).indexOf(node);
+				const position = remaining >= length ? index + 1 : index;
+				const range = document.createRange();
+				range.setStart(parent, Math.max(0, position));
+				range.collapse(true);
+				selection.removeAllRanges();
+				selection.addRange(range);
+				return;
+			}
+			remaining -= length;
+		}
+	}
+	const range = document.createRange();
+	range.selectNodeContents(root);
+	range.collapse(false);
+	selection.removeAllRanges();
+	selection.addRange(range);
+};
+
+const resolveFilePathFromUri = (uri: string) => {
+	if (uri.startsWith("file://")) {
+		return decodeURIComponent(uri.slice("file://".length));
+	}
+	if (uri.startsWith("/")) {
+		return uri;
+	}
+	return null;
 };
 
 export function ChatFooter({
@@ -327,7 +412,12 @@ export function ChatFooter({
 		() => buildCommandSearchItems(availableCommands),
 		[availableCommands],
 	);
-	const rawInput = activeSession?.input ?? "";
+	const contentBlocks =
+		activeSession?.inputContents ?? createDefaultContentBlocks("");
+	const rawInput = useMemo(
+		() => buildInputValueFromContents(contentBlocks),
+		[contentBlocks],
+	);
 	const hasSlashPrefix = rawInput.startsWith("/");
 	const slashInput = hasSlashPrefix ? rawInput.slice(1) : "";
 	const commandQuery = hasSlashPrefix
@@ -361,8 +451,8 @@ export function ChatFooter({
 		[resourceEntries],
 	);
 	const resourceTokens = useMemo(
-		() => buildResourceTokens(activeSession?.inputContents ?? []),
-		[activeSession?.inputContents],
+		() => buildResourceTokens(contentBlocks),
+		[contentBlocks],
 	);
 	const [resourceHighlight, setResourceHighlight] = useState(0);
 	const [resourcePickerSuppressed, setResourcePickerSuppressed] =
@@ -398,73 +488,105 @@ export function ChatFooter({
 	const effectiveResourceHighlight =
 		resourceHighlight >= resourceMatches.length ? 0 : resourceHighlight;
 
-	const handleCommandClick = (command: AvailableCommand) => {
-		const nextValue = `/${command.name}`;
-		if (activeSessionId) {
-			setInput(activeSessionId, nextValue);
-			setInputContents(activeSessionId, createDefaultContentBlocks(nextValue));
-			setInputCursor(nextValue.length);
-		}
-		setCommandHighlight(0);
-		setCommandPickerSuppressed(true);
-	};
-
-	const handleResourceNavigate = (direction: "next" | "prev") => {
-		setResourceHighlight((previous) => {
-			if (resourceMatches.length === 0) {
-				return 0;
+	const handleCommandClick = useCallback(
+		(command: AvailableCommand) => {
+			const nextValue = `/${command.name}`;
+			if (activeSessionId) {
+				setInput(activeSessionId, nextValue);
+				setInputContents(
+					activeSessionId,
+					createDefaultContentBlocks(nextValue),
+				);
+				setInputCursor(nextValue.length);
 			}
-			const nextIndex = direction === "next" ? previous + 1 : previous - 1;
-			if (nextIndex < 0) {
-				return resourceMatches.length - 1;
-			}
-			if (nextIndex >= resourceMatches.length) {
-				return 0;
-			}
-			return nextIndex;
-		});
-	};
+			setCommandHighlight(0);
+			setCommandPickerSuppressed(true);
+		},
+		[activeSessionId, setInput, setInputContents],
+	);
 
-	const applyResourceSelection = (resource: SessionFsResourceEntry) => {
-		if (!activeSessionId) {
-			return false;
-		}
-		if (!resourceTrigger) {
-			return false;
-		}
-		const filename = resource.name;
-		const tokenLabel = `@${filename}`;
-		const nextInput =
-			rawInput.slice(0, resourceTrigger.start) +
-			tokenLabel +
-			rawInput.slice(resourceTrigger.end);
-		const nextResource: ResourceLinkContent = {
-			type: "resource_link",
-			uri: buildFileUri(resource.path),
-			name: filename,
-		};
-		const nextResources = [...resourceTokens.map((token) => token.resource)];
-		nextResources.push(nextResource);
-		const nextContents = buildContentsFromInput(nextInput, nextResources);
-		setInput(activeSessionId, nextInput);
-		setInputContents(activeSessionId, nextContents);
-		setInputCursor(resourceTrigger.start + tokenLabel.length);
-		setResourceHighlight(0);
-		setResourcePickerSuppressed(true);
-		return true;
-	};
+	const handleResourceNavigate = useCallback(
+		(direction: "next" | "prev") => {
+			setResourceHighlight((previous) => {
+				if (resourceMatches.length === 0) {
+					return 0;
+				}
+				const nextIndex = direction === "next" ? previous + 1 : previous - 1;
+				if (nextIndex < 0) {
+					return resourceMatches.length - 1;
+				}
+				if (nextIndex >= resourceMatches.length) {
+					return 0;
+				}
+				return nextIndex;
+			});
+		},
+		[resourceMatches.length],
+	);
 
-	const handleResourceSelect = () => {
+	const updateFromEditor = useCallback(
+		(nextContents: ContentBlock[], nextCursor: number) => {
+			if (!activeSessionId) {
+				return;
+			}
+			setInput(activeSessionId, buildInputValueFromContents(nextContents));
+			setInputContents(activeSessionId, nextContents);
+			setInputCursor(nextCursor);
+		},
+		[activeSessionId, setInput, setInputContents],
+	);
+
+	const applyResourceSelection = useCallback(
+		(resource: SessionFsResourceEntry) => {
+			if (!activeSessionId) {
+				return false;
+			}
+			if (!resourceTrigger) {
+				return false;
+			}
+			const filename = resource.name;
+			const tokenLabel = `@${filename}`;
+			const nextInput =
+				rawInput.slice(0, resourceTrigger.start) +
+				tokenLabel +
+				rawInput.slice(resourceTrigger.end);
+			const nextResource: ResourceLinkContent = {
+				type: "resource_link",
+				uri: buildFileUri(resource.path),
+				name: filename,
+			};
+			const nextResources = [...resourceTokens.map((token) => token.resource)];
+			nextResources.push(nextResource);
+			const nextContents = buildContentsFromInput(nextInput, nextResources);
+			const nextCursor = resourceTrigger.start + tokenLabel.length;
+			updateFromEditor(nextContents, nextCursor);
+			setResourceHighlight(0);
+			setResourcePickerSuppressed(true);
+			return true;
+		},
+		[
+			activeSessionId,
+			rawInput,
+			resourceTrigger,
+			resourceTokens,
+			updateFromEditor,
+		],
+	);
+
+	const handleResourceSelect = useCallback(() => {
 		const target = resourceMatches[effectiveResourceHighlight];
 		if (!target) {
 			return false;
 		}
 		return applyResourceSelection(target);
-	};
+	}, [applyResourceSelection, effectiveResourceHighlight, resourceMatches]);
 
-	const handleResourceClick = (resource: SessionFsResourceEntry) => {
-		applyResourceSelection(resource);
-	};
+	const handleResourceClick = useCallback(
+		(resource: SessionFsResourceEntry) => {
+			applyResourceSelection(resource);
+		},
+		[applyResourceSelection],
+	);
 
 	useEffect(() => {
 		const nextKey = resourceTrigger
@@ -497,23 +619,26 @@ export function ChatFooter({
 		}
 	}, [hasSlashPrefix, rawInput]);
 
-	const handleCommandNavigate = (direction: "next" | "prev") => {
-		setCommandHighlight((previous) => {
-			if (commandMatches.length === 0) {
-				return 0;
-			}
-			const nextIndex = direction === "next" ? previous + 1 : previous - 1;
-			if (nextIndex < 0) {
-				return commandMatches.length - 1;
-			}
-			if (nextIndex >= commandMatches.length) {
-				return 0;
-			}
-			return nextIndex;
-		});
-	};
+	const handleCommandNavigate = useCallback(
+		(direction: "next" | "prev") => {
+			setCommandHighlight((previous) => {
+				if (commandMatches.length === 0) {
+					return 0;
+				}
+				const nextIndex = direction === "next" ? previous + 1 : previous - 1;
+				if (nextIndex < 0) {
+					return commandMatches.length - 1;
+				}
+				if (nextIndex >= commandMatches.length) {
+					return 0;
+				}
+				return nextIndex;
+			});
+		},
+		[commandMatches.length],
+	);
 
-	const handleCommandSelect = () => {
+	const handleCommandSelect = useCallback(() => {
 		if (commandMatches.length === 0) {
 			return false;
 		}
@@ -523,7 +648,7 @@ export function ChatFooter({
 		}
 		handleCommandClick(target);
 		return true;
-	};
+	}, [commandMatches, effectiveCommandHighlight, handleCommandClick]);
 
 	const showModelModeControls = Boolean(
 		availableModels.length > 0 ||
@@ -534,6 +659,285 @@ export function ChatFooter({
 	const showFooterMeta = Boolean(
 		activeSession && (showModelModeControls || activeSession.sending),
 	);
+	const editorRef = useRef<HTMLDivElement | null>(null);
+	const isComposingRef = useRef(false);
+	const fileExplorerAvailable = Boolean(activeSession?.cwd && activeSessionId);
+	const setFileExplorerOpen = useUiStore((state) => state.setFileExplorerOpen);
+	const setFilePreviewPath = useUiStore((state) => state.setFilePreviewPath);
+	const handleOpenResourcePreview = useCallback(
+		(resource: ResourceLinkContent) => {
+			if (!fileExplorerAvailable) {
+				return;
+			}
+			const filePath = resolveFilePathFromUri(resource.uri);
+			if (!filePath) {
+				return;
+			}
+			setFilePreviewPath(filePath);
+			setFileExplorerOpen(true);
+		},
+		[fileExplorerAvailable, setFileExplorerOpen, setFilePreviewPath],
+	);
+	const renderEditorContents = useCallback(
+		(
+			target: HTMLDivElement,
+			blocks: ContentBlock[],
+			selectionOverride?: number,
+		) => {
+			const selectionOffset = selectionOverride ?? getSelectionOffset(target);
+			target.innerHTML = "";
+			blocks.forEach((block) => {
+				if (block.type === "text") {
+					if (!block.text) {
+						return;
+					}
+					target.appendChild(document.createTextNode(block.text));
+					return;
+				}
+				if (block.type === "resource_link") {
+					const label = buildResourceTokenLabel(block);
+					const button = document.createElement("button");
+					button.type = "button";
+					button.textContent = label;
+					button.contentEditable = "false";
+					button.dataset.resourceLink = "true";
+					button.dataset.resourceUri = block.uri;
+					button.dataset.resourceName = block.name;
+					button.dataset.resourceLabel = label;
+					button.className = cn(
+						badgeVariants({ variant: "outline" }),
+						"cursor-pointer text-primary hover:text-primary/80",
+					);
+					button.addEventListener("click", (event) => {
+						event.preventDefault();
+						handleOpenResourcePreview(block);
+					});
+					target.appendChild(button);
+				}
+			});
+			setSelectionOffset(target, selectionOffset);
+		},
+		[handleOpenResourcePreview],
+	);
+
+	const handleEditorInput = useCallback(() => {
+		const editor = editorRef.current;
+		if (!editor || !activeSessionId) {
+			return;
+		}
+		if (isComposingRef.current) {
+			return;
+		}
+		setResourcePickerSuppressed(false);
+		const selectionOffset = getSelectionOffset(editor);
+		const nextContents = parseEditorContents(editor);
+		updateFromEditor(nextContents, selectionOffset);
+		renderEditorContents(editor, nextContents, selectionOffset);
+	}, [activeSessionId, renderEditorContents, updateFromEditor]);
+
+	const handleEditorBeforeInput = useCallback(
+		(event: FormEvent<HTMLDivElement>) => {
+			const editor = editorRef.current;
+			if (!editor || !activeSessionId) {
+				return;
+			}
+			const inputEvent = event.nativeEvent as InputEvent;
+			const selection = window.getSelection();
+			if (!selection || selection.rangeCount === 0) {
+				return;
+			}
+			const range = selection.getRangeAt(0);
+			const isDeleteAction =
+				inputEvent.inputType === "deleteContentBackward" ||
+				inputEvent.inputType === "deleteContentForward" ||
+				inputEvent.inputType === "deleteByCut" ||
+				inputEvent.inputType === "deleteByDrag" ||
+				inputEvent.inputType === "deleteContent";
+			const isInsertAction = inputEvent.inputType === "insertText";
+			const hasSelection = !range.collapsed;
+			const hitTokens = hasSelection ? collectTokensInRange(editor, range) : [];
+			const deleteAdjacent = isDeleteAction
+				? resolveAdjacentToken(
+						editor,
+						range,
+						inputEvent.inputType === "deleteContentBackward"
+							? "backward"
+							: "forward",
+					)
+				: null;
+			if (isDeleteAction && hitTokens.length > 0) {
+				inputEvent.preventDefault();
+				hitTokens.forEach((node) => node.remove());
+				if (hasSelection) {
+					selection.deleteFromDocument();
+				}
+				const nextContents = parseEditorContents(editor);
+				const selectionOffset = getSelectionOffset(editor);
+				updateFromEditor(nextContents, selectionOffset);
+				renderEditorContents(editor, nextContents, selectionOffset);
+				return;
+			}
+			if (isDeleteAction && deleteAdjacent) {
+				inputEvent.preventDefault();
+				deleteAdjacent.remove();
+				const nextContents = parseEditorContents(editor);
+				const selectionOffset = getSelectionOffset(editor);
+				updateFromEditor(nextContents, selectionOffset);
+				renderEditorContents(editor, nextContents, selectionOffset);
+				return;
+			}
+			const tokenNode = findResourceNode(range.startContainer);
+			if (isDeleteAction && tokenNode) {
+				inputEvent.preventDefault();
+				tokenNode.remove();
+				const nextContents = parseEditorContents(editor);
+				const selectionOffset = getSelectionOffset(editor);
+				updateFromEditor(nextContents, selectionOffset);
+				renderEditorContents(editor, nextContents, selectionOffset);
+				return;
+			}
+			if (isInsertAction && hasSelection && hitTokens.length > 0) {
+				inputEvent.preventDefault();
+				hitTokens.forEach((node) => node.remove());
+				selection.deleteFromDocument();
+				selection
+					.getRangeAt(0)
+					.insertNode(document.createTextNode(inputEvent.data ?? ""));
+				const nextContents = parseEditorContents(editor);
+				const selectionOffset = getSelectionOffset(editor);
+				updateFromEditor(nextContents, selectionOffset);
+				renderEditorContents(editor, nextContents, selectionOffset);
+			}
+		},
+		[activeSessionId, renderEditorContents, updateFromEditor],
+	);
+
+	const handleEditorKeyDown = useCallback(
+		(event: KeyboardEvent<HTMLDivElement>) => {
+			if (shouldShowResourcePicker) {
+				if (event.key === "ArrowDown") {
+					event.preventDefault();
+					handleResourceNavigate("next");
+					return;
+				}
+				if (event.key === "ArrowUp") {
+					event.preventDefault();
+					handleResourceNavigate("prev");
+					return;
+				}
+				if (event.key === "Enter" && !event.shiftKey) {
+					event.preventDefault();
+					handleResourceSelect();
+					return;
+				}
+				if (event.key === "Escape") {
+					event.preventDefault();
+					setResourcePickerSuppressed(true);
+					return;
+				}
+			}
+			if (shouldShowCommandPicker) {
+				if (event.key === "ArrowDown") {
+					event.preventDefault();
+					handleCommandNavigate("next");
+					return;
+				}
+				if (event.key === "ArrowUp") {
+					event.preventDefault();
+					handleCommandNavigate("prev");
+					return;
+				}
+				if (event.key === "Enter" && !event.shiftKey) {
+					event.preventDefault();
+					handleCommandSelect();
+					return;
+				}
+				if (event.key === "Escape") {
+					event.preventDefault();
+					if (activeSessionId) {
+						setInput(activeSessionId, "");
+						setInputContents(activeSessionId, createDefaultContentBlocks(""));
+						setInputCursor(0);
+					}
+					setCommandPickerSuppressed(false);
+					return;
+				}
+			}
+			if (event.key === "Enter" && !event.shiftKey) {
+				event.preventDefault();
+				onSend();
+			}
+		},
+		[
+			activeSessionId,
+			handleCommandNavigate,
+			handleCommandSelect,
+			handleResourceNavigate,
+			handleResourceSelect,
+			onSend,
+			setInput,
+			setInputContents,
+			shouldShowCommandPicker,
+			shouldShowResourcePicker,
+		],
+	);
+
+	const updateCursorFromSelection = useCallback(() => {
+		const editor = editorRef.current;
+		if (!editor) {
+			return;
+		}
+		setInputCursor(getSelectionOffset(editor));
+	}, []);
+
+	const handleEditorClick = useCallback(() => {
+		updateCursorFromSelection();
+	}, [updateCursorFromSelection]);
+
+	const handleEditorPaste = useCallback(
+		(event: ClipboardEvent<HTMLDivElement>) => {
+			const editor = editorRef.current;
+			if (!editor || !activeSessionId) {
+				return;
+			}
+			event.preventDefault();
+			const text = event.clipboardData.getData("text/plain");
+			const selection = window.getSelection();
+			if (!selection || selection.rangeCount === 0) {
+				return;
+			}
+			selection.deleteFromDocument();
+			selection.getRangeAt(0).insertNode(document.createTextNode(text));
+			const nextContents = parseEditorContents(editor);
+			const selectionOffset = getSelectionOffset(editor);
+			updateFromEditor(nextContents, selectionOffset);
+			renderEditorContents(editor, nextContents, selectionOffset);
+		},
+		[activeSessionId, renderEditorContents, updateFromEditor],
+	);
+
+	const handleCompositionStart = useCallback(() => {
+		isComposingRef.current = true;
+	}, []);
+
+	const handleCompositionEnd = useCallback(() => {
+		isComposingRef.current = false;
+		handleEditorInput();
+	}, [handleEditorInput]);
+
+	useLayoutEffect(() => {
+		const editor = editorRef.current;
+		if (!editor) {
+			return;
+		}
+		if (document.activeElement !== editor) {
+			renderEditorContents(editor, contentBlocks);
+			return;
+		}
+		if (!isComposingRef.current) {
+			renderEditorContents(editor, contentBlocks, inputCursor);
+		}
+	}, [contentBlocks, inputCursor, renderEditorContents]);
 
 	return (
 		<footer className="bg-background/90 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shrink-0">
@@ -643,108 +1047,30 @@ export function ChatFooter({
 							) : null}
 						</div>
 					) : null}
-					<Textarea
-						className="flex-1 h-10 md:h-auto"
-						value={activeSession?.input ?? ""}
-						onChange={(event) => {
-							if (!activeSessionId) {
-								return;
-							}
-							setResourcePickerSuppressed(false);
-							const target = event.target;
-							const nextValue = target.value;
-							const selectionStart = target.selectionStart ?? nextValue.length;
-							const range = calculateEditRange(rawInput, nextValue);
-							setInputCursor(selectionStart);
-							const touchedTokens = findTokensInEdit(resourceTokens, range);
-							if (touchedTokens.length === 0) {
-								const nextContents = buildContentsFromInput(
-									nextValue,
-									resourceTokens.map((token) => token.resource),
-								);
-								setInput(activeSessionId, nextValue);
-								setInputContents(activeSessionId, nextContents);
-								return;
-							}
-							const { value: sanitizedValue, cursor } = applyTokenRemovalEdit(
-								rawInput,
-								nextValue,
-								range,
-								touchedTokens,
-							);
-							const remainingResources = resourceTokens
-								.filter((token) => !touchedTokens.includes(token))
-								.map((token) => token.resource);
-							const nextContents = buildContentsFromInput(
-								sanitizedValue,
-								remainingResources,
-							);
-							setInput(activeSessionId, sanitizedValue);
-							setInputContents(activeSessionId, nextContents);
-							setInputCursor(cursor);
-						}}
-						onKeyDown={(event) => {
-							if (shouldShowResourcePicker) {
-								if (event.key === "ArrowDown") {
-									event.preventDefault();
-									handleResourceNavigate("next");
-									return;
-								}
-								if (event.key === "ArrowUp") {
-									event.preventDefault();
-									handleResourceNavigate("prev");
-									return;
-								}
-								if (event.key === "Enter" && !event.shiftKey) {
-									event.preventDefault();
-									handleResourceSelect();
-									return;
-								}
-								if (event.key === "Escape") {
-									event.preventDefault();
-									setResourcePickerSuppressed(true);
-									return;
-								}
-							}
-							if (shouldShowCommandPicker) {
-								if (event.key === "ArrowDown") {
-									event.preventDefault();
-									handleCommandNavigate("next");
-									return;
-								}
-								if (event.key === "ArrowUp") {
-									event.preventDefault();
-									handleCommandNavigate("prev");
-									return;
-								}
-								if (event.key === "Enter" && !event.shiftKey) {
-									event.preventDefault();
-									handleCommandSelect();
-									return;
-								}
-								if (event.key === "Escape") {
-									event.preventDefault();
-									if (activeSessionId) {
-										setInput(activeSessionId, "");
-										setInputContents(
-											activeSessionId,
-											createDefaultContentBlocks(""),
-										);
-										setInputCursor(0);
-									}
-									setCommandPickerSuppressed(false);
-									return;
-								}
-							}
-							if (event.key === "Enter" && !event.shiftKey) {
-								event.preventDefault();
-								onSend();
-							}
-						}}
-						placeholder={t("chat.placeholder")}
-						rows={MESSAGE_INPUT_ROWS}
-						disabled={!activeSessionId}
+					<div
+						ref={editorRef}
+						role="textbox"
+						aria-multiline="true"
+						contentEditable={Boolean(activeSessionId)}
+						suppressContentEditableWarning
+						className={cn(
+							"flex-1 min-h-10 md:min-h-16 border border-input bg-transparent px-2.5 py-2 text-xs",
+							"outline-none focus-visible:ring-1 focus-visible:ring-ring/50",
+							"whitespace-pre-wrap break-words",
+							!activeSessionId ? "opacity-50" : null,
+						)}
+						aria-label={t("chat.placeholder")}
+						data-placeholder={t("chat.placeholder")}
+						tabIndex={0}
+						onInput={handleEditorInput}
+						onKeyDown={handleEditorKeyDown}
+						onClick={handleEditorClick}
+						onPaste={handleEditorPaste}
+						onBeforeInput={handleEditorBeforeInput}
+						onCompositionStart={handleCompositionStart}
+						onCompositionEnd={handleCompositionEnd}
 					/>
+
 					<div className="flex flex-col gap-2 md:flex-row md:items-center">
 						{activeSession?.sending ? (
 							<Button

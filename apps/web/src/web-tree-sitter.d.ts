@@ -8,8 +8,10 @@ declare module "web-tree-sitter" {
 		parse(input: string): Tree | null;
 	}
 
-	export class Language {
-		static load(input: string | Uint8Array): Promise<Language>;
+	export interface Language {}
+
+	export namespace Language {
+		function load(input: string | Uint8Array): Promise<Language>;
 	}
 
 	export type Point = { row: number; column: number };

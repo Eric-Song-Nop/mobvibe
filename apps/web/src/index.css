@@ -131,4 +131,11 @@
 	html {
 		@apply font-sans;
 	}
+	[contenteditable][data-placeholder]:empty::before {
+		content: attr(data-placeholder);
+		@apply text-muted-foreground;
+	}
+	[contenteditable][data-placeholder]:empty:focus::before {
+		content: "";
+	}
 }

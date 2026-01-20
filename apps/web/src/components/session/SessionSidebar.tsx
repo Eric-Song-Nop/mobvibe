@@ -210,20 +210,14 @@ const SessionListItem = ({
 	return (
 		<div
 			className={cn(
-				"border-border bg-background hover:bg-muted flex flex-col gap-2 rounded-none border p-2 text-left cursor-pointer",
+				"border-border bg-background hover:bg-muted flex flex-col gap-2 rounded-none border p-2 text-left",
 				isActive ? "border-primary/40" : "",
 			)}
-			onClick={handleSelect}
 		>
-			<div
-				role="button"
-				tabIndex={0}
-				onKeyDown={(event) => {
-					if (event.key === "Enter") {
-						handleSelect();
-					}
-				}}
-				className="flex flex-1 flex-col gap-1"
+			<button
+				type="button"
+				onClick={handleSelect}
+				className="flex flex-1 flex-col gap-1 text-left"
 			>
 				<div className="flex items-center justify-between gap-2">
 					{isEditing ? (
@@ -249,11 +243,8 @@ const SessionListItem = ({
 						{session.error.message}
 					</span>
 				) : null}
-			</div>
-			<div
-				className="flex items-center gap-2"
-				onClick={(event) => event.stopPropagation()}
-			>
+			</button>
+			<div className="flex items-center gap-2">
 				{isEditing ? (
 					<>
 						<Button size="xs" onClick={onEditSubmit}>

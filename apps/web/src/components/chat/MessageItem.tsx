@@ -230,6 +230,7 @@ const renderAudioContent = (
 			</div>
 			<audio controls className="mt-2 w-full">
 				<source src={source} type={content.mimeType} />
+				<track kind="captions" />
 			</audio>
 		</div>
 	);
@@ -670,7 +671,7 @@ export const MessageItem = ({
 			? terminalOutputs[message.sessionId]?.terminalOutputs
 			: undefined;
 		const hasOutputs = Boolean(
-			(outputBlocks && outputBlocks.some(Boolean)) ||
+			outputBlocks?.some(Boolean) ||
 				(terminalIds && terminalIds.length > 0) ||
 				message.rawOutput,
 		);

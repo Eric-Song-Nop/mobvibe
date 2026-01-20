@@ -72,7 +72,7 @@ const OUTLINE_KIND_LABELS: Record<OutlineKind, string> = {
 	struct: "Struct",
 };
 
-const JAVASCRIPT_OUTLINE_QUERY = String.raw`
+const JAVASCRIPT_OUTLINE_QUERY = `
 (
   (method_definition
     name: [(property_identifier) (private_property_identifier)] @name) @definition.method
@@ -129,7 +129,7 @@ const JAVASCRIPT_OUTLINE_QUERY = String.raw`
   value: [(arrow_function) (function_expression)]) @definition.function
 `;
 
-const TYPESCRIPT_OUTLINE_QUERY = String.raw`
+const TYPESCRIPT_OUTLINE_QUERY = `
 ${JAVASCRIPT_OUTLINE_QUERY}
 
 (interface_declaration
@@ -145,12 +145,12 @@ ${JAVASCRIPT_OUTLINE_QUERY}
   name: (identifier) @name) @definition.module
 `;
 
-const BASH_OUTLINE_QUERY = String.raw`
+const BASH_OUTLINE_QUERY = `
 (function_definition
   name: (word) @name) @definition.function
 `;
 
-const C_OUTLINE_QUERY = String.raw`
+const C_OUTLINE_QUERY = `
 (type_definition
   type: (enum_specifier) @definition.enum
   declarator: (type_identifier) @name)
@@ -173,7 +173,7 @@ const C_OUTLINE_QUERY = String.raw`
       declarator: (identifier) @name))) @definition.function
 `;
 
-const CPP_OUTLINE_QUERY = String.raw`
+const CPP_OUTLINE_QUERY = `
 (struct_specifier
   name: (type_identifier) @name
   body: (field_declaration_list)) @definition.struct
@@ -193,7 +193,7 @@ const CPP_OUTLINE_QUERY = String.raw`
   name: (type_identifier) @name) @definition.class
 `;
 
-const CSHARP_OUTLINE_QUERY = String.raw`
+const CSHARP_OUTLINE_QUERY = `
 (interface_declaration
   name: (identifier) @name) @definition.interface
 
@@ -221,7 +221,7 @@ const CSHARP_OUTLINE_QUERY = String.raw`
       (identifier) @name))) @definition.field
 `;
 
-const GO_OUTLINE_QUERY = String.raw`
+const GO_OUTLINE_QUERY = `
 (function_declaration
   name: (identifier) @name) @definition.function
 
@@ -240,7 +240,7 @@ const GO_OUTLINE_QUERY = String.raw`
   name: (field_identifier) @name) @definition.method
 `;
 
-const JAVA_OUTLINE_QUERY = String.raw`
+const JAVA_OUTLINE_QUERY = `
 (interface_declaration
   name: (identifier) @name) @definition.interface
 
@@ -261,7 +261,7 @@ const JAVA_OUTLINE_QUERY = String.raw`
     name: (identifier) @name)) @definition.field
 `;
 
-const PHP_OUTLINE_QUERY = String.raw`
+const PHP_OUTLINE_QUERY = `
 (function_definition
   name: (name) @name) @definition.function
 
@@ -283,7 +283,7 @@ const PHP_OUTLINE_QUERY = String.raw`
   name: (name) @name) @definition.class
 `;
 
-const PYTHON_OUTLINE_QUERY = String.raw`
+const PYTHON_OUTLINE_QUERY = `
 (function_definition
   name: (identifier) @name) @definition.function
 
@@ -294,7 +294,7 @@ const PYTHON_OUTLINE_QUERY = String.raw`
   left: (_) @name) @definition.variable
 `;
 
-const RUBY_OUTLINE_QUERY = String.raw`
+const RUBY_OUTLINE_QUERY = `
 (class
   name: [
     (constant)
@@ -368,7 +368,7 @@ const RUBY_OUTLINE_QUERY = String.raw`
     ])?) @definition.method
 `;
 
-const RUST_OUTLINE_QUERY = String.raw`
+const RUST_OUTLINE_QUERY = `
 (mod_item
   name: (identifier) @name) @definition.module
 
@@ -771,13 +771,14 @@ export function CodePreview({ payload }: CodePreviewProps) {
 				let languageInstance: TreeSitterLanguage;
 				try {
 					languageInstance = await loadOutlineLanguage(outlineLanguage);
-				} catch (error) {
+				} catch (_error) {
 					if (!cancelled) {
 						setOutlineItems([]);
 						setOutlineStatus("unsupported");
 					}
 					return;
 				}
+
 				const query = await loadOutlineQuery(outlineLanguage, languageInstance);
 				parser.setLanguage(languageInstance);
 				const tree = parser.parse(code);
@@ -795,7 +796,7 @@ export function CodePreview({ payload }: CodePreviewProps) {
 				}
 				setOutlineItems(items);
 				setOutlineStatus("ready");
-			} catch (error) {
+			} catch (_error) {
 				if (!cancelled) {
 					setOutlineItems([]);
 					setOutlineStatus("error");
@@ -915,6 +916,7 @@ export function CodePreview({ payload }: CodePreviewProps) {
 							key={item.id}
 							className="file-preview-outline__node"
 							role="treeitem"
+							tabIndex={0}
 							aria-level={depth + 1}
 							aria-expanded={hasChildren ? !isCollapsed : undefined}
 						>
@@ -1009,7 +1011,6 @@ export function CodePreview({ payload }: CodePreviewProps) {
 						{t("codePreview.outlineEmpty")}
 					</div>
 				);
-			case "idle":
 			default:
 				return (
 					<div className="file-preview-outline__empty">

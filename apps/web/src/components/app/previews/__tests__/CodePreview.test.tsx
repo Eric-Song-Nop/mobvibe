@@ -56,7 +56,6 @@ vi.mock("web-tree-sitter", () => {
 			load: vi.fn(async () => mockOutlineLanguage),
 		},
 		Query: class {
-			constructor() {}
 			matches() {
 				return queryMatches;
 			}
