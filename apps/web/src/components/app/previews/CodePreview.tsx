@@ -1,3 +1,10 @@
+import {
+	CodeIcon,
+	LayoutIcon,
+	Maximize01Icon,
+	Minimize01Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import type { Language, RenderProps, Token } from "prism-react-renderer";
 import { Highlight, themes } from "prism-react-renderer";
 import type { CSSProperties, PointerEvent } from "react";
@@ -690,6 +697,7 @@ export function CodePreview({ payload }: CodePreviewProps) {
 	);
 	const [activePane, setActivePane] = useState<"code" | "outline">("code");
 	const [copiedId, setCopiedId] = useState<string | null>(null);
+	const [isFullscreen, setIsFullscreen] = useState(false);
 
 	const filePath = payload.path;
 	const sourceContent = payload.content ?? "";
@@ -736,6 +744,9 @@ export function CodePreview({ payload }: CodePreviewProps) {
 		null,
 	);
 
+	const hasOutlineItems = outlineItems.length > 0;
+	const shouldShowOutline = outlineStatus === "ready" && hasOutlineItems;
+
 	useEffect(() => {
 		const nextSnapshot = { path: filePath, content: sourceContent };
 		const previousSnapshot = outlineSnapshotRef.current;
@@ -750,12 +761,16 @@ export function CodePreview({ payload }: CodePreviewProps) {
 		setActivePane("code");
 		setCollapsedIds(new Set());
 		setCopiedId(null);
+		setIsFullscreen(false);
 	}, [filePath, sourceContent]);
 
 	useEffect(() => {
 		if (!outlineLanguage || !canUseTreeSitter) {
 			setOutlineItems([]);
 			setOutlineStatus("unsupported");
+			setActivePane("code");
+
+			setActivePane("code");
 			return;
 		}
 		let cancelled = false;
@@ -786,6 +801,7 @@ export function CodePreview({ payload }: CodePreviewProps) {
 					if (!cancelled) {
 						setOutlineItems([]);
 						setOutlineStatus("error");
+						setActivePane("code");
 					}
 					return;
 				}
@@ -796,10 +812,14 @@ export function CodePreview({ payload }: CodePreviewProps) {
 				}
 				setOutlineItems(items);
 				setOutlineStatus("ready");
+				if (items.length === 0) {
+					setActivePane("code");
+				}
 			} catch (_error) {
 				if (!cancelled) {
 					setOutlineItems([]);
 					setOutlineStatus("error");
+					setActivePane("code");
 				}
 			}
 		})();
@@ -833,6 +853,25 @@ export function CodePreview({ payload }: CodePreviewProps) {
 		}
 		target.scrollIntoView({ block: "start", behavior: "smooth" });
 	};
+
+	const handleToggleFullscreen = () => {
+		setIsFullscreen((current) => !current);
+	};
+
+	useEffect(() => {
+		if (!isFullscreen) {
+			return;
+		}
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") {
+				setIsFullscreen(false);
+			}
+		};
+		window.addEventListener("keydown", handleKeyDown);
+		return () => {
+			window.removeEventListener("keydown", handleKeyDown);
+		};
+	}, [isFullscreen]);
 
 	const copyOutlineItem = async (item: OutlineItem) => {
 		const text = getTextSlice(
@@ -877,6 +916,9 @@ export function CodePreview({ payload }: CodePreviewProps) {
 
 	const handlePressStart = (item: OutlineItem) => {
 		return (event: PointerEvent<HTMLButtonElement>) => {
+			if (event.pointerType === "touch") {
+				return;
+			}
 			if (event.pointerType === "mouse" && event.button !== 0) {
 				return;
 			}
@@ -894,11 +936,28 @@ export function CodePreview({ payload }: CodePreviewProps) {
 		clearPressTimer();
 	};
 
+	const handleTouchStart = (item: OutlineItem) => {
+		return () => {
+			clearPressTimer();
+			longPressItemIdRef.current = null;
+			pressTimeoutRef.current = window.setTimeout(() => {
+				pressTimeoutRef.current = null;
+				longPressItemIdRef.current = item.id;
+				void copyOutlineItem(item);
+			}, 450);
+		};
+	};
+
+	const handleTouchEnd = () => {
+		clearPressTimer();
+	};
+
 	const handleItemClick = (item: OutlineItem) => {
 		if (longPressItemIdRef.current === item.id) {
 			longPressItemIdRef.current = null;
 			return;
 		}
+		setActivePane("code");
 		handleOutlineJump(item.startLine);
 	};
 
@@ -962,6 +1021,8 @@ export function CodePreview({ payload }: CodePreviewProps) {
 									onPointerUp={handlePressEnd}
 									onPointerLeave={handlePressEnd}
 									onPointerCancel={handlePressEnd}
+									onTouchStart={handleTouchStart(item)}
+									onTouchEnd={handleTouchEnd}
 									title={`${item.label} · ${OUTLINE_KIND_LABELS[item.kind]} (${t("codePreview.longPressCopy")})`}
 									aria-label={`${item.label} · ${OUTLINE_KIND_LABELS[item.kind]}`}
 								>
@@ -1004,13 +1065,7 @@ export function CodePreview({ payload }: CodePreviewProps) {
 					</div>
 				);
 			case "ready":
-				return outlineItems.length > 0 ? (
-					renderOutlineItems(outlineItems)
-				) : (
-					<div className="file-preview-outline__empty">
-						{t("codePreview.outlineEmpty")}
-					</div>
-				);
+				return renderOutlineItems(outlineItems);
 			default:
 				return (
 					<div className="file-preview-outline__empty">
@@ -1021,35 +1076,91 @@ export function CodePreview({ payload }: CodePreviewProps) {
 	};
 
 	return (
-		<div className="file-preview-code">
-			<div className="file-preview-code__header">
-				<span className="file-preview-code__badge">{language}</span>
-				<span className="file-preview-code__meta">
-					{t("codePreview.lineCount", { count: lineCount })}
-				</span>
-			</div>
+		<div
+			className={cn(
+				"file-preview-code",
+				isFullscreen && "file-preview-code--fullscreen",
+			)}
+		>
+			{!isFullscreen ? (
+				<div className="file-preview-code__header">
+					<span className="file-preview-code__badge">{language}</span>
+					<span className="file-preview-code__meta">
+						{t("codePreview.lineCount", { count: lineCount })}
+					</span>
+				</div>
+			) : null}
 			<div className="file-preview-code__body">
 				<div className="file-preview-code__toolbar">
+					{!isFullscreen ? (
+						<Button
+							variant={activePane === "code" ? "secondary" : "outline"}
+							size="sm"
+							onClick={() => setActivePane("code")}
+						>
+							{t("codePreview.code")}
+						</Button>
+					) : null}
+					{!isFullscreen && shouldShowOutline ? (
+						<Button
+							variant={activePane === "outline" ? "secondary" : "outline"}
+							size="sm"
+							onClick={() => setActivePane("outline")}
+						>
+							{t("codePreview.outline")}
+						</Button>
+					) : null}
+					{isFullscreen ? (
+						<Button
+							variant={activePane === "code" ? "secondary" : "outline"}
+							size="sm"
+							onClick={() => setActivePane("code")}
+							className="file-preview-code__toolbar-button"
+							aria-label={t("codePreview.code")}
+							title={t("codePreview.code")}
+						>
+							<HugeiconsIcon icon={CodeIcon} strokeWidth={2} />
+						</Button>
+					) : null}
+					{isFullscreen && shouldShowOutline ? (
+						<Button
+							variant={activePane === "outline" ? "secondary" : "outline"}
+							size="sm"
+							onClick={() => setActivePane("outline")}
+							className="file-preview-code__toolbar-button"
+							aria-label={t("codePreview.outline")}
+							title={t("codePreview.outline")}
+						>
+							<HugeiconsIcon icon={LayoutIcon} strokeWidth={2} />
+						</Button>
+					) : null}
 					<Button
-						variant={activePane === "code" ? "secondary" : "outline"}
+						variant="outline"
 						size="sm"
-						onClick={() => setActivePane("code")}
+						onClick={handleToggleFullscreen}
+						aria-label={
+							isFullscreen
+								? t("codePreview.fullscreenExit")
+								: t("codePreview.fullscreenEnter")
+						}
+						title={
+							isFullscreen
+								? t("codePreview.fullscreenExit")
+								: t("codePreview.fullscreenEnter")
+						}
+						className={cn(isFullscreen && "file-preview-code__toolbar-button")}
 					>
-						{t("codePreview.code")}
-					</Button>
-					<Button
-						variant={activePane === "outline" ? "secondary" : "outline"}
-						size="sm"
-						onClick={() => setActivePane("outline")}
-						disabled={outlineStatus === "unsupported"}
-					>
-						{t("codePreview.outline")}
+						<HugeiconsIcon
+							icon={isFullscreen ? Minimize01Icon : Maximize01Icon}
+							strokeWidth={2}
+						/>
 					</Button>
 				</div>
 				<div className="file-preview-code__layout">
 					<div
 						className="file-preview-code__panel file-preview-code__panel--code"
 						data-active={activePane === "code"}
+						data-fullscreen={isFullscreen}
 					>
 						<div
 							className="file-preview-code__content"
@@ -1127,24 +1238,26 @@ export function CodePreview({ payload }: CodePreviewProps) {
 							</Highlight>
 						</div>
 					</div>
-					<aside
-						className="file-preview-code__panel file-preview-code__panel--outline"
-						data-active={activePane === "outline"}
-					>
-						<div className="file-preview-outline">
-							<div className="file-preview-outline__header">
-								<span className="file-preview-outline__title">
-									{t("codePreview.outlineTitle")}
-								</span>
-								<span className="file-preview-outline__hint">
-									{t("codePreview.outlineHint")}
-								</span>
+					{shouldShowOutline ? (
+						<aside
+							className="file-preview-code__panel file-preview-code__panel--outline"
+							data-active={activePane === "outline"}
+						>
+							<div className="file-preview-outline">
+								<div className="file-preview-outline__header">
+									<span className="file-preview-outline__title">
+										{t("codePreview.outlineTitle")}
+									</span>
+									<span className="file-preview-outline__hint">
+										{t("codePreview.outlineHint")}
+									</span>
+								</div>
+								<div className="file-preview-outline__body">
+									{renderOutlineBody()}
+								</div>
 							</div>
-							<div className="file-preview-outline__body">
-								{renderOutlineBody()}
-							</div>
-						</div>
-					</aside>
+						</aside>
+					) : null}
 				</div>
 			</div>
 		</div>

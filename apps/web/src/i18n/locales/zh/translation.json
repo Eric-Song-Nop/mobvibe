@@ -125,7 +125,9 @@
 		"code": "代码",
 		"outline": "大纲",
 		"outlineTitle": "代码大纲",
-		"outlineHint": "长按复制"
+		"outlineHint": "长按复制",
+		"fullscreenEnter": "全屏预览",
+		"fullscreenExit": "退出全屏"
 	},
 	"toolCall": {
 		"noOutput": "(无输出)",

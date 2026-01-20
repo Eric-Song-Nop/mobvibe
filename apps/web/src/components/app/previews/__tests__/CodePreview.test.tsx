@@ -190,20 +190,18 @@ describe("CodePreview", () => {
 		).toBeInTheDocument();
 	});
 
-	it("disables outline when tree-sitter unsupported", async () => {
+	it("hides outline when tree-sitter unsupported", async () => {
 		setTreeSitterSupport(false);
 		render(<CodePreview payload={buildPayload()} />);
 
-		const outlineButton = screen.getByRole("button", {
-			name: i18n.t("codePreview.outline"),
-		});
-		expect(outlineButton).toBeDisabled();
-
-		await waitFor(() => {
-			expect(
-				screen.getByText(i18n.t("codePreview.outlineUnsupported")),
-			).toBeInTheDocument();
-		});
+		expect(
+			screen.queryByRole("button", {
+				name: i18n.t("codePreview.outline"),
+			}),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByText(i18n.t("codePreview.outlineUnsupported")),
+		).not.toBeInTheDocument();
 	});
 
 	it("renders outline items and jumps to line", async () => {

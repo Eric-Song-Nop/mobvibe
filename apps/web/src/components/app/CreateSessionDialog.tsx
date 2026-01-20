@@ -79,7 +79,10 @@ export function CreateSessionDialog({
 
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
-			<AlertDialogContent size="default" className="sm:max-w-2xl">
+			<AlertDialogContent
+				size="default"
+				className="w-[100vw] max-w-none sm:w-[92vw] sm:max-w-[92vw] lg:max-w-4xl"
+			>
 				<AlertDialogHeader>
 					<AlertDialogTitle>{t("session.createTitle")}</AlertDialogTitle>
 					<AlertDialogDescription>

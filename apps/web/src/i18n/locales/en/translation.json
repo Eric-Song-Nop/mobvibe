@@ -125,7 +125,9 @@
 		"code": "Code",
 		"outline": "Outline",
 		"outlineTitle": "Code outline",
-		"outlineHint": "Long press to copy"
+		"outlineHint": "Long press to copy",
+		"fullscreenEnter": "Enter fullscreen",
+		"fullscreenExit": "Exit fullscreen"
 	},
 	"toolCall": {
 		"noOutput": "(No output)",
