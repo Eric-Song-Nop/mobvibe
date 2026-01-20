@@ -72,6 +72,28 @@
 - 有大纲符号时才会显示大纲入口。
 - 移动端点击大纲项跳转到代码位置，长按可复制符号源码。
 
+## 2026-01-20 移动端大纲跳转与复制交互修复计划
+
+### 目标
+
+- 修复移动端点击大纲项时跳转到首行的问题。
+- 将大纲项“符号类型”改为点击复制符号代码片段，移除长按复制。
+- 保持桌面端与移动端的现有布局与样式。
+
+### 前端方案
+
+- 点击大纲项时先切换到代码面板，再在下一帧执行滚动定位。
+- 大纲项拆分为“符号名称”和“符号类型”两处点击行为。
+- 点击符号类型时复制 Tree-sitter 匹配范围内的源码片段。
+
+### 影响范围
+
+- `apps/web/src/components/app/previews/CodePreview.tsx`
+- `apps/web/src/components/app/previews/preview.css`
+- `apps/web/src/i18n/locales/zh/translation.json`
+- `apps/web/src/i18n/locales/en/translation.json`
+- `apps/web/src/components/app/previews/__tests__/CodePreview.test.tsx`
+
 ## 2026-01-17 会话文件弹窗宽度加强计划
 
 ### 目标

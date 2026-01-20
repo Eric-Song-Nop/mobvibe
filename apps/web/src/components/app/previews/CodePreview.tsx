@@ -7,7 +7,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { Language, RenderProps, Token } from "prism-react-renderer";
 import { Highlight, themes } from "prism-react-renderer";
-import type { CSSProperties, PointerEvent } from "react";
+import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Node, QueryCapture, QueryMatch } from "web-tree-sitter";
@@ -686,8 +686,6 @@ export function CodePreview({ payload }: CodePreviewProps) {
 	const themeMode = useResolvedTheme();
 	const parserRef = useRef<Parser | null>(null);
 	const codeContainerRef = useRef<HTMLDivElement | null>(null);
-	const pressTimeoutRef = useRef<number | null>(null);
-	const longPressItemIdRef = useRef<string | null>(null);
 	const copyTimeoutRef = useRef<number | null>(null);
 
 	const [outlineStatus, setOutlineStatus] = useState<OutlineStatus>("idle");
@@ -851,7 +849,11 @@ export function CodePreview({ payload }: CodePreviewProps) {
 		if (!target) {
 			return;
 		}
-		target.scrollIntoView({ block: "start", behavior: "smooth" });
+		window.requestAnimationFrame(() => {
+			window.requestAnimationFrame(() => {
+				target.scrollIntoView({ block: "start", behavior: "smooth" });
+			});
+		});
 	};
 
 	const handleToggleFullscreen = () => {
@@ -907,58 +909,13 @@ export function CodePreview({ payload }: CodePreviewProps) {
 		}, 1200);
 	};
 
-	const clearPressTimer = () => {
-		if (pressTimeoutRef.current) {
-			window.clearTimeout(pressTimeoutRef.current);
-			pressTimeoutRef.current = null;
-		}
-	};
-
-	const handlePressStart = (item: OutlineItem) => {
-		return (event: PointerEvent<HTMLButtonElement>) => {
-			if (event.pointerType === "touch") {
-				return;
-			}
-			if (event.pointerType === "mouse" && event.button !== 0) {
-				return;
-			}
-			clearPressTimer();
-			longPressItemIdRef.current = null;
-			pressTimeoutRef.current = window.setTimeout(() => {
-				pressTimeoutRef.current = null;
-				longPressItemIdRef.current = item.id;
-				void copyOutlineItem(item);
-			}, 450);
-		};
-	};
-
-	const handlePressEnd = () => {
-		clearPressTimer();
-	};
-
-	const handleTouchStart = (item: OutlineItem) => {
-		return () => {
-			clearPressTimer();
-			longPressItemIdRef.current = null;
-			pressTimeoutRef.current = window.setTimeout(() => {
-				pressTimeoutRef.current = null;
-				longPressItemIdRef.current = item.id;
-				void copyOutlineItem(item);
-			}, 450);
-		};
-	};
-
-	const handleTouchEnd = () => {
-		clearPressTimer();
-	};
-
 	const handleItemClick = (item: OutlineItem) => {
-		if (longPressItemIdRef.current === item.id) {
-			longPressItemIdRef.current = null;
-			return;
-		}
 		setActivePane("code");
 		handleOutlineJump(item.startLine);
+	};
+
+	const handleKindClick = (item: OutlineItem) => {
+		void copyOutlineItem(item);
 	};
 
 	const renderOutlineItems = (items: OutlineItem[], depth = 0) => {
@@ -1008,31 +965,35 @@ export function CodePreview({ payload }: CodePreviewProps) {
 								) : (
 									<span className="file-preview-outline__toggle-spacer" />
 								)}
-								<Button
-									variant="ghost"
-									size="xs"
-									className={cn(
-										"file-preview-outline__item",
-										copiedId === item.id &&
-											"file-preview-outline__item--copied",
-									)}
-									onClick={() => handleItemClick(item)}
-									onPointerDown={handlePressStart(item)}
-									onPointerUp={handlePressEnd}
-									onPointerLeave={handlePressEnd}
-									onPointerCancel={handlePressEnd}
-									onTouchStart={handleTouchStart(item)}
-									onTouchEnd={handleTouchEnd}
-									title={`${item.label} · ${OUTLINE_KIND_LABELS[item.kind]} (${t("codePreview.longPressCopy")})`}
-									aria-label={`${item.label} · ${OUTLINE_KIND_LABELS[item.kind]}`}
+								<div
+									className="file-preview-outline__item"
+									data-copied={copiedId === item.id}
 								>
-									<span className="file-preview-outline__label">
+									<Button
+										variant="ghost"
+										size="xs"
+										className="file-preview-outline__label"
+										onClick={() => handleItemClick(item)}
+										aria-label={item.label}
+										title={item.label}
+									>
 										{item.label}
-									</span>
-									<span className="file-preview-outline__kind">
+									</Button>
+									<Button
+										variant="ghost"
+										size="xs"
+										className="file-preview-outline__kind"
+										onClick={(event) => {
+											event.stopPropagation();
+											handleKindClick(item);
+										}}
+										aria-label={`${OUTLINE_KIND_LABELS[item.kind]} · ${t("codePreview.copySymbol")}`}
+										title={`${OUTLINE_KIND_LABELS[item.kind]} · ${t("codePreview.copySymbol")}`}
+										data-copied={copiedId === item.id}
+									>
 										{OUTLINE_KIND_LABELS[item.kind]}
-									</span>
-								</Button>
+									</Button>
+								</div>
 							</div>
 							{hasChildren && !isCollapsed
 								? renderOutlineItems(item.children, depth + 1)

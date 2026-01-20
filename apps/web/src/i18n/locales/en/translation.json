@@ -116,7 +116,7 @@
 	"codePreview": {
 		"expand": "Expand",
 		"collapse": "Collapse",
-		"longPressCopy": "Long press to copy",
+		"copySymbol": "Tap to copy",
 		"outlineLoading": "Parsing outline...",
 		"outlineUnsupported": "No outline for this language",
 		"outlineFailed": "Failed to parse outline",
@@ -125,7 +125,7 @@
 		"code": "Code",
 		"outline": "Outline",
 		"outlineTitle": "Code outline",
-		"outlineHint": "Long press to copy",
+		"outlineHint": "Tap type to copy",
 		"fullscreenEnter": "Enter fullscreen",
 		"fullscreenExit": "Exit fullscreen"
 	},

@@ -236,6 +236,8 @@
 }
 
 .file-preview-outline__item {
+	display: flex;
+	align-items: center;
 	justify-content: space-between;
 	flex: 1;
 	gap: 0.5rem;
@@ -245,11 +247,19 @@
 	background: color-mix(in oklab, hsl(var(--background)) 85%, transparent);
 }
 
-.file-preview-outline__item--copied {
+.file-preview-outline__item[data-copied="true"] {
 	background: color-mix(in oklab, hsl(var(--secondary)) 70%, transparent);
 }
 
+.file-preview-outline__label,
+.file-preview-outline__kind {
+	height: auto;
+	padding: 0;
+}
+
 .file-preview-outline__label {
+	flex: 1;
+	justify-content: flex-start;
 	font-size: 0.75rem;
 	color: hsl(var(--foreground));
 	white-space: nowrap;
@@ -258,8 +268,13 @@
 }
 
 .file-preview-outline__kind {
+	flex: 0 0 auto;
 	font-size: 0.65rem;
 	color: hsl(var(--muted-foreground));
+}
+
+.file-preview-outline__item[data-copied="true"] .file-preview-outline__kind {
+	color: hsl(var(--foreground));
 }
 
 @media (min-width: 640px) {

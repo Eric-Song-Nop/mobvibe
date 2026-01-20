@@ -33,6 +33,7 @@ const parsedCode = vi.hoisted(() => ({ current: "" }));
 const mockOutlineLanguage = vi.hoisted(() => ({ id: "mock-language" }));
 const originalWebAssembly = globalThis.WebAssembly;
 const originalFetch = globalThis.fetch;
+const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
 
 vi.mock("web-tree-sitter", () => {
 	class MockParser {
@@ -218,8 +219,8 @@ describe("CodePreview", () => {
 			buildMatch({
 				kind: "method",
 				label: "run",
-				startIndex: 12,
-				endIndex: 40,
+				startIndex: 14,
+				endIndex: 24,
 				row: 1,
 			}),
 			buildMatch({
@@ -240,16 +241,16 @@ describe("CodePreview", () => {
 		);
 
 		await waitFor(() => {
-			expect(
-				screen.getByRole("button", { name: "Alpha · Class" }),
-			).toBeInTheDocument();
+			expect(screen.getByRole("button", { name: "Alpha" })).toBeInTheDocument();
 		});
 
+		expect(screen.getByRole("button", { name: "run" })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "beta" })).toBeInTheDocument();
 		expect(
-			screen.getByRole("button", { name: "run · Method" }),
+			screen.getByRole("button", { name: "Method · Tap to copy" }),
 		).toBeInTheDocument();
 		expect(
-			screen.getByRole("button", { name: "beta · Function" }),
+			screen.getByRole("button", { name: "Function · Tap to copy" }),
 		).toBeInTheDocument();
 		expect(parsedCode.current).toContain("class Alpha");
 
@@ -264,7 +265,54 @@ describe("CodePreview", () => {
 		}
 
 		const user = userEvent.setup();
-		await user.click(screen.getByRole("button", { name: "run · Method" }));
+		const rafDescriptor = Object.getOwnPropertyDescriptor(
+			window,
+			"requestAnimationFrame",
+		);
+		Object.defineProperty(window, "requestAnimationFrame", {
+			value: (callback: FrameRequestCallback) => {
+				callback(0);
+				return 0;
+			},
+			configurable: true,
+		});
+
+		await user.click(screen.getByRole("button", { name: "run" }));
 		expect(scrollSpy).toHaveBeenCalled();
+
+		if (rafDescriptor) {
+			Object.defineProperty(window, "requestAnimationFrame", rafDescriptor);
+		} else {
+			Object.defineProperty(window, "requestAnimationFrame", {
+				value: originalRequestAnimationFrame,
+				configurable: true,
+			});
+		}
+
+		const writeSpy = vi.fn();
+		const clipboardDescriptor = Object.getOwnPropertyDescriptor(
+			navigator,
+			"clipboard",
+		);
+		Object.defineProperty(navigator, "clipboard", {
+			value: {
+				writeText: writeSpy,
+			},
+			configurable: true,
+		});
+
+		await user.click(
+			screen.getByRole("button", { name: "Method · Tap to copy" }),
+		);
+		expect(writeSpy).toHaveBeenCalledWith("  run() {}");
+
+		if (clipboardDescriptor) {
+			Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
+		} else {
+			Object.defineProperty(navigator, "clipboard", {
+				value: undefined,
+				configurable: true,
+			});
+		}
 	});
 });

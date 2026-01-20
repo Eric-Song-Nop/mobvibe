@@ -116,7 +116,7 @@
 	"codePreview": {
 		"expand": "展开",
 		"collapse": "折叠",
-		"longPressCopy": "长按复制",
+		"copySymbol": "点击复制",
 		"outlineLoading": "解析大纲中...",
 		"outlineUnsupported": "当前语言暂无大纲",
 		"outlineFailed": "大纲解析失败",
@@ -125,7 +125,7 @@
 		"code": "代码",
 		"outline": "大纲",
 		"outlineTitle": "代码大纲",
-		"outlineHint": "长按复制",
+		"outlineHint": "点击类型复制",
 		"fullscreenEnter": "全屏预览",
 		"fullscreenExit": "退出全屏"
 	},
