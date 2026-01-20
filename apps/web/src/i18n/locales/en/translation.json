@@ -171,5 +171,12 @@
 	},
 	"statusMessages": {
 		"cancelled": "Generation cancelled"
+	},
+	"notifications": {
+		"withSession": "{{sessionTitle}}: {{title}}",
+		"permissionRequest": "Permission required",
+		"permissionRequestDetail": "Tool: {{tool}}",
+		"sessionError": "Session error",
+		"responseCompleted": "Response completed"
 	}
 }

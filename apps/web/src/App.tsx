@@ -8,6 +8,7 @@ import { CreateSessionDialog } from "@/components/app/CreateSessionDialog";
 import { FileExplorerDialog } from "@/components/app/FileExplorerDialog";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Separator } from "@/components/ui/separator";
+import { Toaster } from "@/components/ui/toaster";
 import { useMessageAutoScroll } from "@/hooks/useMessageAutoScroll";
 import { useSessionEventSources } from "@/hooks/useSessionEventSources";
 import { useSessionMutations } from "@/hooks/useSessionMutations";
@@ -19,6 +20,7 @@ import {
 	createFallbackError,
 	normalizeError,
 } from "@/lib/error-utils";
+import { ensureNotificationPermission } from "@/lib/notifications";
 import { useUiStore } from "@/lib/ui-store";
 import { buildSessionTitle, getStatusVariant } from "@/lib/ui-utils";
 
@@ -36,23 +38,23 @@ export function App() {
 		syncSessions,
 		removeSession,
 		renameSession: renameSessionLocal,
+		setError,
 		setInput,
 		setInputContents,
 		setSending,
 		setCanceling,
-		setError,
 		setStreamError,
 		updateSessionMeta,
 		addUserMessage,
 		addStatusMessage,
 		appendAssistantChunk,
+		finalizeAssistantMessage,
 		addPermissionRequest,
 		setPermissionDecisionState,
 		setPermissionOutcome,
 		addToolCall,
 		updateToolCall,
 		appendTerminalOutput,
-		finalizeAssistantMessage,
 	} = useChatStore();
 	const {
 		createDialogOpen,
@@ -87,6 +89,7 @@ export function App() {
 		createMessageIdMutation,
 		permissionDecisionMutation,
 	} = useSessionMutations({
+		sessions,
 		setActiveSessionId,
 		setLastCreatedCwd,
 		createLocalSession,
@@ -139,6 +142,10 @@ export function App() {
 			syncSessions(sessionsQuery.data.sessions);
 		}
 	}, [sessionsQuery.data?.sessions, syncSessions]);
+
+	useEffect(() => {
+		ensureNotificationPermission();
+	}, []);
 
 	useEffect(() => {
 		if (activeSessionId || sessionList.length === 0) {
@@ -371,6 +378,7 @@ export function App() {
 	return (
 		<ThemeProvider>
 			<div className="app-root bg-muted/40 text-foreground flex flex-col overflow-hidden md:flex-row">
+				<Toaster />
 				<CreateSessionDialog
 					open={createDialogOpen}
 					onOpenChange={setCreateDialogOpen}

@@ -106,6 +106,10 @@ vi.mock("@/components/app/AppSidebar", () => ({
 	AppSidebar: () => <button type="button">sidebar</button>,
 }));
 
+vi.mock("@/components/ui/toaster", () => ({
+	Toaster: () => null,
+}));
+
 vi.mock("@/components/app/CreateSessionDialog", () => ({
 	CreateSessionDialog: () => null,
 }));

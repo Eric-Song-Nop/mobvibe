@@ -20,6 +20,10 @@ import {
 	isErrorDetail,
 	normalizeError,
 } from "@/lib/error-utils";
+import {
+	notifyPermissionRequest,
+	notifySessionError,
+} from "@/lib/notifications";
 
 type SessionEventSourceOptions = {
 	sessions: Record<string, ChatSession>;
@@ -129,6 +133,7 @@ export function useSessionEventSources({
 						toolCall: payload.toolCall,
 						options: payload.options ?? [],
 					});
+					notifyPermissionRequest(payload, { sessions });
 				} catch (parseError) {
 					setStreamError(
 						session.sessionId,
@@ -201,19 +206,40 @@ export function useSessionEventSources({
 					const payload = JSON.parse(event.data) as { error?: unknown };
 					if (isErrorDetail(payload.error)) {
 						setStreamError(session.sessionId, payload.error);
+						notifySessionError(
+							{
+								sessionId: session.sessionId,
+								error: payload.error,
+							},
+							{ sessions },
+						);
+
 						return;
 					}
-					setStreamError(
-						session.sessionId,
-						createFallbackError(t("errors.streamErrorParseFailed"), "stream"),
+					const fallback = createFallbackError(
+						t("errors.streamErrorParseFailed"),
+						"stream",
+					);
+					setStreamError(session.sessionId, fallback);
+					notifySessionError(
+						{
+							sessionId: session.sessionId,
+							error: fallback,
+						},
+						{ sessions },
 					);
 				} catch (parseError) {
-					setStreamError(
-						session.sessionId,
-						normalizeError(
-							parseError,
-							createFallbackError(t("errors.streamErrorParseFailed"), "stream"),
-						),
+					const fallback = normalizeError(
+						parseError,
+						createFallbackError(t("errors.streamErrorParseFailed"), "stream"),
+					);
+					setStreamError(session.sessionId, fallback);
+					notifySessionError(
+						{
+							sessionId: session.sessionId,
+							error: fallback,
+						},
+						{ sessions },
 					);
 				}
 			};
@@ -227,7 +253,12 @@ export function useSessionEventSources({
 			eventSource.addEventListener("terminal_output", handleTerminalOutput);
 			eventSource.addEventListener("session_error", handleStreamError);
 			eventSource.addEventListener("error", () => {
-				setStreamError(session.sessionId, buildStreamDisconnectedError());
+				const fallback = buildStreamDisconnectedError();
+				setStreamError(session.sessionId, fallback);
+				notifySessionError(
+					{ sessionId: session.sessionId, error: fallback },
+					{ sessions },
+				);
 			});
 
 			sources.set(session.sessionId, eventSource);

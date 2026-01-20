@@ -171,5 +171,12 @@
 	},
 	"statusMessages": {
 		"cancelled": "已取消本次生成"
+	},
+	"notifications": {
+		"withSession": "{{sessionTitle}}：{{title}}",
+		"permissionRequest": "需要权限确认",
+		"permissionRequestDetail": "工具：{{tool}}",
+		"sessionError": "会话发生错误",
+		"responseCompleted": "回复已完成"
 	}
 }

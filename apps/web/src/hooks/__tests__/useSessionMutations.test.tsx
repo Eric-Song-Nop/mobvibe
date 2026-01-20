@@ -29,6 +29,7 @@ describe("useSessionMutations", () => {
 	let mockStore: ReturnType<typeof createMockStore>;
 
 	const createMockStore = () => ({
+		sessions: {},
 		setActiveSessionId: vi.fn(),
 		setLastCreatedCwd: vi.fn(),
 		createLocalSession: vi.fn(),

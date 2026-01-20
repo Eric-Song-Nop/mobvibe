@@ -130,8 +130,15 @@ export type SessionsResponse = {
 
 export type CreateSessionResponse = SessionSummary;
 
+export type StopReason =
+	| "end_turn"
+	| "max_tokens"
+	| "max_turn_requests"
+	| "refusal"
+	| "cancelled";
+
 export type SendMessageResponse = {
-	stopReason: string;
+	stopReason: StopReason;
 };
 
 export type CancelSessionResponse = {
