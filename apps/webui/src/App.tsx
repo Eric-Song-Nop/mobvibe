@@ -454,21 +454,34 @@ function MainApp() {
 	);
 }
 
+/**
+ * Component to handle Tauri deep link auth callbacks.
+ * Extracted to avoid conditional hook calls in App.
+ */
+function TauriAuthHandler({
+	authClient,
+}: {
+	authClient: NonNullable<ReturnType<typeof getAuthClient>>;
+}) {
+	useBetterAuthTauri({
+		authClient,
+		scheme: "mobvibe",
+		onSuccess: (url) => {
+			if (url) {
+				window.location.href = url;
+			}
+		},
+	});
+	return null;
+}
+
 export function App() {
 	const { isAuthenticated, isLoading, isAuthEnabled } = useAuth();
 	const navigate = useNavigate();
 
 	// Handle Tauri deep link auth callbacks
 	const authClient = getAuthClient();
-	useBetterAuthTauri({
-		// Auth client is null when auth is disabled - in that case enabled is false anyway
-		authClient: authClient as NonNullable<typeof authClient>,
-		scheme: "mobvibe",
-		enabled: isInTauri() && authClient !== null,
-		onSuccess: (url) => {
-			window.location.href = url;
-		},
-	});
+	const shouldSetupTauriAuth = isInTauri() && authClient !== null;
 
 	// Show loading state while checking auth
 	if (isLoading) {
@@ -482,36 +495,42 @@ export function App() {
 	}
 
 	return (
-		<Routes>
-			{/* Machine registration callback from CLI login */}
-			<Route path="/auth/machine-callback" element={<MachineCallbackPage />} />
+		<>
+			{shouldSetupTauriAuth && <TauriAuthHandler authClient={authClient!} />}
+			<Routes>
+				{/* Machine registration callback from CLI login */}
+				<Route
+					path="/auth/machine-callback"
+					element={<MachineCallbackPage />}
+				/>
 
-			{/* Login page */}
-			<Route
-				path="/login"
-				element={
-					isAuthenticated || !isAuthEnabled ? (
-						<Navigate to="/" replace />
-					) : (
-						<ThemeProvider>
-							<LoginPage onSuccess={() => navigate("/")} />
-						</ThemeProvider>
-					)
-				}
-			/>
+				{/* Login page */}
+				<Route
+					path="/login"
+					element={
+						isAuthenticated || !isAuthEnabled ? (
+							<Navigate to="/" replace />
+						) : (
+							<ThemeProvider>
+								<LoginPage onSuccess={() => navigate("/")} />
+							</ThemeProvider>
+						)
+					}
+				/>
 
-			{/* Main app - requires auth when enabled */}
-			<Route
-				path="/*"
-				element={
-					!isAuthEnabled || isAuthenticated ? (
-						<MainApp />
-					) : (
-						<Navigate to="/login" replace />
-					)
-				}
-			/>
-		</Routes>
+				{/* Main app - requires auth when enabled */}
+				<Route
+					path="/*"
+					element={
+						!isAuthEnabled || isAuthenticated ? (
+							<MainApp />
+						) : (
+							<Navigate to="/login" replace />
+						)
+					}
+				/>
+			</Routes>
+		</>
 	);
 }
 
