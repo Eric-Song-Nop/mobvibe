@@ -88,7 +88,7 @@ export class SocketClient extends EventEmitter {
 
 	constructor(private readonly options: SocketClientOptions) {
 		super();
-		this.socket = io(options.config.gatewayUrl, {
+		this.socket = io(`${options.config.gatewayUrl}/cli`, {
 			path: "/socket.io",
 			reconnection: true,
 			reconnectionAttempts: Number.POSITIVE_INFINITY,
@@ -407,6 +407,11 @@ export class SocketClient extends EventEmitter {
 			machineId: config.machineId,
 			hostname: config.hostname,
 			version: config.clientVersion,
+			backends: config.acpBackends.map((backend) => ({
+				backendId: backend.id,
+				backendLabel: backend.label,
+			})),
+			defaultBackendId: config.defaultAcpBackendId,
 		});
 		// Send current sessions list
 		this.socket.emit("sessions:list", sessionManager.listSessions());
