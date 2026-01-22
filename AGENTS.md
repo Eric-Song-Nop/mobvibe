@@ -1,103 +1,148 @@
 # Mobvibe (Remote-Claude)
 
-A distributed ACP (Agent Client Protocol) WebUI for local agent workflows.
+A distributed ACP (Agent Client Protocol) WebUI for local agent workflows. Connect to ACP-compatible CLIs (claude-code, opencode, gemini-cli), manage multi-session chat, and enjoy a fast, touch-friendly experience across desktop and mobile.
 
 ## Architecture
 
 ```
 ┌─────────────┐     Socket.io      ┌──────────────┐     Socket.io     ┌───────────────┐
 │   webui     │◄──────────────────►│   gateway    │◄─────────────────►│  mobvibe-cli  │
-│  (React)    │                    │  (Express)   │                   │  (Node CLI)   │
+│  (React)    │    /webui ns       │  (Express)   │    /cli ns        │  (Node CLI)   │
 └─────────────┘                    └──────────────┘                   └───────┬───────┘
-                                                                              │
-                                                                        stdin/stdout
-                                                                              │
-                                                                      ┌───────▼───────┐
-                                                                      │   ACP CLI     │
-                                                                      │ (claude-code) │
-                                                                      └───────────────┘
+       ▲                                  │                                   │
+       │                             REST API                           stdin/stdout
+       │                             (:3005)                                  │
+┌──────┴──────┐                                                       ┌───────▼───────┐
+│   mobile    │                                                       │   ACP CLI     │
+│   (Expo)    │◄─────────────────────────────►                        │ (claude-code) │
+└─────────────┘                                                       └───────────────┘
 ```
 
-### Package Structure
+## Package Structure
 
-- **packages/shared**: Shared TypeScript types for Socket.io events and ACP
-- **apps/gateway**: Express + Socket.io relay server (port 3005)
-- **apps/mobvibe-cli**: CLI daemon that connects to gateway and manages ACP sessions
-- **apps/webui**: React frontend with Socket.io real-time updates
-
-### Data Flow
-
-1. **webui** connects to **gateway** via Socket.io `/webui` namespace
-2. **mobvibe-cli** connects to **gateway** via Socket.io `/cli` namespace
-3. **gateway** routes REST API calls and Socket.io events between webui and CLI
-4. **mobvibe-cli** spawns and manages ACP CLI processes (claude-code, etc.)
+```
+mobvibe/
+├── apps/
+│   ├── gateway/         # Express + Socket.io relay server (port 3005)
+│   ├── webui/           # React frontend with Vite
+│   ├── mobvibe-cli/     # CLI daemon with ACP SDK
+│   └── mobile/          # React Native (Expo) mobile app
+├── packages/
+│   ├── shared/          # Shared TypeScript types
+│   └── core/            # Shared stores, hooks, and utilities
+└── docs/                # Implementation plans (Chinese)
+```
 
 ## Tech Stack
 
-### Common
+| Package | Key Technologies |
+|---------|-----------------|
+| **gateway** | Express, Socket.io, Drizzle ORM, Better Auth, PostgreSQL |
+| **webui** | React 19, Vite, Zustand, TanStack Query, Shadcn UI, Tailwind, Tree-sitter |
+| **mobvibe-cli** | Commander.js, @agentclientprotocol/sdk, Socket.io-client |
+| **mobile** | Expo SDK 53, Expo Router, React Native Paper, React Navigation |
+| **core** | Zustand, Socket.io-client, i18next |
+| **shared** | TypeScript types only |
+| **Monorepo** | pnpm workspaces, Turborepo, Biome, Vitest |
 
-- **Biome**: Formatting and linting (`pnpm format`, `pnpm lint`)
-- **Turborepo**: Monorepo management and parallel builds
-- **Vite**: Build tool for webui
-- **Vitest**: Testing framework
-- **Socket.io**: Real-time bidirectional communication
+## Quick Start
 
-### packages/shared
+```bash
+# Install dependencies
+pnpm install
 
-- TypeScript types shared across all packages
-- ACP protocol types, Socket.io event definitions, error types
+# Start all services (gateway, webui, mobvibe-cli)
+pnpm dev
 
-### apps/gateway
+# Services:
+# - Gateway: http://localhost:3005
+# - Web UI: http://localhost:5173
 
-- **Express**: HTTP server framework
-- **Socket.io**: WebSocket server with namespaces
-- Routes REST API requests to CLI via Socket.io RPC
-
-### apps/mobvibe-cli
-
-- **Commander.js**: CLI framework
-- **Socket.io-client**: WebSocket client to gateway
-- **@agentclientprotocol/sdk**: ACP protocol implementation
-
-### apps/webui
-
-- **React**: UI framework
-- **Zustand**: State management
-- **TanStack Query**: API calls and caching
-- **Shadcn UI**: Component library (Radix + Tailwind)
-- **Socket.io-client**: Real-time updates from gateway
-- **Streamdown**: Markdown rendering for streamed content
-- **Tree-sitter**: Code outline generation
+# Start CLI daemon manually (if not using pnpm dev)
+cd apps/mobvibe-cli
+./bin/mobvibe.mjs start --gateway http://localhost:3005
+```
 
 ## Development Commands
 
 ```bash
-pnpm dev              # Start all packages (gateway, mobvibe-cli, webui)
+pnpm dev              # Start all packages (Turbo)
 pnpm build            # Build all packages
 pnpm format           # Format code with Biome
 pnpm lint             # Lint code with Biome
-pnpm test             # Run all tests
+pnpm test             # Run all tests with Vitest
 ```
 
-### Running Individually
+## Database Setup (Optional)
+
+When `DATABASE_URL` is set, the gateway uses PostgreSQL for auth and persistence:
 
 ```bash
-# Gateway (port 3005)
-cd apps/gateway && pnpm dev
-
-# CLI daemon
-cd apps/mobvibe-cli && ./bin/mobvibe.mjs start --gateway http://localhost:3005
-
-# Web UI (port 5173)
-cd apps/webui && pnpm dev
+cd apps/gateway
+export DATABASE_URL="postgresql://user:pass@localhost:5432/mobvibe"
+pnpm db:push          # Push schema to database
+pnpm db:studio        # Open Drizzle Studio
 ```
 
-## Development Guidelines
+## CLI Usage
 
-- Run `pnpm format` before committing
-- Document implementation plans in `docs/` folder in Chinese
-- Commit frequently with English messages
-- Follow ACP protocol types and patterns from SDK documentation
-- Use Shadcn UI components for all UI elements
-- Mobile-first, responsive, accessible design
-- Reference ACP SDK docs: <https://agentclientprotocol.github.io/typescript-sdk/>
+```bash
+mobvibe start [--gateway <url>]  # Start daemon
+mobvibe stop                      # Stop daemon
+mobvibe status                    # Show status
+mobvibe logs [-f] [-n <lines>]   # View logs
+mobvibe login [--webui <url>]    # Authenticate
+mobvibe logout                   # Clear credentials
+```
+
+## Environment Variables
+
+| Variable | Package | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | gateway | PostgreSQL connection string |
+| `BETTER_AUTH_SECRET` | gateway | Session signing secret |
+| `GITHUB_CLIENT_ID/SECRET` | gateway | GitHub OAuth |
+| `GOOGLE_CLIENT_ID/SECRET` | gateway | Google OAuth |
+| `MOBVIBE_CORS_ORIGINS` | gateway | Allowed CORS origins |
+| `VITE_GATEWAY_URL` | webui | Gateway URL |
+| `EXPO_PUBLIC_GATEWAY_URL` | mobile | Gateway URL |
+| `MOBVIBE_GATEWAY_URL` | cli | Gateway URL |
+| `ANTHROPIC_AUTH_TOKEN` | cli | Claude Code backend token |
+
+## Data Flow
+
+1. **webui/mobile** → Socket.io `/webui` namespace → **gateway**
+2. **gateway** → Socket.io `/cli` namespace → **mobvibe-cli**
+3. **mobvibe-cli** → stdin/stdout → **ACP CLI** (claude-code, opencode, etc.)
+
+### Session Flow
+1. User creates session → REST `POST /acp/session` → Gateway
+2. Gateway → Socket.io RPC → CLI spawns ACP process
+3. CLI streams `session:update` → Gateway relays to webui
+4. User sends message → Gateway routes to CLI → Response streams back
+
+### Permission Flow
+1. ACP CLI requests permission → CLI emits `permission:request`
+2. Gateway relays to webui → User approves/denies
+3. Decision routed back to CLI → CLI resolves permission
+
+## Key Features
+
+- **Multi-session**: Run multiple ACP sessions concurrently
+- **Real-time streaming**: Socket.io-based message streaming
+- **Permission UI**: Approve/deny tool calls from the browser
+- **File explorer**: Browse session working directory
+- **Code preview**: Syntax highlighting with Tree-sitter outlines
+- **Mobile-first**: Touch-friendly UI with safe-area handling
+- **i18n**: English and Chinese support
+- **Authentication**: Optional Better Auth with OAuth providers
+
+## Documentation
+
+- `CLAUDE.md` - Detailed development guide for AI assistants
+- `docs/` - Implementation plans and design documents (Chinese)
+
+## Links
+
+- ACP Protocol: https://agentclientprotocol.com/
+- ACP TypeScript SDK: https://agentclientprotocol.github.io/typescript-sdk/

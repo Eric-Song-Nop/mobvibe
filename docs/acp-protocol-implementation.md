@@ -5,10 +5,27 @@
 - 记录当前 ACP 协议在 Mobvibe 中的实现范围与接口。
 - 作为后续前端对接与扩展（会话、权限、持久化）的基线文档。
 
+## 架构概览（2026-01 更新）
+
+```
+┌─────────────┐     Socket.io      ┌──────────────┐     Socket.io     ┌───────────────┐
+│   webui     │◄──────────────────►│   gateway    │◄─────────────────►│  mobvibe-cli  │
+│  (React)    │    /webui ns       │  (Express)   │    /cli ns        │  (Node CLI)   │
+└─────────────┘                    └──────────────┘                   └───────┬───────┘
+                                                                              │
+                                                                        stdin/stdout
+                                                                              │
+                                                                      ┌───────▼───────┐
+                                                                      │   ACP CLI     │
+                                                                      │ (claude-code) │
+                                                                      └───────────────┘
+```
+
 ## 协议角色与边界
 
-- Client：Mobvibe 后端作为 ACP Client，负责连接本地 ACP CLI（`opencode`/`gemini-cli`）并转发消息。
-- Agent：ACP CLI 作为 ACP Agent，负责会话管理与回复生成。
+- **Gateway**：中继服务器，负责路由 webui 请求到对应的 CLI 实例，管理用户认证和会话元数据。
+- **mobvibe-cli**：CLI daemon，作为 ACP Client 连接本地 ACP CLI（`claude-code`/`opencode`/`gemini-cli`）并通过 Socket.io 与 Gateway 通信。
+- **ACP Agent**：ACP CLI 作为 ACP Agent，负责会话管理与回复生成。
 
 ## 当前实现范围
 
@@ -35,21 +52,81 @@
 5. `sessionUpdate` 通过 SSE 推送给前端，`current_mode_update` 实时更新会话模式。
 6. `prompt` 返回 `stopReason` 供前端判断完成状态。
 
-## 后端 API 清单
+## Gateway REST API 清单
 
-- `GET /health`：健康检查。
-- `GET /acp/agent`：服务级连接状态。
-- `GET /acp/backends`：可用后端列表。
-- `GET /acp/sessions`：会话列表。
-- `POST /acp/session`：创建新会话（支持 `backendId`）。
-- `PATCH /acp/session`：更新会话标题。
-- `POST /acp/session/close`：关闭会话。
-- `POST /acp/session/cancel`：取消当前会话 prompt。
-- `POST /acp/session/mode`：切换会话模式。
-- `POST /acp/session/model`：切换会话模型。
-- `POST /acp/message`：发送消息。
-- `POST /acp/permission/decision`：提交权限决策。
-- `GET /acp/session/stream`：SSE 推送 `sessionUpdate`。
+### 健康与认证
+
+- `GET /health`：健康检查
+- `GET /api/auth/*`：Better Auth 认证端点
+
+### 机器管理
+
+- `GET /machines`：获取用户已注册的机器列表
+- `POST /machines`：注册新机器
+- `DELETE /machines/:id`：删除机器
+
+### 会话管理
+
+- `GET /acp/sessions`：会话列表（跨所有连接的 CLI）
+- `POST /acp/session`：创建新会话（支持 `machineId`/`backendId`/`cwd`）
+- `PATCH /acp/session`：更新会话标题
+- `POST /acp/session/close`：关闭会话
+- `POST /acp/session/cancel`：取消当前会话 prompt
+- `POST /acp/session/mode`：切换会话模式
+- `POST /acp/session/model`：切换会话模型
+- `POST /acp/message`：发送消息
+- `POST /acp/permission/decision`：提交权限决策
+
+### 文件系统
+
+- `GET /fs/session/:sessionId/roots`：获取会话可访问的根目录
+- `GET /fs/session/:sessionId/entries`：列出目录内容
+- `GET /fs/session/:sessionId/file`：读取文件内容
+- `GET /fs/session/:sessionId/resources`：获取会话资源列表
+
+## Socket.io 事件（Gateway ↔ CLI）
+
+### CLI → Gateway
+
+- `cli:register`：CLI 注册（machineId, hostname, version）
+- `cli:heartbeat`：心跳
+- `sessions:list`：会话列表更新
+- `session:update`：会话更新（消息、模式、标题等）
+- `session:error`：会话错误
+- `permission:request`：权限请求
+- `permission:result`：权限决策结果
+- `terminal:output`：终端输出
+- `rpc:response`：RPC 响应
+
+### Gateway → CLI
+
+- `cli:registered`：注册确认
+- `rpc:session:create`：创建会话
+- `rpc:session:close`：关闭会话
+- `rpc:session:cancel`：取消会话
+- `rpc:session:mode`：切换模式
+- `rpc:session:model`：切换模型
+- `rpc:message:send`：发送消息
+- `rpc:permission:decision`：权限决策
+- `rpc:fs:*`：文件系统操作
+
+## Socket.io 事件（Gateway ↔ Webui）
+
+### Webui → Gateway
+
+- `subscribe:session`：订阅会话更新
+- `unsubscribe:session`：取消订阅
+- `permission:decision`：权限决策
+
+### Gateway → Webui
+
+- `session:update`：会话更新
+- `session:error`：会话错误
+- `permission:request`：权限请求
+- `permission:result`：权限决策结果
+- `terminal:output`：终端输出
+- `cli:status`：CLI 连接状态
+- `sessions:list`：会话列表
 
 ## ACP SDK 对照矩阵（v0.13.0）
 

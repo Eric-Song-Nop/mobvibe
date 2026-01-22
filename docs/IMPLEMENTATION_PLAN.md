@@ -427,3 +427,137 @@
 - 测试断言更新为使用带提示文案的可访问名称，匹配大纲类型按钮的 `aria-label`。
 - 点击复制测试改为定位 `Method · Tap to copy`，避免未来文案变更引发误判。
 - 调整测试用的 Tree-sitter 匹配范围，使复制片段与断言一致。
+
+## M10 分布式架构重构（实现后记录 - 2026-01-21）
+
+- 目标：将单体后端拆分为 Gateway + CLI 架构，支持多机器连接。
+- 架构：
+  - `apps/gateway` - Express + Socket.io 中继服务器，管理 webui 和 CLI 连接
+  - `apps/mobvibe-cli` - CLI daemon，连接本地 ACP CLI 并通过 Socket.io 与 Gateway 通信
+- Socket 命名空间：
+  - `/webui` - 浏览器客户端连接
+  - `/cli` - CLI daemon 连接
+- RPC 模式：Gateway 通过 Socket.io RPC 调用 CLI，CLI 返回结果
+- 会话路由：Gateway 根据 `sessionId` 和 `machineId` 路由请求到对应 CLI
+- 权限流程：CLI 发起权限请求 → Gateway 转发到 webui → 用户决策 → 回传 CLI
+
+## M11 packages/core 共享包（实现后记录 - 2026-01-21）
+
+- 目标：抽离 webui 和 mobile 共用的状态管理和工具代码
+- 包结构：
+  - `stores/` - Zustand stores (chat, machines, ui, notification)
+  - `socket/` - GatewaySocket 单例
+  - `api/` - API 客户端封装
+  - `hooks/` - React hooks (useSocket)
+  - `i18n/` - 国际化翻译文件
+  - `utils/` - 工具函数
+- 导出方式：多入口导出 (`@remote-claude/core/stores`, `/socket`, `/api` 等)
+- 平台适配：`storage-adapter.ts` 抽象存储接口，支持 web localStorage 和 RN AsyncStorage
+
+## M12 React Native 移动端（实现后记录 - 2026-01-22）
+
+- 目标：基于 Expo SDK 53 构建原生移动应用
+- 技术栈：
+  - Expo Router - 文件路由
+  - React Native Paper - Material Design 组件
+  - React Navigation Drawer - 抽屉导航
+  - @remote-claude/core - 共享状态和逻辑
+- 页面结构：
+  - `(tabs)/index.tsx` - 首页/聊天
+  - `(tabs)/machines.tsx` - 机器管理
+  - `(tabs)/settings.tsx` - 设置
+  - `session/[id].tsx` - 会话详情
+- 环境变量：`EXPO_PUBLIC_GATEWAY_URL` 配置 Gateway 地址
+
+## M13 认证与持久化（实现后记录 - 2026-01-22）
+
+- 目标：添加用户认证和数据库持久化
+- 技术栈：
+  - Better Auth - 认证框架
+  - Drizzle ORM - 数据库 ORM
+  - PostgreSQL - 数据库
+- 数据库表：
+  - `users`, `sessions`, `accounts`, `verifications` - Better Auth 表
+  - `machines` - 机器注册 (machineId, userId, token)
+  - `acpSessions` - ACP 会话元数据 (sessionId, machineId, state)
+- OAuth 支持：GitHub, Google
+- CLI 认证：`mobvibe login` 命令通过浏览器 OAuth 流程获取机器令牌
+
+---
+
+## 部署计划
+
+### 本地开发
+
+```bash
+pnpm dev              # 启动所有服务
+# Gateway: http://localhost:3005
+# Web UI: http://localhost:5173
+```
+
+### 生产部署
+
+#### Gateway 服务器
+
+```bash
+cd apps/gateway
+pnpm build
+DATABASE_URL="postgresql://..." BETTER_AUTH_SECRET="..." pnpm start
+```
+
+#### Web UI 静态部署
+
+```bash
+cd apps/webui
+VITE_GATEWAY_URL="https://gateway.example.com" pnpm build
+# 使用 nginx/caddy/vercel 部署 dist/ 目录
+```
+
+#### CLI 守护进程
+
+```bash
+cd apps/mobvibe-cli
+pnpm build
+./bin/mobvibe.mjs start --gateway https://gateway.example.com
+```
+
+#### 移动端构建
+
+```bash
+cd apps/mobile
+EXPO_PUBLIC_GATEWAY_URL="https://gateway.example.com" pnpm build:android
+```
+
+### 环境变量清单
+
+| 变量 | 包 | 说明 |
+|------|-----|------|
+| `DATABASE_URL` | gateway | PostgreSQL 连接字符串 |
+| `BETTER_AUTH_SECRET` | gateway | 会话签名密钥 |
+| `GITHUB_CLIENT_ID/SECRET` | gateway | GitHub OAuth |
+| `GOOGLE_CLIENT_ID/SECRET` | gateway | Google OAuth |
+| `MOBVIBE_CORS_ORIGINS` | gateway | CORS 允许源 |
+| `VITE_GATEWAY_URL` | webui | Gateway 地址 |
+| `EXPO_PUBLIC_GATEWAY_URL` | mobile | Gateway 地址 |
+| `MOBVIBE_GATEWAY_URL` | cli | Gateway 地址 |
+| `ANTHROPIC_AUTH_TOKEN` | cli | Claude Code 后端令牌 |
+
+---
+
+## 后续计划
+
+### 待实现功能
+
+- [ ] 会话恢复 (`loadSession` / `resumeSession`)
+- [ ] 消息历史持久化
+- [ ] 多语言 Tree-sitter 支持扩展
+- [ ] 移动端文件预览完善
+- [ ] WebSocket 重连优化
+- [ ] 性能监控与日志
+
+### 技术债务
+
+- [ ] 移除 `apps/server` 空目录
+- [ ] 统一错误处理中间件
+- [ ] 完善单元测试覆盖率
+- [ ] API 文档生成 (OpenAPI)

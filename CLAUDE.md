@@ -11,26 +11,26 @@ Remote-Claude (Mobvibe) is a distributed ACP (Agent Client Protocol) WebUI for l
 
 ## Architecture
 
-The project follows a distributed architecture with three main packages communicating via Socket.io:
+The project follows a distributed architecture with four main packages communicating via Socket.io:
 
 ```
 ┌─────────────┐     Socket.io      ┌──────────────┐     Socket.io     ┌───────────────┐
 │   webui     │◄──────────────────►│   gateway    │◄─────────────────►│  mobvibe-cli  │
 │  (React)    │    /webui ns       │  (Express)   │    /cli ns        │  (Node CLI)   │
 └─────────────┘                    └──────────────┘                   └───────┬───────┘
-                                          │                                   │
-                                     REST API                           stdin/stdout
-                                     (:3005)                                  │
-                                                                      ┌───────▼───────┐
-                                                                      │   ACP CLI     │
-                                                                      │ (claude-code) │
-                                                                      └───────────────┘
+       ▲                                  │                                   │
+       │                             REST API                           stdin/stdout
+       │                             (:3005)                                  │
+┌──────┴──────┐                                                       ┌───────▼───────┐
+│   mobile    │                                                       │   ACP CLI     │
+│   (Expo)    │◄─────────────────────────────►                        │ (claude-code) │
+└─────────────┘                                                       └───────────────┘
 ```
 
 ### Package Structure
 
 ```
-remote-claude/
+mobvibe/
 ├── apps/
 │   ├── webui/           # React frontend with Socket.io client
 │   ├── mobvibe-cli/     # CLI daemon with ACP connection
@@ -39,6 +39,7 @@ remote-claude/
 ├── packages/
 │   ├── shared/          # Shared TypeScript types
 │   └── core/            # Shared stores, hooks, and utilities
+├── docs/                # Implementation plans and design docs (Chinese)
 └── pnpm-workspace.yaml
 ```
 
@@ -80,8 +81,19 @@ pnpm dev              # Vite dev server
 pnpm build            # TypeScript check + Vite build
 pnpm test             # Run web tests
 
+# Mobile app (apps/mobile)
+cd apps/mobile
+pnpm start            # Expo dev server
+pnpm android          # Run on Android
+pnpm ios              # Run on iOS
+
 # Shared types (packages/shared)
 cd packages/shared
+pnpm build            # TypeScript compilation
+pnpm dev              # Watch mode
+
+# Core package (packages/core)
+cd packages/core
 pnpm build            # TypeScript compilation
 pnpm dev              # Watch mode
 ```
@@ -96,7 +108,30 @@ Shared TypeScript types used across all packages:
 - `types/socket-events.ts` - Socket.io event definitions for CLI↔Gateway↔Webui
 - `types/errors.ts` - Error types and codes
 - `types/session.ts` - Session-related types (SessionSummary, StopReason, etc.)
-- `types/fs.ts` - File system types for session file explorer
+
+### packages/core
+
+Shared logic and state management for webui and mobile:
+
+**Zustand Stores:**
+- `stores/chat-store.ts` - Sessions, messages, permissions, streaming state
+- `stores/machines-store.ts` - Connected CLI machines
+- `stores/ui-store.ts` - Theme, sidebar, language preferences
+- `stores/notification-store.ts` - Toast notifications
+- `stores/storage-adapter.ts` - Platform-agnostic storage abstraction
+
+**Socket Integration:**
+- `socket/gateway-socket.ts` - GatewaySocket singleton for Socket.io connection
+
+**API Layer:**
+- `api/client.ts` - API client wrapper for gateway REST endpoints
+
+**React Hooks:**
+- `hooks/use-socket.ts` - React hook for Socket.io session subscriptions
+
+**i18n:**
+- `i18n/en.json` - English translations
+- `i18n/zh.json` - Chinese translations
 
 ### apps/gateway
 
@@ -106,22 +141,27 @@ Express + Socket.io relay server (port 3005):
 - `/cli` - CLI connections (mobvibe-cli instances)
 - `/webui` - Web UI connections (browser clients)
 
+**Database (Drizzle ORM):**
+- `db/schema.ts` - PostgreSQL schema with Better Auth tables + application tables
+- `db/index.ts` - Database connection and Drizzle client
+
 **Core Services:**
 - `services/cli-registry.ts` - Track connected CLI instances by machineId
 - `services/session-router.ts` - Route requests to appropriate CLI based on session/machine
+- `services/db-service.ts` - Database operations for machines and sessions
 
 **Socket Handlers:**
 - `socket/cli-handlers.ts` - Handle CLI registration, RPC responses, event forwarding
 - `socket/webui-handlers.ts` - Handle session subscriptions, permission decisions
 
 **REST API Routes:**
-- `/api/auth/*` - Better Auth endpoints (sign in, sign up, session, OAuth)
-- `/machines` - Machine registration and token generation
-- `/acp/session` - Session lifecycle (create, close, list)
-- `/acp/message` - Message sending
-- `/acp/permission/decision` - Permission decisions via REST
-- `/fs/session/:sessionId/*` - File system access for sessions
-- `/health` - Health check endpoint
+- `routes/sessions.ts` - Session lifecycle (create, close, list, message)
+- `routes/machines.ts` - Machine registration and token management
+- `routes/fs.ts` - File system access for session working directories
+- `routes/health.ts` - Health check endpoint
+
+**Middleware:**
+- `middleware/` - Auth and CORS middleware
 
 ### apps/mobvibe-cli
 
@@ -134,6 +174,9 @@ CLI daemon that connects to gateway and manages ACP sessions:
 **Daemon System:**
 - `daemon/daemon.ts` - PID file management, background process, graceful shutdown
 - `daemon/socket-client.ts` - Socket.io client to gateway with RPC handlers
+
+**Authentication:**
+- `auth/` - Machine authentication with gateway
 
 **CLI Commands:**
 ```bash
@@ -153,65 +196,85 @@ mobvibe auth-status              # Show authentication status
   - `ANTHROPIC_AUTH_TOKEN` - Required for Claude Code backend
   - `ANTHROPIC_BASE_URL` - Optional for Claude Code backend
 
+### apps/webui
+
+React frontend with Socket.io real-time updates:
+
+**Component Structure:**
+```
+src/components/
+├── app/                 # Main application components
+│   ├── AppHeader.tsx    # Top navigation bar
+│   ├── AppSidebar.tsx   # Session sidebar wrapper
+│   ├── ChatFooter.tsx   # Message input area
+│   ├── ChatMessageList.tsx
+│   ├── CreateSessionDialog.tsx
+│   ├── FileExplorerDialog.tsx
+│   ├── ColumnFileBrowser.tsx
+│   ├── CommandCombobox.tsx    # Slash command picker
+│   ├── ResourceCombobox.tsx   # Resource picker
+│   ├── WorkingDirectoryDialog.tsx
+│   ├── WorkingDirectoryPicker.tsx
+│   └── previews/        # File preview components
+├── auth/                # Authentication components
+├── chat/                # Message rendering
+├── machines/            # Machine management
+├── session/             # Session list and metadata
+└── ui/                  # Shadcn UI components
+```
+
+**State Management:**
+- Uses `@remote-claude/core` stores via re-exports
+- `lib/` contains local utilities and configurations
+
+**Socket Integration:**
+- Uses `@remote-claude/core/socket` for Socket.io connection
+- `hooks/useSocket.ts` - React hook wrapper for session subscriptions
+
+**API Layer:**
+- Uses `@remote-claude/core/api` for REST endpoints
+- TanStack Query for data fetching and caching
+
+**Key Features:**
+- Streamdown for streaming markdown rendering
+- Tree-sitter for code outline generation
+- Prism for syntax highlighting
+- i18next for internationalization
+
 ### apps/mobile
 
 React Native (Expo) mobile app with file-based routing:
 
 **Tech Stack:**
-- Expo SDK with Expo Router (file-based routing)
+- Expo SDK 53 with Expo Router (file-based routing)
 - Uses `packages/core` for shared state and logic
-- NativeWind for Tailwind CSS styling
+- React Native Paper for Material Design components
+- React Navigation with Drawer navigator
 
-**Screens:**
-- `app/(tabs)/index.tsx` - Home/chat screen
-- `app/(tabs)/machines.tsx` - Machine management
-- `app/(tabs)/settings.tsx` - Settings and preferences
-- `app/session/[id].tsx` - Session detail view
+**App Structure:**
+```
+app/
+├── (tabs)/
+│   ├── _layout.tsx      # Tab navigator layout
+│   ├── index.tsx        # Home/chat screen
+│   ├── machines.tsx     # Machine management
+│   └── settings.tsx     # Settings and preferences
+├── session/
+│   └── [id].tsx         # Session detail view
+└── _layout.tsx          # Root layout with drawer
+```
+
+**Source Structure:**
+```
+src/
+├── context/             # React contexts (auth, etc.)
+├── lib/                 # Utilities
+└── theme/               # Theme configuration
+```
 
 **Configuration:**
-- `app.config.ts` - Expo configuration
+- `app.json` - Expo configuration
 - Environment: `EXPO_PUBLIC_GATEWAY_URL`
-
-### packages/core
-
-Shared logic and state management for webui and mobile:
-
-**Zustand Stores:**
-- `stores/chat-store.ts` - Sessions, messages, permissions
-- `stores/machines-store.ts` - Connected machines
-- `stores/ui-store.ts` - Theme, sidebar, language
-- `stores/notification-store.ts` - Toast notifications
-
-**Utilities:**
-- `socket/gateway-socket.ts` - GatewaySocket singleton
-- `api/client.ts` - API client wrapper
-- `hooks/use-socket.ts` - React hook for Socket.io events
-
-**i18n:**
-- `i18n/en.json` - English translations
-- `i18n/zh.json` - Chinese translations
-
-### apps/webui
-
-React frontend with Socket.io real-time updates:
-
-**State Management:**
-- `lib/chat-store.ts` - Zustand store for sessions, messages, permissions
-- `lib/ui-store.ts` - UI state (sidebar, theme, language)
-- `lib/notification-store.ts` - Toast notifications
-
-**Socket Integration:**
-- `lib/socket.ts` - GatewaySocket singleton for Socket.io connection
-- `hooks/useSocket.ts` - React hook for session subscriptions and event handling
-
-**API Layer:**
-- `lib/api.ts` - TanStack Query wrapper for REST endpoints
-- `lib/acp.ts` - ACP types and notification parsing utilities
-
-**Key Components:**
-- `components/app/` - Main layout, file explorer, code preview
-- `components/chat/` - Message rendering, input, slash commands
-- `components/session/` - Session list, metadata, backend selection
 
 ## Socket.io Event Types
 
@@ -276,16 +339,20 @@ When `DATABASE_URL` is configured, the gateway uses PostgreSQL with Drizzle ORM 
 
 ### Schema Tables
 
-- `users` - User accounts (Better Auth managed)
-- `sessions` - Auth sessions (Better Auth managed)
-- `accounts` - OAuth provider accounts (Better Auth managed)
-- `verifications` - Email verifications (Better Auth managed)
-- `machines` - Registered CLI machines (machineId, userId, token, hostname)
-- `acpSessions` - ACP session metadata (sessionId, machineId, userId, state)
+**Better Auth Tables:**
+- `users` - User accounts
+- `sessions` - Auth sessions
+- `accounts` - OAuth provider accounts
+- `verifications` - Email verifications
+
+**Application Tables:**
+- `machines` - Registered CLI machines (machineId, userId, token, hostname, platform)
+- `acpSessions` - ACP session metadata (sessionId, machineId, userId, state, title, cwd)
 
 ### Drizzle Commands
 
 ```bash
+cd apps/gateway
 pnpm db:generate   # Generate migration from schema changes
 pnpm db:migrate    # Run pending migrations
 pnpm db:push       # Push schema directly (dev only)
@@ -419,3 +486,65 @@ When accessing from phone/tablet on same network:
 2. Gateway auto-allows private IPs (10.x.x.x, 192.168.x.x, 172.16-31.x.x)
 3. Access frontend via `http://192.168.1.20:5173` on mobile device
 4. Ensure mobvibe-cli is running and connected to gateway
+
+## Deployment
+
+### Local Development
+
+```bash
+# Start all services
+pnpm dev
+
+# Services will be available at:
+# - Gateway: http://localhost:3005
+# - Web UI: http://localhost:5173
+```
+
+### Production Deployment
+
+**Gateway Server:**
+```bash
+cd apps/gateway
+pnpm build
+DATABASE_URL="postgresql://..." pnpm start
+```
+
+**Web UI:**
+```bash
+cd apps/webui
+pnpm build
+# Serve dist/ with your preferred static file server
+```
+
+**CLI Daemon:**
+```bash
+cd apps/mobvibe-cli
+pnpm build
+./bin/mobvibe.mjs start --gateway https://your-gateway.com
+```
+
+**Mobile App:**
+```bash
+cd apps/mobile
+pnpm build:android  # Build Android APK
+pnpm build:ios      # Build iOS app
+```
+
+### Environment Variables
+
+**Gateway:**
+- `DATABASE_URL` - PostgreSQL connection (required for auth)
+- `BETTER_AUTH_SECRET` - Secret for session signing
+- `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` - GitHub OAuth
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` - Google OAuth
+- `MOBVIBE_CORS_ORIGINS` - Allowed CORS origins
+
+**Web UI:**
+- `VITE_GATEWAY_URL` - Gateway URL (default: http://localhost:3005)
+
+**Mobile:**
+- `EXPO_PUBLIC_GATEWAY_URL` - Gateway URL
+
+**CLI:**
+- `MOBVIBE_GATEWAY_URL` - Gateway URL
+- `ANTHROPIC_AUTH_TOKEN` - For Claude Code backend
