@@ -1,8 +1,8 @@
-import { ApiError } from "../api/client";
 import type { ErrorDetail } from "../api/types";
+import { isErrorDetail } from "../api/types";
 
 // Re-export isErrorDetail from shared (already exported via api/types)
-export { isErrorDetail } from "../api/types";
+export { isErrorDetail };
 
 /**
  * Creates a fallback error object with the given message and scope.
@@ -27,8 +27,13 @@ export const normalizeError = (
 	error: unknown,
 	fallback: ErrorDetail,
 ): ErrorDetail => {
-	if (error instanceof ApiError) {
-		return error.detail;
+	// Duck-type check for ApiError-like objects (works across module boundaries)
+	if (
+		error instanceof Error &&
+		"detail" in error &&
+		isErrorDetail((error as { detail: unknown }).detail)
+	) {
+		return (error as { detail: ErrorDetail }).detail;
 	}
 	if (error instanceof Error) {
 		return {

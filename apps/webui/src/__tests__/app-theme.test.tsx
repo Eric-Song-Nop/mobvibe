@@ -1,5 +1,7 @@
 import { render, waitFor } from "@testing-library/react";
+import type React from "react";
 import { useEffect } from "react";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ThemeProvider, useTheme } from "@/components/theme-provider";
 import { THEME_STORAGE_KEY } from "@/lib/ui-config";
@@ -118,6 +120,20 @@ vi.mock("@/components/app/FileExplorerDialog", () => ({
 	FileExplorerDialog: () => null,
 }));
 
+vi.mock("@/components/auth/AuthProvider", () => ({
+	useAuth: () => ({
+		isAuthenticated: false,
+		isLoading: false,
+		isAuthEnabled: false,
+		user: null,
+		login: vi.fn(),
+		logout: vi.fn(),
+		refresh: vi.fn(),
+	}),
+	AuthProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+
 const setMatchMedia = (matches: boolean) => {
 	const listeners = new Set<(event: MediaQueryListEvent) => void>();
 	const mediaQueryList = {
@@ -161,7 +177,11 @@ describe("App theme preference", () => {
 		setMatchMedia(false);
 
 		const { default: App } = await import("../App");
-		render(<App />);
+		render(
+			<MemoryRouter>
+				<App />
+			</MemoryRouter>,
+		);
 
 		expect(document.documentElement.classList.contains("dark")).toBe(true);
 	});
@@ -170,7 +190,11 @@ describe("App theme preference", () => {
 		const mediaQueryList = setMatchMedia(false);
 
 		const { default: App } = await import("../App");
-		render(<App />);
+		render(
+			<MemoryRouter>
+				<App />
+			</MemoryRouter>,
+		);
 
 		expect(document.documentElement.classList.contains("dark")).toBe(false);
 
