@@ -1,8 +1,11 @@
+import { readdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
 	createErrorDetail,
 	createInternalError,
 	type ErrorDetail,
-} from "@remote-claude/shared";
+} from "@mobvibe/shared";
 import type { Router } from "express";
 import {
 	type AuthenticatedRequest,
@@ -45,6 +48,70 @@ const buildAuthorizationError = (message = "Not authorized") =>
 export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 	// Apply optional auth to all routes
 	router.use(optionalAuth);
+
+	// Get local filesystem roots (for creating sessions)
+	router.get("/roots", (_request, response) => {
+		try {
+			const homePath = homedir();
+			// On Unix, root is /; on Windows, list drive letters
+			const roots =
+				process.platform === "win32"
+					? ["C:\\", "D:\\", "E:\\"].filter((drive) => {
+							try {
+								statSync(drive);
+								return true;
+							} catch {
+								return false;
+							}
+						})
+					: ["/"];
+			response.json({ roots, homePath });
+		} catch (error) {
+			const message = getErrorMessage(error);
+			respondError(response, createInternalError("request", message));
+		}
+	});
+
+	// Get local filesystem entries (for creating sessions)
+	router.get("/entries", (request, response) => {
+		const path =
+			typeof request.query.path === "string" ? request.query.path : undefined;
+		if (!path) {
+			respondError(
+				response,
+				buildRequestValidationError("path required"),
+				400,
+			);
+			return;
+		}
+
+		try {
+			const entries = readdirSync(path, { withFileTypes: true })
+				.filter((entry) => {
+					// Filter hidden files/folders (starting with .)
+					if (entry.name.startsWith(".")) {
+						return false;
+					}
+					return true;
+				})
+				.map((entry) => ({
+					name: entry.name,
+					path: join(path, entry.name),
+					isDirectory: entry.isDirectory(),
+				}))
+				.sort((a, b) => {
+					// Directories first, then alphabetically
+					if (a.isDirectory !== b.isDirectory) {
+						return a.isDirectory ? -1 : 1;
+					}
+					return a.name.localeCompare(b.name);
+				});
+			response.json({ entries });
+		} catch (error) {
+			const message = getErrorMessage(error);
+			respondError(response, createInternalError("request", message));
+		}
+	});
 
 	// Get session roots - with authorization check
 	router.get(
