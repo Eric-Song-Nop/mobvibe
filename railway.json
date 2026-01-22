@@ -6,6 +6,7 @@
 	},
 	"deploy": {
 		"numReplicas": 1,
+		"startCommand": "pnpm start:prod",
 		"healthcheckPath": "/health",
 		"healthcheckTimeout": 30,
 		"restartPolicyType": "ON_FAILURE",

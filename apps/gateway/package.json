@@ -6,6 +6,7 @@
 		"dev": "tsx watch src/index.ts",
 		"build": "tsc -p tsconfig.json",
 		"start": "node dist/index.js",
+		"start:prod": "npx drizzle-kit push --force && node dist/index.js",
 		"lint": "biome check --write .",
 		"format": "biome format --write .",
 		"test": "vitest",
