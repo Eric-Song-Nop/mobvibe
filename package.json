@@ -4,6 +4,7 @@
 		"turbo": "^2.7.4"
 	},
 	"scripts": {
+		"build": "turbo build",
 		"dev": "turbo dev",
 		"format": "turbo format",
 		"lint": "turbo lint",

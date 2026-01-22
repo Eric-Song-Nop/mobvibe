@@ -1,3 +1,14 @@
+# Turbo
 .turbo
+
+# Dependencies
 node_modules/
-apps/web/public/*.wasm
+
+# Build outputs
+dist/
+
+# Tree-sitter WASM files (copied during postinstall)
+apps/webui/public/*.wasm
+
+# Daemon files
+.mobvibe/

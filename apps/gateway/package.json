@@ -1,0 +1,28 @@
+{
+	"name": "gateway",
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"dev": "tsx watch src/index.ts",
+		"build": "tsc -p tsconfig.json",
+		"start": "node dist/index.js",
+		"lint": "biome check --write .",
+		"format": "biome format --write .",
+		"test": "vitest"
+	},
+	"dependencies": {
+		"@remote-claude/shared": "workspace:*",
+		"cors": "^2.8.5",
+		"express": "^4.21.2",
+		"socket.io": "^4.8.1"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.3.11",
+		"@types/cors": "^2.8.18",
+		"@types/express": "^4.17.21",
+		"@types/node": "^24.10.1",
+		"tsx": "^4.19.3",
+		"typescript": "~5.9.3",
+		"vitest": "^2.1.8"
+	}
+}
