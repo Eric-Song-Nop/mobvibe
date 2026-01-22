@@ -9,5 +9,10 @@
 		"format": "turbo format",
 		"lint": "turbo lint",
 		"test": "turbo test"
+	},
+	"pnpm": {
+		"overrides": {
+			"@types/react": "~19.0.10"
+		}
 	}
 }
