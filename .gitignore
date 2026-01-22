@@ -12,3 +12,6 @@ apps/webui/public/*.wasm
 
 # Daemon files
 .mobvibe/
+
+.env
+.env.local
