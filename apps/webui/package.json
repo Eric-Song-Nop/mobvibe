@@ -13,6 +13,7 @@
 		"postinstall": "node -e \"const fs=require('fs'); const path=require('path'); const dest=path.join(process.cwd(),'public'); fs.mkdirSync(dest,{recursive:true}); const modules=['web-tree-sitter/web-tree-sitter.wasm','tree-sitter-javascript/tree-sitter-javascript.wasm','tree-sitter-typescript/tree-sitter-typescript.wasm','tree-sitter-typescript/tree-sitter-tsx.wasm','tree-sitter-bash/tree-sitter-bash.wasm','tree-sitter-c/tree-sitter-c.wasm','tree-sitter-cpp/tree-sitter-cpp.wasm','tree-sitter-c-sharp/tree-sitter-c_sharp.wasm','tree-sitter-go/tree-sitter-go.wasm','tree-sitter-java/tree-sitter-java.wasm','tree-sitter-php/tree-sitter-php.wasm','tree-sitter-php/tree-sitter-php_only.wasm','tree-sitter-python/tree-sitter-python.wasm','tree-sitter-ruby/tree-sitter-ruby.wasm','tree-sitter-rust/tree-sitter-rust.wasm']; modules.forEach((mod)=>{const src=require.resolve(mod); fs.copyFileSync(src, path.join(dest, path.basename(mod)));});\""
 	},
 	"dependencies": {
+		"@remote-claude/core": "workspace:*",
 		"@base-ui/react": "^1.0.0",
 		"better-auth": "^1.2.12",
 		"convex": "^1.22.0",
