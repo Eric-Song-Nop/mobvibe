@@ -42,6 +42,7 @@ export class GatewaySocket {
 			reconnectionDelayMax: 10000,
 			transports: ["websocket"],
 			autoConnect: true,
+			withCredentials: true,
 			auth: token ? { token } : undefined,
 		});
 

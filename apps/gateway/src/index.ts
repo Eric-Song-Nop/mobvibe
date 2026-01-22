@@ -1,8 +1,8 @@
 import { createServer } from "node:http";
+import { toNodeHandler } from "better-auth/node";
 import cors from "cors";
 import express from "express";
 import { Server } from "socket.io";
-import { toNodeHandler } from "better-auth/node";
 import { getGatewayConfig } from "./config.js";
 import { closeDb } from "./db/index.js";
 import { getAuth } from "./lib/auth.js";
@@ -61,6 +61,7 @@ const io = new Server(httpServer, {
 			}
 		},
 		methods: ["GET", "POST"],
+		credentials: true,
 	},
 });
 
