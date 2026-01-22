@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { toNodeHandler } from "better-auth/node";
 import cors from "cors";
-import express from "express";
+import express, { type Express } from "express";
 import { Server } from "socket.io";
 import { getGatewayConfig } from "./config.js";
 import { closeDb } from "./db/index.js";
@@ -17,7 +17,7 @@ import { setupWebuiHandlers } from "./socket/webui-handlers.js";
 
 const config = getGatewayConfig();
 
-const app = express();
+const app: Express = express();
 const httpServer = createServer(app);
 
 // Socket.io server
