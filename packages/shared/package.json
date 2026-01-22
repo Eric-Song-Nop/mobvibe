@@ -1,6 +1,24 @@
 {
 	"name": "@remote-claude/shared",
-	"version": "0.0.0",
+	"version": "0.1.0",
+	"description": "Shared types for remote-claude (mobvibe) distributed ACP system",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/user/remote-claude.git",
+		"directory": "packages/shared"
+	},
+	"keywords": [
+		"acp",
+		"agent-client-protocol",
+		"mobvibe"
+	],
+	"engines": {
+		"node": ">=18"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
 	"type": "module",
 	"exports": {
 		".": {

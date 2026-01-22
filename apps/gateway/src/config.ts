@@ -25,7 +25,7 @@ const parseOrigins = (value: string | undefined) => {
 export const getGatewayConfig = (): GatewayConfig => {
 	const env = process.env;
 	return {
-		port: parsePort(env.GATEWAY_PORT ?? "3005"),
+		port: parsePort(env.PORT ?? env.GATEWAY_PORT ?? "3005"),
 		corsOrigins: parseOrigins(env.GATEWAY_CORS_ORIGINS),
 		convexUrl: env.CONVEX_URL,
 	};

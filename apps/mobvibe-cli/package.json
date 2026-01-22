@@ -1,9 +1,39 @@
 {
-	"name": "mobvibe-cli",
-	"version": "0.0.0",
+	"name": "@remote-claude/cli",
+	"version": "0.1.0",
+	"description": "CLI daemon for remote-claude (mobvibe) - connects ACP agents to the gateway",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/user/remote-claude.git",
+		"directory": "apps/mobvibe-cli"
+	},
+	"keywords": [
+		"acp",
+		"agent-client-protocol",
+		"mobvibe",
+		"claude",
+		"cli"
+	],
+	"engines": {
+		"node": ">=18"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
 	"type": "module",
 	"bin": {
 		"mobvibe": "./bin/mobvibe.mjs"
+	},
+	"files": [
+		"dist",
+		"bin"
+	],
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
 	},
 	"scripts": {
 		"dev": "tsx watch src/index.ts",
@@ -11,11 +41,12 @@
 		"start": "node dist/index.js",
 		"lint": "biome check --write .",
 		"format": "biome format --write .",
-		"test": "vitest"
+		"test": "vitest",
+		"prepublishOnly": "pnpm build"
 	},
 	"dependencies": {
 		"@agentclientprotocol/sdk": "^0.12.0",
-		"@remote-claude/shared": "workspace:*",
+		"@remote-claude/shared": "^0.1.0",
 		"commander": "^13.1.0",
 		"open": "^10.1.0",
 		"socket.io-client": "^4.8.1"

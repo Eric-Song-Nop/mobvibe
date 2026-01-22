@@ -1,15 +1,23 @@
 import { httpRouter } from "convex/server";
+import { api } from "./_generated/api";
 import { httpAction } from "./_generated/server";
 import { authComponent, createAuth } from "./auth";
-import { api } from "./_generated/api";
+
+const siteUrl = process.env.SITE_URL!;
 
 const http = httpRouter();
 
 /**
  * Better Auth HTTP routes.
  * These handle OAuth callbacks, email verification, etc.
+ * CORS is required for client-side frameworks like React.
  */
-authComponent.registerRoutes(http, createAuth);
+authComponent.registerRoutes(http, createAuth, {
+	cors: {
+		allowedOrigins: [siteUrl],
+		allowedHeaders: ["Content-Type", "Authorization"],
+	},
+});
 
 /**
  * Machine registration endpoint.
@@ -37,10 +45,10 @@ http.route({
 		});
 
 		if (!session?.user) {
-			return new Response(
-				JSON.stringify({ error: "Invalid session" }),
-				{ status: 401, headers: { "Content-Type": "application/json" } },
-			);
+			return new Response(JSON.stringify({ error: "Invalid session" }), {
+				status: 401,
+				headers: { "Content-Type": "application/json" },
+			});
 		}
 
 		// Parse request body
@@ -48,15 +56,17 @@ http.route({
 		try {
 			body = await request.json();
 		} catch {
-			return new Response(
-				JSON.stringify({ error: "Invalid request body" }),
-				{ status: 400, headers: { "Content-Type": "application/json" } },
-			);
+			return new Response(JSON.stringify({ error: "Invalid request body" }), {
+				status: 400,
+				headers: { "Content-Type": "application/json" },
+			});
 		}
 
 		if (!body.name || !body.hostname || !body.platform) {
 			return new Response(
-				JSON.stringify({ error: "Missing required fields: name, hostname, platform" }),
+				JSON.stringify({
+					error: "Missing required fields: name, hostname, platform",
+				}),
 				{ status: 400, headers: { "Content-Type": "application/json" } },
 			);
 		}
@@ -65,14 +75,17 @@ http.route({
 		const machineToken = generateMachineToken();
 		const now = Date.now();
 
-		const machineId = await ctx.runMutation(api.machines.registerMachineInternal, {
-			userId: session.user.id,
-			name: body.name,
-			hostname: body.hostname,
-			platform: body.platform,
-			machineToken,
-			createdAt: now,
-		});
+		const machineId = await ctx.runMutation(
+			api.machines.registerMachineInternal,
+			{
+				userId: session.user.id,
+				name: body.name,
+				hostname: body.hostname,
+				platform: body.platform,
+				machineToken,
+				createdAt: now,
+			},
+		);
 
 		return new Response(
 			JSON.stringify({
