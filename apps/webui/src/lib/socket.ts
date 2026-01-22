@@ -20,9 +20,11 @@ let GATEWAY_URL = getDefaultGatewayUrl();
 class GatewaySocket {
 	private socket: TypedSocket | null = null;
 	private subscribedSessions = new Set<string>();
+	private onConnectCallbacks = new Set<() => void>();
 
 	connect(): TypedSocket {
-		if (this.socket?.connected) {
+		// Return existing socket if it exists (even if still connecting)
+		if (this.socket) {
 			return this.socket;
 		}
 
@@ -41,10 +43,8 @@ class GatewaySocket {
 
 		this.socket.on("connect", () => {
 			console.log("[webui] Connected to gateway");
-			// Re-subscribe to sessions after reconnect
-			for (const sessionId of this.subscribedSessions) {
-				this.socket?.emit("subscribe:session", { sessionId });
-			}
+			// Notify listeners that connection is ready
+			this.onConnectCallbacks.forEach((cb) => cb());
 		});
 
 		this.socket.on("disconnect", (reason) => {
@@ -54,6 +54,11 @@ class GatewaySocket {
 		this.socket.on("connect_error", (error) => {
 			console.error("[webui] Connection error:", error.message);
 		});
+
+		// Handle case where socket connected before handlers were attached
+		if (this.socket.connected) {
+			this.onConnectCallbacks.forEach((cb) => cb());
+		}
 
 		return this.socket;
 	}
@@ -133,6 +138,21 @@ class GatewaySocket {
 
 	isConnected(): boolean {
 		return this.socket?.connected ?? false;
+	}
+
+	/**
+	 * Register a callback to be called when the socket connects.
+	 * Returns an unsubscribe function.
+	 */
+	onConnect(callback: () => void) {
+		this.onConnectCallbacks.add(callback);
+		// If already connected, call immediately
+		if (this.socket?.connected) {
+			callback();
+		}
+		return () => {
+			this.onConnectCallbacks.delete(callback);
+		};
 	}
 
 	/**

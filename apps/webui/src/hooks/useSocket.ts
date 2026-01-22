@@ -223,4 +223,16 @@ export function useSocket({
 			}
 		}
 	}, [sessions, setStreamError]);
+
+	// Re-subscribe to all sessions when socket connects/reconnects
+	useEffect(() => {
+		const handleConnect = () => {
+			for (const sessionId of subscribedSessionsRef.current) {
+				gatewaySocket.subscribeToSession(sessionId);
+			}
+		};
+
+		const unsubscribe = gatewaySocket.onConnect(handleConnect);
+		return unsubscribe;
+	}, []);
 }

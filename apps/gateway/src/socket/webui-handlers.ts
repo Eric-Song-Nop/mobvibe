@@ -6,7 +6,7 @@ import type {
 	SessionSummary,
 	StreamErrorPayload,
 	TerminalOutputEvent,
-} from "@remote-claude/shared";
+} from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
 import { getAuth, isAuthEnabled } from "../lib/auth.js";
 import type { CliRegistry } from "../services/cli-registry.js";
