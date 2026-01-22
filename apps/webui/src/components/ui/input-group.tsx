@@ -45,11 +45,10 @@ function InputGroupAddon({
 	className,
 	align = "inline-start",
 	...props
-}: React.ComponentProps<"button"> &
+}: React.ComponentProps<"div"> &
 	VariantProps<typeof inputGroupAddonVariants>) {
 	return (
-		<button
-			type="button"
+		<div
 			data-slot="input-group-addon"
 			data-align={align}
 			className={cn(inputGroupAddonVariants({ align }), className)}
