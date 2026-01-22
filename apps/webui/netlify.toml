@@ -1,5 +1,5 @@
 [build]
-  publish = "dist"
+  publish = "apps/webui/dist"
   command = "pnpm install && pnpm --filter @mobvibe/shared build && pnpm --filter @mobvibe/core build && pnpm --filter webui build"
 
 [build.environment]
