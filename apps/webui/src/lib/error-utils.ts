@@ -4,8 +4,8 @@ import type { ErrorDetail } from "./api";
 // Re-export core error utilities
 export {
 	createFallbackError,
-	normalizeError,
 	isErrorDetail,
+	normalizeError,
 } from "@remote-claude/core/utils";
 
 /**

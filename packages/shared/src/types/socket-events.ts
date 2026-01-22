@@ -4,6 +4,7 @@ import type {
 	PermissionOutcome,
 	PermissionToolCall,
 	SessionNotification,
+	StopReason,
 	TerminalOutputEvent,
 } from "./acp.js";
 import type { ErrorDetail } from "./errors.js";
@@ -12,10 +13,8 @@ import type {
 	AcpBackendSummary,
 	FsEntry,
 	FsRoot,
-	SessionFsFilePreview,
 	SessionFsResourceEntry,
 	SessionSummary,
-	StopReason,
 } from "./session.js";
 
 // Permission request payload sent through Socket.io

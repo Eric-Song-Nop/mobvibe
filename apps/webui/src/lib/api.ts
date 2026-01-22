@@ -1,166 +1,63 @@
-import type { AvailableCommand, ContentBlock, PermissionOutcome } from "./acp";
-import { getCachedToken } from "./auth";
+// Re-export types from @remote-claude/core
+export type {
+	AcpBackendSummary,
+	AcpBackendsResponse,
+	AcpConnectionState,
+	CancelSessionResponse,
+	CreateSessionResponse,
+	ErrorCode,
+	ErrorDetail,
+	ErrorScope,
+	FsEntry,
+	FsRoot,
+	FsRootsResponse,
+	MessageIdResponse,
+	PermissionDecisionResponse,
+	SendMessageResponse,
+	SessionFsFilePreviewResponse,
+	SessionFsFilePreviewType,
+	SessionFsResourceEntry,
+	SessionFsResourcesResponse,
+	SessionFsRoot,
+	SessionFsRootsResponse,
+	SessionModelOption,
+	SessionModeOption,
+	SessionState,
+	SessionSummary,
+	SessionsResponse,
+	StopReason,
+} from "@remote-claude/core";
 
-export type AcpConnectionState =
-	| "idle"
-	| "connecting"
-	| "ready"
-	| "error"
-	| "stopped";
+// Re-export isErrorDetail for local use
+export { isErrorDetail } from "@remote-claude/core";
 
-export type ErrorScope = "service" | "session" | "stream" | "request";
-
-export type ErrorCode =
-	| "ACP_CONNECT_FAILED"
-	| "ACP_PROCESS_EXITED"
-	| "ACP_CONNECTION_CLOSED"
-	| "ACP_PROTOCOL_MISMATCH"
-	| "SESSION_NOT_FOUND"
-	| "SESSION_NOT_READY"
-	| "CAPABILITY_NOT_SUPPORTED"
-	| "REQUEST_VALIDATION_FAILED"
-	| "STREAM_DISCONNECTED"
-	| "INTERNAL_ERROR";
-
-export type ErrorDetail = {
-	code: ErrorCode;
-	message: string;
-	retryable: boolean;
-	scope: ErrorScope;
-	detail?: string;
-};
-
-export type AcpBackendSummary = {
-	backendId: string;
-	backendLabel: string;
-};
-
-export type AcpBackendsResponse = {
-	defaultBackendId: string;
-	backends: AcpBackendSummary[];
-};
-
-export type FsRoot = {
-	name: string;
-	path: string;
-};
-
-export type FsRootsResponse = {
-	homePath: string;
-	roots: FsRoot[];
-};
-
-export type FsEntry = {
-	name: string;
-	path: string;
-	type: "directory" | "file";
-	hidden: boolean;
-};
-
+// Import types for API functions
+// Local type for FsEntriesResponse (not exported from core)
+import type {
+	AcpBackendsResponse,
+	CancelSessionResponse,
+	ContentBlock,
+	CreateSessionResponse,
+	ErrorDetail,
+	FsEntry,
+	FsRootsResponse,
+	MessageIdResponse,
+	PermissionDecisionPayload,
+	PermissionDecisionResponse,
+	SendMessageResponse,
+	SessionFsFilePreviewResponse,
+	SessionFsResourcesResponse,
+	SessionFsRootsResponse,
+	SessionSummary,
+	SessionsResponse,
+} from "@remote-claude/core";
+import { isErrorDetail } from "@remote-claude/core";
 export type FsEntriesResponse = {
 	path: string;
 	entries: FsEntry[];
 };
 
-export type SessionFsRoot = {
-	name: string;
-	path: string;
-};
-
-export type SessionFsRootsResponse = {
-	root: SessionFsRoot;
-};
-
-export type SessionFsFilePreviewType = "code" | "image";
-
-export type SessionFsFilePreviewResponse = {
-	path: string;
-	previewType: SessionFsFilePreviewType;
-	content: string;
-	mimeType?: string;
-};
-
-export type SessionFsResourceEntry = {
-	name: string;
-	path: string;
-	relativePath: string;
-};
-
-export type SessionFsResourcesResponse = {
-	rootPath: string;
-	entries: SessionFsResourceEntry[];
-};
-
-export type SessionState = AcpConnectionState;
-
-export type SessionModeOption = {
-	id: string;
-	name: string;
-};
-
-export type SessionModelOption = {
-	id: string;
-	name: string;
-	description?: string | null;
-};
-
-export type SessionSummary = {
-	sessionId: string;
-	title: string;
-	backendId: string;
-	backendLabel: string;
-	state: SessionState;
-	error?: ErrorDetail;
-	pid?: number;
-	createdAt: string;
-	updatedAt: string;
-	cwd?: string;
-	agentName?: string;
-	modelId?: string;
-	modelName?: string;
-	modeId?: string;
-	modeName?: string;
-	availableModes?: SessionModeOption[];
-	availableModels?: SessionModelOption[];
-	availableCommands?: AvailableCommand[];
-};
-
-export type SessionsResponse = {
-	sessions: SessionSummary[];
-};
-
-export type CreateSessionResponse = SessionSummary;
-
-export type StopReason =
-	| "end_turn"
-	| "max_tokens"
-	| "max_turn_requests"
-	| "refusal"
-	| "cancelled";
-
-export type SendMessageResponse = {
-	stopReason: StopReason;
-};
-
-export type CancelSessionResponse = {
-	ok: boolean;
-};
-
-export type PermissionDecisionPayload = {
-	sessionId: string;
-	requestId: string;
-	outcome: PermissionOutcome;
-};
-
-export type PermissionDecisionResponse = {
-	sessionId: string;
-	requestId: string;
-	outcome: PermissionOutcome;
-};
-
-export type MessageIdResponse = {
-	messageId: string;
-};
+import { getCachedToken } from "./auth";
 
 const resolveDefaultGatewayUrl = () => {
 	if (typeof window === "undefined") {
@@ -171,19 +68,6 @@ const resolveDefaultGatewayUrl = () => {
 
 const API_BASE_URL =
 	import.meta.env.VITE_GATEWAY_URL ?? resolveDefaultGatewayUrl();
-
-const isErrorDetail = (payload: unknown): payload is ErrorDetail => {
-	if (!payload || typeof payload !== "object") {
-		return false;
-	}
-	const detail = payload as ErrorDetail;
-	return (
-		typeof detail.code === "string" &&
-		typeof detail.message === "string" &&
-		typeof detail.retryable === "boolean" &&
-		typeof detail.scope === "string"
-	);
-};
 
 const buildRequestError = (message: string): ErrorDetail => ({
 	code: "INTERNAL_ERROR",

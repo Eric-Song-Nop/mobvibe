@@ -1,26 +1,41 @@
-// ACP types
+// ACP types - re-exported from SDK
 export type {
+	// SDK types (directly from SDK)
 	AudioContent,
 	AvailableCommand,
 	ContentBlock,
+	EmbeddedResource,
 	ImageContent,
+	// Project-specific types
 	PermissionOption,
 	PermissionOutcome,
+	PermissionRequestNotification,
+	PermissionResultNotification,
 	PermissionToolCall,
+	RequestPermissionOutcome,
+	RequestPermissionRequest,
+	RequestPermissionResponse,
+	// Backwards-compatible aliases (deprecated)
 	ResourceContent,
+	ResourceLink,
 	ResourceLinkContent,
+	SdkToolCallUpdate,
 	SessionContent,
 	SessionNotification,
 	SessionUpdate,
 	SessionUpdateType,
+	StopReason,
 	TerminalExitStatus,
 	TerminalOutputEvent,
+	TextContent,
+	ToolCall,
 	ToolCallContent,
 	ToolCallContentPayload,
 	ToolCallKind,
 	ToolCallLocation,
 	ToolCallStatus,
 	ToolCallUpdate,
+	ToolKind,
 } from "./types/acp.js";
 
 // Error types
@@ -53,7 +68,7 @@ export type {
 	SessionModelOption,
 	SessionModeOption,
 	SessionSummary,
-	StopReason,
+	// StopReason is now re-exported from SDK via acp.ts
 } from "./types/session.js";
 
 // Socket event types

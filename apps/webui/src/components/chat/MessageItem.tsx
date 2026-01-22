@@ -178,7 +178,7 @@ const renderImageContent = (
 	const label = resolveResourceLabel(content.uri ?? getLabel("toolCall.image"));
 	const source = content.data
 		? buildDataUri(content.mimeType, content.data)
-		: content.uri;
+		: (content.uri ?? undefined);
 	const canPreviewInline =
 		source !== undefined &&
 		(source.startsWith("data:") ||
@@ -198,7 +198,7 @@ const renderImageContent = (
 				)}
 				<span>{content.mimeType}</span>
 			</div>
-			{canPreviewInline ? (
+			{canPreviewInline && source ? (
 				<img
 					src={source}
 					alt={label}
@@ -243,6 +243,9 @@ const renderResourceContent = (
 	onOpenFilePreview?: (path: string) => void,
 ) => {
 	const label = resolveResourceLabel(content.resource.uri);
+	// SDK uses union type: TextResourceContents | BlobResourceContents
+	const hasText = "text" in content.resource;
+	const hasBlob = "blob" in content.resource;
 	return (
 		<div
 			key={key}
@@ -255,11 +258,11 @@ const renderResourceContent = (
 					<span>{content.resource.mimeType}</span>
 				) : null}
 			</div>
-			{content.resource.text ? (
+			{hasText ? (
 				<pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-foreground">
-					{content.resource.text}
+					{(content.resource as { text: string }).text}
 				</pre>
-			) : content.resource.blob ? (
+			) : hasBlob ? (
 				<div className="mt-2 text-[11px] text-muted-foreground">
 					{getLabel("toolCall.binaryResource")}
 				</div>
@@ -279,10 +282,12 @@ const renderResourceLinkContent = (
 	onOpenFilePreview?: (path: string) => void,
 ) => {
 	const label = resolveResourceLabel(content.uri, content.name, content.title);
-	const meta = [
-		content.mimeType,
-		content.size !== undefined ? formatBytes(content.size) : null,
-	]
+	// SDK uses bigint | null for size, convert to number for formatBytes
+	const size =
+		content.size !== undefined && content.size !== null
+			? Number(content.size)
+			: undefined;
+	const meta = [content.mimeType, size !== undefined ? formatBytes(size) : null]
 		.filter((item): item is string => Boolean(item))
 		.join(" · ");
 	return (

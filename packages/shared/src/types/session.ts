@@ -47,12 +47,7 @@ export type SessionSummary = {
 	availableCommands?: AvailableCommand[];
 };
 
-export type StopReason =
-	| "end_turn"
-	| "max_tokens"
-	| "max_turn_requests"
-	| "refusal"
-	| "cancelled";
+// StopReason is now re-exported from SDK via acp.ts
 
 export type FsEntry = {
 	name: string;
