@@ -1,10 +1,11 @@
 /**
  * Authentication middleware for Express routes.
- * Validates Bearer tokens from the Authorization header.
+ * Validates session tokens using Better Auth.
  */
 
 import type { NextFunction, Request, Response } from "express";
-import { isAuthEnabled, validateSessionToken } from "../lib/convex.js";
+import { fromNodeHeaders } from "better-auth/node";
+import { getAuth, isAuthEnabled } from "../lib/auth.js";
 
 /**
  * Extended request type with user information.
@@ -16,9 +17,9 @@ export interface AuthenticatedRequest extends Request {
 
 /**
  * Middleware that requires authentication.
- * Extracts Bearer token from Authorization header and validates it.
- * Returns 401 if no token or invalid token.
- * Returns 503 if auth is not configured (Convex URL not set).
+ * Validates session using Better Auth.
+ * Returns 401 if no session or invalid session.
+ * Returns 503 if auth is not configured (DATABASE_URL not set).
  */
 export function requireAuth(
 	req: AuthenticatedRequest,
@@ -33,45 +34,36 @@ export function requireAuth(
 		return;
 	}
 
-	const authHeader = req.headers.authorization;
-
-	if (!authHeader) {
-		res.status(401).json({
-			error: "Authentication required",
-			code: "AUTH_REQUIRED",
+	const auth = getAuth();
+	if (!auth) {
+		res.status(503).json({
+			error: "Authentication service unavailable",
+			code: "AUTH_UNAVAILABLE",
 		});
 		return;
 	}
 
-	const parts = authHeader.split(" ");
-	if (parts.length !== 2 || parts[0].toLowerCase() !== "bearer") {
-		res.status(401).json({
-			error: "Invalid authorization header format. Expected: Bearer <token>",
-			code: "INVALID_AUTH_FORMAT",
-		});
-		return;
-	}
-
-	const token = parts[1];
-
-	// Validate token asynchronously
-	validateSessionToken(token)
-		.then((user) => {
-			if (!user) {
+	// Validate session asynchronously using Better Auth
+	auth.api
+		.getSession({
+			headers: fromNodeHeaders(req.headers),
+		})
+		.then((session) => {
+			if (!session?.user) {
 				res.status(401).json({
-					error: "Invalid or expired token",
-					code: "INVALID_TOKEN",
+					error: "Authentication required",
+					code: "AUTH_REQUIRED",
 				});
 				return;
 			}
 
 			// Attach user info to request
-			req.userId = user.userId;
-			req.userEmail = user.email;
+			req.userId = session.user.id;
+			req.userEmail = session.user.email;
 			next();
 		})
 		.catch((error) => {
-			console.error("[auth] Token validation error:", error);
+			console.error("[auth] Session validation error:", error);
 			res.status(500).json({
 				error: "Authentication service error",
 				code: "AUTH_SERVICE_ERROR",
@@ -81,8 +73,8 @@ export function requireAuth(
 
 /**
  * Middleware that optionally authenticates.
- * If a token is provided, validates it and attaches user info.
- * If no token, continues without user context.
+ * If a session exists, validates it and attaches user info.
+ * If no session, continues without user context.
  */
 export function optionalAuth(
 	req: AuthenticatedRequest,
@@ -95,34 +87,27 @@ export function optionalAuth(
 		return;
 	}
 
-	const authHeader = req.headers.authorization;
-
-	if (!authHeader) {
-		// No token provided - continue without auth
+	const auth = getAuth();
+	if (!auth) {
+		// Auth not available - continue without auth
 		next();
 		return;
 	}
 
-	const parts = authHeader.split(" ");
-	if (parts.length !== 2 || parts[0].toLowerCase() !== "bearer") {
-		// Invalid format - continue without auth
-		next();
-		return;
-	}
-
-	const token = parts[1];
-
-	// Validate token asynchronously
-	validateSessionToken(token)
-		.then((user) => {
-			if (user) {
-				req.userId = user.userId;
-				req.userEmail = user.email;
+	// Validate session asynchronously using Better Auth
+	auth.api
+		.getSession({
+			headers: fromNodeHeaders(req.headers),
+		})
+		.then((session) => {
+			if (session?.user) {
+				req.userId = session.user.id;
+				req.userEmail = session.user.email;
 			}
 			next();
 		})
 		.catch((error) => {
-			console.error("[auth] Token validation error:", error);
+			console.error("[auth] Session validation error:", error);
 			// Continue without auth on error
 			next();
 		});
@@ -142,3 +127,6 @@ export function getUserId(req: AuthenticatedRequest): string | undefined {
 export function isAuthenticated(req: AuthenticatedRequest): boolean {
 	return req.userId !== undefined;
 }
+
+// Re-export isAuthEnabled for convenience
+export { isAuthEnabled };

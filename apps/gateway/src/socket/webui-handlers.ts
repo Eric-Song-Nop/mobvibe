@@ -8,7 +8,7 @@ import type {
 	TerminalOutputEvent,
 } from "@remote-claude/shared";
 import type { Server, Socket } from "socket.io";
-import { isAuthEnabled, validateSessionToken } from "../lib/convex.js";
+import { getAuth, isAuthEnabled } from "../lib/auth.js";
 import type { CliRegistry } from "../services/cli-registry.js";
 import type { SessionRouter } from "../services/session-router.js";
 
@@ -31,7 +31,10 @@ export function setupWebuiHandlers(
 
 	// Track session subscriptions with user context
 	// sessionId -> Map<socketId, userId>
-	const sessionSubscriptions = new Map<string, Map<string, string | undefined>>();
+	const sessionSubscriptions = new Map<
+		string,
+		Map<string, string | undefined>
+	>();
 	// socketId -> userId (for quick lookup)
 	const socketUserMap = new Map<string, string | undefined>();
 
@@ -95,29 +98,38 @@ export function setupWebuiHandlers(
 
 		console.log(`[gateway] Webui connected: ${socket.id}`);
 
-		// Authenticate via handshake token if auth is enabled
+		// Authenticate via handshake cookies if auth is enabled
 		if (isAuthEnabled()) {
-			const token = socket.handshake.auth?.token as string | undefined;
-
-			if (token) {
-				const user = await validateSessionToken(token);
-				if (user) {
-					authSocket.data.userId = user.userId;
-					authSocket.data.userEmail = user.email;
-					socketUserMap.set(socket.id, user.userId);
+			const auth = getAuth();
+			if (auth) {
+				try {
+					// Get cookies from handshake headers for session validation
+					const cookies = socket.handshake.headers.cookie;
+					if (cookies) {
+						const session = await auth.api.getSession({
+							headers: new Headers({ cookie: cookies }),
+						});
+						if (session?.user) {
+							authSocket.data.userId = session.user.id;
+							authSocket.data.userEmail = session.user.email;
+							socketUserMap.set(socket.id, session.user.id);
+							console.log(
+								`[gateway] Webui authenticated: ${socket.id} as ${session.user.email}`,
+							);
+						} else {
+							console.log(
+								`[gateway] Webui auth failed: ${socket.id} (no session)`,
+							);
+						}
+					} else {
+						console.log(`[gateway] Webui connected without cookies: ${socket.id}`);
+					}
+				} catch (error) {
 					console.log(
-						`[gateway] Webui authenticated: ${socket.id} as ${user.email}`,
+						`[gateway] Webui auth error: ${socket.id}`,
+						error instanceof Error ? error.message : error,
 					);
-				} else {
-					console.log(
-						`[gateway] Webui auth failed: ${socket.id} (invalid token)`,
-					);
-					// Don't disconnect - allow unauthenticated access with limited data
 				}
-			} else {
-				console.log(
-					`[gateway] Webui connected without token: ${socket.id}`,
-				);
 			}
 		}
 
@@ -218,11 +230,7 @@ export function setupWebuiHandlers(
 		emitToSubscribers,
 		emitToUser,
 		emitSessionUpdate: (notification: SessionNotification) => {
-			emitToSubscribers(
-				notification.sessionId,
-				"session:update",
-				notification,
-			);
+			emitToSubscribers(notification.sessionId, "session:update", notification);
 		},
 		emitPermissionRequest: (payload: PermissionRequestPayload) => {
 			emitToSubscribers(payload.sessionId, "permission:request", payload);

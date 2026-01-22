@@ -2,9 +2,13 @@ import { createServer } from "node:http";
 import cors from "cors";
 import express from "express";
 import { Server } from "socket.io";
+import { toNodeHandler } from "better-auth/node";
 import { getGatewayConfig } from "./config.js";
+import { closeDb } from "./db/index.js";
+import { getAuth } from "./lib/auth.js";
 import { setupFsRoutes } from "./routes/fs.js";
 import { setupHealthRoutes } from "./routes/health.js";
+import { setupMachineRoutes } from "./routes/machines.js";
 import { setupSessionRoutes } from "./routes/sessions.js";
 import { CliRegistry } from "./services/cli-registry.js";
 import { SessionRouter } from "./services/session-router.js";
@@ -154,6 +158,7 @@ app.use((request, response, next) => {
 			"Access-Control-Allow-Headers",
 			"Content-Type, Authorization",
 		);
+		response.setHeader("Access-Control-Allow-Credentials", "true");
 	}
 	if (request.method === "OPTIONS") {
 		response.status(204).end();
@@ -162,7 +167,22 @@ app.use((request, response, next) => {
 	next();
 });
 
+// Mount Better Auth handler BEFORE express.json()
+// Better Auth needs to handle raw requests for some endpoints
+const auth = getAuth();
+if (auth) {
+	app.all("/api/auth/*splat", toNodeHandler(auth));
+	console.log("[gateway] Better Auth enabled");
+} else {
+	console.log("[gateway] Better Auth disabled (no DATABASE_URL)");
+}
+
 app.use(express.json());
+
+// Machine routes (for CLI registration)
+const machineRouter = express.Router();
+setupMachineRoutes(machineRouter);
+app.use("/", machineRouter);
 
 // Routes
 const acpRouter = express.Router();
@@ -201,6 +221,7 @@ const shutdown = async (signal: string) => {
 	try {
 		io.close();
 		await stopServer();
+		await closeDb();
 	} catch (error) {
 		console.error("[gateway] shutdown error", error);
 	}

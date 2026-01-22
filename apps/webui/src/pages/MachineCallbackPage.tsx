@@ -21,7 +21,9 @@ export function MachineCallbackPage() {
 	const [searchParams] = useSearchParams();
 	const { isAuthenticated, isLoading, user, sessionToken } = useAuth();
 	const [machineName, setMachineName] = useState("");
-	const [status, setStatus] = useState<"pending" | "registering" | "success" | "error">("pending");
+	const [status, setStatus] = useState<
+		"pending" | "registering" | "success" | "error"
+	>("pending");
 	const [error, setError] = useState<string | null>(null);
 
 	const callbackPort = searchParams.get("callbackPort");
@@ -44,19 +46,19 @@ export function MachineCallbackPage() {
 		setError(null);
 
 		try {
-			// Register the machine with Convex
-			const convexUrl = import.meta.env.VITE_CONVEX_URL as string;
-			if (!convexUrl) {
-				throw new Error("Convex not configured");
+			// Register the machine with Gateway
+			const gatewayUrl = import.meta.env.VITE_GATEWAY_URL as string;
+			if (!gatewayUrl) {
+				throw new Error("Gateway not configured");
 			}
 
-			// Call Convex mutation to register machine
-			const response = await fetch(`${convexUrl.replace(".convex.cloud", ".convex.site")}/api/machines/register`, {
+			// Call Gateway endpoint to register machine
+			const response = await fetch(`${gatewayUrl}/api/machines/register`, {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
-					Authorization: `Bearer ${sessionToken}`,
 				},
+				credentials: "include",
 				body: JSON.stringify({
 					name: machineName.trim(),
 					hostname,
@@ -125,8 +127,12 @@ export function MachineCallbackPage() {
 						</CardHeader>
 						<CardContent className="space-y-4">
 							<div className="rounded-sm bg-muted p-3 text-xs">
-								<div><strong>Hostname:</strong> {hostname}</div>
-								<div><strong>Platform:</strong> {platform}</div>
+								<div>
+									<strong>Hostname:</strong> {hostname}
+								</div>
+								<div>
+									<strong>Platform:</strong> {platform}
+								</div>
 							</div>
 							<Button
 								className="w-full"
@@ -152,14 +158,18 @@ export function MachineCallbackPage() {
 				<div className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
 					<Card className="w-full max-w-md">
 						<CardHeader className="text-center">
-							<CardTitle className="text-green-600">Machine Registered!</CardTitle>
+							<CardTitle className="text-green-600">
+								Machine Registered!
+							</CardTitle>
 							<CardDescription>
-								Your machine has been successfully registered. You can close this window.
+								Your machine has been successfully registered. You can close
+								this window.
 							</CardDescription>
 						</CardHeader>
 						<CardContent className="text-center">
 							<div className="rounded-sm bg-green-50 dark:bg-green-950 p-4 text-green-700 dark:text-green-300 text-sm">
-								The CLI should now be connected. Return to your terminal to continue.
+								The CLI should now be connected. Return to your terminal to
+								continue.
 							</div>
 						</CardContent>
 					</Card>
@@ -175,13 +185,18 @@ export function MachineCallbackPage() {
 				<div className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
 					<Card className="w-full max-w-md">
 						<CardHeader className="text-center">
-							<CardTitle className="text-destructive">Invalid Request</CardTitle>
+							<CardTitle className="text-destructive">
+								Invalid Request
+							</CardTitle>
 							<CardDescription>
 								This page should be opened from the mobvibe CLI login command.
 							</CardDescription>
 						</CardHeader>
 						<CardContent className="text-center text-sm text-muted-foreground">
-							<p>Run <code className="bg-muted px-1 rounded">mobvibe login</code> to register your machine.</p>
+							<p>
+								Run <code className="bg-muted px-1 rounded">mobvibe login</code>{" "}
+								to register your machine.
+							</p>
 						</CardContent>
 					</Card>
 				</div>
@@ -202,8 +217,12 @@ export function MachineCallbackPage() {
 					</CardHeader>
 					<CardContent className="space-y-4">
 						<div className="rounded-sm bg-muted p-3 text-xs">
-							<div><strong>Hostname:</strong> {hostname}</div>
-							<div><strong>Platform:</strong> {platform}</div>
+							<div>
+								<strong>Hostname:</strong> {hostname}
+							</div>
+							<div>
+								<strong>Platform:</strong> {platform}
+							</div>
 						</div>
 
 						<div className="space-y-2">

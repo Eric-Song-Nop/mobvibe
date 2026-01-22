@@ -22,11 +22,11 @@ import type {
 } from "@remote-claude/shared";
 import type { Socket } from "socket.io";
 import {
-	closeConvexSession,
-	createConvexSession,
+	closeAcpSession,
+	createAcpSession,
 	isAuthEnabled,
-	updateConvexSessionState,
-} from "../lib/convex.js";
+	updateAcpSessionState,
+} from "./db-service.js";
 import type { CliRegistry } from "./cli-registry.js";
 
 type PendingRpc<T> = {
@@ -81,9 +81,9 @@ export class SessionRouter {
 			params,
 		);
 
-		// Sync session to Convex if auth is enabled and machine has a token
+		// Sync session to database if auth is enabled and machine has a token
 		if (isAuthEnabled() && cli.machineToken) {
-			await createConvexSession({
+			await createAcpSession({
 				machineToken: cli.machineToken,
 				sessionId: result.sessionId,
 				title: result.title ?? `Session ${result.sessionId.slice(0, 8)}`,
@@ -110,7 +110,10 @@ export class SessionRouter {
 		}
 
 		// Authorization check if userId provided
-		if (userId && !this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)) {
+		if (
+			userId &&
+			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
+		) {
 			throw new Error("Not authorized to close this session");
 		}
 
@@ -120,9 +123,9 @@ export class SessionRouter {
 			params,
 		);
 
-		// Sync to Convex
+		// Sync to database
 		if (isAuthEnabled()) {
-			await closeConvexSession(params.sessionId);
+			await closeAcpSession(params.sessionId);
 		}
 
 		return result;
@@ -143,7 +146,10 @@ export class SessionRouter {
 		}
 
 		// Authorization check if userId provided
-		if (userId && !this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)) {
+		if (
+			userId &&
+			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
+		) {
 			throw new Error("Not authorized to cancel this session");
 		}
 
@@ -168,7 +174,10 @@ export class SessionRouter {
 			throw new Error("Session not found");
 		}
 
-		if (userId && !this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)) {
+		if (
+			userId &&
+			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
+		) {
 			throw new Error("Not authorized to modify this session");
 		}
 
@@ -193,7 +202,10 @@ export class SessionRouter {
 			throw new Error("Session not found");
 		}
 
-		if (userId && !this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)) {
+		if (
+			userId &&
+			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
+		) {
 			throw new Error("Not authorized to modify this session");
 		}
 
@@ -218,7 +230,10 @@ export class SessionRouter {
 			throw new Error("Session not found");
 		}
 
-		if (userId && !this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)) {
+		if (
+			userId &&
+			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
+		) {
 			throw new Error("Not authorized to send messages to this session");
 		}
 
@@ -243,8 +258,13 @@ export class SessionRouter {
 			throw new Error("Session not found");
 		}
 
-		if (userId && !this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)) {
-			throw new Error("Not authorized to make permission decisions for this session");
+		if (
+			userId &&
+			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
+		) {
+			throw new Error(
+				"Not authorized to make permission decisions for this session",
+			);
 		}
 
 		return this.sendRpc<PermissionDecisionPayload, { ok: boolean }>(
@@ -293,7 +313,10 @@ export class SessionRouter {
 			throw new Error("Session not found");
 		}
 
-		if (userId && !this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)) {
+		if (
+			userId &&
+			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
+		) {
 			throw new Error("Not authorized to access this session");
 		}
 
@@ -318,7 +341,10 @@ export class SessionRouter {
 			throw new Error("Session not found");
 		}
 
-		if (userId && !this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)) {
+		if (
+			userId &&
+			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
+		) {
 			throw new Error("Not authorized to access this session");
 		}
 
@@ -343,7 +369,10 @@ export class SessionRouter {
 			throw new Error("Session not found");
 		}
 
-		if (userId && !this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)) {
+		if (
+			userId &&
+			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
+		) {
 			throw new Error("Not authorized to access this session");
 		}
 
@@ -355,7 +384,7 @@ export class SessionRouter {
 	}
 
 	/**
-	 * Update session state in Convex (called from session update events).
+	 * Update session state in database (called from session update events).
 	 */
 	async syncSessionState(
 		sessionId: string,
@@ -364,7 +393,7 @@ export class SessionRouter {
 		cwd?: string,
 	): Promise<void> {
 		if (isAuthEnabled()) {
-			await updateConvexSessionState({ sessionId, state, title, cwd });
+			await updateAcpSessionState({ sessionId, state, title, cwd });
 		}
 	}
 

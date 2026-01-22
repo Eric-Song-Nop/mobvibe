@@ -14,7 +14,7 @@ import {
 	isAuthEnabled,
 	updateMachineStatus,
 	validateMachineToken,
-} from "../lib/convex.js";
+} from "../services/db-service.js";
 import type { CliRegistry } from "../services/cli-registry.js";
 import type { SessionRouter } from "../services/session-router.js";
 
@@ -47,7 +47,8 @@ export function setupCliHandlers(
 					);
 					socket.emit("cli:error", {
 						code: "AUTH_REQUIRED",
-						message: "Machine token required. Run 'mobvibe login' to authenticate.",
+						message:
+							"Machine token required. Run 'mobvibe login' to authenticate.",
 					});
 					socket.disconnect(true);
 					return;
@@ -60,7 +61,8 @@ export function setupCliHandlers(
 					);
 					socket.emit("cli:error", {
 						code: "INVALID_TOKEN",
-						message: "Invalid machine token. Run 'mobvibe login' to re-authenticate.",
+						message:
+							"Invalid machine token. Run 'mobvibe login' to re-authenticate.",
 					});
 					socket.disconnect(true);
 					return;

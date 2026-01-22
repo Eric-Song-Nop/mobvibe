@@ -10,7 +10,6 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 
 # Copy all workspace packages needed by gateway
 COPY packages/shared ./packages/shared
-COPY packages/convex ./packages/convex
 COPY apps/gateway ./apps/gateway
 
 # Install dependencies
@@ -18,7 +17,6 @@ RUN pnpm install --frozen-lockfile
 
 # Build all packages in order
 RUN pnpm --filter @remote-claude/shared build
-RUN pnpm --filter @remote-claude/convex build
 RUN pnpm --filter gateway build
 
 # Production image
@@ -31,7 +29,6 @@ WORKDIR /app
 # Copy built artifacts and package files
 COPY --from=builder /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/package.json ./
 COPY --from=builder /app/packages/shared ./packages/shared
-COPY --from=builder /app/packages/convex ./packages/convex
 COPY --from=builder /app/apps/gateway ./apps/gateway
 
 # Install production dependencies only

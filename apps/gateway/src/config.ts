@@ -1,7 +1,8 @@
 export type GatewayConfig = {
 	port: number;
 	corsOrigins: string[];
-	convexUrl: string | undefined;
+	siteUrl: string | undefined;
+	databaseUrl: string | undefined;
 };
 
 const parsePort = (value: string) => {
@@ -27,6 +28,7 @@ export const getGatewayConfig = (): GatewayConfig => {
 	return {
 		port: parsePort(env.PORT ?? env.GATEWAY_PORT ?? "3005"),
 		corsOrigins: parseOrigins(env.GATEWAY_CORS_ORIGINS),
-		convexUrl: env.CONVEX_URL,
+		siteUrl: env.SITE_URL,
+		databaseUrl: env.DATABASE_URL,
 	};
 };

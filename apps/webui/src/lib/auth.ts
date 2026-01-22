@@ -1,19 +1,15 @@
-import {
-	convexClient,
-	crossDomainClient,
-} from "@convex-dev/better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
 
-const CONVEX_SITE_URL = import.meta.env.VITE_CONVEX_SITE_URL as
-	| string
-	| undefined;
+const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL as string | undefined;
 
-// Create auth client with Convex HTTP endpoint
-// Note: When Convex is not configured, auth is disabled
-const authClient = CONVEX_SITE_URL
+// Create auth client with Gateway endpoint
+// Note: When Gateway URL is not configured, auth is disabled
+const authClient = GATEWAY_URL
 	? createAuthClient({
-			baseURL: CONVEX_SITE_URL,
-			plugins: [convexClient(), crossDomainClient()],
+			baseURL: GATEWAY_URL,
+			fetchOptions: {
+				credentials: "include",
+			},
 		})
 	: null;
 
