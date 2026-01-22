@@ -4,8 +4,8 @@
  */
 
 import fs from "node:fs/promises";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
 
 export interface Credentials {
 	/** Machine token for gateway authentication */
@@ -18,7 +18,8 @@ export interface Credentials {
 	createdAt: number;
 }
 
-const MOBVIBE_DIR = process.env.MOBVIBE_HOME ?? path.join(os.homedir(), ".mobvibe");
+const MOBVIBE_DIR =
+	process.env.MOBVIBE_HOME ?? path.join(os.homedir(), ".mobvibe");
 const CREDENTIALS_FILE = path.join(MOBVIBE_DIR, "credentials.json");
 
 /**

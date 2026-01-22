@@ -16,9 +16,7 @@ export function MachinesPage() {
 		if (a.connected !== b.connected) {
 			return a.connected ? -1 : 1;
 		}
-		return (a.hostname ?? a.machineId).localeCompare(
-			b.hostname ?? b.machineId,
-		);
+		return (a.hostname ?? a.machineId).localeCompare(b.hostname ?? b.machineId);
 	});
 
 	return (

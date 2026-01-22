@@ -28,9 +28,7 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 		if (a.connected !== b.connected) {
 			return a.connected ? -1 : 1;
 		}
-		return (a.hostname ?? a.machineId).localeCompare(
-			b.hostname ?? b.machineId,
-		);
+		return (a.hostname ?? a.machineId).localeCompare(b.hostname ?? b.machineId);
 	});
 
 	const handleAddMachine = () => {
@@ -81,9 +79,7 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 							<HugeiconsIcon icon={AddCircleIcon} strokeWidth={2} />
 						</Button>
 					</TooltipTrigger>
-					<TooltipContent side="right">
-						{t("machines.register")}
-					</TooltipContent>
+					<TooltipContent side="right">{t("machines.register")}</TooltipContent>
 				</Tooltip>
 			</aside>
 		</TooltipProvider>

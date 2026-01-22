@@ -7,10 +7,10 @@ import http from "node:http";
 import os from "node:os";
 import open from "open";
 import {
-	saveCredentials,
+	type Credentials,
 	deleteCredentials,
 	loadCredentials,
-	type Credentials,
+	saveCredentials,
 } from "./credentials.js";
 
 const DEFAULT_CALLBACK_PORT = 19823;

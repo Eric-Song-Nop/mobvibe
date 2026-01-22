@@ -47,136 +47,145 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 	router.use(optionalAuth);
 
 	// Get session roots - with authorization check
-	router.get("/session/roots", async (request: AuthenticatedRequest, response) => {
-		const sessionId =
-			typeof request.query.sessionId === "string"
-				? request.query.sessionId
-				: undefined;
-		if (!sessionId) {
-			respondError(
-				response,
-				buildRequestValidationError("sessionId required"),
-				400,
-			);
-			return;
-		}
-
-		try {
-			const userId = getUserId(request);
-			const result = await sessionRouter.getFsRoots(sessionId, userId);
-			response.json(result);
-		} catch (error) {
-			const message = getErrorMessage(error);
-			if (message.includes("Not authorized")) {
-				respondError(response, buildAuthorizationError(message), 403);
-			} else {
+	router.get(
+		"/session/roots",
+		async (request: AuthenticatedRequest, response) => {
+			const sessionId =
+				typeof request.query.sessionId === "string"
+					? request.query.sessionId
+					: undefined;
+			if (!sessionId) {
 				respondError(
 					response,
-					createInternalError("request", message),
+					buildRequestValidationError("sessionId required"),
+					400,
 				);
+				return;
 			}
-		}
-	});
+
+			try {
+				const userId = getUserId(request);
+				const result = await sessionRouter.getFsRoots(sessionId, userId);
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				if (message.includes("Not authorized")) {
+					respondError(response, buildAuthorizationError(message), 403);
+				} else {
+					respondError(response, createInternalError("request", message));
+				}
+			}
+		},
+	);
 
 	// Get session entries - with authorization check
-	router.get("/session/entries", async (request: AuthenticatedRequest, response) => {
-		const sessionId =
-			typeof request.query.sessionId === "string"
-				? request.query.sessionId
-				: undefined;
-		const path =
-			typeof request.query.path === "string" ? request.query.path : undefined;
-		if (!sessionId) {
-			respondError(
-				response,
-				buildRequestValidationError("sessionId required"),
-				400,
-			);
-			return;
-		}
-
-		try {
-			const userId = getUserId(request);
-			const result = await sessionRouter.getFsEntries({ sessionId, path }, userId);
-			response.json(result);
-		} catch (error) {
-			const message = getErrorMessage(error);
-			if (message.includes("Not authorized")) {
-				respondError(response, buildAuthorizationError(message), 403);
-			} else {
+	router.get(
+		"/session/entries",
+		async (request: AuthenticatedRequest, response) => {
+			const sessionId =
+				typeof request.query.sessionId === "string"
+					? request.query.sessionId
+					: undefined;
+			const path =
+				typeof request.query.path === "string" ? request.query.path : undefined;
+			if (!sessionId) {
 				respondError(
 					response,
-					createInternalError("request", message),
+					buildRequestValidationError("sessionId required"),
+					400,
 				);
+				return;
 			}
-		}
-	});
+
+			try {
+				const userId = getUserId(request);
+				const result = await sessionRouter.getFsEntries(
+					{ sessionId, path },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				if (message.includes("Not authorized")) {
+					respondError(response, buildAuthorizationError(message), 403);
+				} else {
+					respondError(response, createInternalError("request", message));
+				}
+			}
+		},
+	);
 
 	// Get session file - with authorization check
-	router.get("/session/file", async (request: AuthenticatedRequest, response) => {
-		const sessionId =
-			typeof request.query.sessionId === "string"
-				? request.query.sessionId
-				: undefined;
-		const path =
-			typeof request.query.path === "string" ? request.query.path : undefined;
-		if (!sessionId || !path) {
-			respondError(
-				response,
-				buildRequestValidationError("sessionId and path required"),
-				400,
-			);
-			return;
-		}
-
-		try {
-			const userId = getUserId(request);
-			const result = await sessionRouter.getFsFile({ sessionId, path }, userId);
-			response.json(result);
-		} catch (error) {
-			const message = getErrorMessage(error);
-			if (message.includes("Not authorized")) {
-				respondError(response, buildAuthorizationError(message), 403);
-			} else {
+	router.get(
+		"/session/file",
+		async (request: AuthenticatedRequest, response) => {
+			const sessionId =
+				typeof request.query.sessionId === "string"
+					? request.query.sessionId
+					: undefined;
+			const path =
+				typeof request.query.path === "string" ? request.query.path : undefined;
+			if (!sessionId || !path) {
 				respondError(
 					response,
-					createInternalError("request", message),
+					buildRequestValidationError("sessionId and path required"),
+					400,
 				);
+				return;
 			}
-		}
-	});
+
+			try {
+				const userId = getUserId(request);
+				const result = await sessionRouter.getFsFile(
+					{ sessionId, path },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				if (message.includes("Not authorized")) {
+					respondError(response, buildAuthorizationError(message), 403);
+				} else {
+					respondError(response, createInternalError("request", message));
+				}
+			}
+		},
+	);
 
 	// Get session resources - with authorization check
-	router.get("/session/resources", async (request: AuthenticatedRequest, response) => {
-		const sessionId =
-			typeof request.query.sessionId === "string"
-				? request.query.sessionId
-				: undefined;
-		if (!sessionId) {
-			respondError(
-				response,
-				buildRequestValidationError("sessionId required"),
-				400,
-			);
-			return;
-		}
-
-		try {
-			const userId = getUserId(request);
-			const result = await sessionRouter.getFsResources({ sessionId }, userId);
-			response.json(result);
-		} catch (error) {
-			const message = getErrorMessage(error);
-			if (message.includes("Not authorized")) {
-				respondError(response, buildAuthorizationError(message), 403);
-			} else {
+	router.get(
+		"/session/resources",
+		async (request: AuthenticatedRequest, response) => {
+			const sessionId =
+				typeof request.query.sessionId === "string"
+					? request.query.sessionId
+					: undefined;
+			if (!sessionId) {
 				respondError(
 					response,
-					createInternalError("request", message),
+					buildRequestValidationError("sessionId required"),
+					400,
 				);
+				return;
 			}
-		}
-	});
+
+			try {
+				const userId = getUserId(request);
+				const result = await sessionRouter.getFsResources(
+					{ sessionId },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				if (message.includes("Not authorized")) {
+					respondError(response, buildAuthorizationError(message), 403);
+				} else {
+					respondError(response, createInternalError("request", message));
+				}
+			}
+		},
+	);
 
 	return router;
 }

@@ -71,7 +71,9 @@ export function MachineCard({
 							</AlertDialogTrigger>
 							<AlertDialogContent size="sm">
 								<AlertDialogHeader>
-									<AlertDialogTitle>{t("machines.removeTitle")}</AlertDialogTitle>
+									<AlertDialogTitle>
+										{t("machines.removeTitle")}
+									</AlertDialogTitle>
 									<AlertDialogDescription>
 										{t("machines.removeDescription")}
 									</AlertDialogDescription>

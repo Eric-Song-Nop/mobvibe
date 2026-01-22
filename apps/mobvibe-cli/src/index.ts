@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { login, logout, loginStatus } from "./auth/login.js";
+import { login, loginStatus, logout } from "./auth/login.js";
 import { getCliConfig } from "./config.js";
 import { DaemonManager } from "./daemon/daemon.js";
 
@@ -70,7 +70,11 @@ program
 program
 	.command("login")
 	.description("Authenticate with the gateway")
-	.option("--webui <url>", "WebUI URL for authentication", "http://localhost:5173")
+	.option(
+		"--webui <url>",
+		"WebUI URL for authentication",
+		"http://localhost:5173",
+	)
 	.option("--name <name>", "Machine name")
 	.action(async (options) => {
 		const result = await login({

@@ -1,17 +1,17 @@
 import {
 	createContext,
+	type ReactNode,
 	useContext,
 	useEffect,
 	useState,
-	type ReactNode,
 } from "react";
 import {
 	isAuthEnabled,
-	useSession,
 	signIn,
-	signUp,
 	signOut,
+	signUp,
 	updateCachedToken,
+	useSession,
 } from "@/lib/auth";
 
 type User = {
