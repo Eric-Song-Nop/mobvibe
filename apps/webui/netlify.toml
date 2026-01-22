@@ -1,5 +1,5 @@
 [build]
-  command = "pnpm build"
+  command = "pnpm turbo build --filter=webui"
   publish = "dist"
 
 # SPA routing - all paths serve index.html
