@@ -275,8 +275,14 @@ const createPermissionMessage = (payload: {
 });
 
 const resolveToolCallSnapshot = (payload: ToolCallUpdate) => {
-	const rawInput = payload.rawInput ?? {};
-	const rawOutput = payload.rawOutput ?? {};
+	const rawInput =
+		payload.rawInput && typeof payload.rawInput === "object"
+			? (payload.rawInput as Record<string, unknown>)
+			: {};
+	const rawOutput =
+		payload.rawOutput && typeof payload.rawOutput === "object"
+			? (payload.rawOutput as Record<string, unknown>)
+			: {};
 	const name =
 		(typeof rawInput.name === "string" && rawInput.name) ||
 		(typeof rawInput.tool === "string" && rawInput.tool) ||
@@ -306,6 +312,15 @@ const resolveToolCallSnapshot = (payload: ToolCallUpdate) => {
 	};
 };
 
+const toRecordOrUndefined = (
+	value: unknown,
+): Record<string, unknown> | undefined => {
+	if (value && typeof value === "object") {
+		return value as Record<string, unknown>;
+	}
+	return undefined;
+};
+
 const createToolCallMessage = (
 	sessionId: string,
 	payload: ToolCallUpdate,
@@ -317,17 +332,17 @@ const createToolCallMessage = (
 		kind: "tool_call",
 		sessionId,
 		toolCallId: payload.toolCallId,
-		status: payload.status,
-		title: payload.title,
+		status: payload.status ?? undefined,
+		title: payload.title ?? undefined,
 		name: snapshot.name,
 		command: snapshot.command,
 		args: snapshot.args,
 		duration: snapshot.duration,
 		error: snapshot.error,
-		content: payload.content,
-		locations: payload.locations,
-		rawInput: payload.rawInput,
-		rawOutput: payload.rawOutput,
+		content: payload.content ?? undefined,
+		locations: payload.locations ?? undefined,
+		rawInput: toRecordOrUndefined(payload.rawInput),
+		rawOutput: toRecordOrUndefined(payload.rawOutput),
 		createdAt: new Date().toISOString(),
 		isStreaming: false,
 	};
@@ -349,8 +364,8 @@ const mergeToolCallMessage = (
 		error: snapshot.error ?? message.error,
 		content: payload.content ?? message.content,
 		locations: payload.locations ?? message.locations,
-		rawInput: payload.rawInput ?? message.rawInput,
-		rawOutput: payload.rawOutput ?? message.rawOutput,
+		rawInput: toRecordOrUndefined(payload.rawInput) ?? message.rawInput,
+		rawOutput: toRecordOrUndefined(payload.rawOutput) ?? message.rawOutput,
 	};
 };
 

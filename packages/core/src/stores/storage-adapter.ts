@@ -65,7 +65,10 @@ export const getStorageAdapter = (): SyncStateStorage => {
 	}
 
 	// Default to localStorage in browser, in-memory otherwise
-	if (typeof globalThis !== "undefined" && typeof globalThis.localStorage !== "undefined") {
+	if (
+		typeof globalThis !== "undefined" &&
+		typeof globalThis.localStorage !== "undefined"
+	) {
 		return createLocalStorage();
 	}
 
@@ -73,7 +76,9 @@ export const getStorageAdapter = (): SyncStateStorage => {
 };
 
 // Helper to create StateStorage from SyncStateStorage
-export const createZustandStorage = (storage: SyncStateStorage): StateStorage => ({
+export const createZustandStorage = (
+	storage: SyncStateStorage,
+): StateStorage => ({
 	getItem: (name) => storage.getItem(name),
 	setItem: (name, value) => storage.setItem(name, value),
 	removeItem: (name) => storage.removeItem(name),

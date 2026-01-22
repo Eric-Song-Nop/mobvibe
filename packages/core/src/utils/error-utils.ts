@@ -1,5 +1,8 @@
-import type { ErrorDetail } from "../api/types";
 import { ApiError } from "../api/client";
+import type { ErrorDetail } from "../api/types";
+
+// Re-export isErrorDetail from shared (already exported via api/types)
+export { isErrorDetail } from "../api/types";
 
 /**
  * Creates a fallback error object with the given message and scope.
@@ -35,22 +38,6 @@ export const normalizeError = (
 		};
 	}
 	return fallback;
-};
-
-/**
- * Type guard to check if a payload is an ErrorDetail object.
- */
-export const isErrorDetail = (payload: unknown): payload is ErrorDetail => {
-	if (!payload || typeof payload !== "object") {
-		return false;
-	}
-	const detail = payload as ErrorDetail;
-	return (
-		typeof detail.code === "string" &&
-		typeof detail.message === "string" &&
-		typeof detail.retryable === "boolean" &&
-		typeof detail.scope === "string"
-	);
 };
 
 /**

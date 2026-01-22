@@ -1,10 +1,53 @@
-export type AvailableCommand = {
-	name: string;
-	description: string;
-	input?: { hint: string } | null;
-	_meta?: Record<string, unknown> | null;
-};
+// Full SDK re-exports - use SDK types directly
+export type {
+	AudioContent,
+	// Other
+	AvailableCommand,
+	// Content types
+	ContentBlock,
+	EmbeddedResource,
+	ImageContent,
+	RequestPermissionOutcome,
+	RequestPermissionRequest,
+	RequestPermissionResponse,
+	ResourceLink,
+	// Session types
+	SessionNotification,
+	SessionUpdate,
+	StopReason,
+	TerminalExitStatus,
+	TextContent,
+	ToolCall,
+	ToolCallContent,
+	ToolCallLocation,
+	// Tool types
+	ToolCallStatus,
+	ToolCallUpdate as SdkToolCallUpdate,
+	ToolKind,
+} from "@agentclientprotocol/sdk";
 
+// Backwards-compatible aliases (deprecate over time)
+import type {
+	EmbeddedResource,
+	ResourceLink,
+	ToolCallUpdate as SdkToolCallUpdate,
+	TextContent,
+	ToolKind,
+} from "@agentclientprotocol/sdk";
+
+/** @deprecated Use `TextContent` from SDK instead */
+export type SessionContent = TextContent;
+
+/** @deprecated Use `ToolKind` from SDK instead */
+export type ToolCallKind = ToolKind;
+
+/** @deprecated Use `EmbeddedResource` from SDK instead */
+export type ResourceContent = EmbeddedResource;
+
+/** @deprecated Use `ResourceLink` from SDK instead */
+export type ResourceLinkContent = ResourceLink;
+
+// Keep local types for session update type discriminator values (not exported from SDK)
 export type SessionUpdateType =
 	| "user_message_chunk"
 	| "agent_message_chunk"
@@ -17,153 +60,31 @@ export type SessionUpdateType =
 	| "config_option_update"
 	| "session_info_update";
 
-export type SessionContent = {
-	type: "text";
-	text: string;
-};
-
-export type ImageContent = {
-	type: "image";
-	data: string;
-	mimeType: string;
-	uri?: string;
-};
-
-export type AudioContent = {
-	type: "audio";
-	data: string;
-	mimeType: string;
-};
-
-export type ResourceContent = {
-	type: "resource";
-	resource: {
-		uri: string;
-		mimeType?: string;
-		text?: string;
-		blob?: string;
-	};
-};
-
-export type ResourceLinkContent = {
-	type: "resource_link";
-	uri: string;
-	name: string;
-	mimeType?: string;
-	title?: string;
-	description?: string;
-	size?: number;
-};
-
-export type ContentBlock =
-	| SessionContent
-	| ImageContent
-	| AudioContent
-	| ResourceContent
-	| ResourceLinkContent;
-
-export type ToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
-
-export type ToolCallKind =
-	| "read"
-	| "edit"
-	| "delete"
-	| "move"
-	| "search"
-	| "execute"
-	| "think"
-	| "fetch"
-	| "other";
-
+// Keep local type for broader content payload support (project-specific)
+// SDK's Content.content is strictly ContentBlock, but we allow more flexible types
+import type { ContentBlock } from "@agentclientprotocol/sdk";
 export type ToolCallContentPayload =
 	| ContentBlock
 	| Record<string, unknown>
 	| string;
 
-export type ToolCallContent =
-	| {
-			type: "content";
-			content: ToolCallContentPayload;
-	  }
-	| {
-			type: "diff";
-			path: string;
-			oldText?: string | null;
-			newText: string;
-	  }
-	| {
-			type: "terminal";
-			terminalId: string;
-	  };
-
-export type ToolCallLocation = {
-	path: string;
-	line?: number;
-};
-
-export type ToolCallUpdate = {
+// ToolCallUpdate with sessionUpdate discriminator (project-specific extension)
+// The SDK's ToolCallUpdate doesn't include the sessionUpdate field
+export type ToolCallUpdate = SdkToolCallUpdate & {
 	sessionUpdate: "tool_call" | "tool_call_update";
-	toolCallId: string;
-	title?: string;
-	kind?: ToolCallKind;
-	status?: ToolCallStatus;
-	content?: ToolCallContent[];
-	locations?: ToolCallLocation[];
-	rawInput?: Record<string, unknown>;
-	rawOutput?: Record<string, unknown>;
 };
 
-type ContentChunk = {
-	content: ContentBlock;
-};
-
-type AvailableCommandsUpdate = {
-	sessionUpdate: "available_commands_update";
-	availableCommands: AvailableCommand[];
-};
-
-type UnknownUpdate = {
-	sessionUpdate: "plan" | "config_option_update";
-};
-
-type CurrentModeUpdate = {
-	currentModeId: string;
-};
-
-type SessionInfoUpdate = {
-	title?: string | null;
-	updatedAt?: string | null;
-};
-
-export type SessionUpdate =
-	| (ContentChunk & { sessionUpdate: "user_message_chunk" })
-	| (ContentChunk & { sessionUpdate: "agent_message_chunk" })
-	| (ContentChunk & { sessionUpdate: "agent_thought_chunk" })
-	| ToolCallUpdate
-	| (CurrentModeUpdate & { sessionUpdate: "current_mode_update" })
-	| (SessionInfoUpdate & { sessionUpdate: "session_info_update" })
-	| AvailableCommandsUpdate
-	| UnknownUpdate;
-
-export type SessionNotification = {
-	sessionId: string;
-	update: SessionUpdate;
-};
-
-export type TerminalExitStatus = {
-	exitCode?: number | null;
-	signal?: string | null;
-};
-
+// Terminal output event (project-specific, not in SDK)
 export type TerminalOutputEvent = {
 	sessionId: string;
 	terminalId: string;
 	delta: string;
 	truncated: boolean;
 	output?: string;
-	exitStatus?: TerminalExitStatus | null;
+	exitStatus?: { exitCode?: number | null; signal?: string | null } | null;
 };
 
+// Permission types (project-specific socket event types)
 export type PermissionOption = {
 	optionId: string;
 	label?: string | null;
@@ -181,4 +102,18 @@ export type PermissionToolCall = {
 	command?: string | null;
 	args?: string[] | null;
 	[key: string]: unknown;
+};
+
+// Permission notification types (project-specific)
+export type PermissionRequestNotification = {
+	sessionId: string;
+	requestId: string;
+	options: PermissionOption[];
+	toolCall?: PermissionToolCall;
+};
+
+export type PermissionResultNotification = {
+	sessionId: string;
+	requestId: string;
+	outcome: PermissionOutcome;
 };

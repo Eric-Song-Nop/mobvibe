@@ -24,11 +24,11 @@ type UseSocketOptions = {
 	sessions: Record<string, ChatSession>;
 	t: (key: string) => string;
 	appendAssistantChunk: (sessionId: string, text: string) => void;
-	updateSessionMeta: (
+	updateSessionMeta: (sessionId: string, payload: Partial<ChatSession>) => void;
+	setStreamError: (
 		sessionId: string,
-		payload: Partial<ChatSession>,
+		error?: ChatSession["streamError"],
 	) => void;
-	setStreamError: (sessionId: string, error?: ChatSession["streamError"]) => void;
 	addPermissionRequest: (
 		sessionId: string,
 		payload: {

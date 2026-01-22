@@ -126,7 +126,7 @@ const buildContentsFromInput = (
 			return;
 		}
 		blocks.push({ type: "text", text: value.slice(cursor, tokenIndex) });
-		blocks.push(resource);
+		blocks.push({ type: "resource_link", ...resource });
 		cursor = tokenIndex + tokenLabel.length;
 	});
 	blocks.push({ type: "text", text: value.slice(cursor) });
@@ -550,7 +550,7 @@ export function ChatFooter({
 				rawInput.slice(0, resourceTrigger.start) +
 				tokenLabel +
 				rawInput.slice(resourceTrigger.end);
-			const nextResource: ResourceLinkContent = {
+			const nextResource: ContentBlock = {
 				type: "resource_link",
 				uri: buildFileUri(resource.path),
 				name: filename,
