@@ -34,9 +34,11 @@ remote-claude/
 ├── apps/
 │   ├── webui/           # React frontend with Socket.io client
 │   ├── mobvibe-cli/     # CLI daemon with ACP connection
-│   └── gateway/         # Express + Socket.io relay server
+│   ├── gateway/         # Express + Socket.io relay server
+│   └── mobile/          # React Native (Expo) mobile app
 ├── packages/
-│   └── shared/          # Shared TypeScript types
+│   ├── shared/          # Shared TypeScript types
+│   └── core/            # Shared stores, hooks, and utilities
 └── pnpm-workspace.yaml
 ```
 
@@ -113,6 +115,8 @@ Express + Socket.io relay server (port 3005):
 - `socket/webui-handlers.ts` - Handle session subscriptions, permission decisions
 
 **REST API Routes:**
+- `/api/auth/*` - Better Auth endpoints (sign in, sign up, session, OAuth)
+- `/machines` - Machine registration and token generation
 - `/acp/session` - Session lifecycle (create, close, list)
 - `/acp/message` - Message sending
 - `/acp/permission/decision` - Permission decisions via REST
@@ -136,6 +140,10 @@ CLI daemon that connects to gateway and manages ACP sessions:
 mobvibe start [--gateway <url>]  # Start daemon (default: http://localhost:3005)
 mobvibe stop                      # Stop daemon
 mobvibe status                    # Show daemon status
+mobvibe logs [-f] [-n <lines>]   # View daemon logs
+mobvibe login [--webui <url>]    # Authenticate with gateway
+mobvibe logout                   # Clear stored credentials
+mobvibe auth-status              # Show authentication status
 ```
 
 **Configuration:**
@@ -144,6 +152,44 @@ mobvibe status                    # Show daemon status
   - `MOBVIBE_GATEWAY_URL` - Gateway URL (default: http://localhost:3005)
   - `ANTHROPIC_AUTH_TOKEN` - Required for Claude Code backend
   - `ANTHROPIC_BASE_URL` - Optional for Claude Code backend
+
+### apps/mobile
+
+React Native (Expo) mobile app with file-based routing:
+
+**Tech Stack:**
+- Expo SDK with Expo Router (file-based routing)
+- Uses `packages/core` for shared state and logic
+- NativeWind for Tailwind CSS styling
+
+**Screens:**
+- `app/(tabs)/index.tsx` - Home/chat screen
+- `app/(tabs)/machines.tsx` - Machine management
+- `app/(tabs)/settings.tsx` - Settings and preferences
+- `app/session/[id].tsx` - Session detail view
+
+**Configuration:**
+- `app.config.ts` - Expo configuration
+- Environment: `EXPO_PUBLIC_GATEWAY_URL`
+
+### packages/core
+
+Shared logic and state management for webui and mobile:
+
+**Zustand Stores:**
+- `stores/chat-store.ts` - Sessions, messages, permissions
+- `stores/machines-store.ts` - Connected machines
+- `stores/ui-store.ts` - Theme, sidebar, language
+- `stores/notification-store.ts` - Toast notifications
+
+**Utilities:**
+- `socket/gateway-socket.ts` - GatewaySocket singleton
+- `api/client.ts` - API client wrapper
+- `hooks/use-socket.ts` - React hook for Socket.io events
+
+**i18n:**
+- `i18n/en.json` - English translations
+- `i18n/zh.json` - Chinese translations
 
 ### apps/webui
 
@@ -223,6 +269,56 @@ interface GatewayToWebuiEvents {
   'sessions:list': SessionSummary[];
 }
 ```
+
+## Database (PostgreSQL + Drizzle)
+
+When `DATABASE_URL` is configured, the gateway uses PostgreSQL with Drizzle ORM for persistence.
+
+### Schema Tables
+
+- `users` - User accounts (Better Auth managed)
+- `sessions` - Auth sessions (Better Auth managed)
+- `accounts` - OAuth provider accounts (Better Auth managed)
+- `verifications` - Email verifications (Better Auth managed)
+- `machines` - Registered CLI machines (machineId, userId, token, hostname)
+- `acpSessions` - ACP session metadata (sessionId, machineId, userId, state)
+
+### Drizzle Commands
+
+```bash
+pnpm db:generate   # Generate migration from schema changes
+pnpm db:migrate    # Run pending migrations
+pnpm db:push       # Push schema directly (dev only)
+pnpm db:studio     # Open Drizzle Studio GUI
+```
+
+### Environment
+
+- `DATABASE_URL` - PostgreSQL connection string (optional, auth disabled without it)
+
+## Authentication (Better Auth)
+
+When database is configured, Better Auth provides authentication:
+
+### REST Endpoints
+
+All auth endpoints are under `/api/auth/*`:
+- `POST /api/auth/sign-in/email` - Email/password sign in
+- `POST /api/auth/sign-up/email` - Email registration
+- `POST /api/auth/sign-out` - Sign out
+- `GET /api/auth/session` - Get current session
+- `GET /api/auth/sign-in/social?provider=github` - OAuth redirect
+
+### OAuth Providers
+
+- GitHub (`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`)
+- Google (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`)
+
+### Session Management
+
+- Sessions stored in PostgreSQL
+- HTTP-only cookies for web clients
+- Token-based auth for CLI machines
 
 ## Development Guidelines
 
