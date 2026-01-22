@@ -23,10 +23,11 @@ export function getAuthClient() {
 
 // Re-export hooks from better-auth/react
 export const useSession = () => {
-	if (!authClient) {
+	const session = authClient?.useSession();
+	if (!session) {
 		return { data: null, isPending: false, error: null };
 	}
-	return authClient.useSession();
+	return session;
 };
 
 // Auth actions
