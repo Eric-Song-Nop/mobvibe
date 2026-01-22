@@ -6,7 +6,7 @@
 	},
 	"deploy": {
 		"numReplicas": 1,
-		"startCommand": "pnpm --filter gateway start:prod",
+		"startCommand": "pnpm --filter gateway start",
 		"healthcheckPath": "/health",
 		"healthcheckTimeout": 30,
 		"restartPolicyType": "ON_FAILURE",
