@@ -1,0 +1,12 @@
+[build]
+  publish = "dist"
+  command = "pnpm install && pnpm --filter @mobvibe/shared build && pnpm --filter @mobvibe/core build && pnpm --filter webui build"
+
+[build.environment]
+  NODE_VERSION = "22"
+  NPM_FLAGS = "--version"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

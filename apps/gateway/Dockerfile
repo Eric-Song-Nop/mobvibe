@@ -31,11 +31,22 @@ COPY --from=builder /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/package.js
 COPY --from=builder /app/packages/shared ./packages/shared
 COPY --from=builder /app/apps/gateway ./apps/gateway
 
-# Install production dependencies only
-RUN pnpm install --frozen-lockfile --prod
+# Install all dependencies (need drizzle-kit for migrations)
+RUN pnpm install --frozen-lockfile
 
 WORKDIR /app/apps/gateway
 
+# Create startup script for migrations + server
+RUN echo '#!/bin/sh' > /app/start.sh && \
+    echo 'set -e' >> /app/start.sh && \
+    echo 'if [ -n "$DATABASE_URL" ]; then' >> /app/start.sh && \
+    echo '  echo "[gateway] Running database migrations..."' >> /app/start.sh && \
+    echo '  npx drizzle-kit push --force' >> /app/start.sh && \
+    echo '  echo "[gateway] Migrations complete"' >> /app/start.sh && \
+    echo 'fi' >> /app/start.sh && \
+    echo 'exec node dist/index.js' >> /app/start.sh && \
+    chmod +x /app/start.sh
+
 EXPOSE 3005
 
-CMD ["node", "dist/index.js"]
+CMD ["/app/start.sh"]
