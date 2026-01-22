@@ -1,3 +1,4 @@
+import { useBetterAuthTauri } from "@daveyplate/better-auth-tauri/react";
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
@@ -17,6 +18,7 @@ import { useSessionMutations } from "@/hooks/useSessionMutations";
 import { useSessionQueries } from "@/hooks/useSessionQueries";
 import { useSocket } from "@/hooks/useSocket";
 import type { PermissionResultNotification } from "@/lib/acp";
+import { getAuthClient, isInTauri } from "@/lib/auth";
 import { useChatStore } from "@/lib/chat-store";
 import {
 	buildSessionNotReadyError,
@@ -455,6 +457,18 @@ function MainApp() {
 export function App() {
 	const { isAuthenticated, isLoading, isAuthEnabled } = useAuth();
 	const navigate = useNavigate();
+
+	// Handle Tauri deep link auth callbacks
+	const authClient = getAuthClient();
+	useBetterAuthTauri({
+		// Auth client is null when auth is disabled - in that case enabled is false anyway
+		authClient: authClient as NonNullable<typeof authClient>,
+		scheme: "mobvibe",
+		enabled: isInTauri() && authClient !== null,
+		onSuccess: (url) => {
+			window.location.href = url;
+		},
+	});
 
 	// Show loading state while checking auth
 	if (isLoading) {

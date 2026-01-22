@@ -10,14 +10,29 @@ import App from "./App.tsx";
 
 const queryClient = new QueryClient();
 
-createRoot(document.getElementById("root")!).render(
-	<StrictMode>
-		<BrowserRouter>
-			<QueryClientProvider client={queryClient}>
-				<AuthProvider>
-					<App />
-				</AuthProvider>
-			</QueryClientProvider>
-		</BrowserRouter>
-	</StrictMode>,
-);
+const renderApp = () => {
+	createRoot(document.getElementById("root")!).render(
+		<StrictMode>
+			<BrowserRouter>
+				<QueryClientProvider client={queryClient}>
+					<AuthProvider>
+						<App />
+					</AuthProvider>
+				</QueryClientProvider>
+			</BrowserRouter>
+		</StrictMode>,
+	);
+};
+
+// Initialize Tauri storage adapter if running in Tauri
+if ("__TAURI_INTERNALS__" in window) {
+	import("./lib/tauri-storage-adapter")
+		.then(({ initTauriStorage }) => initTauriStorage())
+		.then(renderApp)
+		.catch((error) => {
+			console.warn("Failed to initialize Tauri storage, using default:", error);
+			renderApp();
+		});
+} else {
+	renderApp();
+}

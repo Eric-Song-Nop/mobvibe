@@ -2,6 +2,48 @@ import { createAuthClient } from "better-auth/react";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL as string | undefined;
 
+/**
+ * Check if running inside Tauri
+ */
+export const isInTauri = (): boolean => "__TAURI_INTERNALS__" in window;
+
+/**
+ * Dynamic fetch implementation that uses Tauri HTTP plugin on macOS
+ * to properly handle cookies (standard fetch doesn't work with cookies in Tauri on macOS)
+ */
+const createFetchImpl = async () => {
+	if (!isInTauri()) {
+		return fetch;
+	}
+
+	try {
+		const [{ fetch: tauriFetch }, { platform }] = await Promise.all([
+			import("@tauri-apps/plugin-http"),
+			import("@tauri-apps/plugin-os"),
+		]);
+		const currentPlatform = platform();
+
+		// Use Tauri fetch on macOS when running in Tauri protocol
+		if (currentPlatform === "macos" && window.location.protocol === "tauri:") {
+			return tauriFetch as typeof fetch;
+		}
+	} catch {
+		// Fall back to standard fetch if plugins not available
+	}
+
+	return fetch;
+};
+
+// Cached fetch implementation
+let cachedFetchImpl: typeof fetch | null = null;
+
+const getFetchImpl = async (): Promise<typeof fetch> => {
+	if (!cachedFetchImpl) {
+		cachedFetchImpl = await createFetchImpl();
+	}
+	return cachedFetchImpl;
+};
+
 // Create auth client with Gateway endpoint
 // Note: When Gateway URL is not configured, auth is disabled
 const authClient = GATEWAY_URL
@@ -9,6 +51,10 @@ const authClient = GATEWAY_URL
 			baseURL: GATEWAY_URL,
 			fetchOptions: {
 				credentials: "include",
+				customFetchImpl: async (...params: Parameters<typeof fetch>) => {
+					const fetchImpl = await getFetchImpl();
+					return fetchImpl(...params);
+				},
 			},
 		})
 	: null;

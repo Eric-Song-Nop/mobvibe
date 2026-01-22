@@ -122,7 +122,9 @@ export function setupWebuiHandlers(
 							);
 						}
 					} else {
-						console.log(`[gateway] Webui connected without cookies: ${socket.id}`);
+						console.log(
+							`[gateway] Webui connected without cookies: ${socket.id}`,
+						);
 					}
 				} catch (error) {
 					console.log(

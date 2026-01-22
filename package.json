@@ -8,7 +8,13 @@
 		"dev": "turbo dev",
 		"format": "turbo format",
 		"lint": "turbo lint",
-		"test": "turbo test"
+		"test": "turbo test",
+		"tauri:dev": "pnpm --filter webui dev:tauri",
+		"tauri:build": "pnpm --filter webui build:tauri",
+		"android:init": "pnpm --filter webui android:init",
+		"android:dev": "pnpm --filter webui android:dev",
+		"ios:init": "pnpm --filter webui ios:init",
+		"ios:dev": "pnpm --filter webui ios:dev"
 	},
 	"pnpm": {
 		"overrides": {

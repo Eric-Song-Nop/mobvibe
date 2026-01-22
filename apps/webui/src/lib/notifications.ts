@@ -2,6 +2,7 @@ import type { ToastVariant } from "@/components/ui/toast";
 import i18n from "@/i18n";
 import type { PermissionToolCall } from "@/lib/acp";
 import type { ErrorDetail } from "@/lib/api";
+import { isInTauri } from "@/lib/auth";
 import { useNotificationStore } from "@/lib/notification-store";
 
 export type NotificationVariant = ToastVariant;
@@ -50,10 +51,45 @@ const resolveNotificationTitle = (
 	});
 };
 
+const emitTauriNotification = async (
+	title: string,
+	body?: string,
+): Promise<boolean> => {
+	try {
+		const { isPermissionGranted, requestPermission, sendNotification } =
+			await import("@tauri-apps/plugin-notification");
+
+		let permissionGranted = await isPermissionGranted();
+		if (!permissionGranted) {
+			const permission = await requestPermission();
+			permissionGranted = permission === "granted";
+		}
+
+		if (!permissionGranted) {
+			return false;
+		}
+
+		sendNotification({ title, body });
+		return true;
+	} catch {
+		return false;
+	}
+};
+
 const emitWebNotification = (
 	payload: NotificationPayload,
 	context?: NotificationContext,
 ) => {
+	const title = resolveNotificationTitle(payload, context);
+	const body = payload.description;
+
+	// Use Tauri notification plugin when running in Tauri
+	if (isInTauri()) {
+		void emitTauriNotification(title, body);
+		return;
+	}
+
+	// Fall back to web Notification API
 	if (typeof window === "undefined" || !("Notification" in window)) {
 		return;
 	}
@@ -65,8 +101,6 @@ const emitWebNotification = (
 		return;
 	}
 
-	const title = resolveNotificationTitle(payload, context);
-	const body = payload.description;
 	new Notification(title, body ? { body } : undefined);
 };
 
@@ -83,6 +117,11 @@ export const pushNotification = (
 };
 
 export const ensureNotificationPermission = () => {
+	// For Tauri, permissions are requested when sending notifications
+	if (isInTauri()) {
+		return;
+	}
+
 	if (typeof window === "undefined" || !("Notification" in window)) {
 		return;
 	}

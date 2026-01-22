@@ -58,16 +58,21 @@ export type FsEntriesResponse = {
 };
 
 import { getCachedToken } from "./auth";
+import { getDefaultGatewayUrl } from "./gateway-config";
 
-const resolveDefaultGatewayUrl = () => {
-	if (typeof window === "undefined") {
-		return "http://localhost:3005";
-	}
-	return `${window.location.protocol}//${window.location.hostname}:3005`;
+let API_BASE_URL = getDefaultGatewayUrl();
+
+/**
+ * Update the API base URL. Used when Tauri app loads a stored gateway URL.
+ */
+export const setApiBaseUrl = (url: string): void => {
+	API_BASE_URL = url;
 };
 
-const API_BASE_URL =
-	import.meta.env.VITE_GATEWAY_URL ?? resolveDefaultGatewayUrl();
+/**
+ * Get the current API base URL.
+ */
+export const getApiBaseUrl = (): string => API_BASE_URL;
 
 const buildRequestError = (message: string): ErrorDetail => ({
 	code: "INTERNAL_ERROR",

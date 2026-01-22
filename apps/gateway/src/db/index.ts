@@ -50,7 +50,9 @@ export function getDb(): ReturnType<typeof drizzle<typeof schema>> | null {
 export function requireDb(): ReturnType<typeof drizzle<typeof schema>> {
 	const database = getDb();
 	if (!database) {
-		throw new Error("Database not configured. Set DATABASE_URL environment variable.");
+		throw new Error(
+			"Database not configured. Set DATABASE_URL environment variable.",
+		);
 	}
 	return database;
 }

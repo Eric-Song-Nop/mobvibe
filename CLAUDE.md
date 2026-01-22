@@ -11,20 +11,20 @@ Remote-Claude (Mobvibe) is a distributed ACP (Agent Client Protocol) WebUI for l
 
 ## Architecture
 
-The project follows a distributed architecture with four main packages communicating via Socket.io:
+The project follows a distributed architecture with three main packages communicating via Socket.io. The webui can run as a web app, desktop app (via Tauri), or mobile app (via Tauri mobile):
 
 ```
-┌─────────────┐     Socket.io      ┌──────────────┐     Socket.io     ┌───────────────┐
-│   webui     │◄──────────────────►│   gateway    │◄─────────────────►│  mobvibe-cli  │
-│  (React)    │    /webui ns       │  (Express)   │    /cli ns        │  (Node CLI)   │
-└─────────────┘                    └──────────────┘                   └───────┬───────┘
-       ▲                                  │                                   │
-       │                             REST API                           stdin/stdout
-       │                             (:3005)                                  │
-┌──────┴──────┐                                                       ┌───────▼───────┐
-│   mobile    │                                                       │   ACP CLI     │
-│   (Expo)    │◄─────────────────────────────►                        │ (claude-code) │
-└─────────────┘                                                       └───────────────┘
+┌─────────────────────────┐     Socket.io      ┌──────────────┐     Socket.io     ┌───────────────┐
+│        webui            │◄──────────────────►│   gateway    │◄─────────────────►│  mobvibe-cli  │
+│  (React + Tauri v2)     │    /webui ns       │  (Express)   │    /cli ns        │  (Node CLI)   │
+│  Web / Desktop / Mobile │                    └──────────────┘                   └───────┬───────┘
+└─────────────────────────┘                           │                                   │
+                                                 REST API                           stdin/stdout
+                                                 (:3005)                                  │
+                                                                                  ┌───────▼───────┐
+                                                                                  │   ACP CLI     │
+                                                                                  │ (claude-code) │
+                                                                                  └───────────────┘
 ```
 
 ### Package Structure
@@ -32,10 +32,10 @@ The project follows a distributed architecture with four main packages communica
 ```
 mobvibe/
 ├── apps/
-│   ├── webui/           # React frontend with Socket.io client
+│   ├── webui/           # React frontend + Tauri desktop/mobile
+│   │   └── src-tauri/   # Tauri Rust backend (desktop/mobile)
 │   ├── mobvibe-cli/     # CLI daemon with ACP connection
-│   ├── gateway/         # Express + Socket.io relay server
-│   └── mobile/          # React Native (Expo) mobile app
+│   └── gateway/         # Express + Socket.io relay server
 ├── packages/
 │   ├── shared/          # Shared TypeScript types
 │   └── core/            # Shared stores, hooks, and utilities
@@ -77,15 +77,15 @@ pnpm build            # TypeScript compilation
 
 # Web UI (apps/webui)
 cd apps/webui
-pnpm dev              # Vite dev server
+pnpm dev              # Vite dev server (web only)
 pnpm build            # TypeScript check + Vite build
 pnpm test             # Run web tests
-
-# Mobile app (apps/mobile)
-cd apps/mobile
-pnpm start            # Expo dev server
-pnpm android          # Run on Android
-pnpm ios              # Run on iOS
+pnpm dev:tauri        # Tauri desktop dev mode
+pnpm build:tauri      # Tauri desktop build
+pnpm android:init     # Initialize Android project
+pnpm android:dev      # Run on Android device/emulator
+pnpm ios:init         # Initialize iOS project (macOS only)
+pnpm ios:dev          # Run on iOS simulator (macOS only)
 
 # Shared types (packages/shared)
 cd packages/shared
@@ -198,7 +198,7 @@ mobvibe auth-status              # Show authentication status
 
 ### apps/webui
 
-React frontend with Socket.io real-time updates:
+React frontend with Socket.io real-time updates. Supports web, desktop (Windows/macOS/Linux), and mobile (iOS/Android) via Tauri v2.
 
 **Component Structure:**
 ```
@@ -215,6 +215,7 @@ src/components/
 │   ├── ResourceCombobox.tsx   # Resource picker
 │   ├── WorkingDirectoryDialog.tsx
 │   ├── WorkingDirectoryPicker.tsx
+│   ├── GatewaySettings.tsx    # Gateway URL settings (Tauri only)
 │   └── previews/        # File preview components
 ├── auth/                # Authentication components
 ├── chat/                # Message rendering
@@ -223,9 +224,29 @@ src/components/
 └── ui/                  # Shadcn UI components
 ```
 
+**Tauri Backend (src-tauri/):**
+```
+src-tauri/
+├── src/
+│   ├── main.rs          # Desktop entry point
+│   └── lib.rs           # Tauri app setup with plugins
+├── Cargo.toml           # Rust dependencies
+├── tauri.conf.json      # Tauri configuration
+├── capabilities/        # Permission capabilities
+└── gen/                 # Generated iOS/Android projects
+```
+
+**Tauri Plugins:**
+- `tauri-plugin-store` - Persistent key-value storage
+- `tauri-plugin-notification` - Native notifications
+- `tauri-plugin-deep-link` - OAuth deep link handling (mobvibe:// scheme)
+- `tauri-plugin-http` - HTTP requests with cookie support on macOS
+- `tauri-plugin-os` - Platform detection
+
 **State Management:**
 - Uses `@remote-claude/core` stores via re-exports
 - `lib/` contains local utilities and configurations
+- `lib/tauri-storage-adapter.ts` - Tauri Store adapter for Zustand persistence
 
 **Socket Integration:**
 - Uses `@remote-claude/core/socket` for Socket.io connection
@@ -240,41 +261,8 @@ src/components/
 - Tree-sitter for code outline generation
 - Prism for syntax highlighting
 - i18next for internationalization
-
-### apps/mobile
-
-React Native (Expo) mobile app with file-based routing:
-
-**Tech Stack:**
-- Expo SDK 53 with Expo Router (file-based routing)
-- Uses `packages/core` for shared state and logic
-- React Native Paper for Material Design components
-- React Navigation with Drawer navigator
-
-**App Structure:**
-```
-app/
-├── (tabs)/
-│   ├── _layout.tsx      # Tab navigator layout
-│   ├── index.tsx        # Home/chat screen
-│   ├── machines.tsx     # Machine management
-│   └── settings.tsx     # Settings and preferences
-├── session/
-│   └── [id].tsx         # Session detail view
-└── _layout.tsx          # Root layout with drawer
-```
-
-**Source Structure:**
-```
-src/
-├── context/             # React contexts (auth, etc.)
-├── lib/                 # Utilities
-└── theme/               # Theme configuration
-```
-
-**Configuration:**
-- `app.json` - Expo configuration
-- Environment: `EXPO_PUBLIC_GATEWAY_URL`
+- Native desktop/mobile apps via Tauri v2
+- Deep link OAuth with @daveyplate/better-auth-tauri
 
 ## Socket.io Event Types
 
@@ -523,11 +511,28 @@ pnpm build
 ./bin/mobvibe.mjs start --gateway https://your-gateway.com
 ```
 
-**Mobile App:**
+**Desktop App (Tauri):**
 ```bash
-cd apps/mobile
-pnpm build:android  # Build Android APK
-pnpm build:ios      # Build iOS app
+cd apps/webui
+pnpm build:tauri
+# Outputs: src-tauri/target/release/bundle/
+# - Windows: .msi, .exe
+# - macOS: .app, .dmg
+# - Linux: .deb, .AppImage
+```
+
+**Mobile App (Tauri):**
+```bash
+cd apps/webui
+# Android (requires Android SDK)
+pnpm android:init   # First time only
+pnpm android:dev    # Development
+# Build: src-tauri/gen/android/ with Android Studio
+
+# iOS (requires Xcode on macOS)
+pnpm ios:init       # First time only
+pnpm ios:dev        # Development
+# Build: src-tauri/gen/apple/ with Xcode
 ```
 
 ### Environment Variables
@@ -539,11 +544,9 @@ pnpm build:ios      # Build iOS app
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` - Google OAuth
 - `MOBVIBE_CORS_ORIGINS` - Allowed CORS origins
 
-**Web UI:**
+**Web UI / Desktop / Mobile:**
 - `VITE_GATEWAY_URL` - Gateway URL (default: http://localhost:3005)
-
-**Mobile:**
-- `EXPO_PUBLIC_GATEWAY_URL` - Gateway URL
+- For Tauri apps: Gateway URL can also be configured via Settings UI (stored in Tauri Store)
 
 **CLI:**
 - `MOBVIBE_GATEWAY_URL` - Gateway URL

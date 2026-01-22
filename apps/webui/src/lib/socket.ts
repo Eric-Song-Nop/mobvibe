@@ -11,18 +11,11 @@ import type {
 } from "./acp";
 import type { SessionSummary } from "./api";
 import { getCachedToken } from "./auth";
+import { getDefaultGatewayUrl } from "./gateway-config";
 
 type TypedSocket = Socket<GatewayToWebuiEvents, WebuiToGatewayEvents>;
 
-const resolveDefaultGatewayUrl = () => {
-	if (typeof window === "undefined") {
-		return "http://localhost:3005";
-	}
-	return `${window.location.protocol}//${window.location.hostname}:3005`;
-};
-
-const GATEWAY_URL =
-	import.meta.env.VITE_GATEWAY_URL ?? resolveDefaultGatewayUrl();
+let GATEWAY_URL = getDefaultGatewayUrl();
 
 class GatewaySocket {
 	private socket: TypedSocket | null = null;
@@ -139,6 +132,24 @@ class GatewaySocket {
 
 	isConnected(): boolean {
 		return this.socket?.connected ?? false;
+	}
+
+	/**
+	 * Update the gateway URL and reconnect.
+	 */
+	setGatewayUrl(url: string) {
+		GATEWAY_URL = url;
+		if (this.socket) {
+			this.disconnect();
+			this.connect();
+		}
+	}
+
+	/**
+	 * Get the current gateway URL.
+	 */
+	getGatewayUrl(): string {
+		return GATEWAY_URL;
 	}
 }
 

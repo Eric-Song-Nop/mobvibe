@@ -1,3 +1,4 @@
+import { tauri } from "@daveyplate/better-auth-tauri/plugin";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { getDb, isDbEnabled } from "../db/index.js";
@@ -58,6 +59,12 @@ export function getAuth(): ReturnType<typeof betterAuth> | null {
 					maxAge: 5 * 60, // 5 minutes cache
 				},
 			},
+			plugins: [
+				tauri({
+					scheme: "mobvibe",
+					callbackURL: "/",
+				}),
+			],
 		});
 	}
 
@@ -70,7 +77,9 @@ export function getAuth(): ReturnType<typeof betterAuth> | null {
 export function requireAuth(): ReturnType<typeof betterAuth> {
 	const auth = getAuth();
 	if (!auth) {
-		throw new Error("Auth not configured. Set DATABASE_URL environment variable.");
+		throw new Error(
+			"Auth not configured. Set DATABASE_URL environment variable.",
+		);
 	}
 	return auth;
 }

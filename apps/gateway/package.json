@@ -15,6 +15,7 @@
 		"db:studio": "drizzle-kit studio"
 	},
 	"dependencies": {
+		"@daveyplate/better-auth-tauri": "^0.1.6",
 		"@remote-claude/shared": "workspace:*",
 		"better-auth": "^1.4.9",
 		"cors": "^2.8.5",
