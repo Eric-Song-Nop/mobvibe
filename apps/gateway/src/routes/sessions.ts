@@ -4,7 +4,7 @@ import {
 	createErrorDetail,
 	createInternalError,
 	type ErrorDetail,
-} from "@remote-claude/shared";
+} from "@mobvibe/shared";
 import type { Router } from "express";
 import {
 	type AuthenticatedRequest,

@@ -18,7 +18,7 @@ import {
 	type PermissionRequestPayload,
 	type SessionSummary,
 	type TerminalOutputEvent,
-} from "@remote-claude/shared";
+} from "@mobvibe/shared";
 import type { AcpBackendConfig, CliConfig } from "../config.js";
 import { AcpConnection } from "./acp-connection.js";
 

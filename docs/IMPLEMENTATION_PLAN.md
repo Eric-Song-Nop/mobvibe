@@ -451,7 +451,7 @@
   - `hooks/` - React hooks (useSocket)
   - `i18n/` - 国际化翻译文件
   - `utils/` - 工具函数
-- 导出方式：多入口导出 (`@remote-claude/core/stores`, `/socket`, `/api` 等)
+- 导出方式：多入口导出 (`@mobvibe/core/stores`, `/socket`, `/api` 等)
 - 平台适配：`storage-adapter.ts` 抽象存储接口，支持 web localStorage 和 RN AsyncStorage
 
 ## M12 React Native 移动端（实现后记录 - 2026-01-22）
@@ -461,7 +461,7 @@
   - Expo Router - 文件路由
   - React Native Paper - Material Design 组件
   - React Navigation Drawer - 抽屉导航
-  - @remote-claude/core - 共享状态和逻辑
+  - @mobvibe/core - 共享状态和逻辑
 - 页面结构：
   - `(tabs)/index.tsx` - 首页/聊天
   - `(tabs)/machines.tsx` - 机器管理

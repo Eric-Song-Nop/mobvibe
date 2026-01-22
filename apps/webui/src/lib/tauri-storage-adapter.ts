@@ -1,4 +1,4 @@
-import type { SyncStateStorage } from "@remote-claude/core/stores";
+import type { SyncStateStorage } from "@mobvibe/core/stores";
 
 // Type for the Tauri Store instance
 type TauriStore = Awaited<
@@ -103,7 +103,7 @@ export const createTauriStorageAdapter = (): SyncStateStorage => {
  * Should be called early in the app lifecycle (e.g., in main.tsx).
  */
 export const initTauriStorage = async (): Promise<void> => {
-	const { setStorageAdapter } = await import("@remote-claude/core/stores");
+	const { setStorageAdapter } = await import("@mobvibe/core/stores");
 	const adapter = createTauriStorageAdapter();
 	setStorageAdapter(adapter);
 };

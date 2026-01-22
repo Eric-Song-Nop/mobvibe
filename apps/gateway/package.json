@@ -16,7 +16,7 @@
 	},
 	"dependencies": {
 		"@daveyplate/better-auth-tauri": "^0.1.6",
-		"@remote-claude/shared": "workspace:*",
+		"@mobvibe/shared": "workspace:*",
 		"better-auth": "^1.4.9",
 		"cors": "^2.8.5",
 		"drizzle-orm": "^0.41.0",

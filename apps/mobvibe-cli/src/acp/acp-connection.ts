@@ -33,7 +33,7 @@ import {
 	type ErrorDetail,
 	isProtocolMismatch,
 	type TerminalOutputEvent,
-} from "@remote-claude/shared";
+} from "@mobvibe/shared";
 import type { AcpBackendConfig } from "../config.js";
 
 type ClientInfo = {

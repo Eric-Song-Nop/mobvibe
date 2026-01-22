@@ -1,4 +1,4 @@
-# @remote-claude/shared
+# @mobvibe/shared
 
 Shared TypeScript types for the remote-claude monorepo.
 
@@ -9,7 +9,7 @@ This package is used internally by the monorepo and is linked via pnpm workspace
 ```json
 {
   "dependencies": {
-    "@remote-claude/shared": "workspace:*"
+    "@mobvibe/shared": "workspace:*"
   }
 }
 ```
@@ -42,7 +42,7 @@ import {
   FsRoot,
   FsEntry,
   SessionFsFilePreview,
-} from "@remote-claude/shared";
+} from "@mobvibe/shared";
 ```
 
 ## Type Categories

@@ -13,7 +13,7 @@ import type {
 	SessionFsResourceEntry,
 	SessionSummary,
 	StopReason,
-} from "@remote-claude/shared";
+} from "@mobvibe/shared";
 import { io, type Socket } from "socket.io-client";
 import type { SessionManager } from "../acp/session-manager.js";
 import { getMachineToken } from "../auth/credentials.js";
@@ -332,7 +332,7 @@ export class SocketClient extends EventEmitter {
 				// Cast through unknown since SDK and shared SessionNotification types are structurally compatible
 				this.socket.emit(
 					"session:update",
-					notification as unknown as import("@remote-claude/shared").SessionNotification,
+					notification as unknown as import("@mobvibe/shared").SessionNotification,
 				);
 			}
 		});

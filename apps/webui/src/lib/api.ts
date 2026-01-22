@@ -1,4 +1,4 @@
-// Re-export types from @remote-claude/core
+// Re-export types from @mobvibe/core
 export type {
 	AcpBackendSummary,
 	AcpBackendsResponse,
@@ -26,10 +26,10 @@ export type {
 	SessionSummary,
 	SessionsResponse,
 	StopReason,
-} from "@remote-claude/core";
+} from "@mobvibe/core";
 
 // Re-export isErrorDetail for local use
-export { isErrorDetail } from "@remote-claude/core";
+export { isErrorDetail } from "@mobvibe/core";
 
 // Import types for API functions
 // Local type for FsEntriesResponse (not exported from core)
@@ -50,8 +50,8 @@ import type {
 	SessionFsRootsResponse,
 	SessionSummary,
 	SessionsResponse,
-} from "@remote-claude/core";
-import { isErrorDetail } from "@remote-claude/core";
+} from "@mobvibe/core";
+import { isErrorDetail } from "@mobvibe/core";
 export type FsEntriesResponse = {
 	path: string;
 	entries: FsEntry[];

@@ -1,4 +1,4 @@
-// Re-export ACP types from @remote-claude/core (which re-exports from @remote-claude/shared)
+// Re-export ACP types from @mobvibe/core (which re-exports from @mobvibe/shared)
 export type {
 	AudioContent,
 	// Content types
@@ -44,7 +44,7 @@ export type {
 	ToolCallUpdate,
 	ToolKind,
 	WebuiToGatewayEvents,
-} from "@remote-claude/core";
+} from "@mobvibe/core";
 
 // Re-export extraction functions
 export {
@@ -53,7 +53,7 @@ export {
 	extractSessionModeUpdate,
 	extractTextChunk,
 	extractToolCallUpdate,
-} from "@remote-claude/core";
+} from "@mobvibe/core";
 
 // Re-export API types used in socket events
 export type { ErrorDetail, SessionSummary } from "./api";

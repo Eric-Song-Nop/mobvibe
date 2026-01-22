@@ -4,7 +4,7 @@ import type {
 	CliRegistrationInfo,
 	CliStatusPayload,
 	SessionSummary,
-} from "@remote-claude/shared";
+} from "@mobvibe/shared";
 import type { Socket } from "socket.io";
 
 export type CliRecord = {

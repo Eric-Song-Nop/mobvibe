@@ -1,5 +1,5 @@
 // Re-export shared types
-export * from "@remote-claude/shared";
+export * from "@mobvibe/shared";
 
 // Import types needed for extraction functions and local types
 import type {
@@ -14,7 +14,7 @@ import type {
 	SessionSummary,
 	StopReason,
 	ToolCallUpdate,
-} from "@remote-claude/shared";
+} from "@mobvibe/shared";
 
 // Core-specific types (UI/extraction helpers)
 export type SessionTextChunk = {

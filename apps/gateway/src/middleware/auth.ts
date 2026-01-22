@@ -3,8 +3,8 @@
  * Validates session tokens using Better Auth.
  */
 
-import type { NextFunction, Request, Response } from "express";
 import { fromNodeHeaders } from "better-auth/node";
+import type { NextFunction, Request, Response } from "express";
 import { getAuth, isAuthEnabled } from "../lib/auth.js";
 
 /**

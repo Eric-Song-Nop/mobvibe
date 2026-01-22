@@ -7,15 +7,15 @@ import type {
 	SessionSummary,
 	StreamErrorPayload,
 	TerminalOutputEvent,
-} from "@remote-claude/shared";
+} from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
+import type { CliRegistry } from "../services/cli-registry.js";
 import {
 	closeSessionsForMachine,
 	isAuthEnabled,
 	updateMachineStatus,
 	validateMachineToken,
 } from "../services/db-service.js";
-import type { CliRegistry } from "../services/cli-registry.js";
 import type { SessionRouter } from "../services/session-router.js";
 
 /**

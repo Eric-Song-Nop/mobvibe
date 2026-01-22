@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import type { AcpBackendId } from "@remote-claude/shared";
+import type { AcpBackendId } from "@mobvibe/shared";
 
 export type AcpBackendConfig = {
 	id: AcpBackendId;

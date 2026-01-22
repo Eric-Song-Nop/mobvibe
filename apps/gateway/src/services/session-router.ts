@@ -19,15 +19,15 @@ import type {
 	SetSessionModelParams,
 	SetSessionModeParams,
 	StopReason,
-} from "@remote-claude/shared";
+} from "@mobvibe/shared";
 import type { Socket } from "socket.io";
+import type { CliRegistry } from "./cli-registry.js";
 import {
 	closeAcpSession,
 	createAcpSession,
 	isAuthEnabled,
 	updateAcpSessionState,
 } from "./db-service.js";
-import type { CliRegistry } from "./cli-registry.js";
 
 type PendingRpc<T> = {
 	requestId: string;

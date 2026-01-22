@@ -16,7 +16,7 @@ COPY apps/gateway ./apps/gateway
 RUN pnpm install --frozen-lockfile
 
 # Build all packages in order
-RUN pnpm --filter @remote-claude/shared build
+RUN pnpm --filter @mobvibe/shared build
 RUN pnpm --filter gateway build
 
 # Production image

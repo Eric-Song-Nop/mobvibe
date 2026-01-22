@@ -6,7 +6,7 @@ export {
 	createFallbackError,
 	isErrorDetail,
 	normalizeError,
-} from "@remote-claude/core/utils";
+} from "@mobvibe/core/utils";
 
 /**
  * Creates an ErrorDetail for a disconnected SSE stream.

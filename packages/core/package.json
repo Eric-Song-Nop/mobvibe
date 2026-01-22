@@ -1,5 +1,5 @@
 {
-	"name": "@remote-claude/core",
+	"name": "@mobvibe/core",
 	"version": "0.0.0",
 	"type": "module",
 	"exports": {
@@ -44,7 +44,7 @@
 		"format": "biome format --write ."
 	},
 	"dependencies": {
-		"@remote-claude/shared": "workspace:*",
+		"@mobvibe/shared": "workspace:*",
 		"i18next": "^25.7.4",
 		"socket.io-client": "^4.8.1",
 		"zustand": "^5.0.8"

@@ -7,7 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { getDb, isDbEnabled } from "../db/index.js";
-import { machines, acpSessions, users } from "../db/schema.js";
+import { acpSessions, machines, users } from "../db/schema.js";
 
 export type MachineTokenValidation = {
 	machineId: string;

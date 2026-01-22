@@ -1,5 +1,5 @@
 {
-	"name": "@remote-claude/shared",
+	"name": "@mobvibe/shared",
 	"version": "0.1.0",
 	"description": "Shared types for remote-claude (mobvibe) distributed ACP system",
 	"license": "MIT",

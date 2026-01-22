@@ -3,4 +3,4 @@ export {
 	cloneContentBlock,
 	cloneContentBlocks,
 	createDefaultContentBlocks,
-} from "@remote-claude/core/utils";
+} from "@mobvibe/core/utils";

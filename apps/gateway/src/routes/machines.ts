@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { Router } from "express";
+import { fromNodeHeaders } from "better-auth/node";
 import { eq } from "drizzle-orm";
-import { getAuth } from "../lib/auth.js";
+import type { Router } from "express";
 import { getDb } from "../db/index.js";
 import { machines } from "../db/schema.js";
-import { fromNodeHeaders } from "better-auth/node";
+import { getAuth } from "../lib/auth.js";
 
 /**
  * Generate a secure machine token.

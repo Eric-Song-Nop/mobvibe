@@ -1,8 +1,8 @@
 import { tauri } from "@daveyplate/better-auth-tauri/plugin";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { getDb, isDbEnabled } from "../db/index.js";
 import { getGatewayConfig } from "../config.js";
+import { getDb, isDbEnabled } from "../db/index.js";
 
 let authInstance: ReturnType<typeof betterAuth> | null = null;
 

@@ -1,11 +1,11 @@
-# @remote-claude/cli
+# @mobvibe/cli
 
 CLI daemon for remote-claude (mobvibe) - connects ACP-compatible agents to the gateway.
 
 ## Installation
 
 ```bash
-npm install -g @remote-claude/cli
+npm install -g @mobvibe/cli
 ```
 
 ## Usage

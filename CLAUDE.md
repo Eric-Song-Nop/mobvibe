@@ -244,16 +244,16 @@ src-tauri/
 - `tauri-plugin-os` - Platform detection
 
 **State Management:**
-- Uses `@remote-claude/core` stores via re-exports
+- Uses `@mobvibe/core` stores via re-exports
 - `lib/` contains local utilities and configurations
 - `lib/tauri-storage-adapter.ts` - Tauri Store adapter for Zustand persistence
 
 **Socket Integration:**
-- Uses `@remote-claude/core/socket` for Socket.io connection
+- Uses `@mobvibe/core/socket` for Socket.io connection
 - `hooks/useSocket.ts` - React hook wrapper for session subscriptions
 
 **API Layer:**
-- Uses `@remote-claude/core/api` for REST endpoints
+- Uses `@mobvibe/core/api` for REST endpoints
 - TanStack Query for data fetching and caching
 
 **Key Features:**
