@@ -24,8 +24,8 @@
 	},
 	"dependencies": {
 		"@convex-dev/better-auth": "^0.10.10",
-		"better-auth": "^1.2.12",
-		"convex": "^1.22.0"
+		"better-auth": "1.4.9",
+		"convex": "^1.31.6"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.3.11",
