@@ -1,4 +1,5 @@
 import type { AvailableCommand, ContentBlock, PermissionOutcome } from "./acp";
+import { getCachedToken } from "./auth";
 
 export type AcpConnectionState =
 	| "idle"
@@ -204,10 +205,17 @@ const requestJson = async <ResponseType>(
 	path: string,
 	options?: RequestInit,
 ): Promise<ResponseType> => {
+	const token = getCachedToken();
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+	};
+	if (token) {
+		headers.Authorization = `Bearer ${token}`;
+	}
 	const response = await fetch(`${API_BASE_URL}${path}`, {
 		...options,
 		headers: {
-			"Content-Type": "application/json",
+			...headers,
 			...options?.headers,
 		},
 	});

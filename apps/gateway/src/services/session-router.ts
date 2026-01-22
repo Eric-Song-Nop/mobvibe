@@ -21,6 +21,12 @@ import type {
 	StopReason,
 } from "@remote-claude/shared";
 import type { Socket } from "socket.io";
+import {
+	closeConvexSession,
+	createConvexSession,
+	isAuthEnabled,
+	updateConvexSessionState,
+} from "../lib/convex.js";
 import type { CliRegistry } from "./cli-registry.js";
 
 type PendingRpc<T> = {
@@ -52,35 +58,95 @@ export class SessionRouter {
 		}
 	}
 
-	async createSession(params: CreateSessionParams): Promise<SessionSummary> {
-		const cli = this.cliRegistry.getFirstCli();
+	/**
+	 * Create a new session.
+	 * @param params - Session creation parameters
+	 * @param userId - Optional user ID for routing to user's machine
+	 */
+	async createSession(
+		params: CreateSessionParams,
+		userId?: string,
+	): Promise<SessionSummary> {
+		// Route to user's machine if userId provided, otherwise first available
+		const cli = this.cliRegistry.getFirstCliForUser(userId);
 		if (!cli) {
-			throw new Error("No CLI connected");
+			throw new Error(
+				userId ? "No CLI connected for this user" : "No CLI connected",
+			);
 		}
-		return this.sendRpc<CreateSessionParams, SessionSummary>(
+
+		const result = await this.sendRpc<CreateSessionParams, SessionSummary>(
 			cli.socket,
 			"rpc:session:create",
 			params,
 		);
+
+		// Sync session to Convex if auth is enabled and machine has a token
+		if (isAuthEnabled() && cli.machineToken) {
+			await createConvexSession({
+				machineToken: cli.machineToken,
+				sessionId: result.sessionId,
+				title: result.title ?? `Session ${result.sessionId.slice(0, 8)}`,
+				backendId: result.backendId,
+				cwd: result.cwd,
+			});
+		}
+
+		return result;
 	}
 
-	async closeSession(params: CloseSessionParams): Promise<{ ok: boolean }> {
+	/**
+	 * Close a session.
+	 * @param params - Session close parameters
+	 * @param userId - Optional user ID for authorization
+	 */
+	async closeSession(
+		params: CloseSessionParams,
+		userId?: string,
+	): Promise<{ ok: boolean }> {
 		const cli = this.cliRegistry.getCliForSession(params.sessionId);
 		if (!cli) {
 			throw new Error("Session not found");
 		}
-		return this.sendRpc<CloseSessionParams, { ok: boolean }>(
+
+		// Authorization check if userId provided
+		if (userId && !this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)) {
+			throw new Error("Not authorized to close this session");
+		}
+
+		const result = await this.sendRpc<CloseSessionParams, { ok: boolean }>(
 			cli.socket,
 			"rpc:session:close",
 			params,
 		);
+
+		// Sync to Convex
+		if (isAuthEnabled()) {
+			await closeConvexSession(params.sessionId);
+		}
+
+		return result;
 	}
 
-	async cancelSession(params: CancelSessionParams): Promise<{ ok: boolean }> {
+	/**
+	 * Cancel a session's current operation.
+	 * @param params - Session cancel parameters
+	 * @param userId - Optional user ID for authorization
+	 */
+	async cancelSession(
+		params: CancelSessionParams,
+		userId?: string,
+	): Promise<{ ok: boolean }> {
 		const cli = this.cliRegistry.getCliForSession(params.sessionId);
 		if (!cli) {
 			throw new Error("Session not found");
 		}
+
+		// Authorization check if userId provided
+		if (userId && !this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)) {
+			throw new Error("Not authorized to cancel this session");
+		}
+
 		return this.sendRpc<CancelSessionParams, { ok: boolean }>(
 			cli.socket,
 			"rpc:session:cancel",
@@ -88,11 +154,24 @@ export class SessionRouter {
 		);
 	}
 
-	async setSessionMode(params: SetSessionModeParams): Promise<SessionSummary> {
+	/**
+	 * Set session mode.
+	 * @param params - Session mode parameters
+	 * @param userId - Optional user ID for authorization
+	 */
+	async setSessionMode(
+		params: SetSessionModeParams,
+		userId?: string,
+	): Promise<SessionSummary> {
 		const cli = this.cliRegistry.getCliForSession(params.sessionId);
 		if (!cli) {
 			throw new Error("Session not found");
 		}
+
+		if (userId && !this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)) {
+			throw new Error("Not authorized to modify this session");
+		}
+
 		return this.sendRpc<SetSessionModeParams, SessionSummary>(
 			cli.socket,
 			"rpc:session:mode",
@@ -100,13 +179,24 @@ export class SessionRouter {
 		);
 	}
 
+	/**
+	 * Set session model.
+	 * @param params - Session model parameters
+	 * @param userId - Optional user ID for authorization
+	 */
 	async setSessionModel(
 		params: SetSessionModelParams,
+		userId?: string,
 	): Promise<SessionSummary> {
 		const cli = this.cliRegistry.getCliForSession(params.sessionId);
 		if (!cli) {
 			throw new Error("Session not found");
 		}
+
+		if (userId && !this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)) {
+			throw new Error("Not authorized to modify this session");
+		}
+
 		return this.sendRpc<SetSessionModelParams, SessionSummary>(
 			cli.socket,
 			"rpc:session:model",
@@ -114,13 +204,24 @@ export class SessionRouter {
 		);
 	}
 
+	/**
+	 * Send a message to a session.
+	 * @param params - Message send parameters
+	 * @param userId - Optional user ID for authorization
+	 */
 	async sendMessage(
 		params: SendMessageParams,
+		userId?: string,
 	): Promise<{ stopReason: StopReason }> {
 		const cli = this.cliRegistry.getCliForSession(params.sessionId);
 		if (!cli) {
 			throw new Error("Session not found");
 		}
+
+		if (userId && !this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)) {
+			throw new Error("Not authorized to send messages to this session");
+		}
+
 		return this.sendRpc<SendMessageParams, { stopReason: StopReason }>(
 			cli.socket,
 			"rpc:message:send",
@@ -128,13 +229,24 @@ export class SessionRouter {
 		);
 	}
 
+	/**
+	 * Send a permission decision for a session.
+	 * @param params - Permission decision parameters
+	 * @param userId - Optional user ID for authorization
+	 */
 	async sendPermissionDecision(
 		params: PermissionDecisionPayload,
+		userId?: string,
 	): Promise<{ ok: boolean }> {
 		const cli = this.cliRegistry.getCliForSession(params.sessionId);
 		if (!cli) {
 			throw new Error("Session not found");
 		}
+
+		if (userId && !this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)) {
+			throw new Error("Not authorized to make permission decisions for this session");
+		}
+
 		return this.sendRpc<PermissionDecisionPayload, { ok: boolean }>(
 			cli.socket,
 			"rpc:permission:decision",
@@ -142,11 +254,24 @@ export class SessionRouter {
 		);
 	}
 
-	async getFsRoots(sessionId: string): Promise<FsRootsResponse> {
+	/**
+	 * Get file system roots for a session.
+	 * @param sessionId - Session ID
+	 * @param userId - Optional user ID for authorization
+	 */
+	async getFsRoots(
+		sessionId: string,
+		userId?: string,
+	): Promise<FsRootsResponse> {
 		const cli = this.cliRegistry.getCliForSession(sessionId);
 		if (!cli) {
 			throw new Error("Session not found");
 		}
+
+		if (userId && !this.cliRegistry.isSessionOwnedByUser(sessionId, userId)) {
+			throw new Error("Not authorized to access this session");
+		}
+
 		return this.sendRpc<{ sessionId: string }, FsRootsResponse>(
 			cli.socket,
 			"rpc:fs:roots",
@@ -154,11 +279,24 @@ export class SessionRouter {
 		);
 	}
 
-	async getFsEntries(params: FsEntriesParams): Promise<FsEntriesResponse> {
+	/**
+	 * Get file system entries for a session.
+	 * @param params - File system entries parameters
+	 * @param userId - Optional user ID for authorization
+	 */
+	async getFsEntries(
+		params: FsEntriesParams,
+		userId?: string,
+	): Promise<FsEntriesResponse> {
 		const cli = this.cliRegistry.getCliForSession(params.sessionId);
 		if (!cli) {
 			throw new Error("Session not found");
 		}
+
+		if (userId && !this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)) {
+			throw new Error("Not authorized to access this session");
+		}
+
 		return this.sendRpc<FsEntriesParams, FsEntriesResponse>(
 			cli.socket,
 			"rpc:fs:entries",
@@ -166,11 +304,24 @@ export class SessionRouter {
 		);
 	}
 
-	async getFsFile(params: FsFileParams): Promise<SessionFsFilePreview> {
+	/**
+	 * Get file content for a session.
+	 * @param params - File parameters
+	 * @param userId - Optional user ID for authorization
+	 */
+	async getFsFile(
+		params: FsFileParams,
+		userId?: string,
+	): Promise<SessionFsFilePreview> {
 		const cli = this.cliRegistry.getCliForSession(params.sessionId);
 		if (!cli) {
 			throw new Error("Session not found");
 		}
+
+		if (userId && !this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)) {
+			throw new Error("Not authorized to access this session");
+		}
+
 		return this.sendRpc<FsFileParams, SessionFsFilePreview>(
 			cli.socket,
 			"rpc:fs:file",
@@ -178,18 +329,43 @@ export class SessionRouter {
 		);
 	}
 
+	/**
+	 * Get resources for a session.
+	 * @param params - Resources parameters
+	 * @param userId - Optional user ID for authorization
+	 */
 	async getFsResources(
 		params: FsResourcesParams,
+		userId?: string,
 	): Promise<FsResourcesResponse> {
 		const cli = this.cliRegistry.getCliForSession(params.sessionId);
 		if (!cli) {
 			throw new Error("Session not found");
 		}
+
+		if (userId && !this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)) {
+			throw new Error("Not authorized to access this session");
+		}
+
 		return this.sendRpc<FsResourcesParams, FsResourcesResponse>(
 			cli.socket,
 			"rpc:fs:resources",
 			params,
 		);
+	}
+
+	/**
+	 * Update session state in Convex (called from session update events).
+	 */
+	async syncSessionState(
+		sessionId: string,
+		state: string,
+		title?: string,
+		cwd?: string,
+	): Promise<void> {
+		if (isAuthEnabled()) {
+			await updateConvexSessionState({ sessionId, state, title, cwd });
+		}
 	}
 
 	private sendRpc<TParams, TResult>(

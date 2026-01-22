@@ -1,6 +1,7 @@
 import { FolderOpenIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
+import { UserMenu } from "@/components/auth/UserMenu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { ChatSession } from "@/lib/chat-store";
@@ -62,6 +63,7 @@ export function AppHeader({
 						<HugeiconsIcon icon={FolderOpenIcon} strokeWidth={2} />
 					</Button>
 				) : null}
+				<UserMenu />
 			</div>
 
 			{statusMessage ? (

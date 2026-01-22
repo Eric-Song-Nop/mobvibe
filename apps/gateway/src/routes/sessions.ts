@@ -5,6 +5,11 @@ import {
 	type ErrorDetail,
 } from "@remote-claude/shared";
 import type { Router } from "express";
+import {
+	type AuthenticatedRequest,
+	getUserId,
+	optionalAuth,
+} from "../middleware/auth.js";
 import type { CliRegistry } from "../services/cli-registry.js";
 import type { SessionRouter } from "../services/session-router.js";
 
@@ -31,43 +36,75 @@ const buildRequestValidationError = (message = "Invalid request") =>
 		scope: "request",
 	});
 
+const buildAuthorizationError = (message = "Not authorized") =>
+	createErrorDetail({
+		code: "AUTHORIZATION_FAILED",
+		message,
+		retryable: false,
+		scope: "request",
+	});
+
 export function setupSessionRoutes(
 	router: Router,
 	cliRegistry: CliRegistry,
 	sessionRouter: SessionRouter,
 ) {
-	// List sessions
-	router.get("/sessions", (_request, response) => {
-		const sessions = cliRegistry.getAllSessions();
+	// Apply optional auth to all routes - userId will be available if authenticated
+	router.use(optionalAuth);
+
+	// List sessions - returns only user's sessions if authenticated
+	router.get("/sessions", (request: AuthenticatedRequest, response) => {
+		const userId = getUserId(request);
+		const sessions = userId
+			? cliRegistry.getSessionsForUser(userId)
+			: cliRegistry.getAllSessions();
 		response.json({ sessions });
 	});
 
-	// Create session
-	router.post("/session", async (request, response) => {
+	// List available backends - returns only user's backends if authenticated
+	router.get("/backends", (request: AuthenticatedRequest, response) => {
+		const userId = getUserId(request);
+		const { backends, defaultBackendId } = cliRegistry.getBackendsForUser(userId);
+		response.json({ backends, defaultBackendId });
+	});
+
+	// Create session - routes to user's machine if authenticated
+	router.post("/session", async (request: AuthenticatedRequest, response) => {
 		try {
 			const { cwd, title, backendId } = request.body ?? {};
-			const session = await sessionRouter.createSession({
-				cwd: typeof cwd === "string" && cwd.trim().length > 0 ? cwd : undefined,
-				title:
-					typeof title === "string" && title.trim().length > 0
-						? title.trim()
-						: undefined,
-				backendId:
-					typeof backendId === "string"
-						? (backendId as AcpBackendId)
-						: undefined,
-			});
+			const userId = getUserId(request);
+
+			const session = await sessionRouter.createSession(
+				{
+					cwd:
+						typeof cwd === "string" && cwd.trim().length > 0 ? cwd : undefined,
+					title:
+						typeof title === "string" && title.trim().length > 0
+							? title.trim()
+							: undefined,
+					backendId:
+						typeof backendId === "string"
+							? (backendId as AcpBackendId)
+							: undefined,
+				},
+				userId,
+			);
 			response.json(session);
 		} catch (error) {
-			respondError(
-				response,
-				createInternalError("service", getErrorMessage(error)),
-			);
+			const message = getErrorMessage(error);
+			if (message.includes("Not authorized") || message.includes("No CLI connected for this user")) {
+				respondError(response, buildAuthorizationError(message), 403);
+			} else {
+				respondError(
+					response,
+					createInternalError("service", message),
+				);
+			}
 		}
 	});
 
-	// Close session
-	router.post("/session/close", async (request, response) => {
+	// Close session - with authorization check
+	router.post("/session/close", async (request: AuthenticatedRequest, response) => {
 		const { sessionId } = request.body ?? {};
 		if (typeof sessionId !== "string") {
 			respondError(
@@ -79,18 +116,24 @@ export function setupSessionRoutes(
 		}
 
 		try {
-			await sessionRouter.closeSession({ sessionId });
+			const userId = getUserId(request);
+			await sessionRouter.closeSession({ sessionId }, userId);
 			response.json({ ok: true });
 		} catch (error) {
-			respondError(
-				response,
-				createInternalError("session", getErrorMessage(error)),
-			);
+			const message = getErrorMessage(error);
+			if (message.includes("Not authorized")) {
+				respondError(response, buildAuthorizationError(message), 403);
+			} else {
+				respondError(
+					response,
+					createInternalError("session", message),
+				);
+			}
 		}
 	});
 
-	// Cancel session
-	router.post("/session/cancel", async (request, response) => {
+	// Cancel session - with authorization check
+	router.post("/session/cancel", async (request: AuthenticatedRequest, response) => {
 		const { sessionId } = request.body ?? {};
 		if (typeof sessionId !== "string") {
 			respondError(
@@ -102,18 +145,24 @@ export function setupSessionRoutes(
 		}
 
 		try {
-			await sessionRouter.cancelSession({ sessionId });
+			const userId = getUserId(request);
+			await sessionRouter.cancelSession({ sessionId }, userId);
 			response.json({ ok: true });
 		} catch (error) {
-			respondError(
-				response,
-				createInternalError("session", getErrorMessage(error)),
-			);
+			const message = getErrorMessage(error);
+			if (message.includes("Not authorized")) {
+				respondError(response, buildAuthorizationError(message), 403);
+			} else {
+				respondError(
+					response,
+					createInternalError("session", message),
+				);
+			}
 		}
 	});
 
-	// Set session mode
-	router.post("/session/mode", async (request, response) => {
+	// Set session mode - with authorization check
+	router.post("/session/mode", async (request: AuthenticatedRequest, response) => {
 		const { sessionId, modeId } = request.body ?? {};
 		if (typeof sessionId !== "string" || typeof modeId !== "string") {
 			respondError(
@@ -125,18 +174,27 @@ export function setupSessionRoutes(
 		}
 
 		try {
-			const session = await sessionRouter.setSessionMode({ sessionId, modeId });
+			const userId = getUserId(request);
+			const session = await sessionRouter.setSessionMode(
+				{ sessionId, modeId },
+				userId,
+			);
 			response.json(session);
 		} catch (error) {
-			respondError(
-				response,
-				createInternalError("session", getErrorMessage(error)),
-			);
+			const message = getErrorMessage(error);
+			if (message.includes("Not authorized")) {
+				respondError(response, buildAuthorizationError(message), 403);
+			} else {
+				respondError(
+					response,
+					createInternalError("session", message),
+				);
+			}
 		}
 	});
 
-	// Set session model
-	router.post("/session/model", async (request, response) => {
+	// Set session model - with authorization check
+	router.post("/session/model", async (request: AuthenticatedRequest, response) => {
 		const { sessionId, modelId } = request.body ?? {};
 		if (typeof sessionId !== "string" || typeof modelId !== "string") {
 			respondError(
@@ -148,21 +206,27 @@ export function setupSessionRoutes(
 		}
 
 		try {
-			const session = await sessionRouter.setSessionModel({
-				sessionId,
-				modelId,
-			});
+			const userId = getUserId(request);
+			const session = await sessionRouter.setSessionModel(
+				{ sessionId, modelId },
+				userId,
+			);
 			response.json(session);
 		} catch (error) {
-			respondError(
-				response,
-				createInternalError("session", getErrorMessage(error)),
-			);
+			const message = getErrorMessage(error);
+			if (message.includes("Not authorized")) {
+				respondError(response, buildAuthorizationError(message), 403);
+			} else {
+				respondError(
+					response,
+					createInternalError("session", message),
+				);
+			}
 		}
 	});
 
-	// Send message
-	router.post("/message", async (request, response) => {
+	// Send message - with authorization check
+	router.post("/message", async (request: AuthenticatedRequest, response) => {
 		const { sessionId, prompt } = request.body ?? {};
 		if (typeof sessionId !== "string" || !Array.isArray(prompt)) {
 			respondError(
@@ -174,18 +238,27 @@ export function setupSessionRoutes(
 		}
 
 		try {
-			const result = await sessionRouter.sendMessage({ sessionId, prompt });
+			const userId = getUserId(request);
+			const result = await sessionRouter.sendMessage(
+				{ sessionId, prompt },
+				userId,
+			);
 			response.json(result);
 		} catch (error) {
-			respondError(
-				response,
-				createInternalError("session", getErrorMessage(error)),
-			);
+			const message = getErrorMessage(error);
+			if (message.includes("Not authorized")) {
+				respondError(response, buildAuthorizationError(message), 403);
+			} else {
+				respondError(
+					response,
+					createInternalError("session", message),
+				);
+			}
 		}
 	});
 
-	// Permission decision
-	router.post("/permission/decision", async (request, response) => {
+	// Permission decision - with authorization check
+	router.post("/permission/decision", async (request: AuthenticatedRequest, response) => {
 		const { sessionId, requestId, outcome } = request.body ?? {};
 		if (typeof sessionId !== "string" || typeof requestId !== "string") {
 			respondError(
@@ -197,17 +270,22 @@ export function setupSessionRoutes(
 		}
 
 		try {
-			await sessionRouter.sendPermissionDecision({
-				sessionId,
-				requestId,
-				outcome,
-			});
+			const userId = getUserId(request);
+			await sessionRouter.sendPermissionDecision(
+				{ sessionId, requestId, outcome },
+				userId,
+			);
 			response.json({ ok: true });
 		} catch (error) {
-			respondError(
-				response,
-				createInternalError("session", getErrorMessage(error)),
-			);
+			const message = getErrorMessage(error);
+			if (message.includes("Not authorized")) {
+				respondError(response, buildAuthorizationError(message), 403);
+			} else {
+				respondError(
+					response,
+					createInternalError("session", message),
+				);
+			}
 		}
 	});
 

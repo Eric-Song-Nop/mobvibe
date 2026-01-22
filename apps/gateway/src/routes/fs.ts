@@ -4,6 +4,11 @@ import {
 	type ErrorDetail,
 } from "@remote-claude/shared";
 import type { Router } from "express";
+import {
+	type AuthenticatedRequest,
+	getUserId,
+	optionalAuth,
+} from "../middleware/auth.js";
 import type { SessionRouter } from "../services/session-router.js";
 
 const getErrorMessage = (error: unknown) => {
@@ -29,9 +34,20 @@ const buildRequestValidationError = (message = "Invalid request") =>
 		scope: "request",
 	});
 
+const buildAuthorizationError = (message = "Not authorized") =>
+	createErrorDetail({
+		code: "AUTHORIZATION_FAILED",
+		message,
+		retryable: false,
+		scope: "request",
+	});
+
 export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
-	// Get session roots
-	router.get("/session/roots", async (request, response) => {
+	// Apply optional auth to all routes
+	router.use(optionalAuth);
+
+	// Get session roots - with authorization check
+	router.get("/session/roots", async (request: AuthenticatedRequest, response) => {
 		const sessionId =
 			typeof request.query.sessionId === "string"
 				? request.query.sessionId
@@ -46,18 +62,24 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 		}
 
 		try {
-			const result = await sessionRouter.getFsRoots(sessionId);
+			const userId = getUserId(request);
+			const result = await sessionRouter.getFsRoots(sessionId, userId);
 			response.json(result);
 		} catch (error) {
-			respondError(
-				response,
-				createInternalError("request", getErrorMessage(error)),
-			);
+			const message = getErrorMessage(error);
+			if (message.includes("Not authorized")) {
+				respondError(response, buildAuthorizationError(message), 403);
+			} else {
+				respondError(
+					response,
+					createInternalError("request", message),
+				);
+			}
 		}
 	});
 
-	// Get session entries
-	router.get("/session/entries", async (request, response) => {
+	// Get session entries - with authorization check
+	router.get("/session/entries", async (request: AuthenticatedRequest, response) => {
 		const sessionId =
 			typeof request.query.sessionId === "string"
 				? request.query.sessionId
@@ -74,18 +96,24 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 		}
 
 		try {
-			const result = await sessionRouter.getFsEntries({ sessionId, path });
+			const userId = getUserId(request);
+			const result = await sessionRouter.getFsEntries({ sessionId, path }, userId);
 			response.json(result);
 		} catch (error) {
-			respondError(
-				response,
-				createInternalError("request", getErrorMessage(error)),
-			);
+			const message = getErrorMessage(error);
+			if (message.includes("Not authorized")) {
+				respondError(response, buildAuthorizationError(message), 403);
+			} else {
+				respondError(
+					response,
+					createInternalError("request", message),
+				);
+			}
 		}
 	});
 
-	// Get session file
-	router.get("/session/file", async (request, response) => {
+	// Get session file - with authorization check
+	router.get("/session/file", async (request: AuthenticatedRequest, response) => {
 		const sessionId =
 			typeof request.query.sessionId === "string"
 				? request.query.sessionId
@@ -102,18 +130,24 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 		}
 
 		try {
-			const result = await sessionRouter.getFsFile({ sessionId, path });
+			const userId = getUserId(request);
+			const result = await sessionRouter.getFsFile({ sessionId, path }, userId);
 			response.json(result);
 		} catch (error) {
-			respondError(
-				response,
-				createInternalError("request", getErrorMessage(error)),
-			);
+			const message = getErrorMessage(error);
+			if (message.includes("Not authorized")) {
+				respondError(response, buildAuthorizationError(message), 403);
+			} else {
+				respondError(
+					response,
+					createInternalError("request", message),
+				);
+			}
 		}
 	});
 
-	// Get session resources
-	router.get("/session/resources", async (request, response) => {
+	// Get session resources - with authorization check
+	router.get("/session/resources", async (request: AuthenticatedRequest, response) => {
 		const sessionId =
 			typeof request.query.sessionId === "string"
 				? request.query.sessionId
@@ -128,13 +162,19 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 		}
 
 		try {
-			const result = await sessionRouter.getFsResources({ sessionId });
+			const userId = getUserId(request);
+			const result = await sessionRouter.getFsResources({ sessionId }, userId);
 			response.json(result);
 		} catch (error) {
-			respondError(
-				response,
-				createInternalError("request", getErrorMessage(error)),
-			);
+			const message = getErrorMessage(error);
+			if (message.includes("Not authorized")) {
+				respondError(response, buildAuthorizationError(message), 403);
+			} else {
+				respondError(
+					response,
+					createInternalError("request", message),
+				);
+			}
 		}
 	});
 

@@ -300,6 +300,7 @@ export type CliStatusPayload = {
 	connected: boolean;
 	hostname?: string;
 	sessionCount?: number;
+	userId?: string;
 };
 
 // Socket.io event interfaces

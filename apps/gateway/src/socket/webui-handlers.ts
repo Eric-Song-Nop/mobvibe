@@ -8,8 +8,19 @@ import type {
 	TerminalOutputEvent,
 } from "@remote-claude/shared";
 import type { Server, Socket } from "socket.io";
+import { isAuthEnabled, validateSessionToken } from "../lib/convex.js";
 import type { CliRegistry } from "../services/cli-registry.js";
 import type { SessionRouter } from "../services/session-router.js";
+
+/**
+ * Extended Socket with user context.
+ */
+interface AuthenticatedSocket extends Socket {
+	data: {
+		userId?: string;
+		userEmail?: string;
+	};
+}
 
 export function setupWebuiHandlers(
 	io: Server,
@@ -18,8 +29,11 @@ export function setupWebuiHandlers(
 ) {
 	const webuiNamespace = io.of("/webui");
 
-	// Track session subscriptions
-	const sessionSubscriptions = new Map<string, Set<string>>(); // sessionId -> Set of socket IDs
+	// Track session subscriptions with user context
+	// sessionId -> Map<socketId, userId>
+	const sessionSubscriptions = new Map<string, Map<string, string | undefined>>();
+	// socketId -> userId (for quick lookup)
+	const socketUserMap = new Map<string, string | undefined>();
 
 	const emitToSubscribers = (
 		sessionId: string,
@@ -30,56 +44,127 @@ export function setupWebuiHandlers(
 		if (!subscribers) {
 			return;
 		}
-		for (const socketId of subscribers) {
-			const socket = webuiNamespace.sockets.get(socketId);
+		for (const socketId of subscribers.keys()) {
+			const socket = webuiNamespace.sockets.get(socketId) as
+				| AuthenticatedSocket
+				| undefined;
 			if (socket) {
 				socket.emit(event, payload);
 			}
 		}
 	};
 
-	// Emit to all webui clients
+	// Emit to user's sockets only
+	const emitToUser = (userId: string, event: string, payload: unknown) => {
+		for (const socket of webuiNamespace.sockets.values()) {
+			const authSocket = socket as AuthenticatedSocket;
+			if (authSocket.data.userId === userId) {
+				socket.emit(event, payload);
+			}
+		}
+	};
+
+	// Emit to all webui clients (filtered by user if auth enabled)
 	const emitToAll = (event: string, payload: unknown) => {
 		webuiNamespace.emit(event, payload);
 	};
 
-	// Forward CLI status to webui
+	// Forward CLI status to webui (user-filtered)
 	cliRegistry.onCliStatus((payload: CliStatusPayload) => {
-		emitToAll("cli:status", payload);
+		if (payload.userId) {
+			// Only emit to the user who owns this CLI
+			emitToUser(payload.userId, "cli:status", payload);
+		} else {
+			// Auth disabled - emit to all
+			emitToAll("cli:status", payload);
+		}
 	});
 
 	// Forward session updates to subscribers
 	cliRegistry.on(
 		"sessions:updated",
 		(_machineId: string, sessions: SessionSummary[]) => {
+			// This event is emitted to all for now - filtering happens at query time
 			emitToAll("sessions:list", sessions);
 		},
 	);
 
-	webuiNamespace.on("connection", (socket: Socket) => {
+	webuiNamespace.on("connection", async (socket: Socket) => {
+		const authSocket = socket as AuthenticatedSocket;
+		authSocket.data = {};
+
 		console.log(`[gateway] Webui connected: ${socket.id}`);
 
-		// Send current CLI status
-		for (const cli of cliRegistry.getAllClis()) {
+		// Authenticate via handshake token if auth is enabled
+		if (isAuthEnabled()) {
+			const token = socket.handshake.auth?.token as string | undefined;
+
+			if (token) {
+				const user = await validateSessionToken(token);
+				if (user) {
+					authSocket.data.userId = user.userId;
+					authSocket.data.userEmail = user.email;
+					socketUserMap.set(socket.id, user.userId);
+					console.log(
+						`[gateway] Webui authenticated: ${socket.id} as ${user.email}`,
+					);
+				} else {
+					console.log(
+						`[gateway] Webui auth failed: ${socket.id} (invalid token)`,
+					);
+					// Don't disconnect - allow unauthenticated access with limited data
+				}
+			} else {
+				console.log(
+					`[gateway] Webui connected without token: ${socket.id}`,
+				);
+			}
+		}
+
+		const userId = authSocket.data.userId;
+
+		// Send current CLI status - filtered by user if authenticated
+		const clis = userId
+			? cliRegistry.getClisForUser(userId)
+			: cliRegistry.getAllClis();
+
+		for (const cli of clis) {
 			socket.emit("cli:status", {
 				machineId: cli.machineId,
 				connected: true,
 				hostname: cli.hostname,
 				sessionCount: cli.sessions.length,
+				userId: cli.userId,
 			});
 		}
 
-		// Send current sessions
-		socket.emit("sessions:list", cliRegistry.getAllSessions());
+		// Send current sessions - filtered by user if authenticated
+		const sessions = userId
+			? cliRegistry.getSessionsForUser(userId)
+			: cliRegistry.getAllSessions();
 
-		// Subscribe to session updates
+		socket.emit("sessions:list", sessions);
+
+		// Subscribe to session updates - with ownership check
 		socket.on("subscribe:session", (payload: { sessionId: string }) => {
 			const { sessionId } = payload;
-			if (!sessionSubscriptions.has(sessionId)) {
-				sessionSubscriptions.set(sessionId, new Set());
+
+			// Check ownership if auth enabled
+			if (userId && !cliRegistry.isSessionOwnedByUser(sessionId, userId)) {
+				socket.emit("subscription:error", {
+					sessionId,
+					error: "Not authorized to subscribe to this session",
+				});
+				return;
 			}
-			sessionSubscriptions.get(sessionId)!.add(socket.id);
-			console.log(`[gateway] Webui ${socket.id} subscribed to ${sessionId}`);
+
+			if (!sessionSubscriptions.has(sessionId)) {
+				sessionSubscriptions.set(sessionId, new Map());
+			}
+			sessionSubscriptions.get(sessionId)!.set(socket.id, userId);
+			console.log(
+				`[gateway] Webui ${socket.id} subscribed to ${sessionId}${userId ? ` (user: ${userId})` : ""}`,
+			);
 		});
 
 		// Unsubscribe from session updates
@@ -91,12 +176,25 @@ export function setupWebuiHandlers(
 			);
 		});
 
-		// Permission decision from webui
+		// Permission decision from webui - with ownership check
 		socket.on(
 			"permission:decision",
 			async (payload: PermissionDecisionPayload) => {
 				try {
-					await sessionRouter.sendPermissionDecision(payload);
+					// Check ownership if auth enabled
+					if (
+						userId &&
+						!cliRegistry.isSessionOwnedByUser(payload.sessionId, userId)
+					) {
+						socket.emit("permission:error", {
+							sessionId: payload.sessionId,
+							requestId: payload.requestId,
+							error: "Not authorized to make decisions for this session",
+						});
+						return;
+					}
+
+					await sessionRouter.sendPermissionDecision(payload, userId);
 				} catch (error) {
 					console.error("[gateway] Permission decision error:", error);
 				}
@@ -109,6 +207,7 @@ export function setupWebuiHandlers(
 			for (const subscribers of sessionSubscriptions.values()) {
 				subscribers.delete(socket.id);
 			}
+			socketUserMap.delete(socket.id);
 			console.log(`[gateway] Webui disconnected: ${socket.id}`);
 		});
 	});
@@ -117,8 +216,13 @@ export function setupWebuiHandlers(
 	return {
 		emitToAll,
 		emitToSubscribers,
+		emitToUser,
 		emitSessionUpdate: (notification: SessionNotification) => {
-			emitToSubscribers(notification.sessionId, "session:update", notification);
+			emitToSubscribers(
+				notification.sessionId,
+				"session:update",
+				notification,
+			);
 		},
 		emitPermissionRequest: (payload: PermissionRequestPayload) => {
 			emitToSubscribers(payload.sessionId, "permission:request", payload);

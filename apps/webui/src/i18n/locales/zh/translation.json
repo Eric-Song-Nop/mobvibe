@@ -180,5 +180,38 @@
 		"permissionRequestDetail": "工具：{{tool}}",
 		"sessionError": "会话发生错误",
 		"responseCompleted": "回复已完成"
+	},
+	"auth": {
+		"signIn": "登录",
+		"signInDescription": "登录以访问您的会话和设备",
+		"createAccount": "创建账号",
+		"createAccountDescription": "创建账号开始使用",
+		"email": "邮箱",
+		"emailPlaceholder": "your@email.com",
+		"password": "密码",
+		"passwordPlaceholder": "输入密码",
+		"name": "姓名",
+		"namePlaceholder": "您的姓名（可选）",
+		"loading": "请稍候...",
+		"orContinueWith": "或使用以下方式",
+		"noAccount": "没有账号？",
+		"haveAccount": "已有账号？",
+		"signOut": "退出登录",
+		"profile": "个人资料",
+		"settings": "设置"
+	},
+	"machines": {
+		"title": "设备",
+		"empty": "暂无连接的设备",
+		"online": "在线",
+		"offline": "离线",
+		"sessions": "{{count}} 个会话",
+		"register": "注册设备",
+		"registerDescription": "在您的设备上运行以下命令以连接：",
+		"copyCommand": "复制命令",
+		"commandCopied": "命令已复制到剪贴板",
+		"remove": "移除",
+		"removeTitle": "移除设备？",
+		"removeDescription": "这将断开设备连接并关闭所有会话。"
 	}
 }

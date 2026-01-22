@@ -2,6 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { SessionManager } from "../acp/session-manager.js";
+import { getMachineToken } from "../auth/credentials.js";
 import type { CliConfig } from "../config.js";
 import { SocketClient } from "./socket-client.js";
 
@@ -84,35 +85,54 @@ export class DaemonManager {
 			return;
 		}
 
+		// Check if process actually exists
 		try {
-			process.kill(pid, "SIGTERM");
-			console.log(`Sent SIGTERM to daemon (PID ${pid})`);
+			process.kill(pid, 0);
+		} catch {
+			console.log("Daemon process not found, cleaning up PID file");
+			await this.removePidFile();
+			return;
+		}
 
-			// Wait for process to exit
-			let attempts = 0;
-			while (attempts < 30) {
+		try {
+			console.log(`Sending SIGTERM to daemon (PID ${pid})...`);
+			process.kill(pid, "SIGTERM");
+
+			// Wait for process to exit (up to 5 seconds)
+			const startTime = Date.now();
+			const timeout = 5000;
+
+			while (Date.now() - startTime < timeout) {
+				await new Promise((resolve) => setTimeout(resolve, 100));
 				try {
 					process.kill(pid, 0);
-					await new Promise((resolve) => setTimeout(resolve, 100));
-					attempts++;
+					// Process still running
 				} catch {
 					// Process exited
-					console.log("Daemon stopped");
+					console.log("Daemon stopped gracefully");
 					await this.removePidFile();
 					return;
 				}
 			}
 
-			// Force kill if still running
+			// Process didn't exit gracefully, force kill
+			console.log("Daemon did not stop gracefully, sending SIGKILL...");
 			try {
 				process.kill(pid, "SIGKILL");
+				// Wait a bit for SIGKILL to take effect
+				await new Promise((resolve) => setTimeout(resolve, 500));
 				console.log("Daemon force killed");
 			} catch {
 				// Already dead
+				console.log("Daemon already stopped");
 			}
 			await this.removePidFile();
 		} catch (error) {
-			console.error("Failed to stop daemon:", error);
+			if (error instanceof Error && "code" in error && error.code === "ESRCH") {
+				console.log("Daemon process not found, cleaning up PID file");
+			} else {
+				console.error("Failed to stop daemon:", error);
+			}
 			await this.removePidFile();
 		}
 	}
@@ -123,38 +143,49 @@ export class DaemonManager {
 			`${new Date().toISOString().replace(/[:.]/g, "-")}-daemon.log`,
 		);
 
-		const child = spawn(
-			process.argv[0],
-			[...process.argv.slice(1), "--foreground"],
-			{
-				detached: true,
-				stdio: ["ignore", "pipe", "pipe"],
-				env: {
-					...process.env,
-					MOBVIBE_GATEWAY_URL: this.config.gatewayUrl,
-				},
+		// Filter out --foreground if already present, then add it
+		const args = process.argv
+			.slice(1)
+			.filter((arg) => arg !== "--foreground" && arg !== "-f");
+		args.push("--foreground");
+
+		const child = spawn(process.argv[0], args, {
+			detached: true,
+			stdio: ["ignore", "pipe", "pipe"],
+			env: {
+				...process.env,
+				MOBVIBE_GATEWAY_URL: this.config.gatewayUrl,
 			},
-		);
+		});
 
 		if (!child.pid) {
 			throw new Error("Failed to spawn daemon process");
 		}
 
-		// Write PID file immediately
-		await this.writePidFile(child.pid);
-
-		// Create log file stream
+		// Create log file stream before writing PID
 		const logStream = await fs.open(logFile, "a");
 		const fileHandle = logStream;
 
-		child.stdout?.on("data", async (data) => {
-			await fileHandle.write(`[stdout] ${data}`);
+		child.stdout?.on("data", (data: Buffer) => {
+			fileHandle.write(`[stdout] ${data.toString()}`).catch(() => {});
 		});
 
-		child.stderr?.on("data", async (data) => {
-			await fileHandle.write(`[stderr] ${data}`);
+		child.stderr?.on("data", (data: Buffer) => {
+			fileHandle.write(`[stderr] ${data.toString()}`).catch(() => {});
 		});
 
+		// Handle child exit to clean up
+		child.on("exit", (code, signal) => {
+			fileHandle
+				.write(`[exit] Process exited with code ${code}, signal ${signal}\n`)
+				.catch(() => {});
+			fileHandle.close().catch(() => {});
+		});
+
+		// Write PID file after setup
+		await this.writePidFile(child.pid);
+
+		// Detach from parent
 		child.unref();
 
 		console.log(`Daemon started with PID ${child.pid}`);
@@ -169,22 +200,53 @@ export class DaemonManager {
 		console.log(`[mobvibe-cli] Gateway URL: ${this.config.gatewayUrl}`);
 		console.log(`[mobvibe-cli] Machine ID: ${this.config.machineId}`);
 
+		// Load machine token for authentication
+		const machineToken = await getMachineToken();
+		if (machineToken) {
+			console.log(`[mobvibe-cli] Authenticated with machine token`);
+		} else {
+			console.log(
+				`[mobvibe-cli] No machine token found. Run 'mobvibe login' to authenticate.`,
+			);
+		}
+
 		const sessionManager = new SessionManager(this.config);
 		const socketClient = new SocketClient({
 			config: this.config,
 			sessionManager,
+			machineToken,
 		});
 
+		let shuttingDown = false;
+
 		const shutdown = async (signal: string) => {
+			if (shuttingDown) {
+				console.log(`[mobvibe-cli] Already shutting down, ignoring ${signal}`);
+				return;
+			}
+			shuttingDown = true;
+
 			console.log(`\n[mobvibe-cli] Received ${signal}, shutting down...`);
-			socketClient.disconnect();
-			await sessionManager.closeAll();
-			await this.removePidFile();
+
+			try {
+				socketClient.disconnect();
+				await sessionManager.closeAll();
+				await this.removePidFile();
+				console.log("[mobvibe-cli] Shutdown complete");
+			} catch (error) {
+				console.error("[mobvibe-cli] Error during shutdown:", error);
+			}
+
 			process.exit(0);
 		};
 
-		process.on("SIGINT", () => void shutdown("SIGINT"));
-		process.on("SIGTERM", () => void shutdown("SIGTERM"));
+		// Use synchronous-style handlers to ensure cleanup completes
+		process.on("SIGINT", () => {
+			shutdown("SIGINT").catch(console.error);
+		});
+		process.on("SIGTERM", () => {
+			shutdown("SIGTERM").catch(console.error);
+		});
 
 		socketClient.connect();
 

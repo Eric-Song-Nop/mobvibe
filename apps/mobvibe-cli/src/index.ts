@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { login, logout, loginStatus } from "./auth/login.js";
 import { getCliConfig } from "./config.js";
 import { DaemonManager } from "./daemon/daemon.js";
 
@@ -64,6 +65,36 @@ program
 			follow: options.follow,
 			lines: Number.parseInt(options.lines, 10),
 		});
+	});
+
+program
+	.command("login")
+	.description("Authenticate with the gateway")
+	.option("--webui <url>", "WebUI URL for authentication", "http://localhost:5173")
+	.option("--name <name>", "Machine name")
+	.action(async (options) => {
+		const result = await login({
+			webuiUrl: options.webui,
+			machineName: options.name,
+		});
+		if (!result.success) {
+			console.error(`Login failed: ${result.error}`);
+			process.exit(1);
+		}
+	});
+
+program
+	.command("logout")
+	.description("Remove stored credentials")
+	.action(async () => {
+		await logout();
+	});
+
+program
+	.command("auth-status")
+	.description("Show authentication status")
+	.action(async () => {
+		await loginStatus();
 	});
 
 export async function run() {

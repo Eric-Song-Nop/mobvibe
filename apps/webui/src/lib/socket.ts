@@ -10,6 +10,7 @@ import type {
 	WebuiToGatewayEvents,
 } from "./acp";
 import type { SessionSummary } from "./api";
+import { getCachedToken } from "./auth";
 
 type TypedSocket = Socket<GatewayToWebuiEvents, WebuiToGatewayEvents>;
 
@@ -32,6 +33,7 @@ class GatewaySocket {
 			return this.socket;
 		}
 
+		const token = getCachedToken();
 		this.socket = io(`${GATEWAY_URL}/webui`, {
 			path: "/socket.io",
 			reconnection: true,
@@ -40,6 +42,7 @@ class GatewaySocket {
 			reconnectionDelayMax: 10000,
 			transports: ["websocket"],
 			autoConnect: true,
+			auth: token ? { token } : undefined,
 		});
 
 		this.socket.on("connect", () => {

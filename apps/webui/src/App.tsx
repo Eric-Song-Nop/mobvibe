@@ -1,11 +1,14 @@
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { AppHeader } from "@/components/app/AppHeader";
 import { AppSidebar } from "@/components/app/AppSidebar";
 import { ChatFooter } from "@/components/app/ChatFooter";
 import { ChatMessageList } from "@/components/app/ChatMessageList";
 import { CreateSessionDialog } from "@/components/app/CreateSessionDialog";
 import { FileExplorerDialog } from "@/components/app/FileExplorerDialog";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { MachinesSidebar } from "@/components/machines/MachinesSidebar";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/toaster";
@@ -23,8 +26,10 @@ import {
 import { ensureNotificationPermission } from "@/lib/notifications";
 import { useUiStore } from "@/lib/ui-store";
 import { buildSessionTitle, getStatusVariant } from "@/lib/ui-utils";
+import { LoginPage } from "@/pages/LoginPage";
+import { MachineCallbackPage } from "@/pages/MachineCallbackPage";
 
-export function App() {
+function MainApp() {
 	const { t } = useTranslation();
 	const {
 		sessions,
@@ -398,6 +403,8 @@ export function App() {
 					initialFilePath={filePreviewPath}
 				/>
 
+				<MachinesSidebar />
+
 				<AppSidebar
 					sessions={sessionList}
 					activeSessionId={activeSessionId}
@@ -442,6 +449,55 @@ export function App() {
 				</div>
 			</div>
 		</ThemeProvider>
+	);
+}
+
+export function App() {
+	const { isAuthenticated, isLoading, isAuthEnabled } = useAuth();
+	const navigate = useNavigate();
+
+	// Show loading state while checking auth
+	if (isLoading) {
+		return (
+			<ThemeProvider>
+				<div className="flex min-h-screen items-center justify-center bg-muted/40">
+					<div className="text-muted-foreground">Loading...</div>
+				</div>
+			</ThemeProvider>
+		);
+	}
+
+	return (
+		<Routes>
+			{/* Machine registration callback from CLI login */}
+			<Route path="/auth/machine-callback" element={<MachineCallbackPage />} />
+
+			{/* Login page */}
+			<Route
+				path="/login"
+				element={
+					isAuthenticated || !isAuthEnabled ? (
+						<Navigate to="/" replace />
+					) : (
+						<ThemeProvider>
+							<LoginPage onSuccess={() => navigate("/")} />
+						</ThemeProvider>
+					)
+				}
+			/>
+
+			{/* Main app - requires auth when enabled */}
+			<Route
+				path="/*"
+				element={
+					!isAuthEnabled || isAuthenticated ? (
+						<MainApp />
+					) : (
+						<Navigate to="/login" replace />
+					)
+				}
+			/>
+		</Routes>
 	);
 }
 

@@ -1,0 +1,10 @@
+# Build output
+dist/
+
+# Convex generated files
+convex/_generated/
+
+# Node modules
+node_modules/
+
+.env.local

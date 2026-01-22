@@ -59,6 +59,7 @@ export type {
 // Socket event types
 export type {
 	CancelSessionParams,
+	CliErrorPayload,
 	CliRegistrationInfo,
 	CliStatusPayload,
 	CliToGatewayEvents,

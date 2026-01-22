@@ -16,11 +16,14 @@ import type {
 } from "@remote-claude/shared";
 import { io, type Socket } from "socket.io-client";
 import type { SessionManager } from "../acp/session-manager.js";
+import { getMachineToken } from "../auth/credentials.js";
 import type { CliConfig } from "../config.js";
 
 type SocketClientOptions = {
 	config: CliConfig;
 	sessionManager: SessionManager;
+	/** Machine token for authentication (loaded from credentials) */
+	machineToken?: string;
 };
 
 const SESSION_ROOT_NAME = "Working Directory";
@@ -131,6 +134,12 @@ export class SocketClient extends EventEmitter {
 
 		this.socket.on("cli:registered", (info) => {
 			console.log(`[mobvibe-cli] Registered with gateway: ${info.machineId}`);
+		});
+
+		// Handle authentication errors
+		this.socket.on("cli:error", (error) => {
+			console.error(`[mobvibe-cli] Authentication error: ${error.message}`);
+			this.emit("auth_error", error);
 		});
 	}
 
@@ -402,7 +411,7 @@ export class SocketClient extends EventEmitter {
 	}
 
 	private register() {
-		const { config, sessionManager } = this.options;
+		const { config, sessionManager, machineToken } = this.options;
 		this.socket.emit("cli:register", {
 			machineId: config.machineId,
 			hostname: config.hostname,
@@ -412,6 +421,8 @@ export class SocketClient extends EventEmitter {
 				backendLabel: backend.label,
 			})),
 			defaultBackendId: config.defaultAcpBackendId,
+			// Include machine token for authentication
+			machineToken,
 		});
 		// Send current sessions list
 		this.socket.emit("sessions:list", sessionManager.listSessions());

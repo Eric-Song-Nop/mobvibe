@@ -21,6 +21,7 @@ export type CliConfig = {
 	pidFile: string;
 	machineId: string;
 	hostname: string;
+	platform: string;
 };
 
 const ACP_BACKENDS: Record<AcpBackendId, Omit<AcpBackendConfig, "id">> = {
@@ -117,5 +118,6 @@ export const getCliConfig = (): CliConfig => {
 		pidFile: path.join(homePath, "daemon.pid"),
 		machineId: env.MOBVIBE_MACHINE_ID ?? generateMachineId(),
 		hostname: os.hostname(),
+		platform: os.platform(),
 	};
 };

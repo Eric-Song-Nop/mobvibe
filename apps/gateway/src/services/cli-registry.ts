@@ -1,29 +1,58 @@
 import { EventEmitter } from "node:events";
 import type {
+	AcpBackendSummary,
 	CliRegistrationInfo,
 	CliStatusPayload,
 	SessionSummary,
 } from "@remote-claude/shared";
 import type { Socket } from "socket.io";
 
-type CliRecord = {
+export type CliRecord = {
 	machineId: string;
 	hostname: string;
 	version?: string;
 	socket: Socket;
 	connectedAt: Date;
 	sessions: SessionSummary[];
+	backends: AcpBackendSummary[];
+	defaultBackendId?: string;
+	/** User ID from Convex (only set when auth is enabled) */
+	userId?: string;
+	/** Machine token used to authenticate this CLI */
+	machineToken?: string;
 };
 
 export class CliRegistry extends EventEmitter {
 	private cliByMachineId = new Map<string, CliRecord>();
 	private cliBySocketId = new Map<string, CliRecord>();
+	/** Index of machines by user ID for efficient lookup */
+	private clisByUserId = new Map<string, Set<string>>();
 
-	register(socket: Socket, info: CliRegistrationInfo): CliRecord {
+	/**
+	 * Register a CLI connection.
+	 * @param socket - The Socket.io socket
+	 * @param info - CLI registration info
+	 * @param authInfo - Optional auth info (userId, machineToken) from Convex validation
+	 */
+	register(
+		socket: Socket,
+		info: CliRegistrationInfo,
+		authInfo?: { userId: string; machineToken: string },
+	): CliRecord {
 		// Remove any existing connection for this machine
 		const existing = this.cliByMachineId.get(info.machineId);
 		if (existing) {
 			this.cliBySocketId.delete(existing.socket.id);
+			// Remove from user index if it had a userId
+			if (existing.userId) {
+				const userMachines = this.clisByUserId.get(existing.userId);
+				if (userMachines) {
+					userMachines.delete(existing.machineId);
+					if (userMachines.size === 0) {
+						this.clisByUserId.delete(existing.userId);
+					}
+				}
+			}
 		}
 
 		const record: CliRecord = {
@@ -33,16 +62,31 @@ export class CliRegistry extends EventEmitter {
 			socket,
 			connectedAt: new Date(),
 			sessions: [],
+			backends: info.backends ?? [],
+			defaultBackendId: info.defaultBackendId,
+			userId: authInfo?.userId,
+			machineToken: authInfo?.machineToken,
 		};
 
 		this.cliByMachineId.set(info.machineId, record);
 		this.cliBySocketId.set(socket.id, record);
+
+		// Add to user index if authenticated
+		if (authInfo?.userId) {
+			let userMachines = this.clisByUserId.get(authInfo.userId);
+			if (!userMachines) {
+				userMachines = new Set();
+				this.clisByUserId.set(authInfo.userId, userMachines);
+			}
+			userMachines.add(info.machineId);
+		}
 
 		this.emitCliStatus({
 			machineId: info.machineId,
 			connected: true,
 			hostname: info.hostname,
 			sessionCount: 0,
+			userId: authInfo?.userId,
 		});
 
 		return record;
@@ -57,10 +101,22 @@ export class CliRegistry extends EventEmitter {
 		this.cliBySocketId.delete(socketId);
 		this.cliByMachineId.delete(record.machineId);
 
+		// Remove from user index
+		if (record.userId) {
+			const userMachines = this.clisByUserId.get(record.userId);
+			if (userMachines) {
+				userMachines.delete(record.machineId);
+				if (userMachines.size === 0) {
+					this.clisByUserId.delete(record.userId);
+				}
+			}
+		}
+
 		this.emitCliStatus({
 			machineId: record.machineId,
 			connected: false,
 			hostname: record.hostname,
+			userId: record.userId,
 		});
 
 		return record;
@@ -107,6 +163,116 @@ export class CliRegistry extends EventEmitter {
 	getFirstCli(): CliRecord | undefined {
 		const clis = this.getAllClis();
 		return clis[0];
+	}
+
+	/**
+	 * Get all CLIs belonging to a specific user.
+	 */
+	getClisForUser(userId: string): CliRecord[] {
+		const machineIds = this.clisByUserId.get(userId);
+		if (!machineIds) {
+			return [];
+		}
+		const records: CliRecord[] = [];
+		for (const machineId of machineIds) {
+			const record = this.cliByMachineId.get(machineId);
+			if (record) {
+				records.push(record);
+			}
+		}
+		return records;
+	}
+
+	/**
+	 * Get the first available CLI for a user.
+	 * Falls back to getFirstCli() if userId is not provided (backwards compatibility).
+	 */
+	getFirstCliForUser(userId?: string): CliRecord | undefined {
+		if (!userId) {
+			return this.getFirstCli();
+		}
+		const clis = this.getClisForUser(userId);
+		return clis[0];
+	}
+
+	/**
+	 * Get all sessions for a specific user.
+	 */
+	getSessionsForUser(userId: string): SessionSummary[] {
+		const sessions: SessionSummary[] = [];
+		const clis = this.getClisForUser(userId);
+		for (const cli of clis) {
+			sessions.push(...cli.sessions);
+		}
+		return sessions;
+	}
+
+	/**
+	 * Check if a session belongs to a specific user.
+	 */
+	isSessionOwnedByUser(sessionId: string, userId: string): boolean {
+		const cli = this.getCliForSession(sessionId);
+		if (!cli) {
+			return false;
+		}
+		// If CLI has no userId (auth disabled), allow access
+		if (!cli.userId) {
+			return true;
+		}
+		return cli.userId === userId;
+	}
+
+	/**
+	 * Get backends available to a specific user.
+	 */
+	getBackendsForUser(userId?: string): {
+		backends: AcpBackendSummary[];
+		defaultBackendId: string | undefined;
+	} {
+		const clis = userId ? this.getClisForUser(userId) : this.getAllClis();
+		const backendsMap = new Map<string, AcpBackendSummary>();
+		let defaultBackendId: string | undefined;
+
+		for (const record of clis) {
+			for (const backend of record.backends) {
+				if (!backendsMap.has(backend.backendId)) {
+					backendsMap.set(backend.backendId, backend);
+				}
+			}
+			if (!defaultBackendId && record.defaultBackendId) {
+				defaultBackendId = record.defaultBackendId;
+			}
+		}
+
+		return {
+			backends: Array.from(backendsMap.values()),
+			defaultBackendId,
+		};
+	}
+
+	getAllBackends(): {
+		backends: AcpBackendSummary[];
+		defaultBackendId: string | undefined;
+	} {
+		// Aggregate backends from all connected CLIs
+		const backendsMap = new Map<string, AcpBackendSummary>();
+		let defaultBackendId: string | undefined;
+
+		for (const record of this.cliByMachineId.values()) {
+			for (const backend of record.backends) {
+				if (!backendsMap.has(backend.backendId)) {
+					backendsMap.set(backend.backendId, backend);
+				}
+			}
+			if (!defaultBackendId && record.defaultBackendId) {
+				defaultBackendId = record.defaultBackendId;
+			}
+		}
+
+		return {
+			backends: Array.from(backendsMap.values()),
+			defaultBackendId,
+		};
 	}
 
 	onCliStatus(listener: (payload: CliStatusPayload) => void) {

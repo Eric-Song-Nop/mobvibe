@@ -9,6 +9,7 @@ import type {
 import type { ErrorDetail } from "./errors.js";
 import type {
 	AcpBackendId,
+	AcpBackendSummary,
 	FsEntry,
 	FsRoot,
 	SessionFsFilePreview,
@@ -37,6 +38,16 @@ export type CliRegistrationInfo = {
 	machineId: string;
 	hostname: string;
 	version?: string;
+	backends?: AcpBackendSummary[];
+	defaultBackendId?: string;
+	/** Machine token for authentication (required when auth is enabled) */
+	machineToken?: string;
+};
+
+// CLI error payload (sent when auth fails)
+export type CliErrorPayload = {
+	code: string;
+	message: string;
 };
 
 // CLI status update
@@ -45,6 +56,8 @@ export type CliStatusPayload = {
 	connected: boolean;
 	hostname?: string;
 	sessionCount?: number;
+	/** User ID (only present when auth is enabled) */
+	userId?: string;
 };
 
 // Stream error event
@@ -153,7 +166,8 @@ export interface CliToGatewayEvents {
 
 // Gateway -> CLI events
 export interface GatewayToCliEvents {
-	"cli:registered": (info: { machineId: string }) => void;
+	"cli:registered": (info: { machineId: string; userId?: string }) => void;
+	"cli:error": (payload: CliErrorPayload) => void;
 
 	// RPC requests
 	"rpc:session:create": (request: RpcRequest<CreateSessionParams>) => void;

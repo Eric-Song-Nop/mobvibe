@@ -180,5 +180,38 @@
 		"permissionRequestDetail": "Tool: {{tool}}",
 		"sessionError": "Session error",
 		"responseCompleted": "Response completed"
+	},
+	"auth": {
+		"signIn": "Sign in",
+		"signInDescription": "Sign in to access your sessions and machines",
+		"createAccount": "Create account",
+		"createAccountDescription": "Create an account to get started",
+		"email": "Email",
+		"emailPlaceholder": "your@email.com",
+		"password": "Password",
+		"passwordPlaceholder": "Enter your password",
+		"name": "Name",
+		"namePlaceholder": "Your name (optional)",
+		"loading": "Please wait...",
+		"orContinueWith": "Or continue with",
+		"noAccount": "Don't have an account?",
+		"haveAccount": "Already have an account?",
+		"signOut": "Sign out",
+		"profile": "Profile",
+		"settings": "Settings"
+	},
+	"machines": {
+		"title": "Machines",
+		"empty": "No machines connected",
+		"online": "Online",
+		"offline": "Offline",
+		"sessions": "{{count}} session(s)",
+		"register": "Register machine",
+		"registerDescription": "Run this command on your machine to connect it:",
+		"copyCommand": "Copy command",
+		"commandCopied": "Command copied to clipboard",
+		"remove": "Remove",
+		"removeTitle": "Remove machine?",
+		"removeDescription": "This will disconnect the machine and all its sessions."
 	}
 }

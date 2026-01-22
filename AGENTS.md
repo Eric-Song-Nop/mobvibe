@@ -1,67 +1,103 @@
-# Mobvibe
+# Mobvibe (Remote-Claude)
 
-An vibe coding WebUI utilizing the [Agent Client Protocol](https://agentclientprotocol.com).
+A distributed ACP (Agent Client Protocol) WebUI for local agent workflows.
 
-## Basic Architecture
+## Architecture
 
-### Backend
+```
+┌─────────────┐     Socket.io      ┌──────────────┐     Socket.io     ┌───────────────┐
+│   webui     │◄──────────────────►│   gateway    │◄─────────────────►│  mobvibe-cli  │
+│  (React)    │                    │  (Express)   │                   │  (Node CLI)   │
+└─────────────┘                    └──────────────┘                   └───────┬───────┘
+                                                                              │
+                                                                        stdin/stdout
+                                                                              │
+                                                                      ┌───────▼───────┐
+                                                                      │   ACP CLI     │
+                                                                      │ (claude-code) │
+                                                                      └───────────────┘
+```
 
-Directly connects to and manages ACP sessions, also provide extra info about the local machine for the web frontend to use.
+### Package Structure
 
-#### Structure
+- **packages/shared**: Shared TypeScript types for Socket.io events and ACP
+- **apps/gateway**: Express + Socket.io relay server (port 3005)
+- **apps/mobvibe-cli**: CLI daemon that connects to gateway and manages ACP sessions
+- **apps/webui**: React frontend with Socket.io real-time updates
 
-- `apps/server/src/acp/acp-connection.ts`: ACP CLI 连接与终端管理（通用实现）。
-- `apps/server/src/acp/session-manager.ts`: 多会话管理与权限请求分发。
-- `apps/server/src/acp/errors.ts`: ACP 相关错误模型与转换。
+### Data Flow
 
-### Frontend
-
-The UI, which is just an AI chat app.
+1. **webui** connects to **gateway** via Socket.io `/webui` namespace
+2. **mobvibe-cli** connects to **gateway** via Socket.io `/cli` namespace
+3. **gateway** routes REST API calls and Socket.io events between webui and CLI
+4. **mobvibe-cli** spawns and manages ACP CLI processes (claude-code, etc.)
 
 ## Tech Stack
 
 ### Common
 
-- Biome: faster formatting and linting
-  - `biome format --write .`
-  - `biome lint --write .`
-- Turborepo: monorepo management
-- Vite: Why not
-- Vitest: Testing with no choice
+- **Biome**: Formatting and linting (`pnpm format`, `pnpm lint`)
+- **Turborepo**: Monorepo management and parallel builds
+- **Vite**: Build tool for webui
+- **Vitest**: Testing framework
+- **Socket.io**: Real-time bidirectional communication
 
-### Frontend Web UI
+### packages/shared
 
-- React: The Framework
-- Zustand: For State Management
-- Tanstack Query: For API Calls
-- [Shadcn UI](https://ui.shadcn.com/): The UI component library for everything as much as possible.
-  - `pnpm dlx shadcn@latest create --preset "https://ui.shadcn.com/init?base=radix&style=lyra&baseColor=neutral&theme=yellow&iconLibrary=hugeicons&font=jetbrains-mono&menuAccent=subtle&menuColor=default&radius=default&template=vite" --template vite` inits everything.
-- [Tailwind CSS](https://tailwindcss.com/): Styling
-- [Streamdown](https://github.com/vercel/streamdown): Rendering streamed markdown
-- [ACP Typescript SDK](https://agentclientprotocol.github.io/typescript-sdk/): communicate with backend for ACP stuffs
+- TypeScript types shared across all packages
+- ACP protocol types, Socket.io event definitions, error types
 
-### Backend ACP Adapter and Server
+### apps/gateway
 
-- Express: The Framework
-- [ACP Typescript SDK](https://agentclientprotocol.github.io/typescript-sdk/): connect to ACP
-- Sqlite3: the simple db
-- [Drizzle](https://orm.drizzle.team/docs/get-started-sqlite): the ORM
-  - [Better-sqlite3](https://orm.drizzle.team/docs/get-started-sqlite#better-sqlite3): Adapter
+- **Express**: HTTP server framework
+- **Socket.io**: WebSocket server with namespaces
+- Routes REST API requests to CLI via Socket.io RPC
+
+### apps/mobvibe-cli
+
+- **Commander.js**: CLI framework
+- **Socket.io-client**: WebSocket client to gateway
+- **@agentclientprotocol/sdk**: ACP protocol implementation
+
+### apps/webui
+
+- **React**: UI framework
+- **Zustand**: State management
+- **TanStack Query**: API calls and caching
+- **Shadcn UI**: Component library (Radix + Tailwind)
+- **Socket.io-client**: Real-time updates from gateway
+- **Streamdown**: Markdown rendering for streamed content
+- **Tree-sitter**: Code outline generation
+
+## Development Commands
+
+```bash
+pnpm dev              # Start all packages (gateway, mobvibe-cli, webui)
+pnpm build            # Build all packages
+pnpm format           # Format code with Biome
+pnpm lint             # Lint code with Biome
+pnpm test             # Run all tests
+```
+
+### Running Individually
+
+```bash
+# Gateway (port 3005)
+cd apps/gateway && pnpm dev
+
+# CLI daemon
+cd apps/mobvibe-cli && ./bin/mobvibe.mjs start --gateway http://localhost:3005
+
+# Web UI (port 5173)
+cd apps/webui && pnpm dev
+```
 
 ## Development Guidelines
 
-- Make sure to run `pnpm format` for formatting
-- Always document your code, implementation plan and Architecture
-  in `docs` folder in Chinese, before and after implementation.
-- Do `git commit` frequently for even minor changes with message in English.
-- Stick to types and design of Agent Client Protocol and corresponding SDKs.
-- For UI, always use Shadcn UI components whenever possible.
-- Mobile UI first, responsive, accessible, and with a focus on performance.
-- Always go to <https://agentclientprotocol.github.io/typescript-sdk/> for ACP SDK documentation.
-- UI text is important, don't add useless text which just repeat the UI itself to the UI.
-
-### Useful Commands
-
-- `pnpm dev`: Starts the backend server and frontend dev server.
-- `pnpm format`: Formats the code.
-- `pnpm lint`: Lints the code.
+- Run `pnpm format` before committing
+- Document implementation plans in `docs/` folder in Chinese
+- Commit frequently with English messages
+- Follow ACP protocol types and patterns from SDK documentation
+- Use Shadcn UI components for all UI elements
+- Mobile-first, responsive, accessible design
+- Reference ACP SDK docs: <https://agentclientprotocol.github.io/typescript-sdk/>

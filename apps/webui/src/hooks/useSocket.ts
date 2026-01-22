@@ -7,6 +7,7 @@ import {
 	extractSessionModeUpdate,
 	extractTextChunk,
 	extractToolCallUpdate,
+	type CliStatusPayload,
 	type PermissionDecisionPayload,
 	type PermissionRequestPayload,
 	type SessionNotification,
@@ -19,6 +20,7 @@ import {
 	isErrorDetail,
 	normalizeError,
 } from "@/lib/error-utils";
+import { useMachinesStore } from "@/lib/machines-store";
 import {
 	notifyPermissionRequest,
 	notifySessionError,
@@ -56,6 +58,9 @@ export function useSocket({
 	const subscribedSessionsRef = useRef<Set<string>>(new Set());
 	const sessionsRef = useRef(sessions);
 	sessionsRef.current = sessions;
+
+	// Get machines store actions
+	const updateMachine = useMachinesStore((state) => state.updateMachine);
 
 	// Connect to gateway on mount
 	useEffect(() => {
@@ -154,6 +159,11 @@ export function useSocket({
 			});
 		};
 
+		// CLI status handler
+		const handleCliStatus = (payload: CliStatusPayload) => {
+			updateMachine(payload);
+		};
+
 		// Set up listeners
 		const unsubUpdate = gatewaySocket.onSessionUpdate(handleSessionUpdate);
 		const unsubError = gatewaySocket.onSessionError(handleSessionError);
@@ -164,6 +174,7 @@ export function useSocket({
 			handlePermissionResult,
 		);
 		const unsubTerminal = gatewaySocket.onTerminalOutput(handleTerminalOutput);
+		const unsubCliStatus = gatewaySocket.onCliStatus(handleCliStatus);
 
 		return () => {
 			unsubUpdate();
@@ -171,6 +182,7 @@ export function useSocket({
 			unsubPermReq();
 			unsubPermRes();
 			unsubTerminal();
+			unsubCliStatus();
 			gatewaySocket.disconnect();
 		};
 	}, [
@@ -182,6 +194,7 @@ export function useSocket({
 		setPermissionOutcome,
 		setStreamError,
 		t,
+		updateMachine,
 		updateSessionMeta,
 		updateToolCall,
 	]);
