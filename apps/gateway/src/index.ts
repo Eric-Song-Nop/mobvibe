@@ -172,7 +172,7 @@ app.use((request, response, next) => {
 // Better Auth needs to handle raw requests for some endpoints
 const auth = getAuth();
 if (auth) {
-	app.all("/api/auth/*splat", toNodeHandler(auth));
+	app.use("/api/auth", toNodeHandler(auth));
 	console.log("[gateway] Better Auth enabled");
 } else {
 	console.log("[gateway] Better Auth disabled (no DATABASE_URL)");
