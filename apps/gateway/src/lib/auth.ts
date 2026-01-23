@@ -1,6 +1,7 @@
 import { tauri } from "@daveyplate/better-auth-tauri/plugin";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { openAPI } from "better-auth/plugins";
 import { getGatewayConfig } from "../config.js";
 import { getDb, isDbEnabled } from "../db/index.js";
 
@@ -64,6 +65,7 @@ export function getAuth(): ReturnType<typeof betterAuth> | null {
 					scheme: "mobvibe",
 					callbackURL: "/",
 				}),
+				openAPI(),
 			],
 		});
 	}
