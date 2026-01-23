@@ -51,6 +51,7 @@ export function getAuth(): ReturnType<typeof betterAuth> | null {
 			database: drizzleAdapter(db, {
 				provider: "pg",
 				schema: {
+					...schema,
 					user: schema.users,
 					session: schema.sessions,
 					account: schema.accounts,
