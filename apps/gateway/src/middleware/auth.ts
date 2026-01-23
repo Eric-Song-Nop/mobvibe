@@ -5,7 +5,7 @@
 
 import { fromNodeHeaders } from "better-auth/node";
 import type { NextFunction, Request, Response } from "express";
-import { getAuth, isAuthEnabled } from "../lib/auth.js";
+import { auth } from "../lib/auth.js";
 
 /**
  * Extended request type with user information.
@@ -27,19 +27,10 @@ export function requireAuth(
 	next: NextFunction,
 ): void {
 	// Check if auth is enabled
-	if (!isAuthEnabled()) {
+	if (!auth) {
 		// Auth disabled - allow all requests without user context
 		// This maintains backwards compatibility during development
 		next();
-		return;
-	}
-
-	const auth = getAuth();
-	if (!auth) {
-		res.status(503).json({
-			error: "Authentication service unavailable",
-			code: "AUTH_UNAVAILABLE",
-		});
 		return;
 	}
 
@@ -82,14 +73,7 @@ export function optionalAuth(
 	next: NextFunction,
 ): void {
 	// Check if auth is enabled
-	if (!isAuthEnabled()) {
-		next();
-		return;
-	}
-
-	const auth = getAuth();
 	if (!auth) {
-		// Auth not available - continue without auth
 		next();
 		return;
 	}
@@ -128,5 +112,9 @@ export function isAuthenticated(req: AuthenticatedRequest): boolean {
 	return req.userId !== undefined;
 }
 
-// Re-export isAuthEnabled for convenience
-export { isAuthEnabled };
+/**
+ * Check if authentication is enabled (database is configured).
+ */
+export function isAuthEnabled(): boolean {
+	return auth !== null;
+}

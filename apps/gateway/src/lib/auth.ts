@@ -3,50 +3,22 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { openAPI } from "better-auth/plugins";
 import { getGatewayConfig } from "../config.js";
-import { getDb, isDbEnabled, schema } from "../db/index.js";
+import { db, schema } from "../db/index.js";
 
-let authInstance: ReturnType<typeof betterAuth> | null = null;
+// Get gateway configuration
+const config = getGatewayConfig();
 
-/**
- * Check if authentication is enabled (database is configured).
- */
-export function isAuthEnabled(): boolean {
-	return isDbEnabled();
-}
+// Build trusted origins list
+const trustedOrigins = [
+	...(config.siteUrl ? [config.siteUrl] : []),
+	...config.corsOrigins,
+	"http://localhost:5173",
+	"http://127.0.0.1:5173",
+];
 
-/**
- * Get the Better Auth instance.
- * Creates the instance lazily on first access.
- * Returns null if database is not configured.
- */
-export function getAuth(): ReturnType<typeof betterAuth> | null {
-	if (!isDbEnabled()) {
-		return null;
-	}
-
-	if (!authInstance) {
-		const config = getGatewayConfig();
-		const db = getDb();
-
-		if (!db) {
-			return null;
-		}
-
-		const trustedOrigins: string[] = [];
-
-		// Add SITE_URL if configured
-		if (config.siteUrl) {
-			trustedOrigins.push(config.siteUrl);
-		}
-
-		// Add CORS origins as trusted
-		trustedOrigins.push(...config.corsOrigins);
-
-		// Always trust localhost for development
-		trustedOrigins.push("http://localhost:5173");
-		trustedOrigins.push("http://127.0.0.1:5173");
-
-		authInstance = betterAuth({
+// Create Better Auth instance
+export const auth = db
+	? betterAuth({
 			trustedOrigins,
 			database: drizzleAdapter(db, {
 				provider: "pg",
@@ -58,10 +30,9 @@ export function getAuth(): ReturnType<typeof betterAuth> | null {
 				requireEmailVerification: false,
 			},
 			session: {
-				// Session cookie settings
 				cookieCache: {
 					enabled: true,
-					maxAge: 5 * 60, // 5 minutes cache
+					maxAge: 5 * 60, // 5 minutes
 				},
 			},
 			plugins: [
@@ -71,21 +42,5 @@ export function getAuth(): ReturnType<typeof betterAuth> | null {
 				}),
 				openAPI(),
 			],
-		});
-	}
-
-	return authInstance;
-}
-
-/**
- * Get the auth instance, throwing if not configured.
- */
-export function requireAuth(): ReturnType<typeof betterAuth> {
-	const auth = getAuth();
-	if (!auth) {
-		throw new Error(
-			"Auth not configured. Set DATABASE_URL environment variable.",
-		);
-	}
-	return auth;
-}
+		})
+	: null;

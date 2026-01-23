@@ -6,7 +6,7 @@
 
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
-import { getDb, isDbEnabled } from "../db/index.js";
+import { db } from "../db/index.js";
 import { acpSessions, machines, users } from "../db/schema.js";
 
 export type MachineTokenValidation = {
@@ -25,7 +25,7 @@ export type SessionOwnershipCheck = {
  * Check if authentication is enabled (database is configured).
  */
 export function isAuthEnabled(): boolean {
-	return isDbEnabled();
+	return db !== null;
 }
 
 /**
@@ -35,7 +35,6 @@ export function isAuthEnabled(): boolean {
 export async function validateMachineToken(
 	machineToken: string,
 ): Promise<MachineTokenValidation | null> {
-	const db = getDb();
 	if (!db) {
 		return null;
 	}
@@ -76,7 +75,6 @@ export async function updateMachineStatus(
 	machineToken: string,
 	isOnline: boolean,
 ): Promise<{ machineId: string; userId: string } | null> {
-	const db = getDb();
 	if (!db) {
 		return null;
 	}
@@ -113,7 +111,6 @@ export async function createAcpSession(params: {
 	backendId: string;
 	cwd?: string;
 }): Promise<{ _id: string; userId: string; machineId: string } | null> {
-	const db = getDb();
 	if (!db) {
 		return null;
 	}
@@ -165,7 +162,6 @@ export async function updateAcpSessionState(params: {
 	title?: string;
 	cwd?: string;
 }): Promise<boolean> {
-	const db = getDb();
 	if (!db) {
 		return true; // No-op if db not configured
 	}
@@ -199,7 +195,6 @@ export async function updateAcpSessionState(params: {
  * Close a session in the database.
  */
 export async function closeAcpSession(sessionId: string): Promise<boolean> {
-	const db = getDb();
 	if (!db) {
 		return true; // No-op if db not configured
 	}
@@ -228,7 +223,6 @@ export async function checkSessionOwnership(
 	sessionId: string,
 	userId: string,
 ): Promise<SessionOwnershipCheck> {
-	const db = getDb();
 	if (!db) {
 		// Auth disabled - allow all
 		return { exists: true, isOwner: true };
@@ -261,7 +255,6 @@ export async function checkSessionOwnership(
 export async function closeSessionsForMachine(
 	machineToken: string,
 ): Promise<number> {
-	const db = getDb();
 	if (!db) {
 		return 0;
 	}
