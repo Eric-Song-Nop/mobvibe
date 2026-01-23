@@ -37,10 +37,24 @@ Environment variables:
 |----------|---------|-------------|
 | `GATEWAY_PORT` | `3005` | Server port |
 | `GATEWAY_CORS_ORIGINS` | (empty) | Additional CORS origins (comma-separated) |
+| `DATABASE_URL` | (empty) | PostgreSQL connection string for auth (optional) |
+| `BETTER_AUTH_SECRET` | (auto) | Secret for session signing (optional) |
 
 Private IPs (10.x.x.x, 192.168.x.x, 172.16-31.x.x) and localhost are always allowed.
 
 ## REST API Endpoints
+
+### Authentication (when DATABASE_URL is set)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/auth/reference` | OpenAPI reference page (interactive) |
+| `GET` | `/api/auth/open-api/generate-schema` | OpenAPI schema JSON |
+| `POST` | `/api/auth/sign-in/email` | Email/password sign in |
+| `POST` | `/api/auth/sign-up/email` | Email registration |
+| `POST` | `/api/auth/sign-out` | Sign out |
+| `GET` | `/api/auth/session` | Get current session |
+| `GET` | `/api/auth/sign-in/social?provider=<provider>` | OAuth redirect |
 
 ### Session Management
 
