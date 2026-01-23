@@ -1,7 +1,0 @@
-[variables]
-# Auto-link PostgreSQL (add a PostgreSQL service named "postgres" to your Railway project)
-DATABASE_URL = "${{postgres.DATABASE_URL}}"
-
-# Set these in Railway dashboard or override here
-# SITE_URL = "https://your-webui.netlify.app"
-# GATEWAY_CORS_ORIGINS = "https://your-webui.netlify.app"
