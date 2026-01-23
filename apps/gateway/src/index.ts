@@ -170,9 +170,10 @@ app.use((request, response, next) => {
 
 // Mount Better Auth handler BEFORE express.json()
 // Better Auth needs to handle raw requests for some endpoints
+// For Express v4, use app.all with wildcard pattern
 const auth = getAuth();
 if (auth) {
-	app.use("/api/auth", toNodeHandler(auth));
+	app.all("/api/auth/*", toNodeHandler(auth));
 	console.log("[gateway] Better Auth enabled");
 } else {
 	console.log("[gateway] Better Auth disabled (no DATABASE_URL)");
