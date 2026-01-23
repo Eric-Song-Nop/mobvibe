@@ -5,7 +5,7 @@ import express, { type Express } from "express";
 import { Server } from "socket.io";
 import { getGatewayConfig } from "./config.js";
 import { closeDb } from "./db/index.js";
-import { getAuth } from "./lib/auth.js";
+import { auth } from "./lib/auth.js";
 import { setupFsRoutes } from "./routes/fs.js";
 import { setupHealthRoutes } from "./routes/health.js";
 import { setupMachineRoutes } from "./routes/machines.js";
@@ -171,13 +171,8 @@ app.use((request, response, next) => {
 // Mount Better Auth handler BEFORE express.json()
 // Better Auth needs to handle raw requests for some endpoints
 // For Express v4, use app.all with wildcard pattern
-const auth = getAuth();
-if (auth) {
-	app.all("/api/auth/*", toNodeHandler(auth));
-	console.log("[gateway] Better Auth enabled");
-} else {
-	console.log("[gateway] Better Auth disabled (no DATABASE_URL)");
-}
+app.all("/api/auth/*", toNodeHandler(auth));
+console.log("[gateway] Better Auth enabled");
 
 app.use(express.json());
 

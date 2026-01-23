@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import { fromNodeHeaders } from "better-auth/node";
 import { eq } from "drizzle-orm";
 import type { Router } from "express";
-import { getDb } from "../db/index.js";
+import { db } from "../db/index.js";
 import { machines } from "../db/schema.js";
-import { getAuth } from "../lib/auth.js";
+import { auth } from "../lib/auth.js";
 
 /**
  * Generate a secure machine token.
@@ -19,17 +19,6 @@ export function setupMachineRoutes(router: Router): void {
 	 * Register a new machine for the authenticated user.
 	 */
 	router.post("/api/machines/register", async (req, res) => {
-		const auth = getAuth();
-		const db = getDb();
-
-		if (!auth || !db) {
-			res.status(503).json({
-				error: "Authentication service unavailable",
-				code: "AUTH_UNAVAILABLE",
-			});
-			return;
-		}
-
 		try {
 			// Validate session using Better Auth
 			const session = await auth.api.getSession({
@@ -93,17 +82,6 @@ export function setupMachineRoutes(router: Router): void {
 	 * List machines for the authenticated user.
 	 */
 	router.get("/api/machines", async (req, res) => {
-		const auth = getAuth();
-		const db = getDb();
-
-		if (!auth || !db) {
-			res.status(503).json({
-				error: "Authentication service unavailable",
-				code: "AUTH_UNAVAILABLE",
-			});
-			return;
-		}
-
 		try {
 			// Validate session using Better Auth
 			const session = await auth.api.getSession({

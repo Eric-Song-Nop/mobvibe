@@ -8,7 +8,7 @@ import type {
 	TerminalOutputEvent,
 } from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
-import { getAuth, isAuthEnabled } from "../lib/auth.js";
+import { auth } from "../lib/auth.js";
 import type { CliRegistry } from "../services/cli-registry.js";
 import type { SessionRouter } from "../services/session-router.js";
 
@@ -98,41 +98,36 @@ export function setupWebuiHandlers(
 
 		console.log(`[gateway] Webui connected: ${socket.id}`);
 
-		// Authenticate via handshake cookies if auth is enabled
-		if (isAuthEnabled()) {
-			const auth = getAuth();
-			if (auth) {
-				try {
-					// Get cookies from handshake headers for session validation
-					const cookies = socket.handshake.headers.cookie;
-					if (cookies) {
-						const session = await auth.api.getSession({
-							headers: new Headers({ cookie: cookies }),
-						});
-						if (session?.user) {
-							authSocket.data.userId = session.user.id;
-							authSocket.data.userEmail = session.user.email;
-							socketUserMap.set(socket.id, session.user.id);
-							console.log(
-								`[gateway] Webui authenticated: ${socket.id} as ${session.user.email}`,
-							);
-						} else {
-							console.log(
-								`[gateway] Webui auth failed: ${socket.id} (no session)`,
-							);
-						}
-					} else {
-						console.log(
-							`[gateway] Webui connected without cookies: ${socket.id}`,
-						);
-					}
-				} catch (error) {
+		// Authenticate via handshake cookies
+		try {
+			// Get cookies from handshake headers for session validation
+			const cookies = socket.handshake.headers.cookie;
+			if (cookies) {
+				const session = await auth.api.getSession({
+					headers: new Headers({ cookie: cookies }),
+				});
+				if (session?.user) {
+					authSocket.data.userId = session.user.id;
+					authSocket.data.userEmail = session.user.email;
+					socketUserMap.set(socket.id, session.user.id);
 					console.log(
-						`[gateway] Webui auth error: ${socket.id}`,
-						error instanceof Error ? error.message : error,
+						`[gateway] Webui authenticated: ${socket.id} as ${session.user.email}`,
+					);
+				} else {
+					console.log(
+						`[gateway] Webui auth failed: ${socket.id} (no session)`,
 					);
 				}
+			} else {
+				console.log(
+					`[gateway] Webui connected without cookies: ${socket.id}`,
+				);
 			}
+		} catch (error) {
+			console.log(
+				`[gateway] Webui auth error: ${socket.id}`,
+				error instanceof Error ? error.message : error,
+			);
 		}
 
 		const userId = authSocket.data.userId;

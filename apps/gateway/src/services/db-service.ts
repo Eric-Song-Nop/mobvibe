@@ -1,13 +1,12 @@
 /**
  * Database service for Gateway server.
  * Provides methods to validate tokens and manage machine/session data.
- * This replaces the previous Convex-based implementation.
  */
 
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
-import { getDb, isDbEnabled } from "../db/index.js";
-import { acpSessions, machines, users } from "../db/schema.js";
+import { db } from "../db/index.js";
+import { acpSessions, machines } from "../db/schema.js";
 
 export type MachineTokenValidation = {
 	machineId: string;
@@ -22,24 +21,12 @@ export type SessionOwnershipCheck = {
 };
 
 /**
- * Check if authentication is enabled (database is configured).
- */
-export function isAuthEnabled(): boolean {
-	return isDbEnabled();
-}
-
-/**
  * Validate a machine token and get machine/user info.
- * Returns null if token is invalid or database is not configured.
+ * Returns null if token is invalid.
  */
 export async function validateMachineToken(
 	machineToken: string,
 ): Promise<MachineTokenValidation | null> {
-	const db = getDb();
-	if (!db) {
-		return null;
-	}
-
 	try {
 		const result = await db
 			.select({
@@ -76,11 +63,6 @@ export async function updateMachineStatus(
 	machineToken: string,
 	isOnline: boolean,
 ): Promise<{ machineId: string; userId: string } | null> {
-	const db = getDb();
-	if (!db) {
-		return null;
-	}
-
 	try {
 		const result = await db
 			.update(machines)
@@ -113,11 +95,6 @@ export async function createAcpSession(params: {
 	backendId: string;
 	cwd?: string;
 }): Promise<{ _id: string; userId: string; machineId: string } | null> {
-	const db = getDb();
-	if (!db) {
-		return null;
-	}
-
 	try {
 		// First, get the machine info from the token
 		const machineResult = await db
@@ -165,11 +142,6 @@ export async function updateAcpSessionState(params: {
 	title?: string;
 	cwd?: string;
 }): Promise<boolean> {
-	const db = getDb();
-	if (!db) {
-		return true; // No-op if db not configured
-	}
-
 	try {
 		const updateData: Record<string, unknown> = {
 			state: params.state,
@@ -199,11 +171,6 @@ export async function updateAcpSessionState(params: {
  * Close a session in the database.
  */
 export async function closeAcpSession(sessionId: string): Promise<boolean> {
-	const db = getDb();
-	if (!db) {
-		return true; // No-op if db not configured
-	}
-
 	try {
 		await db
 			.update(acpSessions)
@@ -228,12 +195,6 @@ export async function checkSessionOwnership(
 	sessionId: string,
 	userId: string,
 ): Promise<SessionOwnershipCheck> {
-	const db = getDb();
-	if (!db) {
-		// Auth disabled - allow all
-		return { exists: true, isOwner: true };
-	}
-
 	try {
 		const result = await db
 			.select({ userId: acpSessions.userId })
@@ -261,11 +222,6 @@ export async function checkSessionOwnership(
 export async function closeSessionsForMachine(
 	machineToken: string,
 ): Promise<number> {
-	const db = getDb();
-	if (!db) {
-		return 0;
-	}
-
 	try {
 		// First get the machine ID from the token
 		const machineResult = await db
@@ -301,21 +257,4 @@ export async function closeSessionsForMachine(
 		console.error("[db-service] closeSessionsForMachine error:", error);
 		return 0;
 	}
-}
-
-/**
- * Validate a Better Auth session token.
- * This is handled directly by Better Auth now, but we keep this for compatibility.
- * Returns user ID if valid, null otherwise.
- */
-export async function validateSessionToken(
-	_token: string,
-): Promise<{ userId: string; email: string } | null> {
-	// This function is now deprecated - session validation is handled
-	// directly by Better Auth in the auth middleware.
-	// Keeping the signature for API compatibility during migration.
-	console.warn(
-		"[db-service] validateSessionToken is deprecated, use Better Auth directly",
-	);
-	return null;
 }

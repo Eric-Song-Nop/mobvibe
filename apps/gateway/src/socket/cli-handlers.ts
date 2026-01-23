@@ -12,7 +12,6 @@ import type { Server, Socket } from "socket.io";
 import type { CliRegistry } from "../services/cli-registry.js";
 import {
 	closeSessionsForMachine,
-	isAuthEnabled,
 	updateMachineStatus,
 	validateMachineToken,
 } from "../services/db-service.js";
@@ -37,61 +36,52 @@ export function setupCliHandlers(
 	cliNamespace.on("connection", (socket: Socket) => {
 		console.log(`[gateway] CLI connected: ${socket.id}`);
 
-		// CLI registration with optional authentication
+		// CLI registration with authentication
 		socket.on("cli:register", async (info: CliRegistrationWithAuth) => {
-			// Validate machine token if auth is enabled
-			if (isAuthEnabled()) {
-				if (!info.machineToken) {
-					console.log(
-						`[gateway] CLI registration rejected: no machine token (${info.machineId})`,
-					);
-					socket.emit("cli:error", {
-						code: "AUTH_REQUIRED",
-						message:
-							"Machine token required. Run 'mobvibe login' to authenticate.",
-					});
-					socket.disconnect(true);
-					return;
-				}
-
-				const machineInfo = await validateMachineToken(info.machineToken);
-				if (!machineInfo) {
-					console.log(
-						`[gateway] CLI registration rejected: invalid machine token (${info.machineId})`,
-					);
-					socket.emit("cli:error", {
-						code: "INVALID_TOKEN",
-						message:
-							"Invalid machine token. Run 'mobvibe login' to re-authenticate.",
-					});
-					socket.disconnect(true);
-					return;
-				}
-
-				// Register with auth info
-				const record = cliRegistry.register(socket, info, {
-					userId: machineInfo.userId,
-					machineToken: info.machineToken,
-				});
-
-				// Update machine status in Convex
-				await updateMachineStatus(info.machineToken, true);
-
-				socket.emit("cli:registered", {
-					machineId: record.machineId,
-					userId: machineInfo.userId,
-				});
+			// Validate machine token
+			if (!info.machineToken) {
 				console.log(
-					`[gateway] CLI registered: ${info.machineId} (${info.hostname}) for user ${machineInfo.userId}`,
+					`[gateway] CLI registration rejected: no machine token (${info.machineId})`,
 				);
-			} else {
-				// Auth disabled - register without auth info
-				const record = cliRegistry.register(socket, info);
-				socket.emit("cli:registered", { machineId: record.machineId });
-				console.log(
-					`[gateway] CLI registered: ${info.machineId} (${info.hostname}) [auth disabled]`,
-				);
+				socket.emit("cli:error", {
+					code: "AUTH_REQUIRED",
+					message:
+						"Machine token required. Run 'mobvibe login' to authenticate.",
+				});
+				socket.disconnect(true);
+				return;
 			}
+
+			const machineInfo = await validateMachineToken(info.machineToken);
+			if (!machineInfo) {
+				console.log(
+					`[gateway] CLI registration rejected: invalid machine token (${info.machineId})`,
+				);
+				socket.emit("cli:error", {
+					code: "INVALID_TOKEN",
+					message:
+						"Invalid machine token. Run 'mobvibe login' to re-authenticate.",
+				});
+				socket.disconnect(true);
+				return;
+			}
+
+			// Register with auth info
+			const record = cliRegistry.register(socket, info, {
+				userId: machineInfo.userId,
+				machineToken: info.machineToken,
+			});
+
+			// Update machine status in database
+			await updateMachineStatus(info.machineToken, true);
+
+			socket.emit("cli:registered", {
+				machineId: record.machineId,
+				userId: machineInfo.userId,
+			});
+			console.log(
+				`[gateway] CLI registered: ${info.machineId} (${info.hostname}) for user ${machineInfo.userId}`,
+			);
 		});
 
 		// Heartbeat

@@ -25,7 +25,6 @@ import type { CliRegistry } from "./cli-registry.js";
 import {
 	closeAcpSession,
 	createAcpSession,
-	isAuthEnabled,
 	updateAcpSessionState,
 } from "./db-service.js";
 
@@ -81,8 +80,8 @@ export class SessionRouter {
 			params,
 		);
 
-		// Sync session to database if auth is enabled and machine has a token
-		if (isAuthEnabled() && cli.machineToken) {
+		// Sync session to database if machine has a token
+		if (cli.machineToken) {
 			await createAcpSession({
 				machineToken: cli.machineToken,
 				sessionId: result.sessionId,
@@ -124,9 +123,7 @@ export class SessionRouter {
 		);
 
 		// Sync to database
-		if (isAuthEnabled()) {
-			await closeAcpSession(params.sessionId);
-		}
+		await closeAcpSession(params.sessionId);
 
 		return result;
 	}
@@ -392,9 +389,7 @@ export class SessionRouter {
 		title?: string,
 		cwd?: string,
 	): Promise<void> {
-		if (isAuthEnabled()) {
-			await updateAcpSessionState({ sessionId, state, title, cwd });
-		}
+		await updateAcpSessionState({ sessionId, state, title, cwd });
 	}
 
 	private sendRpc<TParams, TResult>(

@@ -37,13 +37,12 @@ RUN pnpm install --frozen-lockfile
 WORKDIR /app/apps/gateway
 
 # Create startup script for migrations + server
+# DATABASE_URL is required - app will fail without it
 RUN echo '#!/bin/sh' > /app/start.sh && \
     echo 'set -e' >> /app/start.sh && \
-    echo 'if [ -n "$DATABASE_URL" ]; then' >> /app/start.sh && \
-    echo '  echo "[gateway] Running database migrations..."' >> /app/start.sh && \
-    echo '  npx drizzle-kit migrate' >> /app/start.sh && \
-    echo '  echo "[gateway] Migrations complete"' >> /app/start.sh && \
-    echo 'fi' >> /app/start.sh && \
+    echo 'echo "[gateway] Running database migrations..."' >> /app/start.sh && \
+    echo 'npx drizzle-kit migrate' >> /app/start.sh && \
+    echo 'echo "[gateway] Migrations complete"' >> /app/start.sh && \
     echo 'exec node dist/index.js' >> /app/start.sh && \
     chmod +x /app/start.sh
 
