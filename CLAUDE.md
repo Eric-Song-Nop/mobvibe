@@ -341,11 +341,28 @@ When `DATABASE_URL` is configured, the gateway uses PostgreSQL with Drizzle ORM 
 
 ```bash
 cd apps/gateway
-pnpm db:generate   # Generate migration from schema changes
-pnpm db:migrate    # Run pending migrations
-pnpm db:push       # Push schema directly (dev only)
+pnpm db:generate   # Generate migration SQL files from schema changes
+pnpm db:migrate    # Apply pending migrations to database
+pnpm db:push       # Push schema directly (development only, not for production)
 pnpm db:studio     # Open Drizzle Studio GUI
 ```
+
+### Migration Workflow
+
+**Development:**
+1. Modify `src/db/schema.ts`
+2. Run `pnpm db:generate` to create migration files
+3. Review generated SQL in `drizzle/` directory
+4. Run `pnpm db:migrate` to apply locally
+5. Commit migration files to version control
+
+**Production (Railway):**
+- Migrations run automatically at deployment time (not build time)
+- The Docker startup script executes `drizzle-kit migrate` before starting the server
+- All pending migrations are applied in order
+- See `apps/gateway/MIGRATIONS.md` for detailed best practices
+
+**Important:** Always use `drizzle-kit migrate` (versioned migrations) in production, never `drizzle-kit push --force`.
 
 ### Environment
 

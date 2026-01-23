@@ -29,6 +29,21 @@ pnpm start    # Run production build
 
 Default port: **3005**
 
+## Database Migrations
+
+When `DATABASE_URL` is set, the gateway uses PostgreSQL with Drizzle ORM. See [MIGRATIONS.md](./MIGRATIONS.md) for the complete migration workflow and best practices.
+
+**Quick reference:**
+
+```bash
+pnpm db:generate   # Generate migration files after schema changes
+pnpm db:migrate    # Apply pending migrations
+pnpm db:push       # Direct schema sync (development only)
+pnpm db:studio     # Open Drizzle Studio GUI
+```
+
+**Production deployments** (Railway/Docker) automatically run migrations at startup before starting the server.
+
 ## Configuration
 
 Environment variables:

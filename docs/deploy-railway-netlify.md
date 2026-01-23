@@ -92,8 +92,30 @@ openssl rand -base64 32
 **自动迁移（默认）**
 
 Dockerfile 已配置为启动时自动运行迁移：
-- 当 `DATABASE_URL` 存在时，自动执行 `drizzle-kit push`
+- 当 `DATABASE_URL` 存在时，自动执行 `drizzle-kit migrate`
+- 应用版本化的迁移文件（位于 `apps/gateway/drizzle/` 目录）
 - 迁移完成后启动服务器
+
+这是**推荐的生产环境方式**，因为：
+- 迁移文件已提交到版本控制，可审计和回滚
+- 安全且可追踪的 schema 变更
+- 适合团队协作和 CI/CD 流程
+
+**迁移时机说明**
+
+迁移在**部署阶段（deploy time）运行，而非构建阶段（build time）**：
+
+✅ **部署时运行（当前实现）**
+- 数据库 URL 在生产环境可用
+- 确保迁移在应用启动前执行
+- 迁移失败会阻止应用启动，避免 schema 不匹配
+- 适合零停机部署
+
+❌ **构建时运行（不推荐）**
+- Docker 构建时可能没有数据库 URL
+- 构建产物应该是环境无关的
+- 同一构建的多次部署会重复尝试迁移
+- 迁移失败难以排查
 
 无需手动操作，部署时会自动同步数据库 schema。
 
@@ -309,12 +331,30 @@ netlify deploy --prod
 
 当 `apps/gateway/src/db/schema.ts` 变更时：
 
-1. 提交代码并推送到 GitHub
-2. Railway 重新部署时会自动运行 `drizzle-kit push`
-3. 数据库 schema 自动同步
+1. 在本地生成迁移文件：
+   ```bash
+   cd apps/gateway
+   pnpm db:generate
+   ```
 
-> 注：`drizzle-kit push` 适用于开发和小型生产环境。
-> 对于需要精细控制迁移的场景，可使用 `pnpm db:generate` 生成迁移文件。
+2. 审查生成的 SQL 文件（在 `drizzle/` 目录）
+
+3. 提交迁移文件并推送到 GitHub：
+   ```bash
+   git add apps/gateway/drizzle/ apps/gateway/src/db/schema.ts
+   git commit -m "feat: update database schema"
+   git push
+   ```
+
+4. Railway 重新部署时会自动运行 `drizzle-kit migrate`
+5. 数据库 schema 自动同步
+
+> **重要**：生产环境使用 `drizzle-kit migrate`（版本化迁移），而非 `drizzle-kit push`。
+> 
+> - `migrate` - 使用版本化的 SQL 迁移文件，安全且可追踪
+> - `push` - 直接同步 schema，仅适合开发环境
+> 
+> 详见 `apps/gateway/MIGRATIONS.md` 了解完整的迁移最佳实践。
 
 ---
 

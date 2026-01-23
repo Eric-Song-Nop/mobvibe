@@ -41,7 +41,7 @@ RUN echo '#!/bin/sh' > /app/start.sh && \
     echo 'set -e' >> /app/start.sh && \
     echo 'if [ -n "$DATABASE_URL" ]; then' >> /app/start.sh && \
     echo '  echo "[gateway] Running database migrations..."' >> /app/start.sh && \
-    echo '  npx drizzle-kit push --force' >> /app/start.sh && \
+    echo '  npx drizzle-kit migrate' >> /app/start.sh && \
     echo '  echo "[gateway] Migrations complete"' >> /app/start.sh && \
     echo 'fi' >> /app/start.sh && \
     echo 'exec node dist/index.js' >> /app/start.sh && \
