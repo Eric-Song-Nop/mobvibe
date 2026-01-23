@@ -3,7 +3,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { openAPI } from "better-auth/plugins";
 import { getGatewayConfig } from "../config.js";
-import { getDb, isDbEnabled } from "../db/index.js";
+import { getDb, isDbEnabled, schema } from "../db/index.js";
 
 let authInstance: ReturnType<typeof betterAuth> | null = null;
 
@@ -48,7 +48,11 @@ export function getAuth(): ReturnType<typeof betterAuth> | null {
 
 		authInstance = betterAuth({
 			trustedOrigins,
-			database: drizzleAdapter(db, { provider: "pg" }),
+			database: drizzleAdapter(db, {
+				provider: "pg",
+				schema,
+				usePlural: true,
+			}),
 			emailAndPassword: {
 				enabled: true,
 				requireEmailVerification: false,
