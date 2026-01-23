@@ -133,7 +133,6 @@ vi.mock("@/components/auth/AuthProvider", () => ({
 	AuthProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
-
 const setMatchMedia = (matches: boolean) => {
 	const listeners = new Set<(event: MediaQueryListEvent) => void>();
 	const mediaQueryList = {
