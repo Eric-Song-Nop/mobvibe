@@ -4,6 +4,7 @@ import cors from "cors";
 import express, { type Express } from "express";
 import { Server } from "socket.io";
 import { getGatewayConfig } from "./config.js";
+import { closeDb } from "./db/index.js";
 import { auth } from "./lib/auth.js";
 import { setupFsRoutes } from "./routes/fs.js";
 import { setupHealthRoutes } from "./routes/health.js";
@@ -221,6 +222,7 @@ const shutdown = async (signal: string) => {
 	try {
 		io.close();
 		await stopServer();
+		await closeDb();
 	} catch (error) {
 		console.error("[gateway] shutdown error", error);
 	}

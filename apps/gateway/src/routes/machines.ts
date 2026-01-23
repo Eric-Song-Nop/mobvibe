@@ -19,9 +19,6 @@ export function setupMachineRoutes(router: Router): void {
 	 * Register a new machine for the authenticated user.
 	 */
 	router.post("/api/machines/register", async (req, res) => {
-		// auth is imported at module level
-		// db is imported at module level
-
 		if (!auth || !db) {
 			res.status(503).json({
 				error: "Authentication service unavailable",
@@ -93,9 +90,6 @@ export function setupMachineRoutes(router: Router): void {
 	 * List machines for the authenticated user.
 	 */
 	router.get("/api/machines", async (req, res) => {
-		// auth is imported at module level
-		// db is imported at module level
-
 		if (!auth || !db) {
 			res.status(503).json({
 				error: "Authentication service unavailable",

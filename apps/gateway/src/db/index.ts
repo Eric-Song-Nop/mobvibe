@@ -17,3 +17,13 @@ export const db = pool ? drizzle(pool, { schema }) : null;
 
 // Re-export schema for Better Auth adapter
 export { schema };
+
+/**
+ * Close the database connection pool.
+ * Call this during graceful shutdown.
+ */
+export async function closeDb(): Promise<void> {
+	if (pool) {
+		await pool.end();
+	}
+}
