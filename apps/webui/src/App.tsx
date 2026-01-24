@@ -20,6 +20,7 @@ import { useSocket } from "@/hooks/useSocket";
 import type { PermissionResultNotification } from "@/lib/acp";
 import { getAuthClient, isInTauri } from "@/lib/auth";
 import { useChatStore } from "@/lib/chat-store";
+import { useMachinesStore } from "@/lib/machines-store";
 import {
 	buildSessionNotReadyError,
 	createFallbackError,
@@ -136,13 +137,19 @@ function MainApp() {
 		appendTerminalOutput,
 	});
 
+	const { selectedMachineId } = useMachinesStore();
+
 	const sessionList = useMemo(() => {
-		return Object.values(sessions).sort((left, right) => {
+		const allSessions = Object.values(sessions);
+		const filtered = selectedMachineId
+			? allSessions.filter((s) => s.machineId === selectedMachineId)
+			: allSessions;
+		return filtered.sort((left, right) => {
 			const leftStamp = left.updatedAt ?? left.createdAt ?? "";
 			const rightStamp = right.updatedAt ?? right.createdAt ?? "";
 			return rightStamp.localeCompare(leftStamp);
 		});
-	}, [sessions]);
+	}, [sessions, selectedMachineId]);
 
 	useEffect(() => {
 		if (sessionsQuery.data?.sessions) {

@@ -119,6 +119,8 @@ export type ChatSession = {
 	availableModes?: SessionModeOption[];
 	availableModels?: SessionModelOption[];
 	availableCommands?: AvailableCommand[];
+	/** Machine ID that owns this session */
+	machineId?: string;
 };
 
 type ChatState = {
@@ -420,6 +422,7 @@ const createSessionState = (
 		availableModes?: SessionModeOption[];
 		availableModels?: SessionModelOption[];
 		availableCommands?: AvailableCommand[];
+		machineId?: string;
 	},
 ): ChatSession => ({
 	sessionId,
@@ -447,6 +450,7 @@ const createSessionState = (
 	availableModes: options?.availableModes,
 	availableModels: options?.availableModels,
 	availableCommands: options?.availableCommands,
+	machineId: options?.machineId,
 });
 
 const STORAGE_KEY = "mobvibe.chat-store";
@@ -529,6 +533,7 @@ export const useChatStore = create<ChatState>()(
 								availableModes: summary.availableModes,
 								availableModels: summary.availableModels,
 								availableCommands: summary.availableCommands,
+								machineId: summary.machineId,
 							});
 
 						nextSessions[summary.sessionId] = {
@@ -551,6 +556,7 @@ export const useChatStore = create<ChatState>()(
 								summary.availableModels ?? existing.availableModels,
 							availableCommands:
 								summary.availableCommands ?? existing.availableCommands,
+							machineId: summary.machineId ?? existing.machineId,
 						};
 					});
 

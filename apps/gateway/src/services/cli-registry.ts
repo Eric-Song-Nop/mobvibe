@@ -155,7 +155,9 @@ export class CliRegistry extends EventEmitter {
 	getAllSessions(): SessionSummary[] {
 		const sessions: SessionSummary[] = [];
 		for (const record of this.cliByMachineId.values()) {
-			sessions.push(...record.sessions);
+			for (const session of record.sessions) {
+				sessions.push({ ...session, machineId: record.machineId });
+			}
 		}
 		return sessions;
 	}
@@ -202,7 +204,9 @@ export class CliRegistry extends EventEmitter {
 		const sessions: SessionSummary[] = [];
 		const clis = this.getClisForUser(userId);
 		for (const cli of clis) {
-			sessions.push(...cli.sessions);
+			for (const session of cli.sessions) {
+				sessions.push({ ...session, machineId: cli.machineId });
+			}
 		}
 		return sessions;
 	}

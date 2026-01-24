@@ -45,6 +45,8 @@ export type SessionSummary = {
 	availableModes?: SessionModeOption[];
 	availableModels?: SessionModelOption[];
 	availableCommands?: AvailableCommand[];
+	/** Machine ID that owns this session (populated by gateway) */
+	machineId?: string;
 };
 
 // StopReason is now re-exported from SDK via acp.ts
