@@ -114,14 +114,10 @@ export function setupWebuiHandlers(
 						`[gateway] Webui authenticated: ${socket.id} as ${session.user.email}`,
 					);
 				} else {
-					console.log(
-						`[gateway] Webui auth failed: ${socket.id} (no session)`,
-					);
+					console.log(`[gateway] Webui auth failed: ${socket.id} (no session)`);
 				}
 			} else {
-				console.log(
-					`[gateway] Webui connected without cookies: ${socket.id}`,
-				);
+				console.log(`[gateway] Webui connected without cookies: ${socket.id}`);
 			}
 		} catch (error) {
 			console.log(

@@ -77,11 +77,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 		const path =
 			typeof request.query.path === "string" ? request.query.path : undefined;
 		if (!path) {
-			respondError(
-				response,
-				buildRequestValidationError("path required"),
-				400,
-			);
+			respondError(response, buildRequestValidationError("path required"), 400);
 			return;
 		}
 
