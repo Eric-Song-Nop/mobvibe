@@ -34,6 +34,13 @@ export const auth = betterAuth({
 			maxAge: 5 * 60, // 5 minutes cache
 		},
 	},
+	advanced: {
+		useSecureCookies: true,
+		defaultCookieAttributes: {
+			secure: true,
+			sameSite: "none",
+		},
+	},
 	plugins: [
 		tauri({
 			scheme: "mobvibe",
