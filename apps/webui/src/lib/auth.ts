@@ -1,4 +1,5 @@
 import { createAuthClient } from "better-auth/react";
+import { apiKeyClient } from "better-auth/client/plugins";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL as string | undefined;
 
@@ -56,6 +57,7 @@ const authClient = GATEWAY_URL
 					return fetchImpl(...params);
 				},
 			},
+			plugins: [apiKeyClient()],
 		})
 	: null;
 
@@ -124,4 +126,34 @@ export const getCachedToken = (): string | null => cachedToken;
 
 export const updateCachedToken = (token: string | null): void => {
 	cachedToken = token;
+};
+
+// API Key methods
+export type ApiKeyData = {
+	id: string;
+	name: string | null;
+	start: string | null;
+	createdAt: Date;
+	expiresAt: Date | null;
+};
+
+export const apiKey = {
+	create: async (data: { name?: string; expiresIn?: number }) => {
+		if (!authClient) {
+			throw new Error("Auth not configured");
+		}
+		return authClient.apiKey.create(data);
+	},
+	list: async () => {
+		if (!authClient) {
+			throw new Error("Auth not configured");
+		}
+		return authClient.apiKey.list();
+	},
+	delete: async (data: { keyId: string }) => {
+		if (!authClient) {
+			throw new Error("Auth not configured");
+		}
+		return authClient.apiKey.delete(data);
+	},
 };

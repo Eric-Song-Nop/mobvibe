@@ -69,24 +69,9 @@ program
 
 program
 	.command("login")
-	.description("Authenticate with the gateway")
-	.option("--gateway <url>", "Gateway URL", process.env.MOBVIBE_GATEWAY_URL)
-	.option(
-		"--webui <url>",
-		"WebUI URL for authentication",
-		"http://localhost:5173",
-	)
-	.option("--name <name>", "Machine name")
-	.action(async (options) => {
-		if (options.gateway) {
-			process.env.MOBVIBE_GATEWAY_URL = options.gateway;
-		}
-		const config = getCliConfig();
-		const result = await login({
-			gatewayUrl: config.gatewayUrl,
-			webuiUrl: options.webui,
-			machineName: options.name,
-		});
+	.description("Authenticate with an API key from the WebUI")
+	.action(async () => {
+		const result = await login();
 		if (!result.success) {
 			console.error(`Login failed: ${result.error}`);
 			process.exit(1);

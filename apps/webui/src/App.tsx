@@ -28,8 +28,8 @@ import {
 import { ensureNotificationPermission } from "@/lib/notifications";
 import { useUiStore } from "@/lib/ui-store";
 import { buildSessionTitle, getStatusVariant } from "@/lib/ui-utils";
+import { ApiKeysPage } from "@/pages/ApiKeysPage";
 import { LoginPage } from "@/pages/LoginPage";
-import { MachineCallbackPage } from "@/pages/MachineCallbackPage";
 
 function MainApp() {
 	const { t } = useTranslation();
@@ -498,10 +498,16 @@ export function App() {
 		<>
 			{shouldSetupTauriAuth && <TauriAuthHandler authClient={authClient!} />}
 			<Routes>
-				{/* Machine registration callback from CLI login */}
+				{/* API Keys page */}
 				<Route
-					path="/auth/machine-callback"
-					element={<MachineCallbackPage />}
+					path="/api-keys"
+					element={
+						!isAuthEnabled || isAuthenticated ? (
+							<ApiKeysPage />
+						) : (
+							<Navigate to="/login?returnUrl=/api-keys" replace />
+						)
+					}
 				/>
 
 				{/* Login page */}

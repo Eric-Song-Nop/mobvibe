@@ -2,8 +2,6 @@ import type {
 	CliRegistrationInfo,
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
-	RegistrationCompletePayload,
-	RegistrationRequestPayload,
 	RpcResponse,
 	SessionNotification,
 	SessionSummary,
@@ -11,82 +9,21 @@ import type {
 	TerminalOutputEvent,
 } from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
+import { auth } from "../lib/auth.js";
 import type { CliRegistry } from "../services/cli-registry.js";
 import {
-	closeSessionsForMachine,
-	updateMachineStatus,
-	validateMachineToken,
+	closeSessionsForMachineById,
+	updateMachineStatusById,
+	upsertMachine,
 } from "../services/db-service.js";
 import type { SessionRouter } from "../services/session-router.js";
 
-// Pending registrations: registrationCode -> socket
-const pendingRegistrations = new Map<string, Socket>();
-// Timeout handles for cleanup
-const registrationTimeouts = new Map<string, NodeJS.Timeout>();
-
-const REGISTRATION_TIMEOUT = 300000; // 5 minutes
-
 /**
- * Complete a pending registration by pushing credentials to the CLI.
- * Called from the machines REST endpoint after successful registration.
+ * Extended socket data with auth info.
  */
-export function completeRegistration(
-	registrationCode: string,
-	payload: RegistrationCompletePayload,
-): boolean {
-	const socket = pendingRegistrations.get(registrationCode);
-	if (!socket) {
-		return false;
-	}
-
-	// Emit credentials to CLI
-	socket.emit("registration:complete", payload);
-
-	// Clean up
-	const timeout = registrationTimeouts.get(registrationCode);
-	if (timeout) {
-		clearTimeout(timeout);
-		registrationTimeouts.delete(registrationCode);
-	}
-	pendingRegistrations.delete(registrationCode);
-
-	console.log(
-		`[gateway] Registration completed for code ${registrationCode.slice(0, 8)}...`,
-	);
-	return true;
-}
-
-/**
- * Send registration error to a pending CLI.
- */
-export function failRegistration(
-	registrationCode: string,
-	error: string,
-): boolean {
-	const socket = pendingRegistrations.get(registrationCode);
-	if (!socket) {
-		return false;
-	}
-
-	socket.emit("registration:error", { error });
-
-	// Clean up
-	const timeout = registrationTimeouts.get(registrationCode);
-	if (timeout) {
-		clearTimeout(timeout);
-		registrationTimeouts.delete(registrationCode);
-	}
-	pendingRegistrations.delete(registrationCode);
-
-	return true;
-}
-
-/**
- * Extended CLI registration info with optional machine token.
- */
-interface CliRegistrationWithAuth extends CliRegistrationInfo {
-	/** Machine token for authentication (required when auth is enabled) */
-	machineToken?: string;
+interface SocketData {
+	userId?: string;
+	apiKey?: string;
 }
 
 export function setupCliHandlers(
@@ -97,90 +34,90 @@ export function setupCliHandlers(
 ) {
 	const cliNamespace = io.of("/cli");
 
-	cliNamespace.on("connection", (socket: Socket) => {
+	cliNamespace.on("connection", async (socket: Socket) => {
 		console.log(`[gateway] CLI connected: ${socket.id}`);
 
-		// Handle pre-auth registration request (login flow)
-		socket.on("registration:request", (payload: RegistrationRequestPayload) => {
-			const { registrationCode } = payload;
-			console.log(
-				`[gateway] Registration request: ${registrationCode.slice(0, 8)}...`,
-			);
+		// Extract API key from handshake headers
+		const apiKey = socket.handshake.headers["x-api-key"] as string | undefined;
 
-			// Store socket for later credential push
-			pendingRegistrations.set(registrationCode, socket);
-
-			// Set timeout to clean up if not completed
-			const timeout = setTimeout(() => {
-				if (pendingRegistrations.has(registrationCode)) {
-					pendingRegistrations.delete(registrationCode);
-					registrationTimeouts.delete(registrationCode);
-					socket.emit("registration:error", {
-						error: "Registration timed out",
-					});
-					console.log(
-						`[gateway] Registration timed out: ${registrationCode.slice(0, 8)}...`,
-					);
-				}
-			}, REGISTRATION_TIMEOUT);
-			registrationTimeouts.set(registrationCode, timeout);
-
-			// Clean up on disconnect
-			socket.once("disconnect", () => {
-				const pendingTimeout = registrationTimeouts.get(registrationCode);
-				if (pendingTimeout) {
-					clearTimeout(pendingTimeout);
-					registrationTimeouts.delete(registrationCode);
-				}
-				pendingRegistrations.delete(registrationCode);
+		if (!apiKey) {
+			console.log(`[gateway] CLI rejected: no API key provided`);
+			socket.emit("cli:error", {
+				code: "AUTH_REQUIRED",
+				message: "API key required. Run 'mobvibe login' to authenticate.",
 			});
-		});
+			socket.disconnect(true);
+			return;
+		}
 
-		// CLI registration with authentication
-		socket.on("cli:register", async (info: CliRegistrationWithAuth) => {
-			// Validate machine token
-			if (!info.machineToken) {
+		// Validate API key via Better Auth
+		let userId: string;
+		try {
+			const verification = await auth.api.verifyApiKey({
+				body: { key: apiKey },
+			});
+			if (!verification.valid || !verification.key) {
+				console.log(`[gateway] CLI rejected: invalid API key`);
+				socket.emit("cli:error", {
+					code: "INVALID_KEY",
+					message: "Invalid or expired API key. Create a new one in the WebUI.",
+				});
+				socket.disconnect(true);
+				return;
+			}
+			userId = verification.key.userId;
+		} catch (error) {
+			console.error(`[gateway] API key verification error:`, error);
+			socket.emit("cli:error", {
+				code: "AUTH_ERROR",
+				message: "Failed to verify API key. Please try again.",
+			});
+			socket.disconnect(true);
+			return;
+		}
+
+		// Store auth info in socket data
+		const socketData: SocketData = { userId, apiKey };
+		(socket as Socket & { data: SocketData }).data = socketData;
+
+		console.log(`[gateway] CLI authenticated for user: ${userId}`);
+
+		// CLI registration (after auth)
+		socket.on("cli:register", async (info: CliRegistrationInfo) => {
+			// Create or update machine record in database
+			const machineResult = await upsertMachine({
+				machineId: info.machineId,
+				userId,
+				name: info.hostname, // Use hostname as default name
+				hostname: info.hostname,
+				platform: undefined,
+				isOnline: true,
+			});
+
+			if (!machineResult) {
 				console.log(
-					`[gateway] CLI registration rejected: no machine token (${info.machineId})`,
+					`[gateway] CLI registration failed: could not upsert machine`,
 				);
 				socket.emit("cli:error", {
-					code: "AUTH_REQUIRED",
-					message:
-						"Machine token required. Run 'mobvibe login' to authenticate.",
+					code: "REGISTRATION_ERROR",
+					message: "Failed to register machine. Please try again.",
 				});
 				socket.disconnect(true);
 				return;
 			}
 
-			const machineInfo = await validateMachineToken(info.machineToken);
-			if (!machineInfo) {
-				console.log(
-					`[gateway] CLI registration rejected: invalid machine token (${info.machineId})`,
-				);
-				socket.emit("cli:error", {
-					code: "INVALID_TOKEN",
-					message:
-						"Invalid machine token. Run 'mobvibe login' to re-authenticate.",
-				});
-				socket.disconnect(true);
-				return;
-			}
-
-			// Register with auth info
+			// Register with in-memory registry
 			const record = cliRegistry.register(socket, info, {
-				userId: machineInfo.userId,
-				machineToken: info.machineToken,
+				userId,
+				apiKey,
 			});
-
-			// Update machine status in database
-			await updateMachineStatus(info.machineToken, true);
 
 			socket.emit("cli:registered", {
 				machineId: record.machineId,
-				userId: machineInfo.userId,
+				userId,
 			});
 			console.log(
-				`[gateway] CLI registered: ${info.machineId} (${info.hostname}) for user ${machineInfo.userId}`,
+				`[gateway] CLI registered: ${info.machineId} (${info.hostname}) for user ${userId}`,
 			);
 		});
 
@@ -199,7 +136,7 @@ export function setupCliHandlers(
 		socket.on("session:update", async (notification: SessionNotification) => {
 			emitToWebui("session:update", notification);
 
-			// Sync session info to Convex if this is a session_info_update
+			// Sync session info to database if this is a session_info_update
 			if (
 				notification.sessionId &&
 				notification.update?.sessionUpdate === "session_info_update"
@@ -247,10 +184,10 @@ export function setupCliHandlers(
 					`[gateway] CLI disconnected: ${record.machineId} (${reason})`,
 				);
 
-				// Update machine status and close sessions in Convex
-				if (record.machineToken) {
-					await updateMachineStatus(record.machineToken, false);
-					await closeSessionsForMachine(record.machineToken);
+				// Update machine status and close sessions in database
+				if (record.machineId) {
+					await updateMachineStatusById(record.machineId, false);
+					await closeSessionsForMachineById(record.machineId);
 				}
 			}
 		});

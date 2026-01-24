@@ -2,7 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { SessionManager } from "../acp/session-manager.js";
-import { getMachineToken } from "../auth/credentials.js";
+import { getApiKey } from "../auth/credentials.js";
 import type { CliConfig } from "../config.js";
 import { SocketClient } from "./socket-client.js";
 
@@ -200,21 +200,21 @@ export class DaemonManager {
 		console.log(`[mobvibe-cli] Gateway URL: ${this.config.gatewayUrl}`);
 		console.log(`[mobvibe-cli] Machine ID: ${this.config.machineId}`);
 
-		// Load machine token for authentication
-		const machineToken = await getMachineToken();
-		if (machineToken) {
-			console.log(`[mobvibe-cli] Authenticated with machine token`);
-		} else {
-			console.log(
-				`[mobvibe-cli] No machine token found. Run 'mobvibe login' to authenticate.`,
+		// Load API key for authentication
+		const apiKey = await getApiKey();
+		if (!apiKey) {
+			console.error(
+				`[mobvibe-cli] No API key found. Run 'mobvibe login' to authenticate.`,
 			);
+			process.exit(1);
 		}
+		console.log(`[mobvibe-cli] Authenticated with API key`);
 
 		const sessionManager = new SessionManager(this.config);
 		const socketClient = new SocketClient({
 			config: this.config,
 			sessionManager,
-			machineToken,
+			apiKey,
 		});
 
 		let shuttingDown = false;

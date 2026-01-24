@@ -16,10 +16,10 @@ export type CliRecord = {
 	sessions: SessionSummary[];
 	backends: AcpBackendSummary[];
 	defaultBackendId?: string;
-	/** User ID from Convex (only set when auth is enabled) */
+	/** User ID from auth */
 	userId?: string;
-	/** Machine token used to authenticate this CLI */
-	machineToken?: string;
+	/** API key used to authenticate this CLI */
+	apiKey?: string;
 };
 
 export class CliRegistry extends EventEmitter {
@@ -32,12 +32,12 @@ export class CliRegistry extends EventEmitter {
 	 * Register a CLI connection.
 	 * @param socket - The Socket.io socket
 	 * @param info - CLI registration info
-	 * @param authInfo - Optional auth info (userId, machineToken) from Convex validation
+	 * @param authInfo - Optional auth info (userId, apiKey) from API key validation
 	 */
 	register(
 		socket: Socket,
 		info: CliRegistrationInfo,
-		authInfo?: { userId: string; machineToken: string },
+		authInfo?: { userId: string; apiKey: string },
 	): CliRecord {
 		// Remove any existing connection for this machine
 		const existing = this.cliByMachineId.get(info.machineId);
@@ -65,7 +65,7 @@ export class CliRegistry extends EventEmitter {
 			backends: info.backends ?? [],
 			defaultBackendId: info.defaultBackendId,
 			userId: authInfo?.userId,
-			machineToken: authInfo?.machineToken,
+			apiKey: authInfo?.apiKey,
 		};
 
 		this.cliByMachineId.set(info.machineId, record);

@@ -1,7 +1,7 @@
 import { tauri } from "@daveyplate/better-auth-tauri/plugin";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { openAPI } from "better-auth/plugins";
+import { apiKey, openAPI } from "better-auth/plugins";
 import { getGatewayConfig } from "../config.js";
 import { db } from "../db/index.js";
 import * as schema from "../db/schema.js";
@@ -47,5 +47,10 @@ export const auth = betterAuth({
 			callbackURL: "/",
 		}),
 		openAPI(),
+		apiKey({
+			defaultPrefix: "mbk_",
+			apiKeyHeaders: ["x-api-key"],
+			enableMetadata: true,
+		}),
 	],
 });

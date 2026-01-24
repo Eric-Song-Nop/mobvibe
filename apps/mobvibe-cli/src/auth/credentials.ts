@@ -1,6 +1,6 @@
 /**
  * Credentials management for CLI authentication.
- * Stores machine token and user info in ~/.mobvibe/credentials.json
+ * Stores API key in ~/.mobvibe/credentials.json
  */
 
 import fs from "node:fs/promises";
@@ -8,12 +8,8 @@ import os from "node:os";
 import path from "node:path";
 
 export interface Credentials {
-	/** Machine token for gateway authentication */
-	machineToken: string;
-	/** User ID from Convex */
-	userId: string;
-	/** User email */
-	email?: string;
+	/** API key for gateway authentication */
+	apiKey: string;
 	/** When the credentials were created */
 	createdAt: number;
 }
@@ -39,7 +35,7 @@ export async function loadCredentials(): Promise<Credentials | null> {
 		const credentials = JSON.parse(data) as Credentials;
 
 		// Validate required fields
-		if (!credentials.machineToken || !credentials.userId) {
+		if (!credentials.apiKey) {
 			return null;
 		}
 
@@ -81,15 +77,15 @@ export async function hasCredentials(): Promise<boolean> {
 }
 
 /**
- * Get the machine token from credentials.
- * Also checks MOBVIBE_MACHINE_TOKEN env var as override.
+ * Get the API key from credentials.
+ * Also checks MOBVIBE_API_KEY env var as override.
  */
-export async function getMachineToken(): Promise<string | undefined> {
+export async function getApiKey(): Promise<string | undefined> {
 	// Environment variable takes precedence
-	if (process.env.MOBVIBE_MACHINE_TOKEN) {
-		return process.env.MOBVIBE_MACHINE_TOKEN;
+	if (process.env.MOBVIBE_API_KEY) {
+		return process.env.MOBVIBE_API_KEY;
 	}
 
 	const credentials = await loadCredentials();
-	return credentials?.machineToken;
+	return credentials?.apiKey;
 }

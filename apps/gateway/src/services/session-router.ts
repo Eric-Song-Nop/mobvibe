@@ -24,7 +24,7 @@ import type { Socket } from "socket.io";
 import type { CliRegistry } from "./cli-registry.js";
 import {
 	closeAcpSession,
-	createAcpSession,
+	createAcpSessionDirect,
 	updateAcpSessionState,
 } from "./db-service.js";
 
@@ -80,10 +80,11 @@ export class SessionRouter {
 			params,
 		);
 
-		// Sync session to database if machine has a token
-		if (cli.machineToken) {
-			await createAcpSession({
-				machineToken: cli.machineToken,
+		// Sync session to database if machine is authenticated
+		if (cli.userId && cli.machineId) {
+			await createAcpSessionDirect({
+				userId: cli.userId,
+				machineId: cli.machineId,
 				sessionId: result.sessionId,
 				title: result.title ?? `Session ${result.sessionId.slice(0, 8)}`,
 				backendId: result.backendId,

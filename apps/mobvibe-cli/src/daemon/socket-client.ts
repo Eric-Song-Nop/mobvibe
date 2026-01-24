@@ -16,14 +16,13 @@ import type {
 } from "@mobvibe/shared";
 import { io, type Socket } from "socket.io-client";
 import type { SessionManager } from "../acp/session-manager.js";
-import { getMachineToken } from "../auth/credentials.js";
 import type { CliConfig } from "../config.js";
 
 type SocketClientOptions = {
 	config: CliConfig;
 	sessionManager: SessionManager;
-	/** Machine token for authentication (loaded from credentials) */
-	machineToken?: string;
+	/** API key for authentication (loaded from credentials) */
+	apiKey: string;
 };
 
 const SESSION_ROOT_NAME = "Working Directory";
@@ -99,6 +98,9 @@ export class SocketClient extends EventEmitter {
 			reconnectionDelayMax: 30000,
 			transports: ["websocket"],
 			autoConnect: false,
+			extraHeaders: {
+				"x-api-key": options.apiKey,
+			},
 		});
 		this.setupEventHandlers();
 		this.setupRpcHandlers();
@@ -411,7 +413,7 @@ export class SocketClient extends EventEmitter {
 	}
 
 	private register() {
-		const { config, sessionManager, machineToken } = this.options;
+		const { config, sessionManager } = this.options;
 		this.socket.emit("cli:register", {
 			machineId: config.machineId,
 			hostname: config.hostname,
@@ -421,8 +423,6 @@ export class SocketClient extends EventEmitter {
 				backendLabel: backend.label,
 			})),
 			defaultBackendId: config.defaultAcpBackendId,
-			// Include machine token for authentication
-			machineToken,
 		});
 		// Send current sessions list
 		this.socket.emit("sessions:list", sessionManager.listSessions());

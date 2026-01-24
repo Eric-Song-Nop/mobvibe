@@ -1,4 +1,7 @@
+import { Key01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +15,7 @@ import {
 
 export function UserMenu() {
 	const { t } = useTranslation();
+	const navigate = useNavigate();
 	const { user, isAuthEnabled, signOut } = useAuth();
 
 	// Don't show menu if auth is disabled
@@ -55,6 +59,11 @@ export function UserMenu() {
 						<p className="text-xs text-muted-foreground">{user.email}</p>
 					</div>
 				</DropdownMenuLabel>
+				<DropdownMenuSeparator />
+				<DropdownMenuItem onClick={() => navigate("/api-keys")}>
+					<HugeiconsIcon icon={Key01Icon} className="mr-2 h-4 w-4" />
+					API Keys
+				</DropdownMenuItem>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem
 					onClick={() => {
