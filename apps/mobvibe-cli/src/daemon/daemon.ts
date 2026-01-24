@@ -182,10 +182,8 @@ export class DaemonManager {
 			fileHandle.close().catch(() => {});
 		});
 
-		// Write PID file after setup
-		await this.writePidFile(child.pid);
-
 		// Detach from parent
+		// Note: The child process writes its own PID file in runForeground()
 		child.unref();
 
 		console.log(`Daemon started with PID ${child.pid}`);
