@@ -129,8 +129,8 @@ function buildLoginUrl(
 	hostname: string,
 	platform: string,
 ): string {
-	const url = new URL("/auth/machine-register", webuiUrl);
-	url.searchParams.set("callback", `http://localhost:${callbackPort}/callback`);
+	const url = new URL("/auth/machine-callback", webuiUrl);
+	url.searchParams.set("callbackPort", callbackPort.toString());
 	url.searchParams.set("machineName", machineName);
 	url.searchParams.set("hostname", hostname);
 	url.searchParams.set("platform", platform);

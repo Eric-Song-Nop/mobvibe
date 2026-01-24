@@ -29,13 +29,14 @@ export function MachineCallbackPage() {
 	const callbackPort = searchParams.get("callbackPort");
 	const hostname = searchParams.get("hostname") ?? "Unknown";
 	const platform = searchParams.get("platform") ?? "unknown";
+	const defaultMachineName = searchParams.get("machineName") ?? hostname;
 
-	// Set default machine name from hostname
+	// Set default machine name from query param or hostname
 	useEffect(() => {
-		if (!machineName && hostname) {
-			setMachineName(hostname);
+		if (!machineName && defaultMachineName) {
+			setMachineName(defaultMachineName);
 		}
-	}, [hostname, machineName]);
+	}, [defaultMachineName, machineName]);
 
 	const handleRegister = async () => {
 		if (!sessionToken || !callbackPort || !machineName.trim()) {
@@ -74,18 +75,13 @@ export function MachineCallbackPage() {
 			const data = await response.json();
 			const { machineToken, userId, email } = data;
 
-			// Send callback to CLI's local server
-			const callbackUrl = `http://localhost:${callbackPort}/callback`;
-			const callbackResponse = await fetch(callbackUrl, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					success: true,
-					machineToken,
-					userId,
-					email,
-				}),
-			});
+			// Send callback to CLI's local server via GET with query params
+			const callbackUrl = new URL(`http://localhost:${callbackPort}/callback`);
+			callbackUrl.searchParams.set("success", "true");
+			callbackUrl.searchParams.set("machineToken", machineToken);
+			callbackUrl.searchParams.set("userId", userId);
+			if (email) callbackUrl.searchParams.set("email", email);
+			const callbackResponse = await fetch(callbackUrl.toString());
 
 			if (!callbackResponse.ok) {
 				throw new Error("Failed to send callback to CLI");
