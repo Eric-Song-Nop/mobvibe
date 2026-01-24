@@ -2,6 +2,8 @@ import type {
 	CliRegistrationInfo,
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
+	RegistrationCompletePayload,
+	RegistrationRequestPayload,
 	RpcResponse,
 	SessionNotification,
 	SessionSummary,
@@ -16,6 +18,68 @@ import {
 	validateMachineToken,
 } from "../services/db-service.js";
 import type { SessionRouter } from "../services/session-router.js";
+
+// Pending registrations: registrationCode -> socket
+const pendingRegistrations = new Map<string, Socket>();
+// Timeout handles for cleanup
+const registrationTimeouts = new Map<string, NodeJS.Timeout>();
+
+const REGISTRATION_TIMEOUT = 300000; // 5 minutes
+
+/**
+ * Complete a pending registration by pushing credentials to the CLI.
+ * Called from the machines REST endpoint after successful registration.
+ */
+export function completeRegistration(
+	registrationCode: string,
+	payload: RegistrationCompletePayload,
+): boolean {
+	const socket = pendingRegistrations.get(registrationCode);
+	if (!socket) {
+		return false;
+	}
+
+	// Emit credentials to CLI
+	socket.emit("registration:complete", payload);
+
+	// Clean up
+	const timeout = registrationTimeouts.get(registrationCode);
+	if (timeout) {
+		clearTimeout(timeout);
+		registrationTimeouts.delete(registrationCode);
+	}
+	pendingRegistrations.delete(registrationCode);
+
+	console.log(
+		`[gateway] Registration completed for code ${registrationCode.slice(0, 8)}...`,
+	);
+	return true;
+}
+
+/**
+ * Send registration error to a pending CLI.
+ */
+export function failRegistration(
+	registrationCode: string,
+	error: string,
+): boolean {
+	const socket = pendingRegistrations.get(registrationCode);
+	if (!socket) {
+		return false;
+	}
+
+	socket.emit("registration:error", { error });
+
+	// Clean up
+	const timeout = registrationTimeouts.get(registrationCode);
+	if (timeout) {
+		clearTimeout(timeout);
+		registrationTimeouts.delete(registrationCode);
+	}
+	pendingRegistrations.delete(registrationCode);
+
+	return true;
+}
 
 /**
  * Extended CLI registration info with optional machine token.
@@ -35,6 +99,42 @@ export function setupCliHandlers(
 
 	cliNamespace.on("connection", (socket: Socket) => {
 		console.log(`[gateway] CLI connected: ${socket.id}`);
+
+		// Handle pre-auth registration request (login flow)
+		socket.on("registration:request", (payload: RegistrationRequestPayload) => {
+			const { registrationCode } = payload;
+			console.log(
+				`[gateway] Registration request: ${registrationCode.slice(0, 8)}...`,
+			);
+
+			// Store socket for later credential push
+			pendingRegistrations.set(registrationCode, socket);
+
+			// Set timeout to clean up if not completed
+			const timeout = setTimeout(() => {
+				if (pendingRegistrations.has(registrationCode)) {
+					pendingRegistrations.delete(registrationCode);
+					registrationTimeouts.delete(registrationCode);
+					socket.emit("registration:error", {
+						error: "Registration timed out",
+					});
+					console.log(
+						`[gateway] Registration timed out: ${registrationCode.slice(0, 8)}...`,
+					);
+				}
+			}, REGISTRATION_TIMEOUT);
+			registrationTimeouts.set(registrationCode, timeout);
+
+			// Clean up on disconnect
+			socket.once("disconnect", () => {
+				const pendingTimeout = registrationTimeouts.get(registrationCode);
+				if (pendingTimeout) {
+					clearTimeout(pendingTimeout);
+					registrationTimeouts.delete(registrationCode);
+				}
+				pendingRegistrations.delete(registrationCode);
+			});
+		});
 
 		// CLI registration with authentication
 		socket.on("cli:register", async (info: CliRegistrationWithAuth) => {

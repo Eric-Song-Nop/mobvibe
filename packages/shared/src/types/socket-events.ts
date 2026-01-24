@@ -148,6 +148,24 @@ export type FsResourcesResponse = {
 	entries: SessionFsResourceEntry[];
 };
 
+// Registration request payload (pre-auth CLI connection)
+export type RegistrationRequestPayload = {
+	registrationCode: string;
+};
+
+// Registration complete payload (Gateway -> CLI)
+export type RegistrationCompletePayload = {
+	machineToken: string;
+	userId: string;
+	machineId: string;
+	email?: string;
+};
+
+// Registration error payload (Gateway -> CLI)
+export type RegistrationErrorPayload = {
+	error: string;
+};
+
 // CLI -> Gateway events
 export interface CliToGatewayEvents {
 	"cli:register": (info: CliRegistrationInfo) => void;
@@ -159,6 +177,9 @@ export interface CliToGatewayEvents {
 	"terminal:output": (event: TerminalOutputEvent) => void;
 	"sessions:list": (sessions: SessionSummary[]) => void;
 
+	// Registration flow (pre-auth)
+	"registration:request": (payload: RegistrationRequestPayload) => void;
+
 	// RPC responses
 	"rpc:response": (response: RpcResponse<unknown>) => void;
 }
@@ -167,6 +188,10 @@ export interface CliToGatewayEvents {
 export interface GatewayToCliEvents {
 	"cli:registered": (info: { machineId: string; userId?: string }) => void;
 	"cli:error": (payload: CliErrorPayload) => void;
+
+	// Registration flow (pre-auth)
+	"registration:complete": (payload: RegistrationCompletePayload) => void;
+	"registration:error": (payload: RegistrationErrorPayload) => void;
 
 	// RPC requests
 	"rpc:session:create": (request: RpcRequest<CreateSessionParams>) => void;

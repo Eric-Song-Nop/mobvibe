@@ -15,18 +15,18 @@ import { Label } from "@/components/ui/label";
 
 // This page handles the machine registration callback from CLI login flow
 // The CLI opens this page in a browser, user logs in, and the page sends
-// the machine token back to the CLI's local callback server
+// the registrationCode to the Gateway which pushes credentials to the CLI via Socket.io
 
 export function MachineCallbackPage() {
 	const [searchParams] = useSearchParams();
-	const { isAuthenticated, isLoading, user, sessionToken } = useAuth();
+	const { isAuthenticated, isLoading, user } = useAuth();
 	const [machineName, setMachineName] = useState("");
 	const [status, setStatus] = useState<
 		"pending" | "registering" | "success" | "error"
 	>("pending");
 	const [error, setError] = useState<string | null>(null);
 
-	const callbackPort = searchParams.get("callbackPort");
+	const registrationCode = searchParams.get("registrationCode");
 	const hostname = searchParams.get("hostname") ?? "Unknown";
 	const platform = searchParams.get("platform") ?? "unknown";
 	const defaultMachineName = searchParams.get("machineName") ?? hostname;
@@ -39,7 +39,7 @@ export function MachineCallbackPage() {
 	}, [defaultMachineName, machineName]);
 
 	const handleRegister = async () => {
-		if (!sessionToken || !callbackPort || !machineName.trim()) {
+		if (!registrationCode || !machineName.trim()) {
 			return;
 		}
 
@@ -53,7 +53,8 @@ export function MachineCallbackPage() {
 				throw new Error("Gateway not configured");
 			}
 
-			// Call Gateway endpoint to register machine
+			// Call Gateway endpoint to register machine (includes registrationCode)
+			// Gateway will push credentials to CLI via Socket.io
 			const response = await fetch(`${gatewayUrl}/api/machines/register`, {
 				method: "POST",
 				headers: {
@@ -64,6 +65,7 @@ export function MachineCallbackPage() {
 					name: machineName.trim(),
 					hostname,
 					platform,
+					registrationCode,
 				}),
 			});
 
@@ -72,21 +74,7 @@ export function MachineCallbackPage() {
 				throw new Error(data.error ?? "Failed to register machine");
 			}
 
-			const data = await response.json();
-			const { machineToken, userId, email } = data;
-
-			// Send callback to CLI's local server via GET with query params
-			const callbackUrl = new URL(`http://localhost:${callbackPort}/callback`);
-			callbackUrl.searchParams.set("success", "true");
-			callbackUrl.searchParams.set("machineToken", machineToken);
-			callbackUrl.searchParams.set("userId", userId);
-			if (email) callbackUrl.searchParams.set("email", email);
-			const callbackResponse = await fetch(callbackUrl.toString());
-
-			if (!callbackResponse.ok) {
-				throw new Error("Failed to send callback to CLI");
-			}
-
+			// Success! Gateway has pushed credentials to CLI via Socket.io
 			setStatus("success");
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Registration failed");
@@ -174,8 +162,8 @@ export function MachineCallbackPage() {
 		);
 	}
 
-	// Missing callback port
-	if (!callbackPort) {
+	// Missing registration code
+	if (!registrationCode) {
 		return (
 			<ThemeProvider>
 				<div className="flex min-h-screen items-center justify-center bg-muted/40 p-4">

@@ -1,11 +1,16 @@
 /**
  * Login command for CLI authentication.
- * Opens browser for OAuth/email login, receives callback with machine token.
+ * Opens browser for OAuth/email login, waits for Gateway to push credentials via Socket.io.
  */
 
-import http from "node:http";
+import crypto from "node:crypto";
 import os from "node:os";
+import type {
+	RegistrationCompletePayload,
+	RegistrationErrorPayload,
+} from "@mobvibe/shared";
 import open from "open";
+import { io, type Socket } from "socket.io-client";
 import {
 	type Credentials,
 	deleteCredentials,
@@ -13,14 +18,13 @@ import {
 	saveCredentials,
 } from "./credentials.js";
 
-const DEFAULT_CALLBACK_PORT = 19823;
-const CALLBACK_TIMEOUT = 300000; // 5 minutes
+const REGISTRATION_TIMEOUT = 300000; // 5 minutes
 
 export interface LoginOptions {
+	/** Gateway base URL */
+	gatewayUrl: string;
 	/** WebUI base URL */
 	webuiUrl: string;
-	/** Port for local callback server */
-	callbackPort?: number;
 	/** Machine name (defaults to hostname) */
 	machineName?: string;
 }
@@ -34,24 +38,123 @@ export interface LoginResult {
 }
 
 /**
+ * Generate a unique registration code.
+ */
+function generateRegistrationCode(): string {
+	return `reg_${crypto.randomUUID().replace(/-/g, "")}`;
+}
+
+/**
+ * Build the login URL with query parameters for registration.
+ */
+function buildLoginUrl(
+	webuiUrl: string,
+	registrationCode: string,
+	machineName: string,
+	hostname: string,
+	platform: string,
+): string {
+	const url = new URL("/auth/machine-callback", webuiUrl);
+	url.searchParams.set("registrationCode", registrationCode);
+	url.searchParams.set("machineName", machineName);
+	url.searchParams.set("hostname", hostname);
+	url.searchParams.set("platform", platform);
+	return url.toString();
+}
+
+/**
+ * Wait for registration credentials via Socket.io.
+ * Connects to Gateway and waits for the registration:complete event.
+ */
+function waitForRegistration(
+	gatewayUrl: string,
+	registrationCode: string,
+): Promise<LoginResult> {
+	return new Promise((resolve, reject) => {
+		let socket: Socket | null = null;
+		let timeoutId: NodeJS.Timeout | null = null;
+
+		const cleanup = () => {
+			if (timeoutId) {
+				clearTimeout(timeoutId);
+				timeoutId = null;
+			}
+			if (socket) {
+				socket.disconnect();
+				socket = null;
+			}
+		};
+
+		// Connect to Gateway CLI namespace
+		socket = io(`${gatewayUrl}/cli`, {
+			transports: ["websocket"],
+			reconnection: false,
+		});
+
+		socket.on("connect", () => {
+			console.log("Connected to Gateway, waiting for authentication...");
+			// Send registration request
+			socket?.emit("registration:request", { registrationCode });
+		});
+
+		socket.on("connect_error", (error) => {
+			cleanup();
+			reject(new Error(`Failed to connect to Gateway: ${error.message}`));
+		});
+
+		socket.on(
+			"registration:complete",
+			(payload: RegistrationCompletePayload) => {
+				cleanup();
+				resolve({
+					success: true,
+					machineToken: payload.machineToken,
+					userId: payload.userId,
+					email: payload.email,
+				});
+			},
+		);
+
+		socket.on("registration:error", (payload: RegistrationErrorPayload) => {
+			cleanup();
+			resolve({
+				success: false,
+				error: payload.error,
+			});
+		});
+
+		// Set timeout
+		timeoutId = setTimeout(() => {
+			cleanup();
+			reject(new Error("Login timed out. Please try again."));
+		}, REGISTRATION_TIMEOUT);
+	});
+}
+
+/**
  * Start the login flow.
- * Opens browser for authentication and waits for callback.
+ * Opens browser for authentication and waits for Gateway to push credentials.
  */
 export async function login(options: LoginOptions): Promise<LoginResult> {
-	const callbackPort = options.callbackPort ?? DEFAULT_CALLBACK_PORT;
 	const machineName = options.machineName ?? os.hostname();
-	const platform = os.platform();
 	const hostname = os.hostname();
+	const platform = os.platform();
 
 	console.log("Starting login flow...");
 
-	// Create callback server
-	const callbackPromise = createCallbackServer(callbackPort);
+	// Generate a unique registration code
+	const registrationCode = generateRegistrationCode();
 
-	// Build login URL with callback
+	// Start waiting for registration (connects to Gateway)
+	const registrationPromise = waitForRegistration(
+		options.gatewayUrl,
+		registrationCode,
+	);
+
+	// Build login URL with registration code
 	const loginUrl = buildLoginUrl(
 		options.webuiUrl,
-		callbackPort,
+		registrationCode,
 		machineName,
 		hostname,
 		platform,
@@ -69,9 +172,9 @@ export async function login(options: LoginOptions): Promise<LoginResult> {
 		console.log("Could not open browser automatically.");
 	}
 
-	// Wait for callback
+	// Wait for registration via Socket.io
 	try {
-		const result = await callbackPromise;
+		const result = await registrationPromise;
 
 		if (result.success && result.machineToken && result.userId) {
 			// Save credentials
@@ -117,105 +220,4 @@ export async function loginStatus(): Promise<void> {
 		console.log("Status: Not logged in");
 		console.log("Run 'mobvibe login' to authenticate.");
 	}
-}
-
-/**
- * Build the login URL with query parameters for the callback.
- */
-function buildLoginUrl(
-	webuiUrl: string,
-	callbackPort: number,
-	machineName: string,
-	hostname: string,
-	platform: string,
-): string {
-	const url = new URL("/auth/machine-callback", webuiUrl);
-	url.searchParams.set("callbackPort", callbackPort.toString());
-	url.searchParams.set("machineName", machineName);
-	url.searchParams.set("hostname", hostname);
-	url.searchParams.set("platform", platform);
-	return url.toString();
-}
-
-/**
- * Create a temporary HTTP server to receive the callback.
- */
-function createCallbackServer(port: number): Promise<LoginResult> {
-	return new Promise((resolve, reject) => {
-		const server = http.createServer((req, res) => {
-			const url = new URL(req.url ?? "/", `http://localhost:${port}`);
-
-			if (url.pathname === "/callback") {
-				const success = url.searchParams.get("success") === "true";
-				const error = url.searchParams.get("error");
-				const machineToken = url.searchParams.get("machineToken");
-				const userId = url.searchParams.get("userId");
-				const email = url.searchParams.get("email");
-
-				// Send response to browser
-				res.writeHead(200, { "Content-Type": "text/html" });
-				if (success) {
-					res.end(`
-						<!DOCTYPE html>
-						<html>
-						<head><title>Login Successful</title></head>
-						<body style="font-family: system-ui; padding: 40px; text-align: center;">
-							<h1>Login Successful!</h1>
-							<p>You can close this window and return to the terminal.</p>
-							<script>window.close();</script>
-						</body>
-						</html>
-					`);
-				} else {
-					res.end(`
-						<!DOCTYPE html>
-						<html>
-						<head><title>Login Failed</title></head>
-						<body style="font-family: system-ui; padding: 40px; text-align: center;">
-							<h1>Login Failed</h1>
-							<p>${error ?? "Unknown error"}</p>
-							<p>Please try again.</p>
-						</body>
-						</html>
-					`);
-				}
-
-				// Close server and resolve
-				server.close();
-
-				if (success && machineToken && userId) {
-					resolve({
-						success: true,
-						machineToken,
-						userId,
-						email: email ?? undefined,
-					});
-				} else {
-					resolve({
-						success: false,
-						error: error ?? "Missing machine token or user ID",
-					});
-				}
-			} else {
-				res.writeHead(404);
-				res.end("Not found");
-			}
-		});
-
-		// Handle server errors
-		server.on("error", (err) => {
-			reject(new Error(`Callback server error: ${err.message}`));
-		});
-
-		// Start server
-		server.listen(port, "127.0.0.1", () => {
-			console.log(`Waiting for authentication (timeout: 5 minutes)...`);
-		});
-
-		// Timeout
-		setTimeout(() => {
-			server.close();
-			reject(new Error("Login timed out. Please try again."));
-		}, CALLBACK_TIMEOUT);
-	});
 }

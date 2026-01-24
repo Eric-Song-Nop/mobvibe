@@ -5,6 +5,7 @@ import type { Router } from "express";
 import { db } from "../db/index.js";
 import { machines } from "../db/schema.js";
 import { auth } from "../lib/auth.js";
+import { completeRegistration } from "../socket/cli-handlers.js";
 
 /**
  * Generate a secure machine token.
@@ -33,10 +34,11 @@ export function setupMachineRoutes(router: Router): void {
 				return;
 			}
 
-			const { name, hostname, platform } = req.body as {
+			const { name, hostname, platform, registrationCode } = req.body as {
 				name?: string;
 				hostname?: string;
 				platform?: string;
+				registrationCode?: string;
 			};
 
 			if (!name || !hostname) {
@@ -61,6 +63,21 @@ export function setupMachineRoutes(router: Router): void {
 				machineToken,
 				isOnline: false,
 			});
+
+			// If registrationCode provided, push credentials to CLI via Socket.io
+			if (registrationCode) {
+				const pushed = completeRegistration(registrationCode, {
+					machineToken,
+					machineId,
+					userId: session.user.id,
+					email: session.user.email ?? undefined,
+				});
+				if (!pushed) {
+					console.log(
+						`[machines] No pending registration for code ${registrationCode.slice(0, 8)}...`,
+					);
+				}
+			}
 
 			res.json({
 				machineId,
