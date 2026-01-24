@@ -49,6 +49,7 @@ function generateRegistrationCode(): string {
  */
 function buildLoginUrl(
 	webuiUrl: string,
+	gatewayUrl: string,
 	registrationCode: string,
 	machineName: string,
 	hostname: string,
@@ -56,6 +57,7 @@ function buildLoginUrl(
 ): string {
 	const url = new URL("/auth/machine-callback", webuiUrl);
 	url.searchParams.set("registrationCode", registrationCode);
+	url.searchParams.set("gatewayUrl", gatewayUrl);
 	url.searchParams.set("machineName", machineName);
 	url.searchParams.set("hostname", hostname);
 	url.searchParams.set("platform", platform);
@@ -154,6 +156,7 @@ export async function login(options: LoginOptions): Promise<LoginResult> {
 	// Build login URL with registration code
 	const loginUrl = buildLoginUrl(
 		options.webuiUrl,
+		options.gatewayUrl,
 		registrationCode,
 		machineName,
 		hostname,

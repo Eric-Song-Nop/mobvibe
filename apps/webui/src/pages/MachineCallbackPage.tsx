@@ -27,6 +27,7 @@ export function MachineCallbackPage() {
 	const [error, setError] = useState<string | null>(null);
 
 	const registrationCode = searchParams.get("registrationCode");
+	const gatewayUrlParam = searchParams.get("gatewayUrl");
 	const hostname = searchParams.get("hostname") ?? "Unknown";
 	const platform = searchParams.get("platform") ?? "unknown";
 	const defaultMachineName = searchParams.get("machineName") ?? hostname;
@@ -47,8 +48,9 @@ export function MachineCallbackPage() {
 		setError(null);
 
 		try {
-			// Register the machine with Gateway
-			const gatewayUrl = import.meta.env.VITE_GATEWAY_URL as string;
+			// Use gateway URL from query params, fall back to configured URL
+			const gatewayUrl =
+				gatewayUrlParam ?? (import.meta.env.VITE_GATEWAY_URL as string);
 			if (!gatewayUrl) {
 				throw new Error("Gateway not configured");
 			}
