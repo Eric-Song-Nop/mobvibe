@@ -512,7 +512,17 @@ export function App() {
 							<Navigate to="/" replace />
 						) : (
 							<ThemeProvider>
-								<LoginPage onSuccess={() => navigate("/")} />
+								<LoginPage
+									onSuccess={() => {
+										const params = new URLSearchParams(window.location.search);
+										const returnUrl = params.get("returnUrl");
+										if (returnUrl) {
+											window.location.href = returnUrl;
+										} else {
+											navigate("/");
+										}
+									}}
+								/>
 							</ThemeProvider>
 						)
 					}
