@@ -33,6 +33,10 @@ export const logger = pino(
 		level: LOG_LEVEL,
 		redact,
 		base: { service: "mobvibe-cli" },
+		serializers: {
+			err: pino.stdSerializers.err,
+			error: pino.stdSerializers.err,
+		},
 	},
 	transport ? pino.transport(transport) : undefined,
 );

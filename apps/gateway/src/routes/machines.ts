@@ -82,7 +82,7 @@ export function setupMachineRoutes(
 
 			res.json({ machines: userMachines });
 		} catch (error) {
-			logger.error({ error }, "machines_list_error");
+			logger.error({ err: error }, "machines_list_error");
 			res.status(500).json({
 				error: "Failed to list machines",
 				code: "LIST_ERROR",
@@ -154,7 +154,7 @@ export function setupMachineRoutes(
 
 			req.on("close", cleanup);
 		} catch (error) {
-			logger.error({ error }, "machines_stream_error");
+			logger.error({ err: error }, "machines_stream_error");
 			res.status(500).json({
 				error: "Failed to stream machine updates",
 				code: "STREAM_ERROR",

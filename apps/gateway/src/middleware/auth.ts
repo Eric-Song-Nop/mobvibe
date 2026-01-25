@@ -14,6 +14,7 @@ import { logger } from "../lib/logger.js";
 export interface AuthenticatedRequest extends Request {
 	userId?: string;
 	userEmail?: string;
+	requestId?: string;
 }
 
 /**
@@ -43,7 +44,7 @@ export async function requireAuth(
 		req.userEmail = session.user.email;
 		next();
 	} catch (error) {
-		logger.error({ error }, "auth_session_validation_error");
+		logger.error({ err: error }, "auth_session_validation_error");
 		res.status(500).json({
 			error: "Authentication service error",
 			code: "AUTH_SERVICE_ERROR",
@@ -72,7 +73,7 @@ export async function optionalAuth(
 		}
 		next();
 	} catch (error) {
-		logger.error({ error }, "auth_optional_session_validation_error");
+		logger.error({ err: error }, "auth_optional_session_validation_error");
 		// Continue without auth on error
 		next();
 	}

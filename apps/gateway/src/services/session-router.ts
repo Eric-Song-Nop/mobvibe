@@ -57,10 +57,16 @@ export class SessionRouter {
 					requestId: response.requestId,
 					code: response.error.code,
 					scope: response.error.scope,
+					retryable: response.error.retryable,
+					detail: response.error.detail,
 				},
 				"rpc_response_error",
 			);
-			pending.reject(new Error(response.error.message));
+			const error = new Error(response.error.message);
+			if (response.error.detail) {
+				error.cause = response.error.detail;
+			}
+			pending.reject(error);
 		} else {
 			logger.debug({ requestId: response.requestId }, "rpc_response_success");
 			pending.resolve(response.result);
@@ -304,6 +310,10 @@ export class SessionRouter {
 			{ sessionId: params.sessionId, userId },
 			"message_send_requested",
 		);
+		logger.debug(
+			{ sessionId: params.sessionId, userId },
+			"message_send_rpc_start",
+		);
 
 		return this.sendRpc<SendMessageParams, { stopReason: StopReason }>(
 			cli.socket,
@@ -519,10 +529,12 @@ export class SessionRouter {
 	): Promise<TResult> {
 		return new Promise((resolve, reject) => {
 			const requestId = randomUUID();
+			const start = process.hrtime.bigint();
 			const timeout = setTimeout(() => {
 				this.pendingRpcs.delete(requestId);
+				const durationMs = Number(process.hrtime.bigint() - start) / 1_000_000;
 				logger.warn(
-					{ requestId, event, timeoutMs: RPC_TIMEOUT },
+					{ requestId, event, timeoutMs: RPC_TIMEOUT, durationMs },
 					"rpc_timeout",
 				);
 				reject(new Error("RPC timeout"));
@@ -530,8 +542,24 @@ export class SessionRouter {
 
 			this.pendingRpcs.set(requestId, {
 				requestId,
-				resolve: resolve as (result: unknown) => void,
-				reject,
+				resolve: (result) => {
+					const durationMs =
+						Number(process.hrtime.bigint() - start) / 1_000_000;
+					logger.debug(
+						{ requestId, event, durationMs },
+						"rpc_response_resolved",
+					);
+					resolve(result as TResult);
+				},
+				reject: (error) => {
+					const durationMs =
+						Number(process.hrtime.bigint() - start) / 1_000_000;
+					logger.warn(
+						{ requestId, event, durationMs, err: error },
+						"rpc_response_rejected",
+					);
+					reject(error as Error);
+				},
 				timeout,
 			});
 

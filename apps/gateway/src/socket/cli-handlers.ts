@@ -59,7 +59,7 @@ export function setupCliHandlers(
 			logger.info({ userId: socketData.userId }, "cli_authenticated");
 			return next();
 		} catch (error) {
-			logger.error({ error }, "cli_api_key_verification_error");
+			logger.error({ err: error }, "cli_api_key_verification_error");
 			return next(new Error("AUTH_ERROR"));
 		}
 	});

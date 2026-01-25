@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { SessionManager } from "../acp/session-manager.js";
@@ -129,11 +129,7 @@ export class DaemonManager {
 			}
 			await this.removePidFile();
 		} catch (error) {
-			if (error instanceof Error && "code" in error && error.code === "ESRCH") {
-				logger.warn("daemon_stop_pid_not_found");
-			} else {
-				logger.error({ error }, "daemon_stop_error");
-			}
+			logger.error({ err: error }, "daemon_stop_error");
 			await this.removePidFile();
 		}
 	}
@@ -237,21 +233,18 @@ export class DaemonManager {
 				await this.removePidFile();
 				logger.info({ signal }, "daemon_shutdown_complete");
 			} catch (error) {
-				logger.error({ error, signal }, "daemon_shutdown_error");
+				logger.error({ err: error, signal }, "daemon_shutdown_error");
 			}
-
-			process.exit(0);
 		};
 
-		// Use synchronous-style handlers to ensure cleanup completes
 		process.on("SIGINT", () => {
 			shutdown("SIGINT").catch((error) => {
-				logger.error({ error }, "daemon_shutdown_sigint_error");
+				logger.error({ err: error }, "daemon_shutdown_sigint_error");
 			});
 		});
 		process.on("SIGTERM", () => {
 			shutdown("SIGTERM").catch((error) => {
-				logger.error({ error }, "daemon_shutdown_sigterm_error");
+				logger.error({ err: error }, "daemon_shutdown_sigterm_error");
 			});
 		});
 

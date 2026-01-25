@@ -76,7 +76,7 @@ program
 	.action(async () => {
 		const result = await login();
 		if (!result.success) {
-			logger.error({ error: result.error }, "login_failed");
+			logger.error({ err: result.error }, "login_failed");
 			console.error(`Login failed: ${result.error}`);
 			process.exit(1);
 		}
@@ -101,7 +101,7 @@ export async function run() {
 }
 
 run().catch((error) => {
-	logger.error({ error }, "cli_run_error");
+	logger.error({ err: error }, "cli_run_error");
 	console.error("Error:", error.message);
 	process.exit(1);
 });

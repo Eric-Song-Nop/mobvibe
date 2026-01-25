@@ -529,13 +529,13 @@ export class SessionManager {
 			record.unsubscribe?.();
 			record.unsubscribeTerminal?.();
 		} catch (error) {
-			logger.error({ error, sessionId }, "session_unsubscribe_failed");
+			logger.error({ err: error, sessionId }, "session_unsubscribe_failed");
 		}
 		this.cancelPermissionRequests(sessionId);
 		try {
 			await record.connection.disconnect();
 		} catch (error) {
-			logger.error({ error, sessionId }, "session_disconnect_failed");
+			logger.error({ err: error, sessionId }, "session_disconnect_failed");
 		}
 		this.sessions.delete(sessionId);
 		return true;

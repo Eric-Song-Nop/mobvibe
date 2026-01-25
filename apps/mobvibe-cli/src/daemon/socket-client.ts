@@ -133,7 +133,7 @@ export class SocketClient extends EventEmitter {
 			this.reconnectAttempts++;
 			if (this.reconnectAttempts <= 3 || this.reconnectAttempts % 10 === 0) {
 				logger.error(
-					{ attempt: this.reconnectAttempts, message: error.message },
+					{ attempt: this.reconnectAttempts, err: error },
 					"gateway_connect_error",
 				);
 			}
@@ -145,7 +145,7 @@ export class SocketClient extends EventEmitter {
 
 		// Handle authentication errors
 		this.socket.on("cli:error", (error) => {
-			logger.error({ message: error.message }, "gateway_auth_error");
+			logger.error({ err: error }, "gateway_auth_error");
 			this.emit("auth_error", error);
 		});
 	}
@@ -161,7 +161,7 @@ export class SocketClient extends EventEmitter {
 				this.sendRpcResponse(request.requestId, session);
 			} catch (error) {
 				logger.error(
-					{ error, requestId: request.requestId },
+					{ err: error, requestId: request.requestId },
 					"rpc_session_create_error",
 				);
 				this.sendRpcError(request.requestId, error);
@@ -180,7 +180,7 @@ export class SocketClient extends EventEmitter {
 			} catch (error) {
 				logger.error(
 					{
-						error,
+						err: error,
 						requestId: request.requestId,
 						sessionId: request.params.sessionId,
 					},
@@ -202,7 +202,7 @@ export class SocketClient extends EventEmitter {
 			} catch (error) {
 				logger.error(
 					{
-						error,
+						err: error,
 						requestId: request.requestId,
 						sessionId: request.params.sessionId,
 					},
@@ -231,7 +231,7 @@ export class SocketClient extends EventEmitter {
 			} catch (error) {
 				logger.error(
 					{
-						error,
+						err: error,
 						requestId: request.requestId,
 						sessionId: request.params.sessionId,
 						modeId: request.params.modeId,
@@ -261,7 +261,7 @@ export class SocketClient extends EventEmitter {
 			} catch (error) {
 				logger.error(
 					{
-						error,
+						err: error,
 						requestId: request.requestId,
 						sessionId: request.params.sessionId,
 						modelId: request.params.modelId,
@@ -274,6 +274,7 @@ export class SocketClient extends EventEmitter {
 
 		// Send message
 		this.socket.on("rpc:message:send", async (request) => {
+			const requestStart = process.hrtime.bigint();
 			try {
 				const { sessionId, prompt } = request.params;
 				logger.info(
@@ -283,6 +284,14 @@ export class SocketClient extends EventEmitter {
 						promptBlocks: prompt.length,
 					},
 					"rpc_message_send",
+				);
+				logger.debug(
+					{
+						requestId: request.requestId,
+						sessionId,
+						promptBlocks: prompt.length,
+					},
+					"rpc_message_send_start",
 				);
 				const record = sessionManager.getSession(sessionId);
 				if (!record) {
@@ -298,20 +307,35 @@ export class SocketClient extends EventEmitter {
 				this.sendRpcResponse<{ stopReason: StopReason }>(request.requestId, {
 					stopReason: result.stopReason as StopReason,
 				});
+				const durationMs =
+					Number(process.hrtime.bigint() - requestStart) / 1_000_000;
 				logger.info(
 					{
 						requestId: request.requestId,
 						sessionId,
 						stopReason: result.stopReason,
+						durationMs,
 					},
 					"rpc_message_send_complete",
 				);
+				logger.debug(
+					{
+						requestId: request.requestId,
+						sessionId,
+						durationMs,
+					},
+					"rpc_message_send_finish",
+				);
 			} catch (error) {
+				const durationMs =
+					Number(process.hrtime.bigint() - requestStart) / 1_000_000;
 				logger.error(
 					{
-						error,
+						err: error,
 						requestId: request.requestId,
 						sessionId: request.params.sessionId,
+						promptBlocks: request.params.prompt.length,
+						durationMs,
 					},
 					"rpc_message_send_error",
 				);
@@ -332,9 +356,11 @@ export class SocketClient extends EventEmitter {
 			} catch (error) {
 				logger.error(
 					{
-						error,
+						err: error,
 						requestId: request.requestId,
 						sessionId: request.params.sessionId,
+						permissionRequestId: request.params.requestId,
+						outcome: request.params.outcome,
 					},
 					"rpc_permission_decision_error",
 				);
@@ -361,7 +387,7 @@ export class SocketClient extends EventEmitter {
 			} catch (error) {
 				logger.error(
 					{
-						error,
+						err: error,
 						requestId: request.requestId,
 						sessionId: request.params.sessionId,
 					},
@@ -392,7 +418,7 @@ export class SocketClient extends EventEmitter {
 			} catch (error) {
 				logger.error(
 					{
-						error,
+						err: error,
 						requestId: request.requestId,
 						sessionId: request.params.sessionId,
 					},
@@ -438,7 +464,7 @@ export class SocketClient extends EventEmitter {
 			} catch (error) {
 				logger.error(
 					{
-						error,
+						err: error,
 						requestId: request.requestId,
 						sessionId: request.params.sessionId,
 					},
@@ -467,7 +493,7 @@ export class SocketClient extends EventEmitter {
 			} catch (error) {
 				logger.error(
 					{
-						error,
+						err: error,
 						requestId: request.requestId,
 						sessionId: request.params.sessionId,
 					},
@@ -553,7 +579,16 @@ export class SocketClient extends EventEmitter {
 
 	private sendRpcError(requestId: string, error: unknown) {
 		const message = error instanceof Error ? error.message : "Unknown error";
-		logger.error({ requestId, message }, "rpc_response_error_sent");
+		const detail = error instanceof Error ? error.stack : undefined;
+		logger.error(
+			{
+				requestId,
+				err: error,
+				message,
+				detail,
+			},
+			"rpc_response_error_sent",
+		);
 		const response: RpcResponse<unknown> = {
 			requestId,
 			error: {
@@ -561,6 +596,7 @@ export class SocketClient extends EventEmitter {
 				message,
 				retryable: true,
 				scope: "request",
+				detail,
 			},
 		};
 		this.socket.emit("rpc:response", response);

@@ -113,6 +113,8 @@ app.use((request, response, next) => {
 	const start = process.hrtime.bigint();
 	const requestId = randomUUID();
 	response.setHeader("x-request-id", requestId);
+	(request as Express.Request & { requestId?: string }).requestId = requestId;
+	request.headers["x-request-id"] = requestId;
 	response.on("finish", () => {
 		const durationMs = Number(process.hrtime.bigint() - start) / 1_000_000;
 		logger.info(
@@ -123,6 +125,7 @@ app.use((request, response, next) => {
 				status: response.statusCode,
 				durationMs,
 				ip: request.ip,
+				userAgent: request.headers["user-agent"],
 			},
 			"http_request",
 		);
@@ -242,7 +245,7 @@ const shutdown = async (signal: string) => {
 		await closeDb();
 		logger.info({ signal }, "gateway_shutdown_complete");
 	} catch (error) {
-		logger.error({ error, signal }, "gateway_shutdown_error");
+		logger.error({ err: error, signal }, "gateway_shutdown_error");
 	}
 	process.exit(0);
 };

@@ -12,8 +12,19 @@
 
 ## 网关日志
 - 入口：`apps/gateway/src/lib/logger.ts`
-- 自动记录：HTTP 请求（方法、路径、状态码、耗时、requestId）。
+- 自动记录：HTTP 请求（方法、路径、状态码、耗时、requestId、userAgent）。
 - 关键链路：会话创建/关闭/消息发送、RPC 请求/响应、Socket 连接与权限流。
+- RPC 发送链路增加 `rpc_response_resolved/rpc_response_rejected/rpc_timeout` 耗时信息。
+
+### 消息发送调试字段
+- `message_send_request`：`sessionId`、`userId`、`requestId`、`promptBlocks`。
+- `message_send_http_context`：`route`、`requestHasAuth`、`requestId`。
+- `message_send_rpc_complete`：`stopReason`、`requestId`。
+- `message_send_error`：`err`（包含 stack）、`requestId`、`promptBlocks`。
+
+## 错误序列化
+- 所有错误日志使用 `err` 字段，输出 `message/stack/name`。
+- 响应层 RPC 错误附带 `detail` 字段（来自 Error stack）。
 
 ## CLI 日志
 - 入口：`apps/mobvibe-cli/src/lib/logger.ts`
