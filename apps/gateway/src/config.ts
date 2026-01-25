@@ -2,6 +2,7 @@ export type GatewayConfig = {
 	port: number;
 	corsOrigins: string[];
 	siteUrl: string | undefined;
+	webUrl: string | undefined;
 	databaseUrl: string | undefined;
 };
 
@@ -29,6 +30,7 @@ export const getGatewayConfig = (): GatewayConfig => {
 		port: parsePort(env.PORT ?? env.GATEWAY_PORT ?? "3005"),
 		corsOrigins: parseOrigins(env.GATEWAY_CORS_ORIGINS),
 		siteUrl: env.SITE_URL,
+		webUrl: env.WEB_URL,
 		databaseUrl: env.DATABASE_URL,
 	};
 };

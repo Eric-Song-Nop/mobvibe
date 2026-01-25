@@ -27,41 +27,12 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, {
 	path: "/socket.io",
 	cors: {
-		origin: (origin, callback) => {
-			// Allow localhost and private IPs
+		origin(origin, callback) {
 			if (!origin) {
 				callback(null, true);
 				return;
 			}
-			try {
-				const { hostname } = new URL(origin);
-				if (hostname === "localhost" || hostname === "127.0.0.1") {
-					callback(null, true);
-					return;
-				}
-				// Check private IPv4
-				const parts = hostname.split(".");
-				if (parts.length === 4) {
-					const [first, second] = parts.map((p) => Number.parseInt(p, 10));
-					if (
-						first === 10 ||
-						first === 127 ||
-						(first === 192 && second === 168) ||
-						(first === 172 && second >= 16 && second <= 31)
-					) {
-						callback(null, true);
-						return;
-					}
-				}
-				// Check allowed origins
-				if (config.corsOrigins.includes(origin)) {
-					callback(null, true);
-					return;
-				}
-				callback(null, false);
-			} catch {
-				callback(null, false);
-			}
+			callback(null, origin === config.webUrl);
 		},
 		methods: ["GET", "POST"],
 		credentials: true,
@@ -134,63 +105,13 @@ app.use((request, response, next) => {
 });
 
 // CORS middleware for REST
-const isPrivateIpv4 = (hostname: string) => {
-	const parts = hostname.split(".");
-	if (parts.length !== 4) {
-		return false;
-	}
-	const numbers = parts.map((part) => Number.parseInt(part, 10));
-	if (
-		numbers.some((value) => Number.isNaN(value) || value < 0 || value > 255)
-	) {
-		return false;
-	}
-	const [first, second] = numbers;
-	if (first === 10 || first === 127) {
-		return true;
-	}
-	if (first === 192 && second === 168) {
-		return true;
-	}
-	if (first === 172 && second >= 16 && second <= 31) {
-		return true;
-	}
-	return false;
-};
-
-const isAllowedCorsOrigin = (origin: string) => {
-	if (config.corsOrigins.includes(origin)) {
-		return true;
-	}
-	try {
-		const { hostname } = new URL(origin);
-		if (hostname === "localhost" || hostname === "::1") {
-			return true;
-		}
-		return isPrivateIpv4(hostname);
-	} catch {
-		return false;
-	}
-};
-
-app.use((request, response, next) => {
-	const origin = request.headers.origin;
-	if (origin && isAllowedCorsOrigin(origin)) {
-		response.setHeader("Access-Control-Allow-Origin", origin);
-		response.setHeader("Vary", "Origin");
-		response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-		response.setHeader(
-			"Access-Control-Allow-Headers",
-			"Content-Type, Authorization",
-		);
-		response.setHeader("Access-Control-Allow-Credentials", "true");
-	}
-	if (request.method === "OPTIONS") {
-		response.status(204).end();
-		return;
-	}
-	next();
-});
+app.use(
+	cors({
+		origin: config.webUrl,
+		methods: ["GET", "POST", "PUT", "DELETE"],
+		credentials: true,
+	}),
+);
 
 // Mount Better Auth handler BEFORE express.json()
 // Better Auth needs to handle raw requests for some endpoints

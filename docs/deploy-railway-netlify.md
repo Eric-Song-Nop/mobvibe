@@ -31,6 +31,25 @@
 
 ---
 
+## CORS 简化实现计划
+
+- 新增 `WEB_URL` 环境变量作为 WebUI 域名来源
+- REST CORS 中间件改为 `cors` 官方示例，`origin` 直接使用 `WEB_URL`
+- Socket.io 允许 `Origin` 为空的 CLI 连接
+- 保持 `SITE_URL` 作为 Gateway 公开地址不变
+
+## CORS 简化实现细节与使用方法
+
+- REST CORS 使用 `cors` 中间件并固定 `origin` 为 `WEB_URL`
+- Socket.io 允许 `Origin` 为空（CLI 连接）或匹配 `WEB_URL`
+- `WEB_URL` 必须是完整 WebUI Origin（例如 `https://mobvibe.netlify.app`），不要带尾部 `/`
+- `SITE_URL` 继续表示 Gateway 的公开 URL
+
+使用方法：
+1. Railway Gateway 环境变量新增 `WEB_URL=https://your-app.netlify.app`
+2. 重新部署 Gateway
+3. 在浏览器 Network 中确认响应头包含 `Access-Control-Allow-Origin: https://your-app.netlify.app`
+
 ## 第一部分：Railway 部署 (Gateway + PostgreSQL)
 
 ### 1.1 创建 Railway 项目
@@ -69,7 +88,7 @@ Railway 会自动检测这些文件并正确构建。
 |--------|-----|------|
 | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` | 引用 PostgreSQL 服务 |
 | `PORT` | `3005` | Gateway 端口 |
-| `GATEWAY_CORS_ORIGINS` | `https://your-app.netlify.app` | 允许的 CORS 来源 |
+| `WEB_URL` | `https://your-app.netlify.app` | WebUI 公开 URL |
 | `SITE_URL` | `https://your-gateway.railway.app` | Gateway 的公开 URL |
 | `BETTER_AUTH_SECRET` | `<随机生成的密钥>` | 用于会话签名 |
 
@@ -205,16 +224,10 @@ curl https://your-gateway.railway.app/health
 部署完 Netlify 后，需要更新 Gateway 的 CORS 配置：
 
 1. 在 Railway 的 Gateway 服务中更新环境变量
-2. 设置 `GATEWAY_CORS_ORIGINS` 为 Netlify 的完整 URL
+2. 设置 `WEB_URL` 为 Netlify 的完整 URL
 
 ```
-GATEWAY_CORS_ORIGINS=https://your-app.netlify.app
-```
-
-如有多个域名，用逗号分隔：
-
-```
-GATEWAY_CORS_ORIGINS=https://your-app.netlify.app,https://custom-domain.com
+WEB_URL=https://your-app.netlify.app
 ```
 
 ### 3.2 更新 Better Auth 配置
@@ -266,7 +279,7 @@ railway logs --service gateway
 
 ### CORS 错误
 
-1. 确认 `GATEWAY_CORS_ORIGINS` 包含 Netlify URL
+1. 确认 `WEB_URL` 指向 Netlify URL
 2. URL 不要有末尾斜杠
 3. 确保使用 HTTPS
 
@@ -292,7 +305,7 @@ railway logs --service gateway
 |--------|------|------|
 | `DATABASE_URL` | 是 | PostgreSQL 连接字符串 |
 | `PORT` | 否 | 服务端口（默认 3005） |
-| `GATEWAY_CORS_ORIGINS` | 是 | 允许的 CORS 来源 |
+| `WEB_URL` | 是 | WebUI 公开 URL |
 | `SITE_URL` | 是 | Gateway 公开 URL |
 | `BETTER_AUTH_SECRET` | 是 | 会话签名密钥 |
 | `GITHUB_CLIENT_ID` | 否 | GitHub OAuth |
@@ -367,7 +380,7 @@ Railway Project
 │   ├── Dockerfile: apps/gateway/Dockerfile
 │   └── Environment Variables
 │       ├── DATABASE_URL → ${{Postgres.DATABASE_URL}}
-│       ├── GATEWAY_CORS_ORIGINS
+│       ├── WEB_URL
 │       ├── SITE_URL
 │       └── BETTER_AUTH_SECRET
 │
@@ -398,5 +411,5 @@ mobvibe/
 - [ ] 数据库 schema 已推送
 - [ ] Netlify WebUI 构建成功
 - [ ] `VITE_GATEWAY_URL` 指向正确的 Gateway
-- [ ] `GATEWAY_CORS_ORIGINS` 包含 Netlify URL
+- [ ] `WEB_URL` 指向 Netlify URL
 - [ ] WebUI 可以连接到 Gateway（检查浏览器控制台）

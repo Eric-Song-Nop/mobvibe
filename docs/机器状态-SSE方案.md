@@ -43,11 +43,11 @@
 
 - 检查 gateway 的 CORS 配置是否覆盖 `/api/machines/stream`。
 - 补齐 SSE 响应头中的 `Access-Control-Allow-Origin` 与 `Access-Control-Allow-Credentials`。
-- 支持 `MOBVIBE_CORS_ORIGINS`/`GATEWAY_CORS_ORIGINS` 统一解析。
+- 使用 `WEB_URL` 作为 WebUI 来源。
 - 更新文档说明 CORS 变量与验证方式。
 
 ## 2026-01 SSE 跨域修复记录（实现后）
 
-- Gateway 兼容 `MOBVIBE_CORS_ORIGINS` 与 `GATEWAY_CORS_ORIGINS`。
+- Gateway 使用 `WEB_URL` 作为 WebUI 来源。
 - `/api/machines/stream` 主动写入 CORS 头，确保 SSE 可携带 Cookie。
 - 文档补充 SSE 跨域验证说明。
