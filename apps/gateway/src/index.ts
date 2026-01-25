@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { toNodeHandler } from "better-auth/node";
 import cors from "cors";
@@ -7,6 +8,7 @@ import { Server } from "socket.io";
 import { getGatewayConfig } from "./config.js";
 import { closeDb } from "./db/index.js";
 import { auth } from "./lib/auth.js";
+import { logger } from "./lib/logger.js";
 import { setupFsRoutes } from "./routes/fs.js";
 import { setupHealthRoutes } from "./routes/health.js";
 import { setupMachineRoutes } from "./routes/machines.js";
@@ -107,6 +109,27 @@ setupCliHandlers(io, cliRegistry, sessionRouter, (event, payload) => {
 	}
 });
 
+app.use((request, response, next) => {
+	const start = process.hrtime.bigint();
+	const requestId = randomUUID();
+	response.setHeader("x-request-id", requestId);
+	response.on("finish", () => {
+		const durationMs = Number(process.hrtime.bigint() - start) / 1_000_000;
+		logger.info(
+			{
+				requestId,
+				method: request.method,
+				path: request.originalUrl,
+				status: response.statusCode,
+				durationMs,
+				ip: request.ip,
+			},
+			"http_request",
+		);
+	});
+	next();
+});
+
 // CORS middleware for REST
 const isPrivateIpv4 = (hostname: string) => {
 	const parts = hostname.split(".");
@@ -170,7 +193,7 @@ app.use((request, response, next) => {
 // Better Auth needs to handle raw requests for some endpoints
 // For Express v4, use app.all with wildcard pattern
 app.all("/api/auth/*", toNodeHandler(auth));
-console.log("[gateway] Better Auth enabled");
+logger.info("better_auth_enabled");
 
 app.use(express.json());
 
@@ -212,20 +235,21 @@ const stopServer = async () =>
 	});
 
 const shutdown = async (signal: string) => {
-	console.log(`[gateway] received ${signal}, shutting down`);
+	logger.info({ signal }, "gateway_shutdown_start");
 	try {
 		io.close();
 		await stopServer();
 		await closeDb();
+		logger.info({ signal }, "gateway_shutdown_complete");
 	} catch (error) {
-		console.error("[gateway] shutdown error", error);
+		logger.error({ error, signal }, "gateway_shutdown_error");
 	}
 	process.exit(0);
 };
 
 if (shouldStartServer) {
 	server = httpServer.listen(config.port, () => {
-		console.log(`[gateway] listening on :${config.port}`);
+		logger.info({ port: config.port }, "gateway_listening");
 	});
 
 	process.on("SIGINT", () => {

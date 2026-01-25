@@ -20,6 +20,7 @@ import {
 	type TerminalOutputEvent,
 } from "@mobvibe/shared";
 import type { AcpBackendConfig, CliConfig } from "../config.js";
+import { logger } from "../lib/logger.js";
 import { AcpConnection } from "./acp-connection.js";
 
 type SessionRecord = {
@@ -528,19 +529,13 @@ export class SessionManager {
 			record.unsubscribe?.();
 			record.unsubscribeTerminal?.();
 		} catch (error) {
-			console.error(
-				`[mobvibe-cli] session unsubscribe failed: ${sessionId}`,
-				error,
-			);
+			logger.error({ error, sessionId }, "session_unsubscribe_failed");
 		}
 		this.cancelPermissionRequests(sessionId);
 		try {
 			await record.connection.disconnect();
 		} catch (error) {
-			console.error(
-				`[mobvibe-cli] session disconnect failed: ${sessionId}`,
-				error,
-			);
+			logger.error({ error, sessionId }, "session_disconnect_failed");
 		}
 		this.sessions.delete(sessionId);
 		return true;

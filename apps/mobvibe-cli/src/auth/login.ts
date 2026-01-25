@@ -4,6 +4,7 @@
  */
 
 import * as readline from "node:readline/promises";
+import { logger } from "../lib/logger.js";
 import {
 	type Credentials,
 	deleteCredentials,
@@ -21,6 +22,7 @@ export interface LoginResult {
  * Prompts user to paste an API key from the WebUI.
  */
 export async function login(): Promise<LoginResult> {
+	logger.info("login_prompt_start");
 	console.log("To get an API key:");
 	console.log("  1. Open the Mobvibe WebUI in your browser");
 	console.log("  2. Go to Settings (gear icon) -> API Keys");
@@ -36,11 +38,13 @@ export async function login(): Promise<LoginResult> {
 		const apiKey = await rl.question("Paste your API key: ");
 
 		if (!apiKey.trim()) {
+			logger.warn("login_missing_api_key");
 			return { success: false, error: "No API key provided" };
 		}
 
 		// Basic format check
 		if (!apiKey.trim().startsWith("mbk_")) {
+			logger.warn("login_invalid_api_key_format");
 			return {
 				success: false,
 				error: "Invalid API key format (should start with mbk_)",
@@ -53,6 +57,7 @@ export async function login(): Promise<LoginResult> {
 			createdAt: Date.now(),
 		};
 		await saveCredentials(credentials);
+		logger.info("login_credentials_saved");
 
 		console.log("\nAPI key saved!");
 		console.log("Run 'mobvibe start' to connect to the gateway.");
@@ -68,6 +73,7 @@ export async function login(): Promise<LoginResult> {
  */
 export async function logout(): Promise<void> {
 	await deleteCredentials();
+	logger.info("logout_complete");
 	console.log("Logged out successfully. Credentials deleted.");
 }
 
@@ -77,10 +83,12 @@ export async function logout(): Promise<void> {
 export async function loginStatus(): Promise<void> {
 	const credentials = await loadCredentials();
 	if (credentials) {
+		logger.info("login_status_logged_in");
 		console.log("Status: Logged in");
 		console.log(`API key: ${credentials.apiKey.slice(0, 12)}...`);
 		console.log(`Saved: ${new Date(credentials.createdAt).toLocaleString()}`);
 	} else {
+		logger.info("login_status_logged_out");
 		console.log("Status: Not logged in");
 		console.log("Run 'mobvibe login' to authenticate.");
 	}

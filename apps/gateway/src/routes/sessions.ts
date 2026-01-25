@@ -6,6 +6,7 @@ import {
 	type ErrorDetail,
 } from "@mobvibe/shared";
 import type { Router } from "express";
+import { logger } from "../lib/logger.js";
 import {
 	type AuthenticatedRequest,
 	getUserId,
@@ -72,9 +73,11 @@ export function setupSessionRoutes(
 
 	// Create session - routes to user's machine if authenticated
 	router.post("/session", async (request: AuthenticatedRequest, response) => {
+		const userId = getUserId(request);
 		try {
 			const { cwd, title, backendId } = request.body ?? {};
-			const userId = getUserId(request);
+
+			logger.info({ userId, backendId }, "session_create_request");
 
 			const session = await sessionRouter.createSession(
 				{
@@ -91,9 +94,14 @@ export function setupSessionRoutes(
 				},
 				userId,
 			);
+			logger.info(
+				{ sessionId: session.sessionId, userId },
+				"session_create_success",
+			);
 			response.json(session);
 		} catch (error) {
 			const message = getErrorMessage(error);
+			logger.error({ error, userId }, "session_create_error");
 			if (
 				message.includes("Not authorized") ||
 				message.includes("No CLI connected for this user")
@@ -121,10 +129,13 @@ export function setupSessionRoutes(
 
 			try {
 				const userId = getUserId(request);
+				logger.info({ sessionId, userId }, "session_close_request");
 				await sessionRouter.closeSession({ sessionId }, userId);
+				logger.info({ sessionId, userId }, "session_close_success");
 				response.json({ ok: true });
 			} catch (error) {
 				const message = getErrorMessage(error);
+				logger.error({ error, sessionId }, "session_close_error");
 				if (message.includes("Not authorized")) {
 					respondError(response, buildAuthorizationError(message), 403);
 				} else {
@@ -150,10 +161,13 @@ export function setupSessionRoutes(
 
 			try {
 				const userId = getUserId(request);
+				logger.info({ sessionId, userId }, "session_cancel_request");
 				await sessionRouter.cancelSession({ sessionId }, userId);
+				logger.info({ sessionId, userId }, "session_cancel_success");
 				response.json({ ok: true });
 			} catch (error) {
 				const message = getErrorMessage(error);
+				logger.error({ error, sessionId }, "session_cancel_error");
 				if (message.includes("Not authorized")) {
 					respondError(response, buildAuthorizationError(message), 403);
 				} else {
@@ -179,13 +193,16 @@ export function setupSessionRoutes(
 
 			try {
 				const userId = getUserId(request);
+				logger.info({ sessionId, modeId, userId }, "session_mode_request");
 				const session = await sessionRouter.setSessionMode(
 					{ sessionId, modeId },
 					userId,
 				);
+				logger.info({ sessionId, modeId, userId }, "session_mode_success");
 				response.json(session);
 			} catch (error) {
 				const message = getErrorMessage(error);
+				logger.error({ error, sessionId, modeId }, "session_mode_error");
 				if (message.includes("Not authorized")) {
 					respondError(response, buildAuthorizationError(message), 403);
 				} else {
@@ -211,13 +228,16 @@ export function setupSessionRoutes(
 
 			try {
 				const userId = getUserId(request);
+				logger.info({ sessionId, modelId, userId }, "session_model_request");
 				const session = await sessionRouter.setSessionModel(
 					{ sessionId, modelId },
 					userId,
 				);
+				logger.info({ sessionId, modelId, userId }, "session_model_success");
 				response.json(session);
 			} catch (error) {
 				const message = getErrorMessage(error);
+				logger.error({ error, sessionId, modelId }, "session_model_error");
 				if (message.includes("Not authorized")) {
 					respondError(response, buildAuthorizationError(message), 403);
 				} else {
@@ -241,6 +261,7 @@ export function setupSessionRoutes(
 
 		// Generate a unique message ID
 		const messageId = randomUUID();
+		logger.debug({ sessionId, messageId }, "message_id_created");
 		response.json({ messageId });
 	});
 
@@ -258,13 +279,22 @@ export function setupSessionRoutes(
 
 		try {
 			const userId = getUserId(request);
+			logger.info(
+				{ sessionId, userId, promptBlocks: prompt.length },
+				"message_send_request",
+			);
 			const result = await sessionRouter.sendMessage(
 				{ sessionId, prompt },
 				userId,
 			);
+			logger.info(
+				{ sessionId, userId, stopReason: result.stopReason },
+				"message_send_success",
+			);
 			response.json(result);
 		} catch (error) {
 			const message = getErrorMessage(error);
+			logger.error({ error, sessionId }, "message_send_error");
 			if (message.includes("Not authorized")) {
 				respondError(response, buildAuthorizationError(message), 403);
 			} else {
@@ -289,13 +319,25 @@ export function setupSessionRoutes(
 
 			try {
 				const userId = getUserId(request);
+				logger.info(
+					{ sessionId, requestId, outcome, userId },
+					"permission_decision_request",
+				);
 				await sessionRouter.sendPermissionDecision(
 					{ sessionId, requestId, outcome },
 					userId,
 				);
+				logger.info(
+					{ sessionId, requestId, outcome, userId },
+					"permission_decision_success",
+				);
 				response.json({ ok: true });
 			} catch (error) {
 				const message = getErrorMessage(error);
+				logger.error(
+					{ error, sessionId, requestId },
+					"permission_decision_error",
+				);
 				if (message.includes("Not authorized")) {
 					respondError(response, buildAuthorizationError(message), 403);
 				} else {

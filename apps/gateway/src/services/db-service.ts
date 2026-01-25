@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { acpSessions, machines } from "../db/schema.js";
+import { logger } from "../lib/logger.js";
 
 export type MachineTokenValidation = {
 	machineId: string;
@@ -51,7 +52,7 @@ export async function validateMachineToken(
 			hostname: machine.hostname,
 		};
 	} catch (error) {
-		console.error("[db-service] validateMachineToken error:", error);
+		logger.error({ error }, "db_validate_machine_token_error");
 		return null;
 	}
 }
@@ -80,7 +81,7 @@ export async function updateMachineStatus(
 
 		return { machineId: result[0].id, userId: result[0].userId };
 	} catch (error) {
-		console.error("[db-service] updateMachineStatus error:", error);
+		logger.error({ error }, "db_update_machine_status_error");
 		return null;
 	}
 }
@@ -104,7 +105,10 @@ export async function createAcpSession(params: {
 			.limit(1);
 
 		if (machineResult.length === 0) {
-			console.error("[db-service] createAcpSession: machine not found");
+			logger.warn(
+				{ machineToken: params.machineToken },
+				"db_create_session_machine_not_found",
+			);
 			return null;
 		}
 
@@ -128,7 +132,7 @@ export async function createAcpSession(params: {
 			machineId: machine.id,
 		};
 	} catch (error) {
-		console.error("[db-service] createAcpSession error:", error);
+		logger.error({ error }, "db_create_session_error");
 		return null;
 	}
 }
@@ -162,7 +166,7 @@ export async function updateAcpSessionState(params: {
 
 		return true;
 	} catch (error) {
-		console.error("[db-service] updateAcpSessionState error:", error);
+		logger.error({ error }, "db_update_session_state_error");
 		return false;
 	}
 }
@@ -183,7 +187,7 @@ export async function closeAcpSession(sessionId: string): Promise<boolean> {
 
 		return true;
 	} catch (error) {
-		console.error("[db-service] closeAcpSession error:", error);
+		logger.error({ error }, "db_close_session_error");
 		return false;
 	}
 }
@@ -211,7 +215,7 @@ export async function checkSessionOwnership(
 			isOwner: result[0].userId === userId,
 		};
 	} catch (error) {
-		console.error("[db-service] checkSessionOwnership error:", error);
+		logger.error({ error }, "db_check_session_ownership_error");
 		return { exists: false, isOwner: false };
 	}
 }
@@ -255,7 +259,7 @@ export async function closeSessionsForMachine(
 
 		return result.length;
 	} catch (error) {
-		console.error("[db-service] closeSessionsForMachine error:", error);
+		logger.error({ error }, "db_close_sessions_for_machine_error");
 		return 0;
 	}
 }
@@ -284,7 +288,7 @@ export async function closeSessionsForMachineById(
 
 		return result.length;
 	} catch (error) {
-		console.error("[db-service] closeSessionsForMachineById error:", error);
+		logger.error({ error }, "db_close_sessions_for_machine_by_id_error");
 		return 0;
 	}
 }
@@ -312,9 +316,11 @@ export async function upsertMachine(params: {
 		if (existing.length > 0) {
 			// Machine exists - verify it belongs to the same user
 			if (existing[0].userId !== params.userId) {
-				console.error(
-					"[db-service] upsertMachine: machine belongs to different user",
+				logger.warn(
+					{ machineId: params.machineId, userId: params.userId },
+					"db_upsert_machine_user_mismatch",
 				);
+
 				return null;
 			}
 
@@ -351,7 +357,7 @@ export async function upsertMachine(params: {
 
 		return { id: params.machineId, userId: params.userId };
 	} catch (error) {
-		console.error("[db-service] upsertMachine error:", error);
+		logger.error({ error }, "db_upsert_machine_error");
 		return null;
 	}
 }
@@ -375,7 +381,7 @@ export async function updateMachineStatusById(
 
 		return true;
 	} catch (error) {
-		console.error("[db-service] updateMachineStatusById error:", error);
+		logger.error({ error }, "db_update_machine_status_by_id_error");
 		return false;
 	}
 }
@@ -407,7 +413,7 @@ export async function createAcpSessionDirect(params: {
 
 		return { _id: id };
 	} catch (error) {
-		console.error("[db-service] createAcpSessionDirect error:", error);
+		logger.error({ error }, "db_create_session_direct_error");
 		return null;
 	}
 }

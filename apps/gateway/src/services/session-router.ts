@@ -21,6 +21,7 @@ import type {
 	StopReason,
 } from "@mobvibe/shared";
 import type { Socket } from "socket.io";
+import { logger } from "../lib/logger.js";
 import type { CliRegistry } from "./cli-registry.js";
 import {
 	closeAcpSession,
@@ -51,8 +52,17 @@ export class SessionRouter {
 		clearTimeout(pending.timeout);
 
 		if (response.error) {
+			logger.warn(
+				{
+					requestId: response.requestId,
+					code: response.error.code,
+					scope: response.error.scope,
+				},
+				"rpc_response_error",
+			);
 			pending.reject(new Error(response.error.message));
 		} else {
+			logger.debug({ requestId: response.requestId }, "rpc_response_success");
 			pending.resolve(response.result);
 		}
 	}
@@ -74,6 +84,11 @@ export class SessionRouter {
 			);
 		}
 
+		logger.info(
+			{ userId, machineId: cli.machineId, backendId: params.backendId },
+			"session_create_rpc_start",
+		);
+
 		const result = await this.sendRpc<CreateSessionParams, SessionSummary>(
 			cli.socket,
 			"rpc:session:create",
@@ -91,6 +106,11 @@ export class SessionRouter {
 				cwd: result.cwd,
 			});
 		}
+
+		logger.info(
+			{ sessionId: result.sessionId, userId },
+			"session_create_rpc_complete",
+		);
 
 		return result;
 	}
@@ -117,6 +137,11 @@ export class SessionRouter {
 			throw new Error("Not authorized to close this session");
 		}
 
+		logger.info(
+			{ sessionId: params.sessionId, userId },
+			"session_close_rpc_start",
+		);
+
 		const result = await this.sendRpc<CloseSessionParams, { ok: boolean }>(
 			cli.socket,
 			"rpc:session:close",
@@ -125,6 +150,10 @@ export class SessionRouter {
 
 		// Sync to database
 		await closeAcpSession(params.sessionId);
+		logger.info(
+			{ sessionId: params.sessionId, userId },
+			"session_close_rpc_complete",
+		);
 
 		return result;
 	}
@@ -151,11 +180,23 @@ export class SessionRouter {
 			throw new Error("Not authorized to cancel this session");
 		}
 
-		return this.sendRpc<CancelSessionParams, { ok: boolean }>(
+		logger.info(
+			{ sessionId: params.sessionId, userId },
+			"session_cancel_rpc_start",
+		);
+
+		const result = await this.sendRpc<CancelSessionParams, { ok: boolean }>(
 			cli.socket,
 			"rpc:session:cancel",
 			params,
 		);
+
+		logger.info(
+			{ sessionId: params.sessionId, userId },
+			"session_cancel_rpc_complete",
+		);
+
+		return result;
 	}
 
 	/**
@@ -179,11 +220,23 @@ export class SessionRouter {
 			throw new Error("Not authorized to modify this session");
 		}
 
-		return this.sendRpc<SetSessionModeParams, SessionSummary>(
+		logger.info(
+			{ sessionId: params.sessionId, modeId: params.modeId, userId },
+			"session_mode_rpc_start",
+		);
+
+		const result = await this.sendRpc<SetSessionModeParams, SessionSummary>(
 			cli.socket,
 			"rpc:session:mode",
 			params,
 		);
+
+		logger.info(
+			{ sessionId: params.sessionId, modeId: params.modeId, userId },
+			"session_mode_rpc_complete",
+		);
+
+		return result;
 	}
 
 	/**
@@ -207,11 +260,23 @@ export class SessionRouter {
 			throw new Error("Not authorized to modify this session");
 		}
 
-		return this.sendRpc<SetSessionModelParams, SessionSummary>(
+		logger.info(
+			{ sessionId: params.sessionId, modelId: params.modelId, userId },
+			"session_model_rpc_start",
+		);
+
+		const result = await this.sendRpc<SetSessionModelParams, SessionSummary>(
 			cli.socket,
 			"rpc:session:model",
 			params,
 		);
+
+		logger.info(
+			{ sessionId: params.sessionId, modelId: params.modelId, userId },
+			"session_model_rpc_complete",
+		);
+
+		return result;
 	}
 
 	/**
@@ -234,6 +299,11 @@ export class SessionRouter {
 		) {
 			throw new Error("Not authorized to send messages to this session");
 		}
+
+		logger.info(
+			{ sessionId: params.sessionId, userId },
+			"message_send_requested",
+		);
 
 		return this.sendRpc<SendMessageParams, { stopReason: StopReason }>(
 			cli.socket,
@@ -265,11 +335,22 @@ export class SessionRouter {
 			);
 		}
 
-		return this.sendRpc<PermissionDecisionPayload, { ok: boolean }>(
-			cli.socket,
-			"rpc:permission:decision",
-			params,
+		logger.info(
+			{ sessionId: params.sessionId, requestId: params.requestId, userId },
+			"permission_decision_rpc_start",
 		);
+
+		const result = await this.sendRpc<
+			PermissionDecisionPayload,
+			{ ok: boolean }
+		>(cli.socket, "rpc:permission:decision", params);
+
+		logger.info(
+			{ sessionId: params.sessionId, requestId: params.requestId, userId },
+			"permission_decision_rpc_complete",
+		);
+
+		return result;
 	}
 
 	/**
@@ -290,11 +371,16 @@ export class SessionRouter {
 			throw new Error("Not authorized to access this session");
 		}
 
-		return this.sendRpc<{ sessionId: string }, FsRootsResponse>(
+		logger.debug({ sessionId, userId }, "fs_roots_rpc_start");
+
+		const result = await this.sendRpc<{ sessionId: string }, FsRootsResponse>(
 			cli.socket,
 			"rpc:fs:roots",
 			{ sessionId },
 		);
+
+		logger.debug({ sessionId, userId }, "fs_roots_rpc_complete");
+		return result;
 	}
 
 	/**
@@ -318,11 +404,23 @@ export class SessionRouter {
 			throw new Error("Not authorized to access this session");
 		}
 
-		return this.sendRpc<FsEntriesParams, FsEntriesResponse>(
+		logger.debug(
+			{ sessionId: params.sessionId, userId },
+			"fs_entries_rpc_start",
+		);
+
+		const result = await this.sendRpc<FsEntriesParams, FsEntriesResponse>(
 			cli.socket,
 			"rpc:fs:entries",
 			params,
 		);
+
+		logger.debug(
+			{ sessionId: params.sessionId, userId },
+			"fs_entries_rpc_complete",
+		);
+
+		return result;
 	}
 
 	/**
@@ -346,11 +444,20 @@ export class SessionRouter {
 			throw new Error("Not authorized to access this session");
 		}
 
-		return this.sendRpc<FsFileParams, SessionFsFilePreview>(
+		logger.debug({ sessionId: params.sessionId, userId }, "fs_file_rpc_start");
+
+		const result = await this.sendRpc<FsFileParams, SessionFsFilePreview>(
 			cli.socket,
 			"rpc:fs:file",
 			params,
 		);
+
+		logger.debug(
+			{ sessionId: params.sessionId, userId },
+			"fs_file_rpc_complete",
+		);
+
+		return result;
 	}
 
 	/**
@@ -374,11 +481,23 @@ export class SessionRouter {
 			throw new Error("Not authorized to access this session");
 		}
 
-		return this.sendRpc<FsResourcesParams, FsResourcesResponse>(
+		logger.debug(
+			{ sessionId: params.sessionId, userId },
+			"fs_resources_rpc_start",
+		);
+
+		const result = await this.sendRpc<FsResourcesParams, FsResourcesResponse>(
 			cli.socket,
 			"rpc:fs:resources",
 			params,
 		);
+
+		logger.debug(
+			{ sessionId: params.sessionId, userId },
+			"fs_resources_rpc_complete",
+		);
+
+		return result;
 	}
 
 	/**
@@ -402,6 +521,10 @@ export class SessionRouter {
 			const requestId = randomUUID();
 			const timeout = setTimeout(() => {
 				this.pendingRpcs.delete(requestId);
+				logger.warn(
+					{ requestId, event, timeoutMs: RPC_TIMEOUT },
+					"rpc_timeout",
+				);
 				reject(new Error("RPC timeout"));
 			}, RPC_TIMEOUT);
 
@@ -413,6 +536,7 @@ export class SessionRouter {
 			});
 
 			const request: RpcRequest<TParams> = { requestId, params };
+			logger.debug({ requestId, event }, "rpc_request_sent");
 			socket.emit(event, request);
 		});
 	}

@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { login, loginStatus, logout } from "./auth/login.js";
 import { getCliConfig } from "./config.js";
 import { DaemonManager } from "./daemon/daemon.js";
+import { logger } from "./lib/logger.js";
 
 const program = new Command();
 
@@ -41,6 +42,7 @@ program
 		const daemon = new DaemonManager(config);
 		const status = await daemon.status();
 		if (status.running) {
+			logger.info({ pid: status.pid }, "daemon_status_running");
 			console.log(`Daemon is running (PID ${status.pid})`);
 			if (status.connected !== undefined) {
 				console.log(`Connected to gateway: ${status.connected ? "yes" : "no"}`);
@@ -49,6 +51,7 @@ program
 				console.log(`Active sessions: ${status.sessionCount}`);
 			}
 		} else {
+			logger.info("daemon_status_not_running");
 			console.log("Daemon is not running");
 		}
 	});
@@ -73,6 +76,7 @@ program
 	.action(async () => {
 		const result = await login();
 		if (!result.success) {
+			logger.error({ error: result.error }, "login_failed");
 			console.error(`Login failed: ${result.error}`);
 			process.exit(1);
 		}
@@ -97,6 +101,7 @@ export async function run() {
 }
 
 run().catch((error) => {
+	logger.error({ error }, "cli_run_error");
 	console.error("Error:", error.message);
 	process.exit(1);
 });

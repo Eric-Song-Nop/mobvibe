@@ -6,6 +6,7 @@
 import { fromNodeHeaders } from "better-auth/node";
 import type { NextFunction, Request, Response } from "express";
 import { auth } from "../lib/auth.js";
+import { logger } from "../lib/logger.js";
 
 /**
  * Extended request type with user information.
@@ -42,7 +43,7 @@ export async function requireAuth(
 		req.userEmail = session.user.email;
 		next();
 	} catch (error) {
-		console.error("[auth] Session validation error:", error);
+		logger.error({ error }, "auth_session_validation_error");
 		res.status(500).json({
 			error: "Authentication service error",
 			code: "AUTH_SERVICE_ERROR",
@@ -71,7 +72,7 @@ export async function optionalAuth(
 		}
 		next();
 	} catch (error) {
-		console.error("[auth] Session validation error:", error);
+		logger.error({ error }, "auth_optional_session_validation_error");
 		// Continue without auth on error
 		next();
 	}

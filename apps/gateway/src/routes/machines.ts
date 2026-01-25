@@ -5,6 +5,7 @@ import type { Request as ExpressRequest, Response, Router } from "express";
 import { db } from "../db/index.js";
 import { machines } from "../db/schema.js";
 import { auth } from "../lib/auth.js";
+import { logger } from "../lib/logger.js";
 import type { CliRegistry } from "../services/cli-registry.js";
 
 const sendSseEvent = (response: Response, payload: unknown) => {
@@ -74,12 +75,14 @@ export function setupMachineRoutes(
 				.from(machines)
 				.where(eq(machines.userId, userId));
 
-			console.log(`[machines] List machines for user ${userId}`);
-			console.log(userMachines);
+			logger.info(
+				{ userId, machineCount: userMachines.length },
+				"machines_list_success",
+			);
 
 			res.json({ machines: userMachines });
 		} catch (error) {
-			console.error("[machines] List error:", error);
+			logger.error({ error }, "machines_list_error");
 			res.status(500).json({
 				error: "Failed to list machines",
 				code: "LIST_ERROR",
@@ -151,7 +154,7 @@ export function setupMachineRoutes(
 
 			req.on("close", cleanup);
 		} catch (error) {
-			console.error("[machines] Stream error:", error);
+			logger.error({ error }, "machines_stream_error");
 			res.status(500).json({
 				error: "Failed to stream machine updates",
 				code: "STREAM_ERROR",
@@ -208,7 +211,10 @@ export function setupMachineRoutes(
 
 			res.json({ success: true });
 		} catch (error) {
-			console.error("[machines] Delete error:", error);
+			logger.error(
+				{ error, machineId: req.params.id },
+				"machines_delete_error",
+			);
 			res.status(500).json({
 				error: "Failed to delete machine",
 				code: "DELETE_ERROR",

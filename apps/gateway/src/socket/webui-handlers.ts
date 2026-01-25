@@ -8,6 +8,7 @@ import type {
 } from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
 import { auth } from "../lib/auth.js";
+import { logger } from "../lib/logger.js";
 import type { CliRegistry } from "../services/cli-registry.js";
 import type { SessionRouter } from "../services/session-router.js";
 
@@ -91,7 +92,7 @@ export function setupWebuiHandlers(
 		const authSocket = socket as AuthenticatedSocket;
 		authSocket.data = {};
 
-		console.log(`[gateway] Webui connected: ${socket.id}`);
+		logger.info({ socketId: socket.id }, "webui_connected");
 
 		// Authenticate via handshake cookies
 		try {
@@ -105,19 +106,23 @@ export function setupWebuiHandlers(
 					authSocket.data.userId = session.user.id;
 					authSocket.data.userEmail = session.user.email;
 					socketUserMap.set(socket.id, session.user.id);
-					console.log(
-						`[gateway] Webui authenticated: ${socket.id} as ${session.user.email}`,
+					logger.info(
+						{ socketId: socket.id, userId: session.user.id },
+						"webui_authenticated",
 					);
 				} else {
-					console.log(`[gateway] Webui auth failed: ${socket.id} (no session)`);
+					logger.warn({ socketId: socket.id }, "webui_auth_missing_session");
 				}
 			} else {
-				console.log(`[gateway] Webui connected without cookies: ${socket.id}`);
+				logger.info({ socketId: socket.id }, "webui_connected_no_cookies");
 			}
 		} catch (error) {
-			console.log(
-				`[gateway] Webui auth error: ${socket.id}`,
-				error instanceof Error ? error.message : error,
+			logger.error(
+				{
+					socketId: socket.id,
+					error,
+				},
+				"webui_auth_error",
 			);
 		}
 
@@ -144,6 +149,10 @@ export function setupWebuiHandlers(
 
 			// Check ownership if auth enabled
 			if (userId && !cliRegistry.isSessionOwnedByUser(sessionId, userId)) {
+				logger.warn(
+					{ socketId: socket.id, sessionId, userId },
+					"webui_subscribe_denied",
+				);
 				socket.emit("subscription:error", {
 					sessionId,
 					error: "Not authorized to subscribe to this session",
@@ -155,8 +164,9 @@ export function setupWebuiHandlers(
 				sessionSubscriptions.set(sessionId, new Map());
 			}
 			sessionSubscriptions.get(sessionId)!.set(socket.id, userId);
-			console.log(
-				`[gateway] Webui ${socket.id} subscribed to ${sessionId}${userId ? ` (user: ${userId})` : ""}`,
+			logger.info(
+				{ socketId: socket.id, sessionId, userId },
+				"webui_subscribed",
 			);
 		});
 
@@ -164,9 +174,7 @@ export function setupWebuiHandlers(
 		socket.on("unsubscribe:session", (payload: { sessionId: string }) => {
 			const { sessionId } = payload;
 			sessionSubscriptions.get(sessionId)?.delete(socket.id);
-			console.log(
-				`[gateway] Webui ${socket.id} unsubscribed from ${sessionId}`,
-			);
+			logger.info({ socketId: socket.id, sessionId }, "webui_unsubscribed");
 		});
 
 		// Permission decision from webui - with ownership check
@@ -179,6 +187,14 @@ export function setupWebuiHandlers(
 						userId &&
 						!cliRegistry.isSessionOwnedByUser(payload.sessionId, userId)
 					) {
+						logger.warn(
+							{
+								sessionId: payload.sessionId,
+								requestId: payload.requestId,
+								userId,
+							},
+							"permission_decision_denied",
+						);
 						socket.emit("permission:error", {
 							sessionId: payload.sessionId,
 							requestId: payload.requestId,
@@ -188,8 +204,23 @@ export function setupWebuiHandlers(
 					}
 
 					await sessionRouter.sendPermissionDecision(payload, userId);
+					logger.info(
+						{
+							sessionId: payload.sessionId,
+							requestId: payload.requestId,
+							userId,
+						},
+						"permission_decision_sent",
+					);
 				} catch (error) {
-					console.error("[gateway] Permission decision error:", error);
+					logger.error(
+						{
+							error,
+							sessionId: payload.sessionId,
+							requestId: payload.requestId,
+						},
+						"permission_decision_error",
+					);
 				}
 			},
 		);
@@ -201,7 +232,7 @@ export function setupWebuiHandlers(
 				subscribers.delete(socket.id);
 			}
 			socketUserMap.delete(socket.id);
-			console.log(`[gateway] Webui disconnected: ${socket.id}`);
+			logger.info({ socketId: socket.id }, "webui_disconnected");
 		});
 	});
 

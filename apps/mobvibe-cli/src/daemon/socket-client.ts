@@ -17,6 +17,7 @@ import type {
 import { io, type Socket } from "socket.io-client";
 import type { SessionManager } from "../acp/session-manager.js";
 import type { CliConfig } from "../config.js";
+import { logger } from "../lib/logger.js";
 
 type SocketClientOptions = {
 	config: CliConfig;
@@ -109,17 +110,20 @@ export class SocketClient extends EventEmitter {
 
 	private setupEventHandlers() {
 		this.socket.on("connect", () => {
-			console.log("[mobvibe-cli] Connected to gateway");
+			logger.info(
+				{ gatewayUrl: this.options.config.gatewayUrl },
+				"gateway_connected",
+			);
 			this.connected = true;
 			this.reconnectAttempts = 0;
-      console.log(`[mobvibe-cli] Registering to gateway`);
+			logger.info("gateway_register_start");
 			this.register();
 			this.startHeartbeat();
 			this.emit("connected");
 		});
 
 		this.socket.on("disconnect", (reason) => {
-			console.log(`[mobvibe-cli] Disconnected from gateway: ${reason}`);
+			logger.warn({ reason }, "gateway_disconnected");
 			this.connected = false;
 			this.stopHeartbeat();
 			this.emit("disconnected", reason);
@@ -128,20 +132,20 @@ export class SocketClient extends EventEmitter {
 		this.socket.on("connect_error", (error) => {
 			this.reconnectAttempts++;
 			if (this.reconnectAttempts <= 3 || this.reconnectAttempts % 10 === 0) {
-				console.error(
-					`[mobvibe-cli] Connection error (attempt ${this.reconnectAttempts}):`,
-					error.message,
+				logger.error(
+					{ attempt: this.reconnectAttempts, message: error.message },
+					"gateway_connect_error",
 				);
 			}
 		});
 
 		this.socket.on("cli:registered", (info) => {
-			console.log(`[mobvibe-cli] Registered with gateway: ${info.machineId}`);
+			logger.info({ machineId: info.machineId }, "gateway_registered");
 		});
 
 		// Handle authentication errors
 		this.socket.on("cli:error", (error) => {
-			console.error(`[mobvibe-cli] Authentication error: ${error.message}`);
+			logger.error({ message: error.message }, "gateway_auth_error");
 			this.emit("auth_error", error);
 		});
 	}
@@ -152,9 +156,14 @@ export class SocketClient extends EventEmitter {
 		// Session create
 		this.socket.on("rpc:session:create", async (request) => {
 			try {
+				logger.info({ requestId: request.requestId }, "rpc_session_create");
 				const session = await sessionManager.createSession(request.params);
 				this.sendRpcResponse(request.requestId, session);
 			} catch (error) {
+				logger.error(
+					{ error, requestId: request.requestId },
+					"rpc_session_create_error",
+				);
 				this.sendRpcError(request.requestId, error);
 			}
 		});
@@ -162,9 +171,21 @@ export class SocketClient extends EventEmitter {
 		// Session close
 		this.socket.on("rpc:session:close", async (request) => {
 			try {
+				logger.info(
+					{ requestId: request.requestId, sessionId: request.params.sessionId },
+					"rpc_session_close",
+				);
 				await sessionManager.closeSession(request.params.sessionId);
 				this.sendRpcResponse(request.requestId, { ok: true });
 			} catch (error) {
+				logger.error(
+					{
+						error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_session_close_error",
+				);
 				this.sendRpcError(request.requestId, error);
 			}
 		});
@@ -172,9 +193,21 @@ export class SocketClient extends EventEmitter {
 		// Session cancel
 		this.socket.on("rpc:session:cancel", async (request) => {
 			try {
+				logger.info(
+					{ requestId: request.requestId, sessionId: request.params.sessionId },
+					"rpc_session_cancel",
+				);
 				await sessionManager.cancelSession(request.params.sessionId);
 				this.sendRpcResponse(request.requestId, { ok: true });
 			} catch (error) {
+				logger.error(
+					{
+						error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_session_cancel_error",
+				);
 				this.sendRpcError(request.requestId, error);
 			}
 		});
@@ -182,12 +215,29 @@ export class SocketClient extends EventEmitter {
 		// Session mode
 		this.socket.on("rpc:session:mode", async (request) => {
 			try {
+				logger.info(
+					{
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+						modeId: request.params.modeId,
+					},
+					"rpc_session_mode",
+				);
 				const session = await sessionManager.setSessionMode(
 					request.params.sessionId,
 					request.params.modeId,
 				);
 				this.sendRpcResponse(request.requestId, session);
 			} catch (error) {
+				logger.error(
+					{
+						error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+						modeId: request.params.modeId,
+					},
+					"rpc_session_mode_error",
+				);
 				this.sendRpcError(request.requestId, error);
 			}
 		});
@@ -195,12 +245,29 @@ export class SocketClient extends EventEmitter {
 		// Session model
 		this.socket.on("rpc:session:model", async (request) => {
 			try {
+				logger.info(
+					{
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+						modelId: request.params.modelId,
+					},
+					"rpc_session_model",
+				);
 				const session = await sessionManager.setSessionModel(
 					request.params.sessionId,
 					request.params.modelId,
 				);
 				this.sendRpcResponse(request.requestId, session);
 			} catch (error) {
+				logger.error(
+					{
+						error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+						modelId: request.params.modelId,
+					},
+					"rpc_session_model_error",
+				);
 				this.sendRpcError(request.requestId, error);
 			}
 		});
@@ -209,6 +276,14 @@ export class SocketClient extends EventEmitter {
 		this.socket.on("rpc:message:send", async (request) => {
 			try {
 				const { sessionId, prompt } = request.params;
+				logger.info(
+					{
+						requestId: request.requestId,
+						sessionId,
+						promptBlocks: prompt.length,
+					},
+					"rpc_message_send",
+				);
 				const record = sessionManager.getSession(sessionId);
 				if (!record) {
 					throw new Error("Session not found");
@@ -223,7 +298,23 @@ export class SocketClient extends EventEmitter {
 				this.sendRpcResponse<{ stopReason: StopReason }>(request.requestId, {
 					stopReason: result.stopReason as StopReason,
 				});
+				logger.info(
+					{
+						requestId: request.requestId,
+						sessionId,
+						stopReason: result.stopReason,
+					},
+					"rpc_message_send_complete",
+				);
 			} catch (error) {
+				logger.error(
+					{
+						error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_message_send_error",
+				);
 				this.sendRpcError(request.requestId, error);
 			}
 		});
@@ -232,9 +323,21 @@ export class SocketClient extends EventEmitter {
 		this.socket.on("rpc:permission:decision", async (request) => {
 			try {
 				const { sessionId, requestId, outcome } = request.params;
+				logger.info(
+					{ requestId: request.requestId, sessionId, outcome },
+					"rpc_permission_decision",
+				);
 				sessionManager.resolvePermissionRequest(sessionId, requestId, outcome);
 				this.sendRpcResponse(request.requestId, { ok: true });
 			} catch (error) {
+				logger.error(
+					{
+						error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_permission_decision_error",
+				);
 				this.sendRpcError(request.requestId, error);
 			}
 		});
@@ -242,6 +345,10 @@ export class SocketClient extends EventEmitter {
 		// File system handlers
 		this.socket.on("rpc:fs:roots", async (request) => {
 			try {
+				logger.debug(
+					{ requestId: request.requestId, sessionId: request.params.sessionId },
+					"rpc_fs_roots",
+				);
 				const record = sessionManager.getSession(request.params.sessionId);
 				if (!record || !record.cwd) {
 					throw new Error("Session not found or no working directory");
@@ -252,6 +359,14 @@ export class SocketClient extends EventEmitter {
 				};
 				this.sendRpcResponse(request.requestId, { root });
 			} catch (error) {
+				logger.error(
+					{
+						error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_fs_roots_error",
+				);
 				this.sendRpcError(request.requestId, error);
 			}
 		});
@@ -259,6 +374,10 @@ export class SocketClient extends EventEmitter {
 		this.socket.on("rpc:fs:entries", async (request) => {
 			try {
 				const { sessionId, path: requestPath } = request.params;
+				logger.debug(
+					{ requestId: request.requestId, sessionId, path: requestPath },
+					"rpc_fs_entries",
+				);
 				const record = sessionManager.getSession(sessionId);
 				if (!record || !record.cwd) {
 					throw new Error("Session not found or no working directory");
@@ -271,6 +390,14 @@ export class SocketClient extends EventEmitter {
 				const entries = await readDirectoryEntries(resolved);
 				this.sendRpcResponse(request.requestId, { path: resolved, entries });
 			} catch (error) {
+				logger.error(
+					{
+						error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_fs_entries_error",
+				);
 				this.sendRpcError(request.requestId, error);
 			}
 		});
@@ -278,6 +405,10 @@ export class SocketClient extends EventEmitter {
 		this.socket.on("rpc:fs:file", async (request) => {
 			try {
 				const { sessionId, path: requestPath } = request.params;
+				logger.debug(
+					{ requestId: request.requestId, sessionId, path: requestPath },
+					"rpc_fs_file",
+				);
 				const record = sessionManager.getSession(sessionId);
 				if (!record || !record.cwd) {
 					throw new Error("Session not found or no working directory");
@@ -305,6 +436,14 @@ export class SocketClient extends EventEmitter {
 				};
 				this.sendRpcResponse(request.requestId, preview);
 			} catch (error) {
+				logger.error(
+					{
+						error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_fs_file_error",
+				);
 				this.sendRpcError(request.requestId, error);
 			}
 		});
@@ -312,6 +451,10 @@ export class SocketClient extends EventEmitter {
 		this.socket.on("rpc:fs:resources", async (request) => {
 			try {
 				const { sessionId } = request.params;
+				logger.debug(
+					{ requestId: request.requestId, sessionId },
+					"rpc_fs_resources",
+				);
 				const record = sessionManager.getSession(sessionId);
 				if (!record || !record.cwd) {
 					throw new Error("Session not found or no working directory");
@@ -322,6 +465,14 @@ export class SocketClient extends EventEmitter {
 					entries,
 				});
 			} catch (error) {
+				logger.error(
+					{
+						error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_fs_resources_error",
+				);
 				this.sendRpcError(request.requestId, error);
 			}
 		});
@@ -397,10 +548,12 @@ export class SocketClient extends EventEmitter {
 	private sendRpcResponse<T>(requestId: string, result: T) {
 		const response: RpcResponse<T> = { requestId, result };
 		this.socket.emit("rpc:response", response);
+		logger.debug({ requestId }, "rpc_response_sent");
 	}
 
 	private sendRpcError(requestId: string, error: unknown) {
 		const message = error instanceof Error ? error.message : "Unknown error";
+		logger.error({ requestId, message }, "rpc_response_error_sent");
 		const response: RpcResponse<unknown> = {
 			requestId,
 			error: {
@@ -415,7 +568,7 @@ export class SocketClient extends EventEmitter {
 
 	private register() {
 		const { config, sessionManager } = this.options;
-    console.log(`[cli] Registering CLI for machine ${config.machineId}`);
+		logger.info({ machineId: config.machineId }, "cli_register_emit");
 		this.socket.emit("cli:register", {
 			machineId: config.machineId,
 			hostname: config.hostname,
@@ -426,7 +579,7 @@ export class SocketClient extends EventEmitter {
 			})),
 			defaultBackendId: config.defaultAcpBackendId,
 		});
-    console.log(`[cli] Registered CLI for machine ${config.machineId}, sending sessions list`);
+		logger.info({ machineId: config.machineId }, "cli_register_sessions_list");
 		// Send current sessions list
 		this.socket.emit("sessions:list", sessionManager.listSessions());
 	}
