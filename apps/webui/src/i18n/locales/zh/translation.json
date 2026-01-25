@@ -202,6 +202,7 @@
 	},
 	"machines": {
 		"title": "设备",
+		"refresh": "刷新",
 		"empty": "暂无连接的设备",
 		"online": "在线",
 		"offline": "离线",

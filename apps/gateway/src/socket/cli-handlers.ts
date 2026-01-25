@@ -34,14 +34,44 @@ export function setupCliHandlers(
 ) {
 	const cliNamespace = io.of("/cli");
 
-	cliNamespace.on("connection", async (socket: Socket) => {
-		console.log(`[gateway] CLI connected: ${socket.id}`);
-
-		// Extract API key from handshake headers
+	cliNamespace.use(async (socket: Socket, next) => {
 		const apiKey = socket.handshake.headers["x-api-key"] as string | undefined;
 
 		if (!apiKey) {
 			console.log(`[gateway] CLI rejected: no API key provided`);
+			return next(new Error("AUTH_REQUIRED"));
+		}
+
+		try {
+			const verification = await auth.api.verifyApiKey({
+				body: { key: apiKey },
+			});
+			if (!verification.valid || !verification.key) {
+				console.log(`[gateway] CLI rejected: invalid API key`);
+				return next(new Error("INVALID_KEY"));
+			}
+			const socketData: SocketData = {
+				userId: verification.key.userId,
+				apiKey,
+			};
+			(socket as Socket & { data: SocketData }).data = socketData;
+			console.log(`[gateway] CLI authenticated for user: ${socketData.userId}`);
+			return next();
+		} catch (error) {
+			console.error(`[gateway] API key verification error:`, error);
+			return next(new Error("AUTH_ERROR"));
+		}
+	});
+
+	cliNamespace.on("connection", (socket: Socket) => {
+		console.log(`[gateway] CLI connected: ${socket.id}`);
+
+		const socketData = (socket as Socket & { data: SocketData }).data;
+		const userId = socketData?.userId;
+		const apiKey = socketData?.apiKey;
+
+		if (!userId || !apiKey) {
+			console.log(`[gateway] CLI rejected: missing auth data`);
 			socket.emit("cli:error", {
 				code: "AUTH_REQUIRED",
 				message: "API key required. Run 'mobvibe login' to authenticate.",
@@ -50,41 +80,10 @@ export function setupCliHandlers(
 			return;
 		}
 
-		// Validate API key via Better Auth
-		let userId: string;
-		try {
-			const verification = await auth.api.verifyApiKey({
-				body: { key: apiKey },
-			});
-			if (!verification.valid || !verification.key) {
-				console.log(`[gateway] CLI rejected: invalid API key`);
-				socket.emit("cli:error", {
-					code: "INVALID_KEY",
-					message: "Invalid or expired API key. Create a new one in the WebUI.",
-				});
-				socket.disconnect(true);
-				return;
-			}
-			userId = verification.key.userId;
-		} catch (error) {
-			console.error(`[gateway] API key verification error:`, error);
-			socket.emit("cli:error", {
-				code: "AUTH_ERROR",
-				message: "Failed to verify API key. Please try again.",
-			});
-			socket.disconnect(true);
-			return;
-		}
-
-		// Store auth info in socket data
-		const socketData: SocketData = { userId, apiKey };
-		(socket as Socket & { data: SocketData }).data = socketData;
-
-		console.log(`[gateway] CLI authenticated for user: ${userId}`);
-
 		// CLI registration (after auth)
 		socket.on("cli:register", async (info: CliRegistrationInfo) => {
 			// Create or update machine record in database
+			console.log(`[gateway] Registering CLI for machine ${info.machineId}`);
 			const machineResult = await upsertMachine({
 				machineId: info.machineId,
 				userId,
@@ -129,7 +128,6 @@ export function setupCliHandlers(
 		// Sessions list update
 		socket.on("sessions:list", (sessions: SessionSummary[]) => {
 			cliRegistry.updateSessions(socket.id, sessions);
-			emitToWebui("sessions:list", sessions);
 		});
 
 		// Session update

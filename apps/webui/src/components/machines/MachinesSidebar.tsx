@@ -1,5 +1,6 @@
-import { AddCircleIcon } from "@hugeicons/core-free-icons";
+import { AddCircleIcon, Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RegisterMachineDialog } from "@/components/machines/RegisterMachineDialog";
@@ -10,8 +11,14 @@ import {
 	TooltipProvider,
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useMachinesQuery } from "@/hooks/useMachinesQuery";
 import { type Machine, useMachinesStore } from "@/lib/machines-store";
 import { cn } from "@/lib/utils";
+
+const queryKeys = {
+	machines: ["machines"],
+	sessions: ["sessions"],
+};
 
 type MachinesSidebarProps = {
 	onAddMachine?: () => void;
@@ -21,6 +28,8 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 	const { t } = useTranslation();
 	const { machines, selectedMachineId, setSelectedMachineId } =
 		useMachinesStore();
+	const machinesQuery = useMachinesQuery();
+	const queryClient = useQueryClient();
 	const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
 
 	const machineList = Object.values(machines).sort((a, b) => {
@@ -39,6 +48,11 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 		}
 	};
 
+	const handleRefresh = async () => {
+		await machinesQuery.refetch();
+		await queryClient.refetchQueries({ queryKey: queryKeys.sessions });
+	};
+
 	return (
 		<TooltipProvider delayDuration={300}>
 			<RegisterMachineDialog
@@ -47,8 +61,18 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 			/>
 
 			<aside className="bg-background/80 border-r hidden w-14 flex-col items-center gap-2 py-3 md:flex">
-				<div className="text-xs font-semibold text-muted-foreground mb-1">
-					{t("machines.title")}
+				<div className="flex flex-col items-center gap-1 text-xs font-semibold text-muted-foreground mb-1">
+					<span>{t("machines.title")}</span>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button variant="ghost" size="icon-sm" onClick={handleRefresh}>
+								<HugeiconsIcon icon={Refresh01Icon} strokeWidth={2} />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent side="right">
+							{t("machines.refresh")}
+						</TooltipContent>
+					</Tooltip>
 				</div>
 
 				<div className="flex flex-1 flex-col items-center gap-1 overflow-y-auto">

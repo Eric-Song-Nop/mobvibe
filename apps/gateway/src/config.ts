@@ -27,7 +27,9 @@ export const getGatewayConfig = (): GatewayConfig => {
 	const env = process.env;
 	return {
 		port: parsePort(env.PORT ?? env.GATEWAY_PORT ?? "3005"),
-		corsOrigins: parseOrigins(env.GATEWAY_CORS_ORIGINS),
+		corsOrigins: parseOrigins(
+			env.MOBVIBE_CORS_ORIGINS ?? env.GATEWAY_CORS_ORIGINS,
+		),
 		siteUrl: env.SITE_URL,
 		databaseUrl: env.DATABASE_URL,
 	};

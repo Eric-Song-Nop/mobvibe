@@ -102,9 +102,6 @@ setupCliHandlers(io, cliRegistry, sessionRouter, (event, payload) => {
 				payload as Parameters<typeof webuiEmitter.emitTerminalOutput>[0],
 			);
 			break;
-		case "sessions:list":
-			webuiEmitter.emitToAll(event, payload);
-			break;
 		default:
 			webuiEmitter.emitToAll(event, payload);
 	}
@@ -179,7 +176,7 @@ app.use(express.json());
 
 // Machine routes (for CLI registration)
 const machineRouter = express.Router();
-setupMachineRoutes(machineRouter);
+setupMachineRoutes(machineRouter, cliRegistry);
 app.use("/", machineRouter);
 
 // Routes

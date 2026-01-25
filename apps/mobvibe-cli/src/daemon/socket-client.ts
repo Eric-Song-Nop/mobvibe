@@ -112,6 +112,7 @@ export class SocketClient extends EventEmitter {
 			console.log("[mobvibe-cli] Connected to gateway");
 			this.connected = true;
 			this.reconnectAttempts = 0;
+      console.log(`[mobvibe-cli] Registering to gateway`);
 			this.register();
 			this.startHeartbeat();
 			this.emit("connected");
@@ -414,6 +415,7 @@ export class SocketClient extends EventEmitter {
 
 	private register() {
 		const { config, sessionManager } = this.options;
+    console.log(`[cli] Registering CLI for machine ${config.machineId}`);
 		this.socket.emit("cli:register", {
 			machineId: config.machineId,
 			hostname: config.hostname,
@@ -424,6 +426,7 @@ export class SocketClient extends EventEmitter {
 			})),
 			defaultBackendId: config.defaultAcpBackendId,
 		});
+    console.log(`[cli] Registered CLI for machine ${config.machineId}, sending sessions list`);
 		// Send current sessions list
 		this.socket.emit("sessions:list", sessionManager.listSessions());
 	}

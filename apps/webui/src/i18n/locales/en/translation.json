@@ -202,6 +202,7 @@
 	},
 	"machines": {
 		"title": "Machines",
+		"refresh": "Refresh",
 		"empty": "No machines connected",
 		"online": "Online",
 		"offline": "Offline",

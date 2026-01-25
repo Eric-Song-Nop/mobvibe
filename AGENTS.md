@@ -52,7 +52,7 @@ mobvibe/
 pnpm install
 
 # Start all services (gateway, webui, mobvibe-cli)
-pnpm dev
+pnpm dev # we are always running dev, don't run it unless explicitly requested to.
 
 # Services:
 # - Gateway: http://localhost:3005
@@ -66,7 +66,7 @@ cd apps/mobvibe-cli
 ## Development Commands
 
 ```bash
-pnpm dev              # Start all packages (Turbo)
+pnpm dev              # Start all packages (Turbo) we are always running dev, don't run it unless explicitly requested to.
 pnpm build            # Build all packages
 pnpm format           # Format code with Biome
 pnpm lint             # Lint code with Biome
@@ -81,6 +81,7 @@ When `DATABASE_URL` is set, the gateway uses PostgreSQL for auth and persistence
 cd apps/gateway
 export DATABASE_URL="postgresql://user:pass@localhost:5432/mobvibe"
 pnpm db:push          # Push schema to database
+pnpm db:migrate       # Migrate database schema
 pnpm db:studio        # Open Drizzle Studio
 ```
 
@@ -116,12 +117,14 @@ mobvibe logout                   # Clear credentials
 3. **mobvibe-cli** → stdin/stdout → **ACP CLI** (claude-code, opencode, etc.)
 
 ### Session Flow
+
 1. User creates session → REST `POST /acp/session` → Gateway
 2. Gateway → Socket.io RPC → CLI spawns ACP process
 3. CLI streams `session:update` → Gateway relays to webui
 4. User sends message → Gateway routes to CLI → Response streams back
 
 ### Permission Flow
+
 1. ACP CLI requests permission → CLI emits `permission:request`
 2. Gateway relays to webui → User approves/denies
 3. Decision routed back to CLI → CLI resolves permission
@@ -144,5 +147,5 @@ mobvibe logout                   # Clear credentials
 
 ## Links
 
-- ACP Protocol: https://agentclientprotocol.com/
-- ACP TypeScript SDK: https://agentclientprotocol.github.io/typescript-sdk/
+- ACP Protocol: <https://agentclientprotocol.com/>
+- ACP TypeScript SDK: <https://agentclientprotocol.github.io/typescript-sdk/>

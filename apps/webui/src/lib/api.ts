@@ -52,13 +52,24 @@ import type {
 	SessionsResponse,
 } from "@mobvibe/core";
 import { isErrorDetail } from "@mobvibe/core";
+import { getDefaultGatewayUrl } from "./gateway-config";
+
 export type FsEntriesResponse = {
 	path: string;
 	entries: FsEntry[];
 };
 
-import { getCachedToken } from "./auth";
-import { getDefaultGatewayUrl } from "./gateway-config";
+export type MachinesResponse = {
+	machines: Array<{
+		id: string;
+		name?: string | null;
+		hostname?: string | null;
+		platform?: string | null;
+		isOnline: boolean;
+		lastSeenAt?: string | null;
+		createdAt?: string | null;
+	}>;
+};
 
 let API_BASE_URL = getDefaultGatewayUrl();
 
@@ -94,15 +105,12 @@ const requestJson = async <ResponseType>(
 	path: string,
 	options?: RequestInit,
 ): Promise<ResponseType> => {
-	const token = getCachedToken();
 	const headers: Record<string, string> = {
 		"Content-Type": "application/json",
 	};
-	if (token) {
-		headers.Authorization = `Bearer ${token}`;
-	}
 	const response = await fetch(`${API_BASE_URL}${path}`, {
 		...options,
+		credentials: "include",
 		headers: {
 			...headers,
 			...options?.headers,
@@ -135,6 +143,9 @@ export const fetchAcpBackends = async (): Promise<AcpBackendsResponse> =>
 
 export const fetchSessions = async (): Promise<SessionsResponse> =>
 	requestJson<SessionsResponse>("/acp/sessions");
+
+export const fetchMachines = async (): Promise<MachinesResponse> =>
+	requestJson<MachinesResponse>("/api/machines");
 
 const buildFsEntriesPath = (pathValue: string) =>
 	`/fs/entries?path=${encodeURIComponent(pathValue)}`;

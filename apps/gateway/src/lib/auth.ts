@@ -35,10 +35,11 @@ export const auth = betterAuth({
 		},
 	},
 	advanced: {
-		useSecureCookies: true,
+		useSecureCookies: process.env.NODE_ENV !== "development",
 		defaultCookieAttributes: {
-			secure: true,
+			secure: process.env.NODE_ENV !== "development",
 			sameSite: "none",
+			partitioned: true,
 		},
 	},
 	plugins: [
@@ -51,6 +52,10 @@ export const auth = betterAuth({
 			defaultPrefix: "mbk_",
 			apiKeyHeaders: ["x-api-key"],
 			enableMetadata: true,
+			enableSessionForAPIKeys: true,
+			rateLimit: {
+				enabled: false,
+			},
 		}),
 	],
 });

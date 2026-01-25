@@ -1,6 +1,5 @@
 import { io, type Socket } from "socket.io-client";
 import type {
-	CliStatusPayload,
 	GatewayToWebuiEvents,
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
@@ -9,8 +8,6 @@ import type {
 	TerminalOutputEvent,
 	WebuiToGatewayEvents,
 } from "./acp";
-import type { SessionSummary } from "./api";
-import { getCachedToken } from "./auth";
 import { getDefaultGatewayUrl } from "./gateway-config";
 
 type TypedSocket = Socket<GatewayToWebuiEvents, WebuiToGatewayEvents>;
@@ -28,7 +25,6 @@ class GatewaySocket {
 			return this.socket;
 		}
 
-		const token = getCachedToken();
 		this.socket = io(`${GATEWAY_URL}/webui`, {
 			path: "/socket.io",
 			reconnection: true,
@@ -38,7 +34,6 @@ class GatewaySocket {
 			transports: ["websocket"],
 			autoConnect: true,
 			withCredentials: true,
-			auth: token ? { token } : undefined,
 		});
 
 		this.socket.on("connect", () => {
@@ -119,20 +114,6 @@ class GatewaySocket {
 		this.socket?.on("terminal:output", handler);
 		return () => {
 			this.socket?.off("terminal:output", handler);
-		};
-	}
-
-	onCliStatus(handler: (payload: CliStatusPayload) => void) {
-		this.socket?.on("cli:status", handler);
-		return () => {
-			this.socket?.off("cli:status", handler);
-		};
-	}
-
-	onSessionsList(handler: (sessions: SessionSummary[]) => void) {
-		this.socket?.on("sessions:list", handler);
-		return () => {
-			this.socket?.off("sessions:list", handler);
 		};
 	}
 

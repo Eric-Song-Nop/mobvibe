@@ -13,6 +13,8 @@ import { MachinesSidebar } from "@/components/machines/MachinesSidebar";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/toaster";
+import { useMachinesQuery } from "@/hooks/useMachinesQuery";
+import { useMachinesStream } from "@/hooks/useMachinesStream";
 import { useMessageAutoScroll } from "@/hooks/useMessageAutoScroll";
 import { useSessionMutations } from "@/hooks/useSessionMutations";
 import { useSessionQueries } from "@/hooks/useSessionQueries";
@@ -20,12 +22,12 @@ import { useSocket } from "@/hooks/useSocket";
 import type { PermissionResultNotification } from "@/lib/acp";
 import { getAuthClient, isInTauri } from "@/lib/auth";
 import { useChatStore } from "@/lib/chat-store";
-import { useMachinesStore } from "@/lib/machines-store";
 import {
 	buildSessionNotReadyError,
 	createFallbackError,
 	normalizeError,
 } from "@/lib/error-utils";
+import { useMachinesStore } from "@/lib/machines-store";
 import { ensureNotificationPermission } from "@/lib/notifications";
 import { useUiStore } from "@/lib/ui-store";
 import { buildSessionTitle, getStatusVariant } from "@/lib/ui-utils";
@@ -85,6 +87,8 @@ function MainApp() {
 
 	const { sessionsQuery, backendsQuery, availableBackends, defaultBackendId } =
 		useSessionQueries();
+	useMachinesQuery();
+	useMachinesStream();
 
 	const {
 		createSessionMutation,

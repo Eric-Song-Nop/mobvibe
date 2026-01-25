@@ -1,5 +1,3 @@
-import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
 import {
 	Add01Icon,
 	ArrowLeft02Icon,
@@ -9,6 +7,8 @@ import {
 	Key01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { apiKey, type ApiKeyData } from "@/lib/auth";
+import { type ApiKeyData, apiKey } from "@/lib/auth";
 
 type ApiKeyWithKey = ApiKeyData & { key?: string };
 

@@ -1,5 +1,5 @@
-import { createAuthClient } from "better-auth/react";
 import { apiKeyClient } from "better-auth/client/plugins";
+import { createAuthClient } from "better-auth/react";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL as string | undefined;
 
@@ -108,24 +108,6 @@ export const signOut = async () => {
 		throw new Error("Auth not configured");
 	}
 	return authClient.signOut();
-};
-
-// Get session token for API calls
-export const getSessionToken = async (): Promise<string | null> => {
-	if (!authClient) {
-		return null;
-	}
-	const session = await authClient.getSession();
-	return session?.data?.session?.token ?? null;
-};
-
-// Store for reactive session token access
-let cachedToken: string | null = null;
-
-export const getCachedToken = (): string | null => cachedToken;
-
-export const updateCachedToken = (token: string | null): void => {
-	cachedToken = token;
 };
 
 // API Key methods

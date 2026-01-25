@@ -1,18 +1,5 @@
-import {
-	createContext,
-	type ReactNode,
-	useContext,
-	useEffect,
-	useState,
-} from "react";
-import {
-	isAuthEnabled,
-	signIn,
-	signOut,
-	signUp,
-	updateCachedToken,
-	useSession,
-} from "@/lib/auth";
+import { createContext, type ReactNode, useContext } from "react";
+import { isAuthEnabled, signIn, signOut, signUp, useSession } from "@/lib/auth";
 
 type User = {
 	id: string;
@@ -29,7 +16,6 @@ type AuthContextValue = {
 	signIn: typeof signIn;
 	signUp: typeof signUp;
 	signOut: () => Promise<void>;
-	sessionToken: string | null;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -40,8 +26,6 @@ type AuthProviderProps = {
 
 export function AuthProvider({ children }: AuthProviderProps) {
 	const session = useSession();
-	const [sessionToken, setSessionToken] = useState<string | null>(null);
-
 	// Extract user from session
 	const user = session.data?.user
 		? {
@@ -52,17 +36,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 			}
 		: null;
 
-	// Update session token when session changes
-	useEffect(() => {
-		const token = session.data?.session?.token ?? null;
-		setSessionToken(token);
-		updateCachedToken(token);
-	}, [session.data?.session?.token]);
-
 	const handleSignOut = async () => {
 		await signOut();
-		setSessionToken(null);
-		updateCachedToken(null);
 	};
 
 	const value: AuthContextValue = {
@@ -73,7 +48,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
 		signIn,
 		signUp,
 		signOut: handleSignOut,
-		sessionToken,
 	};
 
 	return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -3,7 +3,6 @@ import type {
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
 	SessionNotification,
-	SessionSummary,
 	StreamErrorPayload,
 	TerminalOutputEvent,
 } from "@mobvibe/shared";
@@ -84,13 +83,9 @@ export function setupWebuiHandlers(
 	});
 
 	// Forward session updates to subscribers
-	cliRegistry.on(
-		"sessions:updated",
-		(_machineId: string, sessions: SessionSummary[]) => {
-			// This event is emitted to all for now - filtering happens at query time
-			emitToAll("sessions:list", sessions);
-		},
-	);
+	cliRegistry.on("sessions:updated", (_machineId: string) => {
+		// HTTP-first: session list is fetched via REST on demand
+	});
 
 	webuiNamespace.on("connection", async (socket: Socket) => {
 		const authSocket = socket as AuthenticatedSocket;
@@ -142,13 +137,6 @@ export function setupWebuiHandlers(
 				userId: cli.userId,
 			});
 		}
-
-		// Send current sessions - filtered by user if authenticated
-		const sessions = userId
-			? cliRegistry.getSessionsForUser(userId)
-			: cliRegistry.getAllSessions();
-
-		socket.emit("sessions:list", sessions);
 
 		// Subscribe to session updates - with ownership check
 		socket.on("subscribe:session", (payload: { sessionId: string }) => {
