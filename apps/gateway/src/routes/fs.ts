@@ -93,16 +93,17 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				.map((entry) => ({
 					name: entry.name,
 					path: join(path, entry.name),
-					isDirectory: entry.isDirectory(),
+					type: entry.isDirectory() ? "directory" : "file",
+					hidden: entry.name.startsWith("."),
 				}))
 				.sort((a, b) => {
 					// Directories first, then alphabetically
-					if (a.isDirectory !== b.isDirectory) {
-						return a.isDirectory ? -1 : 1;
+					if (a.type !== b.type) {
+						return a.type === "directory" ? -1 : 1;
 					}
 					return a.name.localeCompare(b.name);
 				});
-			response.json({ entries });
+			response.json({ path, entries });
 		} catch (error) {
 			const message = getErrorMessage(error);
 			respondError(response, createInternalError("request", message));
