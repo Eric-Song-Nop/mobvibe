@@ -1,7 +1,7 @@
 # Tauri + Better Auth CORS 修复计划
 
 ## 背景
-- Tauri 生产环境的 WebView `Origin` 常见为 `tauri://localhost` 或 `https://tauri.localhost`。
+- Tauri 生产环境的 WebView `Origin` 常见为 `tauri://localhost`、`https://tauri.localhost` 或 `http://tauri.localhost`。
 - 当前 Gateway REST CORS 仅允许 `WEB_URL`，Better Auth 的 `trustedOrigins` 未包含 Tauri origin 与 `mobvibe://`。
 - 这会导致 Tauri 应用访问 `/api/auth/*` 时出现 CORS/Origin 校验失败。
 - Tauri Dev 使用 `http://localhost:*` 时，`Secure + SameSite=None + Partitioned` 的 cookie 会被 WebView 拒收，导致登录后仍停留在登录页。
@@ -18,8 +18,8 @@
 4. 更新本文档的实现细节与使用方法。
 
 ## 实现细节
-- `apps/gateway/src/index.ts` REST CORS 放行：`WEB_URL` + `GATEWAY_CORS_ORIGINS` + `tauri://localhost` + `https://tauri.localhost`。
-- `apps/gateway/src/lib/auth.ts` `trustedOrigins` 追加：`tauri://localhost`、`https://tauri.localhost`、`mobvibe://`。
+- `apps/gateway/src/index.ts` REST CORS 放行：`WEB_URL` + `GATEWAY_CORS_ORIGINS` + `tauri://localhost` + `http://tauri.localhost` + `https://tauri.localhost`。
+- `apps/gateway/src/lib/auth.ts` `trustedOrigins` 追加：`tauri://localhost`、`http://tauri.localhost`、`https://tauri.localhost`、`mobvibe://`。
 - `apps/gateway/src/lib/auth.ts` Dev 环境设置 `secure: false`、`sameSite: "lax"`、`partitioned: false`，Prod 保持 `secure: true`、`sameSite: "none"`、`partitioned: true`。
 
 ## 使用方法
