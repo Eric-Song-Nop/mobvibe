@@ -92,6 +92,17 @@ vi.mock("@/hooks/useSessionEventSources", () => ({
 	useSessionEventSources: vi.fn(),
 }));
 
+vi.mock("@/hooks/useMachinesQuery", () => ({
+	useMachinesQuery: () => ({
+		data: { machines: [] },
+		isError: false,
+	}),
+}));
+
+vi.mock("@/hooks/useMachinesStream", () => ({
+	useMachinesStream: () => undefined,
+}));
+
 vi.mock("@/components/app/AppHeader", () => ({
 	AppHeader: () => <div data-testid="app-header" />,
 }));
@@ -106,6 +117,10 @@ vi.mock("@/components/app/ChatFooter", () => ({
 
 vi.mock("@/components/app/AppSidebar", () => ({
 	AppSidebar: () => <button type="button">sidebar</button>,
+}));
+
+vi.mock("@/components/machines/MachinesSidebar", () => ({
+	MachinesSidebar: () => <div data-testid="machines-sidebar" />,
 }));
 
 vi.mock("@/components/ui/toaster", () => ({

@@ -9,7 +9,7 @@
 		"start:migrate": "npx drizzle-kit migrate && node dist/index.js",
 		"lint": "biome check --write .",
 		"format": "biome format --write .",
-		"test": "vitest",
+		"test": "vitest --passWithNoTests",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate",
 		"db:push": "drizzle-kit push",
