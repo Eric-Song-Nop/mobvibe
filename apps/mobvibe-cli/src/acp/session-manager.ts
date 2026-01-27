@@ -9,7 +9,6 @@ import type {
 	SessionNotification,
 } from "@agentclientprotocol/sdk";
 import {
-	type AcpBackendId,
 	type AcpConnectionState,
 	AppError,
 	createErrorDetail,
@@ -26,7 +25,7 @@ import { AcpConnection } from "./acp-connection.js";
 type SessionRecord = {
 	sessionId: string;
 	title: string;
-	backendId: AcpBackendId;
+	backendId: string;
 	backendLabel: string;
 	connection: AcpConnection;
 	createdAt: Date;
@@ -114,8 +113,8 @@ const createCapabilityNotSupportedError = (message: string) =>
 
 export class SessionManager {
 	private sessions = new Map<string, SessionRecord>();
-	private backendById: Map<AcpBackendId, AcpBackendConfig>;
-	private defaultBackendId: AcpBackendId;
+	private backendById: Map<string, AcpBackendConfig>;
+	private defaultBackendId: string;
 	private permissionRequests = new Map<string, PermissionRequestRecord>();
 	private readonly sessionUpdateEmitter = new EventEmitter();
 	private readonly sessionErrorEmitter = new EventEmitter();
@@ -216,9 +215,7 @@ export class SessionManager {
 	private resolveBackend(backendId?: string) {
 		const normalized = backendId?.trim();
 		const resolvedId =
-			normalized && normalized.length > 0
-				? (normalized as AcpBackendId)
-				: this.defaultBackendId;
+			normalized && normalized.length > 0 ? normalized : this.defaultBackendId;
 		const backend = this.backendById.get(resolvedId);
 		if (!backend) {
 			throw new AppError(

@@ -8,7 +8,7 @@ export type AcpConnectionState =
 	| "error"
 	| "stopped";
 
-export type AcpBackendId = "opencode" | "gemini-cli" | "claude-code";
+export type AcpBackendId = string;
 
 export type AcpBackendSummary = {
 	backendId: string;

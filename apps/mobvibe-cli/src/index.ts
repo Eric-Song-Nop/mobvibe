@@ -20,7 +20,7 @@ program
 		if (options.gateway) {
 			process.env.MOBVIBE_GATEWAY_URL = options.gateway;
 		}
-		const config = getCliConfig();
+		const config = await getCliConfig();
 		const daemon = new DaemonManager(config);
 		await daemon.start({ foreground: options.foreground });
 	});
@@ -29,7 +29,7 @@ program
 	.command("stop")
 	.description("Stop the mobvibe daemon")
 	.action(async () => {
-		const config = getCliConfig();
+		const config = await getCliConfig();
 		const daemon = new DaemonManager(config);
 		await daemon.stop();
 	});
@@ -38,7 +38,7 @@ program
 	.command("status")
 	.description("Show daemon status")
 	.action(async () => {
-		const config = getCliConfig();
+		const config = await getCliConfig();
 		const daemon = new DaemonManager(config);
 		const status = await daemon.status();
 		if (status.running) {
@@ -62,7 +62,7 @@ program
 	.option("-f, --follow", "Follow log output")
 	.option("-n, --lines <number>", "Number of lines to show", "50")
 	.action(async (options) => {
-		const config = getCliConfig();
+		const config = await getCliConfig();
 		const daemon = new DaemonManager(config);
 		await daemon.logs({
 			follow: options.follow,

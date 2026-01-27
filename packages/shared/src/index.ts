@@ -37,7 +37,11 @@ export type {
 	ToolCallUpdate,
 	ToolKind,
 } from "./types/acp.js";
-
+// Agent configuration types
+export type {
+	MobvibeUserConfig,
+	UserAgentConfig,
+} from "./types/agent-config.js";
 // Error types
 export type {
 	ErrorCode,
@@ -45,7 +49,6 @@ export type {
 	ErrorDetailInput,
 	ErrorScope,
 } from "./types/errors.js";
-
 export {
 	AppError,
 	createErrorDetail,
@@ -54,7 +57,6 @@ export {
 	isProtocolMismatch,
 	withScope,
 } from "./types/errors.js";
-
 // Session types
 export type {
 	AcpBackendId,

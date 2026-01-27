@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import {
-	type AcpBackendId,
 	createErrorDetail,
 	createInternalError,
 	type ErrorDetail,
@@ -87,10 +86,7 @@ export function setupSessionRoutes(
 						typeof title === "string" && title.trim().length > 0
 							? title.trim()
 							: undefined,
-					backendId:
-						typeof backendId === "string"
-							? (backendId as AcpBackendId)
-							: undefined,
+					backendId: typeof backendId === "string" ? backendId : undefined,
 				},
 				userId,
 			);

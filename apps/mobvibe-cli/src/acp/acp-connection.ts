@@ -27,7 +27,6 @@ import {
 	type WaitForTerminalExitResponse,
 } from "@agentclientprotocol/sdk";
 import {
-	type AcpBackendId,
 	type AcpConnectionState,
 	createErrorDetail,
 	type ErrorDetail,
@@ -42,7 +41,7 @@ type ClientInfo = {
 };
 
 export type AcpBackendStatus = {
-	backendId: AcpBackendId;
+	backendId: string;
 	backendLabel: string;
 	state: AcpConnectionState;
 	command: string;
