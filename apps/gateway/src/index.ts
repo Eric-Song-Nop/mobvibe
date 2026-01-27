@@ -19,7 +19,11 @@ import { setupCliHandlers } from "./socket/cli-handlers.js";
 import { setupWebuiHandlers } from "./socket/webui-handlers.js";
 
 const config = getGatewayConfig();
-const tauriOrigins = ["tauri://localhost", "https://tauri.localhost"];
+const tauriOrigins = [
+	"tauri://localhost",
+	"http://tauri.localhost",
+	"https://tauri.localhost",
+];
 const restCorsOrigins = [
 	config.webUrl,
 	...config.corsOrigins,

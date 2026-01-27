@@ -11,6 +11,7 @@ const config = getGatewayConfig();
 
 const tauriOrigins = [
 	"tauri://localhost",
+	"http://tauri.localhost",
 	"https://tauri.localhost",
 	"mobvibe://",
 ];
