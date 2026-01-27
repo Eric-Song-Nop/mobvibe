@@ -25,7 +25,10 @@ const createFetchImpl = async () => {
 		const currentPlatform = platform();
 
 		// Use Tauri fetch on macOS when running in Tauri protocol
-		if (currentPlatform === "macos" && window.location.protocol === "tauri:") {
+		if (
+			currentPlatform === "macos" ||
+			(currentPlatform === "linux" && window.location.protocol === "tauri:")
+		) {
 			return tauriFetch as typeof fetch;
 		}
 	} catch {

@@ -9,12 +9,21 @@ import { logger } from "./logger.js";
 
 const config = getGatewayConfig();
 
+const tauriOrigins = [
+	"tauri://localhost",
+	"https://tauri.localhost",
+	"mobvibe://",
+];
+
 const trustedOrigins = [
 	config.siteUrl,
 	...config.corsOrigins,
 	"http://localhost:5173",
 	"http://127.0.0.1:5173",
+	...tauriOrigins,
 ].filter(Boolean) as string[];
+
+const isDevelopment = process.env.NODE_ENV === "development";
 
 logger.info(
 	{
@@ -45,11 +54,11 @@ export const auth = betterAuth({
 		},
 	},
 	advanced: {
-		useSecureCookies: process.env.NODE_ENV !== "development",
+		useSecureCookies: !isDevelopment,
 		defaultCookieAttributes: {
-			secure: process.env.NODE_ENV !== "development",
-			sameSite: "none",
-			partitioned: true,
+			secure: !isDevelopment,
+			sameSite: isDevelopment ? "lax" : "none",
+			partitioned: !isDevelopment,
 		},
 	},
 	plugins: [

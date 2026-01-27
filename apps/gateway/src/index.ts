@@ -19,6 +19,12 @@ import { setupCliHandlers } from "./socket/cli-handlers.js";
 import { setupWebuiHandlers } from "./socket/webui-handlers.js";
 
 const config = getGatewayConfig();
+const tauriOrigins = ["tauri://localhost", "https://tauri.localhost"];
+const restCorsOrigins = [
+	config.webUrl,
+	...config.corsOrigins,
+	...tauriOrigins,
+].filter(Boolean) as string[];
 
 const app: Express = express();
 const httpServer = createServer(app);
@@ -142,7 +148,17 @@ app.use((request, response, next) => {
 // CORS middleware for REST
 app.use(
 	cors({
-		origin: config.webUrl,
+		origin: (origin, callback) => {
+			if (!origin) {
+				callback(null, true);
+				return;
+			}
+			if (restCorsOrigins.includes(origin)) {
+				callback(null, true);
+				return;
+			}
+			callback(null, false);
+		},
 		methods: ["GET", "POST", "PUT", "DELETE"],
 		credentials: true,
 	}),

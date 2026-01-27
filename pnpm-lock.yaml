@@ -11,6 +11,9 @@ importers:
 
   .:
     devDependencies:
+      '@tauri-apps/cli':
+        specifier: ^2.9.6
+        version: 2.9.6
       turbo:
         specifier: ^2.7.4
         version: 2.7.4
