@@ -147,7 +147,7 @@ function MainApp() {
 		const allSessions = Object.values(sessions);
 		const filtered = selectedMachineId
 			? allSessions.filter((s) => s.machineId === selectedMachineId)
-			: allSessions;
+			: [];
 		return filtered.sort((left, right) => {
 			const leftStamp = left.updatedAt ?? left.createdAt ?? "";
 			const rightStamp = right.updatedAt ?? right.createdAt ?? "";
