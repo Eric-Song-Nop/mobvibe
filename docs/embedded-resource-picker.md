@@ -53,6 +53,9 @@
 
 ## 实现后记录
 
+- 资源扫描改用 `ignore` npm 包解析 `.gitignore`，支持完整的 gitignore 语法。
+- 默认忽略 `node_modules`、`.git`、`dist`、`build` 等常见目录。
+- 添加文件数量限制（2000），防止大型项目内存溢出。
 - 后端新增 `/fs/session/resources`，优先通过 `git ls-files` 获取未被忽略的文件，失败时递归扫描工作目录（包含隐藏文件）。
 - `/acp/message` 改为直接接收 `ContentBlock[]`，避免发送时再解析 `@`。
 - 前端新增 `inputContents` 与 `contentBlocks`，统一维护结构化内容（`content-block-utils.ts`）。

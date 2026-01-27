@@ -90,6 +90,9 @@ importers:
       commander:
         specifier: ^13.1.0
         version: 13.1.0
+      ignore:
+        specifier: ^7.0.4
+        version: 7.0.5
       open:
         specifier: ^10.1.0
         version: 10.2.0
@@ -3598,6 +3601,10 @@ packages:
 
   ignore@5.3.2:
     resolution: {integrity: sha512-hsBTNUqQTDwkWtcdYI2i06Y/nUBEsNEDJKjWdigLvegy8kDuJAS8uRlpkkcQpyEXL0Z/pjDy5HBmMjRCJ2gq+g==, tarball: https://registry.npmjs.org/ignore/-/ignore-5.3.2.tgz}
+    engines: {node: '>= 4'}
+
+  ignore@7.0.5:
+    resolution: {integrity: sha512-Hs59xBNfUIunMFgWAbGX5cq6893IbWg4KnrjbYwX3tx0ztorVgTDA6B2sxf8ejHJ4wz8BqGUMYlnzNBer5NvGg==, tarball: https://registry.npmjs.org/ignore/-/ignore-7.0.5.tgz}
     engines: {node: '>= 4'}
 
   import-fresh@3.3.1:
@@ -8582,6 +8589,8 @@ snapshots:
       safer-buffer: 2.1.2
 
   ignore@5.3.2: {}
+
+  ignore@7.0.5: {}
 
   import-fresh@3.3.1:
     dependencies:

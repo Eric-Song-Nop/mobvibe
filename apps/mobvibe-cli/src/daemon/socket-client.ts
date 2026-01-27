@@ -3,17 +3,15 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type {
 	CliToGatewayEvents,
-	ContentBlock,
 	FsEntry,
 	FsRoot,
 	GatewayToCliEvents,
-	RpcRequest,
 	RpcResponse,
 	SessionFsFilePreview,
 	SessionFsResourceEntry,
-	SessionSummary,
 	StopReason,
 } from "@mobvibe/shared";
+import ignore, { type Ignore } from "ignore";
 import { io, type Socket } from "socket.io-client";
 import type { SessionManager } from "../acp/session-manager.js";
 import type { CliConfig } from "../config.js";
@@ -27,6 +25,33 @@ type SocketClientOptions = {
 };
 
 const SESSION_ROOT_NAME = "Working Directory";
+const MAX_RESOURCE_FILES = 2000;
+const DEFAULT_IGNORES = [
+	"node_modules",
+	".git",
+	"dist",
+	"build",
+	".next",
+	".nuxt",
+	".output",
+	".cache",
+	"__pycache__",
+	".venv",
+	"venv",
+	"target",
+];
+
+const loadGitignore = async (rootPath: string): Promise<Ignore> => {
+	const ig = ignore().add(DEFAULT_IGNORES);
+	try {
+		const gitignorePath = path.join(rootPath, ".gitignore");
+		const content = await fs.readFile(gitignorePath, "utf8");
+		ig.add(content);
+	} catch {
+		// No .gitignore file, use defaults only
+	}
+	return ig;
+};
 
 const resolveImageMimeType = (filePath: string) => {
 	const extension = path.extname(filePath).toLowerCase();
@@ -545,7 +570,8 @@ export class SocketClient extends EventEmitter {
 	private async listSessionResources(
 		rootPath: string,
 	): Promise<SessionFsResourceEntry[]> {
-		const allFiles = await this.listAllFiles(rootPath);
+		const ig = await loadGitignore(rootPath);
+		const allFiles = await this.listAllFiles(rootPath, ig, rootPath, []);
 		return allFiles.map((filePath) => ({
 			name: path.basename(filePath),
 			relativePath: path.relative(rootPath, filePath),
@@ -553,22 +579,36 @@ export class SocketClient extends EventEmitter {
 		}));
 	}
 
-	private async listAllFiles(rootPath: string): Promise<string[]> {
-		const files: string[] = [];
+	private async listAllFiles(
+		rootPath: string,
+		ig: Ignore,
+		baseDir: string,
+		collected: string[] = [],
+	): Promise<string[]> {
+		if (collected.length >= MAX_RESOURCE_FILES) {
+			return collected;
+		}
 		const entries = await fs.readdir(rootPath, { withFileTypes: true });
-		await Promise.all(
-			entries.map(async (entry) => {
-				const entryPath = path.join(rootPath, entry.name);
-				if (entry.isDirectory()) {
-					files.push(...(await this.listAllFiles(entryPath)));
-					return;
-				}
-				if (entry.isFile()) {
-					files.push(entryPath);
-				}
-			}),
-		);
-		return files;
+		for (const entry of entries) {
+			if (collected.length >= MAX_RESOURCE_FILES) {
+				break;
+			}
+			const entryPath = path.join(rootPath, entry.name);
+			const relativePath = path.relative(baseDir, entryPath);
+
+			// Check gitignore (add trailing slash for directories)
+			const checkPath = entry.isDirectory() ? `${relativePath}/` : relativePath;
+			if (ig.ignores(checkPath)) {
+				continue;
+			}
+
+			if (entry.isDirectory()) {
+				await this.listAllFiles(entryPath, ig, baseDir, collected);
+			} else if (entry.isFile()) {
+				collected.push(entryPath);
+			}
+		}
+		return collected;
 	}
 
 	private sendRpcResponse<T>(requestId: string, result: T) {
