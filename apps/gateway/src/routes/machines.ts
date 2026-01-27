@@ -95,13 +95,34 @@ export function setupMachineRoutes(
 	 * Stream machine status updates via SSE.
 	 */
 	router.get("/api/machines/stream", async (req, res) => {
+		const requestId =
+			(req as ExpressRequest & { requestId?: string }).requestId ??
+			req.headers["x-request-id"];
+		res.setHeader("x-gateway-instance", "mobvibe");
+		logger.info(
+			{
+				requestId,
+				origin: req.headers.origin,
+				ip: req.ip,
+				userAgent: req.headers["user-agent"],
+			},
+			"machines_stream_open",
+		);
 		try {
 			const { userId, errorResponse } = await extractSessionUserId(req);
 			if (errorResponse) {
+				logger.warn(
+					{
+						requestId,
+						status: errorResponse.status,
+					},
+					"machines_stream_auth_failed",
+				);
 				res.status(errorResponse.status).json(errorResponse.body);
 				return;
 			}
 			if (!userId) {
+				logger.warn({ requestId }, "machines_stream_auth_missing_user");
 				res.status(401).json({
 					error: "Authentication required",
 					code: "AUTH_REQUIRED",
@@ -154,7 +175,16 @@ export function setupMachineRoutes(
 
 			req.on("close", cleanup);
 		} catch (error) {
-			logger.error({ err: error }, "machines_stream_error");
+			logger.error(
+				{
+					err: error,
+					requestId,
+					origin: req.headers.origin,
+					ip: req.ip,
+					userAgent: req.headers["user-agent"],
+				},
+				"machines_stream_error",
+			);
 			res.status(500).json({
 				error: "Failed to stream machine updates",
 				code: "STREAM_ERROR",

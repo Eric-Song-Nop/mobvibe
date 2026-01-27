@@ -27,12 +27,41 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, {
 	path: "/socket.io",
 	cors: {
-		origin(origin, callback) {
+		origin: (origin, callback) => {
+			// Allow localhost and private IPs
 			if (!origin) {
 				callback(null, true);
 				return;
 			}
-			callback(null, origin === config.webUrl);
+			try {
+				const { hostname } = new URL(origin);
+				if (hostname === "localhost" || hostname === "127.0.0.1") {
+					callback(null, true);
+					return;
+				}
+				// Check private IPv4
+				const parts = hostname.split(".");
+				if (parts.length === 4) {
+					const [first, second] = parts.map((p) => Number.parseInt(p, 10));
+					if (
+						first === 10 ||
+						first === 127 ||
+						(first === 192 && second === 168) ||
+						(first === 172 && second >= 16 && second <= 31)
+					) {
+						callback(null, true);
+						return;
+					}
+				}
+				// Check allowed origins
+				if (config.corsOrigins.includes(origin)) {
+					callback(null, true);
+					return;
+				}
+				callback(null, false);
+			} catch {
+				callback(null, false);
+			}
 		},
 		methods: ["GET", "POST"],
 		credentials: true,
@@ -88,7 +117,13 @@ app.use((request, response, next) => {
 	request.headers["x-request-id"] = requestId;
 	response.on("finish", () => {
 		const durationMs = Number(process.hrtime.bigint() - start) / 1_000_000;
-		logger.info(
+		const log =
+			response.statusCode >= 500
+				? logger.error.bind(logger)
+				: response.statusCode >= 400
+					? logger.warn.bind(logger)
+					: logger.info.bind(logger);
+		log(
 			{
 				requestId,
 				method: request.method,
