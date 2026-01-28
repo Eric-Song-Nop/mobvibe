@@ -23,6 +23,20 @@ type NotificationContext = {
 	sessions?: Record<string, SessionSummary>;
 };
 
+const isMobileBrowser = () => {
+	if (typeof navigator === "undefined") {
+		return false;
+	}
+	return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+};
+
+const canUseWebNotification = () => {
+	if (typeof window === "undefined" || !("Notification" in window)) {
+		return false;
+	}
+	return !isMobileBrowser();
+};
+
 const resolveSessionTitle = (
 	sessions: Record<string, SessionSummary> | undefined,
 	sessionId: string,
@@ -90,7 +104,7 @@ const emitWebNotification = (
 	}
 
 	// Fall back to web Notification API
-	if (typeof window === "undefined" || !("Notification" in window)) {
+	if (!canUseWebNotification()) {
 		return;
 	}
 	if (Notification.permission === "default") {
@@ -101,7 +115,11 @@ const emitWebNotification = (
 		return;
 	}
 
-	new Notification(title, body ? { body } : undefined);
+	try {
+		new Notification(title, body ? { body } : undefined);
+	} catch {
+		return;
+	}
 };
 
 export const pushNotification = (
@@ -122,7 +140,7 @@ export const ensureNotificationPermission = () => {
 		return;
 	}
 
-	if (typeof window === "undefined" || !("Notification" in window)) {
+	if (!canUseWebNotification()) {
 		return;
 	}
 	if (Notification.permission === "default") {
