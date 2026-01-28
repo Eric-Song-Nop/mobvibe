@@ -189,7 +189,7 @@ export const fetchFsRoots = async (payload?: {
 
 export const fetchFsEntries = async (payload: {
 	path: string;
- 	machineId?: string;
+	machineId?: string;
 }): Promise<FsEntriesResponse> =>
 	requestJson<FsEntriesResponse>(
 		buildFsEntriesPath(payload.path, payload.machineId),

@@ -77,7 +77,13 @@ export function CreateSessionDialog({
 		if (homePath) {
 			setDraftCwd(homePath);
 		}
-	}, [draftCwd, open, rootsQuery.data?.homePath, selectedMachineId, setDraftCwd]);
+	}, [
+		draftCwd,
+		open,
+		rootsQuery.data?.homePath,
+		selectedMachineId,
+		setDraftCwd,
+	]);
 
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -135,44 +141,41 @@ export function CreateSessionDialog({
 								onChange={(event) => setDraftCwd(event.target.value)}
 								placeholder={t("session.cwdPlaceholder")}
 							/>
-						<InputGroupAddon align="inline-end">
-							<InputGroupButton
-								type="button"
-								onClick={() => setDirectoryDialogOpen(true)}
-								disabled={!selectedMachineId}
-							>
-								{t("session.browse")}
-							</InputGroupButton>
-						</InputGroupAddon>
-					</InputGroup>
-					{!selectedMachineId ? (
-						<div className="text-destructive text-xs">
-							{t("errors.selectMachine")}
-						</div>
-					) : null}
+							<InputGroupAddon align="inline-end">
+								<InputGroupButton
+									type="button"
+									onClick={() => setDirectoryDialogOpen(true)}
+									disabled={!selectedMachineId}
+								>
+									{t("session.browse")}
+								</InputGroupButton>
+							</InputGroupAddon>
+						</InputGroup>
+						{!selectedMachineId ? (
+							<div className="text-destructive text-xs">
+								{t("errors.selectMachine")}
+							</div>
+						) : null}
+					</div>
+					<WorkingDirectoryDialog
+						open={directoryDialogOpen}
+						onOpenChange={setDirectoryDialogOpen}
+						value={draftCwd}
+						onChange={setDraftCwd}
+						machineId={selectedMachineId ?? undefined}
+					/>
 				</div>
-				<WorkingDirectoryDialog
-					open={directoryDialogOpen}
-					onOpenChange={setDirectoryDialogOpen}
-					value={draftCwd}
-					onChange={setDraftCwd}
-					machineId={selectedMachineId ?? undefined}
-				/>
-			</div>
 				<AlertDialogFooter>
 					<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-				<AlertDialogAction
-					disabled={
-						isCreating ||
-						!draftBackendId ||
-						!draftCwd ||
-						!selectedMachineId
-					}
-					onClick={(event) => {
-						event.preventDefault();
-						onCreate();
-					}}
-				>
+					<AlertDialogAction
+						disabled={
+							isCreating || !draftBackendId || !draftCwd || !selectedMachineId
+						}
+						onClick={(event) => {
+							event.preventDefault();
+							onCreate();
+						}}
+					>
 						{isCreating ? t("common.creating") : t("common.create")}
 					</AlertDialogAction>
 				</AlertDialogFooter>

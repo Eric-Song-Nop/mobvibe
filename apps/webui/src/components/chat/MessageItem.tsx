@@ -72,6 +72,8 @@ const resolveFileName = (pathValue: string) => {
 	return parts.at(-1) ?? pathValue;
 };
 
+const isAbsolutePath = (pathValue: string) => pathValue.startsWith("/");
+
 const resolveFilePathFromUri = (uri: string) => {
 	if (uri.startsWith("file://")) {
 		return decodeURIComponent(uri.slice("file://".length));
@@ -471,16 +473,50 @@ const collectToolCallPaths = (
 		}
 	});
 	const rawPath = parseRawInputValue<string>(message.rawInput, "path");
-	if (rawPath) {
+	if (rawPath && isAbsolutePath(rawPath)) {
 		paths.add(rawPath);
+	}
+	const rawFilePath =
+		parseRawInputValue<string>(message.rawInput, "file_path") ??
+		parseRawInputValue<string>(message.rawInput, "filePath");
+	if (rawFilePath && isAbsolutePath(rawFilePath)) {
+		paths.add(rawFilePath);
 	}
 	const rawPaths = parseRawInputValue<unknown[]>(message.rawInput, "paths");
 	if (Array.isArray(rawPaths)) {
 		rawPaths.forEach((entry) => {
-			if (typeof entry === "string") {
+			if (typeof entry === "string" && isAbsolutePath(entry)) {
 				paths.add(entry);
 			}
 		});
+	}
+	const rawEdits = parseRawInputValue<unknown[]>(message.rawInput, "edits");
+	if (Array.isArray(rawEdits)) {
+		rawEdits.forEach((entry) => {
+			if (!entry || typeof entry !== "object") {
+				return;
+			}
+			const editPath = (entry as { path?: unknown }).path;
+			if (typeof editPath === "string" && isAbsolutePath(editPath)) {
+				paths.add(editPath);
+			}
+		});
+	}
+	const rawPatch =
+		parseRawInputValue<string>(message.rawInput, "patch") ??
+		parseRawInputValue<string>(message.rawInput, "patchText") ??
+		parseRawInputValue<string>(message.rawInput, "diff");
+	if (rawPatch) {
+		const matches = rawPatch.matchAll(
+			/^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm,
+		);
+		Array.from(matches, (match) => match[1]?.trim())
+			.filter((pathValue): pathValue is string =>
+				Boolean(pathValue && isAbsolutePath(pathValue)),
+			)
+			.forEach((pathValue) => {
+				paths.add(pathValue);
+			});
 	}
 	return Array.from(paths);
 };

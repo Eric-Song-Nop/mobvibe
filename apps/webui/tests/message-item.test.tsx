@@ -1,10 +1,11 @@
 import "@testing-library/jest-dom/vitest";
-import { render } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { fireEvent, render } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageItem } from "../src/components/chat/MessageItem";
 import i18n from "../src/i18n";
 import type { ChatMessage, ChatSession } from "../src/lib/chat-store";
 import { useChatStore } from "../src/lib/chat-store";
+import { createDefaultContentBlocks } from "../src/lib/content-block-utils";
 
 const buildMessage = (overrides?: Partial<ChatMessage>): ChatMessage => {
 	const base: ChatMessage = {
@@ -12,6 +13,7 @@ const buildMessage = (overrides?: Partial<ChatMessage>): ChatMessage => {
 		role: "assistant",
 		kind: "text",
 		content: "hello",
+		contentBlocks: createDefaultContentBlocks("hello"),
 		createdAt: new Date().toISOString(),
 		isStreaming: false,
 	};
@@ -22,6 +24,7 @@ const buildSession = (overrides?: Partial<ChatSession>): ChatSession => ({
 	sessionId: "session-1",
 	title: "Test session",
 	input: "",
+	inputContents: createDefaultContentBlocks(""),
 	messages: [],
 	terminalOutputs: {},
 	streamingMessageId: undefined,
@@ -197,5 +200,54 @@ describe("MessageItem", () => {
 		expect(getByText("terminal output")).toBeInTheDocument();
 		const link = getByRole("link", { name: "resource" });
 		expect(link).toHaveAttribute("href", "https://example.com/resource");
+	});
+
+	it("renders tool call path from rawInput.path", () => {
+		const onOpenFilePreview = vi.fn();
+		const message = {
+			...buildMessage({
+				kind: "tool_call",
+				sessionId: "session-1",
+				toolCallId: "tool-3",
+			}),
+			rawInput: {
+				path: "/tmp/foo.txt",
+			},
+		} as ChatMessage;
+		const { getByRole } = render(
+			<MessageItem message={message} onOpenFilePreview={onOpenFilePreview} />,
+		);
+		const button = getByRole("button", { name: "foo.txt" });
+		fireEvent.click(button);
+		expect(onOpenFilePreview).toHaveBeenCalledWith("/tmp/foo.txt");
+	});
+
+	it("renders tool call paths from rawInput.patch", () => {
+		const onOpenFilePreview = vi.fn();
+		const message = {
+			...buildMessage({
+				kind: "tool_call",
+				sessionId: "session-1",
+				toolCallId: "tool-4",
+			}),
+			rawInput: {
+				patch: [
+					"*** Begin Patch",
+					"*** Update File: /tmp/alpha.txt",
+					"*** Add File: /tmp/bravo.txt",
+					"*** Delete File: /tmp/charlie.txt",
+					"*** End Patch",
+				].join("\n"),
+			},
+		} as ChatMessage;
+		const { getByRole } = render(
+			<MessageItem message={message} onOpenFilePreview={onOpenFilePreview} />,
+		);
+		fireEvent.click(getByRole("button", { name: "alpha.txt" }));
+		fireEvent.click(getByRole("button", { name: "bravo.txt" }));
+		fireEvent.click(getByRole("button", { name: "charlie.txt" }));
+		expect(onOpenFilePreview).toHaveBeenCalledWith("/tmp/alpha.txt");
+		expect(onOpenFilePreview).toHaveBeenCalledWith("/tmp/bravo.txt");
+		expect(onOpenFilePreview).toHaveBeenCalledWith("/tmp/charlie.txt");
 	});
 });
