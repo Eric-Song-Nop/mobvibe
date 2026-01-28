@@ -227,6 +227,20 @@ export class CliRegistry extends EventEmitter {
 	}
 
 	/**
+	 * Check if a machine belongs to a specific user.
+	 */
+	isMachineOwnedByUser(machineId: string, userId: string): boolean {
+		const cli = this.getCliByMachineId(machineId);
+		if (!cli) {
+			return false;
+		}
+		if (!cli.userId) {
+			return true;
+		}
+		return cli.userId === userId;
+	}
+
+	/**
 	 * Get backends available to a specific user.
 	 */
 	getBackendsForUser(userId?: string): {

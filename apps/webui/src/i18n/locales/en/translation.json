@@ -64,6 +64,7 @@
 		"browse": "Browse"
 	},
 	"errors": {
+		"selectMachine": "Please select a machine",
 		"selectBackend": "Please select a backend",
 		"selectDirectory": "Please select a working directory",
 		"backendsFetchFailed": "Failed to load backends",

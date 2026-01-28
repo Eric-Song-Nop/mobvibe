@@ -81,6 +81,7 @@ export type CreateSessionParams = {
 	cwd?: string;
 	title?: string;
 	backendId?: AcpBackendId;
+	machineId?: string;
 };
 
 // Send message RPC params
@@ -122,6 +123,16 @@ export type FsEntriesParams = {
 	path?: string;
 };
 
+// Host file system RPC params
+export type HostFsRootsParams = {
+	machineId: string;
+};
+
+export type HostFsEntriesParams = {
+	machineId: string;
+	path: string;
+};
+
 export type FsFileParams = {
 	sessionId: string;
 	path: string;
@@ -144,6 +155,11 @@ export type FsEntriesResponse = {
 export type FsResourcesResponse = {
 	rootPath: string;
 	entries: SessionFsResourceEntry[];
+};
+
+export type HostFsRootsResponse = {
+	homePath: string;
+	roots: FsRoot[];
 };
 
 // CLI -> Gateway events
@@ -182,6 +198,8 @@ export interface GatewayToCliEvents {
 	"rpc:fs:entries": (request: RpcRequest<FsEntriesParams>) => void;
 	"rpc:fs:file": (request: RpcRequest<FsFileParams>) => void;
 	"rpc:fs:resources": (request: RpcRequest<FsResourcesParams>) => void;
+	"rpc:hostfs:roots": (request: RpcRequest<HostFsRootsParams>) => void;
+	"rpc:hostfs:entries": (request: RpcRequest<HostFsEntriesParams>) => void;
 }
 
 // Webui -> Gateway events

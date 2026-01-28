@@ -21,6 +21,7 @@ export type WorkingDirectoryPickerProps = {
 	browserClassName?: string;
 	inputId?: string;
 	className?: string;
+	machineId?: string;
 };
 
 export function WorkingDirectoryPicker({
@@ -31,14 +32,20 @@ export function WorkingDirectoryPicker({
 	browserClassName,
 	inputId = "session-cwd",
 	className,
+	machineId,
 }: WorkingDirectoryPickerProps) {
 	const { t } = useTranslation();
 	const [inputValue, setInputValue] = useState("");
 
 	const rootsQuery = useQuery<FsRootsResponse>({
-		queryKey: ["fs-roots"],
-		queryFn: fetchFsRoots,
-		enabled: open,
+		queryKey: ["fs-roots", machineId],
+		queryFn: () => {
+			if (!machineId) {
+				throw createFallbackError(t("errors.selectMachine"), "request");
+			}
+			return fetchFsRoots({ machineId });
+		},
+		enabled: open && Boolean(machineId),
 	});
 
 	const homePath = rootsQuery.data?.homePath;
@@ -47,6 +54,16 @@ export function WorkingDirectoryPicker({
 		t("workingDirectory.homeLabel", {
 			defaultValue: HOME_LABEL_FALLBACK,
 		});
+
+	const fetchEntries = useCallback(
+		async (payload: { path: string }) => {
+			if (!machineId) {
+				throw createFallbackError(t("errors.selectMachine"), "request");
+			}
+			return fetchFsEntries({ path: payload.path, machineId });
+		},
+		[machineId, t],
+	);
 
 	const {
 		columns,
@@ -64,7 +81,7 @@ export function WorkingDirectoryPicker({
 		value,
 		onChange,
 		onSelect,
-		fetchEntries: fetchFsEntries,
+		fetchEntries,
 		errorMessage: t("errors.pathLoadFailed"),
 	});
 
@@ -87,6 +104,8 @@ export function WorkingDirectoryPicker({
 		setInputValue(value);
 	}, [open, value]);
 
+	const machineError =
+		open && !machineId ? t("errors.selectMachine") : undefined;
 	const rootsError = rootsQuery.isError
 		? normalizeError(
 				rootsQuery.error,
@@ -112,6 +131,9 @@ export function WorkingDirectoryPicker({
 					disabled={!open || rootsQuery.isLoading}
 				/>
 			</InputGroup>
+			{machineError ? (
+				<div className="text-destructive text-xs">{machineError}</div>
+			) : null}
 			{rootsError ? (
 				<div className="text-destructive text-xs">{rootsError}</div>
 			) : null}

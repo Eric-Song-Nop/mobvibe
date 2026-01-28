@@ -28,6 +28,7 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { type AcpBackendSummary, fetchFsRoots } from "@/lib/api";
+import { useMachinesStore } from "@/lib/machines-store";
 import { useUiStore } from "@/lib/ui-store";
 
 export type CreateSessionDialogProps = {
@@ -55,10 +56,11 @@ export function CreateSessionDialog({
 		setDraftBackendId,
 		setDraftCwd,
 	} = useUiStore();
+	const { selectedMachineId } = useMachinesStore();
 	const rootsQuery = useQuery({
-		queryKey: ["fs-roots"],
-		queryFn: fetchFsRoots,
-		enabled: open,
+		queryKey: ["fs-roots", selectedMachineId],
+		queryFn: () => fetchFsRoots({ machineId: selectedMachineId ?? undefined }),
+		enabled: open && Boolean(selectedMachineId),
 	});
 
 	useEffect(() => {
@@ -68,14 +70,14 @@ export function CreateSessionDialog({
 	}, [open]);
 
 	useEffect(() => {
-		if (!open || draftCwd) {
+		if (!open || draftCwd || !selectedMachineId) {
 			return;
 		}
 		const homePath = rootsQuery.data?.homePath;
 		if (homePath) {
 			setDraftCwd(homePath);
 		}
-	}, [draftCwd, open, rootsQuery.data?.homePath, setDraftCwd]);
+	}, [draftCwd, open, rootsQuery.data?.homePath, selectedMachineId, setDraftCwd]);
 
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -133,32 +135,44 @@ export function CreateSessionDialog({
 								onChange={(event) => setDraftCwd(event.target.value)}
 								placeholder={t("session.cwdPlaceholder")}
 							/>
-							<InputGroupAddon align="inline-end">
-								<InputGroupButton
-									type="button"
-									onClick={() => setDirectoryDialogOpen(true)}
-								>
-									{t("session.browse")}
-								</InputGroupButton>
-							</InputGroupAddon>
-						</InputGroup>
-					</div>
-					<WorkingDirectoryDialog
-						open={directoryDialogOpen}
-						onOpenChange={setDirectoryDialogOpen}
-						value={draftCwd}
-						onChange={setDraftCwd}
-					/>
+						<InputGroupAddon align="inline-end">
+							<InputGroupButton
+								type="button"
+								onClick={() => setDirectoryDialogOpen(true)}
+								disabled={!selectedMachineId}
+							>
+								{t("session.browse")}
+							</InputGroupButton>
+						</InputGroupAddon>
+					</InputGroup>
+					{!selectedMachineId ? (
+						<div className="text-destructive text-xs">
+							{t("errors.selectMachine")}
+						</div>
+					) : null}
 				</div>
+				<WorkingDirectoryDialog
+					open={directoryDialogOpen}
+					onOpenChange={setDirectoryDialogOpen}
+					value={draftCwd}
+					onChange={setDraftCwd}
+					machineId={selectedMachineId ?? undefined}
+				/>
+			</div>
 				<AlertDialogFooter>
 					<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-					<AlertDialogAction
-						disabled={isCreating || !draftBackendId || !draftCwd}
-						onClick={(event) => {
-							event.preventDefault();
-							onCreate();
-						}}
-					>
+				<AlertDialogAction
+					disabled={
+						isCreating ||
+						!draftBackendId ||
+						!draftCwd ||
+						!selectedMachineId
+					}
+					onClick={(event) => {
+						event.preventDefault();
+						onCreate();
+					}}
+				>
 						{isCreating ? t("common.creating") : t("common.create")}
 					</AlertDialogAction>
 				</AlertDialogFooter>

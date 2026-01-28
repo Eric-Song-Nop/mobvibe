@@ -74,9 +74,9 @@ export function setupSessionRoutes(
 	router.post("/session", async (request: AuthenticatedRequest, response) => {
 		const userId = getUserId(request);
 		try {
-			const { cwd, title, backendId } = request.body ?? {};
+			const { cwd, title, backendId, machineId } = request.body ?? {};
 
-			logger.info({ userId, backendId }, "session_create_request");
+			logger.info({ userId, backendId, machineId }, "session_create_request");
 
 			const session = await sessionRouter.createSession(
 				{
@@ -87,6 +87,10 @@ export function setupSessionRoutes(
 							? title.trim()
 							: undefined,
 					backendId: typeof backendId === "string" ? backendId : undefined,
+					machineId:
+						typeof machineId === "string" && machineId.trim().length > 0
+							? machineId.trim()
+							: undefined,
 				},
 				userId,
 			);
@@ -100,7 +104,8 @@ export function setupSessionRoutes(
 			logger.error({ err: error, userId }, "session_create_error");
 			if (
 				message.includes("Not authorized") ||
-				message.includes("No CLI connected for this user")
+				message.includes("No CLI connected for this user") ||
+				message.includes("No CLI connected for this machine")
 			) {
 				respondError(response, buildAuthorizationError(message), 403);
 			} else {

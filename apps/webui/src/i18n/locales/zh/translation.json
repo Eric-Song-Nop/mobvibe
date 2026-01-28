@@ -64,6 +64,7 @@
 		"browse": "浏览"
 	},
 	"errors": {
+		"selectMachine": "请先选择机器",
 		"selectBackend": "请选择后端",
 		"selectDirectory": "请选择工作目录",
 		"backendsFetchFailed": "后端列表获取失败",

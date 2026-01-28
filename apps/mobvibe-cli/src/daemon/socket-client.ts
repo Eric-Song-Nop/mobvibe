@@ -1,11 +1,13 @@
 import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import type {
 	CliToGatewayEvents,
 	FsEntry,
 	FsRoot,
 	GatewayToCliEvents,
+	HostFsRootsResponse,
 	RpcResponse,
 	SessionFsFilePreview,
 	SessionFsResourceEntry,
@@ -106,6 +108,17 @@ const readDirectoryEntries = async (dirPath: string): Promise<FsEntry[]> => {
 		}
 		return left.name.localeCompare(right.name);
 	});
+};
+
+const filterVisibleEntries = (entries: FsEntry[]) =>
+	entries.filter((entry) => !entry.hidden);
+
+const buildHostFsRoots = async (): Promise<HostFsRootsResponse> => {
+	const homePath = homedir();
+	return {
+		homePath,
+		roots: [{ name: "Home", path: homePath }],
+	};
 };
 
 export class SocketClient extends EventEmitter {
@@ -417,6 +430,55 @@ export class SocketClient extends EventEmitter {
 						sessionId: request.params.sessionId,
 					},
 					"rpc_fs_roots_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		this.socket.on("rpc:hostfs:roots", async (request) => {
+			try {
+				logger.debug(
+					{
+						requestId: request.requestId,
+						machineId: request.params.machineId,
+					},
+					"rpc_hostfs_roots",
+				);
+				const result = await buildHostFsRoots();
+				this.sendRpcResponse(request.requestId, result);
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						machineId: request.params.machineId,
+					},
+					"rpc_hostfs_roots_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		this.socket.on("rpc:hostfs:entries", async (request) => {
+			try {
+				const { path: requestPath, machineId } = request.params;
+				logger.debug(
+					{ requestId: request.requestId, machineId, path: requestPath },
+					"rpc_hostfs_entries",
+				);
+				const entries = await readDirectoryEntries(requestPath);
+				this.sendRpcResponse(request.requestId, {
+					path: requestPath,
+					entries: filterVisibleEntries(entries),
+				});
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						machineId: request.params.machineId,
+					},
+					"rpc_hostfs_entries_error",
 				);
 				this.sendRpcError(request.requestId, error);
 			}

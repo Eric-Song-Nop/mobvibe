@@ -15,6 +15,7 @@ export type WorkingDirectoryDialogProps = {
 	onOpenChange: (open: boolean) => void;
 	value: string | undefined;
 	onChange: (nextPath: string) => void;
+	machineId?: string;
 };
 
 export function WorkingDirectoryDialog({
@@ -22,6 +23,7 @@ export function WorkingDirectoryDialog({
 	onOpenChange,
 	value,
 	onChange,
+	machineId,
 }: WorkingDirectoryDialogProps) {
 	const { t } = useTranslation();
 
@@ -41,6 +43,7 @@ export function WorkingDirectoryDialog({
 					open={open}
 					value={value}
 					onChange={onChange}
+					machineId={machineId}
 					browserClassName="flex-1 min-h-0 h-auto sm:h-auto"
 					inputId="session-cwd-dialog"
 					className="flex-1 min-h-0"

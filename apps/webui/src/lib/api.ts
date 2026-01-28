@@ -147,8 +147,21 @@ export const fetchSessions = async (): Promise<SessionsResponse> =>
 export const fetchMachines = async (): Promise<MachinesResponse> =>
 	requestJson<MachinesResponse>("/api/machines");
 
-const buildFsEntriesPath = (pathValue: string) =>
-	`/fs/entries?path=${encodeURIComponent(pathValue)}`;
+const buildFsRootsPath = (machineId?: string) => {
+	if (!machineId) {
+		return "/fs/roots";
+	}
+	const params = new URLSearchParams({ machineId });
+	return `/fs/roots?${params.toString()}`;
+};
+
+const buildFsEntriesPath = (pathValue: string, machineId?: string) => {
+	const params = new URLSearchParams({ path: pathValue });
+	if (machineId) {
+		params.set("machineId", machineId);
+	}
+	return `/fs/entries?${params.toString()}`;
+};
 
 const buildSessionFsRootsPath = (sessionId: string) =>
 	`/fs/session/roots?sessionId=${encodeURIComponent(sessionId)}`;
@@ -169,13 +182,18 @@ const buildSessionFsFilePath = (sessionId: string, pathValue: string) => {
 const buildSessionFsResourcesPath = (sessionId: string) =>
 	`/fs/session/resources?sessionId=${encodeURIComponent(sessionId)}`;
 
-export const fetchFsRoots = async (): Promise<FsRootsResponse> =>
-	requestJson<FsRootsResponse>("/fs/roots");
+export const fetchFsRoots = async (payload?: {
+	machineId?: string;
+}): Promise<FsRootsResponse> =>
+	requestJson<FsRootsResponse>(buildFsRootsPath(payload?.machineId));
 
 export const fetchFsEntries = async (payload: {
 	path: string;
+ 	machineId?: string;
 }): Promise<FsEntriesResponse> =>
-	requestJson<FsEntriesResponse>(buildFsEntriesPath(payload.path));
+	requestJson<FsEntriesResponse>(
+		buildFsEntriesPath(payload.path, payload.machineId),
+	);
 
 export const fetchSessionFsRoots = async (payload: {
 	sessionId: string;
@@ -211,6 +229,7 @@ export const createSession = async (payload?: {
 	cwd?: string;
 	title?: string;
 	backendId?: string;
+	machineId?: string;
 }): Promise<CreateSessionResponse> =>
 	requestJson<CreateSessionResponse>("/acp/session", {
 		method: "POST",

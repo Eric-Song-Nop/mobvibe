@@ -10,6 +10,9 @@ import type {
 	FsResourcesParams,
 	FsResourcesResponse,
 	FsRootsResponse,
+	HostFsEntriesParams,
+	HostFsRootsParams,
+	HostFsRootsResponse,
 	PermissionDecisionPayload,
 	RpcRequest,
 	RpcResponse,
@@ -82,12 +85,25 @@ export class SessionRouter {
 		params: CreateSessionParams,
 		userId?: string,
 	): Promise<SessionSummary> {
-		// Route to user's machine if userId provided, otherwise first available
-		const cli = this.cliRegistry.getFirstCliForUser(userId);
+		const targetMachineId = params.machineId;
+		const cli = targetMachineId
+			? this.cliRegistry.getCliByMachineId(targetMachineId)
+			: this.cliRegistry.getFirstCliForUser(userId);
 		if (!cli) {
 			throw new Error(
-				userId ? "No CLI connected for this user" : "No CLI connected",
+				targetMachineId
+					? "No CLI connected for this machine"
+					: userId
+						? "No CLI connected for this user"
+						: "No CLI connected",
 			);
+		}
+		if (
+			targetMachineId &&
+			userId &&
+			!this.cliRegistry.isMachineOwnedByUser(targetMachineId, userId)
+		) {
+			throw new Error("Not authorized to access this machine");
 		}
 
 		logger.info(
@@ -95,10 +111,15 @@ export class SessionRouter {
 			"session_create_rpc_start",
 		);
 
+		const rpcParams: CreateSessionParams = {
+			cwd: params.cwd,
+			title: params.title,
+			backendId: params.backendId,
+		};
 		const result = await this.sendRpc<CreateSessionParams, SessionSummary>(
 			cli.socket,
 			"rpc:session:create",
-			params,
+			rpcParams,
 		);
 
 		// Sync session to database if machine is authenticated
@@ -507,6 +528,78 @@ export class SessionRouter {
 			"fs_resources_rpc_complete",
 		);
 
+		return result;
+	}
+
+	/**
+	 * Get host file system roots for a machine.
+	 */
+	async getHostFsRoots(
+		params: HostFsRootsParams,
+		userId?: string,
+	): Promise<HostFsRootsResponse> {
+		const cli = this.cliRegistry.getCliByMachineId(params.machineId);
+		if (!cli) {
+			throw new Error("Machine not found");
+		}
+		if (
+			userId &&
+			!this.cliRegistry.isMachineOwnedByUser(params.machineId, userId)
+		) {
+			throw new Error("Not authorized to access this machine");
+		}
+
+		logger.debug(
+			{ machineId: params.machineId, userId },
+			"host_fs_roots_rpc_start",
+		);
+
+		const result = await this.sendRpc<HostFsRootsParams, HostFsRootsResponse>(
+			cli.socket,
+			"rpc:hostfs:roots",
+			params,
+		);
+
+		logger.debug(
+			{ machineId: params.machineId, userId },
+			"host_fs_roots_rpc_complete",
+		);
+		return result;
+	}
+
+	/**
+	 * Get host file system entries for a machine.
+	 */
+	async getHostFsEntries(
+		params: HostFsEntriesParams,
+		userId?: string,
+	): Promise<FsEntriesResponse> {
+		const cli = this.cliRegistry.getCliByMachineId(params.machineId);
+		if (!cli) {
+			throw new Error("Machine not found");
+		}
+		if (
+			userId &&
+			!this.cliRegistry.isMachineOwnedByUser(params.machineId, userId)
+		) {
+			throw new Error("Not authorized to access this machine");
+		}
+
+		logger.debug(
+			{ machineId: params.machineId, userId, path: params.path },
+			"host_fs_entries_rpc_start",
+		);
+
+		const result = await this.sendRpc<HostFsEntriesParams, FsEntriesResponse>(
+			cli.socket,
+			"rpc:hostfs:entries",
+			params,
+		);
+
+		logger.debug(
+			{ machineId: params.machineId, userId, path: params.path },
+			"host_fs_entries_rpc_complete",
+		);
 		return result;
 	}
 

@@ -204,6 +204,10 @@ function MainApp() {
 	};
 
 	const handleCreateSession = async () => {
+		if (!selectedMachineId) {
+			setAppError(createFallbackError(t("errors.selectMachine"), "request"));
+			return;
+		}
 		if (!draftBackendId) {
 			setAppError(createFallbackError(t("errors.selectBackend"), "request"));
 			return;
@@ -219,6 +223,7 @@ function MainApp() {
 				backendId: draftBackendId,
 				cwd: draftCwd,
 				title: title.length > 0 ? title : undefined,
+				machineId: selectedMachineId,
 			});
 			setCreateDialogOpen(false);
 			setMobileMenuOpen(false);
