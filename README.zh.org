@@ -70,7 +70,7 @@ pnpm build
 | =mobvibe stop=                     | 停止守护进程       |
 | =mobvibe status=                   | 查看守护进程状态   |
 | =mobvibe logs [-f] [-n <lines>]=   | 查看守护进程日志   |
-| =mobvibe login [--webui <url>]=    | 向 gateway 认证    |
+| =mobvibe login=                   | 向 gateway 认证    |
 | =mobvibe logout=                   | 清除认证凭据       |
 | =mobvibe auth-status=              | 查看认证状态       |
 

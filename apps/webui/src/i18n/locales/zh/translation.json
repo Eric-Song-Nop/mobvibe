@@ -209,7 +209,7 @@
 		"offline": "离线",
 		"sessions": "{{count}} 个会话",
 		"register": "注册设备",
-		"registerDescription": "在您的设备上运行以下命令以连接：",
+		"registerDescription": "在设备上运行以下命令登录并连接：",
 		"copyCommand": "复制命令",
 		"commandCopied": "命令已复制到剪贴板",
 		"remove": "移除",

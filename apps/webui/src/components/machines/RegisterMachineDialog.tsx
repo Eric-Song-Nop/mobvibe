@@ -26,12 +26,7 @@ export function RegisterMachineDialog({
 	);
 	const [copied, setCopied] = useState(false);
 
-	const webuiUrl =
-		typeof window !== "undefined"
-			? `${window.location.protocol}//${window.location.host}`
-			: "http://localhost:5173";
-
-	const command = `mobvibe login --webui ${webuiUrl}`;
+	const command = "mobvibe login";
 
 	const handleCopy = async () => {
 		try {

@@ -209,7 +209,7 @@
 		"offline": "Offline",
 		"sessions": "{{count}} session(s)",
 		"register": "Register machine",
-		"registerDescription": "Run this command on your machine to connect it:",
+		"registerDescription": "Run this command on your machine to log in and connect:",
 		"copyCommand": "Copy command",
 		"commandCopied": "Command copied to clipboard",
 		"remove": "Remove",
