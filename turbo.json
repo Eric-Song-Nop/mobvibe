@@ -20,6 +20,9 @@
 		},
 		"test": {
 			"dependsOn": ["^test"]
+		},
+		"test:run": {
+			"dependsOn": ["^test:run"]
 		}
 	}
 }

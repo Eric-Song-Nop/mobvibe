@@ -10,6 +10,7 @@
 		"lint": "biome check --write .",
 		"format": "biome format --write .",
 		"test": "vitest --passWithNoTests",
+		"test:run": "vitest run --passWithNoTests",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate",
 		"db:push": "drizzle-kit push",

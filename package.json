@@ -9,6 +9,7 @@
 		"format": "turbo format",
 		"lint": "turbo lint",
 		"test": "turbo test",
+		"test:run": "turbo test:run",
 		"tauri:dev": "pnpm --filter webui dev:tauri",
 		"tauri:build": "pnpm --filter webui build:tauri",
 		"android:init": "pnpm --filter webui android:init",

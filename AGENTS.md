@@ -70,7 +70,8 @@ pnpm dev              # Start all packages (Turbo) we are always running dev, do
 pnpm build            # Build all packages
 pnpm format           # Format code with Biome
 pnpm lint             # Lint code with Biome
-pnpm test             # Run all tests with Vitest
+pnpm test             # Run all tests with Vitest, agent and CI should NOT use this
+pnpm test:run         # Run all tests with Vitest for once, no watch mode
 ```
 
 ## Database Setup (Optional)

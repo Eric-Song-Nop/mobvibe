@@ -1,9 +1,9 @@
 import { useTranslation } from "react-i18next";
 import { Streamdown } from "streamdown";
+import { DiffView } from "@/components/chat/DiffView";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { DiffView } from "@/components/chat/DiffView";
 import type {
 	AudioContent,
 	ContentBlock,
@@ -382,7 +382,9 @@ const renderContentBlock = (
 	}
 };
 
-const isDiffPayload = (payload: ToolCallContentPayload): payload is DiffContent => {
+const isDiffPayload = (
+	payload: ToolCallContentPayload,
+): payload is DiffContent => {
 	if (!payload || typeof payload !== "object") {
 		return false;
 	}

@@ -10,6 +10,7 @@
 		"format": "biome format --write .",
 		"preview": "vite preview",
 		"test": "vitest",
+		"test:run": "vitest run",
 		"dev:tauri": "tauri dev",
 		"build:tauri": "tauri build",
 		"android:init": "tauri android init",

@@ -275,10 +275,7 @@ export const DiffView = ({
 					lines={oldLines}
 					emptyLabel={isNewFile ? getLabel("toolCall.newFile") : undefined}
 				/>
-				<DiffPanel
-					title={getLabel("toolCall.updated")}
-					lines={newLines}
-				/>
+				<DiffPanel title={getLabel("toolCall.updated")} lines={newLines} />
 			</div>
 		</div>
 	);

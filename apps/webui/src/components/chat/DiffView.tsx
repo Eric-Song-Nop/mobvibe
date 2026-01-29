@@ -281,7 +281,10 @@ const DiffPanel = ({
 											)}
 										>
 											<span
-												className={cn("text-right", lineNumberTone(line.variant))}
+												className={cn(
+													"text-right",
+													lineNumberTone(line.variant),
+												)}
 											>
 												{line.lineNumber}
 											</span>
@@ -293,7 +296,9 @@ const DiffPanel = ({
 																{...getTokenProps({ token, key: tokenIndex })}
 															/>
 														))
-													: (line.text.length > 0 ? line.text : " ")}
+													: line.text.length > 0
+														? line.text
+														: " "}
 											</span>
 										</div>
 									);
@@ -326,10 +331,7 @@ export const DiffView = ({
 		() => (isNewFile ? [] : splitLines(oldSource)),
 		[isNewFile, oldSource],
 	);
-	const newLinesSource = useMemo(
-		() => splitLines(newSource),
-		[newSource],
-	);
+	const newLinesSource = useMemo(() => splitLines(newSource), [newSource]);
 	const diffOps = useMemo(
 		() => buildDiffOps(oldLinesSource, newLinesSource),
 		[oldLinesSource, newLinesSource],
@@ -347,7 +349,10 @@ export const DiffView = ({
 	const newContainerRef = useRef<HTMLDivElement | null>(null);
 	const isSyncingRef = useRef(false);
 
-	const syncScroll = (source: HTMLDivElement, target: HTMLDivElement | null) => {
+	const syncScroll = (
+		source: HTMLDivElement,
+		target: HTMLDivElement | null,
+	) => {
 		if (!target) {
 			return;
 		}
