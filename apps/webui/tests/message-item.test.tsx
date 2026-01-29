@@ -54,7 +54,11 @@ describe("MessageItem", () => {
 	});
 
 	it("renders assistant content with streaming opacity", () => {
-		const message = buildMessage({ isStreaming: true, content: "Streaming" });
+		const message = buildMessage({
+			isStreaming: true,
+			content: "Streaming",
+			contentBlocks: createDefaultContentBlocks("Streaming"),
+		});
 		const { container, getByText } = render(<MessageItem message={message} />);
 		expect(getByText("Streaming")).toBeInTheDocument();
 		expect(container.querySelector(".opacity-90")).toBeTruthy();
@@ -210,6 +214,7 @@ describe("MessageItem", () => {
 				sessionId: "session-1",
 				toolCallId: "tool-3",
 			}),
+			content: [],
 			rawInput: {
 				path: "/tmp/foo.txt",
 			},
@@ -230,6 +235,7 @@ describe("MessageItem", () => {
 				sessionId: "session-1",
 				toolCallId: "tool-4",
 			}),
+			content: [],
 			rawInput: {
 				patch: [
 					"*** Begin Patch",
