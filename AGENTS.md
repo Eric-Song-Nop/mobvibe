@@ -70,6 +70,8 @@ pnpm dev              # Start all packages (Turbo) we are always running dev, do
 pnpm build            # Build all packages
 pnpm format           # Format code with Biome
 pnpm lint             # Lint code with Biome
+                      # Before git commit, run `pnpm format && pnpm lint`
+                      #   and fix all lint errors, lint warning is ok.
 pnpm test             # Run all tests with Vitest, agent and CI should NOT use this
 pnpm test:run         # Run all tests with Vitest for once, no watch mode
 ```
