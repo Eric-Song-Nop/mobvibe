@@ -137,7 +137,6 @@ const validateUserConfig = (
 			}
 
 			if (validAgents.length > 0) {
-        console.log(validAgents);
 				config.agents = validAgents;
 			}
 		}
@@ -163,6 +162,7 @@ export const loadUserConfig = async (
 	homePath: string,
 ): Promise<ConfigLoadResult> => {
 	const configPath = path.join(homePath, CONFIG_FILENAME);
+	console.log(`[config] Loading config from: ${configPath}`);
 
 	try {
 		const content = await fs.readFile(configPath, "utf-8");
@@ -171,6 +171,7 @@ export const loadUserConfig = async (
 		try {
 			parsed = JSON.parse(content);
 		} catch {
+			console.log(`[config] Invalid JSON in config file: ${configPath}`);
 			return {
 				config: null,
 				errors: ["Invalid JSON in config file"],
@@ -179,16 +180,27 @@ export const loadUserConfig = async (
 		}
 
 		const { config, errors } = validateUserConfig(parsed);
+
+		if (errors.length > 0) {
+			console.log("[config] Validation errors:", errors);
+		}
+
+		if (config) {
+			console.log("[config] Loaded config:", JSON.stringify(config, null, 2));
+		}
+
 		return { config, errors, path: configPath };
 	} catch (error) {
 		// File not found is not an error, just return null config
 		if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+			console.log(`[config] No config file found at: ${configPath}`);
 			return { config: null, errors: [], path: configPath };
 		}
 
 		// Other errors (permissions, etc.)
 		const message =
 			error instanceof Error ? error.message : "Unknown error reading config";
+		console.log(`[config] Error reading config: ${message}`);
 		return { config: null, errors: [message], path: configPath };
 	}
 };
