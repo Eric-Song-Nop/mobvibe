@@ -1,8 +1,9 @@
 name: Publish to npm
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
 
 jobs:
   ci:
@@ -55,6 +56,6 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.release.tag_name }}
+          tag_name: ${{ github.ref_name }}
           files: ${{ steps.apk.outputs.path }}
           generate_release_notes: true

@@ -4,6 +4,12 @@ on:
   pull_request:
     branches: [master, main]
   workflow_dispatch:
+    inputs:
+      build_tauri_android:
+        description: 'Build Tauri Android APK'
+        type: boolean
+        required: false
+        default: false
   workflow_call:
     inputs:
       build_tauri_android:
@@ -58,7 +64,7 @@ jobs:
   tauri-android:
     name: Tauri Android Build
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_call' && inputs.build_tauri_android }}
+    if: ${{ inputs.build_tauri_android }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
