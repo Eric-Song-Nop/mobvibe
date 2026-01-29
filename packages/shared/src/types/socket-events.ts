@@ -189,6 +189,12 @@ export type ResumeSessionRpcParams = {
 	cwd: string;
 };
 
+/** Payload for sessions:discovered event */
+export type SessionsDiscoveredPayload = {
+	sessions: AcpSessionInfo[];
+	capabilities: AgentSessionCapabilities;
+};
+
 // CLI -> Gateway events
 export interface CliToGatewayEvents {
 	"cli:register": (info: CliRegistrationInfo) => void;
@@ -200,6 +206,7 @@ export interface CliToGatewayEvents {
 	"terminal:output": (event: TerminalOutputEvent) => void;
 	"sessions:list": (sessions: SessionSummary[]) => void;
 	"sessions:changed": (payload: SessionsChangedPayload) => void;
+	"sessions:discovered": (payload: SessionsDiscoveredPayload) => void;
 
 	// RPC responses
 	"rpc:response": (response: RpcResponse<unknown>) => void;

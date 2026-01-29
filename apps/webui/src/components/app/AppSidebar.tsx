@@ -26,6 +26,8 @@ export type AppSidebarProps = {
 	onEditSubmit: () => void;
 	onCloseSession: (sessionId: string) => void;
 	isCreating: boolean;
+	/** Whether a session is being activated (restored/loaded) */
+	isActivating?: boolean;
 };
 
 export function AppSidebar({
@@ -36,6 +38,7 @@ export function AppSidebar({
 	onEditSubmit,
 	onCloseSession,
 	isCreating,
+	isActivating: _isActivating,
 }: AppSidebarProps) {
 	const { mobileMenuOpen, setMobileMenuOpen } = useUiStore();
 	return (

@@ -21,6 +21,8 @@ vi.mock("@/lib/api", async () => {
 		sendMessage: vi.fn(),
 		createMessageId: vi.fn(),
 		sendPermissionDecision: vi.fn(),
+		resumeSession: vi.fn(),
+		loadSession: vi.fn(),
 	};
 });
 
@@ -55,6 +57,8 @@ describe("useSessionMutations", () => {
 		updateToolCall: vi.fn(),
 		appendTerminalOutput: vi.fn(),
 		handleSessionsChanged: vi.fn(),
+		clearSessionMessages: vi.fn(),
+		restoreSessionMessages: vi.fn(),
 	});
 
 	const wrapper = ({ children }: { children: ReactNode }) => (

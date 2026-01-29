@@ -177,8 +177,24 @@ export class SocketClient extends EventEmitter {
 			}
 		});
 
-		this.socket.on("cli:registered", (info) => {
+		this.socket.on("cli:registered", async (info) => {
 			logger.info({ machineId: info.machineId }, "gateway_registered");
+
+			// Auto-discover historical sessions from ACP agent
+			try {
+				const { sessions, capabilities } =
+					await this.options.sessionManager.discoverSessions();
+
+				if (sessions.length > 0) {
+					this.socket.emit("sessions:discovered", { sessions, capabilities });
+					logger.info(
+						{ count: sessions.length, capabilities },
+						"historical_sessions_discovered",
+					);
+				}
+			} catch (error) {
+				logger.warn({ err: error }, "session_discovery_failed");
+			}
 		});
 
 		// Handle authentication errors

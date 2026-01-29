@@ -136,6 +136,8 @@ type ChatState = {
 	setAppError: (value?: ErrorDetail) => void;
 	setLastCreatedCwd: (value?: string) => void;
 	handleSessionsChanged: (payload: SessionsChangedPayload) => void;
+	clearSessionMessages: (sessionId: string) => void;
+	restoreSessionMessages: (sessionId: string, messages: ChatMessage[]) => void;
 	createLocalSession: (
 		sessionId: string,
 		options?: {
@@ -598,6 +600,36 @@ export const useChatStore = create<ChatState>()(
 					return {
 						sessions: nextSessions,
 						lastSyncAt: new Date().toISOString(),
+					};
+				}),
+			clearSessionMessages: (sessionId: string) =>
+				set((state: ChatState) => {
+					const session = state.sessions[sessionId];
+					if (!session) return state;
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: {
+								...session,
+								messages: [],
+								terminalOutputs: {},
+								streamingMessageId: undefined,
+							},
+						},
+					};
+				}),
+			restoreSessionMessages: (sessionId: string, messages: ChatMessage[]) =>
+				set((state: ChatState) => {
+					const session = state.sessions[sessionId];
+					if (!session) return state;
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: {
+								...session,
+								messages,
+							},
+						},
 					};
 				}),
 			createLocalSession: (sessionId, options) =>

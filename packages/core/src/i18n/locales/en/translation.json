@@ -24,7 +24,9 @@
 		"ready": "Ready",
 		"error": "Error",
 		"stopped": "Stopped",
-		"backend": "Backend"
+		"backend": "Backend",
+		"resuming": "Resuming...",
+		"loading": "Loading..."
 	},
 	"chat": {
 		"placeholder": "Type a message, Enter to send, Shift+Enter for newline",
@@ -89,7 +91,9 @@
 		"pathUnavailable": "Path unavailable",
 		"rootLoadFailed": "Failed to load root directory",
 		"previewLoadFailed": "Failed to load preview",
-		"pathLoadFailed": "Failed to load path"
+		"pathLoadFailed": "Failed to load path",
+		"resumeSessionFailed": "Failed to resume session",
+		"loadSessionFailed": "Failed to load session"
 	},
 	"workingDirectory": {
 		"dialogTitle": "Select working directory",

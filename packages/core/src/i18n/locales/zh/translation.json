@@ -24,7 +24,9 @@
 		"ready": "就绪",
 		"error": "错误",
 		"stopped": "已停止",
-		"backend": "后端"
+		"backend": "后端",
+		"resuming": "恢复中...",
+		"loading": "加载中..."
 	},
 	"chat": {
 		"placeholder": "输入消息，Enter 发送，Shift+Enter 换行",
@@ -89,7 +91,9 @@
 		"pathUnavailable": "路径不可用",
 		"rootLoadFailed": "根目录加载失败",
 		"previewLoadFailed": "预览加载失败",
-		"pathLoadFailed": "路径加载失败"
+		"pathLoadFailed": "路径加载失败",
+		"resumeSessionFailed": "恢复会话失败",
+		"loadSessionFailed": "加载会话失败"
 	},
 	"workingDirectory": {
 		"dialogTitle": "选择工作目录",

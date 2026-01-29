@@ -17,6 +17,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { useMachinesQuery } from "@/hooks/useMachinesQuery";
 import { useMachinesStream } from "@/hooks/useMachinesStream";
 import { useMessageAutoScroll } from "@/hooks/useMessageAutoScroll";
+import { useSessionActivation } from "@/hooks/useSessionActivation";
 import { useSessionMutations } from "@/hooks/useSessionMutations";
 import { useSessionQueries } from "@/hooks/useSessionQueries";
 import { useSocket } from "@/hooks/useSocket";
@@ -66,6 +67,8 @@ function MainApp() {
 		updateToolCall,
 		appendTerminalOutput,
 		handleSessionsChanged,
+		clearSessionMessages,
+		restoreSessionMessages,
 	} = useChatStore();
 	const {
 		createDialogOpen,
@@ -128,6 +131,39 @@ function MainApp() {
 		updateToolCall,
 		appendTerminalOutput,
 		handleSessionsChanged,
+		clearSessionMessages,
+		restoreSessionMessages,
+	});
+
+	const { activateSession, isActivating } = useSessionActivation({
+		sessions,
+		setActiveSessionId,
+		setLastCreatedCwd,
+		createLocalSession,
+		syncSessions,
+		removeSession,
+		renameSession: renameSessionLocal,
+		setError,
+		setAppError,
+		setInput,
+		setInputContents,
+		setSending,
+		setCanceling,
+		setStreamError,
+		updateSessionMeta,
+		addUserMessage,
+		addStatusMessage,
+		appendAssistantChunk,
+		finalizeAssistantMessage,
+		addPermissionRequest,
+		setPermissionDecisionState,
+		setPermissionOutcome,
+		addToolCall,
+		updateToolCall,
+		appendTerminalOutput,
+		handleSessionsChanged,
+		clearSessionMessages,
+		restoreSessionMessages,
 	});
 
 	useSocket({
@@ -430,12 +466,20 @@ function MainApp() {
 					sessions={sessionList}
 					activeSessionId={activeSessionId}
 					onCreateSession={handleOpenCreateDialog}
-					onSelectSession={setActiveSessionId}
+					onSelectSession={(sessionId) => {
+						const session = sessions[sessionId];
+						if (session) {
+							void activateSession(session);
+						} else {
+							setActiveSessionId(sessionId);
+						}
+					}}
 					onEditSubmit={handleRenameSubmit}
 					onCloseSession={(sessionId) => {
 						void handleCloseSession(sessionId);
 					}}
 					isCreating={createSessionMutation.isPending}
+					isActivating={isActivating}
 				/>
 
 				<div className="flex min-h-0 flex-1 flex-col overflow-hidden">

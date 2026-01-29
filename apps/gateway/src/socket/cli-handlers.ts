@@ -6,6 +6,7 @@ import type {
 	SessionNotification,
 	SessionSummary,
 	SessionsChangedPayload,
+	SessionsDiscoveredPayload,
 	StreamErrorPayload,
 	TerminalOutputEvent,
 } from "@mobvibe/shared";
@@ -153,6 +154,59 @@ export function setupCliHandlers(
 				"cli_sessions_changed",
 			);
 			cliRegistry.updateSessionsIncremental(socket.id, payload);
+		});
+
+		// Historical sessions discovered from ACP agent
+		socket.on("sessions:discovered", (payload: SessionsDiscoveredPayload) => {
+			const cliRecord = cliRegistry.getCliBySocketId(socket.id);
+			if (!cliRecord) {
+				logger.warn(
+					{ socketId: socket.id },
+					"sessions_discovered_no_cli_record",
+				);
+				return;
+			}
+
+			const { sessions, capabilities } = payload;
+
+			// Transform AcpSessionInfo to SessionSummary with historical markers
+			const historicalSessions: SessionSummary[] = sessions.map((s) => ({
+				sessionId: s.sessionId,
+				title: s.title ?? `Session ${s.sessionId.slice(0, 8)}`,
+				cwd: s.cwd,
+				updatedAt: s.updatedAt ?? new Date().toISOString(),
+				createdAt: s.updatedAt ?? new Date().toISOString(),
+				state: "idle" as const,
+				backendId: cliRecord.defaultBackendId ?? "",
+				backendLabel:
+					cliRecord.backends[0]?.backendLabel ??
+					cliRecord.defaultBackendId ??
+					"",
+				machineId: cliRecord.machineId,
+				lifecycle: "suspended" as const,
+			}));
+
+			// Add to CLI registry (only adds sessions that don't already exist)
+			cliRegistry.addDiscoveredSessions(socket.id, historicalSessions);
+
+			// Emit sessions:changed to webui for the user
+			if (cliRecord.userId && historicalSessions.length > 0) {
+				// Use the same event pattern as updateSessionsIncremental
+				emitToWebui("sessions:changed", {
+					added: historicalSessions,
+					updated: [],
+					removed: [],
+				});
+			}
+
+			logger.info(
+				{
+					machineId: cliRecord.machineId,
+					count: sessions.length,
+					capabilities,
+				},
+				"historical_sessions_synced",
+			);
 		});
 
 		// Session update

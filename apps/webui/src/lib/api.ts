@@ -304,5 +304,25 @@ export const sendPermissionDecision = async (
 		body: JSON.stringify(payload),
 	});
 
+export const resumeSession = async (payload: {
+	sessionId: string;
+	cwd: string;
+	machineId?: string;
+}): Promise<SessionSummary> =>
+	requestJson<SessionSummary>("/acp/session/resume", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+
+export const loadSession = async (payload: {
+	sessionId: string;
+	cwd: string;
+	machineId?: string;
+}): Promise<SessionSummary> =>
+	requestJson<SessionSummary>("/acp/session/load", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+
 // Note: SSE streaming (createSessionEventSource) has been replaced with Socket.io
 // See @/lib/socket.ts for the Socket.io implementation

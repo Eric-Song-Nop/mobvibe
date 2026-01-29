@@ -1,4 +1,5 @@
 import type {
+	ChatMessage,
 	ChatSession,
 	PermissionDecisionState,
 	StatusVariant,
@@ -18,7 +19,9 @@ import {
 	closeSession,
 	createMessageId,
 	createSession,
+	loadSession,
 	renameSession,
+	resumeSession,
 	type SessionSummary,
 	sendMessage,
 	sendPermissionDecision,
@@ -114,6 +117,8 @@ export interface ChatStoreActions {
 		},
 	) => void;
 	handleSessionsChanged: (payload: SessionsChangedPayload) => void;
+	clearSessionMessages: (sessionId: string) => void;
+	restoreSessionMessages: (sessionId: string, messages: ChatMessage[]) => void;
 }
 
 const applySessionSummary = (
@@ -340,6 +345,64 @@ export function useSessionMutations(store: ChatStoreActions) {
 		},
 	});
 
+	const resumeSessionMutation = useMutation({
+		mutationFn: resumeSession,
+		onSuccess: (data) => {
+			store.updateSessionMeta(data.sessionId, {
+				title: data.title,
+				updatedAt: data.updatedAt,
+				cwd: data.cwd,
+				agentName: data.agentName,
+				modelId: data.modelId,
+				modelName: data.modelName,
+				modeId: data.modeId,
+				modeName: data.modeName,
+				availableModes: data.availableModes,
+				availableModels: data.availableModels,
+				availableCommands: data.availableCommands,
+			});
+			store.setActiveSessionId(data.sessionId);
+			store.setAppError(undefined);
+		},
+		onError: (mutationError: unknown) => {
+			store.setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError(t("errors.resumeSessionFailed"), "session"),
+				),
+			);
+		},
+	});
+
+	const loadSessionMutation = useMutation({
+		mutationFn: loadSession,
+		onSuccess: (data) => {
+			store.updateSessionMeta(data.sessionId, {
+				title: data.title,
+				updatedAt: data.updatedAt,
+				cwd: data.cwd,
+				agentName: data.agentName,
+				modelId: data.modelId,
+				modelName: data.modelName,
+				modeId: data.modeId,
+				modeName: data.modeName,
+				availableModes: data.availableModes,
+				availableModels: data.availableModels,
+				availableCommands: data.availableCommands,
+			});
+			store.setActiveSessionId(data.sessionId);
+			store.setAppError(undefined);
+		},
+		onError: (mutationError: unknown) => {
+			store.setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError(t("errors.loadSessionFailed"), "session"),
+				),
+			);
+		},
+	});
+
 	return {
 		createSessionMutation,
 		renameSessionMutation,
@@ -350,5 +413,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 		sendMessageMutation,
 		createMessageIdMutation,
 		permissionDecisionMutation,
+		resumeSessionMutation,
+		loadSessionMutation,
 	};
 }

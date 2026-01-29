@@ -111,6 +111,7 @@ export type {
 	RpcResponse,
 	SendMessageParams,
 	SendMessageResult,
+	SessionsDiscoveredPayload,
 	SetSessionModelParams,
 	SetSessionModeParams,
 	StreamErrorPayload,
