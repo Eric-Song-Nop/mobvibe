@@ -137,6 +137,7 @@ const validateUserConfig = (
 			}
 
 			if (validAgents.length > 0) {
+        console.log(validAgents);
 				config.agents = validAgents;
 			}
 		}

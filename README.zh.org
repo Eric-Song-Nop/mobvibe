@@ -31,7 +31,7 @@ Mobvibe 是一个分布式 ACP（Agent Client Protocol）WebUI，用于本地 Ag
 
 - Node.js 18+
 - pnpm（包管理器）
-- ACP CLI 工具：=opencode=、=gemini-cli= 或 =claude-code=
+- ACP CLI 工具：=opencode=（默认）、=claude-code=、=codex=、=gemini-cli=，或其他 ACP 兼容 agent
 
 ** 快速开始
 
@@ -79,8 +79,109 @@ pnpm build
 | 变量                    | 说明                                     |
 |-------------------------+------------------------------------------|
 | =MOBVIBE_GATEWAY_URL=    | Gateway URL（默认: http://localhost:3005）|
-| =ANTHROPIC_AUTH_TOKEN=   | Claude Code 后端必需                     |
-| =MOBVIBE_ACP_BACKENDS=   | 启用的后端列表（逗号分隔）               |
+| =MOBVIBE_HOME=           | CLI 家目录（默认: ~/.mobvibe）           |
+
+*** ACP Agents
+
+Mobvibe 从 =${MOBVIBE_HOME:-~/.mobvibe}/.config.json= 加载 agent 定义。
+
+- =agents=：对外暴露的 agent 列表。每项支持 =id=（必填）、=command=（必填）、=label=、=args=、=env=。
+- =defaultAgentId=：可选，默认 agent 的 id。
+
+行为：
+- 未配置或 =agents= 为空时，使用内置 =opencode= 后端。
+- 若配置了 =agents= 但没有 =opencode= 项，内置 =opencode= 会被自动添加到列表最前。
+- 若配置了 =id: "opencode"=，则使用你的列表并覆盖内置默认。
+- =defaultAgentId= 必须匹配现有 agent id。
+
+#+begin_src json
+{
+  "agents": [
+    {
+      "id": "opencode",
+      "label": "OpenCode",
+      "command": "opencode",
+      "args": ["acp"]
+    }
+  ],
+  "defaultAgentId": "opencode"
+}
+#+end_src
+
+**** OpenCode（默认）
+
+- 安装 OpenCode 并确保 =opencode= 在 PATH：[[https://github.com/sst/opencode][https://github.com/sst/opencode]]
+- 默认执行 =opencode acp=。只有需要自定义参数或环境变量时才需要显式添加 =opencode=。
+
+**** Claude Code（通过 Zed 适配器）
+
+- 安装：=pnpm add -g @zed-industries/claude-code-acp=
+- 确保提供 =ANTHROPIC_API_KEY=（或在 =env= 中注入）。
+
+#+begin_src json
+{
+  "agents": [
+    {
+      "id": "claude-code",
+      "label": "Claude Code",
+      "command": "claude-code-acp",
+      "env": {
+        "ANTHROPIC_API_KEY": "<your-key>"
+      }
+    }
+  ],
+  "defaultAgentId": "claude-code"
+}
+#+end_src
+
+**** Codex（通过 Zed 适配器）
+
+- 从 releases 安装或 =pnpm dlx @zed-industries/codex-acp=，并确保 =codex-acp= 在 PATH：[[https://github.com/zed-industries/codex-acp][https://github.com/zed-industries/codex-acp]]
+- 提供 =OPENAI_API_KEY=（或 =CODEX_API_KEY=）。
+
+#+begin_src json
+{
+  "agents": [
+    {
+      "id": "codex",
+      "label": "Codex",
+      "command": "codex-acp",
+      "env": {
+        "OPENAI_API_KEY": "<your-key>"
+      }
+    }
+  ],
+  "defaultAgentId": "codex"
+}
+#+end_src
+
+** 支持的 ACP Agents
+
+文档索引：https://agentclientprotocol.com/llms.txt
+
+以下 agent 可用于 ACP Client：
+
+- [[https://phil65.github.io/agentpool/advanced/acp-integration/][AgentPool]]
+- [[https://docs.augmentcode.com/cli/acp][Augment Code]]
+- [[https://docs.blackbox.ai/features/blackbox-cli/introduction][Blackbox AI]]
+- [[https://docs.anthropic.com/en/docs/claude-code/overview][Claude Code]]（通过 [[https://github.com/zed-industries/claude-code-acp][Zed 适配器]]）
+- [[https://developers.openai.com/codex/cli][Codex CLI]]（通过 [[https://github.com/zed-industries/codex-acp][Zed 适配器]]）
+- [[https://github.com/stippi/code-assistant?tab=readme-ov-file#configuration][Code Assistant]]
+- [[https://github.com/docker/cagent][Docker's cagent]]
+- [[https://fast-agent.ai/acp][fast-agent]]
+- [[https://github.com/google-gemini/gemini-cli][Gemini CLI]]
+- [[https://block.github.io/goose/docs/guides/acp-clients][Goose]]
+- [[https://www.jetbrains.com/junie/][JetBrains Junie（即将推出）]]
+- [[https://github.com/MoonshotAI/kimi-cli][Kimi CLI]]
+- [[https://github.com/femto/minion-code][Minion Code]]
+- [[https://github.com/mistralai/mistral-vibe][Mistral Vibe]]
+- [[https://github.com/sst/opencode][OpenCode]]
+- [[https://docs.openhands.dev/openhands/usage/run-openhands/acp][OpenHands]]
+- [[https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent][Pi]]（通过 [[https://github.com/svkozak/pi-acp][pi-acp 适配器]]）
+- [[https://docs.qoder.com/cli/acp][Qoder CLI]]
+- [[https://github.com/QwenLM/qwen-code][Qwen Code]]
+- [[https://github.com/stakpak/agent?tab=readme-ov-file#agent-client-protocol-acp][Stakpak]]
+- [[https://github.com/vinhnx/vtcode/blob/main/README.md#zed-ide-integration-agent-client-protocol][VT Code]]
 
 ** WebUI 使用
 

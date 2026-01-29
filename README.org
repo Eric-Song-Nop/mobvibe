@@ -31,7 +31,7 @@ Mobvibe is a distributed ACP (Agent Client Protocol) WebUI for local agent workf
 
 - Node.js 18+
 - pnpm (package manager)
-- ACP CLI tools: =opencode=, =gemini-cli=, or =claude-code=
+- ACP CLI tools: =opencode= (default), =claude-code=, =codex=, =gemini-cli=, or any ACP-compatible agent
 
 ** Quick Start
 
@@ -79,8 +79,109 @@ pnpm build
 | Variable                | Description                              |
 |-------------------------+------------------------------------------|
 | =MOBVIBE_GATEWAY_URL=    | Gateway URL (default: http://localhost:3005) |
-| =ANTHROPIC_AUTH_TOKEN=   | Required for Claude Code backend         |
-| =MOBVIBE_ACP_BACKENDS=   | Comma-separated backends to enable       |
+| =MOBVIBE_HOME=           | CLI home directory (default: ~/.mobvibe) |
+
+*** ACP Agents
+
+Mobvibe loads agent definitions from =${MOBVIBE_HOME:-~/.mobvibe}/.config.json=.
+
+- =agents=: list of agents to expose. Each entry supports =id= (required), =command= (required), =label=, =args=, =env=.
+- =defaultAgentId=: optional default agent id.
+
+Behavior:
+- If the config is missing or =agents= is empty, Mobvibe uses the built-in =opencode= backend.
+- If you define =agents= without an =opencode= entry, the built-in =opencode= backend is prepended.
+- If you define an agent with =id: "opencode"=, your list replaces the built-in default.
+- =defaultAgentId= must match an existing agent id.
+
+#+begin_src json
+{
+  "agents": [
+    {
+      "id": "opencode",
+      "label": "OpenCode",
+      "command": "opencode",
+      "args": ["acp"]
+    }
+  ],
+  "defaultAgentId": "opencode"
+}
+#+end_src
+
+**** OpenCode (default)
+
+- Install OpenCode and ensure =opencode= is on your PATH: [[https://github.com/sst/opencode][https://github.com/sst/opencode]]
+- Mobvibe runs =opencode acp= by default. Add an explicit =opencode= entry only if you need custom args or env.
+
+**** Claude Code (via Zed adapter)
+
+- Install: =pnpm add -g @zed-industries/claude-code-acp=
+- Ensure =ANTHROPIC_API_KEY= is available (or set it via =env=).
+
+#+begin_src json
+{
+  "agents": [
+    {
+      "id": "claude-code",
+      "label": "Claude Code",
+      "command": "claude-code-acp",
+      "env": {
+        "ANTHROPIC_API_KEY": "<your-key>"
+      }
+    }
+  ],
+  "defaultAgentId": "claude-code"
+}
+#+end_src
+
+**** Codex (via Zed adapter)
+
+- Install from releases or =pnpm dlx @zed-industries/codex-acp= and ensure =codex-acp= is on your PATH: [[https://github.com/zed-industries/codex-acp][https://github.com/zed-industries/codex-acp]]
+- Ensure =OPENAI_API_KEY= (or =CODEX_API_KEY=) is available.
+
+#+begin_src json
+{
+  "agents": [
+    {
+      "id": "codex",
+      "label": "Codex",
+      "command": "codex-acp",
+      "env": {
+        "OPENAI_API_KEY": "<your-key>"
+      }
+    }
+  ],
+  "defaultAgentId": "codex"
+}
+#+end_src
+
+** Supported ACP Agents
+
+Documentation Index: https://agentclientprotocol.com/llms.txt
+
+The following agents can be used with an ACP Client:
+
+- [[https://phil65.github.io/agentpool/advanced/acp-integration/][AgentPool]]
+- [[https://docs.augmentcode.com/cli/acp][Augment Code]]
+- [[https://docs.blackbox.ai/features/blackbox-cli/introduction][Blackbox AI]]
+- [[https://docs.anthropic.com/en/docs/claude-code/overview][Claude Code]] (via [[https://github.com/zed-industries/claude-code-acp][Zed's SDK adapter]])
+- [[https://developers.openai.com/codex/cli][Codex CLI]] (via [[https://github.com/zed-industries/codex-acp][Zed's adapter]])
+- [[https://github.com/stippi/code-assistant?tab=readme-ov-file#configuration][Code Assistant]]
+- [[https://github.com/docker/cagent][Docker's cagent]]
+- [[https://fast-agent.ai/acp][fast-agent]]
+- [[https://github.com/google-gemini/gemini-cli][Gemini CLI]]
+- [[https://block.github.io/goose/docs/guides/acp-clients][Goose]]
+- [[https://www.jetbrains.com/junie/][JetBrains Junie (coming soon)]]
+- [[https://github.com/MoonshotAI/kimi-cli][Kimi CLI]]
+- [[https://github.com/femto/minion-code][Minion Code]]
+- [[https://github.com/mistralai/mistral-vibe][Mistral Vibe]]
+- [[https://github.com/sst/opencode][OpenCode]]
+- [[https://docs.openhands.dev/openhands/usage/run-openhands/acp][OpenHands]]
+- [[https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent][Pi]] (via [[https://github.com/svkozak/pi-acp][pi-acp adapter]])
+- [[https://docs.qoder.com/cli/acp][Qoder CLI]]
+- [[https://github.com/QwenLM/qwen-code][Qwen Code]]
+- [[https://github.com/stakpak/agent?tab=readme-ov-file#agent-client-protocol-acp][Stakpak]]
+- [[https://github.com/vinhnx/vtcode/blob/main/README.md#zed-ide-integration-agent-client-protocol][VT Code]]
 
 ** WebUI Usage
 
