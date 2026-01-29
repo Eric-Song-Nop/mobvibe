@@ -686,9 +686,7 @@ export class SessionManager {
 			const now = new Date();
 			const agentInfo = connection.getAgentInfo();
 			const { modelId, modelName, availableModels } = resolveModelState(
-				response.modes
-					? { currentModelId: undefined, availableModels: undefined }
-					: undefined,
+				response.models,
 			);
 			const { modeId, modeName, availableModes } = resolveModeState(
 				response.modes,
@@ -777,9 +775,7 @@ export class SessionManager {
 			const now = new Date();
 			const agentInfo = connection.getAgentInfo();
 			const { modelId, modelName, availableModels } = resolveModelState(
-				response.modes
-					? { currentModelId: undefined, availableModels: undefined }
-					: undefined,
+				response.models,
 			);
 			const { modeId, modeName, availableModes } = resolveModeState(
 				response.modes,

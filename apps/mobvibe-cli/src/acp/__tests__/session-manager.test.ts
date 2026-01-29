@@ -71,6 +71,7 @@ vi.mock("../../lib/logger.js", () => ({
 }));
 
 const createMockConfig = (): CliConfig => ({
+	gatewayUrl: "http://localhost:3005",
 	clientName: "test-client",
 	clientVersion: "1.0.0",
 	acpBackends: [
@@ -82,6 +83,12 @@ const createMockConfig = (): CliConfig => ({
 		},
 	],
 	defaultAcpBackendId: "backend-1",
+	homePath: "/tmp/mobvibe-test",
+	logPath: "/tmp/mobvibe-test/logs",
+	pidFile: "/tmp/mobvibe-test/daemon.pid",
+	machineId: "test-machine-id",
+	hostname: "test-host",
+	platform: "linux",
 });
 
 describe("SessionManager", () => {
@@ -134,7 +141,10 @@ describe("SessionManager", () => {
 		it("returns empty sessions when list not supported", async () => {
 			// Get the AcpConnection mock
 			const { AcpConnection } = await import("../acp-connection.js");
-			vi.mocked(AcpConnection).mockImplementationOnce(
+			const MockedAcpConnection = AcpConnection as unknown as ReturnType<
+				typeof vi.fn
+			>;
+			MockedAcpConnection.mockImplementationOnce(
 				() =>
 					({
 						connect: vi.fn().mockResolvedValue(undefined),
@@ -146,7 +156,7 @@ describe("SessionManager", () => {
 						}),
 						supportsSessionList: vi.fn().mockReturnValue(false),
 						listSessions: vi.fn(),
-					}) as unknown as ReturnType<typeof AcpConnection>,
+					}) as unknown,
 			);
 
 			const manager = new SessionManager(mockConfig);
@@ -204,13 +214,16 @@ describe("SessionManager", () => {
 
 		it("throws error when load not supported", async () => {
 			const { AcpConnection } = await import("../acp-connection.js");
-			vi.mocked(AcpConnection).mockImplementationOnce(
+			const MockedAcpConnection = AcpConnection as unknown as ReturnType<
+				typeof vi.fn
+			>;
+			MockedAcpConnection.mockImplementationOnce(
 				() =>
 					({
 						connect: vi.fn().mockResolvedValue(undefined),
 						disconnect: vi.fn().mockResolvedValue(undefined),
 						supportsSessionLoad: vi.fn().mockReturnValue(false),
-					}) as unknown as ReturnType<typeof AcpConnection>,
+					}) as unknown,
 			);
 
 			const manager = new SessionManager(mockConfig);
@@ -271,13 +284,16 @@ describe("SessionManager", () => {
 
 		it("throws error when resume not supported", async () => {
 			const { AcpConnection } = await import("../acp-connection.js");
-			vi.mocked(AcpConnection).mockImplementationOnce(
+			const MockedAcpConnection = AcpConnection as unknown as ReturnType<
+				typeof vi.fn
+			>;
+			MockedAcpConnection.mockImplementationOnce(
 				() =>
 					({
 						connect: vi.fn().mockResolvedValue(undefined),
 						disconnect: vi.fn().mockResolvedValue(undefined),
 						supportsSessionResume: vi.fn().mockReturnValue(false),
-					}) as unknown as ReturnType<typeof AcpConnection>,
+					}) as unknown,
 			);
 
 			const manager = new SessionManager(mockConfig);

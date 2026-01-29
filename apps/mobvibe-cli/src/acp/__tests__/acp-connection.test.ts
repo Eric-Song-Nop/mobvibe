@@ -65,7 +65,7 @@ describe("AcpConnection", () => {
 			// @ts-expect-error - accessing private property for testing
 			connection.agentCapabilities = {
 				sessionCapabilities: {
-					list: { maxResults: 100 },
+					list: {},
 				},
 			};
 
@@ -109,7 +109,7 @@ describe("AcpConnection", () => {
 			connection.agentCapabilities = {
 				loadSession: true,
 				sessionCapabilities: {
-					list: { maxResults: 100 },
+					list: {},
 					resume: {},
 				},
 			};
@@ -149,7 +149,7 @@ describe("AcpConnection", () => {
 			// @ts-expect-error - accessing private property for testing
 			connection.agentCapabilities = {
 				sessionCapabilities: {
-					list: { maxResults: 100 },
+					list: {},
 				},
 			};
 
