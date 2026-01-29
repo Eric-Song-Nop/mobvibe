@@ -3,6 +3,7 @@ import { Streamdown } from "streamdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { DiffView } from "@/components/chat/DiffView";
 import type {
 	AudioContent,
 	ContentBlock,
@@ -26,6 +27,8 @@ type MessageItemProps = {
 	onPermissionDecision?: (payload: PermissionDecisionPayload) => void;
 	onOpenFilePreview?: (path: string) => void;
 };
+
+type DiffContent = Extract<ToolCallContent, { type: "diff" }>;
 
 type TerminalOutputBlockProps = {
 	terminalId: string;
@@ -379,6 +382,22 @@ const renderContentBlock = (
 	}
 };
 
+const isDiffPayload = (payload: ToolCallContentPayload): payload is DiffContent => {
+	if (!payload || typeof payload !== "object") {
+		return false;
+	}
+	const value = payload as {
+		type?: unknown;
+		path?: unknown;
+		newText?: unknown;
+	};
+	return (
+		value.type === "diff" &&
+		typeof value.path === "string" &&
+		typeof value.newText === "string"
+	);
+};
+
 const renderToolCallContentPayload = (
 	payload: ToolCallContentPayload,
 	key: string,
@@ -387,6 +406,9 @@ const renderToolCallContentPayload = (
 ) => {
 	if (typeof payload === "string") {
 		return renderTextContent(payload, key);
+	}
+	if (isDiffPayload(payload)) {
+		return renderDiffBlock(payload, key, getLabel, onOpenFilePreview);
 	}
 	if (payload && typeof payload === "object" && "type" in payload) {
 		return renderContentBlock(
@@ -400,53 +422,22 @@ const renderToolCallContentPayload = (
 };
 
 const renderDiffBlock = (
-	content: Extract<ToolCallContent, { type: "diff" }>,
+	content: DiffContent,
 	key: string,
 	getLabel: (key: string, options?: Record<string, unknown>) => string,
 	onOpenFilePreview?: (path: string) => void,
 ) => {
 	const label = resolveFileName(content.path);
 	return (
-		<div
+		<DiffView
 			key={key}
-			className="rounded border border-border bg-background/80 px-2 py-1 text-xs text-muted-foreground"
-		>
-			<div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-				<span>{getLabel("toolCall.diff")}</span>
-				{onOpenFilePreview ? (
-					<button
-						type="button"
-						className="text-xs text-primary hover:underline"
-						onClick={(event) => {
-							event.preventDefault();
-							onOpenFilePreview(content.path);
-						}}
-					>
-						{label}
-					</button>
-				) : (
-					<span className="text-xs text-foreground">{label}</span>
-				)}
-			</div>
-			<div className="mt-2 space-y-2">
-				<div>
-					<div className="text-[11px] text-muted-foreground">
-						{getLabel("toolCall.original")}
-					</div>
-					<pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-foreground">
-						{content.oldText ?? getLabel("toolCall.newFile")}
-					</pre>
-				</div>
-				<div>
-					<div className="text-[11px] text-muted-foreground">
-						{getLabel("toolCall.updated")}
-					</div>
-					<pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-foreground">
-						{content.newText}
-					</pre>
-				</div>
-			</div>
-		</div>
+			path={content.path}
+			label={label}
+			oldText={content.oldText ?? undefined}
+			newText={content.newText}
+			getLabel={getLabel}
+			onOpenFilePreview={onOpenFilePreview}
+		/>
 	);
 };
 
