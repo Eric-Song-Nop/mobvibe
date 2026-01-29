@@ -1,6 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import type { AcpBackendId, UserAgentConfig } from "@mobvibe/shared";
+import { getGatewayUrl } from "./auth/credentials.js";
 import { loadUserConfig } from "./config-loader.js";
 import { logger } from "./lib/logger.js";
 
@@ -108,8 +109,11 @@ export const getCliConfig = async (): Promise<CliConfig> => {
 			? userConfigResult.config.defaultAgentId
 			: defaultId;
 
+	// Get gateway URL (env var > credentials file > default production URL)
+	const gatewayUrl = await getGatewayUrl();
+
 	return {
-		gatewayUrl: env.MOBVIBE_GATEWAY_URL ?? "http://localhost:3005",
+		gatewayUrl,
 		acpBackends: backends,
 		defaultAcpBackendId: resolvedDefaultId,
 		clientName: env.MOBVIBE_ACP_CLIENT_NAME ?? "mobvibe-cli",

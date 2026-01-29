@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      build_tauri_android:
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: biomejs/setup-biome@v2
+        with:
+          version: latest
+      - run: biome ci .
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test:run
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+  tauri-android:
+    name: Tauri Android Build
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_call' && inputs.build_tauri_android }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      - uses: android-actions/setup-android@v3
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses
+      - name: Install Android SDK packages
+        run: sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;29.0.14206865"
+      - name: Configure Android NDK env
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+      - run: pnpm install --frozen-lockfile
+      - name: Build Android (Tauri)
+        run: pnpm -C apps/webui exec tauri android build
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-android-apk
+          path: apps/webui/src-tauri/gen/android/app/build/outputs/apk/**/release/*.apk
+          if-no-files-found: error

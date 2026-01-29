@@ -12,6 +12,8 @@ export interface Credentials {
 	apiKey: string;
 	/** When the credentials were created */
 	createdAt: number;
+	/** Optional: custom gateway URL (user can manually set this) */
+	gatewayUrl?: string;
 }
 
 const MOBVIBE_DIR =
@@ -88,4 +90,29 @@ export async function getApiKey(): Promise<string | undefined> {
 
 	const credentials = await loadCredentials();
 	return credentials?.apiKey;
+}
+
+/** Default production gateway URL */
+const DEFAULT_GATEWAY_URL = "https://mobvibe.zeabur.app";
+
+/**
+ * Get the gateway URL with the following priority:
+ * 1. MOBVIBE_GATEWAY_URL env var
+ * 2. gatewayUrl in credentials file
+ * 3. Default production URL
+ */
+export async function getGatewayUrl(): Promise<string> {
+	// Environment variable takes precedence
+	if (process.env.MOBVIBE_GATEWAY_URL) {
+		return process.env.MOBVIBE_GATEWAY_URL;
+	}
+
+	// Check credentials file for custom gateway URL
+	const credentials = await loadCredentials();
+	if (credentials?.gatewayUrl) {
+		return credentials.gatewayUrl;
+	}
+
+	// Default to production
+	return DEFAULT_GATEWAY_URL;
 }

@@ -1,32 +1,62 @@
 name: Publish to npm
 
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [published]
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    with:
+      build_tauri_android: true
+
   publish:
+    needs: ci
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v2
+      - uses: pnpm/action-setup@v4
         with:
           version: 10
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          registry-url: 'https://registry.npmjs.org'
-
-      - run: pnpm install
+          node-version: 22
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+      - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - name: Publish @mobvibe/cli
+        run: npm publish --access public --provenance
+        working-directory: apps/mobvibe-cli
 
-      - name: Publish shared
-        run: cd packages/shared && npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish CLI
-        run: cd apps/mobvibe-cli && npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+  release:
+    needs: [ci, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: tauri-android-apk
+          path: dist/apk
+      - name: Select APK
+        id: apk
+        run: |
+          apk_path=$(find dist/apk -type f -name "*-aligned.apk" | head -n1)
+          if [ -z "$apk_path" ]; then
+            apk_path=$(find dist/apk -type f -name "*.apk" | head -n1)
+          fi
+          if [ -z "$apk_path" ]; then
+            echo "No APK found in dist/apk." >&2
+            exit 1
+          fi
+          echo "path=$apk_path" >> "$GITHUB_OUTPUT"
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: ${{ steps.apk.outputs.path }}
+          generate_release_notes: true

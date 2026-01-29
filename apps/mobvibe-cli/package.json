@@ -16,7 +16,7 @@
 		"cli"
 	],
 	"engines": {
-		"node": ">=18"
+		"node": ">=22"
 	},
 	"publishConfig": {
 		"access": "public"
@@ -37,7 +37,7 @@
 	},
 	"scripts": {
 		"dev": "tsx watch src/index.ts",
-		"build": "tsc -p tsconfig.json",
+		"build": "tsup",
 		"start": "node dist/index.js",
 		"lint": "biome check --write .",
 		"format": "biome format --write .",
@@ -47,7 +47,6 @@
 	},
 	"dependencies": {
 		"@agentclientprotocol/sdk": "^0.12.0",
-		"@mobvibe/shared": "workspace:*",
 		"commander": "^13.1.0",
 		"ignore": "^7.0.4",
 		"open": "^10.1.0",
@@ -57,7 +56,9 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.3.11",
+		"@mobvibe/shared": "workspace:*",
 		"@types/node": "^24.10.1",
+		"tsup": "^8.5.0",
 		"tsx": "^4.19.3",
 		"typescript": "~5.9.3",
 		"vitest": "^2.1.8"
