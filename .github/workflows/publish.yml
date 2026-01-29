@@ -30,8 +30,6 @@ jobs:
       - name: Publish @mobvibe/cli
         run: npm publish --access public --provenance
         working-directory: apps/mobvibe-cli
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   release:
     needs: [ci, publish]
