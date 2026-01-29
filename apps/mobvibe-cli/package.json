@@ -1,6 +1,6 @@
 {
 	"name": "@mobvibe/cli",
-	"version": "0.1.2",
+	"version": "0.0.0-dev",
 	"description": "CLI daemon for remote-claude (mobvibe) - connects ACP agents to the gateway",
 	"license": "MIT",
 	"repository": {

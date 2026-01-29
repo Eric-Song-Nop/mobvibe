@@ -10,6 +10,8 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       build_tauri_android: true
+      version: ${{ github.ref_name }}
+    secrets: inherit
 
   publish:
     needs: ci
@@ -26,6 +28,12 @@ jobs:
           cache: pnpm
           registry-url: "https://registry.npmjs.org"
       - run: pnpm install --frozen-lockfile
+      - name: Set version from tag
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"  # Strip v prefix
+          jq --arg v "$VERSION" '.version = $v' apps/mobvibe-cli/package.json > tmp.json && mv tmp.json apps/mobvibe-cli/package.json
+          echo "Set @mobvibe/cli version to $VERSION"
       - run: pnpm build
       - name: Publish @mobvibe/cli
         run: npm publish --access public --provenance
@@ -39,23 +47,15 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: tauri-android-apk
-          path: dist/apk
-      - name: Select APK
-        id: apk
-        run: |
-          apk_path=$(find dist/apk -type f -name "*-aligned.apk" | head -n1)
-          if [ -z "$apk_path" ]; then
-            apk_path=$(find dist/apk -type f -name "*.apk" | head -n1)
-          fi
-          if [ -z "$apk_path" ]; then
-            echo "No APK found in dist/apk." >&2
-            exit 1
-          fi
-          echo "path=$apk_path" >> "$GITHUB_OUTPUT"
+          name: tauri-android
+          path: dist
+      - name: List artifacts
+        run: ls -la dist/
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          files: ${{ steps.apk.outputs.path }}
+          files: |
+            dist/mobvibe-*.apk
+            dist/mobvibe-*.aab
           generate_release_notes: true
