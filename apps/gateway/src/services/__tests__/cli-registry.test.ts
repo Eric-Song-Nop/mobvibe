@@ -6,7 +6,9 @@ import type {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CliRegistry } from "../cli-registry.js";
 
-const createMockSocket = (id = `socket-${Math.random().toString(36).slice(2, 8)}`) =>
+const createMockSocket = (
+	id = `socket-${Math.random().toString(36).slice(2, 8)}`,
+) =>
 	({
 		id,
 		emit: vi.fn(),
@@ -336,7 +338,9 @@ describe("CliRegistry", () => {
 			expect(sessionIds).toContain("session-3");
 			expect(sessionIds).not.toContain("session-2");
 
-			const session1 = record?.sessions.find((s) => s.sessionId === "session-1");
+			const session1 = record?.sessions.find(
+				(s) => s.sessionId === "session-1",
+			);
 			expect(session1?.title).toBe("Updated Session 1");
 		});
 	});
@@ -465,7 +469,9 @@ describe("CliRegistry", () => {
 
 			const user1Sessions = registry.getSessionsForUser("user-1");
 			expect(user1Sessions).toHaveLength(2);
-			expect(user1Sessions.every((s) => s.machineId === "machine-1")).toBe(true);
+			expect(user1Sessions.every((s) => s.machineId === "machine-1")).toBe(
+				true,
+			);
 
 			const user2Sessions = registry.getSessionsForUser("user-2");
 			expect(user2Sessions).toHaveLength(1);
