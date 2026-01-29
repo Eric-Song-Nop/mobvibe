@@ -91,9 +91,9 @@ export const SessionSidebar = ({
 }: SessionSidebarProps) => {
 	const { t } = useTranslation();
 	const { theme, setTheme } = useTheme();
-	const [expandedGroups, setExpandedGroups] = useState<
-		Record<string, boolean>
-	>({});
+	const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
+		{},
+	);
 	const {
 		editingSessionId,
 		editingTitle,
