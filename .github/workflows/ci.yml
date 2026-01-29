@@ -93,8 +93,16 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
       - run: pnpm install --frozen-lockfile
+      - name: Setup Android signing
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > $HOME/release.keystore
       - name: Build Android (Tauri)
         run: pnpm -C apps/webui exec tauri android build
+        env:
+          TAURI_ANDROID_KEYSTORE_PATH: ${{ env.HOME }}/release.keystore
+          TAURI_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          TAURI_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          TAURI_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
