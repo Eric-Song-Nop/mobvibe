@@ -230,7 +230,7 @@ type DiffPanelProps = {
 	emptyLabel?: string;
 	code: string;
 	language: Language;
-	containerRef: RefObject<HTMLDivElement>;
+	containerRef: RefObject<HTMLDivElement | null>;
 	onScroll: (event: UIEvent<HTMLDivElement>) => void;
 	themeMode: "light" | "dark";
 };
