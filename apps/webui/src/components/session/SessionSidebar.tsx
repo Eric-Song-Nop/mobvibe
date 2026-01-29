@@ -6,6 +6,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { type ChatSession } from "@mobvibe/core";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "@/components/theme-provider";
 import {
@@ -53,6 +54,22 @@ const toThemePreference = (value: string): "light" | "dark" | "system" => {
 	}
 };
 
+const getSessionStamp = (session: ChatSession) =>
+	session.updatedAt ?? session.createdAt ?? "";
+
+const getPathBasename = (path?: string) => {
+	if (!path) {
+		return undefined;
+	}
+	const trimmed = path.replace(/\/+$/, "");
+	if (trimmed.length === 0) {
+		return undefined;
+	}
+	const parts = trimmed.split("/");
+	const tail = parts[parts.length - 1];
+	return tail && tail.length > 0 ? tail : undefined;
+};
+
 type SessionSidebarProps = {
 	sessions: ChatSession[];
 	activeSessionId?: string;
@@ -74,6 +91,9 @@ export const SessionSidebar = ({
 }: SessionSidebarProps) => {
 	const { t } = useTranslation();
 	const { theme, setTheme } = useTheme();
+	const [expandedGroups, setExpandedGroups] = useState<
+		Record<string, boolean>
+	>({});
 	const {
 		editingSessionId,
 		editingTitle,
@@ -81,6 +101,55 @@ export const SessionSidebar = ({
 		setEditingTitle,
 		clearEditingSession,
 	} = useUiStore();
+
+	const groupedSessions = useMemo(() => {
+		const groups = new Map<
+			string,
+			{
+				id: string;
+				label: string;
+				sessions: ChatSession[];
+				latestStamp: string;
+			}
+		>();
+
+		for (const session of sessions) {
+			const id = session.backendId?.trim() || "unknown";
+			const rawLabel = session.backendLabel ?? session.backendId ?? "";
+			const label = rawLabel.trim().length > 0 ? rawLabel : t("common.unknown");
+			const stamp = getSessionStamp(session);
+			const existing = groups.get(id);
+			if (!existing) {
+				groups.set(id, {
+					id,
+					label,
+					sessions: [session],
+					latestStamp: stamp,
+				});
+				continue;
+			}
+			existing.sessions.push(session);
+			if (stamp.localeCompare(existing.latestStamp) > 0) {
+				existing.latestStamp = stamp;
+			}
+		}
+
+		const compareSession = (left: ChatSession, right: ChatSession) =>
+			getSessionStamp(right).localeCompare(getSessionStamp(left));
+
+		const grouped = Array.from(groups.values());
+		for (const group of grouped) {
+			group.sessions.sort(compareSession);
+		}
+
+		return grouped.sort((left, right) => {
+			const byRecent = right.latestStamp.localeCompare(left.latestStamp);
+			if (byRecent !== 0) {
+				return byRecent;
+			}
+			return left.label.localeCompare(right.label);
+		});
+	}, [sessions, t]);
 
 	return (
 		<div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden">
@@ -155,21 +224,49 @@ export const SessionSidebar = ({
 						{t("session.empty")}
 					</div>
 				) : null}
-				{sessions.map((session) => (
-					<SessionListItem
-						key={session.sessionId}
-						session={session}
-						isActive={session.sessionId === activeSessionId}
-						isEditing={session.sessionId === editingSessionId}
-						editingTitle={editingTitle}
-						onSelect={onSelectSession}
-						onEdit={() => startEditingSession(session.sessionId, session.title)}
-						onEditCancel={clearEditingSession}
-						onEditSubmit={onEditSubmit}
-						onEditingTitleChange={setEditingTitle}
-						onClose={onCloseSession}
-					/>
-				))}
+				{groupedSessions.map((group) => {
+					const isExpanded = expandedGroups[group.id] ?? true;
+					return (
+						<div key={group.id} className="flex flex-col gap-2">
+							<button
+								type="button"
+								className="text-muted-foreground hover:text-foreground flex items-center gap-2 text-xs font-semibold"
+								onClick={() =>
+									setExpandedGroups((prev) => ({
+										...prev,
+										[group.id]: !(prev[group.id] ?? true),
+									}))
+								}
+							>
+								<span className="w-3 text-center">
+									{isExpanded ? "v" : ">"}
+								</span>
+								<span className="truncate">{group.label}</span>
+							</button>
+							{isExpanded ? (
+								<div className="flex flex-col gap-2 pl-4">
+									{group.sessions.map((session) => (
+										<SessionListItem
+											key={session.sessionId}
+											session={session}
+											isActive={session.sessionId === activeSessionId}
+											isEditing={session.sessionId === editingSessionId}
+											editingTitle={editingTitle}
+											onSelect={onSelectSession}
+											onEdit={() =>
+												startEditingSession(session.sessionId, session.title)
+											}
+											onEditCancel={clearEditingSession}
+											onEditSubmit={onEditSubmit}
+											onEditingTitleChange={setEditingTitle}
+											onClose={onCloseSession}
+										/>
+									))}
+								</div>
+							) : null}
+						</div>
+					);
+				})}
 			</div>
 		</div>
 	);
@@ -202,10 +299,10 @@ const SessionListItem = ({
 }: SessionListItemProps) => {
 	const { t } = useTranslation();
 	const statusVariant = getStatusVariant(session.state);
-	const backendLabel = session.backendLabel ?? session.backendId;
 	const statusLabel = t(`status.${session.state ?? "idle"}`, {
 		defaultValue: session.state ?? "idle",
 	});
+	const cwdLabel = getPathBasename(session.cwd) ?? t("common.unknown");
 	const handleSelect = () => onSelect(session.sessionId);
 	return (
 		<div
@@ -233,11 +330,9 @@ const SessionListItem = ({
 					)}
 					<div className="flex items-center gap-2">
 						<Badge variant={statusVariant}>{statusLabel}</Badge>
-						{backendLabel ? (
-							<Badge variant="outline">{backendLabel}</Badge>
-						) : null}
 					</div>
 				</div>
+				<span className="text-muted-foreground text-xs">{cwdLabel}</span>
 				{session.error ? (
 					<span className="text-destructive text-xs">
 						{session.error.message}

@@ -159,4 +159,73 @@ describe("SessionSidebar", () => {
 		expect(input).toBeInTheDocument();
 		expect(screen.getByText(i18n.t("common.save"))).toBeInTheDocument();
 	});
+
+	it("groups sessions by backend and sorts by recent use", () => {
+		renderSidebar([
+			buildSession({
+				sessionId: "session-a1",
+				title: "Alpha 1",
+				backendId: "backend-a",
+				backendLabel: "Backend Alpha",
+				updatedAt: "2024-01-01T00:00:00.000Z",
+				createdAt: "2024-01-01T00:00:00.000Z",
+				cwd: "/home/user/alpha-1",
+			}),
+			buildSession({
+				sessionId: "session-b1",
+				title: "Beta 1",
+				backendId: "backend-b",
+				backendLabel: "Backend Beta",
+				updatedAt: "2024-01-03T00:00:00.000Z",
+				createdAt: "2024-01-03T00:00:00.000Z",
+				cwd: "/home/user/beta-1",
+			}),
+			buildSession({
+				sessionId: "session-a2",
+				title: "Alpha 2",
+				backendId: "backend-a",
+				backendLabel: "Backend Alpha",
+				updatedAt: "2024-01-02T00:00:00.000Z",
+				createdAt: "2024-01-02T00:00:00.000Z",
+				cwd: "/home/user/alpha-2",
+			}),
+		]);
+
+		const groupHeaders = screen.getAllByText(/Backend (Alpha|Beta)/);
+		expect(groupHeaders[0]).toHaveTextContent("Backend Beta");
+		expect(groupHeaders[1]).toHaveTextContent("Backend Alpha");
+
+		const alphaSessions = screen.getAllByText(/Alpha (1|2)/);
+		expect(alphaSessions[0]).toHaveTextContent("Alpha 2");
+		expect(alphaSessions[1]).toHaveTextContent("Alpha 1");
+	});
+
+	it("shows the last directory name for cwd", () => {
+		renderSidebar([
+			buildSession({
+				sessionId: "session-cwd",
+				title: "Session With Path",
+				cwd: "/home/user/projects/mobvibe/",
+			}),
+		]);
+
+		expect(screen.getByText("mobvibe")).toBeInTheDocument();
+	});
+
+	it("toggles group visibility when header is clicked", async () => {
+		const user = userEvent.setup();
+		renderSidebar([
+			buildSession({
+				sessionId: "session-toggle",
+				title: "Toggle Session",
+				backendId: "backend-toggle",
+				backendLabel: "Backend Toggle",
+			}),
+		]);
+
+		await user.click(screen.getByText("Backend Toggle"));
+		expect(screen.queryByText("Toggle Session")).not.toBeInTheDocument();
+		await user.click(screen.getByText("Backend Toggle"));
+		expect(screen.getByText("Toggle Session")).toBeInTheDocument();
+	});
 });
