@@ -1,8 +1,8 @@
+import type { ChatSession } from "@mobvibe/core";
 import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { MessageItem } from "@/components/chat/MessageItem";
 import type { PermissionResultNotification } from "@/lib/acp";
-import type { ChatSession } from "@/lib/chat-store";
 import { useUiStore } from "@/lib/ui-store";
 
 export type ChatMessageListProps = {

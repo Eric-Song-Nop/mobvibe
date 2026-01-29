@@ -19,10 +19,10 @@ export interface UseSessionQueriesReturn {
  * Returns query objects and derived data.
  */
 export function useSessionQueries(): UseSessionQueriesReturn {
+	// Fetch sessions once on mount; real-time updates come via sessions:changed socket event
 	const sessionsQuery = useQuery({
 		queryKey: ["sessions"],
 		queryFn: fetchSessions,
-		refetchInterval: 5000,
 	});
 
 	const backendsQuery = useQuery({

@@ -1,6 +1,9 @@
 import type { AvailableCommand } from "./acp.js";
 import type { ErrorDetail } from "./errors.js";
 
+/** Session lifecycle state */
+export type SessionLifecycle = "active" | "suspended" | "closed" | "unknown";
+
 export type AcpConnectionState =
 	| "idle"
 	| "connecting"
@@ -47,6 +50,18 @@ export type SessionSummary = {
 	availableCommands?: AvailableCommand[];
 	/** Machine ID that owns this session (populated by gateway) */
 	machineId?: string;
+	/** Session lifecycle state */
+	lifecycle?: SessionLifecycle;
+};
+
+/** Sessions changed event payload for incremental sync */
+export type SessionsChangedPayload = {
+	/** Newly added sessions */
+	added: SessionSummary[];
+	/** Updated sessions */
+	updated: SessionSummary[];
+	/** Removed session IDs */
+	removed: string[];
 };
 
 // StopReason is now re-exported from SDK via acp.ts

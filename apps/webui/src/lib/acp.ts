@@ -26,6 +26,7 @@ export type {
 	SessionModeUpdate,
 	// Session types
 	SessionNotification,
+	SessionsChangedPayload,
 	// Extraction helper types
 	SessionTextChunk,
 	SessionUpdate,

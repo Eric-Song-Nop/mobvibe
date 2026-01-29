@@ -1,10 +1,10 @@
 import { FolderOpenIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import type { ChatSession } from "@mobvibe/core";
 import { useTranslation } from "react-i18next";
 import { UserMenu } from "@/components/auth/UserMenu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { ChatSession } from "@/lib/chat-store";
 
 export type AppHeaderProps = {
 	statusVariant: "default" | "destructive" | "secondary" | "outline";

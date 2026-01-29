@@ -1,4 +1,5 @@
 import { useBetterAuthTauri } from "@daveyplate/better-auth-tauri/react";
+import { useChatStore } from "@mobvibe/core";
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
@@ -21,7 +22,6 @@ import { useSessionQueries } from "@/hooks/useSessionQueries";
 import { useSocket } from "@/hooks/useSocket";
 import type { PermissionResultNotification } from "@/lib/acp";
 import { getAuthClient, isInTauri } from "@/lib/auth";
-import { useChatStore } from "@/lib/chat-store";
 import {
 	buildSessionNotReadyError,
 	createFallbackError,
@@ -65,6 +65,7 @@ function MainApp() {
 		addToolCall,
 		updateToolCall,
 		appendTerminalOutput,
+		handleSessionsChanged,
 	} = useChatStore();
 	const {
 		createDialogOpen,
@@ -126,6 +127,7 @@ function MainApp() {
 		addToolCall,
 		updateToolCall,
 		appendTerminalOutput,
+		handleSessionsChanged,
 	});
 
 	useSocket({
@@ -139,6 +141,7 @@ function MainApp() {
 		addToolCall,
 		updateToolCall,
 		appendTerminalOutput,
+		handleSessionsChanged,
 	});
 
 	const { selectedMachineId } = useMachinesStore();

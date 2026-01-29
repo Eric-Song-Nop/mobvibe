@@ -4,6 +4,7 @@ import type {
 	CliRegistrationInfo,
 	CliStatusPayload,
 	SessionSummary,
+	SessionsChangedPayload,
 } from "@mobvibe/shared";
 import type { Socket } from "socket.io";
 
@@ -129,6 +130,83 @@ export class CliRegistry extends EventEmitter {
 		}
 		record.sessions = sessions;
 		this.emit("sessions:updated", record.machineId, sessions);
+	}
+
+	/**
+	 * Update sessions incrementally based on change payload.
+	 * Returns the enhanced payload with machineId added to sessions.
+	 */
+	updateSessionsIncremental(
+		socketId: string,
+		payload: SessionsChangedPayload,
+	): SessionsChangedPayload | undefined {
+		const record = this.cliBySocketId.get(socketId);
+		if (!record) {
+			return undefined;
+		}
+
+		// Remove sessions
+		for (const removedId of payload.removed) {
+			const index = record.sessions.findIndex((s) => s.sessionId === removedId);
+			if (index !== -1) {
+				record.sessions.splice(index, 1);
+			}
+		}
+
+		// Update sessions
+		for (const updated of payload.updated) {
+			const index = record.sessions.findIndex(
+				(s) => s.sessionId === updated.sessionId,
+			);
+			if (index !== -1) {
+				record.sessions[index] = updated;
+			}
+		}
+
+		// Add new sessions
+		for (const added of payload.added) {
+			const existing = record.sessions.find(
+				(s) => s.sessionId === added.sessionId,
+			);
+			if (!existing) {
+				record.sessions.push(added);
+			}
+		}
+
+		// Emit the enhanced payload with machineId
+		const enhancedPayload: SessionsChangedPayload = {
+			added: payload.added.map((s) => ({ ...s, machineId: record.machineId })),
+			updated: payload.updated.map((s) => ({
+				...s,
+				machineId: record.machineId,
+			})),
+			removed: payload.removed,
+		};
+
+		this.emit(
+			"sessions:changed",
+			record.machineId,
+			enhancedPayload,
+			record.userId,
+		);
+
+		return enhancedPayload;
+	}
+
+	/**
+	 * Register a listener for sessions:changed events.
+	 */
+	onSessionsChanged(
+		listener: (
+			machineId: string,
+			payload: SessionsChangedPayload,
+			userId?: string,
+		) => void,
+	) {
+		this.on("sessions:changed", listener);
+		return () => {
+			this.off("sessions:changed", listener);
+		};
 	}
 
 	getCliBySocketId(socketId: string): CliRecord | undefined {

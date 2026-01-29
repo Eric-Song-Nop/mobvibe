@@ -1,10 +1,10 @@
 import "@testing-library/jest-dom/vitest";
+import type { ChatMessage, ChatSession } from "@mobvibe/core";
+import { useChatStore } from "@mobvibe/core";
 import { fireEvent, render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageItem } from "../src/components/chat/MessageItem";
 import i18n from "../src/i18n";
-import type { ChatMessage, ChatSession } from "../src/lib/chat-store";
-import { useChatStore } from "../src/lib/chat-store";
 import { createDefaultContentBlocks } from "../src/lib/content-block-utils";
 
 const buildMessage = (overrides?: Partial<ChatMessage>): ChatMessage => {

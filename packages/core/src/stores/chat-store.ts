@@ -11,11 +11,13 @@ import type {
 	SessionModeOption,
 	SessionState,
 	SessionSummary,
+	SessionsChangedPayload,
 	ToolCallContent,
 	ToolCallLocation,
 	ToolCallStatus,
 	ToolCallUpdate,
 } from "../api/types";
+import { i18n } from "../i18n";
 import { createDefaultContentBlocks } from "../utils/content-block-utils";
 import { getStorageAdapter } from "./storage-adapter";
 
@@ -128,9 +130,12 @@ type ChatState = {
 	activeSessionId?: string;
 	appError?: ErrorDetail;
 	lastCreatedCwd?: string;
+	syncStatus: "idle" | "syncing" | "error";
+	lastSyncAt?: string;
 	setActiveSessionId: (value?: string) => void;
 	setAppError: (value?: ErrorDetail) => void;
 	setLastCreatedCwd: (value?: string) => void;
+	handleSessionsChanged: (payload: SessionsChangedPayload) => void;
 	createLocalSession: (
 		sessionId: string,
 		options?: {
@@ -386,22 +391,9 @@ const createStatusMessage = (payload: {
 	isStreaming: false,
 });
 
-// Configurable default title getter
-let defaultTitleGetter: () => string = () => "New session";
-let sessionClosedMessageGetter: () => string = () =>
-	"Session has ended or was closed";
-
-export const setDefaultTitleGetter = (getter: () => string) => {
-	defaultTitleGetter = getter;
-};
-
-export const setSessionClosedMessageGetter = (getter: () => string) => {
-	sessionClosedMessageGetter = getter;
-};
-
 const createSessionClosedError = (): ErrorDetail => ({
 	code: "SESSION_NOT_FOUND",
-	message: sessionClosedMessageGetter(),
+	message: i18n.t("session.sessionClosed"),
 	retryable: false,
 	scope: "session",
 });
@@ -426,7 +418,7 @@ const createSessionState = (
 	},
 ): ChatSession => ({
 	sessionId,
-	title: options?.title ?? defaultTitleGetter(),
+	title: options?.title ?? i18n.t("session.defaultTitle"),
 	input: "",
 	inputContents: createDefaultContentBlocks(""),
 	messages: [],
@@ -499,9 +491,115 @@ export const useChatStore = create<ChatState>()(
 			sessions: {},
 			activeSessionId: undefined,
 			appError: undefined,
+			syncStatus: "idle",
+			lastSyncAt: undefined,
 			setActiveSessionId: (value?: string) => set({ activeSessionId: value }),
 			setAppError: (value?: ErrorDetail) => set({ appError: value }),
 			setLastCreatedCwd: (value?: string) => set({ lastCreatedCwd: value }),
+			handleSessionsChanged: (payload: SessionsChangedPayload) =>
+				set((state: ChatState) => {
+					const nextSessions: Record<string, ChatSession> = {
+						...state.sessions,
+					};
+
+					// Handle removed sessions
+					for (const removedId of payload.removed) {
+						const session = nextSessions[removedId];
+						if (session && session.state !== "stopped") {
+							nextSessions[removedId] = {
+								...session,
+								state: "stopped",
+								error: session.error ?? createSessionClosedError(),
+							};
+						}
+					}
+
+					// Handle added sessions
+					for (const added of payload.added) {
+						const existing = nextSessions[added.sessionId];
+						if (existing) {
+							// Merge with existing local session
+							nextSessions[added.sessionId] = {
+								...existing,
+								title: added.title ?? existing.title,
+								state: added.state,
+								error: added.error,
+								createdAt: added.createdAt,
+								updatedAt: added.updatedAt,
+								backendId: added.backendId ?? existing.backendId,
+								backendLabel: added.backendLabel ?? existing.backendLabel,
+								cwd: added.cwd ?? existing.cwd,
+								agentName: added.agentName ?? existing.agentName,
+								modelId: added.modelId ?? existing.modelId,
+								modelName: added.modelName ?? existing.modelName,
+								modeId: added.modeId ?? existing.modeId,
+								modeName: added.modeName ?? existing.modeName,
+								availableModes: added.availableModes ?? existing.availableModes,
+								availableModels:
+									added.availableModels ?? existing.availableModels,
+								availableCommands:
+									added.availableCommands ?? existing.availableCommands,
+								machineId: added.machineId ?? existing.machineId,
+							};
+						} else {
+							// Create new session
+							nextSessions[added.sessionId] = createSessionState(
+								added.sessionId,
+								{
+									title: added.title,
+									state: added.state,
+									backendId: added.backendId,
+									backendLabel: added.backendLabel,
+									cwd: added.cwd,
+									agentName: added.agentName,
+									modelId: added.modelId,
+									modelName: added.modelName,
+									modeId: added.modeId,
+									modeName: added.modeName,
+									availableModes: added.availableModes,
+									availableModels: added.availableModels,
+									availableCommands: added.availableCommands,
+									machineId: added.machineId,
+								},
+							);
+						}
+					}
+
+					// Handle updated sessions
+					for (const updated of payload.updated) {
+						const existing = nextSessions[updated.sessionId];
+						if (existing) {
+							nextSessions[updated.sessionId] = {
+								...existing,
+								title: updated.title ?? existing.title,
+								state: updated.state,
+								error: updated.error,
+								createdAt: updated.createdAt ?? existing.createdAt,
+								updatedAt: updated.updatedAt,
+								backendId: updated.backendId ?? existing.backendId,
+								backendLabel: updated.backendLabel ?? existing.backendLabel,
+								cwd: updated.cwd ?? existing.cwd,
+								agentName: updated.agentName ?? existing.agentName,
+								modelId: updated.modelId ?? existing.modelId,
+								modelName: updated.modelName ?? existing.modelName,
+								modeId: updated.modeId ?? existing.modeId,
+								modeName: updated.modeName ?? existing.modeName,
+								availableModes:
+									updated.availableModes ?? existing.availableModes,
+								availableModels:
+									updated.availableModels ?? existing.availableModels,
+								availableCommands:
+									updated.availableCommands ?? existing.availableCommands,
+								machineId: updated.machineId ?? existing.machineId,
+							};
+						}
+					}
+
+					return {
+						sessions: nextSessions,
+						lastSyncAt: new Date().toISOString(),
+					};
+				}),
 			createLocalSession: (sessionId, options) =>
 				set((state) => {
 					if (state.sessions[sessionId]) {

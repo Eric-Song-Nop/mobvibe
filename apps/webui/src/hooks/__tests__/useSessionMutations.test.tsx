@@ -54,6 +54,7 @@ describe("useSessionMutations", () => {
 		addToolCall: vi.fn(),
 		updateToolCall: vi.fn(),
 		appendTerminalOutput: vi.fn(),
+		handleSessionsChanged: vi.fn(),
 	});
 
 	const wrapper = ({ children }: { children: ReactNode }) => (

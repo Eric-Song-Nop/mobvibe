@@ -1,13 +1,29 @@
+import { useChatStore } from "@mobvibe/core";
+import type { SessionSummary, SessionsChangedPayload } from "@mobvibe/shared";
 import { beforeEach, describe, expect, it } from "vitest";
-import { useChatStore } from "../src/lib/chat-store";
 
 const resetStore = () => {
 	useChatStore.setState({
 		sessions: {},
 		activeSessionId: undefined,
 		appError: undefined,
+		syncStatus: "idle",
+		lastSyncAt: undefined,
 	});
 };
+
+const createMockSessionSummary = (
+	overrides: Partial<SessionSummary> = {},
+): SessionSummary => ({
+	sessionId: `session-${Math.random().toString(36).slice(2, 8)}`,
+	title: "Test Session",
+	backendId: "backend-1",
+	backendLabel: "Claude Code",
+	state: "ready",
+	createdAt: new Date().toISOString(),
+	updatedAt: new Date().toISOString(),
+	...overrides,
+});
 
 describe("useChatStore", () => {
 	beforeEach(() => {
@@ -57,5 +73,367 @@ describe("useChatStore", () => {
 		const session = useChatStore.getState().sessions["session-1"];
 		expect(session.state).toBe("stopped");
 		expect(session.error?.code).toBe("SESSION_NOT_FOUND");
+	});
+
+	describe("handleSessionsChanged", () => {
+		it("adds new sessions from payload", () => {
+			const newSession = createMockSessionSummary({
+				sessionId: "new-session-1",
+				title: "New Session",
+				cwd: "/home/user/project",
+				machineId: "machine-1",
+			});
+
+			useChatStore.getState().handleSessionsChanged({
+				added: [newSession],
+				updated: [],
+				removed: [],
+			});
+
+			const session = useChatStore.getState().sessions["new-session-1"];
+			expect(session).toBeTruthy();
+			expect(session.title).toBe("New Session");
+			expect(session.state).toBe("ready");
+			expect(session.cwd).toBe("/home/user/project");
+			expect(session.machineId).toBe("machine-1");
+		});
+
+		it("merges added session with existing local session", () => {
+			// Create local session with messages
+			const store = useChatStore.getState();
+			store.createLocalSession("session-1", {
+				title: "Local Title",
+				state: "ready",
+			});
+			store.addUserMessage("session-1", "Hello from user");
+
+			// Add session from server with different metadata
+			const serverSession = createMockSessionSummary({
+				sessionId: "session-1",
+				title: "Server Title",
+				state: "ready",
+				cwd: "/home/user/project",
+				modelId: "claude-3",
+				modelName: "Claude 3",
+				machineId: "machine-1",
+			});
+
+			useChatStore.getState().handleSessionsChanged({
+				added: [serverSession],
+				updated: [],
+				removed: [],
+			});
+
+			const session = useChatStore.getState().sessions["session-1"];
+			// Server metadata should be merged
+			expect(session.title).toBe("Server Title");
+			expect(session.cwd).toBe("/home/user/project");
+			expect(session.modelId).toBe("claude-3");
+			expect(session.machineId).toBe("machine-1");
+			// Local messages should be preserved
+			expect(session.messages).toHaveLength(1);
+			expect(session.messages[0].role).toBe("user");
+		});
+
+		it("updates existing session metadata", () => {
+			useChatStore.getState().createLocalSession("session-1", {
+				title: "Original Title",
+				state: "ready",
+				modelId: "claude-2",
+			});
+
+			const updatedSession = createMockSessionSummary({
+				sessionId: "session-1",
+				title: "Updated Title",
+				state: "ready",
+				modelId: "claude-3",
+				modelName: "Claude 3 Opus",
+				cwd: "/updated/path",
+			});
+
+			useChatStore.getState().handleSessionsChanged({
+				added: [],
+				updated: [updatedSession],
+				removed: [],
+			});
+
+			const session = useChatStore.getState().sessions["session-1"];
+			expect(session.title).toBe("Updated Title");
+			expect(session.modelId).toBe("claude-3");
+			expect(session.modelName).toBe("Claude 3 Opus");
+			expect(session.cwd).toBe("/updated/path");
+		});
+
+		it("ignores update for non-existent session", () => {
+			const initialSessionCount = Object.keys(
+				useChatStore.getState().sessions,
+			).length;
+
+			const updatedSession = createMockSessionSummary({
+				sessionId: "non-existent-session",
+				title: "Should Not Appear",
+			});
+
+			useChatStore.getState().handleSessionsChanged({
+				added: [],
+				updated: [updatedSession],
+				removed: [],
+			});
+
+			const finalSessionCount = Object.keys(
+				useChatStore.getState().sessions,
+			).length;
+			expect(finalSessionCount).toBe(initialSessionCount);
+			expect(
+				useChatStore.getState().sessions["non-existent-session"],
+			).toBeUndefined();
+		});
+
+		it("marks removed sessions as stopped with error", () => {
+			useChatStore.getState().createLocalSession("session-1", {
+				title: "Active Session",
+				state: "ready",
+			});
+
+			useChatStore.getState().handleSessionsChanged({
+				added: [],
+				updated: [],
+				removed: ["session-1"],
+			});
+
+			const session = useChatStore.getState().sessions["session-1"];
+			expect(session.state).toBe("stopped");
+			expect(session.error).toBeTruthy();
+			expect(session.error?.code).toBe("SESSION_NOT_FOUND");
+		});
+
+		it("preserves already stopped sessions", () => {
+			const customError = {
+				code: "CUSTOM_ERROR",
+				message: "Session crashed",
+				retryable: false,
+				scope: "session" as const,
+			};
+
+			useChatStore.getState().createLocalSession("session-1", {
+				title: "Stopped Session",
+				state: "stopped",
+			});
+			useChatStore.getState().setError("session-1", customError);
+
+			useChatStore.getState().handleSessionsChanged({
+				added: [],
+				updated: [],
+				removed: ["session-1"],
+			});
+
+			const session = useChatStore.getState().sessions["session-1"];
+			// Session should remain stopped
+			expect(session.state).toBe("stopped");
+			// Original error should be preserved since session was already stopped
+			expect(session.error?.code).toBe("CUSTOM_ERROR");
+		});
+
+		it("handles add + update + remove in single payload", () => {
+			// Setup: create two existing sessions
+			useChatStore.getState().createLocalSession("session-to-update", {
+				title: "Will Update",
+				state: "ready",
+			});
+			useChatStore.getState().createLocalSession("session-to-remove", {
+				title: "Will Remove",
+				state: "ready",
+			});
+
+			const payload: SessionsChangedPayload = {
+				added: [
+					createMockSessionSummary({
+						sessionId: "session-new",
+						title: "Newly Added",
+					}),
+				],
+				updated: [
+					createMockSessionSummary({
+						sessionId: "session-to-update",
+						title: "Updated Title",
+						modelId: "claude-4",
+					}),
+				],
+				removed: ["session-to-remove"],
+			};
+
+			useChatStore.getState().handleSessionsChanged(payload);
+
+			const sessions = useChatStore.getState().sessions;
+
+			// New session should exist
+			expect(sessions["session-new"]).toBeTruthy();
+			expect(sessions["session-new"].title).toBe("Newly Added");
+
+			// Updated session should have new metadata
+			expect(sessions["session-to-update"].title).toBe("Updated Title");
+			expect(sessions["session-to-update"].modelId).toBe("claude-4");
+
+			// Removed session should be stopped
+			expect(sessions["session-to-remove"].state).toBe("stopped");
+			expect(sessions["session-to-remove"].error?.code).toBe(
+				"SESSION_NOT_FOUND",
+			);
+		});
+
+		it("handles empty payload gracefully", () => {
+			useChatStore.getState().createLocalSession("session-1", {
+				title: "Existing",
+				state: "ready",
+			});
+
+			const beforeState = useChatStore.getState().sessions["session-1"];
+
+			useChatStore.getState().handleSessionsChanged({
+				added: [],
+				updated: [],
+				removed: [],
+			});
+
+			const afterState = useChatStore.getState().sessions["session-1"];
+			expect(afterState.title).toBe(beforeState.title);
+			expect(afterState.state).toBe(beforeState.state);
+		});
+
+		it("updates lastSyncAt timestamp", () => {
+			expect(useChatStore.getState().lastSyncAt).toBeUndefined();
+
+			const before = new Date().toISOString();
+
+			useChatStore.getState().handleSessionsChanged({
+				added: [createMockSessionSummary({ sessionId: "new-session" })],
+				updated: [],
+				removed: [],
+			});
+
+			const after = new Date().toISOString();
+			const lastSyncAt = useChatStore.getState().lastSyncAt;
+
+			expect(lastSyncAt).toBeTruthy();
+			expect(lastSyncAt! >= before).toBe(true);
+			expect(lastSyncAt! <= after).toBe(true);
+		});
+
+		it("preserves local messages when merging", () => {
+			// Create session with multiple messages
+			const store = useChatStore.getState();
+			store.createLocalSession("session-1", {
+				title: "Chat Session",
+				state: "ready",
+			});
+			store.addUserMessage("session-1", "First message");
+			store.appendAssistantChunk("session-1", "Response 1");
+			store.finalizeAssistantMessage("session-1");
+			store.addUserMessage("session-1", "Second message");
+
+			const messagesBefore =
+				useChatStore.getState().sessions["session-1"].messages;
+			expect(messagesBefore).toHaveLength(3);
+
+			// Update session metadata via handleSessionsChanged
+			const updatedSession = createMockSessionSummary({
+				sessionId: "session-1",
+				title: "Updated Title",
+				modelId: "claude-3",
+			});
+
+			useChatStore.getState().handleSessionsChanged({
+				added: [],
+				updated: [updatedSession],
+				removed: [],
+			});
+
+			const session = useChatStore.getState().sessions["session-1"];
+			expect(session.title).toBe("Updated Title");
+			expect(session.modelId).toBe("claude-3");
+			// Messages should be preserved
+			expect(session.messages).toHaveLength(3);
+			expect(session.messages[0].role).toBe("user");
+			expect(session.messages[1].role).toBe("assistant");
+			expect(session.messages[2].role).toBe("user");
+		});
+	});
+
+	describe("syncSessions (extended)", () => {
+		it("updates existing session with new metadata", () => {
+			useChatStore.getState().createLocalSession("session-1", {
+				title: "Original Title",
+				state: "ready",
+				modelId: "claude-2",
+			});
+
+			const serverSession = createMockSessionSummary({
+				sessionId: "session-1",
+				title: "Server Title",
+				state: "ready",
+				modelId: "claude-3",
+				modelName: "Claude 3",
+				cwd: "/new/path",
+				machineId: "machine-1",
+			});
+
+			useChatStore.getState().syncSessions([serverSession]);
+
+			const session = useChatStore.getState().sessions["session-1"];
+			expect(session.title).toBe("Server Title");
+			expect(session.modelId).toBe("claude-3");
+			expect(session.modelName).toBe("Claude 3");
+			expect(session.cwd).toBe("/new/path");
+			expect(session.machineId).toBe("machine-1");
+		});
+
+		it("creates new sessions from server list", () => {
+			const serverSessions = [
+				createMockSessionSummary({
+					sessionId: "server-session-1",
+					title: "Server Session 1",
+					machineId: "machine-1",
+				}),
+				createMockSessionSummary({
+					sessionId: "server-session-2",
+					title: "Server Session 2",
+					machineId: "machine-2",
+				}),
+			];
+
+			useChatStore.getState().syncSessions(serverSessions);
+
+			const sessions = useChatStore.getState().sessions;
+			expect(sessions["server-session-1"]).toBeTruthy();
+			expect(sessions["server-session-1"].title).toBe("Server Session 1");
+			expect(sessions["server-session-1"].machineId).toBe("machine-1");
+
+			expect(sessions["server-session-2"]).toBeTruthy();
+			expect(sessions["server-session-2"].title).toBe("Server Session 2");
+			expect(sessions["server-session-2"].machineId).toBe("machine-2");
+		});
+
+		it("preserves messages when updating existing sessions", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("session-1", {
+				title: "Local Session",
+				state: "ready",
+			});
+			store.addUserMessage("session-1", "Hello");
+			store.appendAssistantChunk("session-1", "Hi there!");
+			store.finalizeAssistantMessage("session-1");
+
+			const serverSession = createMockSessionSummary({
+				sessionId: "session-1",
+				title: "Updated from Server",
+				state: "ready",
+			});
+
+			useChatStore.getState().syncSessions([serverSession]);
+
+			const session = useChatStore.getState().sessions["session-1"];
+			expect(session.title).toBe("Updated from Server");
+			expect(session.messages).toHaveLength(2);
+		});
 	});
 });

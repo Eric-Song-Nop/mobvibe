@@ -1,5 +1,5 @@
+import type { ChatSession } from "@mobvibe/core";
 import type { TFunction } from "i18next";
-import type { ChatSession } from "./chat-store";
 
 /**
  * Maps a session state to a badge variant.

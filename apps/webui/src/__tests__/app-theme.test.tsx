@@ -44,12 +44,17 @@ const mockChatStore = vi.hoisted(() => ({
 		updateToolCall: vi.fn(),
 		appendTerminalOutput: vi.fn(),
 		finalizeAssistantMessage: vi.fn(),
+		handleSessionsChanged: vi.fn(),
 	},
 }));
 
-vi.mock("@/lib/chat-store", () => ({
-	useChatStore: () => mockChatStore.value,
-}));
+vi.mock("@mobvibe/core", async (importOriginal) => {
+	const original = await importOriginal<typeof import("@mobvibe/core")>();
+	return {
+		...original,
+		useChatStore: () => mockChatStore.value,
+	};
+});
 
 vi.mock("@/hooks/useMessageAutoScroll", () => ({
 	useMessageAutoScroll: () => ({

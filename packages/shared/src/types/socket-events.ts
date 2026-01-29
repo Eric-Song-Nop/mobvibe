@@ -15,6 +15,7 @@ import type {
 	FsRoot,
 	SessionFsResourceEntry,
 	SessionSummary,
+	SessionsChangedPayload,
 } from "./session.js";
 
 // Permission request payload sent through Socket.io
@@ -172,6 +173,7 @@ export interface CliToGatewayEvents {
 	"permission:result": (payload: PermissionDecisionPayload) => void;
 	"terminal:output": (event: TerminalOutputEvent) => void;
 	"sessions:list": (sessions: SessionSummary[]) => void;
+	"sessions:changed": (payload: SessionsChangedPayload) => void;
 
 	// RPC responses
 	"rpc:response": (response: RpcResponse<unknown>) => void;
@@ -218,4 +220,5 @@ export interface GatewayToWebuiEvents {
 	"terminal:output": (event: TerminalOutputEvent) => void;
 	"cli:status": (payload: CliStatusPayload) => void;
 	"sessions:list": (sessions: SessionSummary[]) => void;
+	"sessions:changed": (payload: SessionsChangedPayload) => void;
 }

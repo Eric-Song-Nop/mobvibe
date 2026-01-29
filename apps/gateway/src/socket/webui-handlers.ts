@@ -3,6 +3,7 @@ import type {
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
 	SessionNotification,
+	SessionsChangedPayload,
 	StreamErrorPayload,
 	TerminalOutputEvent,
 } from "@mobvibe/shared";
@@ -87,6 +88,19 @@ export function setupWebuiHandlers(
 	cliRegistry.on("sessions:updated", (_machineId: string) => {
 		// HTTP-first: session list is fetched via REST on demand
 	});
+
+	// Forward sessions:changed events to webui clients
+	cliRegistry.onSessionsChanged(
+		(machineId: string, payload: SessionsChangedPayload, userId?: string) => {
+			if (userId) {
+				// Only emit to the user who owns this CLI
+				emitToUser(userId, "sessions:changed", payload);
+			} else {
+				// Auth disabled - emit to all
+				emitToAll("sessions:changed", payload);
+			}
+		},
+	);
 
 	webuiNamespace.on("connection", async (socket: Socket) => {
 		const authSocket = socket as AuthenticatedSocket;

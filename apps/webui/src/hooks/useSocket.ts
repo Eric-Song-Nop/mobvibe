@@ -1,3 +1,4 @@
+import type { ChatSession } from "@mobvibe/core";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { ChatStoreActions } from "@/hooks/useSessionMutations";
@@ -10,10 +11,10 @@ import {
 	type PermissionDecisionPayload,
 	type PermissionRequestPayload,
 	type SessionNotification,
+	type SessionsChangedPayload,
 	type StreamErrorPayload,
 	type TerminalOutputEvent,
 } from "@/lib/acp";
-import type { ChatSession } from "@/lib/chat-store";
 import {
 	createFallbackError,
 	isErrorDetail,
@@ -38,6 +39,7 @@ type UseSocketOptions = {
 	| "addToolCall"
 	| "updateToolCall"
 	| "appendTerminalOutput"
+	| "handleSessionsChanged"
 >;
 
 export function useSocket({
@@ -51,6 +53,7 @@ export function useSocket({
 	addToolCall,
 	updateToolCall,
 	appendTerminalOutput,
+	handleSessionsChanged,
 }: UseSocketOptions) {
 	const { t } = useTranslation();
 	const subscribedSessionsRef = useRef<Set<string>>(new Set());
@@ -154,6 +157,11 @@ export function useSocket({
 			});
 		};
 
+		// Sessions changed handler (incremental sync)
+		const handleSessionsChangedEvent = (payload: SessionsChangedPayload) => {
+			handleSessionsChanged(payload);
+		};
+
 		// Set up listeners
 		const unsubUpdate = gatewaySocket.onSessionUpdate(handleSessionUpdate);
 		const unsubError = gatewaySocket.onSessionError(handleSessionError);
@@ -164,6 +172,9 @@ export function useSocket({
 			handlePermissionResult,
 		);
 		const unsubTerminal = gatewaySocket.onTerminalOutput(handleTerminalOutput);
+		const unsubSessionsChanged = gatewaySocket.onSessionsChanged(
+			handleSessionsChangedEvent,
+		);
 
 		return () => {
 			unsubUpdate();
@@ -171,6 +182,7 @@ export function useSocket({
 			unsubPermReq();
 			unsubPermRes();
 			unsubTerminal();
+			unsubSessionsChanged();
 			gatewaySocket.disconnect();
 		};
 	}, [
@@ -178,6 +190,7 @@ export function useSocket({
 		addToolCall,
 		appendAssistantChunk,
 		appendTerminalOutput,
+		handleSessionsChanged,
 		setPermissionDecisionState,
 		setPermissionOutcome,
 		setStreamError,

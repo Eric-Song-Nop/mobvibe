@@ -627,6 +627,20 @@ export class SocketClient extends EventEmitter {
 				this.socket.emit("terminal:output", event);
 			}
 		});
+
+		sessionManager.onSessionsChanged((payload) => {
+			if (this.connected) {
+				logger.info(
+					{
+						added: payload.added.length,
+						updated: payload.updated.length,
+						removed: payload.removed.length,
+					},
+					"sessions_changed_emit",
+				);
+				this.socket.emit("sessions:changed", payload);
+			}
+		});
 	}
 
 	private async listSessionResources(

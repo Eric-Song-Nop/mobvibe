@@ -5,6 +5,7 @@ import type {
 	RpcResponse,
 	SessionNotification,
 	SessionSummary,
+	SessionsChangedPayload,
 	StreamErrorPayload,
 	TerminalOutputEvent,
 } from "@mobvibe/shared";
@@ -131,13 +132,27 @@ export function setupCliHandlers(
 			// Just acknowledge
 		});
 
-		// Sessions list update
+		// Sessions list update (initial sync and heartbeat)
 		socket.on("sessions:list", (sessions: SessionSummary[]) => {
 			cliRegistry.updateSessions(socket.id, sessions);
 			logger.debug(
 				{ socketId: socket.id, sessionCount: sessions.length },
 				"cli_sessions_list",
 			);
+		});
+
+		// Incremental sessions update
+		socket.on("sessions:changed", (payload: SessionsChangedPayload) => {
+			logger.info(
+				{
+					socketId: socket.id,
+					added: payload.added.length,
+					updated: payload.updated.length,
+					removed: payload.removed.length,
+				},
+				"cli_sessions_changed",
+			);
+			cliRegistry.updateSessionsIncremental(socket.id, payload);
 		});
 
 		// Session update

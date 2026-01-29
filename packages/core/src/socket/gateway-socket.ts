@@ -6,6 +6,7 @@ import type {
 	PermissionRequestPayload,
 	SessionNotification,
 	SessionSummary,
+	SessionsChangedPayload,
 	StreamErrorPayload,
 	TerminalOutputEvent,
 	WebuiToGatewayEvents,
@@ -135,6 +136,13 @@ export class GatewaySocket {
 		this.socket?.on("sessions:list", handler);
 		return () => {
 			this.socket?.off("sessions:list", handler);
+		};
+	}
+
+	onSessionsChanged(handler: (payload: SessionsChangedPayload) => void) {
+		this.socket?.on("sessions:changed", handler);
+		return () => {
+			this.socket?.off("sessions:changed", handler);
 		};
 	}
 

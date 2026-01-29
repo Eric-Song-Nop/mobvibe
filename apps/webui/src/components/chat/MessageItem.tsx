@@ -1,3 +1,4 @@
+import { type ChatMessage, useChatStore } from "@mobvibe/core";
 import { useTranslation } from "react-i18next";
 import { Streamdown } from "streamdown";
 import { DiffView } from "@/components/chat/DiffView";
@@ -14,7 +15,6 @@ import type {
 	ToolCallContent,
 	ToolCallContentPayload,
 } from "@/lib/acp";
-import { type ChatMessage, useChatStore } from "@/lib/chat-store";
 import { cn } from "@/lib/utils";
 
 type PermissionDecisionPayload = {

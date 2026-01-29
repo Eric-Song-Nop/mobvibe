@@ -67,9 +67,11 @@ export type {
 	SessionFsFilePreview,
 	SessionFsFilePreviewType,
 	SessionFsResourceEntry,
+	SessionLifecycle,
 	SessionModelOption,
 	SessionModeOption,
 	SessionSummary,
+	SessionsChangedPayload,
 	// StopReason is now re-exported from SDK via acp.ts
 } from "./types/session.js";
 

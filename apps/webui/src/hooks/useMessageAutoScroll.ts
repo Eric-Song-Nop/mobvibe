@@ -1,3 +1,4 @@
+import type { ChatMessage } from "@mobvibe/core";
 import type { RefObject } from "react";
 import { useCallback, useLayoutEffect, useRef } from "react";
 import {
@@ -5,7 +6,6 @@ import {
 	shouldAutoScroll,
 	updateAutoScrollState,
 } from "@/lib/auto-scroll";
-import type { ChatMessage } from "@/lib/chat-store";
 import { AUTO_SCROLL_THRESHOLD } from "@/lib/ui-config";
 
 export type MessageAutoScroll = {

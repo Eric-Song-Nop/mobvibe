@@ -16,6 +16,7 @@ import {
 	type PermissionDecisionPayload,
 	type PermissionRequestPayload,
 	type SessionSummary,
+	type SessionsChangedPayload,
 	type TerminalOutputEvent,
 } from "@mobvibe/shared";
 import type { AcpBackendConfig, CliConfig } from "../config.js";
@@ -121,6 +122,7 @@ export class SessionManager {
 	private readonly permissionRequestEmitter = new EventEmitter();
 	private readonly permissionResultEmitter = new EventEmitter();
 	private readonly terminalOutputEmitter = new EventEmitter();
+	private readonly sessionsChangedEmitter = new EventEmitter();
 
 	constructor(private readonly config: CliConfig) {
 		this.backendById = new Map(
@@ -174,6 +176,17 @@ export class SessionManager {
 		return () => {
 			this.terminalOutputEmitter.off("output", listener);
 		};
+	}
+
+	onSessionsChanged(listener: (payload: SessionsChangedPayload) => void) {
+		this.sessionsChangedEmitter.on("changed", listener);
+		return () => {
+			this.sessionsChangedEmitter.off("changed", listener);
+		};
+	}
+
+	private emitSessionsChanged(payload: SessionsChangedPayload) {
+		this.sessionsChangedEmitter.emit("changed", payload);
 	}
 
 	listPendingPermissions(sessionId: string): PermissionRequestPayload[] {
@@ -317,7 +330,13 @@ export class SessionManager {
 				}
 			});
 			this.sessions.set(session.sessionId, record);
-			return this.buildSummary(record);
+			const summary = this.buildSummary(record);
+			this.emitSessionsChanged({
+				added: [summary],
+				updated: [],
+				removed: [],
+			});
+			return summary;
 		} catch (error) {
 			const status = connection.getStatus();
 			await connection.disconnect();
@@ -413,7 +432,13 @@ export class SessionManager {
 		}
 		record.title = title;
 		record.updatedAt = new Date();
-		return this.buildSummary(record);
+		const summary = this.buildSummary(record);
+		this.emitSessionsChanged({
+			added: [],
+			updated: [summary],
+			removed: [],
+		});
+		return summary;
 	}
 
 	touchSession(sessionId: string) {
@@ -461,7 +486,13 @@ export class SessionManager {
 		record.modeId = selected.id;
 		record.modeName = selected.name;
 		record.updatedAt = new Date();
-		return this.buildSummary(record);
+		const summary = this.buildSummary(record);
+		this.emitSessionsChanged({
+			added: [],
+			updated: [summary],
+			removed: [],
+		});
+		return summary;
 	}
 
 	async setSessionModel(
@@ -503,7 +534,13 @@ export class SessionManager {
 		record.modelId = selected.id;
 		record.modelName = selected.name;
 		record.updatedAt = new Date();
-		return this.buildSummary(record);
+		const summary = this.buildSummary(record);
+		this.emitSessionsChanged({
+			added: [],
+			updated: [summary],
+			removed: [],
+		});
+		return summary;
 	}
 
 	async cancelSession(sessionId: string): Promise<boolean> {
@@ -535,6 +572,11 @@ export class SessionManager {
 			logger.error({ err: error, sessionId }, "session_disconnect_failed");
 		}
 		this.sessions.delete(sessionId);
+		this.emitSessionsChanged({
+			added: [],
+			updated: [],
+			removed: [sessionId],
+		});
 		return true;
 	}
 
