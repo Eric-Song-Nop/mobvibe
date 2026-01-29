@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { Readable, Writable } from "node:stream";
 import {
+	type AgentCapabilities,
 	type Client,
 	ClientSideConnection,
 	type ContentBlock,
@@ -11,6 +12,8 @@ import {
 	type Implementation,
 	type KillTerminalCommandRequest,
 	type KillTerminalCommandResponse,
+	type ListSessionsResponse,
+	type LoadSessionResponse,
 	type NewSessionResponse,
 	ndJsonStream,
 	PROTOCOL_VERSION,
@@ -19,6 +22,8 @@ import {
 	type ReleaseTerminalResponse,
 	type RequestPermissionRequest,
 	type RequestPermissionResponse,
+	type ResumeSessionResponse,
+	type SessionInfo,
 	type SessionNotification,
 	type TerminalExitStatus,
 	type TerminalOutputRequest,
@@ -28,6 +33,7 @@ import {
 } from "@agentclientprotocol/sdk";
 import {
 	type AcpConnectionState,
+	type AgentSessionCapabilities,
 	createErrorDetail,
 	type ErrorDetail,
 	isProtocolMismatch,
@@ -220,6 +226,7 @@ export class AcpConnection {
 	private error?: ErrorDetail;
 	private sessionId?: string;
 	private agentInfo?: Implementation;
+	private agentCapabilities?: AgentCapabilities;
 	private readonly sessionUpdateEmitter = new EventEmitter();
 	private readonly statusEmitter = new EventEmitter();
 	private readonly terminalOutputEmitter = new EventEmitter();
@@ -251,6 +258,105 @@ export class AcpConnection {
 
 	getAgentInfo(): Implementation | undefined {
 		return this.agentInfo;
+	}
+
+	/**
+	 * Get the agent's session capabilities.
+	 */
+	getSessionCapabilities(): AgentSessionCapabilities {
+		return {
+			list: this.agentCapabilities?.sessionCapabilities?.list != null,
+			load: this.agentCapabilities?.loadSession === true,
+			resume: this.agentCapabilities?.sessionCapabilities?.resume != null,
+		};
+	}
+
+	/**
+	 * Check if the agent supports session/list.
+	 */
+	supportsSessionList(): boolean {
+		return this.agentCapabilities?.sessionCapabilities?.list != null;
+	}
+
+	/**
+	 * Check if the agent supports session/load.
+	 */
+	supportsSessionLoad(): boolean {
+		return this.agentCapabilities?.loadSession === true;
+	}
+
+	/**
+	 * Check if the agent supports session/resume.
+	 */
+	supportsSessionResume(): boolean {
+		return this.agentCapabilities?.sessionCapabilities?.resume != null;
+	}
+
+	/**
+	 * List sessions from the agent (session/list).
+	 * @param params Optional filter parameters
+	 * @returns List of session info from the agent
+	 */
+	async listSessions(params?: {
+		cursor?: string;
+		cwd?: string;
+	}): Promise<SessionInfo[]> {
+		if (!this.supportsSessionList()) {
+			return [];
+		}
+		const connection = await this.ensureReady();
+		const response: ListSessionsResponse =
+			await connection.unstable_listSessions({
+				cursor: params?.cursor ?? undefined,
+				cwd: params?.cwd ?? undefined,
+			});
+		return response.sessions;
+	}
+
+	/**
+	 * Load a historical session with message history replay (session/load).
+	 * @param sessionId The session ID to load
+	 * @param cwd The working directory
+	 * @returns Load session response with modes/models state
+	 */
+	async loadSession(
+		sessionId: string,
+		cwd: string,
+	): Promise<LoadSessionResponse> {
+		if (!this.supportsSessionLoad()) {
+			throw new Error("Agent does not support session/load capability");
+		}
+		const connection = await this.ensureReady();
+		const response = await connection.loadSession({
+			sessionId,
+			cwd,
+			mcpServers: [],
+		});
+		this.sessionId = sessionId;
+		return response;
+	}
+
+	/**
+	 * Resume an active session without message history replay (session/resume).
+	 * @param sessionId The session ID to resume
+	 * @param cwd The working directory
+	 * @returns Resume session response
+	 */
+	async resumeSession(
+		sessionId: string,
+		cwd: string,
+	): Promise<ResumeSessionResponse> {
+		if (!this.supportsSessionResume()) {
+			throw new Error("Agent does not support session/resume capability");
+		}
+		const connection = await this.ensureReady();
+		const response = await connection.unstable_resumeSession({
+			sessionId,
+			cwd,
+			mcpServers: [],
+		});
+		this.sessionId = sessionId;
+		return response;
 	}
 
 	setPermissionHandler(
@@ -366,6 +472,8 @@ export class AcpConnection {
 			});
 
 			this.agentInfo = initializeResponse.agentInfo ?? undefined;
+			this.agentCapabilities =
+				initializeResponse.agentCapabilities ?? undefined;
 			this.connectedAt = new Date();
 			this.updateStatus("ready");
 		} catch (error) {

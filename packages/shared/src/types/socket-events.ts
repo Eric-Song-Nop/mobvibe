@@ -11,6 +11,8 @@ import type { ErrorDetail } from "./errors.js";
 import type {
 	AcpBackendId,
 	AcpBackendSummary,
+	AcpSessionInfo,
+	AgentSessionCapabilities,
 	FsEntry,
 	FsRoot,
 	SessionFsResourceEntry,
@@ -163,6 +165,30 @@ export type HostFsRootsResponse = {
 	roots: FsRoot[];
 };
 
+// Session discovery RPC params
+export type DiscoverSessionsRpcParams = {
+	cwd?: string;
+	backendId?: string;
+};
+
+// Session discovery RPC response
+export type DiscoverSessionsRpcResult = {
+	sessions: AcpSessionInfo[];
+	capabilities: AgentSessionCapabilities;
+};
+
+// Load session RPC params
+export type LoadSessionRpcParams = {
+	sessionId: string;
+	cwd: string;
+};
+
+// Resume session RPC params
+export type ResumeSessionRpcParams = {
+	sessionId: string;
+	cwd: string;
+};
+
 // CLI -> Gateway events
 export interface CliToGatewayEvents {
 	"cli:register": (info: CliRegistrationInfo) => void;
@@ -202,6 +228,13 @@ export interface GatewayToCliEvents {
 	"rpc:fs:resources": (request: RpcRequest<FsResourcesParams>) => void;
 	"rpc:hostfs:roots": (request: RpcRequest<HostFsRootsParams>) => void;
 	"rpc:hostfs:entries": (request: RpcRequest<HostFsEntriesParams>) => void;
+
+	// Session discovery RPC requests
+	"rpc:sessions:discover": (
+		request: RpcRequest<DiscoverSessionsRpcParams>,
+	) => void;
+	"rpc:session:load": (request: RpcRequest<LoadSessionRpcParams>) => void;
+	"rpc:session:resume": (request: RpcRequest<ResumeSessionRpcParams>) => void;
 }
 
 // Webui -> Gateway events

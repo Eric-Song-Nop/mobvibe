@@ -3,7 +3,8 @@ import type {
 	CancelSessionParams,
 	CloseSessionParams,
 	CreateSessionParams,
-	ErrorDetail,
+	DiscoverSessionsRpcParams,
+	DiscoverSessionsRpcResult,
 	FsEntriesParams,
 	FsEntriesResponse,
 	FsFileParams,
@@ -13,7 +14,9 @@ import type {
 	HostFsEntriesParams,
 	HostFsRootsParams,
 	HostFsRootsResponse,
+	LoadSessionRpcParams,
 	PermissionDecisionPayload,
+	ResumeSessionRpcParams,
 	RpcRequest,
 	RpcResponse,
 	SendMessageParams,
@@ -600,6 +603,209 @@ export class SessionRouter {
 			{ machineId: params.machineId, userId, path: params.path },
 			"host_fs_entries_rpc_complete",
 		);
+		return result;
+	}
+
+	/**
+	 * Discover sessions persisted by the ACP agent.
+	 * @param machineId - Optional machine ID to target specific CLI
+	 * @param cwd - Optional working directory filter
+	 * @param userId - Optional user ID for authorization
+	 * @returns List of discovered sessions and agent capabilities
+	 */
+	async discoverSessions(
+		machineId?: string,
+		cwd?: string,
+		userId?: string,
+	): Promise<DiscoverSessionsRpcResult> {
+		const cli = machineId
+			? this.cliRegistry.getCliByMachineId(machineId)
+			: this.cliRegistry.getFirstCliForUser(userId);
+
+		if (!cli) {
+			throw new Error(
+				machineId
+					? "No CLI connected for this machine"
+					: userId
+						? "No CLI connected for this user"
+						: "No CLI connected",
+			);
+		}
+
+		if (
+			machineId &&
+			userId &&
+			!this.cliRegistry.isMachineOwnedByUser(machineId, userId)
+		) {
+			throw new Error("Not authorized to access this machine");
+		}
+
+		logger.info(
+			{ machineId: cli.machineId, cwd, userId },
+			"sessions_discover_rpc_start",
+		);
+
+		const params: DiscoverSessionsRpcParams = { cwd };
+		const result = await this.sendRpc<
+			DiscoverSessionsRpcParams,
+			DiscoverSessionsRpcResult
+		>(cli.socket, "rpc:sessions:discover", params);
+
+		logger.info(
+			{
+				machineId: cli.machineId,
+				sessionCount: result.sessions.length,
+				capabilities: result.capabilities,
+			},
+			"sessions_discover_rpc_complete",
+		);
+
+		return result;
+	}
+
+	/**
+	 * Load a historical session from the ACP agent.
+	 * This will replay the session's message history.
+	 * @param params - Load session parameters
+	 * @param userId - Optional user ID for authorization
+	 * @returns The loaded session summary
+	 */
+	async loadSession(
+		params: { sessionId: string; cwd: string; machineId?: string },
+		userId?: string,
+	): Promise<SessionSummary> {
+		const cli = params.machineId
+			? this.cliRegistry.getCliByMachineId(params.machineId)
+			: this.cliRegistry.getFirstCliForUser(userId);
+
+		if (!cli) {
+			throw new Error(
+				params.machineId
+					? "No CLI connected for this machine"
+					: userId
+						? "No CLI connected for this user"
+						: "No CLI connected",
+			);
+		}
+
+		if (
+			params.machineId &&
+			userId &&
+			!this.cliRegistry.isMachineOwnedByUser(params.machineId, userId)
+		) {
+			throw new Error("Not authorized to access this machine");
+		}
+
+		logger.info(
+			{
+				sessionId: params.sessionId,
+				machineId: cli.machineId,
+				cwd: params.cwd,
+				userId,
+			},
+			"session_load_rpc_start",
+		);
+
+		const rpcParams: LoadSessionRpcParams = {
+			sessionId: params.sessionId,
+			cwd: params.cwd,
+		};
+		const result = await this.sendRpc<LoadSessionRpcParams, SessionSummary>(
+			cli.socket,
+			"rpc:session:load",
+			rpcParams,
+		);
+
+		// Sync session to database if machine is authenticated
+		if (cli.userId && cli.machineId) {
+			await createAcpSessionDirect({
+				userId: cli.userId,
+				machineId: cli.machineId,
+				sessionId: result.sessionId,
+				title: result.title ?? `Loaded Session`,
+				backendId: result.backendId,
+				cwd: result.cwd,
+			});
+		}
+
+		logger.info(
+			{ sessionId: result.sessionId, userId },
+			"session_load_rpc_complete",
+		);
+
+		return result;
+	}
+
+	/**
+	 * Resume an active session from the ACP agent.
+	 * This does not replay message history.
+	 * @param params - Resume session parameters
+	 * @param userId - Optional user ID for authorization
+	 * @returns The resumed session summary
+	 */
+	async resumeSession(
+		params: { sessionId: string; cwd: string; machineId?: string },
+		userId?: string,
+	): Promise<SessionSummary> {
+		const cli = params.machineId
+			? this.cliRegistry.getCliByMachineId(params.machineId)
+			: this.cliRegistry.getFirstCliForUser(userId);
+
+		if (!cli) {
+			throw new Error(
+				params.machineId
+					? "No CLI connected for this machine"
+					: userId
+						? "No CLI connected for this user"
+						: "No CLI connected",
+			);
+		}
+
+		if (
+			params.machineId &&
+			userId &&
+			!this.cliRegistry.isMachineOwnedByUser(params.machineId, userId)
+		) {
+			throw new Error("Not authorized to access this machine");
+		}
+
+		logger.info(
+			{
+				sessionId: params.sessionId,
+				machineId: cli.machineId,
+				cwd: params.cwd,
+				userId,
+			},
+			"session_resume_rpc_start",
+		);
+
+		const rpcParams: ResumeSessionRpcParams = {
+			sessionId: params.sessionId,
+			cwd: params.cwd,
+		};
+		const result = await this.sendRpc<ResumeSessionRpcParams, SessionSummary>(
+			cli.socket,
+			"rpc:session:resume",
+			rpcParams,
+		);
+
+		// Sync session to database if machine is authenticated
+		if (cli.userId && cli.machineId) {
+			await createAcpSessionDirect({
+				userId: cli.userId,
+				machineId: cli.machineId,
+				sessionId: result.sessionId,
+				title: result.title ?? `Resumed Session`,
+				backendId: result.backendId,
+				cwd: result.cwd,
+			});
+		}
+
+		logger.info(
+			{ sessionId: result.sessionId, userId },
+			"session_resume_rpc_complete",
+		);
+
 		return result;
 	}
 

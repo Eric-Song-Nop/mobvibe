@@ -92,3 +92,44 @@ export type SessionFsResourceEntry = {
 	path: string;
 	relativePath: string;
 };
+
+/** ACP session info returned from agent's session/list */
+export type AcpSessionInfo = {
+	sessionId: string;
+	cwd: string;
+	title?: string;
+	updatedAt?: string;
+};
+
+/** Agent session capabilities */
+export type AgentSessionCapabilities = {
+	list: boolean;
+	load: boolean;
+	resume: boolean;
+};
+
+/** Parameters for discovering sessions from agent */
+export type DiscoverSessionsParams = {
+	machineId?: string;
+	cwd?: string;
+};
+
+/** Result of discovering sessions */
+export type DiscoverSessionsResult = {
+	sessions: AcpSessionInfo[];
+	capabilities: AgentSessionCapabilities;
+};
+
+/** Parameters for loading a historical session */
+export type LoadSessionParams = {
+	sessionId: string;
+	cwd: string;
+	machineId?: string;
+};
+
+/** Parameters for resuming an active session */
+export type ResumeSessionParams = {
+	sessionId: string;
+	cwd: string;
+	machineId?: string;
+};

@@ -407,5 +407,148 @@ export function setupSessionRoutes(
 		},
 	);
 
+	// Discover sessions from ACP agent
+	router.get(
+		"/sessions/discover",
+		async (request: AuthenticatedRequest, response) => {
+			const userId = getUserId(request);
+			const { machineId, cwd } = request.query ?? {};
+
+			try {
+				logger.info({ userId, machineId, cwd }, "sessions_discover_request");
+				const result = await sessionRouter.discoverSessions(
+					typeof machineId === "string" ? machineId : undefined,
+					typeof cwd === "string" ? cwd : undefined,
+					userId,
+				);
+				logger.info(
+					{ userId, sessionCount: result.sessions.length },
+					"sessions_discover_success",
+				);
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				logger.error({ err: error, userId }, "sessions_discover_error");
+				if (message.includes("Not authorized")) {
+					respondError(response, buildAuthorizationError(message), 403);
+				} else if (message.includes("No CLI connected")) {
+					respondError(response, buildAuthorizationError(message), 503);
+				} else {
+					respondError(response, createInternalError("service", message));
+				}
+			}
+		},
+	);
+
+	// Load historical session from ACP agent
+	router.post(
+		"/session/load",
+		async (request: AuthenticatedRequest, response) => {
+			const { sessionId, cwd, machineId } = request.body ?? {};
+			if (typeof sessionId !== "string" || typeof cwd !== "string") {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId and cwd required"),
+					400,
+				);
+				return;
+			}
+
+			try {
+				const userId = getUserId(request);
+				logger.info(
+					{ sessionId, cwd, machineId, userId },
+					"session_load_request",
+				);
+				const session = await sessionRouter.loadSession(
+					{
+						sessionId,
+						cwd,
+						machineId: typeof machineId === "string" ? machineId : undefined,
+					},
+					userId,
+				);
+				logger.info({ sessionId, userId }, "session_load_success");
+				response.json(session);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				logger.error({ err: error, sessionId }, "session_load_error");
+				if (message.includes("Not authorized")) {
+					respondError(response, buildAuthorizationError(message), 403);
+				} else if (message.includes("No CLI connected")) {
+					respondError(response, buildAuthorizationError(message), 503);
+				} else if (message.includes("does not support")) {
+					respondError(
+						response,
+						createErrorDetail({
+							code: "CAPABILITY_NOT_SUPPORTED",
+							message,
+							retryable: false,
+							scope: "session",
+						}),
+						409,
+					);
+				} else {
+					respondError(response, createInternalError("session", message));
+				}
+			}
+		},
+	);
+
+	// Resume active session from ACP agent
+	router.post(
+		"/session/resume",
+		async (request: AuthenticatedRequest, response) => {
+			const { sessionId, cwd, machineId } = request.body ?? {};
+			if (typeof sessionId !== "string" || typeof cwd !== "string") {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId and cwd required"),
+					400,
+				);
+				return;
+			}
+
+			try {
+				const userId = getUserId(request);
+				logger.info(
+					{ sessionId, cwd, machineId, userId },
+					"session_resume_request",
+				);
+				const session = await sessionRouter.resumeSession(
+					{
+						sessionId,
+						cwd,
+						machineId: typeof machineId === "string" ? machineId : undefined,
+					},
+					userId,
+				);
+				logger.info({ sessionId, userId }, "session_resume_success");
+				response.json(session);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				logger.error({ err: error, sessionId }, "session_resume_error");
+				if (message.includes("Not authorized")) {
+					respondError(response, buildAuthorizationError(message), 403);
+				} else if (message.includes("No CLI connected")) {
+					respondError(response, buildAuthorizationError(message), 503);
+				} else if (message.includes("does not support")) {
+					respondError(
+						response,
+						createErrorDetail({
+							code: "CAPABILITY_NOT_SUPPORTED",
+							message,
+							retryable: false,
+							scope: "session",
+						}),
+						409,
+					);
+				} else {
+					respondError(response, createInternalError("session", message));
+				}
+			}
+		},
+	);
+
 	return router;
 }

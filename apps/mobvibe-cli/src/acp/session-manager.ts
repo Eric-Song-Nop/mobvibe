@@ -9,9 +9,10 @@ import type {
 	SessionNotification,
 } from "@agentclientprotocol/sdk";
 import {
-	type AcpConnectionState,
+	type AcpSessionInfo,
 	AppError,
 	createErrorDetail,
+	type DiscoverSessionsRpcResult,
 	type ErrorDetail,
 	type PermissionDecisionPayload,
 	type PermissionRequestPayload,
@@ -585,6 +586,291 @@ export class SessionManager {
 		await Promise.all(
 			sessionIds.map((sessionId) => this.closeSession(sessionId)),
 		);
+	}
+
+	/**
+	 * Discover sessions persisted by the ACP agent.
+	 * Creates a temporary connection to query sessions.
+	 * @param options Optional parameters for discovery
+	 * @returns List of discovered sessions and agent capabilities
+	 */
+	async discoverSessions(options?: {
+		cwd?: string;
+		backendId?: string;
+	}): Promise<DiscoverSessionsRpcResult> {
+		const backend = this.resolveBackend(options?.backendId);
+		const connection = new AcpConnection({
+			backend,
+			client: {
+				name: this.config.clientName,
+				version: this.config.clientVersion,
+			},
+		});
+
+		try {
+			await connection.connect();
+			const capabilities = connection.getSessionCapabilities();
+			const sessions: AcpSessionInfo[] = [];
+
+			if (capabilities.list) {
+				const agentSessions = await connection.listSessions({
+					cwd: options?.cwd,
+				});
+				for (const session of agentSessions) {
+					sessions.push({
+						sessionId: session.sessionId,
+						cwd: session.cwd,
+						title: session.title ?? undefined,
+						updatedAt: session.updatedAt ?? undefined,
+					});
+				}
+			}
+
+			logger.info(
+				{
+					backendId: backend.id,
+					sessionCount: sessions.length,
+					capabilities,
+				},
+				"sessions_discovered",
+			);
+
+			return { sessions, capabilities };
+		} finally {
+			await connection.disconnect();
+		}
+	}
+
+	/**
+	 * Load a historical session from the ACP agent.
+	 * This will replay the session's message history.
+	 * @param sessionId The session ID to load
+	 * @param cwd The working directory
+	 * @param backendId Optional backend ID
+	 * @returns The loaded session summary
+	 */
+	async loadSession(
+		sessionId: string,
+		cwd: string,
+		backendId?: string,
+	): Promise<SessionSummary> {
+		// Check if session is already loaded
+		const existing = this.sessions.get(sessionId);
+		if (existing) {
+			return this.buildSummary(existing);
+		}
+
+		const backend = this.resolveBackend(backendId);
+		const connection = new AcpConnection({
+			backend,
+			client: {
+				name: this.config.clientName,
+				version: this.config.clientVersion,
+			},
+		});
+
+		try {
+			await connection.connect();
+
+			if (!connection.supportsSessionLoad()) {
+				throw createCapabilityNotSupportedError(
+					"Agent does not support session loading",
+				);
+			}
+
+			const response = await connection.loadSession(sessionId, cwd);
+			connection.setPermissionHandler((params) =>
+				this.handlePermissionRequest(sessionId, params),
+			);
+
+			const now = new Date();
+			const agentInfo = connection.getAgentInfo();
+			const { modelId, modelName, availableModels } = resolveModelState(
+				response.modes
+					? { currentModelId: undefined, availableModels: undefined }
+					: undefined,
+			);
+			const { modeId, modeName, availableModes } = resolveModeState(
+				response.modes,
+			);
+
+			const record: SessionRecord = {
+				sessionId,
+				title: `Loaded Session`,
+				backendId: backend.id,
+				backendLabel: backend.label,
+				connection,
+				createdAt: now,
+				updatedAt: now,
+				cwd,
+				agentName: agentInfo?.title ?? agentInfo?.name,
+				modelId,
+				modelName,
+				modeId,
+				modeName,
+				availableModes,
+				availableModels,
+				availableCommands: undefined,
+			};
+
+			this.setupSessionSubscriptions(record);
+			this.sessions.set(sessionId, record);
+
+			const summary = this.buildSummary(record);
+			this.emitSessionsChanged({
+				added: [summary],
+				updated: [],
+				removed: [],
+			});
+
+			logger.info({ sessionId, backendId: backend.id }, "session_loaded");
+
+			return summary;
+		} catch (error) {
+			await connection.disconnect();
+			throw error;
+		}
+	}
+
+	/**
+	 * Resume an active session from the ACP agent.
+	 * This does not replay message history.
+	 * @param sessionId The session ID to resume
+	 * @param cwd The working directory
+	 * @param backendId Optional backend ID
+	 * @returns The resumed session summary
+	 */
+	async resumeSession(
+		sessionId: string,
+		cwd: string,
+		backendId?: string,
+	): Promise<SessionSummary> {
+		// Check if session is already loaded
+		const existing = this.sessions.get(sessionId);
+		if (existing) {
+			return this.buildSummary(existing);
+		}
+
+		const backend = this.resolveBackend(backendId);
+		const connection = new AcpConnection({
+			backend,
+			client: {
+				name: this.config.clientName,
+				version: this.config.clientVersion,
+			},
+		});
+
+		try {
+			await connection.connect();
+
+			if (!connection.supportsSessionResume()) {
+				throw createCapabilityNotSupportedError(
+					"Agent does not support session resuming",
+				);
+			}
+
+			const response = await connection.resumeSession(sessionId, cwd);
+			connection.setPermissionHandler((params) =>
+				this.handlePermissionRequest(sessionId, params),
+			);
+
+			const now = new Date();
+			const agentInfo = connection.getAgentInfo();
+			const { modelId, modelName, availableModels } = resolveModelState(
+				response.modes
+					? { currentModelId: undefined, availableModels: undefined }
+					: undefined,
+			);
+			const { modeId, modeName, availableModes } = resolveModeState(
+				response.modes,
+			);
+
+			const record: SessionRecord = {
+				sessionId,
+				title: `Resumed Session`,
+				backendId: backend.id,
+				backendLabel: backend.label,
+				connection,
+				createdAt: now,
+				updatedAt: now,
+				cwd,
+				agentName: agentInfo?.title ?? agentInfo?.name,
+				modelId,
+				modelName,
+				modeId,
+				modeName,
+				availableModes,
+				availableModels,
+				availableCommands: undefined,
+			};
+
+			this.setupSessionSubscriptions(record);
+			this.sessions.set(sessionId, record);
+
+			const summary = this.buildSummary(record);
+			this.emitSessionsChanged({
+				added: [summary],
+				updated: [],
+				removed: [],
+			});
+
+			logger.info({ sessionId, backendId: backend.id }, "session_resumed");
+
+			return summary;
+		} catch (error) {
+			await connection.disconnect();
+			throw error;
+		}
+	}
+
+	/**
+	 * Set up event subscriptions for a session record.
+	 */
+	private setupSessionSubscriptions(record: SessionRecord): void {
+		const { sessionId, connection } = record;
+
+		record.unsubscribe = connection.onSessionUpdate(
+			(notification: SessionNotification) => {
+				this.touchSession(sessionId);
+				this.sessionUpdateEmitter.emit("update", notification);
+
+				const update = notification.update;
+				if (update.sessionUpdate === "current_mode_update") {
+					record.modeId = update.currentModeId;
+					record.modeName =
+						record.availableModes?.find(
+							(mode) => mode.id === update.currentModeId,
+						)?.name ?? record.modeName;
+					return;
+				}
+				if (update.sessionUpdate === "session_info_update") {
+					if (typeof update.title === "string") {
+						record.title = update.title;
+					}
+					if (typeof update.updatedAt === "string") {
+						record.updatedAt = new Date(update.updatedAt);
+					}
+				}
+				if (update.sessionUpdate === "available_commands_update") {
+					if (update.availableCommands) {
+						record.availableCommands = update.availableCommands;
+					}
+				}
+			},
+		);
+
+		record.unsubscribeTerminal = connection.onTerminalOutput((event) => {
+			this.terminalOutputEmitter.emit("output", event);
+		});
+
+		connection.onStatusChange((status) => {
+			if (status.error) {
+				this.sessionErrorEmitter.emit("error", {
+					sessionId,
+					error: status.error,
+				});
+			}
+		});
 	}
 
 	private buildSummary(record: SessionRecord): SessionSummary {

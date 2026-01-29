@@ -589,6 +589,77 @@ export class SocketClient extends EventEmitter {
 				this.sendRpcError(request.requestId, error);
 			}
 		});
+
+		// Session discovery - list sessions from ACP agent
+		this.socket.on("rpc:sessions:discover", async (request) => {
+			try {
+				const { cwd, backendId } = request.params;
+				logger.info(
+					{ requestId: request.requestId, cwd, backendId },
+					"rpc_sessions_discover",
+				);
+				const result = await sessionManager.discoverSessions({
+					cwd,
+					backendId,
+				});
+				this.sendRpcResponse(request.requestId, result);
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+					},
+					"rpc_sessions_discover_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		// Load historical session from ACP agent
+		this.socket.on("rpc:session:load", async (request) => {
+			try {
+				const { sessionId, cwd } = request.params;
+				logger.info(
+					{ requestId: request.requestId, sessionId, cwd },
+					"rpc_session_load",
+				);
+				const session = await sessionManager.loadSession(sessionId, cwd);
+				this.sendRpcResponse(request.requestId, session);
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_session_load_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		// Resume active session from ACP agent
+		this.socket.on("rpc:session:resume", async (request) => {
+			try {
+				const { sessionId, cwd } = request.params;
+				logger.info(
+					{ requestId: request.requestId, sessionId, cwd },
+					"rpc_session_resume",
+				);
+				const session = await sessionManager.resumeSession(sessionId, cwd);
+				this.sendRpcResponse(request.requestId, session);
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_session_resume_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
 	}
 
 	private setupSessionManagerListeners() {
