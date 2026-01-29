@@ -16,3 +16,5 @@ apps/webui/public/*.wasm
 .env
 .env.local
 .env.production
+
+.claude
