@@ -117,21 +117,65 @@ jobs:
           TAURI_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           TAURI_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           TAURI_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      - name: Sign Android APK
+        run: |
+          # Find the unsigned APK
+          unsigned_apk=$(find apps/webui/src-tauri/gen/android/app/build/outputs/apk -name "*-unsigned.apk" -path "*release*" | head -1)
+          if [ -z "$unsigned_apk" ]; then
+            echo "No unsigned APK found, checking for already signed APK"
+            signed_apk=$(find apps/webui/src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -path "*release*" ! -name "*-unsigned.apk" | head -1)
+            if [ -n "$signed_apk" ]; then
+              echo "APK is already signed: $signed_apk"
+              exit 0
+            fi
+            echo "Error: No APK found"
+            exit 1
+          fi
+          
+          # Get the directory and create signed APK path
+          apk_dir=$(dirname "$unsigned_apk")
+          signed_apk="${apk_dir}/app-universal-release-signed.apk"
+          
+          # Align the APK
+          $ANDROID_SDK_ROOT/build-tools/34.0.0/zipalign -v -p 4 "$unsigned_apk" "${unsigned_apk%.apk}-aligned.apk"
+          
+          # Sign the APK
+          $ANDROID_SDK_ROOT/build-tools/34.0.0/apksigner sign \
+            --ks $HOME/release.keystore \
+            --ks-pass pass:"${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            --ks-key-alias "${{ secrets.ANDROID_KEY_ALIAS }}" \
+            --key-pass pass:"${{ secrets.ANDROID_KEY_PASSWORD }}" \
+            --out "$signed_apk" \
+            "${unsigned_apk%.apk}-aligned.apk"
+          
+          # Verify the signature
+          $ANDROID_SDK_ROOT/build-tools/34.0.0/apksigner verify "$signed_apk"
+          
+          echo "APK signed successfully: $signed_apk"
+          ls -lh "$signed_apk"
       - name: Prepare Android artifacts
         id: artifacts
         run: |
           VERSION="${{ inputs.version || 'v0.0.0' }}"
           VERSION="${VERSION#v}"  # Strip v prefix
           mkdir -p dist
-          # Copy and rename APK
-          apk=$(find apps/webui/src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -path "*release*" | head -1)
+          # Copy and rename signed APK (prefer signed over unsigned)
+          apk=$(find apps/webui/src-tauri/gen/android/app/build/outputs/apk -name "*-signed.apk" -path "*release*" | head -1)
+          if [ -z "$apk" ]; then
+            # Fallback to any APK if signed one doesn't exist
+            apk=$(find apps/webui/src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -path "*release*" ! -name "*-unsigned.apk" ! -name "*-aligned.apk" | head -1)
+          fi
           if [ -n "$apk" ]; then
             cp "$apk" "dist/mobvibe-${VERSION}.apk"
+            echo "Packaged APK: $apk"
+          else
+            echo "Warning: No signed APK found"
           fi
           # Copy and rename AAB
           aab=$(find apps/webui/src-tauri/gen/android/app/build/outputs/bundle -name "*.aab" -path "*release*" | head -1)
           if [ -n "$aab" ]; then
             cp "$aab" "dist/mobvibe-${VERSION}.aab"
+            echo "Packaged AAB: $aab"
           fi
           ls -la dist/
       - name: Upload Android artifacts
