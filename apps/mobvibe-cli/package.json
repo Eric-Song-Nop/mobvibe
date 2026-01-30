@@ -2,10 +2,10 @@
 	"name": "@mobvibe/cli",
 	"version": "0.0.0-dev",
 	"description": "CLI daemon for remote-claude (mobvibe) - connects ACP agents to the gateway",
-	"license": "MIT",
+	"license": "Apache-2.0",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/Eric-Song-Nop/mobvibe.git",
+		"url": "git+https://github.com/Eric-Song-Nop/mobvibe.git",
 		"directory": "apps/mobvibe-cli"
 	},
 	"keywords": [
@@ -23,7 +23,7 @@
 	},
 	"type": "module",
 	"bin": {
-		"mobvibe": "./bin/mobvibe.mjs"
+		"mobvibe": "bin/mobvibe.mjs"
 	},
 	"files": [
 		"dist",
