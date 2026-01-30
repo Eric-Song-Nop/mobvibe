@@ -43,8 +43,9 @@
 			},
 			"mobile": [
 				{
-					"scheme": "mobvibe",
-					"host": "auth"
+					"scheme": ["mobvibe"],
+					"host": "auth",
+					"appLink": false
 				}
 			]
 		}

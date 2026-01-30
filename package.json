@@ -1,4 +1,6 @@
 {
+	"name": "mobvibe",
+	"license": "Apache-2.0",
 	"packageManager": "pnpm@10.27.0",
 	"devDependencies": {
 		"turbo": "^2.7.4"
