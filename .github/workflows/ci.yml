@@ -87,7 +87,9 @@ jobs:
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses
       - name: Install Android SDK packages
-        run: sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;29.0.14206865"
+        run: |
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;29.0.14206865"
+          echo "ANDROID_BUILD_TOOLS_VERSION=34.0.0" >> "$GITHUB_ENV"
       - name: Configure Android NDK env
         run: |
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
@@ -118,19 +120,19 @@ jobs:
           TAURI_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           TAURI_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       - name: Sign Android APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -e  # Exit on any error
           
-          # Find the unsigned APK
-          unsigned_apk=$(find apps/webui/src-tauri/gen/android/app/build/outputs/apk -name "*-unsigned.apk" -path "*release*" | head -1)
+          # Find the unsigned APK - expect exactly one universal release APK
+          unsigned_apk=$(find apps/webui/src-tauri/gen/android/app/build/outputs/apk/universal/release -name "*-unsigned.apk" | head -1)
           if [ -z "$unsigned_apk" ]; then
-            echo "No unsigned APK found, checking for already signed APK"
-            signed_apk=$(find apps/webui/src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -path "*release*" ! -name "*-unsigned.apk" | head -1)
-            if [ -n "$signed_apk" ]; then
-              echo "APK is already signed: $signed_apk"
-              exit 0
-            fi
-            echo "Error: No APK found"
+            echo "Error: No unsigned APK found at expected location"
+            echo "Build output structure:"
+            find apps/webui/src-tauri/gen/android/app/build/outputs/apk -type f -name "*.apk" || true
             exit 1
           fi
           
@@ -140,20 +142,19 @@ jobs:
           signed_apk="${apk_dir}/app-universal-release-signed.apk"
           
           # Use the build-tools version from the install step
-          BUILD_TOOLS_VERSION="34.0.0"
-          BUILD_TOOLS_PATH="$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS_VERSION"
+          BUILD_TOOLS_PATH="$ANDROID_SDK_ROOT/build-tools/$ANDROID_BUILD_TOOLS_VERSION"
           
           # Align the APK
           echo "Aligning APK..."
           "$BUILD_TOOLS_PATH/zipalign" -v -p 4 "$unsigned_apk" "$aligned_apk"
           
-          # Sign the APK
+          # Sign the APK using environment variables for credentials
           echo "Signing APK..."
           "$BUILD_TOOLS_PATH/apksigner" sign \
             --ks "$HOME/release.keystore" \
-            --ks-pass pass:"${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
-            --ks-key-alias "${{ secrets.ANDROID_KEY_ALIAS }}" \
-            --key-pass pass:"${{ secrets.ANDROID_KEY_PASSWORD }}" \
+            --ks-pass env:KEYSTORE_PASSWORD \
+            --ks-key-alias "$KEY_ALIAS" \
+            --key-pass env:KEY_PASSWORD \
             --out "$signed_apk" \
             "$aligned_apk"
           
@@ -161,8 +162,8 @@ jobs:
           echo "Verifying APK signature..."
           "$BUILD_TOOLS_PATH/apksigner" verify "$signed_apk"
           
-          # Clean up intermediate file
-          rm -f "$aligned_apk"
+          # Clean up intermediate files
+          rm -f "$aligned_apk" "$unsigned_apk"
           
           echo "APK signed successfully: $signed_apk"
           ls -lh "$signed_apk"
