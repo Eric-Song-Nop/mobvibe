@@ -45,6 +45,11 @@ export const auth = betterAuth({
 		provider: "pg",
 		schema,
 	}),
+	account: {
+		// Skip cookie-based state validation for cross-origin OAuth flows.
+		// Database lookup still validates the state cryptographically.
+		skipStateCookieCheck: true,
+	},
 	socialProviders: {
 		github: {
 			clientId: process.env.GITHUB_CLIENT_ID as string,
