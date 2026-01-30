@@ -92,7 +92,7 @@ By default, the gateway URL is auto-detected as `{protocol}://{hostname}:3005`.
 **App Layout (`components/app/`):**
 - `AppHeader` - Status bar, file explorer toggle
 - `AppSidebar` - Session list, create button
-- `ChatMessageList` - Message display with auto-scroll
+- `ChatMessageList` - Message display
 - `ChatFooter` - Input, mode/model selectors
 - `FileExplorerDialog` - Finder-style file browser
 - `CreateSessionDialog` - New session form
@@ -158,7 +158,6 @@ Tests are located in `src/**/__tests__/`:
 
 ```bash
 pnpm test                  # Run all tests
-pnpm test auto-scroll      # Run specific test
 pnpm test --coverage       # With coverage
 ```
 

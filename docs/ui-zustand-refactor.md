@@ -21,7 +21,7 @@
   - `fileExplorerOpen`、`filePreviewPath`
 - 仍由 `App.tsx` 负责：
   - Tanstack Query 的查询/Mutation
-  - `useSessionEventSources` 与 `useMessageAutoScroll`
+  - `useSessionEventSources`
   - 业务侧衍生数据（`sessionList`、`activeSession`）
 
 ## Store 设计（草案）

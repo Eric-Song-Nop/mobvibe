@@ -16,7 +16,6 @@ import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/toaster";
 import { useMachinesQuery } from "@/hooks/useMachinesQuery";
 import { useMachinesStream } from "@/hooks/useMachinesStream";
-import { useMessageAutoScroll } from "@/hooks/useMessageAutoScroll";
 import { useSessionActivation } from "@/hooks/useSessionActivation";
 import { useSessionMutations } from "@/hooks/useSessionMutations";
 import { useSessionQueries } from "@/hooks/useSessionQueries";
@@ -231,9 +230,6 @@ function MainApp() {
 		setFileExplorerOpen(false);
 		setFilePreviewPath(undefined);
 	}, [fileExplorerAvailable, setFileExplorerOpen, setFilePreviewPath]);
-
-	const { messageListRef, endOfMessagesRef, handleMessagesScroll } =
-		useMessageAutoScroll(activeSessionId, activeSession?.messages ?? []);
 
 	const handleOpenCreateDialog = () => {
 		setDraftTitle(buildSessionTitle(sessionList, t));
@@ -496,9 +492,6 @@ function MainApp() {
 					<ChatMessageList
 						activeSession={activeSession}
 						onPermissionDecision={handlePermissionDecision}
-						messageListRef={messageListRef}
-						endOfMessagesRef={endOfMessagesRef}
-						onMessagesScroll={handleMessagesScroll}
 					/>
 					<Separator />
 					<ChatFooter

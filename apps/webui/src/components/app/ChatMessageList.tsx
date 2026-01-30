@@ -1,5 +1,4 @@
 import type { ChatSession } from "@mobvibe/core";
-import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { MessageItem } from "@/components/chat/MessageItem";
 import type { PermissionResultNotification } from "@/lib/acp";
@@ -11,17 +10,11 @@ export type ChatMessageListProps = {
 		requestId: string;
 		outcome: PermissionResultNotification["outcome"];
 	}) => void;
-	messageListRef: RefObject<HTMLDivElement | null>;
-	endOfMessagesRef: RefObject<HTMLDivElement | null>;
-	onMessagesScroll: () => void;
 };
 
 export function ChatMessageList({
 	activeSession,
 	onPermissionDecision,
-	messageListRef,
-	endOfMessagesRef,
-	onMessagesScroll,
 }: ChatMessageListProps) {
 	const { setFileExplorerOpen, setFilePreviewPath } = useUiStore();
 	const { t } = useTranslation();
@@ -47,11 +40,7 @@ export function ChatMessageList({
 							{t("chat.startConversation")}
 						</div>
 					) : null}
-					<div
-						className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-4"
-						ref={messageListRef}
-						onScroll={onMessagesScroll}
-					>
+					<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-4">
 						{activeSession?.messages.map((message) => (
 							<MessageItem
 								key={message.id}
@@ -60,7 +49,6 @@ export function ChatMessageList({
 								onOpenFilePreview={handleOpenFilePreview}
 							/>
 						))}
-						<div ref={endOfMessagesRef} />
 					</div>
 				</div>
 			</div>

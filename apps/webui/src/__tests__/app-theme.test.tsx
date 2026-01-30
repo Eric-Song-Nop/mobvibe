@@ -56,14 +56,6 @@ vi.mock("@mobvibe/core", async (importOriginal) => {
 	};
 });
 
-vi.mock("@/hooks/useMessageAutoScroll", () => ({
-	useMessageAutoScroll: () => ({
-		messageListRef: { current: null },
-		endOfMessagesRef: { current: null },
-		handleMessagesScroll: vi.fn(),
-	}),
-}));
-
 vi.mock("@/hooks/useSessionQueries", () => ({
 	useSessionQueries: () => ({
 		sessionsQuery: {
