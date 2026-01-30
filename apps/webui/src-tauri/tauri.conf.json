@@ -43,6 +43,7 @@
 			},
 			"mobile": [
 				{
+					"scheme": "mobvibe",
 					"host": "auth"
 				}
 			]

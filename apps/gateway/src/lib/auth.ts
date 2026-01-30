@@ -39,6 +39,7 @@ logger.info(
  * Better Auth instance.
  */
 export const auth = betterAuth({
+	baseURL: config.siteUrl,
 	trustedOrigins,
 	database: drizzleAdapter(db, {
 		provider: "pg",

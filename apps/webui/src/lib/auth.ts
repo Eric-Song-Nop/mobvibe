@@ -93,7 +93,10 @@ export const signIn = {
 		if (!authClient) {
 			throw new Error("Auth not configured");
 		}
-		return authClient.signIn.social({ provider });
+		return authClient.signIn.social({
+			provider,
+			callbackURL: window.location.origin + "/",
+		});
 	},
 };
 
