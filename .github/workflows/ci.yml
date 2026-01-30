@@ -119,6 +119,8 @@ jobs:
           TAURI_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       - name: Sign Android APK
         run: |
+          set -e  # Exit on any error
+          
           # Find the unsigned APK
           unsigned_apk=$(find apps/webui/src-tauri/gen/android/app/build/outputs/apk -name "*-unsigned.apk" -path "*release*" | head -1)
           if [ -z "$unsigned_apk" ]; then
@@ -134,22 +136,33 @@ jobs:
           
           # Get the directory and create signed APK path
           apk_dir=$(dirname "$unsigned_apk")
+          aligned_apk="${unsigned_apk%.apk}-aligned.apk"
           signed_apk="${apk_dir}/app-universal-release-signed.apk"
           
+          # Use the build-tools version from the install step
+          BUILD_TOOLS_VERSION="34.0.0"
+          BUILD_TOOLS_PATH="$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS_VERSION"
+          
           # Align the APK
-          $ANDROID_SDK_ROOT/build-tools/34.0.0/zipalign -v -p 4 "$unsigned_apk" "${unsigned_apk%.apk}-aligned.apk"
+          echo "Aligning APK..."
+          "$BUILD_TOOLS_PATH/zipalign" -v -p 4 "$unsigned_apk" "$aligned_apk"
           
           # Sign the APK
-          $ANDROID_SDK_ROOT/build-tools/34.0.0/apksigner sign \
-            --ks $HOME/release.keystore \
+          echo "Signing APK..."
+          "$BUILD_TOOLS_PATH/apksigner" sign \
+            --ks "$HOME/release.keystore" \
             --ks-pass pass:"${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
             --ks-key-alias "${{ secrets.ANDROID_KEY_ALIAS }}" \
             --key-pass pass:"${{ secrets.ANDROID_KEY_PASSWORD }}" \
             --out "$signed_apk" \
-            "${unsigned_apk%.apk}-aligned.apk"
+            "$aligned_apk"
           
           # Verify the signature
-          $ANDROID_SDK_ROOT/build-tools/34.0.0/apksigner verify "$signed_apk"
+          echo "Verifying APK signature..."
+          "$BUILD_TOOLS_PATH/apksigner" verify "$signed_apk"
+          
+          # Clean up intermediate file
+          rm -f "$aligned_apk"
           
           echo "APK signed successfully: $signed_apk"
           ls -lh "$signed_apk"
@@ -159,24 +172,24 @@ jobs:
           VERSION="${{ inputs.version || 'v0.0.0' }}"
           VERSION="${VERSION#v}"  # Strip v prefix
           mkdir -p dist
-          # Copy and rename signed APK (prefer signed over unsigned)
+          
+          # Find and copy signed APK (must be signed, not unsigned)
           apk=$(find apps/webui/src-tauri/gen/android/app/build/outputs/apk -name "*-signed.apk" -path "*release*" | head -1)
-          if [ -z "$apk" ]; then
-            # Fallback to any APK if signed one doesn't exist
-            apk=$(find apps/webui/src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -path "*release*" ! -name "*-unsigned.apk" ! -name "*-aligned.apk" | head -1)
-          fi
           if [ -n "$apk" ]; then
             cp "$apk" "dist/mobvibe-${VERSION}.apk"
-            echo "Packaged APK: $apk"
+            echo "Packaged signed APK: $apk"
           else
-            echo "Warning: No signed APK found"
+            echo "Error: No signed APK found. The APK signing step may have failed."
+            exit 1
           fi
+          
           # Copy and rename AAB
           aab=$(find apps/webui/src-tauri/gen/android/app/build/outputs/bundle -name "*.aab" -path "*release*" | head -1)
           if [ -n "$aab" ]; then
             cp "$aab" "dist/mobvibe-${VERSION}.aab"
             echo "Packaged AAB: $aab"
           fi
+          
           ls -la dist/
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
