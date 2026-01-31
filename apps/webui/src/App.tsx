@@ -200,6 +200,7 @@ function MainApp() {
 		handleSessionsChanged,
 		markSessionAttached,
 		markSessionDetached,
+		createLocalSession,
 	});
 
 	const { machines, selectedMachineId, setMachineCapabilities } =

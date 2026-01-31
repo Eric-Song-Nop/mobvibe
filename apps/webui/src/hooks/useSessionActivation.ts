@@ -2,6 +2,7 @@ import type { ChatMessage, ChatSession } from "@mobvibe/core";
 import { useCallback, useState } from "react";
 import { createFallbackError } from "@/lib/error-utils";
 import { useMachinesStore } from "@/lib/machines-store";
+import { gatewaySocket } from "@/lib/socket";
 import type { ChatStoreActions } from "./useSessionMutations";
 import { useSessionMutations } from "./useSessionMutations";
 
@@ -51,12 +52,14 @@ export function useSessionActivation(store: ChatStoreActions) {
 			store.setSessionLoading(session.sessionId, true);
 			const backupMessages: ChatMessage[] = [...session.messages];
 			store.clearSessionMessages(session.sessionId);
+			gatewaySocket.subscribeToSession(session.sessionId);
 
 			try {
 				await loadSessionMutation.mutateAsync(params);
 				store.setActiveSessionId(session.sessionId);
 			} catch {
 				store.restoreSessionMessages(session.sessionId, backupMessages);
+				gatewaySocket.unsubscribeFromSession(session.sessionId);
 			} finally {
 				store.setSessionLoading(session.sessionId, false);
 				setActivationState("idle");

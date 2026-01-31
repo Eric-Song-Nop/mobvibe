@@ -13,6 +13,7 @@ const mockGatewaySocket = vi.hoisted(() => ({
 	disconnect: vi.fn(),
 	subscribeToSession: vi.fn(),
 	unsubscribeFromSession: vi.fn(),
+	getSubscribedSessions: vi.fn(() => []),
 	onSessionUpdate: vi.fn(),
 	onSessionError: vi.fn(),
 	onPermissionRequest: vi.fn(),
@@ -167,7 +168,7 @@ describe("useSocket (webui)", () => {
 			},
 		);
 		mockGatewaySocket.onDisconnect.mockImplementation(
-			(handler: (reason: string) => void) => {
+			(handler: (reason: unknown) => void) => {
 				handlers.disconnect = handler;
 				return () => {
 					handlers.disconnect = undefined;
@@ -184,7 +185,7 @@ describe("useSocket (webui)", () => {
 
 	it("subscribes to sessions that are attached or loading", async () => {
 		const store = createStore();
-		const sessions = {
+		const sessions: Record<string, ChatSession> = {
 			"session-1": buildSession({ sessionId: "session-1", isAttached: true }),
 			"session-2": buildSession({ sessionId: "session-2", isLoading: true }),
 		};
@@ -206,6 +207,7 @@ describe("useSocket (webui)", () => {
 					handleSessionsChanged: store.handleSessionsChanged,
 					markSessionAttached: store.markSessionAttached,
 					markSessionDetached: store.markSessionDetached,
+					createLocalSession: store.createLocalSession,
 				}),
 			{ initialProps: { sessions } },
 		);
@@ -250,6 +252,7 @@ describe("useSocket (webui)", () => {
 				handleSessionsChanged: store.handleSessionsChanged,
 				markSessionAttached: store.markSessionAttached,
 				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
 			}),
 		);
 
@@ -292,6 +295,7 @@ describe("useSocket (webui)", () => {
 				handleSessionsChanged: store.handleSessionsChanged,
 				markSessionAttached: store.markSessionAttached,
 				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
 			}),
 		);
 

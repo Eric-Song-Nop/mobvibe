@@ -89,6 +89,10 @@ class GatewaySocket {
 		this.socket?.emit("unsubscribe:session", { sessionId });
 	}
 
+	getSubscribedSessions() {
+		return Array.from(this.subscribedSessions);
+	}
+
 	sendPermissionDecision(payload: PermissionDecisionPayload) {
 		this.socket?.emit("permission:decision", payload);
 	}

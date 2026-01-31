@@ -45,6 +45,7 @@ type UseSocketOptions = {
 	| "handleSessionsChanged"
 	| "markSessionAttached"
 	| "markSessionDetached"
+	| "createLocalSession"
 >;
 
 export function useSocket({
@@ -62,6 +63,7 @@ export function useSocket({
 	handleSessionsChanged,
 	markSessionAttached,
 	markSessionDetached,
+	createLocalSession,
 }: UseSocketOptions) {
 	const { t } = useTranslation();
 	const subscribedSessionsRef = useRef<Set<string>>(new Set());
@@ -74,8 +76,11 @@ export function useSocket({
 
 		// Session update handler
 		const handleSessionUpdate = (notification: SessionNotification) => {
-			const session = sessionsRef.current[notification.sessionId];
-			if (!session) return;
+			let session = sessionsRef.current[notification.sessionId];
+			if (!session) {
+				createLocalSession(notification.sessionId);
+				session = sessionsRef.current[notification.sessionId];
+			}
 
 			try {
 				const textChunk = extractTextChunk(notification);
@@ -87,7 +92,7 @@ export function useSocket({
 
 				const modeUpdate = extractSessionModeUpdate(notification);
 				if (modeUpdate) {
-					const modeName = session.availableModes?.find(
+					const modeName = session?.availableModes?.find(
 						(mode) => mode.id === modeUpdate.modeId,
 					)?.name;
 					updateSessionMeta(notification.sessionId, {
@@ -231,6 +236,7 @@ export function useSocket({
 		appendAssistantChunk,
 		appendUserChunk,
 		appendTerminalOutput,
+		createLocalSession,
 		handleSessionsChanged,
 		markSessionAttached,
 		markSessionDetached,
@@ -244,6 +250,12 @@ export function useSocket({
 
 	// Subscribe to sessions while attached or loading (load replays history)
 	useEffect(() => {
+		for (const sessionId of gatewaySocket.getSubscribedSessions()) {
+			if (!subscribedSessionsRef.current.has(sessionId)) {
+				subscribedSessionsRef.current.add(sessionId);
+			}
+		}
+
 		const subscribableSessions = Object.values(sessions).filter(
 			(session) => session.isAttached || session.isLoading,
 		);

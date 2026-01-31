@@ -64,7 +64,9 @@ type UseSocketOptions = {
 	) => void;
 	updateMachine: (payload: CliStatusPayload) => void;
 	markSessionAttached: (payload: SessionAttachedPayload) => void;
-	markSessionDetached: (payload: SessionDetachedPayload) => void;
+	markSessionDetached: (
+		payload: Omit<SessionDetachedPayload, "machineId"> & { machineId?: string },
+	) => void;
 	onPermissionRequest?: (payload: PermissionRequestPayload) => void;
 	onSessionError?: (payload: StreamErrorPayload) => void;
 };

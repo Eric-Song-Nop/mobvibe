@@ -13,6 +13,15 @@ vi.mock("@/lib/machines-store", () => ({
 		selector(machinesState),
 }));
 
+const mockGatewaySocket = vi.hoisted(() => ({
+	subscribeToSession: vi.fn(),
+	unsubscribeFromSession: vi.fn(),
+}));
+
+vi.mock("@/lib/socket", () => ({
+	gatewaySocket: mockGatewaySocket,
+}));
+
 const loadSessionMutation = {
 	mutateAsync: vi.fn(),
 };
@@ -77,6 +86,8 @@ describe("useSessionActivation", () => {
 	beforeEach(() => {
 		machinesState = { machines: {} };
 		loadSessionMutation.mutateAsync.mockReset();
+		mockGatewaySocket.subscribeToSession.mockReset();
+		mockGatewaySocket.unsubscribeFromSession.mockReset();
 	});
 
 	it("activates attached session without loading", async () => {

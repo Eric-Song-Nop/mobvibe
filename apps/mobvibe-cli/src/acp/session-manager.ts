@@ -366,31 +366,9 @@ export class SessionManager {
 			};
 			record.unsubscribe = connection.onSessionUpdate(
 				(notification: SessionNotification) => {
-					this.touchSession(session.sessionId);
+					record.updatedAt = new Date();
 					this.sessionUpdateEmitter.emit("update", notification);
-
-					const update = notification.update;
-					if (update.sessionUpdate === "current_mode_update") {
-						record.modeId = update.currentModeId;
-						record.modeName =
-							record.availableModes?.find(
-								(mode) => mode.id === update.currentModeId,
-							)?.name ?? record.modeName;
-						return;
-					}
-					if (update.sessionUpdate === "session_info_update") {
-						if (typeof update.title === "string") {
-							record.title = update.title;
-						}
-						if (typeof update.updatedAt === "string") {
-							record.updatedAt = new Date(update.updatedAt);
-						}
-					}
-					if (update.sessionUpdate === "available_commands_update") {
-						if (update.availableCommands) {
-							record.availableCommands = update.availableCommands;
-						}
-					}
+					this.applySessionUpdateToRecord(record, notification);
 				},
 			);
 			record.unsubscribeTerminal = connection.onTerminalOutput((event) => {
@@ -766,6 +744,20 @@ export class SessionManager {
 				);
 			}
 
+			const bufferedUpdates: SessionNotification[] = [];
+			let recordRef: SessionRecord | undefined;
+			const unsubscribe = connection.onSessionUpdate(
+				(notification: SessionNotification) => {
+					this.sessionUpdateEmitter.emit("update", notification);
+					if (recordRef) {
+						recordRef.updatedAt = new Date();
+						this.applySessionUpdateToRecord(recordRef, notification);
+					} else {
+						bufferedUpdates.push(notification);
+					}
+				},
+			);
+
 			const response = await connection.loadSession(sessionId, cwd);
 			connection.setPermissionHandler((params) =>
 				this.handlePermissionRequest(sessionId, params),
@@ -800,7 +792,13 @@ export class SessionManager {
 				availableCommands: undefined,
 			};
 
-			this.setupSessionSubscriptions(record);
+			recordRef = record;
+			record.unsubscribe = unsubscribe;
+			for (const notification of bufferedUpdates) {
+				this.applySessionUpdateToRecord(record, notification);
+			}
+
+			this.setupSessionSubscriptions(record, { skipSessionUpdates: true });
 			this.sessions.set(sessionId, record);
 
 			const summary = this.buildSummary(record);
@@ -820,41 +818,51 @@ export class SessionManager {
 		}
 	}
 
+	private applySessionUpdateToRecord(
+		record: SessionRecord,
+		notification: SessionNotification,
+	) {
+		const update = notification.update;
+		if (update.sessionUpdate === "current_mode_update") {
+			record.modeId = update.currentModeId;
+			record.modeName =
+				record.availableModes?.find((mode) => mode.id === update.currentModeId)
+					?.name ?? record.modeName;
+			return;
+		}
+		if (update.sessionUpdate === "session_info_update") {
+			if (typeof update.title === "string") {
+				record.title = update.title;
+			}
+			if (typeof update.updatedAt === "string") {
+				record.updatedAt = new Date(update.updatedAt);
+			}
+		}
+		if (update.sessionUpdate === "available_commands_update") {
+			if (update.availableCommands) {
+				record.availableCommands = update.availableCommands;
+			}
+		}
+	}
+
 	/**
 	 * Set up event subscriptions for a session record.
 	 */
-	private setupSessionSubscriptions(record: SessionRecord): void {
+	private setupSessionSubscriptions(
+		record: SessionRecord,
+		options?: { skipSessionUpdates?: boolean },
+	): void {
 		const { sessionId, connection } = record;
 
-		record.unsubscribe = connection.onSessionUpdate(
-			(notification: SessionNotification) => {
-				this.touchSession(sessionId);
-				this.sessionUpdateEmitter.emit("update", notification);
-
-				const update = notification.update;
-				if (update.sessionUpdate === "current_mode_update") {
-					record.modeId = update.currentModeId;
-					record.modeName =
-						record.availableModes?.find(
-							(mode) => mode.id === update.currentModeId,
-						)?.name ?? record.modeName;
-					return;
-				}
-				if (update.sessionUpdate === "session_info_update") {
-					if (typeof update.title === "string") {
-						record.title = update.title;
-					}
-					if (typeof update.updatedAt === "string") {
-						record.updatedAt = new Date(update.updatedAt);
-					}
-				}
-				if (update.sessionUpdate === "available_commands_update") {
-					if (update.availableCommands) {
-						record.availableCommands = update.availableCommands;
-					}
-				}
-			},
-		);
+		if (!options?.skipSessionUpdates) {
+			record.unsubscribe = connection.onSessionUpdate(
+				(notification: SessionNotification) => {
+					record.updatedAt = new Date();
+					this.sessionUpdateEmitter.emit("update", notification);
+					this.applySessionUpdateToRecord(record, notification);
+				},
+			);
+		}
 
 		record.unsubscribeTerminal = connection.onTerminalOutput((event) => {
 			this.terminalOutputEmitter.emit("output", event);

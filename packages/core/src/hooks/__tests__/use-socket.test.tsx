@@ -1,5 +1,6 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { GatewaySocket } from "../../socket/gateway-socket";
 import type { ChatSession } from "../../stores/chat-store";
 import { useSocket } from "../use-socket";
 
@@ -24,6 +25,8 @@ const gatewaySocket = {
 	onSessionAttached: vi.fn(),
 	onSessionDetached: vi.fn(),
 };
+
+const gatewaySocketTyped = gatewaySocket as unknown as GatewaySocket;
 
 const buildSession = (overrides: Partial<ChatSession> = {}): ChatSession => ({
 	sessionId: "session-1",
@@ -81,7 +84,7 @@ describe("useSocket (core)", () => {
 	});
 
 	it("subscribes to sessions that are attached or loading", async () => {
-		const sessions = {
+		const sessions: Record<string, ChatSession> = {
 			"session-1": buildSession({ sessionId: "session-1", isAttached: true }),
 			"session-2": buildSession({ sessionId: "session-2", isLoading: true }),
 		};
@@ -89,7 +92,7 @@ describe("useSocket (core)", () => {
 		const { rerender } = renderHook(
 			(props: { sessions: Record<string, ChatSession> }) =>
 				useSocket({
-					gatewaySocket,
+					gatewaySocket: gatewaySocketTyped,
 					sessions: props.sessions,
 					t: (key) => key,
 					appendAssistantChunk: vi.fn(),
@@ -135,7 +138,7 @@ describe("useSocket (core)", () => {
 
 		renderHook(() =>
 			useSocket({
-				gatewaySocket,
+				gatewaySocket: gatewaySocketTyped,
 				sessions: {},
 				t: (key) => key,
 				appendAssistantChunk: vi.fn(),
@@ -169,7 +172,7 @@ describe("useSocket (core)", () => {
 
 	it("marks attached sessions detached on socket disconnect", () => {
 		const markSessionDetached = vi.fn();
-		const sessions = {
+		const sessions: Record<string, ChatSession> = {
 			"session-1": buildSession({
 				sessionId: "session-1",
 				isAttached: true,
@@ -179,7 +182,7 @@ describe("useSocket (core)", () => {
 
 		renderHook(() =>
 			useSocket({
-				gatewaySocket,
+				gatewaySocket: gatewaySocketTyped,
 				sessions,
 				t: (key) => key,
 				appendAssistantChunk: vi.fn(),
