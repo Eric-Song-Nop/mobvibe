@@ -66,8 +66,11 @@ const io = new Server(httpServer, {
 						return;
 					}
 				}
-				// Check allowed origins
-				if (config.corsOrigins.includes(origin)) {
+				// Check allowed origins (including Tauri origins)
+				if (
+					config.corsOrigins.includes(origin) ||
+					tauriOrigins.includes(origin)
+				) {
 					callback(null, true);
 					return;
 				}

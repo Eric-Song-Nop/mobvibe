@@ -19,6 +19,7 @@ class GatewaySocket {
 	private socket: TypedSocket | null = null;
 	private subscribedSessions = new Set<string>();
 	private onConnectCallbacks = new Set<() => void>();
+	private isConnecting = false;
 
 	connect(): TypedSocket {
 		// Return existing socket if it exists (even if still connecting)
@@ -26,6 +27,7 @@ class GatewaySocket {
 			return this.socket;
 		}
 
+		this.isConnecting = true;
 		this.socket = io(`${GATEWAY_URL}/webui`, {
 			path: "/socket.io",
 			reconnection: true,
@@ -38,6 +40,7 @@ class GatewaySocket {
 		});
 
 		this.socket.on("connect", () => {
+			this.isConnecting = false;
 			console.log("[webui] Connected to gateway");
 			// Notify listeners that connection is ready
 			this.onConnectCallbacks.forEach((cb) => cb());
@@ -48,6 +51,7 @@ class GatewaySocket {
 		});
 
 		this.socket.on("connect_error", (error) => {
+			this.isConnecting = false;
 			console.error("[webui] Connection error:", error.message);
 		});
 
@@ -60,6 +64,10 @@ class GatewaySocket {
 	}
 
 	disconnect() {
+		// Don't disconnect while connecting (protects against React StrictMode race condition)
+		if (this.isConnecting) {
+			return;
+		}
 		this.socket?.disconnect();
 		this.socket = null;
 		this.subscribedSessions.clear();
