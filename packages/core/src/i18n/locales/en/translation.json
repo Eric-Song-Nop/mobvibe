@@ -217,6 +217,10 @@
 		"removeTitle": "Remove machine?",
 		"removeDescription": "This will disconnect the machine and all its sessions."
 	},
+	"workspace": {
+		"title": "Workspace",
+		"empty": "No workspaces"
+	},
 	"mobile": {
 		"settings": "Settings",
 		"gatewayUrl": "Gateway URL",

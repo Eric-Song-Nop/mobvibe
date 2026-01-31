@@ -217,6 +217,10 @@
 		"removeTitle": "移除设备？",
 		"removeDescription": "这将断开设备连接并关闭所有会话。"
 	},
+	"workspace": {
+		"title": "工作区",
+		"empty": "暂无工作区"
+	},
 	"mobile": {
 		"settings": "设置",
 		"gatewayUrl": "网关地址",

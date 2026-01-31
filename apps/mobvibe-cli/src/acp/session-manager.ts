@@ -117,6 +117,7 @@ const createCapabilityNotSupportedError = (message: string) =>
 
 export class SessionManager {
 	private sessions = new Map<string, SessionRecord>();
+	private discoveredSessions = new Map<string, AcpSessionInfo>();
 	private backendById: Map<string, AcpBackendConfig>;
 	private defaultBackendId: string;
 	private permissionRequests = new Map<string, PermissionRequestRecord>();
@@ -697,6 +698,12 @@ export class SessionManager {
 				});
 				nextCursor = response.nextCursor;
 				for (const session of response.sessions) {
+					this.discoveredSessions.set(session.sessionId, {
+						sessionId: session.sessionId,
+						cwd: session.cwd,
+						title: session.title ?? undefined,
+						updatedAt: session.updatedAt ?? undefined,
+					});
 					sessions.push({
 						sessionId: session.sessionId,
 						cwd: session.cwd,
@@ -772,10 +779,11 @@ export class SessionManager {
 			const { modeId, modeName, availableModes } = resolveModeState(
 				response.modes,
 			);
+			const discovered = this.discoveredSessions.get(sessionId);
 
 			const record: SessionRecord = {
 				sessionId,
-				title: `Loaded Session`,
+				title: discovered?.title ?? sessionId,
 				backendId: backend.id,
 				backendLabel: backend.label,
 				connection,

@@ -102,6 +102,7 @@ export type ChatSession = {
 	messages: ChatMessage[];
 	terminalOutputs: Record<string, TerminalOutputSnapshot>;
 	streamingMessageId?: string;
+	streamingMessageRole?: ChatRole;
 	sending: boolean;
 	canceling: boolean;
 	error?: ErrorDetail;
@@ -216,6 +217,7 @@ type ChatState = {
 		},
 	) => void;
 	appendAssistantChunk: (sessionId: string, content: string) => void;
+	appendUserChunk: (sessionId: string, content: string) => void;
 	addPermissionRequest: (
 		sessionId: string,
 		payload: {
@@ -436,6 +438,7 @@ const createSessionState = (
 	messages: [],
 	terminalOutputs: {},
 	streamingMessageId: undefined,
+	streamingMessageRole: undefined,
 	sending: false,
 	canceling: false,
 	error: undefined,
@@ -482,6 +485,7 @@ const sanitizeSessionForPersist = (session: ChatSession): ChatSession => ({
 	error: undefined,
 	streamError: undefined,
 	streamingMessageId: undefined,
+	streamingMessageRole: undefined,
 	isAttached: false,
 	isLoading: false,
 	attachedAt: undefined,
@@ -668,6 +672,7 @@ export const useChatStore = create<ChatState>()(
 								messages: [],
 								terminalOutputs: {},
 								streamingMessageId: undefined,
+								streamingMessageRole: undefined,
 							},
 						},
 					};
@@ -936,11 +941,12 @@ export const useChatStore = create<ChatState>()(
 				set((state: ChatState) => {
 					const session =
 						state.sessions[sessionId] ?? createSessionState(sessionId);
-					let { streamingMessageId } = session;
+					let { streamingMessageId, streamingMessageRole } = session;
 					let messages = [...session.messages];
-					if (!streamingMessageId) {
+					if (!streamingMessageId || streamingMessageRole !== "assistant") {
 						const message = createMessage("assistant", "");
 						streamingMessageId = message.id;
+						streamingMessageRole = "assistant";
 						messages = [...messages, message];
 					}
 
@@ -966,6 +972,47 @@ export const useChatStore = create<ChatState>()(
 								...session,
 								messages,
 								streamingMessageId,
+								streamingMessageRole,
+							},
+						},
+					};
+				}),
+			appendUserChunk: (sessionId, content) =>
+				set((state: ChatState) => {
+					const session =
+						state.sessions[sessionId] ?? createSessionState(sessionId);
+					let { streamingMessageId, streamingMessageRole } = session;
+					let messages = [...session.messages];
+					if (!streamingMessageId || streamingMessageRole !== "user") {
+						const message = createMessage("user", "");
+						streamingMessageId = message.id;
+						streamingMessageRole = "user";
+						messages = [...messages, message];
+					}
+
+					messages = messages.map((message: ChatMessage) => {
+						if (message.id !== streamingMessageId || !isTextMessage(message)) {
+							return message;
+						}
+						const nextContent = `${message.content}${content}`;
+						const nextBlocks = message.contentBlocks.map((block) =>
+							block.type === "text" ? { ...block, text: nextContent } : block,
+						);
+						return {
+							...message,
+							content: nextContent,
+							contentBlocks: nextBlocks,
+						};
+					});
+
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: {
+								...session,
+								messages,
+								streamingMessageId,
+								streamingMessageRole,
 							},
 						},
 					};
@@ -1155,6 +1202,7 @@ export const useChatStore = create<ChatState>()(
 								),
 
 								streamingMessageId: undefined,
+								streamingMessageRole: undefined,
 							},
 						},
 					};

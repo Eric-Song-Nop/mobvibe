@@ -33,6 +33,7 @@ type UseSocketOptions = {
 } & Pick<
 	ChatStoreActions,
 	| "appendAssistantChunk"
+	| "appendUserChunk"
 	| "updateSessionMeta"
 	| "setStreamError"
 	| "addPermissionRequest"
@@ -49,6 +50,7 @@ type UseSocketOptions = {
 export function useSocket({
 	sessions,
 	appendAssistantChunk,
+	appendUserChunk,
 	updateSessionMeta,
 	setStreamError,
 	addPermissionRequest,
@@ -79,6 +81,8 @@ export function useSocket({
 				const textChunk = extractTextChunk(notification);
 				if (textChunk?.role === "assistant") {
 					appendAssistantChunk(notification.sessionId, textChunk.text);
+				} else if (textChunk?.role === "user") {
+					appendUserChunk(notification.sessionId, textChunk.text);
 				}
 
 				const modeUpdate = extractSessionModeUpdate(notification);
@@ -225,6 +229,7 @@ export function useSocket({
 		addPermissionRequest,
 		addToolCall,
 		appendAssistantChunk,
+		appendUserChunk,
 		appendTerminalOutput,
 		handleSessionsChanged,
 		markSessionAttached,

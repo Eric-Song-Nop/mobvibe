@@ -128,6 +128,8 @@ describe("SessionSidebar", () => {
 			draftTitle: "",
 			draftBackendId: undefined,
 			draftCwd: undefined,
+			selectedWorkspaceByMachine: {},
+			expandedMachines: {},
 		});
 	});
 
@@ -152,6 +154,8 @@ describe("SessionSidebar", () => {
 		useUiStore.setState({
 			editingSessionId: "session-1",
 			editingTitle: "Updated title",
+			selectedWorkspaceByMachine: {},
+			expandedMachines: {},
 		});
 		renderSidebar([buildSession()]);
 

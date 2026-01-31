@@ -65,6 +65,7 @@ const createStore = (): ChatStoreActions =>
 		addUserMessage: vi.fn(),
 		addStatusMessage: vi.fn(),
 		appendAssistantChunk: vi.fn(),
+		appendUserChunk: vi.fn(),
 		finalizeAssistantMessage: vi.fn(),
 		addPermissionRequest: vi.fn(),
 		setPermissionDecisionState: vi.fn(),
@@ -193,6 +194,7 @@ describe("useSocket (webui)", () => {
 				useSocket({
 					sessions: props.sessions,
 					appendAssistantChunk: store.appendAssistantChunk,
+					appendUserChunk: store.appendUserChunk,
 					updateSessionMeta: store.updateSessionMeta,
 					setStreamError: store.setStreamError,
 					addPermissionRequest: store.addPermissionRequest,
@@ -236,6 +238,7 @@ describe("useSocket (webui)", () => {
 			useSocket({
 				sessions: {},
 				appendAssistantChunk: store.appendAssistantChunk,
+				appendUserChunk: store.appendUserChunk,
 				updateSessionMeta: store.updateSessionMeta,
 				setStreamError: store.setStreamError,
 				addPermissionRequest: store.addPermissionRequest,
@@ -277,6 +280,7 @@ describe("useSocket (webui)", () => {
 			useSocket({
 				sessions,
 				appendAssistantChunk: store.appendAssistantChunk,
+				appendUserChunk: store.appendUserChunk,
 				updateSessionMeta: store.updateSessionMeta,
 				setStreamError: store.setStreamError,
 				addPermissionRequest: store.addPermissionRequest,

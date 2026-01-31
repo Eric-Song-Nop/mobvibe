@@ -31,6 +31,7 @@ import { useMachinesStore } from "@/lib/machines-store";
 import { ensureNotificationPermission } from "@/lib/notifications";
 import { useUiStore } from "@/lib/ui-store";
 import { buildSessionTitle } from "@/lib/ui-utils";
+import { collectWorkspaces } from "@/lib/workspace-utils";
 import { ApiKeysPage } from "@/pages/ApiKeysPage";
 import { LoginPage } from "@/pages/LoginPage";
 
@@ -61,6 +62,7 @@ function MainApp() {
 		addUserMessage,
 		addStatusMessage,
 		appendAssistantChunk,
+		appendUserChunk,
 		finalizeAssistantMessage,
 		addPermissionRequest,
 		setPermissionDecisionState,
@@ -81,6 +83,7 @@ function MainApp() {
 		draftTitle,
 		draftBackendId,
 		draftCwd,
+		selectedWorkspaceByMachine,
 		setMobileMenuOpen,
 		setCreateDialogOpen,
 		setFileExplorerOpen,
@@ -89,6 +92,7 @@ function MainApp() {
 		setDraftTitle,
 		setDraftBackendId,
 		setDraftCwd,
+		setSelectedWorkspace,
 	} = useUiStore();
 
 	const {
@@ -133,6 +137,7 @@ function MainApp() {
 		addUserMessage,
 		addStatusMessage,
 		appendAssistantChunk,
+		appendUserChunk,
 		finalizeAssistantMessage,
 		addPermissionRequest,
 		setPermissionDecisionState,
@@ -167,6 +172,7 @@ function MainApp() {
 		addUserMessage,
 		addStatusMessage,
 		appendAssistantChunk,
+		appendUserChunk,
 		finalizeAssistantMessage,
 		addPermissionRequest,
 		setPermissionDecisionState,
@@ -182,6 +188,7 @@ function MainApp() {
 	useSocket({
 		sessions,
 		appendAssistantChunk,
+		appendUserChunk,
 		updateSessionMeta,
 		setStreamError,
 		addPermissionRequest,
@@ -200,6 +207,21 @@ function MainApp() {
 	const discoveryInFlightRef = useRef(new Set<string>());
 	const previousConnectionRef = useRef<Record<string, boolean>>({});
 
+	const workspaceList = useMemo(
+		() => collectWorkspaces(sessions, selectedMachineId),
+		[sessions, selectedMachineId],
+	);
+	const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
+	const activeWorkspaceCwd =
+		activeSession?.machineId === selectedMachineId
+			? activeSession.cwd
+			: undefined;
+	const selectedWorkspaceCwd = selectedMachineId
+		? selectedWorkspaceByMachine[selectedMachineId]
+		: undefined;
+	const effectiveWorkspaceCwd =
+		activeWorkspaceCwd ?? selectedWorkspaceCwd ?? workspaceList[0]?.cwd;
+
 	useEffect(() => {
 		const previous = previousConnectionRef.current;
 
@@ -216,10 +238,14 @@ function MainApp() {
 			if (discoveryInFlightRef.current.has(machine.machineId)) {
 				continue;
 			}
+			const workspaceCwd = selectedWorkspaceByMachine[machine.machineId];
+			if (!workspaceCwd) {
+				continue;
+			}
 
 			discoveryInFlightRef.current.add(machine.machineId);
 			discoverSessionsMutation.mutate(
-				{ machineId: machine.machineId },
+				{ machineId: machine.machineId, cwd: workspaceCwd },
 				{
 					onSuccess: (result) => {
 						setMachineCapabilities(machine.machineId, result.capabilities);
@@ -230,19 +256,32 @@ function MainApp() {
 				},
 			);
 		}
-	}, [discoverSessionsMutation, machines, setMachineCapabilities]);
+	}, [
+		discoverSessionsMutation,
+		machines,
+		selectedWorkspaceByMachine,
+		setMachineCapabilities,
+	]);
 
 	const sessionList = useMemo(() => {
 		const allSessions = Object.values(sessions);
 		const filtered = selectedMachineId
-			? allSessions.filter((s) => s.machineId === selectedMachineId)
+			? allSessions.filter((s) => {
+					if (s.machineId !== selectedMachineId) {
+						return false;
+					}
+					if (effectiveWorkspaceCwd) {
+						return s.cwd === effectiveWorkspaceCwd;
+					}
+					return true;
+				})
 			: [];
 		return filtered.sort((left, right) => {
 			const leftStamp = left.updatedAt ?? left.createdAt ?? "";
 			const rightStamp = right.updatedAt ?? right.createdAt ?? "";
 			return rightStamp.localeCompare(leftStamp);
 		});
-	}, [sessions, selectedMachineId]);
+	}, [effectiveWorkspaceCwd, sessions, selectedMachineId]);
 
 	useEffect(() => {
 		if (sessionsQuery.data?.sessions) {
@@ -255,11 +294,41 @@ function MainApp() {
 	}, []);
 
 	useEffect(() => {
-		if (activeSessionId || sessionList.length === 0) {
+		if (sessionList.length === 0) {
+			if (activeSessionId) {
+				setActiveSessionId(undefined);
+			}
 			return;
 		}
-		setActiveSessionId(sessionList[0].sessionId);
+		const isActiveInList = sessionList.some(
+			(session) => session.sessionId === activeSessionId,
+		);
+		if (!isActiveInList) {
+			setActiveSessionId(sessionList[0].sessionId);
+		}
 	}, [activeSessionId, sessionList, setActiveSessionId]);
+
+	useEffect(() => {
+		if (!activeSession?.machineId || !activeSession.cwd) {
+			return;
+		}
+		setSelectedWorkspace(activeSession.machineId, activeSession.cwd);
+	}, [activeSession?.cwd, activeSession?.machineId, setSelectedWorkspace]);
+
+	useEffect(() => {
+		if (!selectedMachineId) {
+			return;
+		}
+		if (selectedWorkspaceCwd || workspaceList.length === 0) {
+			return;
+		}
+		setSelectedWorkspace(selectedMachineId, workspaceList[0].cwd);
+	}, [
+		selectedMachineId,
+		selectedWorkspaceCwd,
+		setSelectedWorkspace,
+		workspaceList,
+	]);
 
 	useEffect(() => {
 		if (!createDialogOpen) {
@@ -270,7 +339,6 @@ function MainApp() {
 		}
 	}, [createDialogOpen, defaultBackendId, draftBackendId, setDraftBackendId]);
 
-	const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
 	const fileExplorerAvailable = Boolean(activeSessionId && activeSession?.cwd);
 
 	useEffect(() => {

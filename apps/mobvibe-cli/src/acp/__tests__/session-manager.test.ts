@@ -170,7 +170,7 @@ describe("SessionManager", () => {
 			);
 
 			expect(result.sessionId).toBe("session-to-load");
-			expect(result.title).toBe("Loaded Session");
+			expect(result.title).toBe("session-to-load");
 			expect(result.cwd).toBe("/home/user/project");
 			expect(result.sessionId).toBeDefined();
 		});

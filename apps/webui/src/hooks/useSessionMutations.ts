@@ -99,6 +99,7 @@ export interface ChatStoreActions {
 	) => void;
 	addStatusMessage: (sessionId: string, status: StatusPayload) => void;
 	appendAssistantChunk: (sessionId: string, text: string) => void;
+	appendUserChunk: (sessionId: string, text: string) => void;
 	finalizeAssistantMessage: (sessionId: string) => void;
 	addPermissionRequest: (
 		sessionId: string,
@@ -358,7 +359,6 @@ export function useSessionMutations(store: ChatStoreActions) {
 		mutationFn: loadSession,
 		onSuccess: (data) => {
 			store.updateSessionMeta(data.sessionId, {
-				title: data.title,
 				updatedAt: data.updatedAt,
 				cwd: data.cwd,
 				agentName: data.agentName,

@@ -722,7 +722,7 @@ export class SessionRouter {
 				userId: cli.userId,
 				machineId: cli.machineId,
 				sessionId: result.sessionId,
-				title: result.title ?? `Loaded Session`,
+				title: result.title ?? result.sessionId,
 				backendId: result.backendId,
 				cwd: result.cwd,
 			});

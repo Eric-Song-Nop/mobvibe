@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RegisterMachineDialog } from "@/components/machines/RegisterMachineDialog";
+import { MachineWorkspaces } from "@/components/machines/MachineWorkspaces";
 import { SessionSidebar } from "@/components/session/SessionSidebar";
 import { Button } from "@/components/ui/button";
 import {
@@ -97,6 +98,11 @@ function MobileMachineColumn() {
 	const queryClient = useQueryClient();
 	const discoverSessionsMutation = useDiscoverSessionsMutation();
 	const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
+	const {
+		selectedWorkspaceByMachine,
+		expandedMachines,
+		toggleMachineExpanded,
+	} = useUiStore();
 
 	const machineList = Object.values(machines).sort((a, b) => {
 		if (a.connected !== b.connected) {
@@ -114,8 +120,13 @@ function MobileMachineColumn() {
 
 		await Promise.allSettled(
 			connectedMachineIds.map(async (machineId) => {
+				const cwd = selectedWorkspaceByMachine[machineId];
+				if (!cwd) {
+					return;
+				}
 				const result = await discoverSessionsMutation.mutateAsync({
 					machineId,
+					cwd,
 				});
 				setMachineCapabilities(machineId, result.capabilities);
 			}),
@@ -151,14 +162,29 @@ function MobileMachineColumn() {
 						</div>
 					) : null}
 
-					{machineList.map((machine) => (
-						<MachineIcon
-							key={machine.machineId}
-							machine={machine}
-							isSelected={machine.machineId === selectedMachineId}
-							onSelect={() => setSelectedMachineId(machine.machineId)}
-						/>
-					))}
+					{machineList.map((machine) => {
+						const isExpanded = Boolean(expandedMachines[machine.machineId]);
+						return (
+							<div
+								key={machine.machineId}
+								className="flex flex-col items-center gap-1"
+							>
+								<MachineIcon
+									machine={machine}
+									isSelected={machine.machineId === selectedMachineId}
+									isExpanded={isExpanded}
+									onSelect={() => {
+										setSelectedMachineId(machine.machineId);
+										toggleMachineExpanded(machine.machineId);
+									}}
+								/>
+								<MachineWorkspaces
+									machineId={machine.machineId}
+									isExpanded={isExpanded}
+								/>
+							</div>
+						);
+					})}
 				</div>
 
 				<Tooltip>
@@ -182,10 +208,16 @@ function MobileMachineColumn() {
 type MachineIconProps = {
 	machine: Machine;
 	isSelected: boolean;
+	isExpanded?: boolean;
 	onSelect: () => void;
 };
 
-function MachineIcon({ machine, isSelected, onSelect }: MachineIconProps) {
+function MachineIcon({
+	machine,
+	isSelected,
+	isExpanded,
+	onSelect,
+}: MachineIconProps) {
 	const { t } = useTranslation();
 	const displayName = machine.hostname ?? machine.machineId.slice(0, 8);
 	const initials = displayName.slice(0, 2).toUpperCase();
@@ -196,11 +228,13 @@ function MachineIcon({ machine, isSelected, onSelect }: MachineIconProps) {
 				<button
 					type="button"
 					onClick={onSelect}
+					aria-expanded={isExpanded}
 					className={cn(
 						"relative flex h-10 w-10 items-center justify-center rounded-sm border transition-colors",
 						isSelected
 							? "border-primary bg-primary/10 text-primary"
 							: "border-border bg-background hover:bg-muted text-foreground",
+						isExpanded && !isSelected && "border-primary/40",
 						!machine.connected && "opacity-50",
 					)}
 				>

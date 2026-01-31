@@ -26,6 +26,7 @@ type UseSocketOptions = {
 	sessions: Record<string, ChatSession>;
 	t: (key: string) => string;
 	appendAssistantChunk: (sessionId: string, text: string) => void;
+	appendUserChunk: (sessionId: string, text: string) => void;
 	updateSessionMeta: (sessionId: string, payload: Partial<ChatSession>) => void;
 	setStreamError: (
 		sessionId: string,
@@ -73,6 +74,7 @@ export function useSocket({
 	sessions,
 	t,
 	appendAssistantChunk,
+	appendUserChunk,
 	updateSessionMeta,
 	setStreamError,
 	addPermissionRequest,
@@ -104,6 +106,8 @@ export function useSocket({
 				const textChunk = extractTextChunk(notification);
 				if (textChunk?.role === "assistant") {
 					appendAssistantChunk(notification.sessionId, textChunk.text);
+				} else if (textChunk?.role === "user") {
+					appendUserChunk(notification.sessionId, textChunk.text);
 				}
 
 				const modeUpdate = extractSessionModeUpdate(notification);
@@ -248,7 +252,8 @@ export function useSocket({
 		gatewaySocket,
 		addPermissionRequest,
 		addToolCall,
-		appendAssistantChunk,
+	appendAssistantChunk,
+	appendUserChunk,
 		appendTerminalOutput,
 		markSessionAttached,
 		markSessionDetached,

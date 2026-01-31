@@ -181,7 +181,7 @@ describe("SessionRouter", () => {
 
 			const mockSession = createMockSessionSummary({
 				sessionId: "loaded-session-1",
-				title: "Loaded Session",
+				title: "Session Title",
 				cwd: "/home/user/project",
 			});
 
@@ -206,7 +206,7 @@ describe("SessionRouter", () => {
 			);
 
 			expect(result.sessionId).toBe("loaded-session-1");
-			expect(result.title).toBe("Loaded Session");
+			expect(result.title).toBe("Session Title");
 			expect(socket.emit).toHaveBeenCalledWith(
 				"rpc:session:load",
 				expect.objectContaining({

@@ -10,6 +10,8 @@ type UiState = {
 	draftTitle: string;
 	draftBackendId?: string;
 	draftCwd?: string;
+	selectedWorkspaceByMachine: Record<string, string>;
+	expandedMachines: Record<string, boolean>;
 	setMobileMenuOpen: (open: boolean) => void;
 	setCreateDialogOpen: (open: boolean) => void;
 	setFileExplorerOpen: (open: boolean) => void;
@@ -20,6 +22,9 @@ type UiState = {
 	setDraftTitle: (value: string) => void;
 	setDraftBackendId: (value?: string) => void;
 	setDraftCwd: (value?: string) => void;
+	setSelectedWorkspace: (machineId: string, cwd?: string) => void;
+	setMachineExpanded: (machineId: string, expanded: boolean) => void;
+	toggleMachineExpanded: (machineId: string) => void;
 };
 
 export const useUiStore = create<UiState>((set) => ({
@@ -32,6 +37,8 @@ export const useUiStore = create<UiState>((set) => ({
 	draftTitle: "",
 	draftBackendId: undefined,
 	draftCwd: undefined,
+	selectedWorkspaceByMachine: {},
+	expandedMachines: {},
 	setMobileMenuOpen: (open) => set({ mobileMenuOpen: open }),
 	setCreateDialogOpen: (open) => set({ createDialogOpen: open }),
 	setFileExplorerOpen: (open) =>
@@ -47,4 +54,25 @@ export const useUiStore = create<UiState>((set) => ({
 	setDraftTitle: (value) => set({ draftTitle: value }),
 	setDraftBackendId: (value) => set({ draftBackendId: value }),
 	setDraftCwd: (value) => set({ draftCwd: value }),
+	setSelectedWorkspace: (machineId, cwd) =>
+		set((state) => {
+			const next = { ...state.selectedWorkspaceByMachine };
+			if (cwd) {
+				next[machineId] = cwd;
+			} else {
+				delete next[machineId];
+			}
+			return { selectedWorkspaceByMachine: next };
+		}),
+	setMachineExpanded: (machineId, expanded) =>
+		set((state) => ({
+			expandedMachines: { ...state.expandedMachines, [machineId]: expanded },
+		})),
+	toggleMachineExpanded: (machineId) =>
+		set((state) => ({
+			expandedMachines: {
+				...state.expandedMachines,
+				[machineId]: !state.expandedMachines[machineId],
+			},
+		})),
 }));
