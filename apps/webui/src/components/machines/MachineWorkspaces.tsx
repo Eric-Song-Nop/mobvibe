@@ -1,7 +1,9 @@
 import { type ChatSession, useChatStore } from "@mobvibe/core";
-import { useMemo } from "react";
+import { useQueries } from "@tanstack/react-query";
+import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useDiscoverSessionsMutation } from "@/hooks/useSessionQueries";
+import { fetchFsEntries } from "@/lib/api";
 import { useMachinesStore } from "@/lib/machines-store";
 import { useUiStore } from "@/lib/ui-store";
 import { cn } from "@/lib/utils";
@@ -35,7 +37,8 @@ export function MachineWorkspaces({
 }: MachineWorkspacesProps) {
 	const { t } = useTranslation();
 	const { sessions, activeSessionId, setActiveSessionId } = useChatStore();
-	const { setSelectedMachineId, setMachineCapabilities } = useMachinesStore();
+	const { machines, setSelectedMachineId, setMachineCapabilities } =
+		useMachinesStore();
 	const {
 		selectedWorkspaceByMachine,
 		setSelectedWorkspace,
@@ -47,11 +50,61 @@ export function MachineWorkspaces({
 		() => collectWorkspaces(sessions, machineId),
 		[sessions, machineId],
 	);
+	const machine = machines[machineId];
+	const canValidateWorkspaces = Boolean(isExpanded && machine?.connected);
+	const workspaceValidityQueries = useQueries({
+		queries: canValidateWorkspaces
+			? workspaceList.map((workspace) => ({
+					queryKey: ["fs-entries", machineId, workspace.cwd],
+					queryFn: () => fetchFsEntries({ path: workspace.cwd, machineId }),
+					retry: false,
+					staleTime: 60_000,
+				}))
+			: [],
+	});
+	const validWorkspaces = useMemo(() => {
+		if (!canValidateWorkspaces) {
+			return [];
+		}
+		return workspaceList.filter(
+			(workspace, index) => workspaceValidityQueries[index]?.isSuccess,
+		);
+	}, [canValidateWorkspaces, workspaceList, workspaceValidityQueries]);
+	const isValidating =
+		canValidateWorkspaces &&
+		workspaceValidityQueries.some((query) => query.isFetching);
 	const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
 	const activeWorkspaceCwd =
 		activeSession?.machineId === machineId ? activeSession.cwd : undefined;
 	const selectedWorkspaceCwd = selectedWorkspaceByMachine[machineId];
 	const effectiveWorkspaceCwd = activeWorkspaceCwd ?? selectedWorkspaceCwd;
+
+	useEffect(() => {
+		if (!canValidateWorkspaces || !selectedWorkspaceCwd) {
+			return;
+		}
+		const workspaceIndex = workspaceList.findIndex(
+			(workspace) => workspace.cwd === selectedWorkspaceCwd,
+		);
+		if (workspaceIndex === -1) {
+			setSelectedWorkspace(machineId, undefined);
+			return;
+		}
+		const query = workspaceValidityQueries[workspaceIndex];
+		if (!query || query.isFetching) {
+			return;
+		}
+		if (query.isError) {
+			setSelectedWorkspace(machineId, undefined);
+		}
+	}, [
+		canValidateWorkspaces,
+		machineId,
+		selectedWorkspaceCwd,
+		setSelectedWorkspace,
+		workspaceList,
+		workspaceValidityQueries,
+	]);
 
 	if (!isExpanded) {
 		return null;
@@ -85,7 +138,11 @@ export function MachineWorkspaces({
 
 	return (
 		<div className={cn("flex flex-col items-center gap-1", className)}>
-			{workspaceList.length === 0 ? (
+			{isValidating && validWorkspaces.length === 0 ? (
+				<div className="text-muted-foreground text-[10px] text-center px-1">
+					{t("common.loading")}
+				</div>
+			) : validWorkspaces.length === 0 ? (
 				<button
 					type="button"
 					onClick={handleEmptyClick}
@@ -94,7 +151,7 @@ export function MachineWorkspaces({
 					{t("workspace.empty")}
 				</button>
 			) : (
-				workspaceList.map((workspace) => {
+				validWorkspaces.map((workspace) => {
 					const isActive = workspace.cwd === effectiveWorkspaceCwd;
 					const initials = getWorkspaceInitials(workspace.label);
 					return (

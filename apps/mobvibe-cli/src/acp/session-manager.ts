@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import fs from "node:fs/promises";
 import type {
 	AvailableCommand,
 	RequestPermissionRequest,
@@ -114,6 +115,15 @@ const createCapabilityNotSupportedError = (message: string) =>
 		}),
 		409,
 	);
+
+const isValidWorkspacePath = async (cwd: string): Promise<boolean> => {
+	try {
+		const stats = await fs.stat(cwd);
+		return stats.isDirectory();
+	} catch {
+		return false;
+	}
+};
 
 export class SessionManager {
 	private sessions = new Map<string, SessionRecord>();
@@ -675,7 +685,19 @@ export class SessionManager {
 					cursor: options?.cursor,
 				});
 				nextCursor = response.nextCursor;
-				for (const session of response.sessions) {
+				const validity = await Promise.all(
+					response.sessions.map(async (session) => ({
+						session,
+						isValid: session.cwd
+							? await isValidWorkspacePath(session.cwd)
+							: false,
+					})),
+				);
+				for (const { session, isValid } of validity) {
+					if (!isValid) {
+						this.discoveredSessions.delete(session.sessionId);
+						continue;
+					}
 					this.discoveredSessions.set(session.sessionId, {
 						sessionId: session.sessionId,
 						cwd: session.cwd,

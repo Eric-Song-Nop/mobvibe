@@ -2,6 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CliConfig } from "../../config.js";
 import { SessionManager } from "../session-manager.js";
 
+vi.mock("node:fs/promises", () => ({
+	default: {
+		stat: vi.fn().mockResolvedValue({ isDirectory: () => true }),
+	},
+}));
+
 // Mock the AcpConnection class
 vi.mock("../acp-connection.js", () => ({
 	AcpConnection: vi.fn().mockImplementation(() => ({
