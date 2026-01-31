@@ -1,6 +1,6 @@
 import { useBetterAuthTauri } from "@daveyplate/better-auth-tauri/react";
 import { useChatStore } from "@mobvibe/core";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { AppHeader } from "@/components/app/AppHeader";
@@ -30,7 +30,7 @@ import {
 import { useMachinesStore } from "@/lib/machines-store";
 import { ensureNotificationPermission } from "@/lib/notifications";
 import { useUiStore } from "@/lib/ui-store";
-import { buildSessionTitle, getStatusVariant } from "@/lib/ui-utils";
+import { buildSessionTitle } from "@/lib/ui-utils";
 import { ApiKeysPage } from "@/pages/ApiKeysPage";
 import { LoginPage } from "@/pages/LoginPage";
 
@@ -44,6 +44,9 @@ function MainApp() {
 		setActiveSessionId,
 		setAppError,
 		setLastCreatedCwd,
+		setSessionLoading,
+		markSessionAttached,
+		markSessionDetached,
 		createLocalSession,
 		syncSessions,
 		removeSession,
@@ -88,8 +91,13 @@ function MainApp() {
 		setDraftCwd,
 	} = useUiStore();
 
-	const { sessionsQuery, backendsQuery, availableBackends, defaultBackendId } =
-		useSessionQueries();
+	const {
+		sessionsQuery,
+		backendsQuery,
+		availableBackends,
+		defaultBackendId,
+		discoverSessionsMutation,
+	} = useSessionQueries();
 	useMachinesQuery();
 	useMachinesStream();
 
@@ -107,6 +115,9 @@ function MainApp() {
 		sessions,
 		setActiveSessionId,
 		setLastCreatedCwd,
+		setSessionLoading,
+		markSessionAttached,
+		markSessionDetached,
 		createLocalSession,
 		syncSessions,
 		removeSession,
@@ -138,6 +149,9 @@ function MainApp() {
 		sessions,
 		setActiveSessionId,
 		setLastCreatedCwd,
+		setSessionLoading,
+		markSessionAttached,
+		markSessionDetached,
 		createLocalSession,
 		syncSessions,
 		removeSession,
@@ -177,9 +191,46 @@ function MainApp() {
 		updateToolCall,
 		appendTerminalOutput,
 		handleSessionsChanged,
+		markSessionAttached,
+		markSessionDetached,
 	});
 
-	const { selectedMachineId } = useMachinesStore();
+	const { machines, selectedMachineId, setMachineCapabilities } =
+		useMachinesStore();
+	const discoveryInFlightRef = useRef(new Set<string>());
+	const previousConnectionRef = useRef<Record<string, boolean>>({});
+
+	useEffect(() => {
+		const previous = previousConnectionRef.current;
+
+		for (const machine of Object.values(machines)) {
+			const wasConnected = previous[machine.machineId];
+			previous[machine.machineId] = machine.connected;
+
+			if (!machine.connected) {
+				continue;
+			}
+			if (machine.lastCapabilitiesAt && wasConnected) {
+				continue;
+			}
+			if (discoveryInFlightRef.current.has(machine.machineId)) {
+				continue;
+			}
+
+			discoveryInFlightRef.current.add(machine.machineId);
+			discoverSessionsMutation.mutate(
+				{ machineId: machine.machineId },
+				{
+					onSuccess: (result) => {
+						setMachineCapabilities(machine.machineId, result.capabilities);
+					},
+					onSettled: () => {
+						discoveryInFlightRef.current.delete(machine.machineId);
+					},
+				},
+			);
+		}
+	}, [discoverSessionsMutation, machines, setMachineCapabilities]);
 
 	const sessionList = useMemo(() => {
 		const allSessions = Object.values(sessions);
@@ -220,7 +271,6 @@ function MainApp() {
 	}, [createDialogOpen, defaultBackendId, draftBackendId, setDraftBackendId]);
 
 	const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
-	const activeSessionState = activeSession?.state;
 	const fileExplorerAvailable = Boolean(activeSessionId && activeSession?.cwd);
 
 	useEffect(() => {
@@ -301,7 +351,7 @@ function MainApp() {
 		if (!activeSessionId || !activeSession) {
 			return;
 		}
-		if (activeSession.state !== "ready") {
+		if (!activeSession.isAttached) {
 			setError(activeSessionId, buildSessionNotReadyError());
 			return;
 		}
@@ -316,7 +366,7 @@ function MainApp() {
 		if (!activeSessionId || !activeSession) {
 			return;
 		}
-		if (activeSession.state !== "ready") {
+		if (!activeSession.isAttached) {
 			setError(activeSessionId, buildSessionNotReadyError());
 			return;
 		}
@@ -331,7 +381,7 @@ function MainApp() {
 		if (!activeSessionId || !activeSession) {
 			return;
 		}
-		if (activeSession.state !== "ready") {
+		if (!activeSession.isAttached) {
 			setError(activeSessionId, buildSessionNotReadyError());
 			return;
 		}
@@ -349,7 +399,7 @@ function MainApp() {
 		if (!activeSession.sending || activeSession.canceling) {
 			return;
 		}
-		if (activeSession.state !== "ready") {
+		if (!activeSession.isAttached) {
 			setError(activeSessionId, buildSessionNotReadyError());
 			return;
 		}
@@ -364,7 +414,7 @@ function MainApp() {
 		if (!promptContents.length || activeSession.sending) {
 			return;
 		}
-		if (activeSession.state !== "ready") {
+		if (!activeSession.isAttached) {
 			setError(activeSessionId, buildSessionNotReadyError());
 			return;
 		}
@@ -394,11 +444,6 @@ function MainApp() {
 			prompt: promptContents,
 		});
 	};
-
-	const statusVariant = getStatusVariant(activeSessionState);
-	const statusLabel = t(`status.${activeSessionState ?? "idle"}`, {
-		defaultValue: activeSessionState ?? "idle",
-	});
 
 	const statusMessage = useMemo(() => {
 		if (backendsQuery.isError) {
@@ -480,8 +525,6 @@ function MainApp() {
 
 				<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
 					<AppHeader
-						statusVariant={statusVariant}
-						statusLabel={statusLabel}
 						backendLabel={backendLabel}
 						statusMessage={statusMessage}
 						streamError={streamError}

@@ -182,16 +182,25 @@ export class SocketClient extends EventEmitter {
 
 			// Auto-discover historical sessions from ACP agent
 			try {
-				const { sessions, capabilities } =
-					await this.options.sessionManager.discoverSessions();
-
-				if (sessions.length > 0) {
-					this.socket.emit("sessions:discovered", { sessions, capabilities });
-					logger.info(
-						{ count: sessions.length, capabilities },
-						"historical_sessions_discovered",
-					);
-				}
+				let cursor: string | undefined;
+				let page = 0;
+				do {
+					const { sessions, capabilities, nextCursor } =
+						await this.options.sessionManager.discoverSessions({ cursor });
+					cursor = nextCursor;
+					if (sessions.length > 0) {
+						this.socket.emit("sessions:discovered", {
+							sessions,
+							capabilities,
+							nextCursor,
+						});
+						logger.info(
+							{ count: sessions.length, capabilities, page },
+							"historical_sessions_discovered",
+						);
+					}
+					page += 1;
+				} while (cursor);
 			} catch (error) {
 				logger.warn({ err: error }, "session_discovery_failed");
 			}
@@ -609,14 +618,15 @@ export class SocketClient extends EventEmitter {
 		// Session discovery - list sessions from ACP agent
 		this.socket.on("rpc:sessions:discover", async (request) => {
 			try {
-				const { cwd, backendId } = request.params;
+				const { cwd, backendId, cursor } = request.params;
 				logger.info(
-					{ requestId: request.requestId, cwd, backendId },
+					{ requestId: request.requestId, cwd, backendId, cursor },
 					"rpc_sessions_discover",
 				);
 				const result = await sessionManager.discoverSessions({
 					cwd,
 					backendId,
+					cursor,
 				});
 				this.sendRpcResponse(request.requestId, result);
 			} catch (error) {
@@ -654,28 +664,6 @@ export class SocketClient extends EventEmitter {
 			}
 		});
 
-		// Resume active session from ACP agent
-		this.socket.on("rpc:session:resume", async (request) => {
-			try {
-				const { sessionId, cwd } = request.params;
-				logger.info(
-					{ requestId: request.requestId, sessionId, cwd },
-					"rpc_session_resume",
-				);
-				const session = await sessionManager.resumeSession(sessionId, cwd);
-				this.sendRpcResponse(request.requestId, session);
-			} catch (error) {
-				logger.error(
-					{
-						err: error,
-						requestId: request.requestId,
-						sessionId: request.params.sessionId,
-					},
-					"rpc_session_resume_error",
-				);
-				this.sendRpcError(request.requestId, error);
-			}
-		});
 	}
 
 	private setupSessionManagerListeners() {
@@ -726,6 +714,18 @@ export class SocketClient extends EventEmitter {
 					"sessions_changed_emit",
 				);
 				this.socket.emit("sessions:changed", payload);
+			}
+		});
+
+		sessionManager.onSessionAttached((payload) => {
+			if (this.connected) {
+				this.socket.emit("session:attached", payload);
+			}
+		});
+
+		sessionManager.onSessionDetached((payload) => {
+			if (this.connected) {
+				this.socket.emit("session:detached", payload);
 			}
 		});
 	}

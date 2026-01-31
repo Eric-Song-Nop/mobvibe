@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { SessionSummary } from "@mobvibe/shared";
 import {
 	createErrorDetail,
 	createInternalError,
@@ -412,7 +413,7 @@ export function setupSessionRoutes(
 		"/sessions/discover",
 		async (request: AuthenticatedRequest, response) => {
 			const userId = getUserId(request);
-			const { machineId, cwd } = request.query ?? {};
+			const { machineId, cwd, cursor } = request.query ?? {};
 
 			try {
 				logger.info({ userId, machineId, cwd }, "sessions_discover_request");
@@ -420,9 +421,35 @@ export function setupSessionRoutes(
 					typeof machineId === "string" ? machineId : undefined,
 					typeof cwd === "string" ? cwd : undefined,
 					userId,
+					typeof cursor === "string" ? cursor : undefined,
 				);
+				if (typeof machineId === "string") {
+					const cli = cliRegistry.getCliByMachineId(machineId);
+					if (cli) {
+						const summaries: SessionSummary[] = result.sessions.map((s) => ({
+							sessionId: s.sessionId,
+							title: s.title ?? `Session ${s.sessionId.slice(0, 8)}`,
+							cwd: s.cwd,
+							updatedAt: s.updatedAt ?? new Date().toISOString(),
+							createdAt: s.updatedAt ?? new Date().toISOString(),
+							backendId: cli.defaultBackendId ?? "",
+							backendLabel:
+								cli.backends[0]?.backendLabel ?? cli.defaultBackendId ?? "",
+							machineId: cli.machineId,
+						}));
+						cliRegistry.addDiscoveredSessionsForMachine(
+							cli.machineId,
+							summaries,
+							userId,
+						);
+					}
+				}
 				logger.info(
-					{ userId, sessionCount: result.sessions.length },
+					{
+						userId,
+						sessionCount: result.sessions.length,
+						nextCursor: result.nextCursor,
+					},
 					"sessions_discover_success",
 				);
 				response.json(result);
@@ -473,61 +500,6 @@ export function setupSessionRoutes(
 			} catch (error) {
 				const message = getErrorMessage(error);
 				logger.error({ err: error, sessionId }, "session_load_error");
-				if (message.includes("Not authorized")) {
-					respondError(response, buildAuthorizationError(message), 403);
-				} else if (message.includes("No CLI connected")) {
-					respondError(response, buildAuthorizationError(message), 503);
-				} else if (message.includes("does not support")) {
-					respondError(
-						response,
-						createErrorDetail({
-							code: "CAPABILITY_NOT_SUPPORTED",
-							message,
-							retryable: false,
-							scope: "session",
-						}),
-						409,
-					);
-				} else {
-					respondError(response, createInternalError("session", message));
-				}
-			}
-		},
-	);
-
-	// Resume active session from ACP agent
-	router.post(
-		"/session/resume",
-		async (request: AuthenticatedRequest, response) => {
-			const { sessionId, cwd, machineId } = request.body ?? {};
-			if (typeof sessionId !== "string" || typeof cwd !== "string") {
-				respondError(
-					response,
-					buildRequestValidationError("sessionId and cwd required"),
-					400,
-				);
-				return;
-			}
-
-			try {
-				const userId = getUserId(request);
-				logger.info(
-					{ sessionId, cwd, machineId, userId },
-					"session_resume_request",
-				);
-				const session = await sessionRouter.resumeSession(
-					{
-						sessionId,
-						cwd,
-						machineId: typeof machineId === "string" ? machineId : undefined,
-					},
-					userId,
-				);
-				logger.info({ sessionId, userId }, "session_resume_success");
-				response.json(session);
-			} catch (error) {
-				const message = getErrorMessage(error);
-				logger.error({ err: error, sessionId }, "session_resume_error");
 				if (message.includes("Not authorized")) {
 					respondError(response, buildAuthorizationError(message), 403);
 				} else if (message.includes("No CLI connected")) {

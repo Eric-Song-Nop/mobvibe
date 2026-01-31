@@ -9,6 +9,7 @@ import { useSessionQueries } from "../useSessionQueries";
 vi.mock("@/lib/api", () => ({
 	fetchSessions: vi.fn(),
 	fetchAcpBackends: vi.fn(),
+	discoverSessions: vi.fn(),
 }));
 
 describe("useSessionQueries", () => {
@@ -49,7 +50,6 @@ describe("useSessionQueries", () => {
 				{
 					sessionId: "session-1",
 					title: "Test Session",
-					state: "ready",
 					backendId: "backend-1",
 					backendLabel: "Backend 1",
 					createdAt: "2025-01-01T00:00:00Z",

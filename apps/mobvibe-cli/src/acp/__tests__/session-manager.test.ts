@@ -27,29 +27,26 @@ vi.mock("../acp-connection.js", () => ({
 		getSessionCapabilities: vi.fn().mockReturnValue({
 			list: true,
 			load: true,
-			resume: true,
 		}),
 		supportsSessionList: vi.fn().mockReturnValue(true),
 		supportsSessionLoad: vi.fn().mockReturnValue(true),
-		supportsSessionResume: vi.fn().mockReturnValue(true),
-		listSessions: vi.fn().mockResolvedValue([
-			{
-				sessionId: "discovered-1",
-				cwd: "/home/user/project1",
-				title: "Project 1",
-				updatedAt: new Date().toISOString(),
-			},
-			{
-				sessionId: "discovered-2",
-				cwd: "/home/user/project2",
-				title: "Project 2",
-			},
-		]),
-		loadSession: vi.fn().mockResolvedValue({
-			modes: null,
-			models: null,
+		listSessions: vi.fn().mockResolvedValue({
+			sessions: [
+				{
+					sessionId: "discovered-1",
+					cwd: "/home/user/project1",
+					title: "Project 1",
+					updatedAt: new Date().toISOString(),
+				},
+				{
+					sessionId: "discovered-2",
+					cwd: "/home/user/project2",
+					title: "Project 2",
+				},
+			],
+			nextCursor: undefined,
 		}),
-		resumeSession: vi.fn().mockResolvedValue({
+		loadSession: vi.fn().mockResolvedValue({
 			modes: null,
 			models: null,
 		}),
@@ -112,7 +109,6 @@ describe("SessionManager", () => {
 			expect(result.sessions[1].sessionId).toBe("discovered-2");
 			expect(result.capabilities.list).toBe(true);
 			expect(result.capabilities.load).toBe(true);
-			expect(result.capabilities.resume).toBe(true);
 		});
 
 		it("discovers sessions with cwd filter", async () => {
@@ -152,7 +148,6 @@ describe("SessionManager", () => {
 						getSessionCapabilities: vi.fn().mockReturnValue({
 							list: false,
 							load: false,
-							resume: false,
 						}),
 						supportsSessionList: vi.fn().mockReturnValue(false),
 						listSessions: vi.fn(),
@@ -177,7 +172,7 @@ describe("SessionManager", () => {
 			expect(result.sessionId).toBe("session-to-load");
 			expect(result.title).toBe("Loaded Session");
 			expect(result.cwd).toBe("/home/user/project");
-			expect(result.state).toBe("ready");
+			expect(result.sessionId).toBeDefined();
 		});
 
 		it("returns existing session if already loaded", async () => {
@@ -234,76 +229,6 @@ describe("SessionManager", () => {
 		});
 	});
 
-	describe("resumeSession", () => {
-		it("resumes an active session", async () => {
-			const result = await sessionManager.resumeSession(
-				"session-to-resume",
-				"/home/user/project",
-			);
-
-			expect(result.sessionId).toBe("session-to-resume");
-			expect(result.title).toBe("Resumed Session");
-			expect(result.cwd).toBe("/home/user/project");
-			expect(result.state).toBe("ready");
-		});
-
-		it("returns existing session if already loaded", async () => {
-			// First, create a session
-			const created = await sessionManager.createSession({
-				cwd: "/home/user/project",
-			});
-
-			// Try to resume the same session
-			const resumed = await sessionManager.resumeSession(
-				created.sessionId,
-				"/home/user/project",
-			);
-
-			expect(resumed.sessionId).toBe(created.sessionId);
-		});
-
-		it("emits sessions:changed event when session resumed", async () => {
-			const changedListener = vi.fn();
-			sessionManager.onSessionsChanged(changedListener);
-
-			await sessionManager.resumeSession(
-				"session-to-resume",
-				"/home/user/project",
-			);
-
-			expect(changedListener).toHaveBeenCalledWith(
-				expect.objectContaining({
-					added: expect.arrayContaining([
-						expect.objectContaining({ sessionId: "session-to-resume" }),
-					]),
-					updated: [],
-					removed: [],
-				}),
-			);
-		});
-
-		it("throws error when resume not supported", async () => {
-			const { AcpConnection } = await import("../acp-connection.js");
-			const MockedAcpConnection = AcpConnection as unknown as ReturnType<
-				typeof vi.fn
-			>;
-			MockedAcpConnection.mockImplementationOnce(
-				() =>
-					({
-						connect: vi.fn().mockResolvedValue(undefined),
-						disconnect: vi.fn().mockResolvedValue(undefined),
-						supportsSessionResume: vi.fn().mockReturnValue(false),
-					}) as unknown,
-			);
-
-			const manager = new SessionManager(mockConfig);
-
-			await expect(
-				manager.resumeSession("session-1", "/home/user/project"),
-			).rejects.toThrow("Agent does not support session resuming");
-		});
-	});
-
 	describe("listSessions", () => {
 		it("returns empty array initially", () => {
 			const sessions = sessionManager.listSessions();
@@ -315,7 +240,7 @@ describe("SessionManager", () => {
 
 			const sessions = sessionManager.listSessions();
 			expect(sessions).toHaveLength(1);
-			expect(sessions[0].state).toBe("ready");
+			expect(sessions[0].sessionId).toBeDefined();
 		});
 	});
 

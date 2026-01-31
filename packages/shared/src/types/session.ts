@@ -1,9 +1,6 @@
 import type { AvailableCommand } from "./acp.js";
 import type { ErrorDetail } from "./errors.js";
 
-/** Session lifecycle state */
-export type SessionLifecycle = "active" | "suspended" | "closed" | "unknown";
-
 export type AcpConnectionState =
 	| "idle"
 	| "connecting"
@@ -34,7 +31,6 @@ export type SessionSummary = {
 	title: string;
 	backendId: string;
 	backendLabel: string;
-	state: AcpConnectionState;
 	error?: ErrorDetail;
 	pid?: number;
 	createdAt: string;
@@ -50,8 +46,6 @@ export type SessionSummary = {
 	availableCommands?: AvailableCommand[];
 	/** Machine ID that owns this session (populated by gateway) */
 	machineId?: string;
-	/** Session lifecycle state */
-	lifecycle?: SessionLifecycle;
 };
 
 /** Sessions changed event payload for incremental sync */
@@ -105,30 +99,24 @@ export type AcpSessionInfo = {
 export type AgentSessionCapabilities = {
 	list: boolean;
 	load: boolean;
-	resume: boolean;
 };
 
 /** Parameters for discovering sessions from agent */
 export type DiscoverSessionsParams = {
 	machineId?: string;
 	cwd?: string;
+	cursor?: string;
 };
 
 /** Result of discovering sessions */
 export type DiscoverSessionsResult = {
 	sessions: AcpSessionInfo[];
 	capabilities: AgentSessionCapabilities;
+	nextCursor?: string;
 };
 
 /** Parameters for loading a historical session */
 export type LoadSessionParams = {
-	sessionId: string;
-	cwd: string;
-	machineId?: string;
-};
-
-/** Parameters for resuming an active session */
-export type ResumeSessionParams = {
 	sessionId: string;
 	cwd: string;
 	machineId?: string;

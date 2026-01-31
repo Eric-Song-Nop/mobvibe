@@ -92,7 +92,6 @@
 		"rootLoadFailed": "根目录加载失败",
 		"previewLoadFailed": "预览加载失败",
 		"pathLoadFailed": "路径加载失败",
-		"resumeSessionFailed": "恢复会话失败",
 		"loadSessionFailed": "加载会话失败"
 	},
 	"workingDirectory": {

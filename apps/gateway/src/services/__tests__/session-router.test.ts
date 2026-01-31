@@ -46,7 +46,6 @@ const createMockSessionSummary = (
 	title: "Test Session",
 	backendId: "backend-1",
 	backendLabel: "Claude Code",
-	state: "ready",
 	createdAt: new Date().toISOString(),
 	updatedAt: new Date().toISOString(),
 	...overrides,
@@ -69,7 +68,6 @@ const createMockDiscoverResult = (): DiscoverSessionsRpcResult => ({
 	capabilities: {
 		list: true,
 		load: true,
-		resume: true,
 	},
 });
 
@@ -114,7 +112,6 @@ describe("SessionRouter", () => {
 			expect(result.sessions[0].sessionId).toBe("discovered-session-1");
 			expect(result.capabilities.list).toBe(true);
 			expect(result.capabilities.load).toBe(true);
-			expect(result.capabilities.resume).toBe(true);
 		});
 
 		it("throws error when no CLI connected for machine", async () => {
@@ -282,116 +279,6 @@ describe("SessionRouter", () => {
 			);
 
 			expect(result.sessionId).toBe("loaded-session-1");
-		});
-	});
-
-	describe("resumeSession", () => {
-		it("routes resume request to CLI and returns session", async () => {
-			const socket = createMockSocket("socket-1");
-			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
-			cliRegistry.register(socket, info, authInfo);
-
-			const mockSession = createMockSessionSummary({
-				sessionId: "resumed-session-1",
-				title: "Resumed Session",
-				cwd: "/home/user/project",
-			});
-
-			socket.emit.mockImplementation((event, request) => {
-				if (event === "rpc:session:resume") {
-					setTimeout(() => {
-						sessionRouter.handleRpcResponse({
-							requestId: request.requestId,
-							result: mockSession,
-						});
-					}, 0);
-				}
-			});
-
-			const result = await sessionRouter.resumeSession(
-				{
-					sessionId: "resumed-session-1",
-					cwd: "/home/user/project",
-					machineId: "machine-1",
-				},
-				"user-1",
-			);
-
-			expect(result.sessionId).toBe("resumed-session-1");
-			expect(result.title).toBe("Resumed Session");
-			expect(socket.emit).toHaveBeenCalledWith(
-				"rpc:session:resume",
-				expect.objectContaining({
-					params: {
-						sessionId: "resumed-session-1",
-						cwd: "/home/user/project",
-					},
-				}),
-			);
-		});
-
-		it("throws error when no CLI connected", async () => {
-			await expect(
-				sessionRouter.resumeSession(
-					{
-						sessionId: "session-1",
-						cwd: "/home/user",
-						machineId: "unknown-machine",
-					},
-					"user-1",
-				),
-			).rejects.toThrow("No CLI connected for this machine");
-		});
-
-		it("throws error when user not authorized for machine", async () => {
-			const socket = createMockSocket("socket-1");
-			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
-			cliRegistry.register(socket, info, authInfo);
-
-			await expect(
-				sessionRouter.resumeSession(
-					{
-						sessionId: "session-1",
-						cwd: "/home/user",
-						machineId: "machine-1",
-					},
-					"user-2",
-				),
-			).rejects.toThrow("Not authorized to access this machine");
-		});
-
-		it("uses first CLI for user when no machineId specified", async () => {
-			const socket = createMockSocket("socket-1");
-			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
-			cliRegistry.register(socket, info, authInfo);
-
-			const mockSession = createMockSessionSummary({
-				sessionId: "resumed-session-1",
-			});
-
-			socket.emit.mockImplementation((event, request) => {
-				if (event === "rpc:session:resume") {
-					setTimeout(() => {
-						sessionRouter.handleRpcResponse({
-							requestId: request.requestId,
-							result: mockSession,
-						});
-					}, 0);
-				}
-			});
-
-			const result = await sessionRouter.resumeSession(
-				{
-					sessionId: "resumed-session-1",
-					cwd: "/home/user/project",
-				},
-				"user-1",
-			);
-
-			expect(result.sessionId).toBe("resumed-session-1");
 		});
 	});
 

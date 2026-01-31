@@ -57,7 +57,6 @@ describe("AcpConnection", () => {
 
 			expect(capabilities.list).toBe(false);
 			expect(capabilities.load).toBe(false);
-			expect(capabilities.resume).toBe(false);
 		});
 
 		it("returns correct capabilities when sessionCapabilities.list is defined", () => {
@@ -73,7 +72,6 @@ describe("AcpConnection", () => {
 
 			expect(capabilities.list).toBe(true);
 			expect(capabilities.load).toBe(false);
-			expect(capabilities.resume).toBe(false);
 		});
 
 		it("returns correct capabilities when loadSession is true", () => {
@@ -86,39 +84,6 @@ describe("AcpConnection", () => {
 
 			expect(capabilities.list).toBe(false);
 			expect(capabilities.load).toBe(true);
-			expect(capabilities.resume).toBe(false);
-		});
-
-		it("returns correct capabilities when sessionCapabilities.resume is defined", () => {
-			// @ts-expect-error - accessing private property for testing
-			connection.agentCapabilities = {
-				sessionCapabilities: {
-					resume: {},
-				},
-			};
-
-			const capabilities = connection.getSessionCapabilities();
-
-			expect(capabilities.list).toBe(false);
-			expect(capabilities.load).toBe(false);
-			expect(capabilities.resume).toBe(true);
-		});
-
-		it("returns all true when all capabilities are present", () => {
-			// @ts-expect-error - accessing private property for testing
-			connection.agentCapabilities = {
-				loadSession: true,
-				sessionCapabilities: {
-					list: {},
-					resume: {},
-				},
-			};
-
-			const capabilities = connection.getSessionCapabilities();
-
-			expect(capabilities.list).toBe(true);
-			expect(capabilities.load).toBe(true);
-			expect(capabilities.resume).toBe(true);
 		});
 	});
 
@@ -188,47 +153,13 @@ describe("AcpConnection", () => {
 		});
 	});
 
-	describe("supportsSessionResume", () => {
-		it("returns false when agentCapabilities is undefined", () => {
-			expect(connection.supportsSessionResume()).toBe(false);
-		});
-
-		it("returns false when sessionCapabilities is undefined", () => {
-			// @ts-expect-error - accessing private property for testing
-			connection.agentCapabilities = {};
-
-			expect(connection.supportsSessionResume()).toBe(false);
-		});
-
-		it("returns false when sessionCapabilities.resume is null", () => {
-			// @ts-expect-error - accessing private property for testing
-			connection.agentCapabilities = {
-				sessionCapabilities: {
-					resume: null,
-				},
-			};
-
-			expect(connection.supportsSessionResume()).toBe(false);
-		});
-
-		it("returns true when sessionCapabilities.resume is defined", () => {
-			// @ts-expect-error - accessing private property for testing
-			connection.agentCapabilities = {
-				sessionCapabilities: {
-					resume: {},
-				},
-			};
-
-			expect(connection.supportsSessionResume()).toBe(true);
-		});
-	});
 
 	describe("listSessions", () => {
 		it("returns empty array when session list not supported", async () => {
 			// agentCapabilities is undefined, so supportsSessionList() returns false
 			const result = await connection.listSessions();
 
-			expect(result).toEqual([]);
+			expect(result).toEqual({ sessions: [] });
 		});
 	});
 
@@ -238,15 +169,6 @@ describe("AcpConnection", () => {
 			await expect(
 				connection.loadSession("session-1", "/home/user/project"),
 			).rejects.toThrow("Agent does not support session/load capability");
-		});
-	});
-
-	describe("resumeSession", () => {
-		it("throws error when session resume not supported", async () => {
-			// agentCapabilities is undefined, so supportsSessionResume() returns false
-			await expect(
-				connection.resumeSession("session-1", "/home/user/project"),
-			).rejects.toThrow("Agent does not support session/resume capability");
 		});
 	});
 

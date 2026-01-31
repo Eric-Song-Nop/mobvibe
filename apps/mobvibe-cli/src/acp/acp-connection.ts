@@ -22,7 +22,6 @@ import {
 	type ReleaseTerminalResponse,
 	type RequestPermissionRequest,
 	type RequestPermissionResponse,
-	type ResumeSessionResponse,
 	type SessionInfo,
 	type SessionNotification,
 	type TerminalExitStatus,
@@ -267,7 +266,6 @@ export class AcpConnection {
 		return {
 			list: this.agentCapabilities?.sessionCapabilities?.list != null,
 			load: this.agentCapabilities?.loadSession === true,
-			resume: this.agentCapabilities?.sessionCapabilities?.resume != null,
 		};
 	}
 
@@ -286,13 +284,6 @@ export class AcpConnection {
 	}
 
 	/**
-	 * Check if the agent supports session/resume.
-	 */
-	supportsSessionResume(): boolean {
-		return this.agentCapabilities?.sessionCapabilities?.resume != null;
-	}
-
-	/**
 	 * List sessions from the agent (session/list).
 	 * @param params Optional filter parameters
 	 * @returns List of session info from the agent
@@ -300,9 +291,9 @@ export class AcpConnection {
 	async listSessions(params?: {
 		cursor?: string;
 		cwd?: string;
-	}): Promise<SessionInfo[]> {
+	}): Promise<{ sessions: SessionInfo[]; nextCursor?: string }> {
 		if (!this.supportsSessionList()) {
-			return [];
+			return { sessions: [] };
 		}
 		const connection = await this.ensureReady();
 		const response: ListSessionsResponse =
@@ -310,7 +301,10 @@ export class AcpConnection {
 				cursor: params?.cursor ?? undefined,
 				cwd: params?.cwd ?? undefined,
 			});
-		return response.sessions;
+		return {
+			sessions: response.sessions,
+			nextCursor: response.nextCursor ?? undefined,
+		};
 	}
 
 	/**
@@ -328,29 +322,6 @@ export class AcpConnection {
 		}
 		const connection = await this.ensureReady();
 		const response = await connection.loadSession({
-			sessionId,
-			cwd,
-			mcpServers: [],
-		});
-		this.sessionId = sessionId;
-		return response;
-	}
-
-	/**
-	 * Resume an active session without message history replay (session/resume).
-	 * @param sessionId The session ID to resume
-	 * @param cwd The working directory
-	 * @returns Resume session response
-	 */
-	async resumeSession(
-		sessionId: string,
-		cwd: string,
-	): Promise<ResumeSessionResponse> {
-		if (!this.supportsSessionResume()) {
-			throw new Error("Agent does not support session/resume capability");
-		}
-		const connection = await this.ensureReady();
-		const response = await connection.unstable_resumeSession({
 			sessionId,
 			cwd,
 			mcpServers: [],

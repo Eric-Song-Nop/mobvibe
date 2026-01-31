@@ -47,6 +47,8 @@ type SessionRecord = {
 	availableCommands?: AvailableCommand[];
 	unsubscribe?: () => void;
 	unsubscribeTerminal?: () => void;
+	isAttached?: boolean;
+	attachedAt?: Date;
 };
 
 type PermissionRequestRecord = {
@@ -124,6 +126,8 @@ export class SessionManager {
 	private readonly permissionResultEmitter = new EventEmitter();
 	private readonly terminalOutputEmitter = new EventEmitter();
 	private readonly sessionsChangedEmitter = new EventEmitter();
+	private readonly sessionAttachedEmitter = new EventEmitter();
+	private readonly sessionDetachedEmitter = new EventEmitter();
 
 	constructor(private readonly config: CliConfig) {
 		this.backendById = new Map(
@@ -186,8 +190,77 @@ export class SessionManager {
 		};
 	}
 
+	onSessionAttached(
+		listener: (payload: {
+			sessionId: string;
+			machineId: string;
+			attachedAt: string;
+		}) => void,
+	) {
+		this.sessionAttachedEmitter.on("attached", listener);
+		return () => {
+			this.sessionAttachedEmitter.off("attached", listener);
+		};
+	}
+
+	onSessionDetached(
+		listener: (payload: {
+			sessionId: string;
+			machineId: string;
+			detachedAt: string;
+			reason:
+				| "agent_exit"
+				| "cli_disconnect"
+				| "gateway_disconnect"
+				| "unknown";
+		}) => void,
+	) {
+		this.sessionDetachedEmitter.on("detached", listener);
+		return () => {
+			this.sessionDetachedEmitter.off("detached", listener);
+		};
+	}
+
 	private emitSessionsChanged(payload: SessionsChangedPayload) {
 		this.sessionsChangedEmitter.emit("changed", payload);
+	}
+
+	private emitSessionAttached(sessionId: string) {
+		const record = this.sessions.get(sessionId);
+		if (!record) {
+			return;
+		}
+		if (record.isAttached) {
+			return;
+		}
+		const attachedAt = new Date();
+		record.isAttached = true;
+		record.attachedAt = attachedAt;
+		this.sessionAttachedEmitter.emit("attached", {
+			sessionId,
+			machineId: this.config.machineId,
+			attachedAt: attachedAt.toISOString(),
+		});
+	}
+
+	private emitSessionDetached(
+		sessionId: string,
+		reason: "agent_exit" | "cli_disconnect" | "gateway_disconnect" | "unknown",
+	) {
+		const record = this.sessions.get(sessionId);
+		if (!record) {
+			return;
+		}
+		if (!record.isAttached) {
+			return;
+		}
+		record.isAttached = false;
+		this.sessionDetachedEmitter.emit("detached", {
+			sessionId,
+			machineId: this.config.machineId,
+			detachedAt: new Date().toISOString(),
+			reason,
+		});
 	}
 
 	listPendingPermissions(sessionId: string): PermissionRequestPayload[] {
@@ -328,6 +401,7 @@ export class SessionManager {
 						sessionId: session.sessionId,
 						error: status.error,
 					});
+					this.emitSessionDetached(session.sessionId, "agent_exit");
 				}
 			});
 			this.sessions.set(session.sessionId, record);
@@ -337,6 +411,7 @@ export class SessionManager {
 				updated: [],
 				removed: [],
 			});
+			this.emitSessionAttached(session.sessionId);
 			return summary;
 		} catch (error) {
 			const status = connection.getStatus();
@@ -572,6 +647,7 @@ export class SessionManager {
 		} catch (error) {
 			logger.error({ err: error, sessionId }, "session_disconnect_failed");
 		}
+		this.emitSessionDetached(sessionId, "unknown");
 		this.sessions.delete(sessionId);
 		this.emitSessionsChanged({
 			added: [],
@@ -597,6 +673,7 @@ export class SessionManager {
 	async discoverSessions(options?: {
 		cwd?: string;
 		backendId?: string;
+		cursor?: string;
 	}): Promise<DiscoverSessionsRpcResult> {
 		const backend = this.resolveBackend(options?.backendId);
 		const connection = new AcpConnection({
@@ -611,12 +688,15 @@ export class SessionManager {
 			await connection.connect();
 			const capabilities = connection.getSessionCapabilities();
 			const sessions: AcpSessionInfo[] = [];
+			let nextCursor: string | undefined;
 
 			if (capabilities.list) {
-				const agentSessions = await connection.listSessions({
+				const response = await connection.listSessions({
 					cwd: options?.cwd,
+					cursor: options?.cursor,
 				});
-				for (const session of agentSessions) {
+				nextCursor = response.nextCursor;
+				for (const session of response.sessions) {
 					sessions.push({
 						sessionId: session.sessionId,
 						cwd: session.cwd,
@@ -635,7 +715,7 @@ export class SessionManager {
 				"sessions_discovered",
 			);
 
-			return { sessions, capabilities };
+			return { sessions, capabilities, nextCursor };
 		} finally {
 			await connection.disconnect();
 		}
@@ -657,6 +737,7 @@ export class SessionManager {
 		// Check if session is already loaded
 		const existing = this.sessions.get(sessionId);
 		if (existing) {
+			this.emitSessionAttached(sessionId);
 			return this.buildSummary(existing);
 		}
 
@@ -720,97 +801,9 @@ export class SessionManager {
 				updated: [],
 				removed: [],
 			});
+			this.emitSessionAttached(sessionId);
 
 			logger.info({ sessionId, backendId: backend.id }, "session_loaded");
-
-			return summary;
-		} catch (error) {
-			await connection.disconnect();
-			throw error;
-		}
-	}
-
-	/**
-	 * Resume an active session from the ACP agent.
-	 * This does not replay message history.
-	 * @param sessionId The session ID to resume
-	 * @param cwd The working directory
-	 * @param backendId Optional backend ID
-	 * @returns The resumed session summary
-	 */
-	async resumeSession(
-		sessionId: string,
-		cwd: string,
-		backendId?: string,
-	): Promise<SessionSummary> {
-		// Check if session is already loaded
-		const existing = this.sessions.get(sessionId);
-		if (existing) {
-			return this.buildSummary(existing);
-		}
-
-		const backend = this.resolveBackend(backendId);
-		const connection = new AcpConnection({
-			backend,
-			client: {
-				name: this.config.clientName,
-				version: this.config.clientVersion,
-			},
-		});
-
-		try {
-			await connection.connect();
-
-			if (!connection.supportsSessionResume()) {
-				throw createCapabilityNotSupportedError(
-					"Agent does not support session resuming",
-				);
-			}
-
-			const response = await connection.resumeSession(sessionId, cwd);
-			connection.setPermissionHandler((params) =>
-				this.handlePermissionRequest(sessionId, params),
-			);
-
-			const now = new Date();
-			const agentInfo = connection.getAgentInfo();
-			const { modelId, modelName, availableModels } = resolveModelState(
-				response.models,
-			);
-			const { modeId, modeName, availableModes } = resolveModeState(
-				response.modes,
-			);
-
-			const record: SessionRecord = {
-				sessionId,
-				title: `Resumed Session`,
-				backendId: backend.id,
-				backendLabel: backend.label,
-				connection,
-				createdAt: now,
-				updatedAt: now,
-				cwd,
-				agentName: agentInfo?.title ?? agentInfo?.name,
-				modelId,
-				modelName,
-				modeId,
-				modeName,
-				availableModes,
-				availableModels,
-				availableCommands: undefined,
-			};
-
-			this.setupSessionSubscriptions(record);
-			this.sessions.set(sessionId, record);
-
-			const summary = this.buildSummary(record);
-			this.emitSessionsChanged({
-				added: [summary],
-				updated: [],
-				removed: [],
-			});
-
-			logger.info({ sessionId, backendId: backend.id }, "session_resumed");
 
 			return summary;
 		} catch (error) {
@@ -865,6 +858,7 @@ export class SessionManager {
 					sessionId,
 					error: status.error,
 				});
+				this.emitSessionDetached(sessionId, "agent_exit");
 			}
 		});
 	}
@@ -876,7 +870,6 @@ export class SessionManager {
 			title: record.title,
 			backendId: record.backendId,
 			backendLabel: record.backendLabel,
-			state: status.state,
 			error: status.error,
 			pid: status.pid,
 			createdAt: record.createdAt.toISOString(),

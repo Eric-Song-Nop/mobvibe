@@ -14,7 +14,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useMachinesQuery } from "@/hooks/useMachinesQuery";
-import { discoverSessions } from "@/lib/api";
+import { useDiscoverSessionsMutation } from "@/hooks/useSessionQueries";
 import { type Machine, useMachinesStore } from "@/lib/machines-store";
 import { useUiStore } from "@/lib/ui-store";
 import { cn } from "@/lib/utils";
@@ -87,10 +87,15 @@ export function AppSidebar({
 
 function MobileMachineColumn() {
 	const { t } = useTranslation();
-	const { machines, selectedMachineId, setSelectedMachineId } =
-		useMachinesStore();
+	const {
+		machines,
+		selectedMachineId,
+		setSelectedMachineId,
+		setMachineCapabilities,
+	} = useMachinesStore();
 	const machinesQuery = useMachinesQuery();
 	const queryClient = useQueryClient();
+	const discoverSessionsMutation = useDiscoverSessionsMutation();
 	const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
 
 	const machineList = Object.values(machines).sort((a, b) => {
@@ -108,9 +113,14 @@ function MobileMachineColumn() {
 				.map((machine) => machine.id) ?? [];
 
 		await Promise.allSettled(
-			connectedMachineIds.map((machineId) => discoverSessions({ machineId })),
+			connectedMachineIds.map(async (machineId) => {
+				const result = await discoverSessionsMutation.mutateAsync({
+					machineId,
+				});
+				setMachineCapabilities(machineId, result.capabilities);
+			}),
 		);
-		await queryClient.refetchQueries({ queryKey: ["sessions"] });
+		await queryClient.invalidateQueries({ queryKey: ["sessions"] });
 	};
 
 	return (

@@ -23,7 +23,6 @@ export type {
 	SessionFsRootsResponse,
 	SessionModelOption,
 	SessionModeOption,
-	SessionState,
 	SessionSummary,
 	SessionsResponse,
 	StopReason,
@@ -152,6 +151,7 @@ export const fetchMachines = async (): Promise<MachinesResponse> =>
 const buildSessionsDiscoverPath = (payload?: {
 	machineId?: string;
 	cwd?: string;
+	cursor?: string;
 }) => {
 	const params = new URLSearchParams();
 	if (payload?.machineId) {
@@ -159,6 +159,9 @@ const buildSessionsDiscoverPath = (payload?: {
 	}
 	if (payload?.cwd) {
 		params.set("cwd", payload.cwd);
+	}
+	if (payload?.cursor) {
+		params.set("cursor", payload.cursor);
 	}
 	const query = params.toString();
 	return query ? `/acp/sessions/discover?${query}` : "/acp/sessions/discover";
@@ -207,6 +210,7 @@ export const fetchFsRoots = async (payload?: {
 export const discoverSessions = async (payload?: {
 	machineId?: string;
 	cwd?: string;
+	cursor?: string;
 }): Promise<DiscoverSessionsResult> =>
 	requestJson<DiscoverSessionsResult>(buildSessionsDiscoverPath(payload));
 
@@ -323,16 +327,6 @@ export const sendPermissionDecision = async (
 	payload: PermissionDecisionPayload,
 ): Promise<PermissionDecisionResponse> =>
 	requestJson<PermissionDecisionResponse>("/acp/permission/decision", {
-		method: "POST",
-		body: JSON.stringify(payload),
-	});
-
-export const resumeSession = async (payload: {
-	sessionId: string;
-	cwd: string;
-	machineId?: string;
-}): Promise<SessionSummary> =>
-	requestJson<SessionSummary>("/acp/session/resume", {
 		method: "POST",
 		body: JSON.stringify(payload),
 	});

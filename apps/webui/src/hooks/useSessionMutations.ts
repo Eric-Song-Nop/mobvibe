@@ -21,7 +21,6 @@ import {
 	createSession,
 	loadSession,
 	renameSession,
-	resumeSession,
 	type SessionSummary,
 	sendMessage,
 	sendPermissionDecision,
@@ -35,7 +34,6 @@ type SessionMetadata = Partial<
 	Pick<
 		ChatSession,
 		| "title"
-		| "state"
 		| "backendId"
 		| "backendLabel"
 		| "cwd"
@@ -70,6 +68,18 @@ export interface ChatStoreActions {
 	sessions: Record<string, ChatSession>;
 	setActiveSessionId: (id: string | undefined) => void;
 	setLastCreatedCwd: (value?: string) => void;
+	setSessionLoading: (sessionId: string, value: boolean) => void;
+	markSessionAttached: (payload: {
+		sessionId: string;
+		machineId?: string;
+		attachedAt: string;
+	}) => void;
+	markSessionDetached: (payload: {
+		sessionId: string;
+		machineId?: string;
+		detachedAt: string;
+		reason: ChatSession["detachedReason"];
+	}) => void;
 	createLocalSession: (sessionId: string, metadata?: SessionMetadata) => void;
 	syncSessions: (sessions: SessionSummary[]) => void;
 	removeSession: (sessionId: string) => void;
@@ -152,7 +162,6 @@ export function useSessionMutations(store: ChatStoreActions) {
 		onSuccess: (data) => {
 			store.createLocalSession(data.sessionId, {
 				title: data.title,
-				state: data.state,
 				backendId: data.backendId,
 				backendLabel: data.backendLabel,
 				cwd: data.cwd,
@@ -345,35 +354,6 @@ export function useSessionMutations(store: ChatStoreActions) {
 		},
 	});
 
-	const resumeSessionMutation = useMutation({
-		mutationFn: resumeSession,
-		onSuccess: (data) => {
-			store.updateSessionMeta(data.sessionId, {
-				title: data.title,
-				updatedAt: data.updatedAt,
-				cwd: data.cwd,
-				agentName: data.agentName,
-				modelId: data.modelId,
-				modelName: data.modelName,
-				modeId: data.modeId,
-				modeName: data.modeName,
-				availableModes: data.availableModes,
-				availableModels: data.availableModels,
-				availableCommands: data.availableCommands,
-			});
-			store.setActiveSessionId(data.sessionId);
-			store.setAppError(undefined);
-		},
-		onError: (mutationError: unknown) => {
-			store.setAppError(
-				normalizeError(
-					mutationError,
-					createFallbackError(t("errors.resumeSessionFailed"), "session"),
-				),
-			);
-		},
-	});
-
 	const loadSessionMutation = useMutation({
 		mutationFn: loadSession,
 		onSuccess: (data) => {
@@ -413,7 +393,6 @@ export function useSessionMutations(store: ChatStoreActions) {
 		sendMessageMutation,
 		createMessageIdMutation,
 		permissionDecisionMutation,
-		resumeSessionMutation,
 		loadSessionMutation,
 	};
 }

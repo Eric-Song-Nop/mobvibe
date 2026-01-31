@@ -169,12 +169,14 @@ export type HostFsRootsResponse = {
 export type DiscoverSessionsRpcParams = {
 	cwd?: string;
 	backendId?: string;
+	cursor?: string;
 };
 
 // Session discovery RPC response
 export type DiscoverSessionsRpcResult = {
 	sessions: AcpSessionInfo[];
 	capabilities: AgentSessionCapabilities;
+	nextCursor?: string;
 };
 
 // Load session RPC params
@@ -183,16 +185,25 @@ export type LoadSessionRpcParams = {
 	cwd: string;
 };
 
-// Resume session RPC params
-export type ResumeSessionRpcParams = {
-	sessionId: string;
-	cwd: string;
-};
 
 /** Payload for sessions:discovered event */
 export type SessionsDiscoveredPayload = {
 	sessions: AcpSessionInfo[];
 	capabilities: AgentSessionCapabilities;
+	nextCursor?: string;
+};
+
+export type SessionAttachedPayload = {
+	sessionId: string;
+	machineId: string;
+	attachedAt: string;
+};
+
+export type SessionDetachedPayload = {
+	sessionId: string;
+	machineId: string;
+	detachedAt: string;
+	reason: "agent_exit" | "cli_disconnect" | "gateway_disconnect" | "unknown";
 };
 
 // CLI -> Gateway events
@@ -201,6 +212,8 @@ export interface CliToGatewayEvents {
 	"cli:heartbeat": () => void;
 	"session:update": (notification: SessionNotification) => void;
 	"session:error": (payload: StreamErrorPayload) => void;
+	"session:attached": (payload: SessionAttachedPayload) => void;
+	"session:detached": (payload: SessionDetachedPayload) => void;
 	"permission:request": (payload: PermissionRequestPayload) => void;
 	"permission:result": (payload: PermissionDecisionPayload) => void;
 	"terminal:output": (event: TerminalOutputEvent) => void;
@@ -241,7 +254,6 @@ export interface GatewayToCliEvents {
 		request: RpcRequest<DiscoverSessionsRpcParams>,
 	) => void;
 	"rpc:session:load": (request: RpcRequest<LoadSessionRpcParams>) => void;
-	"rpc:session:resume": (request: RpcRequest<ResumeSessionRpcParams>) => void;
 }
 
 // Webui -> Gateway events
@@ -255,6 +267,8 @@ export interface WebuiToGatewayEvents {
 export interface GatewayToWebuiEvents {
 	"session:update": (notification: SessionNotification) => void;
 	"session:error": (payload: StreamErrorPayload) => void;
+	"session:attached": (payload: SessionAttachedPayload) => void;
+	"session:detached": (payload: SessionDetachedPayload) => void;
 	"permission:request": (payload: PermissionRequestPayload) => void;
 	"permission:result": (payload: PermissionDecisionPayload) => void;
 	"terminal:output": (event: TerminalOutputEvent) => void;

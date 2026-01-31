@@ -21,7 +21,6 @@ vi.mock("@/lib/api", async () => {
 		sendMessage: vi.fn(),
 		createMessageId: vi.fn(),
 		sendPermissionDecision: vi.fn(),
-		resumeSession: vi.fn(),
 		loadSession: vi.fn(),
 	};
 });
@@ -34,6 +33,9 @@ describe("useSessionMutations", () => {
 		sessions: {},
 		setActiveSessionId: vi.fn(),
 		setLastCreatedCwd: vi.fn(),
+		setSessionLoading: vi.fn(),
+		markSessionAttached: vi.fn(),
+		markSessionDetached: vi.fn(),
 		createLocalSession: vi.fn(),
 		syncSessions: vi.fn(),
 		removeSession: vi.fn(),
@@ -82,7 +84,6 @@ describe("useSessionMutations", () => {
 			const mockSession: apiModule.CreateSessionResponse = {
 				sessionId: "new-session",
 				title: "New Session",
-				state: "ready",
 				backendId: "backend-1",
 				backendLabel: "Backend 1",
 				createdAt: "2025-01-01T00:00:00Z",
@@ -110,7 +111,6 @@ describe("useSessionMutations", () => {
 
 			expect(mockStore.createLocalSession).toHaveBeenCalledWith("new-session", {
 				title: "New Session",
-				state: "ready",
 				backendId: "backend-1",
 				backendLabel: "Backend 1",
 				cwd: mockSession.cwd,
@@ -296,7 +296,6 @@ describe("useSessionMutations", () => {
 				modeId: "mode-1",
 				modeName: "Chat Mode",
 				title: "Session",
-				state: "ready" as const,
 				backendId: "backend-1",
 				backendLabel: "Backend",
 				createdAt: "2025-01-01T00:00:00Z",
@@ -331,7 +330,6 @@ describe("useSessionMutations", () => {
 				modelId: "model-1",
 				modelName: "GPT-4",
 				title: "Session",
-				state: "ready" as const,
 				backendId: "backend-1",
 				backendLabel: "Backend",
 				createdAt: "2025-01-01T00:00:00Z",

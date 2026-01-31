@@ -16,7 +16,6 @@ import type {
 	HostFsRootsResponse,
 	LoadSessionRpcParams,
 	PermissionDecisionPayload,
-	ResumeSessionRpcParams,
 	RpcRequest,
 	RpcResponse,
 	SendMessageParams,
@@ -617,6 +616,7 @@ export class SessionRouter {
 		machineId?: string,
 		cwd?: string,
 		userId?: string,
+		cursor?: string,
 	): Promise<DiscoverSessionsRpcResult> {
 		const cli = machineId
 			? this.cliRegistry.getCliByMachineId(machineId)
@@ -645,7 +645,7 @@ export class SessionRouter {
 			"sessions_discover_rpc_start",
 		);
 
-		const params: DiscoverSessionsRpcParams = { cwd };
+		const params: DiscoverSessionsRpcParams = { cwd, cursor };
 		const result = await this.sendRpc<
 			DiscoverSessionsRpcParams,
 			DiscoverSessionsRpcResult
@@ -731,79 +731,6 @@ export class SessionRouter {
 		logger.info(
 			{ sessionId: result.sessionId, userId },
 			"session_load_rpc_complete",
-		);
-
-		return result;
-	}
-
-	/**
-	 * Resume an active session from the ACP agent.
-	 * This does not replay message history.
-	 * @param params - Resume session parameters
-	 * @param userId - Optional user ID for authorization
-	 * @returns The resumed session summary
-	 */
-	async resumeSession(
-		params: { sessionId: string; cwd: string; machineId?: string },
-		userId?: string,
-	): Promise<SessionSummary> {
-		const cli = params.machineId
-			? this.cliRegistry.getCliByMachineId(params.machineId)
-			: this.cliRegistry.getFirstCliForUser(userId);
-
-		if (!cli) {
-			throw new Error(
-				params.machineId
-					? "No CLI connected for this machine"
-					: userId
-						? "No CLI connected for this user"
-						: "No CLI connected",
-			);
-		}
-
-		if (
-			params.machineId &&
-			userId &&
-			!this.cliRegistry.isMachineOwnedByUser(params.machineId, userId)
-		) {
-			throw new Error("Not authorized to access this machine");
-		}
-
-		logger.info(
-			{
-				sessionId: params.sessionId,
-				machineId: cli.machineId,
-				cwd: params.cwd,
-				userId,
-			},
-			"session_resume_rpc_start",
-		);
-
-		const rpcParams: ResumeSessionRpcParams = {
-			sessionId: params.sessionId,
-			cwd: params.cwd,
-		};
-		const result = await this.sendRpc<ResumeSessionRpcParams, SessionSummary>(
-			cli.socket,
-			"rpc:session:resume",
-			rpcParams,
-		);
-
-		// Sync session to database if machine is authenticated
-		if (cli.userId && cli.machineId) {
-			await createAcpSessionDirect({
-				userId: cli.userId,
-				machineId: cli.machineId,
-				sessionId: result.sessionId,
-				title: result.title ?? `Resumed Session`,
-				backendId: result.backendId,
-				cwd: result.cwd,
-			});
-		}
-
-		logger.info(
-			{ sessionId: result.sessionId, userId },
-			"session_resume_rpc_complete",
 		);
 
 		return result;
