@@ -1,6 +1,4 @@
-import { FolderIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { useChatStore, type ChatSession } from "@mobvibe/core";
+import { type ChatSession, useChatStore } from "@mobvibe/core";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useDiscoverSessionsMutation } from "@/hooks/useSessionQueries";
@@ -8,6 +6,14 @@ import { useMachinesStore } from "@/lib/machines-store";
 import { useUiStore } from "@/lib/ui-store";
 import { cn } from "@/lib/utils";
 import { collectWorkspaces } from "@/lib/workspace-utils";
+
+const getWorkspaceInitials = (label: string) => {
+	const trimmed = label.trim();
+	if (trimmed.length === 0) {
+		return "--";
+	}
+	return trimmed.slice(0, 2).toUpperCase();
+};
 
 const sortSessionsByUpdatedAt = (sessions: ChatSession[]) =>
 	[...sessions].sort((left, right) => {
@@ -90,6 +96,7 @@ export function MachineWorkspaces({
 			) : (
 				workspaceList.map((workspace) => {
 					const isActive = workspace.cwd === effectiveWorkspaceCwd;
+					const initials = getWorkspaceInitials(workspace.label);
 					return (
 						<button
 							key={`${workspace.machineId}:${workspace.cwd}`}
@@ -111,7 +118,7 @@ export function MachineWorkspaces({
 										: "border-border bg-background hover:bg-muted",
 								)}
 							>
-								<HugeiconsIcon icon={FolderIcon} strokeWidth={2} />
+								<span className="text-[10px] font-semibold">{initials}</span>
 							</span>
 							<span className="w-10 truncate">{workspace.label}</span>
 						</button>

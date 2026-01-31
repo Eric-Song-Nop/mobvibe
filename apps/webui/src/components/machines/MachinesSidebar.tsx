@@ -3,9 +3,10 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { RegisterMachineDialog } from "@/components/machines/RegisterMachineDialog";
 import { MachineWorkspaces } from "@/components/machines/MachineWorkspaces";
+import { RegisterMachineDialog } from "@/components/machines/RegisterMachineDialog";
 import { Button } from "@/components/ui/button";
+import { ResizeHandle } from "@/components/ui/ResizeHandle";
 import {
 	Tooltip,
 	TooltipContent,
@@ -39,6 +40,8 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 		selectedWorkspaceByMachine,
 		expandedMachines,
 		toggleMachineExpanded,
+		machineSidebarWidth,
+		setMachineSidebarWidth,
 	} = useUiStore();
 	const machinesQuery = useMachinesQuery();
 	const queryClient = useQueryClient();
@@ -91,7 +94,10 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 				onOpenChange={setRegisterDialogOpen}
 			/>
 
-			<aside className="bg-background/80 border-r hidden w-14 flex-col items-center gap-2 py-3 md:flex">
+			<aside
+				className="bg-background/80 border-r hidden flex-col items-center gap-2 py-3 md:flex"
+				style={{ width: machineSidebarWidth }}
+			>
 				<div className="flex flex-col items-center gap-1 text-xs font-semibold text-muted-foreground mb-1">
 					<span>{t("machines.title")}</span>
 					<Tooltip>
@@ -152,6 +158,12 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 					<TooltipContent side="right">{t("machines.register")}</TooltipContent>
 				</Tooltip>
 			</aside>
+			<ResizeHandle
+				className="hidden md:block"
+				onResize={(deltaX) =>
+					setMachineSidebarWidth(machineSidebarWidth + deltaX)
+				}
+			/>
 		</TooltipProvider>
 	);
 }

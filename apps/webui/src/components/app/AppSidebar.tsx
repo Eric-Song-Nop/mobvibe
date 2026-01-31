@@ -4,10 +4,11 @@ import type { ChatSession } from "@mobvibe/core";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { RegisterMachineDialog } from "@/components/machines/RegisterMachineDialog";
 import { MachineWorkspaces } from "@/components/machines/MachineWorkspaces";
+import { RegisterMachineDialog } from "@/components/machines/RegisterMachineDialog";
 import { SessionSidebar } from "@/components/session/SessionSidebar";
 import { Button } from "@/components/ui/button";
+import { ResizeHandle } from "@/components/ui/ResizeHandle";
 import {
 	Tooltip,
 	TooltipContent,
@@ -42,10 +43,18 @@ export function AppSidebar({
 	isCreating,
 	isActivating: _isActivating,
 }: AppSidebarProps) {
-	const { mobileMenuOpen, setMobileMenuOpen } = useUiStore();
+	const {
+		mobileMenuOpen,
+		setMobileMenuOpen,
+		sessionSidebarWidth,
+		setSessionSidebarWidth,
+	} = useUiStore();
 	return (
 		<>
-			<aside className="bg-background/80 border-r hidden w-64 flex-col px-4 py-4 md:flex min-h-0 overflow-hidden">
+			<aside
+				className="bg-background/80 border-r hidden flex-col px-4 py-4 md:flex min-h-0 overflow-hidden"
+				style={{ width: sessionSidebarWidth }}
+			>
 				<SessionSidebar
 					sessions={sessions}
 					activeSessionId={activeSessionId}
@@ -56,6 +65,12 @@ export function AppSidebar({
 					isCreating={isCreating}
 				/>
 			</aside>
+			<ResizeHandle
+				className="hidden md:block"
+				onResize={(deltaX) =>
+					setSessionSidebarWidth(sessionSidebarWidth + deltaX)
+				}
+			/>
 			{mobileMenuOpen ? (
 				<div className="fixed inset-0 z-50 flex md:hidden">
 					<div className="bg-background/90 border-r w-80 p-0 flex h-full overflow-hidden">

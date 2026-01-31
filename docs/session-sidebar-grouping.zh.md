@@ -2,6 +2,7 @@
 - 会话列表按后端分组展示，形成可折叠的二级菜单，默认全部展开。
 - 排序遵循“最近使用”：组按组内最近会话排序，组内会话按最近更新时间排序。
 - 会话条目展示工作路径末级目录名，不再显示后端/agent 信息。
+- 桌面端支持横向拖拽调整会话侧栏与机器侧栏宽度，宽度会被持久化。
 
 ## 具体实现
 - 分组 key：`backendId`，为空时归入 `unknown`。
@@ -12,6 +13,7 @@
 
 ## 相关文件
 - 组件：`apps/webui/src/components/session/SessionSidebar.tsx`
+- 机器侧栏：`apps/webui/src/components/machines/MachinesSidebar.tsx`
 - 测试：`apps/webui/tests/session-sidebar.test.tsx`
 
 ## 验证方式
@@ -20,3 +22,4 @@
   - 组/组内排序是否随最近使用变化。
   - 折叠按钮是否默认展开且可切换。
   - 会话条目显示的路径是否为末级目录名。
+  - 侧栏是否可拖拽调整宽度，刷新后是否保持。

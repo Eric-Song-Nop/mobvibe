@@ -130,6 +130,8 @@ describe("SessionSidebar", () => {
 			draftCwd: undefined,
 			selectedWorkspaceByMachine: {},
 			expandedMachines: {},
+			machineSidebarWidth: 56,
+			sessionSidebarWidth: 256,
 		});
 	});
 
@@ -156,6 +158,8 @@ describe("SessionSidebar", () => {
 			editingTitle: "Updated title",
 			selectedWorkspaceByMachine: {},
 			expandedMachines: {},
+			machineSidebarWidth: 56,
+			sessionSidebarWidth: 256,
 		});
 		renderSidebar([buildSession()]);
 
