@@ -185,7 +185,6 @@ export type LoadSessionRpcParams = {
 	cwd: string;
 };
 
-
 /** Payload for sessions:discovered event */
 export type SessionsDiscoveredPayload = {
 	sessions: AcpSessionInfo[];

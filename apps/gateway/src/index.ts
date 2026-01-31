@@ -105,6 +105,26 @@ setupCliHandlers(io, cliRegistry, sessionRouter, (event, payload) => {
 				payload as Parameters<typeof webuiEmitter.emitSessionError>[0],
 			);
 			break;
+		case "session:attached": {
+			const machineId = (payload as { machineId: string }).machineId;
+			const cli = cliRegistry.getCliByMachineId(machineId);
+			if (cli?.userId) {
+				webuiEmitter.emitToUser(cli.userId, "session:attached", payload);
+			} else {
+				webuiEmitter.emitToAll("session:attached", payload);
+			}
+			break;
+		}
+		case "session:detached": {
+			const machineId = (payload as { machineId: string }).machineId;
+			const cli = cliRegistry.getCliByMachineId(machineId);
+			if (cli?.userId) {
+				webuiEmitter.emitToUser(cli.userId, "session:detached", payload);
+			} else {
+				webuiEmitter.emitToAll("session:detached", payload);
+			}
+			break;
+		}
 		case "permission:request":
 			webuiEmitter.emitPermissionRequest(
 				payload as Parameters<typeof webuiEmitter.emitPermissionRequest>[0],

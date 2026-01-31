@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CliStatusPayload } from "./acp";
+import type { AgentSessionCapabilities, CliStatusPayload } from "./acp";
 
 export type Machine = {
 	machineId: string;
@@ -7,6 +7,8 @@ export type Machine = {
 	connected: boolean;
 	sessionCount?: number;
 	userId?: string;
+	capabilities?: AgentSessionCapabilities;
+	lastCapabilitiesAt?: string;
 };
 
 type MachinesState = {
@@ -16,6 +18,10 @@ type MachinesState = {
 	updateMachine: (payload: CliStatusPayload) => void;
 	removeMachine: (machineId: string) => void;
 	syncMachines: (machines: Machine[]) => void;
+	setMachineCapabilities: (
+		machineId: string,
+		capabilities: AgentSessionCapabilities,
+	) => void;
 };
 
 export const useMachinesStore = create<MachinesState>((set) => ({
@@ -33,6 +39,8 @@ export const useMachinesStore = create<MachinesState>((set) => ({
 				connected: payload.connected,
 				sessionCount: payload.sessionCount,
 				userId: payload.userId,
+				capabilities: existing?.capabilities,
+				lastCapabilitiesAt: existing?.lastCapabilitiesAt,
 			};
 
 			// Auto-select first connected machine if none selected
@@ -67,11 +75,34 @@ export const useMachinesStore = create<MachinesState>((set) => ({
 			return { machines: rest, selectedMachineId: nextSelected };
 		}),
 
+	setMachineCapabilities: (machineId, capabilities) =>
+		set((state) => {
+			const existing = state.machines[machineId];
+			if (!existing) {
+				return state;
+			}
+			return {
+				machines: {
+					...state.machines,
+					[machineId]: {
+						...existing,
+						capabilities,
+						lastCapabilitiesAt: new Date().toISOString(),
+					},
+				},
+			};
+		}),
+
 	syncMachines: (machines) =>
 		set((state) => {
 			const nextMachines: Record<string, Machine> = {};
 			for (const machine of machines) {
-				nextMachines[machine.machineId] = machine;
+				const existing = state.machines[machine.machineId];
+				nextMachines[machine.machineId] = {
+					...machine,
+					capabilities: existing?.capabilities,
+					lastCapabilitiesAt: existing?.lastCapabilitiesAt,
+				};
 			}
 
 			// Keep selection if still valid

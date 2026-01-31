@@ -153,7 +153,6 @@ describe("AcpConnection", () => {
 		});
 	});
 
-
 	describe("listSessions", () => {
 		it("returns empty array when session list not supported", async () => {
 			// agentCapabilities is undefined, so supportsSessionList() returns false

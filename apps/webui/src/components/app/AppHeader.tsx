@@ -7,8 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 export type AppHeaderProps = {
-	statusVariant: "default" | "destructive" | "secondary" | "outline";
-	statusLabel: string;
 	backendLabel?: string;
 	statusMessage?: string;
 	streamError?: ChatSession["streamError"];
@@ -19,8 +17,6 @@ export type AppHeaderProps = {
 };
 
 export function AppHeader({
-	statusVariant,
-	statusLabel,
 	backendLabel,
 	statusMessage,
 	streamError,
@@ -43,9 +39,6 @@ export function AppHeader({
 					☰
 				</Button>
 				<div className="flex flex-1 flex-wrap items-center gap-2">
-					<Badge variant={statusVariant} className="shrink-0">
-						{statusLabel}
-					</Badge>
 					{backendLabel ? (
 						<Badge variant="outline" className="shrink-0">
 							{t("status.backend")}: {backendLabel}

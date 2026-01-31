@@ -3,6 +3,8 @@ import type {
 	GatewayToWebuiEvents,
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
+	SessionAttachedPayload,
+	SessionDetachedPayload,
 	SessionNotification,
 	SessionsChangedPayload,
 	StreamErrorPayload,
@@ -105,6 +107,20 @@ class GatewaySocket {
 		};
 	}
 
+	onSessionAttached(handler: (payload: SessionAttachedPayload) => void) {
+		this.socket?.on("session:attached", handler);
+		return () => {
+			this.socket?.off("session:attached", handler);
+		};
+	}
+
+	onSessionDetached(handler: (payload: SessionDetachedPayload) => void) {
+		this.socket?.on("session:detached", handler);
+		return () => {
+			this.socket?.off("session:detached", handler);
+		};
+	}
+
 	onPermissionRequest(handler: (payload: PermissionRequestPayload) => void) {
 		this.socket?.on("permission:request", handler);
 		return () => {
@@ -149,6 +165,14 @@ class GatewaySocket {
 		}
 		return () => {
 			this.onConnectCallbacks.delete(callback);
+		};
+	}
+
+	onDisconnect(callback: (reason: string) => void) {
+		const handler = (reason: string) => callback(reason);
+		this.socket?.on("disconnect", handler);
+		return () => {
+			this.socket?.off("disconnect", handler);
 		};
 	}
 

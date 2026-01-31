@@ -9,7 +9,6 @@ import type {
 	PermissionToolCall,
 	SessionModelOption,
 	SessionModeOption,
-	SessionState,
 	SessionSummary,
 	SessionsChangedPayload,
 	ToolCallContent,
@@ -107,7 +106,6 @@ export type ChatSession = {
 	canceling: boolean;
 	error?: ErrorDetail;
 	streamError?: ErrorDetail;
-	state?: SessionState;
 	createdAt?: string;
 	updatedAt?: string;
 	backendId?: string;
@@ -123,6 +121,15 @@ export type ChatSession = {
 	availableCommands?: AvailableCommand[];
 	/** Machine ID that owns this session */
 	machineId?: string;
+	isAttached?: boolean;
+	attachedAt?: string;
+	detachedAt?: string;
+	detachedReason?:
+		| "agent_exit"
+		| "cli_disconnect"
+		| "gateway_disconnect"
+		| "unknown";
+	isLoading?: boolean;
 };
 
 type ChatState = {
@@ -135,6 +142,18 @@ type ChatState = {
 	setActiveSessionId: (value?: string) => void;
 	setAppError: (value?: ErrorDetail) => void;
 	setLastCreatedCwd: (value?: string) => void;
+	setSessionLoading: (sessionId: string, value: boolean) => void;
+	markSessionAttached: (payload: {
+		sessionId: string;
+		machineId?: string;
+		attachedAt: string;
+	}) => void;
+	markSessionDetached: (payload: {
+		sessionId: string;
+		machineId?: string;
+		detachedAt: string;
+		reason: ChatSession["detachedReason"];
+	}) => void;
 	handleSessionsChanged: (payload: SessionsChangedPayload) => void;
 	clearSessionMessages: (sessionId: string) => void;
 	restoreSessionMessages: (sessionId: string, messages: ChatMessage[]) => void;
@@ -142,7 +161,6 @@ type ChatState = {
 		sessionId: string,
 		options?: {
 			title?: string;
-			state?: SessionState;
 			backendId?: string;
 			backendLabel?: string;
 			cwd?: string;
@@ -393,18 +411,10 @@ const createStatusMessage = (payload: {
 	isStreaming: false,
 });
 
-const createSessionClosedError = (): ErrorDetail => ({
-	code: "SESSION_NOT_FOUND",
-	message: i18n.t("session.sessionClosed"),
-	retryable: false,
-	scope: "session",
-});
-
 const createSessionState = (
 	sessionId: string,
 	options?: {
 		title?: string;
-		state?: SessionState;
 		backendId?: string;
 		backendLabel?: string;
 		cwd?: string;
@@ -430,7 +440,6 @@ const createSessionState = (
 	canceling: false,
 	error: undefined,
 	streamError: undefined,
-	state: options?.state,
 	createdAt: undefined,
 	updatedAt: undefined,
 	backendId: options?.backendId,
@@ -445,6 +454,11 @@ const createSessionState = (
 	availableModels: options?.availableModels,
 	availableCommands: options?.availableCommands,
 	machineId: options?.machineId,
+	isAttached: false,
+	attachedAt: undefined,
+	detachedAt: undefined,
+	detachedReason: undefined,
+	isLoading: false,
 });
 
 const STORAGE_KEY = "mobvibe.chat-store";
@@ -468,6 +482,11 @@ const sanitizeSessionForPersist = (session: ChatSession): ChatSession => ({
 	error: undefined,
 	streamError: undefined,
 	streamingMessageId: undefined,
+	isAttached: false,
+	isLoading: false,
+	attachedAt: undefined,
+	detachedAt: undefined,
+	detachedReason: undefined,
 	messages: session.messages.map(sanitizeMessageForPersist),
 });
 
@@ -498,33 +517,72 @@ export const useChatStore = create<ChatState>()(
 			setActiveSessionId: (value?: string) => set({ activeSessionId: value }),
 			setAppError: (value?: ErrorDetail) => set({ appError: value }),
 			setLastCreatedCwd: (value?: string) => set({ lastCreatedCwd: value }),
+			setSessionLoading: (sessionId, value) =>
+				set((state) => {
+					const session = state.sessions[sessionId];
+					if (!session) {
+						return state;
+					}
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: { ...session, isLoading: value },
+						},
+					};
+				}),
+			markSessionAttached: (payload) =>
+				set((state) => {
+					const session =
+						state.sessions[payload.sessionId] ??
+						createSessionState(payload.sessionId);
+					return {
+						sessions: {
+							...state.sessions,
+							[payload.sessionId]: {
+								...session,
+								isAttached: true,
+								attachedAt: payload.attachedAt,
+								detachedAt: undefined,
+								detachedReason: undefined,
+								machineId: payload.machineId ?? session.machineId,
+							},
+						},
+					};
+				}),
+			markSessionDetached: (payload) =>
+				set((state) => {
+					const session =
+						state.sessions[payload.sessionId] ??
+						createSessionState(payload.sessionId);
+					return {
+						sessions: {
+							...state.sessions,
+							[payload.sessionId]: {
+								...session,
+								isAttached: false,
+								detachedAt: payload.detachedAt,
+								detachedReason: payload.reason,
+								machineId: payload.machineId ?? session.machineId,
+							},
+						},
+					};
+				}),
 			handleSessionsChanged: (payload: SessionsChangedPayload) =>
 				set((state: ChatState) => {
 					const nextSessions: Record<string, ChatSession> = {
 						...state.sessions,
 					};
 
-					// Handle removed sessions
 					for (const removedId of payload.removed) {
-						const session = nextSessions[removedId];
-						if (session && session.state !== "stopped") {
-							nextSessions[removedId] = {
-								...session,
-								state: "stopped",
-								error: session.error ?? createSessionClosedError(),
-							};
-						}
+						delete nextSessions[removedId];
 					}
 
-					// Handle added sessions
 					for (const added of payload.added) {
 						const existing = nextSessions[added.sessionId];
 						if (existing) {
-							// Merge with existing local session
 							nextSessions[added.sessionId] = {
 								...existing,
 								title: added.title ?? existing.title,
-								state: added.state,
 								error: added.error,
 								createdAt: added.createdAt,
 								updatedAt: added.updatedAt,
@@ -544,12 +602,10 @@ export const useChatStore = create<ChatState>()(
 								machineId: added.machineId ?? existing.machineId,
 							};
 						} else {
-							// Create new session
 							nextSessions[added.sessionId] = createSessionState(
 								added.sessionId,
 								{
 									title: added.title,
-									state: added.state,
 									backendId: added.backendId,
 									backendLabel: added.backendLabel,
 									cwd: added.cwd,
@@ -567,14 +623,12 @@ export const useChatStore = create<ChatState>()(
 						}
 					}
 
-					// Handle updated sessions
 					for (const updated of payload.updated) {
 						const existing = nextSessions[updated.sessionId];
 						if (existing) {
 							nextSessions[updated.sessionId] = {
 								...existing,
 								title: updated.title ?? existing.title,
-								state: updated.state,
 								error: updated.error,
 								createdAt: updated.createdAt ?? existing.createdAt,
 								updatedAt: updated.updatedAt,
@@ -656,7 +710,6 @@ export const useChatStore = create<ChatState>()(
 							nextSessions[summary.sessionId] ??
 							createSessionState(summary.sessionId, {
 								title: summary.title,
-								state: summary.state,
 								backendId: summary.backendId,
 								backendLabel: summary.backendLabel,
 								cwd: summary.cwd,
@@ -669,7 +722,6 @@ export const useChatStore = create<ChatState>()(
 						nextSessions[summary.sessionId] = {
 							...existing,
 							title: summary.title ?? existing.title,
-							state: summary.state,
 							error: summary.error,
 							createdAt: summary.createdAt,
 							updatedAt: summary.updatedAt,
@@ -692,14 +744,7 @@ export const useChatStore = create<ChatState>()(
 
 					Object.keys(nextSessions).forEach((sessionId) => {
 						if (!serverIds.has(sessionId)) {
-							const session = nextSessions[sessionId];
-							if (session.state !== "stopped") {
-								nextSessions[sessionId] = {
-									...session,
-									state: "stopped",
-									error: session.error ?? createSessionClosedError(),
-								};
-							}
+							delete nextSessions[sessionId];
 						}
 					});
 

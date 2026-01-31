@@ -3,6 +3,8 @@ import type {
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
 	RpcResponse,
+	SessionAttachedPayload,
+	SessionDetachedPayload,
 	SessionNotification,
 	SessionSummary,
 	SessionsChangedPayload,
@@ -176,14 +178,12 @@ export function setupCliHandlers(
 				cwd: s.cwd,
 				updatedAt: s.updatedAt ?? new Date().toISOString(),
 				createdAt: s.updatedAt ?? new Date().toISOString(),
-				state: "idle" as const,
 				backendId: cliRecord.defaultBackendId ?? "",
 				backendLabel:
 					cliRecord.backends[0]?.backendLabel ??
 					cliRecord.defaultBackendId ??
 					"",
 				machineId: cliRecord.machineId,
-				lifecycle: "suspended" as const,
 			}));
 
 			// Add to CLI registry (only adds sessions that don't already exist)
@@ -241,6 +241,28 @@ export function setupCliHandlers(
 			emitToWebui("session:error", payload);
 		});
 
+		// Session attached
+		socket.on("session:attached", (payload: SessionAttachedPayload) => {
+			logger.info(
+				{ sessionId: payload.sessionId, machineId: payload.machineId },
+				"session_attached_received",
+			);
+			emitToWebui("session:attached", payload);
+		});
+
+		// Session detached
+		socket.on("session:detached", (payload: SessionDetachedPayload) => {
+			logger.info(
+				{
+					sessionId: payload.sessionId,
+					machineId: payload.machineId,
+					reason: payload.reason,
+				},
+				"session_detached_received",
+			);
+			emitToWebui("session:detached", payload);
+		});
+
 		// Permission request from CLI
 		socket.on("permission:request", (payload: PermissionRequestPayload) => {
 			logger.info(
@@ -289,6 +311,14 @@ export function setupCliHandlers(
 					{ machineId: record.machineId, reason, socketId: socket.id },
 					"cli_disconnected",
 				);
+				for (const session of record.sessions) {
+					emitToWebui("session:detached", {
+						sessionId: session.sessionId,
+						machineId: record.machineId,
+						detachedAt: new Date().toISOString(),
+						reason: "cli_disconnect",
+					});
+				}
 
 				// Update machine status and close sessions in database
 				if (record.machineId) {

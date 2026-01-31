@@ -40,7 +40,6 @@ import {
 } from "@/components/ui/select";
 import i18n, { supportedLanguages } from "@/i18n";
 import { useUiStore } from "@/lib/ui-store";
-import { getStatusVariant } from "@/lib/ui-utils";
 import { cn } from "@/lib/utils";
 
 const toThemePreference = (value: string): "light" | "dark" | "system" => {
@@ -298,10 +297,6 @@ const SessionListItem = ({
 	onClose,
 }: SessionListItemProps) => {
 	const { t } = useTranslation();
-	const statusVariant = getStatusVariant(session.state);
-	const statusLabel = t(`status.${session.state ?? "idle"}`, {
-		defaultValue: session.state ?? "idle",
-	});
 	const cwdLabel = getPathBasename(session.cwd) ?? t("common.unknown");
 	const handleSelect = () => onSelect(session.sessionId);
 	return (
@@ -329,10 +324,17 @@ const SessionListItem = ({
 						<span className="text-sm font-medium">{session.title}</span>
 					)}
 					<div className="flex items-center gap-2">
-						<Badge variant={statusVariant}>{statusLabel}</Badge>
+						{session.isLoading ? (
+							<Badge variant="secondary">{t("common.loading")}</Badge>
+						) : null}
 					</div>
 				</div>
 				<span className="text-muted-foreground text-xs">{cwdLabel}</span>
+				{session.detachedReason ? (
+					<span className="text-muted-foreground text-xs">
+						{t("status.error")}: {session.detachedReason}
+					</span>
+				) : null}
 				{session.error ? (
 					<span className="text-destructive text-xs">
 						{session.error.message}

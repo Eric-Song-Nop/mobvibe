@@ -663,7 +663,6 @@ export class SocketClient extends EventEmitter {
 				this.sendRpcError(request.requestId, error);
 			}
 		});
-
 	}
 
 	private setupSessionManagerListeners() {

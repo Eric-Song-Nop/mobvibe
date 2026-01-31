@@ -4,6 +4,8 @@ import type {
 	GatewayToWebuiEvents,
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
+	SessionAttachedPayload,
+	SessionDetachedPayload,
 	SessionNotification,
 	SessionSummary,
 	SessionsChangedPayload,
@@ -101,6 +103,20 @@ export class GatewaySocket {
 		this.socket?.on("session:error", handler);
 		return () => {
 			this.socket?.off("session:error", handler);
+		};
+	}
+
+	onSessionAttached(handler: (payload: SessionAttachedPayload) => void) {
+		this.socket?.on("session:attached", handler);
+		return () => {
+			this.socket?.off("session:attached", handler);
+		};
+	}
+
+	onSessionDetached(handler: (payload: SessionDetachedPayload) => void) {
+		this.socket?.on("session:detached", handler);
+		return () => {
+			this.socket?.off("session:detached", handler);
 		};
 	}
 

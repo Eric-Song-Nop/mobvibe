@@ -3,7 +3,6 @@ export * from "@mobvibe/shared";
 
 // Import types needed for extraction functions and local types
 import type {
-	AcpConnectionState,
 	AvailableCommand,
 	FsEntry,
 	FsRoot,
@@ -30,9 +29,6 @@ export type SessionInfoPayload = {
 	title?: string;
 	updatedAt?: string;
 };
-
-// Alias for backwards compatibility
-export type SessionState = AcpConnectionState;
 
 // API Response types (core-specific)
 export type AcpBackendsResponse = {

@@ -128,8 +128,21 @@ export class CliRegistry extends EventEmitter {
 		if (!record) {
 			return;
 		}
-		record.sessions = sessions;
-		this.emit("sessions:updated", record.machineId, sessions);
+
+		const merged = new Map<string, SessionSummary>();
+		for (const existing of record.sessions) {
+			merged.set(existing.sessionId, existing);
+		}
+		for (const session of sessions) {
+			const current = merged.get(session.sessionId);
+			merged.set(
+				session.sessionId,
+				current ? { ...current, ...session } : session,
+			);
+		}
+
+		record.sessions = Array.from(merged.values());
+		this.emit("sessions:updated", record.machineId, record.sessions);
 	}
 
 	/**
@@ -226,6 +239,45 @@ export class CliRegistry extends EventEmitter {
 			if (!exists) {
 				record.sessions.push(session);
 			}
+		}
+	}
+
+	/**
+	 * Add discovered sessions to a CLI record by machineId.
+	 * Only adds sessions that don't already exist (to avoid overwriting active sessions).
+	 */
+	addDiscoveredSessionsForMachine(
+		machineId: string,
+		sessions: SessionSummary[],
+		userId?: string,
+	): void {
+		const record = this.cliByMachineId.get(machineId);
+		if (!record) {
+			return;
+		}
+
+		const added: SessionSummary[] = [];
+		for (const session of sessions) {
+			const exists = record.sessions.some(
+				(existing) => existing.sessionId === session.sessionId,
+			);
+			if (!exists) {
+				record.sessions.push(session);
+				added.push(session);
+			}
+		}
+
+		if (added.length > 0) {
+			this.emit(
+				"sessions:changed",
+				record.machineId,
+				{
+					added,
+					updated: [],
+					removed: [],
+				} as SessionsChangedPayload,
+				userId ?? record.userId,
+			);
 		}
 	}
 

@@ -10,6 +10,8 @@ import {
 	extractToolCallUpdate,
 	type PermissionDecisionPayload,
 	type PermissionRequestPayload,
+	type SessionAttachedPayload,
+	type SessionDetachedPayload,
 	type SessionNotification,
 	type SessionsChangedPayload,
 	type StreamErrorPayload,
@@ -40,6 +42,8 @@ type UseSocketOptions = {
 	| "updateToolCall"
 	| "appendTerminalOutput"
 	| "handleSessionsChanged"
+	| "markSessionAttached"
+	| "markSessionDetached"
 >;
 
 export function useSocket({
@@ -54,6 +58,8 @@ export function useSocket({
 	updateToolCall,
 	appendTerminalOutput,
 	handleSessionsChanged,
+	markSessionAttached,
+	markSessionDetached,
 }: UseSocketOptions) {
 	const { t } = useTranslation();
 	const subscribedSessionsRef = useRef<Set<string>>(new Set());
@@ -126,6 +132,14 @@ export function useSocket({
 			}
 		};
 
+		const handleSessionAttached = (payload: SessionAttachedPayload) => {
+			markSessionAttached(payload);
+		};
+
+		const handleSessionDetached = (payload: SessionDetachedPayload) => {
+			markSessionDetached(payload);
+		};
+
 		// Permission request handler
 		const handlePermissionRequest = (payload: PermissionRequestPayload) => {
 			addPermissionRequest(payload.sessionId, {
@@ -172,9 +186,28 @@ export function useSocket({
 			handlePermissionResult,
 		);
 		const unsubTerminal = gatewaySocket.onTerminalOutput(handleTerminalOutput);
+		const unsubSessionAttached = gatewaySocket.onSessionAttached(
+			handleSessionAttached,
+		);
+		const unsubSessionDetached = gatewaySocket.onSessionDetached(
+			handleSessionDetached,
+		);
 		const unsubSessionsChanged = gatewaySocket.onSessionsChanged(
 			handleSessionsChangedEvent,
 		);
+		const unsubDisconnect = gatewaySocket.onDisconnect(() => {
+			const now = new Date().toISOString();
+			for (const session of Object.values(sessionsRef.current)) {
+				if (session.isAttached) {
+					markSessionDetached({
+						sessionId: session.sessionId,
+						machineId: session.machineId,
+						detachedAt: now,
+						reason: "gateway_disconnect",
+					});
+				}
+			}
+		});
 
 		return () => {
 			unsubUpdate();
@@ -182,7 +215,10 @@ export function useSocket({
 			unsubPermReq();
 			unsubPermRes();
 			unsubTerminal();
+			unsubSessionAttached();
+			unsubSessionDetached();
 			unsubSessionsChanged();
+			unsubDisconnect();
 			gatewaySocket.disconnect();
 		};
 	}, [
@@ -191,6 +227,8 @@ export function useSocket({
 		appendAssistantChunk,
 		appendTerminalOutput,
 		handleSessionsChanged,
+		markSessionAttached,
+		markSessionDetached,
 		setPermissionDecisionState,
 		setPermissionOutcome,
 		setStreamError,
@@ -199,15 +237,17 @@ export function useSocket({
 		updateToolCall,
 	]);
 
-	// Subscribe to ready sessions
+	// Subscribe to sessions while attached or loading (load replays history)
 	useEffect(() => {
-		const readySessions = Object.values(sessions).filter(
-			(session) => session.state === "ready",
+		const subscribableSessions = Object.values(sessions).filter(
+			(session) => session.isAttached || session.isLoading,
 		);
-		const readyIds = new Set(readySessions.map((s) => s.sessionId));
+		const subscribableIds = new Set(
+			subscribableSessions.map((s) => s.sessionId),
+		);
 
-		// Subscribe to new ready sessions
-		for (const sessionId of readyIds) {
+		// Subscribe to new sessions that can stream (attached/loading)
+		for (const sessionId of subscribableIds) {
 			if (!subscribedSessionsRef.current.has(sessionId)) {
 				gatewaySocket.subscribeToSession(sessionId);
 				subscribedSessionsRef.current.add(sessionId);
@@ -215,9 +255,9 @@ export function useSocket({
 			}
 		}
 
-		// Unsubscribe from sessions that are no longer ready
+		// Unsubscribe from sessions that are no longer streaming
 		for (const sessionId of subscribedSessionsRef.current) {
-			if (!readyIds.has(sessionId)) {
+			if (!subscribableIds.has(sessionId)) {
 				gatewaySocket.unsubscribeFromSession(sessionId);
 				subscribedSessionsRef.current.delete(sessionId);
 			}

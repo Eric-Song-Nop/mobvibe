@@ -1,5 +1,6 @@
 // Re-export ACP types from @mobvibe/core (which re-exports from @mobvibe/shared)
 export type {
+	AgentSessionCapabilities,
 	AudioContent,
 	// Content types
 	AvailableCommand,
@@ -20,8 +21,10 @@ export type {
 	ResourceContent,
 	ResourceLink,
 	ResourceLinkContent,
+	SessionAttachedPayload,
 	// Backwards-compatible aliases
 	SessionContent,
+	SessionDetachedPayload,
 	SessionInfoPayload,
 	SessionModeUpdate,
 	// Session types

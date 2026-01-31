@@ -3,6 +3,8 @@ import type {
 	CliStatusPayload,
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
+	SessionAttachedPayload,
+	SessionDetachedPayload,
 	SessionNotification,
 	StreamErrorPayload,
 	TerminalOutputEvent,
@@ -60,6 +62,8 @@ type UseSocketOptions = {
 		},
 	) => void;
 	updateMachine: (payload: CliStatusPayload) => void;
+	markSessionAttached: (payload: SessionAttachedPayload) => void;
+	markSessionDetached: (payload: SessionDetachedPayload) => void;
 	onPermissionRequest?: (payload: PermissionRequestPayload) => void;
 	onSessionError?: (payload: StreamErrorPayload) => void;
 };
@@ -78,6 +82,8 @@ export function useSocket({
 	updateToolCall,
 	appendTerminalOutput,
 	updateMachine,
+	markSessionAttached,
+	markSessionDetached,
 	onPermissionRequest,
 	onSessionError,
 }: UseSocketOptions) {
@@ -87,7 +93,7 @@ export function useSocket({
 
 	// Connect to gateway on mount
 	useEffect(() => {
-		gatewaySocket.connect();
+		const socket = gatewaySocket.connect();
 
 		// Session update handler
 		const handleSessionUpdate = (notification: SessionNotification) => {
@@ -148,6 +154,14 @@ export function useSocket({
 			}
 		};
 
+		const handleSessionAttached = (payload: SessionAttachedPayload) => {
+			markSessionAttached(payload);
+		};
+
+		const handleSessionDetached = (payload: SessionDetachedPayload) => {
+			markSessionDetached(payload);
+		};
+
 		// Permission request handler
 		const handlePermissionRequest = (payload: PermissionRequestPayload) => {
 			addPermissionRequest(payload.sessionId, {
@@ -195,14 +209,39 @@ export function useSocket({
 		);
 		const unsubTerminal = gatewaySocket.onTerminalOutput(handleTerminalOutput);
 		const unsubCliStatus = gatewaySocket.onCliStatus(handleCliStatus);
+		const unsubSessionAttached = gatewaySocket.onSessionAttached(
+			handleSessionAttached,
+		);
+		const unsubSessionDetached = gatewaySocket.onSessionDetached(
+			handleSessionDetached,
+		);
+
+		const handleDisconnect = () => {
+			const now = new Date().toISOString();
+			for (const session of Object.values(sessionsRef.current)) {
+				if (session.isAttached) {
+					markSessionDetached({
+						sessionId: session.sessionId,
+						machineId: session.machineId,
+						detachedAt: now,
+						reason: "gateway_disconnect",
+					});
+				}
+			}
+		};
+
+		socket.on("disconnect", handleDisconnect);
 
 		return () => {
+			socket.off("disconnect", handleDisconnect);
 			unsubUpdate();
 			unsubError();
 			unsubPermReq();
 			unsubPermRes();
 			unsubTerminal();
 			unsubCliStatus();
+			unsubSessionAttached();
+			unsubSessionDetached();
 			gatewaySocket.disconnect();
 		};
 	}, [
@@ -211,6 +250,8 @@ export function useSocket({
 		addToolCall,
 		appendAssistantChunk,
 		appendTerminalOutput,
+		markSessionAttached,
+		markSessionDetached,
 		setPermissionDecisionState,
 		setPermissionOutcome,
 		setStreamError,
@@ -222,15 +263,17 @@ export function useSocket({
 		onSessionError,
 	]);
 
-	// Subscribe to ready sessions
+	// Subscribe to sessions while attached or loading (load replays history)
 	useEffect(() => {
-		const readySessions = Object.values(sessions).filter(
-			(session) => session.state === "ready",
+		const subscribableSessions = Object.values(sessions).filter(
+			(session) => session.isAttached || session.isLoading,
 		);
-		const readyIds = new Set(readySessions.map((s) => s.sessionId));
+		const subscribableIds = new Set(
+			subscribableSessions.map((s) => s.sessionId),
+		);
 
-		// Subscribe to new ready sessions
-		for (const sessionId of readyIds) {
+		// Subscribe to new sessions that can stream (attached/loading)
+		for (const sessionId of subscribableIds) {
 			if (!subscribedSessionsRef.current.has(sessionId)) {
 				gatewaySocket.subscribeToSession(sessionId);
 				subscribedSessionsRef.current.add(sessionId);
@@ -238,9 +281,9 @@ export function useSocket({
 			}
 		}
 
-		// Unsubscribe from sessions that are no longer ready
+		// Unsubscribe from sessions that are no longer streaming
 		for (const sessionId of subscribedSessionsRef.current) {
-			if (!readyIds.has(sessionId)) {
+			if (!subscribableIds.has(sessionId)) {
 				gatewaySocket.unsubscribeFromSession(sessionId);
 				subscribedSessionsRef.current.delete(sessionId);
 			}
