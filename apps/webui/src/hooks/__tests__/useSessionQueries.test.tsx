@@ -225,6 +225,45 @@ describe("useSessionQueries", () => {
 		expect(result.current.backendsQuery.error).toBeDefined();
 	});
 
+	it("discovers sessions and invalidates sessions query", async () => {
+		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
+		vi.mocked(api.fetchAcpBackends).mockResolvedValue({
+			defaultBackendId: "backend-1",
+			backends: [],
+		});
+		vi.mocked(api.discoverSessions).mockResolvedValueOnce({
+			sessions: [],
+			capabilities: { list: true, load: true },
+			nextCursor: "next",
+		});
+		vi.mocked(api.discoverSessions).mockResolvedValueOnce({
+			sessions: [],
+			capabilities: { list: true, load: true },
+			nextCursor: undefined,
+		});
+
+		const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+		const { result } = renderHook(() => useSessionQueries(), { wrapper });
+
+		await result.current.discoverSessionsMutation.mutateAsync({
+			machineId: "machine-1",
+		});
+
+		expect(api.discoverSessions).toHaveBeenCalledTimes(2);
+		expect(api.discoverSessions).toHaveBeenCalledWith({
+			machineId: "machine-1",
+			cwd: undefined,
+			cursor: undefined,
+		});
+		expect(api.discoverSessions).toHaveBeenCalledWith({
+			machineId: "machine-1",
+			cwd: undefined,
+			cursor: "next",
+		});
+		expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["sessions"] });
+	});
+
 	it("should use correct query keys", async () => {
 		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
 		vi.mocked(api.fetchAcpBackends).mockResolvedValue({

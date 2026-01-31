@@ -35,7 +35,6 @@ const createMockSessionSummary = (
 	title: "Test Session",
 	backendId: "backend-1",
 	backendLabel: "Claude Code",
-	state: "ready",
 	createdAt: new Date().toISOString(),
 	updatedAt: new Date().toISOString(),
 	...overrides,
@@ -125,6 +124,96 @@ describe("CliRegistry", () => {
 
 			registry.unregister("socket-1");
 			expect(registry.getClisForUser("user-1")).toHaveLength(0);
+		});
+	});
+
+	describe("updateSessions", () => {
+		it("merges sessions without dropping existing entries", () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			registry.register(socket, info);
+
+			registry.updateSessions("socket-1", [
+				createMockSessionSummary({
+					sessionId: "session-1",
+					title: "Original Title",
+				}),
+				createMockSessionSummary({
+					sessionId: "session-2",
+					title: "Session 2",
+				}),
+			]);
+
+			registry.updateSessions("socket-1", [
+				createMockSessionSummary({
+					sessionId: "session-1",
+					title: "Updated Title",
+				}),
+			]);
+
+			const record = registry.getCliBySocketId("socket-1");
+			expect(record?.sessions).toHaveLength(2);
+			expect(
+				record?.sessions.find((s) => s.sessionId === "session-1")?.title,
+			).toBe("Updated Title");
+			expect(
+				record?.sessions.find((s) => s.sessionId === "session-2")?.title,
+			).toBe("Session 2");
+		});
+	});
+
+	describe("addDiscoveredSessionsForMachine", () => {
+		it("adds new sessions and emits sessions:changed", () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			registry.register(socket, info, authInfo);
+
+			const listener = vi.fn();
+			registry.onSessionsChanged(listener);
+
+			registry.addDiscoveredSessionsForMachine(
+				"machine-1",
+				[
+					createMockSessionSummary({
+						sessionId: "session-1",
+						title: "Discovered 1",
+					}),
+				],
+				"user-1",
+			);
+
+			const record = registry.getCliByMachineId("machine-1");
+			expect(record?.sessions).toHaveLength(1);
+			expect(record?.sessions[0].sessionId).toBe("session-1");
+			expect(listener).toHaveBeenCalledWith(
+				"machine-1",
+				expect.objectContaining({
+					added: expect.arrayContaining([
+						expect.objectContaining({ sessionId: "session-1" }),
+					]),
+				}),
+				"user-1",
+			);
+		});
+
+		it("does not emit when discovered sessions already exist", () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			registry.register(socket, info);
+
+			registry.updateSessions("socket-1", [
+				createMockSessionSummary({ sessionId: "session-1" }),
+			]);
+
+			const listener = vi.fn();
+			registry.onSessionsChanged(listener);
+
+			registry.addDiscoveredSessionsForMachine("machine-1", [
+				createMockSessionSummary({ sessionId: "session-1" }),
+			]);
+
+			expect(listener).not.toHaveBeenCalled();
 		});
 	});
 

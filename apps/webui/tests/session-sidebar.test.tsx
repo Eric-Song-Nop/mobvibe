@@ -212,6 +212,32 @@ describe("SessionSidebar", () => {
 		expect(screen.getByText("mobvibe")).toBeInTheDocument();
 	});
 
+	it("shows loading badge when session is loading", () => {
+		renderSidebar([
+			buildSession({
+				sessionId: "session-loading",
+				title: "Loading Session",
+				isLoading: true,
+			}),
+		]);
+
+		expect(screen.getByText(i18n.t("common.loading"))).toBeInTheDocument();
+	});
+
+	it("shows detached reason when present", () => {
+		renderSidebar([
+			buildSession({
+				sessionId: "session-detached",
+				title: "Detached Session",
+				detachedReason: "gateway_disconnect",
+			}),
+		]);
+
+		expect(
+			screen.getByText(`${i18n.t("status.error")}: gateway_disconnect`),
+		).toBeInTheDocument();
+	});
+
 	it("toggles group visibility when header is clicked", async () => {
 		const user = userEvent.setup();
 		renderSidebar([

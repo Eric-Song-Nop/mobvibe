@@ -19,7 +19,6 @@ const createMockSessionSummary = (
 	title: "Test Session",
 	backendId: "backend-1",
 	backendLabel: "Claude Code",
-	state: "ready",
 	createdAt: new Date().toISOString(),
 	updatedAt: new Date().toISOString(),
 	...overrides,
@@ -34,13 +33,48 @@ describe("useChatStore", () => {
 	it("creates a local session when missing", () => {
 		useChatStore.getState().createLocalSession("session-1", {
 			title: "Test conversation",
-			state: "ready",
 		});
 
 		const session = useChatStore.getState().sessions["session-1"];
 		expect(session).toBeTruthy();
 		expect(session.title).toBe("Test conversation");
-		expect(session.state).toBe("ready");
+		expect(session.isAttached).toBe(false);
+	});
+
+	it("sets loading state for a session", () => {
+		useChatStore.getState().createLocalSession("session-1", {
+			title: "Test conversation",
+		});
+
+		useChatStore.getState().setSessionLoading("session-1", true);
+
+		const session = useChatStore.getState().sessions["session-1"];
+		expect(session.isLoading).toBe(true);
+	});
+
+	it("marks session attached and detached", () => {
+		useChatStore.getState().markSessionAttached({
+			sessionId: "session-1",
+			machineId: "machine-1",
+			attachedAt: "2024-01-01T00:00:00Z",
+		});
+
+		let session = useChatStore.getState().sessions["session-1"];
+		expect(session.isAttached).toBe(true);
+		expect(session.machineId).toBe("machine-1");
+		expect(session.attachedAt).toBe("2024-01-01T00:00:00Z");
+
+		useChatStore.getState().markSessionDetached({
+			sessionId: "session-1",
+			machineId: "machine-1",
+			detachedAt: "2024-01-01T01:00:00Z",
+			reason: "cli_disconnect",
+		});
+
+		session = useChatStore.getState().sessions["session-1"];
+		expect(session.isAttached).toBe(false);
+		expect(session.detachedAt).toBe("2024-01-01T01:00:00Z");
+		expect(session.detachedReason).toBe("cli_disconnect");
 	});
 
 	it("streams assistant messages and finalizes", () => {
@@ -62,17 +96,14 @@ describe("useChatStore", () => {
 		expect(session.streamingMessageId).toBeUndefined();
 	});
 
-	it("marks missing sessions as stopped", () => {
+	it("removes missing sessions during sync", () => {
 		useChatStore.getState().createLocalSession("session-1", {
 			title: "Old conversation",
-			state: "ready",
 		});
 
 		useChatStore.getState().syncSessions([]);
 
-		const session = useChatStore.getState().sessions["session-1"];
-		expect(session.state).toBe("stopped");
-		expect(session.error?.code).toBe("SESSION_NOT_FOUND");
+		expect(useChatStore.getState().sessions["session-1"]).toBeUndefined();
 	});
 
 	describe("handleSessionsChanged", () => {
@@ -93,7 +124,6 @@ describe("useChatStore", () => {
 			const session = useChatStore.getState().sessions["new-session-1"];
 			expect(session).toBeTruthy();
 			expect(session.title).toBe("New Session");
-			expect(session.state).toBe("ready");
 			expect(session.cwd).toBe("/home/user/project");
 			expect(session.machineId).toBe("machine-1");
 		});
@@ -103,7 +133,6 @@ describe("useChatStore", () => {
 			const store = useChatStore.getState();
 			store.createLocalSession("session-1", {
 				title: "Local Title",
-				state: "ready",
 			});
 			store.addUserMessage("session-1", "Hello from user");
 
@@ -111,7 +140,6 @@ describe("useChatStore", () => {
 			const serverSession = createMockSessionSummary({
 				sessionId: "session-1",
 				title: "Server Title",
-				state: "ready",
 				cwd: "/home/user/project",
 				modelId: "claude-3",
 				modelName: "Claude 3",
@@ -138,14 +166,12 @@ describe("useChatStore", () => {
 		it("updates existing session metadata", () => {
 			useChatStore.getState().createLocalSession("session-1", {
 				title: "Original Title",
-				state: "ready",
 				modelId: "claude-2",
 			});
 
 			const updatedSession = createMockSessionSummary({
 				sessionId: "session-1",
 				title: "Updated Title",
-				state: "ready",
 				modelId: "claude-3",
 				modelName: "Claude 3 Opus",
 				cwd: "/updated/path",
@@ -189,10 +215,9 @@ describe("useChatStore", () => {
 			).toBeUndefined();
 		});
 
-		it("marks removed sessions as stopped with error", () => {
+		it("removes sessions listed in removed payload", () => {
 			useChatStore.getState().createLocalSession("session-1", {
 				title: "Active Session",
-				state: "ready",
 			});
 
 			useChatStore.getState().handleSessionsChanged({
@@ -201,13 +226,10 @@ describe("useChatStore", () => {
 				removed: ["session-1"],
 			});
 
-			const session = useChatStore.getState().sessions["session-1"];
-			expect(session.state).toBe("stopped");
-			expect(session.error).toBeTruthy();
-			expect(session.error?.code).toBe("SESSION_NOT_FOUND");
+			expect(useChatStore.getState().sessions["session-1"]).toBeUndefined();
 		});
 
-		it("preserves already stopped sessions", () => {
+		it("removes sessions even if they had errors", () => {
 			const customError = {
 				code: "CUSTOM_ERROR",
 				message: "Session crashed",
@@ -216,8 +238,7 @@ describe("useChatStore", () => {
 			};
 
 			useChatStore.getState().createLocalSession("session-1", {
-				title: "Stopped Session",
-				state: "stopped",
+				title: "Session With Error",
 			});
 			useChatStore.getState().setError("session-1", customError);
 
@@ -227,22 +248,16 @@ describe("useChatStore", () => {
 				removed: ["session-1"],
 			});
 
-			const session = useChatStore.getState().sessions["session-1"];
-			// Session should remain stopped
-			expect(session.state).toBe("stopped");
-			// Original error should be preserved since session was already stopped
-			expect(session.error?.code).toBe("CUSTOM_ERROR");
+			expect(useChatStore.getState().sessions["session-1"]).toBeUndefined();
 		});
 
 		it("handles add + update + remove in single payload", () => {
 			// Setup: create two existing sessions
 			useChatStore.getState().createLocalSession("session-to-update", {
 				title: "Will Update",
-				state: "ready",
 			});
 			useChatStore.getState().createLocalSession("session-to-remove", {
 				title: "Will Remove",
-				state: "ready",
 			});
 
 			const payload: SessionsChangedPayload = {
@@ -274,17 +289,13 @@ describe("useChatStore", () => {
 			expect(sessions["session-to-update"].title).toBe("Updated Title");
 			expect(sessions["session-to-update"].modelId).toBe("claude-4");
 
-			// Removed session should be stopped
-			expect(sessions["session-to-remove"].state).toBe("stopped");
-			expect(sessions["session-to-remove"].error?.code).toBe(
-				"SESSION_NOT_FOUND",
-			);
+			// Removed session should no longer exist
+			expect(sessions["session-to-remove"]).toBeUndefined();
 		});
 
 		it("handles empty payload gracefully", () => {
 			useChatStore.getState().createLocalSession("session-1", {
 				title: "Existing",
-				state: "ready",
 			});
 
 			const beforeState = useChatStore.getState().sessions["session-1"];
@@ -297,7 +308,7 @@ describe("useChatStore", () => {
 
 			const afterState = useChatStore.getState().sessions["session-1"];
 			expect(afterState.title).toBe(beforeState.title);
-			expect(afterState.state).toBe(beforeState.state);
+			expect(afterState.isAttached).toBe(beforeState.isAttached);
 		});
 
 		it("updates lastSyncAt timestamp", () => {
@@ -324,7 +335,6 @@ describe("useChatStore", () => {
 			const store = useChatStore.getState();
 			store.createLocalSession("session-1", {
 				title: "Chat Session",
-				state: "ready",
 			});
 			store.addUserMessage("session-1", "First message");
 			store.appendAssistantChunk("session-1", "Response 1");
@@ -357,20 +367,47 @@ describe("useChatStore", () => {
 			expect(session.messages[1].role).toBe("assistant");
 			expect(session.messages[2].role).toBe("user");
 		});
+
+		it("preserves runtime flags when updating sessions", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("session-1", {
+				title: "Local Title",
+			});
+			store.setSessionLoading("session-1", true);
+			store.markSessionAttached({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				attachedAt: "2024-01-01T00:00:00Z",
+			});
+
+			useChatStore.getState().handleSessionsChanged({
+				added: [],
+				updated: [
+					createMockSessionSummary({
+						sessionId: "session-1",
+						title: "Updated Title",
+					}),
+				],
+				removed: [],
+			});
+
+			const session = useChatStore.getState().sessions["session-1"];
+			expect(session.isLoading).toBe(true);
+			expect(session.isAttached).toBe(true);
+			expect(session.attachedAt).toBe("2024-01-01T00:00:00Z");
+		});
 	});
 
 	describe("syncSessions (extended)", () => {
 		it("updates existing session with new metadata", () => {
 			useChatStore.getState().createLocalSession("session-1", {
 				title: "Original Title",
-				state: "ready",
 				modelId: "claude-2",
 			});
 
 			const serverSession = createMockSessionSummary({
 				sessionId: "session-1",
 				title: "Server Title",
-				state: "ready",
 				modelId: "claude-3",
 				modelName: "Claude 3",
 				cwd: "/new/path",
@@ -385,6 +422,30 @@ describe("useChatStore", () => {
 			expect(session.modelName).toBe("Claude 3");
 			expect(session.cwd).toBe("/new/path");
 			expect(session.machineId).toBe("machine-1");
+		});
+
+		it("preserves runtime flags when syncing sessions", () => {
+			useChatStore.getState().createLocalSession("session-1", {
+				title: "Local Session",
+			});
+			useChatStore.getState().setSessionLoading("session-1", true);
+			useChatStore.getState().markSessionAttached({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				attachedAt: "2024-01-01T00:00:00Z",
+			});
+
+			const serverSession = createMockSessionSummary({
+				sessionId: "session-1",
+				title: "Server Session",
+			});
+
+			useChatStore.getState().syncSessions([serverSession]);
+
+			const session = useChatStore.getState().sessions["session-1"];
+			expect(session.isLoading).toBe(true);
+			expect(session.isAttached).toBe(true);
+			expect(session.attachedAt).toBe("2024-01-01T00:00:00Z");
 		});
 
 		it("creates new sessions from server list", () => {
@@ -417,7 +478,6 @@ describe("useChatStore", () => {
 			const store = useChatStore.getState();
 			store.createLocalSession("session-1", {
 				title: "Local Session",
-				state: "ready",
 			});
 			store.addUserMessage("session-1", "Hello");
 			store.appendAssistantChunk("session-1", "Hi there!");
@@ -426,7 +486,6 @@ describe("useChatStore", () => {
 			const serverSession = createMockSessionSummary({
 				sessionId: "session-1",
 				title: "Updated from Server",
-				state: "ready",
 			});
 
 			useChatStore.getState().syncSessions([serverSession]);
