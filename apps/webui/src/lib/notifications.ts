@@ -23,18 +23,11 @@ type NotificationContext = {
 	sessions?: Record<string, SessionSummary>;
 };
 
-const isMobileBrowser = () => {
-	if (typeof navigator === "undefined") {
-		return false;
-	}
-	return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-};
-
 const canUseWebNotification = () => {
 	if (typeof window === "undefined" || !("Notification" in window)) {
 		return false;
 	}
-	return !isMobileBrowser();
+	return true;
 };
 
 const resolveSessionTitle = (
@@ -108,7 +101,11 @@ const emitWebNotification = (
 		return;
 	}
 	if (Notification.permission === "default") {
-		void Notification.requestPermission();
+		try {
+			void Notification.requestPermission();
+		} catch {
+			return;
+		}
 		return;
 	}
 	if (Notification.permission !== "granted") {
@@ -144,7 +141,11 @@ export const ensureNotificationPermission = () => {
 		return;
 	}
 	if (Notification.permission === "default") {
-		void Notification.requestPermission();
+		try {
+			void Notification.requestPermission();
+		} catch {
+			return;
+		}
 	}
 };
 
