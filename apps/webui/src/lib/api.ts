@@ -5,6 +5,7 @@ export type {
 	AcpConnectionState,
 	CancelSessionResponse,
 	CreateSessionResponse,
+	DiscoverSessionsResult,
 	ErrorCode,
 	ErrorDetail,
 	ErrorScope,
@@ -38,6 +39,7 @@ import type {
 	CancelSessionResponse,
 	ContentBlock,
 	CreateSessionResponse,
+	DiscoverSessionsResult,
 	ErrorDetail,
 	FsEntry,
 	FsRootsResponse,
@@ -147,6 +149,21 @@ export const fetchSessions = async (): Promise<SessionsResponse> =>
 export const fetchMachines = async (): Promise<MachinesResponse> =>
 	requestJson<MachinesResponse>("/api/machines");
 
+const buildSessionsDiscoverPath = (payload?: {
+	machineId?: string;
+	cwd?: string;
+}) => {
+	const params = new URLSearchParams();
+	if (payload?.machineId) {
+		params.set("machineId", payload.machineId);
+	}
+	if (payload?.cwd) {
+		params.set("cwd", payload.cwd);
+	}
+	const query = params.toString();
+	return query ? `/acp/sessions/discover?${query}` : "/acp/sessions/discover";
+};
+
 const buildFsRootsPath = (machineId?: string) => {
 	if (!machineId) {
 		return "/fs/roots";
@@ -186,6 +203,12 @@ export const fetchFsRoots = async (payload?: {
 	machineId?: string;
 }): Promise<FsRootsResponse> =>
 	requestJson<FsRootsResponse>(buildFsRootsPath(payload?.machineId));
+
+export const discoverSessions = async (payload?: {
+	machineId?: string;
+	cwd?: string;
+}): Promise<DiscoverSessionsResult> =>
+	requestJson<DiscoverSessionsResult>(buildSessionsDiscoverPath(payload));
 
 export const fetchFsEntries = async (payload: {
 	path: string;

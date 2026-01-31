@@ -12,6 +12,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useMachinesQuery } from "@/hooks/useMachinesQuery";
+import { discoverSessions } from "@/lib/api";
 import { type Machine, useMachinesStore } from "@/lib/machines-store";
 import { cn } from "@/lib/utils";
 
@@ -49,7 +50,15 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 	};
 
 	const handleRefresh = async () => {
-		await machinesQuery.refetch();
+		const result = await machinesQuery.refetch();
+		const connectedMachineIds =
+			result.data?.machines
+				?.filter((machine) => machine.isOnline)
+				.map((machine) => machine.id) ?? [];
+
+		await Promise.allSettled(
+			connectedMachineIds.map((machineId) => discoverSessions({ machineId })),
+		);
 		await queryClient.refetchQueries({ queryKey: queryKeys.sessions });
 	};
 
