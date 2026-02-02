@@ -5,7 +5,12 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import type { SessionFsFilePreviewResponse } from "@/lib/api";
+import { fetchSessionGitDiff } from "@/lib/api";
 import { CodePreview } from "../CodePreview";
+
+vi.mock("@/lib/api", () => ({
+	fetchSessionGitDiff: vi.fn(),
+}));
 
 const createTestQueryClient = () =>
 	new QueryClient({
@@ -30,6 +35,7 @@ type TestNode = {
 	startIndex: number;
 	endIndex: number;
 	startPosition: { row: number; column: number };
+	endPosition: { row: number; column: number };
 	text: string;
 };
 
@@ -43,6 +49,7 @@ type OutlineMatch = {
 	startIndex: number;
 	endIndex: number;
 	row: number;
+	endRow?: number;
 };
 
 const queryMatches = vi.hoisted(() => [] as TestQueryMatch[]);
@@ -143,10 +150,12 @@ const buildNode = (
 	startIndex: number,
 	endIndex: number,
 	row: number,
+	endRow?: number,
 ): TestNode => ({
 	startIndex,
 	endIndex,
 	startPosition: { row, column: 0 },
+	endPosition: { row: endRow ?? row, column: 0 },
 	text,
 });
 
@@ -156,15 +165,16 @@ const buildMatch = ({
 	startIndex,
 	endIndex,
 	row,
+	endRow,
 }: OutlineMatch): TestQueryMatch => ({
 	captures: [
 		{
 			name: `definition.${kind}`,
-			node: buildNode("", startIndex, endIndex, row),
+			node: buildNode("", startIndex, endIndex, row, endRow),
 		},
 		{
 			name: "name",
-			node: buildNode(label, startIndex, endIndex, row),
+			node: buildNode(label, startIndex, endIndex, row, endRow),
 		},
 	],
 });
@@ -334,5 +344,98 @@ describe("CodePreview", () => {
 				configurable: true,
 			});
 		}
+	});
+
+	it("renders git status indicators for symbols with changes", async () => {
+		setTreeSitterSupport(true);
+		setTreeSitterTestFlag(true);
+
+		// Mock outline items spanning different line ranges
+		queryMatches.push(
+			buildMatch({
+				kind: "function",
+				label: "addedFunc",
+				startIndex: 0,
+				endIndex: 50,
+				row: 0,
+				endRow: 2, // Lines 1-3
+			}),
+			buildMatch({
+				kind: "function",
+				label: "deletedFunc",
+				startIndex: 60,
+				endIndex: 100,
+				row: 4,
+				endRow: 6, // Lines 5-7
+			}),
+			buildMatch({
+				kind: "function",
+				label: "modifiedFunc",
+				startIndex: 110,
+				endIndex: 150,
+				row: 8,
+				endRow: 10, // Lines 9-11
+			}),
+		);
+
+		// Mock the git diff API
+		vi.mocked(fetchSessionGitDiff).mockResolvedValueOnce({
+			isGitRepo: true,
+			path: "/tmp/example.ts",
+			addedLines: [2], // Affects addedFunc (lines 1-3)
+			deletedLines: [6], // Affects deletedFunc (lines 5-7)
+			modifiedLines: [10], // Affects modifiedFunc (lines 9-11)
+		});
+
+		const multiLineContent = `function addedFunc() {
+  console.log("added");
+}
+
+function deletedFunc() {
+  console.log("deleted");
+}
+
+function modifiedFunc() {
+  console.log("modified");
+}`;
+
+		render(
+			<CodePreview
+				payload={buildPayload({
+					content: multiLineContent,
+				})}
+				sessionId="test-session"
+			/>,
+			{ wrapper: TestWrapper },
+		);
+
+		await waitFor(() => {
+			expect(
+				screen.getByRole("button", { name: "addedFunc" }),
+			).toBeInTheDocument();
+		});
+
+		// Verify all outline items are rendered
+		expect(
+			screen.getByRole("button", { name: "deletedFunc" }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "modifiedFunc" }),
+		).toBeInTheDocument();
+
+		// Check for git indicators
+		const addedIndicator = document.querySelector(
+			".file-preview-outline__git-indicator--added",
+		);
+		const deletedIndicator = document.querySelector(
+			".file-preview-outline__git-indicator--deleted",
+		);
+		const modifiedIndicator = document.querySelector(
+			".file-preview-outline__git-indicator--modified",
+		);
+
+		expect(addedIndicator?.textContent).toBe("+");
+		expect(deletedIndicator?.textContent).toBe("-");
+		expect(modifiedIndicator?.textContent).toBe("m");
 	});
 });

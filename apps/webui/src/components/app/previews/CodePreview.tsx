@@ -61,10 +61,13 @@ type OutlineItem = {
 	startIndex: number;
 	endIndex: number;
 	startLine: number;
+	endLine: number;
 	children: OutlineItem[];
 };
 
 type OutlineStatus = "idle" | "loading" | "ready" | "unsupported" | "error";
+
+type SymbolGitStatus = "added" | "deleted" | "modified" | "unchanged";
 
 const OUTLINE_KIND_LABELS: Record<OutlineKind, string> = {
 	class: "Class",
@@ -625,6 +628,7 @@ const buildOutlineItems = (rootNode: Node, query: Query) => {
 			startIndex: definitionNode.startIndex,
 			endIndex: definitionNode.endIndex,
 			startLine: definitionNode.startPosition.row + 1,
+			endLine: definitionNode.endPosition.row + 1,
 			children: [],
 		});
 	});
@@ -665,6 +669,27 @@ const useResolvedTheme = () => {
 const normalizeCode = (code: string) => {
 	const trimmed = code.replace(/\t/g, "  ");
 	return trimmed.length > 0 ? trimmed : " ";
+};
+
+const computeSymbolGitStatus = (
+	item: OutlineItem,
+	addedLines: Set<number>,
+	deletedLines: Set<number>,
+	modifiedLines: Set<number>,
+): SymbolGitStatus => {
+	const { startLine, endLine } = item;
+
+	// Check range intersection (priority: added > deleted > modified)
+	for (let line = startLine; line <= endLine; line++) {
+		if (addedLines.has(line)) return "added";
+	}
+	for (let line = startLine; line <= endLine; line++) {
+		if (deletedLines.has(line)) return "deleted";
+	}
+	for (let line = startLine; line <= endLine; line++) {
+		if (modifiedLines.has(line)) return "modified";
+	}
+	return "unchanged";
 };
 
 const getTextSlice = (
@@ -721,6 +746,10 @@ export function CodePreview({ payload, sessionId }: CodePreviewProps) {
 	);
 	const modifiedLines = useMemo(
 		() => new Set(gitDiffQuery.data?.modifiedLines ?? []),
+		[gitDiffQuery.data],
+	);
+	const deletedLines = useMemo(
+		() => new Set(gitDiffQuery.data?.deletedLines ?? []),
 		[gitDiffQuery.data],
 	);
 	const sourceContent = payload.content ?? "";
@@ -943,7 +972,13 @@ export function CodePreview({ payload, sessionId }: CodePreviewProps) {
 		void copyOutlineItem(item);
 	};
 
-	const renderOutlineItems = (items: OutlineItem[], depth = 0) => {
+	const renderOutlineItems = (
+		items: OutlineItem[],
+		depth = 0,
+		addedLinesSet: Set<number>,
+		deletedLinesSet: Set<number>,
+		modifiedLinesSet: Set<number>,
+	) => {
 		return (
 			<ul
 				className="file-preview-outline__list"
@@ -952,6 +987,12 @@ export function CodePreview({ payload, sessionId }: CodePreviewProps) {
 				{items.map((item) => {
 					const hasChildren = item.children.length > 0;
 					const isCollapsed = collapsedIds.has(item.id);
+					const gitStatus = computeSymbolGitStatus(
+						item,
+						addedLinesSet,
+						deletedLinesSet,
+						modifiedLinesSet,
+					);
 					return (
 						<li
 							key={item.id}
@@ -965,6 +1006,27 @@ export function CodePreview({ payload, sessionId }: CodePreviewProps) {
 								className="file-preview-outline__row"
 								style={{ paddingLeft: `${depth * 12}px` }}
 							>
+								{/* Git status indicator */}
+								<span
+									className={cn(
+										"file-preview-outline__git-indicator",
+										gitStatus === "added" &&
+											"file-preview-outline__git-indicator--added",
+										gitStatus === "deleted" &&
+											"file-preview-outline__git-indicator--deleted",
+										gitStatus === "modified" &&
+											"file-preview-outline__git-indicator--modified",
+									)}
+									aria-hidden="true"
+								>
+									{gitStatus === "added"
+										? "+"
+										: gitStatus === "deleted"
+											? "-"
+											: gitStatus === "modified"
+												? "m"
+												: null}
+								</span>
 								{hasChildren ? (
 									<Button
 										variant="ghost"
@@ -1015,13 +1077,20 @@ export function CodePreview({ payload, sessionId }: CodePreviewProps) {
 										aria-label={`${OUTLINE_KIND_LABELS[item.kind]} · ${t("codePreview.copySymbol")}`}
 										title={`${OUTLINE_KIND_LABELS[item.kind]} · ${t("codePreview.copySymbol")}`}
 										data-copied={copiedId === item.id}
+										data-kind={item.kind}
 									>
 										{OUTLINE_KIND_LABELS[item.kind]}
 									</Button>
 								</div>
 							</div>
 							{hasChildren && !isCollapsed
-								? renderOutlineItems(item.children, depth + 1)
+								? renderOutlineItems(
+										item.children,
+										depth + 1,
+										addedLinesSet,
+										deletedLinesSet,
+										modifiedLinesSet,
+									)
 								: null}
 						</li>
 					);
@@ -1051,7 +1120,13 @@ export function CodePreview({ payload, sessionId }: CodePreviewProps) {
 					</div>
 				);
 			case "ready":
-				return renderOutlineItems(outlineItems);
+				return renderOutlineItems(
+					outlineItems,
+					0,
+					addedLines,
+					deletedLines,
+					modifiedLines,
+				);
 			default:
 				return (
 					<div className="file-preview-outline__empty">

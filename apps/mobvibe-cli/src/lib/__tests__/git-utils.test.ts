@@ -234,6 +234,45 @@ index abc123..def456 100644
 
 			expect(result.addedLines).toContain(2);
 			expect(result.addedLines).toContain(3);
+			expect(result.deletedLines).toEqual([]);
+		});
+
+		it("parses deleted lines from diff output", async () => {
+			const diffOutput = `diff --git a/src/file.ts b/src/file.ts
+--- a/src/file.ts
++++ b/src/file.ts
+@@ -1,5 +1,3 @@
+ const a = 1;
+-const b = 2;
+-const c = 3;
+ const d = 4;
+`;
+			mockExecAsync.mockResolvedValueOnce({ stdout: diffOutput, stderr: "" });
+
+			const result = await getFileDiff("/home/user/project", "src/file.ts");
+
+			expect(result.deletedLines).toContain(2);
+			expect(result.addedLines).toEqual([]);
+		});
+
+		it("parses deleted lines across multiple hunks", async () => {
+			const diffOutput = `diff --git a/src/file.ts b/src/file.ts
+--- a/src/file.ts
++++ b/src/file.ts
+@@ -1,3 +1,2 @@
+ line1
+-removed line
+ line3
+@@ -10,3 +9,2 @@
+ line10
+-another removed line
+ line12
+`;
+			mockExecAsync.mockResolvedValueOnce({ stdout: diffOutput, stderr: "" });
+
+			const result = await getFileDiff("/home/user/project", "src/file.ts");
+
+			expect(result.deletedLines.length).toBeGreaterThan(0);
 		});
 
 		it("handles untracked files by marking all lines as added", async () => {
@@ -251,6 +290,7 @@ index abc123..def456 100644
 
 			expect(result.addedLines).toHaveLength(10);
 			expect(result.addedLines).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+			expect(result.deletedLines).toEqual([]);
 		});
 
 		it("returns empty arrays when file has no changes", async () => {
@@ -266,6 +306,7 @@ index abc123..def456 100644
 
 			expect(result.addedLines).toEqual([]);
 			expect(result.modifiedLines).toEqual([]);
+			expect(result.deletedLines).toEqual([]);
 		});
 
 		it("returns empty arrays when git command fails", async () => {
@@ -275,6 +316,7 @@ index abc123..def456 100644
 
 			expect(result.addedLines).toEqual([]);
 			expect(result.modifiedLines).toEqual([]);
+			expect(result.deletedLines).toEqual([]);
 		});
 
 		it("handles multiple hunks in diff", async () => {

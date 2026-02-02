@@ -154,18 +154,22 @@ export function aggregateDirStatus(
 }
 
 /**
- * Parse git diff output to extract added and modified line numbers.
+ * Parse git diff output to extract added, modified, and deleted line numbers.
+ * Deleted lines are recorded at the position where the deletion occurred in the new file.
  */
 function parseDiffOutput(diffOutput: string): {
 	addedLines: number[];
 	modifiedLines: number[];
+	deletedLines: number[];
 } {
 	const addedLines: number[] = [];
 	const modifiedLines: number[] = [];
+	const deletedLines: number[] = [];
 
 	const lines = diffOutput.split("\n");
 	let currentLine = 0;
 	let inHunk = false;
+	let pendingDeletionLine = 0;
 
 	for (const line of lines) {
 		// Parse hunk header: @@ -start,count +start,count @@
@@ -173,6 +177,7 @@ function parseDiffOutput(diffOutput: string): {
 		if (hunkMatch) {
 			currentLine = Number.parseInt(hunkMatch[1], 10);
 			inHunk = true;
+			pendingDeletionLine = 0;
 			continue;
 		}
 
@@ -184,18 +189,26 @@ function parseDiffOutput(diffOutput: string): {
 			// Added line
 			addedLines.push(currentLine);
 			currentLine++;
+			pendingDeletionLine = 0;
 		} else if (line.startsWith("-") && !line.startsWith("---")) {
-			// Deleted line - mark next line as modified if it's an addition
-			// (this handles the case where a line is modified - shown as delete + add)
+			// Deleted line - record the current new file position
+			// If we're at a deletion, mark the position where content was removed
+			if (pendingDeletionLine === 0) {
+				pendingDeletionLine = currentLine;
+			}
+			// Record deletion at the current line position (or previous line if at start)
+			const deletionPos = Math.max(1, currentLine);
+			if (!deletedLines.includes(deletionPos)) {
+				deletedLines.push(deletionPos);
+			}
 		} else if (!line.startsWith("\\")) {
 			// Context line or empty line
 			currentLine++;
+			pendingDeletionLine = 0;
 		}
 	}
 
-	// Detect modified lines (lines that appear in both added and removed positions)
-	// This is a simplification - actual modification detection would need more context
-	return { addedLines, modifiedLines };
+	return { addedLines, modifiedLines, deletedLines };
 }
 
 /**
@@ -204,7 +217,11 @@ function parseDiffOutput(diffOutput: string): {
 export async function getFileDiff(
 	cwd: string,
 	filePath: string,
-): Promise<{ addedLines: number[]; modifiedLines: number[] }> {
+): Promise<{
+	addedLines: number[];
+	modifiedLines: number[];
+	deletedLines: number[];
+}> {
 	try {
 		// Get diff against HEAD (includes both staged and unstaged changes)
 		const relativePath = path.isAbsolute(filePath)
@@ -233,14 +250,15 @@ export async function getFileDiff(
 				return {
 					addedLines: Array.from({ length: lineCount }, (_, i) => i + 1),
 					modifiedLines: [],
+					deletedLines: [],
 				};
 			}
 
-			return { addedLines: [], modifiedLines: [] };
+			return { addedLines: [], modifiedLines: [], deletedLines: [] };
 		}
 
 		return parseDiffOutput(stdout);
 	} catch {
-		return { addedLines: [], modifiedLines: [] };
+		return { addedLines: [], modifiedLines: [], deletedLines: [] };
 	}
 }

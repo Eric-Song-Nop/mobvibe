@@ -256,6 +256,43 @@
 	height: 1.25rem;
 }
 
+.file-preview-outline__git-indicator {
+	width: 0.875rem;
+	min-width: 0.875rem;
+	text-align: center;
+	font-size: 0.625rem;
+	font-weight: 600;
+	line-height: 1.25rem;
+	flex-shrink: 0;
+	user-select: none;
+}
+
+/* Light mode - gruvbox light palette */
+.file-preview-outline__git-indicator--added {
+	color: #6c782e; /* gruvbox green */
+}
+
+.file-preview-outline__git-indicator--deleted {
+	color: #c14a4a; /* gruvbox red */
+}
+
+.file-preview-outline__git-indicator--modified {
+	color: #b47109; /* gruvbox yellow */
+}
+
+/* Dark mode - gruvbox dark palette */
+.dark .file-preview-outline__git-indicator--added {
+	color: #a9b665; /* gruvbox green */
+}
+
+.dark .file-preview-outline__git-indicator--deleted {
+	color: #ea6962; /* gruvbox red */
+}
+
+.dark .file-preview-outline__git-indicator--modified {
+	color: #d8a657; /* gruvbox yellow */
+}
+
 .file-preview-outline__item {
 	display: flex;
 	align-items: center;
@@ -296,6 +333,70 @@
 
 .file-preview-outline__item[data-copied="true"] .file-preview-outline__kind {
 	color: hsl(var(--foreground));
+}
+
+/* Symbol kind colors - Gruvbox Light */
+.file-preview-outline__kind[data-kind="class"],
+.file-preview-outline__kind[data-kind="struct"] {
+	color: #c35e0a; /* gruvbox orange */
+}
+
+.file-preview-outline__kind[data-kind="interface"],
+.file-preview-outline__kind[data-kind="type"] {
+	color: #4c7a5d; /* gruvbox aqua */
+}
+
+.file-preview-outline__kind[data-kind="function"],
+.file-preview-outline__kind[data-kind="method"],
+.file-preview-outline__kind[data-kind="constructor"] {
+	color: #945e80; /* gruvbox purple */
+}
+
+.file-preview-outline__kind[data-kind="enum"] {
+	color: #6c782e; /* gruvbox green */
+}
+
+.file-preview-outline__kind[data-kind="module"] {
+	color: #b47109; /* gruvbox yellow */
+}
+
+.file-preview-outline__kind[data-kind="property"],
+.file-preview-outline__kind[data-kind="field"],
+.file-preview-outline__kind[data-kind="constant"],
+.file-preview-outline__kind[data-kind="variable"] {
+	color: #45707a; /* gruvbox blue */
+}
+
+/* Symbol kind colors - Gruvbox Dark */
+.dark .file-preview-outline__kind[data-kind="class"],
+.dark .file-preview-outline__kind[data-kind="struct"] {
+	color: #e78a4e; /* gruvbox orange */
+}
+
+.dark .file-preview-outline__kind[data-kind="interface"],
+.dark .file-preview-outline__kind[data-kind="type"] {
+	color: #89b482; /* gruvbox aqua */
+}
+
+.dark .file-preview-outline__kind[data-kind="function"],
+.dark .file-preview-outline__kind[data-kind="method"],
+.dark .file-preview-outline__kind[data-kind="constructor"] {
+	color: #d3869b; /* gruvbox purple */
+}
+
+.dark .file-preview-outline__kind[data-kind="enum"] {
+	color: #a9b665; /* gruvbox green */
+}
+
+.dark .file-preview-outline__kind[data-kind="module"] {
+	color: #d8a657; /* gruvbox yellow */
+}
+
+.dark .file-preview-outline__kind[data-kind="property"],
+.dark .file-preview-outline__kind[data-kind="field"],
+.dark .file-preview-outline__kind[data-kind="constant"],
+.dark .file-preview-outline__kind[data-kind="variable"] {
+	color: #7daea3; /* gruvbox blue */
 }
 
 @media (min-width: 640px) {

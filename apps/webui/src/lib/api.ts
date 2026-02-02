@@ -358,6 +358,7 @@ export type GitFileDiffResponse = {
 	path: string;
 	addedLines: number[];
 	modifiedLines: number[];
+	deletedLines: number[];
 };
 
 const buildSessionGitStatusPath = (sessionId: string) =>
