@@ -434,6 +434,7 @@ describe("SessionRouter", () => {
 				path: "src/file.ts",
 				addedLines: [5, 6, 7],
 				modifiedLines: [10],
+				deletedLines: [],
 			};
 
 			socket.emit.mockImplementation((event, request) => {
@@ -480,6 +481,7 @@ describe("SessionRouter", () => {
 				path: "src/file.ts",
 				addedLines: [],
 				modifiedLines: [],
+				deletedLines: [],
 			};
 
 			socket.emit.mockImplementation((event, request) => {
