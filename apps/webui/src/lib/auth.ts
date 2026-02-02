@@ -9,42 +9,6 @@ const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL as string | undefined;
 export const isInTauri = (): boolean => "__TAURI_INTERNALS__" in window;
 
 /**
- * Check if running in Tauri production mode (not dev server).
- * In dev mode, deep links don't work because the scheme isn't registered.
- * Production uses tauri://localhost origin, dev uses http://localhost:5173
- */
-const isInTauriProduction = (): boolean => {
-	return isInTauri() && window.location.origin.startsWith("tauri://");
-};
-
-/**
- * Get the platform name for Tauri auth flow.
- * This header tells the server to use deep link OAuth.
- */
-let cachedPlatform: string | null = null;
-
-const initPlatformDetection = async (): Promise<void> => {
-	if (!isInTauri()) return;
-	try {
-		const { platform } = await import("@tauri-apps/plugin-os");
-		cachedPlatform = platform();
-	} catch {
-		cachedPlatform = "unknown";
-	}
-};
-
-// Initialize immediately
-void initPlatformDetection();
-
-const getTauriPlatform = (): string | null => {
-	// Only return platform for production Tauri (where deep links work)
-	// In dev mode, return null to skip deep link flow
-	if (!isInTauriProduction()) return null;
-	// Return cached value or default to "linux" until async detection completes
-	return cachedPlatform ?? "linux";
-};
-
-/**
  * Dynamic fetch implementation that uses Tauri HTTP plugin
  * to properly handle cookies (standard fetch doesn't work with cookies in Tauri)
  */
@@ -75,9 +39,6 @@ const getFetchImpl = async (): Promise<typeof fetch> => {
 	return cachedFetchImpl;
 };
 
-// Get platform header for Tauri production (deep link flow)
-const platformHeader = getTauriPlatform();
-
 // Create auth client with Gateway endpoint
 // Note: When Gateway URL is not configured, auth is disabled
 const authClient = GATEWAY_URL
@@ -85,9 +46,6 @@ const authClient = GATEWAY_URL
 			baseURL: GATEWAY_URL,
 			fetchOptions: {
 				credentials: "include",
-				// Send platform header for Tauri production to enable deep link OAuth flow
-				// In dev mode, platformHeader is null so we use regular web auth
-				headers: platformHeader ? { platform: platformHeader } : undefined,
 				customFetchImpl: async (...params: Parameters<typeof fetch>) => {
 					const fetchImpl = await getFetchImpl();
 					return fetchImpl(...params);
@@ -122,19 +80,11 @@ export const signIn = {
 		}
 		return authClient.signIn.email(credentials);
 	},
-	social: async (provider: "github" | "google") => {
+	social: async (params: { provider: "github" }) => {
 		if (!authClient) {
 			throw new Error("Auth not configured");
 		}
-		// In Tauri production, use "/" as callbackURL - deep link handler navigates after auth
-		// In Tauri dev or web, use full origin URL for regular web auth flow
-		const callbackURL = isInTauriProduction()
-			? "/"
-			: window.location.origin + "/";
-		return authClient.signIn.social({
-			provider,
-			callbackURL,
-		});
+		return authClient.signIn.social(params);
 	},
 };
 

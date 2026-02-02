@@ -67,7 +67,7 @@ export function MachineWorkspaces({
 			return [];
 		}
 		return workspaceList.filter(
-			(workspace, index) => workspaceValidityQueries[index]?.isSuccess,
+			(_, index) => workspaceValidityQueries[index]?.isSuccess,
 		);
 	}, [canValidateWorkspaces, workspaceList, workspaceValidityQueries]);
 	const isValidating =

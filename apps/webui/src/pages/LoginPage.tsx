@@ -1,3 +1,4 @@
+import { signInSocial } from "@daveyplate/better-auth-tauri";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/components/auth/AuthProvider";
@@ -12,6 +13,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getAuthClient, isInTauri } from "@/lib/auth";
 
 type LoginPageProps = {
 	onSuccess?: () => void;
@@ -68,9 +70,21 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 		setIsLoading(true);
 
 		try {
-			await signIn.social("github");
+			if (isInTauri()) {
+				const authClient = getAuthClient();
+				if (!authClient) {
+					throw new Error("Auth not configured");
+				}
+				await signInSocial({
+					authClient,
+					provider: "github",
+				});
+			} else {
+				await signIn.social({ provider: "github" });
+			}
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Social login failed");
+		} finally {
 			setIsLoading(false);
 		}
 	};
