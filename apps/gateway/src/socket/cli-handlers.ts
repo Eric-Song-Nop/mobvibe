@@ -87,13 +87,14 @@ export function setupCliHandlers(
 
 		// CLI registration (after auth)
 		socket.on("cli:register", async (info: CliRegistrationInfo) => {
+			const rawMachineId = info.machineId;
 			// Create or update machine record in database
 			logger.info(
-				{ machineId: info.machineId, hostname: info.hostname, userId },
+				{ machineId: rawMachineId, hostname: info.hostname, userId },
 				"cli_register_start",
 			);
 			const machineResult = await upsertMachine({
-				machineId: info.machineId,
+				rawMachineId,
 				userId,
 				name: info.hostname, // Use hostname as default name
 				hostname: info.hostname,
@@ -114,18 +115,29 @@ export function setupCliHandlers(
 				return;
 			}
 
+			const resolvedMachineId = machineResult.machineId;
+
 			// Register with in-memory registry
-			const record = cliRegistry.register(socket, info, {
-				userId,
-				apiKey,
-			});
+			const record = cliRegistry.register(
+				socket,
+				{ ...info, machineId: resolvedMachineId },
+				{
+					userId,
+					apiKey,
+				},
+			);
 
 			socket.emit("cli:registered", {
 				machineId: record.machineId,
 				userId,
 			});
 			logger.info(
-				{ machineId: info.machineId, hostname: info.hostname, userId },
+				{
+					machineId: record.machineId,
+					rawMachineId,
+					hostname: info.hostname,
+					userId,
+				},
 				"cli_registered",
 			);
 		});
@@ -243,15 +255,20 @@ export function setupCliHandlers(
 
 		// Session attached
 		socket.on("session:attached", (payload: SessionAttachedPayload) => {
+			const record = cliRegistry.getCliBySocketId(socket.id);
 			logger.info(
 				{ sessionId: payload.sessionId, machineId: payload.machineId },
 				"session_attached_received",
 			);
-			emitToWebui("session:attached", payload);
+			emitToWebui("session:attached", {
+				...payload,
+				machineId: record?.machineId ?? payload.machineId,
+			});
 		});
 
 		// Session detached
 		socket.on("session:detached", (payload: SessionDetachedPayload) => {
+			const record = cliRegistry.getCliBySocketId(socket.id);
 			logger.info(
 				{
 					sessionId: payload.sessionId,
@@ -260,7 +277,10 @@ export function setupCliHandlers(
 				},
 				"session_detached_received",
 			);
-			emitToWebui("session:detached", payload);
+			emitToWebui("session:detached", {
+				...payload,
+				machineId: record?.machineId ?? payload.machineId,
+			});
 		});
 
 		// Permission request from CLI

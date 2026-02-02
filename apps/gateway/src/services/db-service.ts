@@ -295,29 +295,53 @@ export async function closeSessionsForMachineById(
 
 /**
  * Create or update a machine record.
- * Uses the CLI-provided machineId as the primary key.
+ * Prefers legacy raw machineId for the same user; otherwise uses a user-scoped id.
  */
+const buildUserScopedMachineId = (
+	userId: string,
+	rawMachineId: string,
+): string => `${userId}:${rawMachineId}`;
+
 export async function upsertMachine(params: {
-	machineId: string;
+	rawMachineId: string;
 	userId: string;
 	name: string;
 	hostname: string;
 	platform?: string;
 	isOnline?: boolean;
-}): Promise<{ id: string; userId: string } | null> {
+}): Promise<{ machineId: string; userId: string } | null> {
 	try {
-		// Check if machine exists
-		const existing = await db
+		// Prefer legacy machineId (raw) if it already belongs to this user
+		const legacyMatch = await db
 			.select({ id: machines.id, userId: machines.userId })
 			.from(machines)
-			.where(eq(machines.id, params.machineId))
+			.where(
+				and(
+					eq(machines.id, params.rawMachineId),
+					eq(machines.userId, params.userId),
+				),
+			)
 			.limit(1);
+
+		const resolvedMachineId =
+			legacyMatch.length > 0
+				? params.rawMachineId
+				: buildUserScopedMachineId(params.userId, params.rawMachineId);
+
+		const existing =
+			resolvedMachineId === params.rawMachineId
+				? legacyMatch
+				: await db
+						.select({ id: machines.id, userId: machines.userId })
+						.from(machines)
+						.where(eq(machines.id, resolvedMachineId))
+						.limit(1);
 
 		if (existing.length > 0) {
 			// Machine exists - verify it belongs to the same user
 			if (existing[0].userId !== params.userId) {
 				logger.warn(
-					{ machineId: params.machineId, userId: params.userId },
+					{ machineId: resolvedMachineId, userId: params.userId },
 					"db_upsert_machine_user_mismatch",
 				);
 
@@ -335,17 +359,17 @@ export async function upsertMachine(params: {
 					lastSeenAt: new Date(),
 					updatedAt: new Date(),
 				})
-				.where(eq(machines.id, params.machineId));
+				.where(eq(machines.id, resolvedMachineId));
 
-			return { id: params.machineId, userId: params.userId };
+			return { machineId: resolvedMachineId, userId: params.userId };
 		}
 
 		// Create new machine
 		// Generate a placeholder machineToken for backwards compatibility
-		const placeholderToken = `api_${params.machineId.replace(/-/g, "")}`;
+		const placeholderToken = `api_${resolvedMachineId.replace(/-/g, "")}`;
 
 		await db.insert(machines).values({
-			id: params.machineId,
+			id: resolvedMachineId,
 			userId: params.userId,
 			name: params.name,
 			hostname: params.hostname,
@@ -355,7 +379,7 @@ export async function upsertMachine(params: {
 			lastSeenAt: new Date(),
 		});
 
-		return { id: params.machineId, userId: params.userId };
+		return { machineId: resolvedMachineId, userId: params.userId };
 	} catch (error) {
 		logger.error({ err: error }, "db_upsert_machine_error");
 		return null;
