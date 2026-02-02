@@ -196,12 +196,20 @@
 		"name": "Name",
 		"namePlaceholder": "Your name (optional)",
 		"loading": "Please wait...",
-		"orContinueWith": "Or continue with",
 		"noAccount": "Don't have an account?",
 		"haveAccount": "Already have an account?",
 		"signOut": "Sign out",
 		"profile": "Profile",
-		"settings": "Settings"
+		"settings": "Settings",
+		"emailNotVerified": "Please verify your email before signing in.",
+		"verificationEmailSent": "A verification email has been sent. Please check your inbox.",
+		"pleaseVerifyEmail": "Please verify your email to continue.",
+		"resendVerification": "Resend verification email",
+		"resending": "Sending...",
+		"resendFailed": "Failed to resend verification email",
+		"loginFailed": "Login failed",
+		"registrationFailed": "Registration failed",
+		"errorOccurred": "An error occurred"
 	},
 	"machines": {
 		"title": "Machines",

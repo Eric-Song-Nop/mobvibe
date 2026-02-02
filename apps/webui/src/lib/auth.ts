@@ -80,12 +80,13 @@ export const signIn = {
 		}
 		return authClient.signIn.email(credentials);
 	},
-	social: async (params: { provider: "github" }) => {
-		if (!authClient) {
-			throw new Error("Auth not configured");
-		}
-		return authClient.signIn.social(params);
-	},
+};
+
+export const sendVerificationEmail = async (params: { email: string }) => {
+	if (!authClient) {
+		throw new Error("Auth not configured");
+	}
+	return authClient.sendVerificationEmail(params);
 };
 
 export const signUp = {

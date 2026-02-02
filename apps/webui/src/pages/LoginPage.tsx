@@ -1,4 +1,3 @@
-import { signInSocial } from "@daveyplate/better-auth-tauri";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/components/auth/AuthProvider";
@@ -13,7 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getAuthClient, isInTauri } from "@/lib/auth";
+import { sendVerificationEmail } from "@/lib/auth";
 
 type LoginPageProps = {
 	onSuccess?: () => void;
@@ -25,6 +24,8 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 	const [mode, setMode] = useState<"login" | "register">("login");
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [showVerificationMessage, setShowVerificationMessage] = useState(false);
+	const [resendingEmail, setResendingEmail] = useState(false);
 	const [formData, setFormData] = useState({
 		email: "",
 		password: "",
@@ -34,6 +35,7 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 	const handleSubmit = async (event: React.FormEvent) => {
 		event.preventDefault();
 		setError(null);
+		setShowVerificationMessage(false);
 		setIsLoading(true);
 
 		try {
@@ -43,9 +45,16 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 					password: formData.password,
 				});
 				if (result.error) {
-					setError(result.error.message ?? "Login failed");
+					// Check if error is due to email not verified
+					if (result.error.status === 403) {
+						setShowVerificationMessage(true);
+						setError(t("auth.emailNotVerified"));
+					} else {
+						setError(result.error.message ?? t("auth.loginFailed"));
+					}
 					return;
 				}
+				onSuccess?.();
 			} else {
 				const result = await signUp.email({
 					email: formData.email,
@@ -53,39 +62,32 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 					name: formData.name || formData.email.split("@")[0],
 				});
 				if (result.error) {
-					setError(result.error.message ?? "Registration failed");
+					setError(result.error.message ?? t("auth.registrationFailed"));
 					return;
 				}
+				// Show verification message after successful registration
+				setShowVerificationMessage(true);
 			}
-			onSuccess?.();
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "An error occurred");
+			setError(err instanceof Error ? err.message : t("auth.errorOccurred"));
 		} finally {
 			setIsLoading(false);
 		}
 	};
 
-	const handleSocialLogin = async () => {
+	const handleResendVerification = async () => {
+		setResendingEmail(true);
 		setError(null);
-		setIsLoading(true);
 
 		try {
-			if (isInTauri()) {
-				const authClient = getAuthClient();
-				if (!authClient) {
-					throw new Error("Auth not configured");
-				}
-				await signInSocial({
-					authClient,
-					provider: "github",
-				});
-			} else {
-				await signIn.social({ provider: "github" });
+			const result = await sendVerificationEmail({ email: formData.email });
+			if (result.error) {
+				setError(result.error.message ?? t("auth.resendFailed"));
 			}
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "Social login failed");
+			setError(err instanceof Error ? err.message : t("auth.resendFailed"));
 		} finally {
-			setIsLoading(false);
+			setResendingEmail(false);
 		}
 	};
 
@@ -155,6 +157,26 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 							</div>
 						)}
 
+						{showVerificationMessage && (
+							<div className="rounded-sm bg-primary/10 p-3 text-primary text-xs">
+								{mode === "register"
+									? t("auth.verificationEmailSent")
+									: t("auth.pleaseVerifyEmail")}
+								<Button
+									type="button"
+									variant="link"
+									size="sm"
+									className="h-auto p-0 ml-1"
+									onClick={handleResendVerification}
+									disabled={resendingEmail}
+								>
+									{resendingEmail
+										? t("auth.resending")
+										: t("auth.resendVerification")}
+								</Button>
+							</div>
+						)}
+
 						<Button type="submit" className="w-full" disabled={isLoading}>
 							{isLoading
 								? t("auth.loading")
@@ -163,35 +185,6 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 									: t("auth.createAccount")}
 						</Button>
 					</form>
-
-					<div className="relative my-4">
-						<div className="absolute inset-0 flex items-center">
-							<div className="w-full border-t border-border" />
-						</div>
-						<div className="relative flex justify-center text-xs uppercase">
-							<span className="bg-card px-2 text-muted-foreground">
-								{t("auth.orContinueWith")}
-							</span>
-						</div>
-					</div>
-
-					<div className="grid gap-3">
-						<Button
-							type="button"
-							variant="outline"
-							onClick={handleSocialLogin}
-							disabled={isLoading}
-						>
-							<svg
-								className="mr-2 h-4 w-4"
-								viewBox="0 0 24 24"
-								fill="currentColor"
-							>
-								<path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
-							</svg>
-							GitHub
-						</Button>
-					</div>
 				</CardContent>
 				<CardFooter className="justify-center">
 					<p className="text-xs text-muted-foreground">
