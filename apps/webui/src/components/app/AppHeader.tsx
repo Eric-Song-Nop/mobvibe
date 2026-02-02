@@ -1,8 +1,19 @@
-import { FolderOpenIcon } from "@hugeicons/core-free-icons";
+import { FolderOpenIcon, Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ChatSession } from "@mobvibe/core";
 import { useTranslation } from "react-i18next";
 import { UserMenu } from "@/components/auth/UserMenu";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+	AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -12,8 +23,11 @@ export type AppHeaderProps = {
 	streamError?: ChatSession["streamError"];
 	onOpenMobileMenu: () => void;
 	onOpenFileExplorer?: () => void;
+	onForceReload?: () => void;
 	showFileExplorer?: boolean;
 	fileExplorerDisabled?: boolean;
+	showForceReload?: boolean;
+	forceReloadDisabled?: boolean;
 };
 
 export function AppHeader({
@@ -22,8 +36,11 @@ export function AppHeader({
 	streamError,
 	onOpenMobileMenu,
 	onOpenFileExplorer,
+	onForceReload,
 	showFileExplorer = false,
 	fileExplorerDisabled = false,
+	showForceReload = false,
+	forceReloadDisabled = false,
 }: AppHeaderProps) {
 	const { t } = useTranslation();
 
@@ -45,6 +62,42 @@ export function AppHeader({
 						</Badge>
 					) : null}
 				</div>
+				{showForceReload ? (
+					<AlertDialog>
+						<AlertDialogTrigger asChild>
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={forceReloadDisabled}
+							>
+								<HugeiconsIcon icon={Refresh01Icon} strokeWidth={2} />
+								<span className="sr-only">{t("session.forceReload")}</span>
+								<span className="hidden sm:inline">
+									{t("session.forceReload")}
+								</span>
+							</Button>
+						</AlertDialogTrigger>
+						<AlertDialogContent size="sm">
+							<AlertDialogHeader>
+								<AlertDialogTitle>
+									{t("session.forceReloadTitle")}
+								</AlertDialogTitle>
+								<AlertDialogDescription>
+									{t("session.forceReloadDescription")}
+								</AlertDialogDescription>
+							</AlertDialogHeader>
+							<AlertDialogFooter>
+								<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+								<AlertDialogAction
+									variant="destructive"
+									onClick={() => onForceReload?.()}
+								>
+									{t("session.forceReloadConfirm")}
+								</AlertDialogAction>
+							</AlertDialogFooter>
+						</AlertDialogContent>
+					</AlertDialog>
+				) : null}
 				{showFileExplorer ? (
 					<Button
 						variant="outline"

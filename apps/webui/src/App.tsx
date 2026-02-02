@@ -1,6 +1,6 @@
 import { useBetterAuthTauri } from "@daveyplate/better-auth-tauri/react";
 import { useChatStore } from "@mobvibe/core";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { AppHeader } from "@/components/app/AppHeader";
@@ -37,6 +37,7 @@ import { LoginPage } from "@/pages/LoginPage";
 
 function MainApp() {
 	const { t } = useTranslation();
+	const [isForceReloading, setIsForceReloading] = useState(false);
 	const {
 		sessions,
 		activeSessionId,
@@ -341,6 +342,15 @@ function MainApp() {
 	}, [createDialogOpen, defaultBackendId, draftBackendId, setDraftBackendId]);
 
 	const fileExplorerAvailable = Boolean(activeSessionId && activeSession?.cwd);
+	const forceReloadAvailable = Boolean(
+		activeSessionId &&
+			activeSession?.machineId &&
+			activeSession?.cwd &&
+			machines[activeSession.machineId]?.capabilities?.load,
+	);
+	const forceReloadDisabled =
+		!forceReloadAvailable ||
+		Boolean(activeSession?.isLoading || isActivating || isForceReloading);
 
 	useEffect(() => {
 		if (fileExplorerAvailable) {
@@ -475,6 +485,37 @@ function MainApp() {
 		cancelSessionMutation.mutate({ sessionId: activeSessionId });
 	};
 
+	const handleForceReload = async () => {
+		if (!activeSessionId || !activeSession) {
+			return;
+		}
+		const capabilities = activeSession.machineId
+			? machines[activeSession.machineId]?.capabilities
+			: undefined;
+		if (!activeSession.cwd || !activeSession.machineId || !capabilities?.load) {
+			return;
+		}
+		if (activeSession.isLoading || isActivating || isForceReloading) {
+			return;
+		}
+
+		setIsForceReloading(true);
+		try {
+			if (activeSession.sending && !activeSession.canceling) {
+				if (activeSession.isAttached) {
+					await cancelSessionMutation.mutateAsync({
+						sessionId: activeSessionId,
+					});
+				}
+			}
+			const latestSession =
+				useChatStore.getState().sessions[activeSessionId] ?? activeSession;
+			await activateSession(latestSession, { force: true });
+		} finally {
+			setIsForceReloading(false);
+		}
+	};
+
 	const handleSend = async () => {
 		if (!activeSessionId || !activeSession) {
 			return;
@@ -599,7 +640,10 @@ function MainApp() {
 						streamError={streamError}
 						onOpenMobileMenu={() => setMobileMenuOpen(true)}
 						onOpenFileExplorer={() => setFileExplorerOpen(true)}
+						onForceReload={handleForceReload}
 						showFileExplorer={fileExplorerAvailable}
+						showForceReload={Boolean(activeSessionId)}
+						forceReloadDisabled={forceReloadDisabled}
 					/>
 					<ChatMessageList
 						activeSession={activeSession}

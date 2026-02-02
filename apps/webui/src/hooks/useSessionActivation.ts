@@ -10,7 +10,7 @@ export type ActivationState = "idle" | "loading";
 
 /**
  * Hook for session activation via session/load (no resume).
- * - Attached session: set active immediately
+ * - Attached session: set active immediately (unless forced)
  * - Otherwise: call load, clear local messages, restore on failure
  * - Active session ID is set only after load succeeds
  */
@@ -21,11 +21,12 @@ export function useSessionActivation(store: ChatStoreActions) {
 	const machines = useMachinesStore((state) => state.machines);
 
 	const activateSession = useCallback(
-		async (session: ChatSession) => {
+		async (session: ChatSession, options?: { force?: boolean }) => {
+			const force = options?.force === true;
 			if (session.isLoading) {
 				return;
 			}
-			if (session.isAttached) {
+			if (session.isAttached && !force) {
 				store.setActiveSessionId(session.sessionId);
 				return;
 			}
