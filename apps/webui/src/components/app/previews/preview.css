@@ -121,12 +121,33 @@
 
 .file-preview-code__line {
 	display: grid;
-	grid-template-columns: 3.5rem 1fr;
+	grid-template-columns: 0.75rem 3rem 1fr;
 	align-items: flex-start;
-	column-gap: 0.75rem;
+	column-gap: 0.5rem;
 	line-height: 1.5;
 	white-space: pre-wrap;
 	word-break: break-word;
+}
+
+.file-preview-code__diff-indicator {
+	width: 0.75rem;
+	text-align: center;
+	font-size: 0.625rem;
+	line-height: 1.5;
+	flex-shrink: 0;
+	user-select: none;
+}
+
+.file-preview-code__diff-indicator--added {
+	color: hsl(142 76% 36%);
+}
+
+.file-preview-code__diff-indicator--deleted {
+	color: hsl(0 84% 60%);
+}
+
+.file-preview-code__diff-indicator--modified {
+	color: hsl(45 93% 47%);
 }
 
 .file-preview-code__line-number,

@@ -17,6 +17,13 @@ import ignore, { type Ignore } from "ignore";
 import { io, type Socket } from "socket.io-client";
 import type { SessionManager } from "../acp/session-manager.js";
 import type { CliConfig } from "../config.js";
+import {
+	aggregateDirStatus,
+	getFileDiff,
+	getGitBranch,
+	getGitStatus,
+	isGitRepo,
+} from "../lib/git-utils.js";
 import { logger } from "../lib/logger.js";
 
 type SocketClientOptions = {
@@ -659,6 +666,102 @@ export class SocketClient extends EventEmitter {
 						sessionId: request.params.sessionId,
 					},
 					"rpc_session_load_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		// Git status handler
+		this.socket.on("rpc:git:status", async (request) => {
+			try {
+				const { sessionId } = request.params;
+				logger.debug(
+					{ requestId: request.requestId, sessionId },
+					"rpc_git_status",
+				);
+				const record = sessionManager.getSession(sessionId);
+				if (!record || !record.cwd) {
+					throw new Error("Session not found or no working directory");
+				}
+
+				const isRepo = await isGitRepo(record.cwd);
+				if (!isRepo) {
+					this.sendRpcResponse(request.requestId, {
+						isGitRepo: false,
+						files: [],
+						dirStatus: {},
+					});
+					return;
+				}
+
+				const [branch, files] = await Promise.all([
+					getGitBranch(record.cwd),
+					getGitStatus(record.cwd),
+				]);
+				const dirStatus = aggregateDirStatus(files);
+
+				this.sendRpcResponse(request.requestId, {
+					isGitRepo: true,
+					branch,
+					files,
+					dirStatus,
+				});
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_git_status_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		// Git file diff handler
+		this.socket.on("rpc:git:fileDiff", async (request) => {
+			try {
+				const { sessionId, path: filePath } = request.params;
+				logger.debug(
+					{ requestId: request.requestId, sessionId, path: filePath },
+					"rpc_git_file_diff",
+				);
+				const record = sessionManager.getSession(sessionId);
+				if (!record || !record.cwd) {
+					throw new Error("Session not found or no working directory");
+				}
+
+				const isRepo = await isGitRepo(record.cwd);
+				if (!isRepo) {
+					this.sendRpcResponse(request.requestId, {
+						isGitRepo: false,
+						path: filePath,
+						addedLines: [],
+						modifiedLines: [],
+					});
+					return;
+				}
+
+				const { addedLines, modifiedLines } = await getFileDiff(
+					record.cwd,
+					filePath,
+				);
+
+				this.sendRpcResponse(request.requestId, {
+					isGitRepo: true,
+					path: filePath,
+					addedLines,
+					modifiedLines,
+				});
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_git_file_diff_error",
 				);
 				this.sendRpcError(request.requestId, error);
 			}

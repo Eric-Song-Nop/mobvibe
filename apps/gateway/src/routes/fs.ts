@@ -253,5 +253,74 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 		},
 	);
 
+	// Get git status for session - with authorization check
+	router.get(
+		"/session/git/status",
+		async (request: AuthenticatedRequest, response) => {
+			const sessionId =
+				typeof request.query.sessionId === "string"
+					? request.query.sessionId
+					: undefined;
+			if (!sessionId) {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId required"),
+					400,
+				);
+				return;
+			}
+
+			try {
+				const userId = getUserId(request);
+				const result = await sessionRouter.getGitStatus(sessionId, userId);
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				if (message.includes("Not authorized")) {
+					respondError(response, buildAuthorizationError(message), 403);
+				} else {
+					respondError(response, createInternalError("request", message));
+				}
+			}
+		},
+	);
+
+	// Get git file diff for session - with authorization check
+	router.get(
+		"/session/git/diff",
+		async (request: AuthenticatedRequest, response) => {
+			const sessionId =
+				typeof request.query.sessionId === "string"
+					? request.query.sessionId
+					: undefined;
+			const path =
+				typeof request.query.path === "string" ? request.query.path : undefined;
+			if (!sessionId || !path) {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId and path required"),
+					400,
+				);
+				return;
+			}
+
+			try {
+				const userId = getUserId(request);
+				const result = await sessionRouter.getGitFileDiff(
+					{ sessionId, path },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				if (message.includes("Not authorized")) {
+					respondError(response, buildAuthorizationError(message), 403);
+				} else {
+					respondError(response, createInternalError("request", message));
+				}
+			}
+		},
+	);
+
 	return router;
 }

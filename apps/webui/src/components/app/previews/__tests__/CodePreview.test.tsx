@@ -1,9 +1,26 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import type { SessionFsFilePreviewResponse } from "@/lib/api";
 import { CodePreview } from "../CodePreview";
+
+const createTestQueryClient = () =>
+	new QueryClient({
+		defaultOptions: {
+			queries: {
+				retry: false,
+			},
+		},
+	});
+
+const TestWrapper = ({ children }: { children: ReactNode }) => (
+	<QueryClientProvider client={createTestQueryClient()}>
+		{children}
+	</QueryClientProvider>
+);
 
 type TreeSitterTestFlag = { __ENABLE_TREESITTER_TESTS__?: boolean };
 
@@ -175,7 +192,7 @@ afterEach(() => {
 
 describe("CodePreview", () => {
 	it("renders language badge and line count", () => {
-		render(<CodePreview payload={buildPayload()} />);
+		render(<CodePreview payload={buildPayload()} />, { wrapper: TestWrapper });
 
 		expect(screen.getByText("typescript")).toBeInTheDocument();
 		expect(
@@ -184,7 +201,9 @@ describe("CodePreview", () => {
 	});
 
 	it("renders at least one line for empty content", () => {
-		render(<CodePreview payload={buildPayload({ content: "" })} />);
+		render(<CodePreview payload={buildPayload({ content: "" })} />, {
+			wrapper: TestWrapper,
+		});
 
 		expect(
 			screen.getByText(i18n.t("codePreview.lineCount", { count: 1 })),
@@ -193,7 +212,7 @@ describe("CodePreview", () => {
 
 	it("hides outline when tree-sitter unsupported", async () => {
 		setTreeSitterSupport(false);
-		render(<CodePreview payload={buildPayload()} />);
+		render(<CodePreview payload={buildPayload()} />, { wrapper: TestWrapper });
 
 		expect(
 			screen.queryByRole("button", {
@@ -238,6 +257,7 @@ describe("CodePreview", () => {
 					content: "class Alpha {\n  run() {}\n}\n\nfunction beta() {}",
 				})}
 			/>,
+			{ wrapper: TestWrapper },
 		);
 
 		await waitFor(() => {

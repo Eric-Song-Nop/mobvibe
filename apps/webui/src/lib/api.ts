@@ -341,5 +341,45 @@ export const loadSession = async (payload: {
 		body: JSON.stringify(payload),
 	});
 
+// Git file status codes (from git status --porcelain)
+export type GitFileStatus = "M" | "A" | "D" | "?" | "R" | "C" | "U" | "!";
+
+// Git status response
+export type GitStatusResponse = {
+	isGitRepo: boolean;
+	branch?: string;
+	files: Array<{ path: string; status: GitFileStatus }>;
+	dirStatus: Record<string, GitFileStatus>;
+};
+
+// Git file diff response
+export type GitFileDiffResponse = {
+	isGitRepo: boolean;
+	path: string;
+	addedLines: number[];
+	modifiedLines: number[];
+};
+
+const buildSessionGitStatusPath = (sessionId: string) =>
+	`/fs/session/git/status?sessionId=${encodeURIComponent(sessionId)}`;
+
+const buildSessionGitDiffPath = (sessionId: string, pathValue: string) => {
+	const params = new URLSearchParams({ sessionId, path: pathValue });
+	return `/fs/session/git/diff?${params.toString()}`;
+};
+
+export const fetchSessionGitStatus = async (payload: {
+	sessionId: string;
+}): Promise<GitStatusResponse> =>
+	requestJson<GitStatusResponse>(buildSessionGitStatusPath(payload.sessionId));
+
+export const fetchSessionGitDiff = async (payload: {
+	sessionId: string;
+	path: string;
+}): Promise<GitFileDiffResponse> =>
+	requestJson<GitFileDiffResponse>(
+		buildSessionGitDiffPath(payload.sessionId, payload.path),
+	);
+
 // Note: SSE streaming (createSessionEventSource) has been replaced with Socket.io
 // See @/lib/socket.ts for the Socket.io implementation

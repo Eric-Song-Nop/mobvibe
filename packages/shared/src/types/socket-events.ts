@@ -253,6 +253,10 @@ export interface GatewayToCliEvents {
 		request: RpcRequest<DiscoverSessionsRpcParams>,
 	) => void;
 	"rpc:session:load": (request: RpcRequest<LoadSessionRpcParams>) => void;
+
+	// Git RPC requests
+	"rpc:git:status": (request: RpcRequest<GitStatusParams>) => void;
+	"rpc:git:fileDiff": (request: RpcRequest<GitFileDiffParams>) => void;
 }
 
 // Webui -> Gateway events
@@ -275,3 +279,24 @@ export interface GatewayToWebuiEvents {
 	"sessions:list": (sessions: SessionSummary[]) => void;
 	"sessions:changed": (payload: SessionsChangedPayload) => void;
 }
+
+// Git file status codes (from git status --porcelain)
+export type GitFileStatus = "M" | "A" | "D" | "?" | "R" | "C" | "U" | "!";
+
+// Git status params/response
+export type GitStatusParams = { sessionId: string };
+export type GitStatusResponse = {
+	isGitRepo: boolean;
+	branch?: string;
+	files: Array<{ path: string; status: GitFileStatus }>;
+	dirStatus: Record<string, GitFileStatus>;
+};
+
+// Git file diff params/response
+export type GitFileDiffParams = { sessionId: string; path: string };
+export type GitFileDiffResponse = {
+	isGitRepo: boolean;
+	path: string;
+	addedLines: number[];
+	modifiedLines: number[];
+};

@@ -5,6 +5,7 @@ import {
 	Minimize01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useQuery } from "@tanstack/react-query";
 import type { Language, RenderProps, Token } from "prism-react-renderer";
 import { Highlight, themes } from "prism-react-renderer";
 import type { CSSProperties } from "react";
@@ -14,11 +15,13 @@ import type { Node, QueryCapture, QueryMatch } from "web-tree-sitter";
 import { Parser, Query, Language as TreeSitterLanguage } from "web-tree-sitter";
 import { Button } from "@/components/ui/button";
 import type { SessionFsFilePreviewResponse } from "@/lib/api";
+import { fetchSessionGitDiff } from "@/lib/api";
 import { resolveLanguageFromPath } from "@/lib/file-preview-utils";
 import { cn } from "@/lib/utils";
 
 export type CodePreviewProps = {
 	payload: SessionFsFilePreviewResponse;
+	sessionId?: string;
 };
 
 type OutlineLanguage =
@@ -681,7 +684,7 @@ const getTextSlice = (
 	return textDecoder.decode(slice);
 };
 
-export function CodePreview({ payload }: CodePreviewProps) {
+export function CodePreview({ payload, sessionId }: CodePreviewProps) {
 	const { t } = useTranslation();
 	const themeMode = useResolvedTheme();
 	const parserRef = useRef<Parser | null>(null);
@@ -698,6 +701,28 @@ export function CodePreview({ payload }: CodePreviewProps) {
 	const [isFullscreen, setIsFullscreen] = useState(false);
 
 	const filePath = payload.path;
+
+	// Git diff query
+	const gitDiffQuery = useQuery({
+		queryKey: ["session-git-diff", sessionId, filePath],
+		queryFn: () => {
+			if (!sessionId || !filePath) {
+				throw new Error("Session or path unavailable");
+			}
+			return fetchSessionGitDiff({ sessionId, path: filePath });
+		},
+		enabled: !!sessionId && !!filePath,
+		staleTime: 30000, // Cache for 30 seconds
+	});
+
+	const addedLines = useMemo(
+		() => new Set(gitDiffQuery.data?.addedLines ?? []),
+		[gitDiffQuery.data],
+	);
+	const modifiedLines = useMemo(
+		() => new Set(gitDiffQuery.data?.modifiedLines ?? []),
+		[gitDiffQuery.data],
+	);
 	const sourceContent = payload.content ?? "";
 	const language = useMemo(() => resolveLanguageFromPath(filePath), [filePath]);
 	const outlineLanguage = useMemo(
@@ -1164,17 +1189,40 @@ export function CodePreview({ payload }: CodePreviewProps) {
 												});
 												const { className: lineClassName, ...restLineProps } =
 													lineProps;
+												const lineNum = lineIndex + 1;
+												const isAdded = addedLines.has(lineNum);
+												const isModified = modifiedLines.has(lineNum);
+												let diffIndicator: string | null = null;
+												let diffClassName = "";
+												if (isAdded) {
+													diffIndicator = "+";
+													diffClassName =
+														"file-preview-code__diff-indicator--added";
+												} else if (isModified) {
+													diffIndicator = "\u25CF";
+													diffClassName =
+														"file-preview-code__diff-indicator--modified";
+												}
 												return (
 													<div
 														key={`line-${lineIndex}`}
 														className="file-preview-code__line"
-														data-line={lineIndex + 1}
+														data-line={lineNum}
 													>
+														<span
+															className={cn(
+																"file-preview-code__diff-indicator",
+																diffClassName,
+															)}
+															aria-hidden="true"
+														>
+															{diffIndicator}
+														</span>
 														<span
 															className="file-preview-code__line-number"
 															aria-hidden="true"
 														>
-															{lineIndex + 1}
+															{lineNum}
 														</span>
 														<span
 															{...restLineProps}

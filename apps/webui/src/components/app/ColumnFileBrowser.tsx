@@ -12,9 +12,38 @@ import {
 	useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import type { FsEntriesResponse, FsEntry } from "@/lib/api";
+import type { FsEntriesResponse, FsEntry, GitFileStatus } from "@/lib/api";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { cn } from "@/lib/utils";
+
+const GIT_STATUS_CONFIG: Record<
+	GitFileStatus,
+	{ label: string; className: string }
+> = {
+	M: { label: "Modified", className: "text-amber-500" },
+	A: { label: "Added", className: "text-green-500" },
+	D: { label: "Deleted", className: "text-red-500" },
+	"?": { label: "Untracked", className: "text-blue-400" },
+	R: { label: "Renamed", className: "text-purple-500" },
+	C: { label: "Copied", className: "text-cyan-500" },
+	U: { label: "Unmerged", className: "text-orange-500" },
+	"!": { label: "Ignored", className: "text-gray-400" },
+};
+
+function GitStatusIndicator({ status }: { status: GitFileStatus }) {
+	const config = GIT_STATUS_CONFIG[status];
+	return (
+		<span
+			className={cn(
+				"ml-auto shrink-0 text-[0.65rem] font-medium",
+				config.className,
+			)}
+			title={config.label}
+		>
+			{status}
+		</span>
+	);
+}
 
 const normalizePath = (value: string) => value.replace(/\/+$/, "");
 
@@ -285,6 +314,8 @@ export type ColumnFileBrowserProps = {
 	className?: string;
 	scrollContainerRef: React.RefObject<HTMLDivElement | null>;
 	columnRefs: React.MutableRefObject<Record<string, HTMLDivElement | null>>;
+	rootPath?: string;
+	getGitStatus?: (relativePath: string) => GitFileStatus | undefined;
 };
 
 export function ColumnFileBrowser({
@@ -299,9 +330,25 @@ export function ColumnFileBrowser({
 	className,
 	scrollContainerRef,
 	columnRefs,
+	rootPath,
+	getGitStatus,
 }: ColumnFileBrowserProps) {
 	const { t } = useTranslation();
 	const resolvedEmptyLabel = emptyLabel ?? t("fileBrowser.empty");
+
+	const getRelativePath = useCallback(
+		(absolutePath: string): string => {
+			if (!rootPath) {
+				return absolutePath;
+			}
+			if (absolutePath.startsWith(rootPath)) {
+				const relative = absolutePath.slice(rootPath.length);
+				return relative.startsWith("/") ? relative.slice(1) : relative;
+			}
+			return absolutePath;
+		},
+		[rootPath],
+	);
 
 	return (
 		<div
@@ -354,6 +401,8 @@ export function ColumnFileBrowser({
 												entry.path === (highlightedEntryPath ?? currentPath);
 											const icon =
 												entry.type === "directory" ? FolderIcon : File01Icon;
+											const relativePath = getRelativePath(entry.path);
+											const gitStatus = getGitStatus?.(relativePath);
 											return (
 												<button
 													key={entry.path}
@@ -370,6 +419,9 @@ export function ColumnFileBrowser({
 														className="shrink-0"
 													/>
 													<span className="truncate">{entry.name}</span>
+													{gitStatus ? (
+														<GitStatusIndicator status={gitStatus} />
+													) : null}
 												</button>
 											);
 										})

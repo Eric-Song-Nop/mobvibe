@@ -4,6 +4,7 @@ import type { SessionFsFilePreviewResponse } from "@/lib/api";
 
 export type PreviewRenderer = (
 	payload: SessionFsFilePreviewResponse,
+	sessionId?: string,
 ) => ReactElement;
 
 export type PreviewRendererRegistry = Record<PreviewKind, PreviewRenderer>;

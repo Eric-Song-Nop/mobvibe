@@ -1,4 +1,8 @@
-import { FolderOpenIcon, Loading03Icon } from "@hugeicons/core-free-icons";
+import {
+	FolderOpenIcon,
+	GitBranchIcon,
+	Loading03Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -17,11 +21,12 @@ import {
 	AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import type { FsEntry } from "@/lib/api";
+import type { FsEntry, GitFileStatus } from "@/lib/api";
 import {
 	fetchSessionFsEntries,
 	fetchSessionFsFile,
 	fetchSessionFsRoots,
+	fetchSessionGitStatus,
 } from "@/lib/api";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { resolveFileNameFromPath } from "@/lib/file-preview-utils";
@@ -61,9 +66,22 @@ export function FileExplorerDialog({
 		enabled: open && !!sessionId,
 	});
 
+	const gitStatusQuery = useQuery({
+		queryKey: ["session-git-status", sessionId],
+		queryFn: () => {
+			if (!sessionId) {
+				throw createFallbackError(t("errors.sessionUnavailable"), "request");
+			}
+			return fetchSessionGitStatus({ sessionId });
+		},
+		enabled: open && !!sessionId,
+		staleTime: 30000, // Cache for 30 seconds
+	});
+
 	const root = rootsQuery.data?.root;
 	const rootPath = root?.path;
 	const rootLabel = root?.name ?? t("session.cwdLabel");
+	const gitStatus = gitStatusQuery.data;
 
 	const fetchEntries = useCallback(
 		async (payload: { path: string }) => {
@@ -195,6 +213,24 @@ export function FileExplorerDialog({
 		[selectedFilePath],
 	);
 
+	const getGitStatusForPath = useCallback(
+		(relativePath: string): GitFileStatus | undefined => {
+			if (!gitStatus?.isGitRepo) {
+				return undefined;
+			}
+			// Check if it's a file
+			const fileEntry = gitStatus.files.find(
+				(f) => f.path === relativePath || f.path === `${relativePath}/`,
+			);
+			if (fileEntry) {
+				return fileEntry.status;
+			}
+			// Check if it's a directory
+			return gitStatus.dirStatus[relativePath];
+		},
+		[gitStatus],
+	);
+
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
 			<AlertDialogContent className="grid h-[100svh] w-[100vw] !max-w-none min-h-0 min-w-0 grid-rows-[auto_1fr_auto] overflow-hidden translate-x-0 translate-y-0 rounded-none p-4 sm:h-[82vh] sm:!w-[98vw] sm:!max-w-[98vw] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-none top-0 left-0 sm:top-1/2 sm:left-1/2">
@@ -203,6 +239,16 @@ export function FileExplorerDialog({
 						<AlertDialogTitle className="flex items-center gap-2">
 							<HugeiconsIcon icon={FolderOpenIcon} strokeWidth={2} />
 							{t("fileExplorer.sessionFiles")}
+							{gitStatus?.isGitRepo && gitStatus.branch ? (
+								<span className="text-muted-foreground flex items-center gap-1 text-xs font-normal">
+									<HugeiconsIcon
+										icon={GitBranchIcon}
+										strokeWidth={2}
+										className="h-3.5 w-3.5"
+									/>
+									{gitStatus.branch}
+								</span>
+							) : null}
 						</AlertDialogTitle>
 						<div className="flex items-center gap-2 sm:hidden">
 							<Button
@@ -254,6 +300,8 @@ export function FileExplorerDialog({
 								scrollContainerRef={scrollContainerRef}
 								columnRefs={columnRefs}
 								className="min-h-0 min-w-0 flex-1"
+								rootPath={rootPath}
+								getGitStatus={getGitStatusForPath}
 							/>
 						)}
 					</section>
@@ -296,7 +344,7 @@ export function FileExplorerDialog({
 										{previewError}
 									</div>
 								) : previewQuery.data && previewRenderer ? (
-									previewRenderer(previewQuery.data)
+									previewRenderer(previewQuery.data, sessionId)
 								) : (
 									<div className="text-muted-foreground flex flex-1 items-center justify-center px-3 text-xs">
 										{t("fileExplorer.unsupportedFormat")}

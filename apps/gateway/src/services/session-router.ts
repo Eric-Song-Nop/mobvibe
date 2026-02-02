@@ -11,6 +11,10 @@ import type {
 	FsResourcesParams,
 	FsResourcesResponse,
 	FsRootsResponse,
+	GitFileDiffParams,
+	GitFileDiffResponse,
+	GitStatusParams,
+	GitStatusResponse,
 	HostFsEntriesParams,
 	HostFsRootsParams,
 	HostFsRootsResponse,
@@ -746,6 +750,75 @@ export class SessionRouter {
 		cwd?: string,
 	): Promise<void> {
 		await updateAcpSessionState({ sessionId, state, title, cwd });
+	}
+
+	/**
+	 * Get git status for a session's working directory.
+	 * @param sessionId - Session ID
+	 * @param userId - Optional user ID for authorization
+	 */
+	async getGitStatus(
+		sessionId: string,
+		userId?: string,
+	): Promise<GitStatusResponse> {
+		const cli = this.cliRegistry.getCliForSession(sessionId);
+		if (!cli) {
+			throw new Error("Session not found");
+		}
+
+		if (userId && !this.cliRegistry.isSessionOwnedByUser(sessionId, userId)) {
+			throw new Error("Not authorized to access this session");
+		}
+
+		logger.debug({ sessionId, userId }, "git_status_rpc_start");
+
+		const result = await this.sendRpc<GitStatusParams, GitStatusResponse>(
+			cli.socket,
+			"rpc:git:status",
+			{ sessionId },
+		);
+
+		logger.debug({ sessionId, userId }, "git_status_rpc_complete");
+		return result;
+	}
+
+	/**
+	 * Get git diff for a file in a session's working directory.
+	 * @param params - Git file diff parameters
+	 * @param userId - Optional user ID for authorization
+	 */
+	async getGitFileDiff(
+		params: GitFileDiffParams,
+		userId?: string,
+	): Promise<GitFileDiffResponse> {
+		const cli = this.cliRegistry.getCliForSession(params.sessionId);
+		if (!cli) {
+			throw new Error("Session not found");
+		}
+
+		if (
+			userId &&
+			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
+		) {
+			throw new Error("Not authorized to access this session");
+		}
+
+		logger.debug(
+			{ sessionId: params.sessionId, path: params.path, userId },
+			"git_file_diff_rpc_start",
+		);
+
+		const result = await this.sendRpc<GitFileDiffParams, GitFileDiffResponse>(
+			cli.socket,
+			"rpc:git:fileDiff",
+			params,
+		);
+
+		logger.debug(
+			{ sessionId: params.sessionId, path: params.path, userId },
+			"git_file_diff_rpc_complete",
+		);
+		return result;
 	}
 
 	private sendRpc<TParams, TResult>(

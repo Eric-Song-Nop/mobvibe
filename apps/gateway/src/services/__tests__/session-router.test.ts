@@ -1,6 +1,8 @@
 import type {
 	CliRegistrationInfo,
 	DiscoverSessionsRpcResult,
+	GitFileDiffResponse,
+	GitStatusResponse,
 	SessionSummary,
 } from "@mobvibe/shared";
 import type { Socket } from "socket.io";
@@ -308,6 +310,224 @@ describe("SessionRouter", () => {
 			await expect(
 				sessionRouter.discoverSessions("machine-1", undefined, "user-1"),
 			).rejects.toThrow("Agent does not support session listing");
+		});
+	});
+
+	describe("getGitStatus", () => {
+		it("routes git status request to CLI and returns result", async () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			cliRegistry.register(socket, info, authInfo);
+
+			const mockSession = createMockSessionSummary({
+				sessionId: "session-1",
+			});
+			cliRegistry.updateSessions(socket.id, [mockSession]);
+
+			const mockResult: GitStatusResponse = {
+				isGitRepo: true,
+				branch: "main",
+				files: [
+					{ path: "src/file.ts", status: "M" },
+					{ path: "src/new.ts", status: "A" },
+				],
+				dirStatus: { src: "A" },
+			};
+
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:git:status") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							result: mockResult,
+						});
+					}, 0);
+				}
+			});
+
+			const result = await sessionRouter.getGitStatus("session-1", "user-1");
+
+			expect(result.isGitRepo).toBe(true);
+			expect(result.branch).toBe("main");
+			expect(result.files).toHaveLength(2);
+			expect(result.dirStatus.src).toBe("A");
+			expect(socket.emit).toHaveBeenCalledWith(
+				"rpc:git:status",
+				expect.objectContaining({
+					params: { sessionId: "session-1" },
+				}),
+			);
+		});
+
+		it("returns isGitRepo false for non-git directories", async () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			cliRegistry.register(socket, info, authInfo);
+
+			const mockSession = createMockSessionSummary({
+				sessionId: "session-1",
+			});
+			cliRegistry.updateSessions(socket.id, [mockSession]);
+
+			const mockResult: GitStatusResponse = {
+				isGitRepo: false,
+				files: [],
+				dirStatus: {},
+			};
+
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:git:status") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							result: mockResult,
+						});
+					}, 0);
+				}
+			});
+
+			const result = await sessionRouter.getGitStatus("session-1", "user-1");
+
+			expect(result.isGitRepo).toBe(false);
+			expect(result.branch).toBeUndefined();
+		});
+
+		it("throws error when session not found", async () => {
+			await expect(
+				sessionRouter.getGitStatus("unknown-session", "user-1"),
+			).rejects.toThrow("Session not found");
+		});
+
+		it("throws error when user not authorized for session", async () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			cliRegistry.register(socket, info, authInfo);
+
+			const mockSession = createMockSessionSummary({
+				sessionId: "session-1",
+			});
+			cliRegistry.updateSessions(socket.id, [mockSession]);
+
+			await expect(
+				sessionRouter.getGitStatus("session-1", "user-2"),
+			).rejects.toThrow("Not authorized to access this session");
+		});
+	});
+
+	describe("getGitFileDiff", () => {
+		it("routes git file diff request to CLI and returns result", async () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			cliRegistry.register(socket, info, authInfo);
+
+			const mockSession = createMockSessionSummary({
+				sessionId: "session-1",
+			});
+			cliRegistry.updateSessions(socket.id, [mockSession]);
+
+			const mockResult: GitFileDiffResponse = {
+				isGitRepo: true,
+				path: "src/file.ts",
+				addedLines: [5, 6, 7],
+				modifiedLines: [10],
+			};
+
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:git:fileDiff") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							result: mockResult,
+						});
+					}, 0);
+				}
+			});
+
+			const result = await sessionRouter.getGitFileDiff(
+				{ sessionId: "session-1", path: "src/file.ts" },
+				"user-1",
+			);
+
+			expect(result.isGitRepo).toBe(true);
+			expect(result.path).toBe("src/file.ts");
+			expect(result.addedLines).toEqual([5, 6, 7]);
+			expect(result.modifiedLines).toEqual([10]);
+			expect(socket.emit).toHaveBeenCalledWith(
+				"rpc:git:fileDiff",
+				expect.objectContaining({
+					params: { sessionId: "session-1", path: "src/file.ts" },
+				}),
+			);
+		});
+
+		it("returns empty arrays for non-git directories", async () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			cliRegistry.register(socket, info, authInfo);
+
+			const mockSession = createMockSessionSummary({
+				sessionId: "session-1",
+			});
+			cliRegistry.updateSessions(socket.id, [mockSession]);
+
+			const mockResult: GitFileDiffResponse = {
+				isGitRepo: false,
+				path: "src/file.ts",
+				addedLines: [],
+				modifiedLines: [],
+			};
+
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:git:fileDiff") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							result: mockResult,
+						});
+					}, 0);
+				}
+			});
+
+			const result = await sessionRouter.getGitFileDiff(
+				{ sessionId: "session-1", path: "src/file.ts" },
+				"user-1",
+			);
+
+			expect(result.isGitRepo).toBe(false);
+			expect(result.addedLines).toEqual([]);
+		});
+
+		it("throws error when session not found", async () => {
+			await expect(
+				sessionRouter.getGitFileDiff(
+					{ sessionId: "unknown-session", path: "src/file.ts" },
+					"user-1",
+				),
+			).rejects.toThrow("Session not found");
+		});
+
+		it("throws error when user not authorized for session", async () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			cliRegistry.register(socket, info, authInfo);
+
+			const mockSession = createMockSessionSummary({
+				sessionId: "session-1",
+			});
+			cliRegistry.updateSessions(socket.id, [mockSession]);
+
+			await expect(
+				sessionRouter.getGitFileDiff(
+					{ sessionId: "session-1", path: "src/file.ts" },
+					"user-2",
+				),
+			).rejects.toThrow("Not authorized to access this session");
 		});
 	});
 });
