@@ -5,6 +5,11 @@ import { apiKey, openAPI } from "better-auth/plugins";
 import { getGatewayConfig } from "../config.js";
 import { db } from "../db/index.js";
 import * as schema from "../db/schema.js";
+import { sendEmail } from "./email.js";
+import {
+	passwordResetEmailTemplate,
+	verificationEmailTemplate,
+} from "./email-templates.js";
 import { logger } from "./logger.js";
 
 const config = getGatewayConfig();
@@ -45,20 +50,36 @@ export const auth = betterAuth({
 		provider: "pg",
 		schema,
 	}),
-	account: {
-		// Skip cookie-based state validation for cross-origin OAuth flows.
-		// Database lookup still validates the state cryptographically.
-		skipStateCookieCheck: true,
-	},
-	socialProviders: {
-		github: {
-			clientId: process.env.GITHUB_CLIENT_ID as string,
-			clientSecret: process.env.GITHUB_CLIENT_SECRET as string,
+	emailVerification: {
+		sendVerificationEmail: async ({ user, url }) => {
+			const template = verificationEmailTemplate({
+				userName: user.name,
+				url,
+			});
+			void sendEmail({
+				to: user.email,
+				subject: template.subject,
+				text: template.text,
+				html: template.html,
+			});
 		},
+		sendOnSignUp: true,
 	},
 	emailAndPassword: {
 		enabled: true,
-		requireEmailVerification: false,
+		requireEmailVerification: true,
+		sendResetPassword: async ({ user, url }) => {
+			const template = passwordResetEmailTemplate({
+				userName: user.name,
+				url,
+			});
+			void sendEmail({
+				to: user.email,
+				subject: template.subject,
+				text: template.text,
+				html: template.html,
+			});
+		},
 	},
 	session: {
 		cookieCache: {

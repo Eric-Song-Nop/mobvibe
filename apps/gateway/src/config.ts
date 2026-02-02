@@ -4,6 +4,8 @@ export type GatewayConfig = {
 	siteUrl: string | undefined;
 	webUrl: string | undefined;
 	databaseUrl: string | undefined;
+	resendApiKey: string | undefined;
+	emailFrom: string;
 };
 
 const parsePort = (value: string) => {
@@ -32,5 +34,7 @@ export const getGatewayConfig = (): GatewayConfig => {
 		siteUrl: env.SITE_URL,
 		webUrl: env.WEB_URL,
 		databaseUrl: env.DATABASE_URL,
+		resendApiKey: env.RESEND_API_KEY,
+		emailFrom: env.EMAIL_FROM ?? "Mobvibe <noreply@example.com>",
 	};
 };

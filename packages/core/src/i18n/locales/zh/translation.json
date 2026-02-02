@@ -196,12 +196,20 @@
 		"name": "姓名",
 		"namePlaceholder": "您的姓名（可选）",
 		"loading": "请稍候...",
-		"orContinueWith": "或使用以下方式",
 		"noAccount": "没有账号？",
 		"haveAccount": "已有账号？",
 		"signOut": "退出登录",
 		"profile": "个人资料",
-		"settings": "设置"
+		"settings": "设置",
+		"emailNotVerified": "请先验证您的邮箱再登录。",
+		"verificationEmailSent": "验证邮件已发送，请查收您的邮箱。",
+		"pleaseVerifyEmail": "请验证您的邮箱以继续。",
+		"resendVerification": "重新发送验证邮件",
+		"resending": "发送中...",
+		"resendFailed": "重新发送验证邮件失败",
+		"loginFailed": "登录失败",
+		"registrationFailed": "注册失败",
+		"errorOccurred": "发生错误"
 	},
 	"machines": {
 		"title": "设备",
