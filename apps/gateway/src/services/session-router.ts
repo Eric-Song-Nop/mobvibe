@@ -20,6 +20,7 @@ import type {
 	HostFsRootsResponse,
 	LoadSessionRpcParams,
 	PermissionDecisionPayload,
+	ReloadSessionRpcParams,
 	RpcRequest,
 	RpcResponse,
 	SendMessageParams,
@@ -735,6 +736,79 @@ export class SessionRouter {
 		logger.info(
 			{ sessionId: result.sessionId, userId },
 			"session_load_rpc_complete",
+		);
+
+		return result;
+	}
+
+	/**
+	 * Reload a historical session from the ACP agent.
+	 * This will tear down any existing session and replay history again.
+	 * @param params - Reload session parameters
+	 * @param userId - Optional user ID for authorization
+	 * @returns The reloaded session summary
+	 */
+	async reloadSession(
+		params: { sessionId: string; cwd: string; machineId?: string },
+		userId?: string,
+	): Promise<SessionSummary> {
+		const cli = params.machineId
+			? this.cliRegistry.getCliByMachineId(params.machineId)
+			: this.cliRegistry.getFirstCliForUser(userId);
+
+		if (!cli) {
+			throw new Error(
+				params.machineId
+					? "No CLI connected for this machine"
+					: userId
+						? "No CLI connected for this user"
+						: "No CLI connected",
+			);
+		}
+
+		if (
+			params.machineId &&
+			userId &&
+			!this.cliRegistry.isMachineOwnedByUser(params.machineId, userId)
+		) {
+			throw new Error("Not authorized to access this machine");
+		}
+
+		logger.info(
+			{
+				sessionId: params.sessionId,
+				machineId: cli.machineId,
+				cwd: params.cwd,
+				userId,
+			},
+			"session_reload_rpc_start",
+		);
+
+		const rpcParams: ReloadSessionRpcParams = {
+			sessionId: params.sessionId,
+			cwd: params.cwd,
+		};
+		const result = await this.sendRpc<ReloadSessionRpcParams, SessionSummary>(
+			cli.socket,
+			"rpc:session:reload",
+			rpcParams,
+		);
+
+		// Sync session to database if machine is authenticated
+		if (cli.userId && cli.machineId) {
+			await createAcpSessionDirect({
+				userId: cli.userId,
+				machineId: cli.machineId,
+				sessionId: result.sessionId,
+				title: result.title ?? result.sessionId,
+				backendId: result.backendId,
+				cwd: result.cwd,
+			});
+		}
+
+		logger.info(
+			{ sessionId: result.sessionId, userId },
+			"session_reload_rpc_complete",
 		);
 
 		return result;

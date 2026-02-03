@@ -579,6 +579,11 @@ function MainApp() {
 		t,
 	]);
 
+	const loadingMessage = activeSession?.isLoading
+		? isForceReloading
+			? t("session.reloadingHistory")
+			: t("session.loadingHistory")
+		: undefined;
 	const streamError = activeSession?.streamError;
 	const backendLabel = activeSession?.backendLabel ?? activeSession?.backendId;
 	const isModeSwitching =
@@ -638,6 +643,7 @@ function MainApp() {
 						backendLabel={backendLabel}
 						statusMessage={statusMessage}
 						streamError={streamError}
+						loadingMessage={loadingMessage}
 						onOpenMobileMenu={() => setMobileMenuOpen(true)}
 						onOpenFileExplorer={() => setFileExplorerOpen(true)}
 						onForceReload={handleForceReload}
@@ -647,6 +653,7 @@ function MainApp() {
 					/>
 					<ChatMessageList
 						activeSession={activeSession}
+						loadingMessage={loadingMessage}
 						onPermissionDecision={handlePermissionDecision}
 					/>
 					<Separator />

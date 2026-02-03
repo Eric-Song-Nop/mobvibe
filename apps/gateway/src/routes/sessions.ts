@@ -522,5 +522,60 @@ export function setupSessionRoutes(
 		},
 	);
 
+	// Reload historical session from ACP agent
+	router.post(
+		"/session/reload",
+		async (request: AuthenticatedRequest, response) => {
+			const { sessionId, cwd, machineId } = request.body ?? {};
+			if (typeof sessionId !== "string" || typeof cwd !== "string") {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId and cwd required"),
+					400,
+				);
+				return;
+			}
+
+			try {
+				const userId = getUserId(request);
+				logger.info(
+					{ sessionId, cwd, machineId, userId },
+					"session_reload_request",
+				);
+				const session = await sessionRouter.reloadSession(
+					{
+						sessionId,
+						cwd,
+						machineId: typeof machineId === "string" ? machineId : undefined,
+					},
+					userId,
+				);
+				logger.info({ sessionId, userId }, "session_reload_success");
+				response.json(session);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				logger.error({ err: error, sessionId }, "session_reload_error");
+				if (message.includes("Not authorized")) {
+					respondError(response, buildAuthorizationError(message), 403);
+				} else if (message.includes("No CLI connected")) {
+					respondError(response, buildAuthorizationError(message), 503);
+				} else if (message.includes("does not support")) {
+					respondError(
+						response,
+						createErrorDetail({
+							code: "CAPABILITY_NOT_SUPPORTED",
+							message,
+							retryable: false,
+							scope: "session",
+						}),
+						409,
+					);
+				} else {
+					respondError(response, createInternalError("session", message));
+				}
+			}
+		},
+	);
+
 	return router;
 }

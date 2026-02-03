@@ -51,10 +51,11 @@
 		"closeTitle": "Close session?",
 		"closeDescription": "Closing ends the backend session while keeping local history.",
 		"closeConfirm": "Confirm close",
-		"forceReload": "Force stop and reload",
 		"forceReloadTitle": "Force stop and reload?",
-		"forceReloadDescription": "This stops the current generation and reloads history via session/load.",
+		"forceReloadDescription": "This stops the current generation and reloads history from the agent.",
 		"forceReloadConfirm": "Force reload",
+		"loadingHistory": "Loading history...",
+		"reloadingHistory": "Reloading history...",
 		"sessionClosed": "Session has ended or was closed",
 		"createTitle": "New conversation",
 		"createDescription": "Choose a backend and set the title and working directory.",
@@ -94,7 +95,8 @@
 		"pathUnavailable": "Path unavailable",
 		"rootLoadFailed": "Failed to load root directory",
 		"previewLoadFailed": "Failed to load preview",
-		"pathLoadFailed": "Failed to load path"
+		"pathLoadFailed": "Failed to load path",
+		"reloadSessionFailed": "Failed to reload session"
 	},
 	"workingDirectory": {
 		"dialogTitle": "Select working directory",

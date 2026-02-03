@@ -671,6 +671,29 @@ export class SocketClient extends EventEmitter {
 			}
 		});
 
+		// Reload historical session from ACP agent
+		this.socket.on("rpc:session:reload", async (request) => {
+			try {
+				const { sessionId, cwd } = request.params;
+				logger.info(
+					{ requestId: request.requestId, sessionId, cwd },
+					"rpc_session_reload",
+				);
+				const session = await sessionManager.reloadSession(sessionId, cwd);
+				this.sendRpcResponse(request.requestId, session);
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_session_reload_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
 		// Git status handler
 		this.socket.on("rpc:git:status", async (request) => {
 			try {

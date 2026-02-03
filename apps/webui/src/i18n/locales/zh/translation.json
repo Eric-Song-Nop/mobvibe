@@ -51,10 +51,11 @@
 		"closeTitle": "关闭对话？",
 		"closeDescription": "关闭后将断开后端会话进程，前端仍保留消息记录。",
 		"closeConfirm": "确认关闭",
-		"forceReload": "强制停止并加载",
 		"forceReloadTitle": "强制停止并加载？",
-		"forceReloadDescription": "将先停止当前生成，再通过 session/load 重放历史。",
-		"forceReloadConfirm": "确认加载",
+		"forceReloadDescription": "将先停止当前生成，再从代理重放历史。",
+		"forceReloadConfirm": "确认重载",
+		"loadingHistory": "正在加载历史...",
+		"reloadingHistory": "正在重放历史...",
 		"sessionClosed": "会话已结束或被关闭",
 		"createTitle": "新建对话",
 		"createDescription": "选择后端并设置对话标题与工作目录。",
@@ -94,7 +95,8 @@
 		"pathUnavailable": "路径不可用",
 		"rootLoadFailed": "根目录加载失败",
 		"previewLoadFailed": "预览加载失败",
-		"pathLoadFailed": "路径加载失败"
+		"pathLoadFailed": "路径加载失败",
+		"reloadSessionFailed": "重载会话失败"
 	},
 	"workingDirectory": {
 		"dialogTitle": "选择工作目录",

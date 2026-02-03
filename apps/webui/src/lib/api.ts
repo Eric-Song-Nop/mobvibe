@@ -341,6 +341,16 @@ export const loadSession = async (payload: {
 		body: JSON.stringify(payload),
 	});
 
+export const reloadSession = async (payload: {
+	sessionId: string;
+	cwd: string;
+	machineId?: string;
+}): Promise<SessionSummary> =>
+	requestJson<SessionSummary>("/acp/session/reload", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+
 // Git file status codes (from git status --porcelain)
 export type GitFileStatus = "M" | "A" | "D" | "?" | "R" | "C" | "U" | "!";
 

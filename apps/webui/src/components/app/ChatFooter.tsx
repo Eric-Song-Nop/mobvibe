@@ -407,7 +407,9 @@ export function ChatFooter({
 	const availableCommands = activeSession?.availableCommands ?? [];
 	const modelLabel = activeSession?.modelName ?? activeSession?.modelId;
 	const modeLabel = activeSession?.modeName ?? activeSession?.modeId;
-	const isReady = Boolean(activeSession?.isAttached);
+	const isReady = Boolean(
+		activeSession?.isAttached && !activeSession?.isLoading,
+	);
 	const searchItems = useMemo(
 		() => buildCommandSearchItems(availableCommands),
 		[availableCommands],

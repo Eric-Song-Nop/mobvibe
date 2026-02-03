@@ -20,6 +20,7 @@ import {
 	createMessageId,
 	createSession,
 	loadSession,
+	reloadSession,
 	renameSession,
 	type SessionSummary,
 	sendMessage,
@@ -383,6 +384,34 @@ export function useSessionMutations(store: ChatStoreActions) {
 		},
 	});
 
+	const reloadSessionMutation = useMutation({
+		mutationFn: reloadSession,
+		onSuccess: (data) => {
+			store.updateSessionMeta(data.sessionId, {
+				updatedAt: data.updatedAt,
+				cwd: data.cwd,
+				agentName: data.agentName,
+				modelId: data.modelId,
+				modelName: data.modelName,
+				modeId: data.modeId,
+				modeName: data.modeName,
+				availableModes: data.availableModes,
+				availableModels: data.availableModels,
+				availableCommands: data.availableCommands,
+			});
+			store.setActiveSessionId(data.sessionId);
+			store.setAppError(undefined);
+		},
+		onError: (mutationError: unknown) => {
+			store.setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError(t("errors.reloadSessionFailed"), "session"),
+				),
+			);
+		},
+	});
+
 	return {
 		createSessionMutation,
 		renameSessionMutation,
@@ -394,5 +423,6 @@ export function useSessionMutations(store: ChatStoreActions) {
 		createMessageIdMutation,
 		permissionDecisionMutation,
 		loadSessionMutation,
+		reloadSessionMutation,
 	};
 }

@@ -185,6 +185,12 @@ export type LoadSessionRpcParams = {
 	cwd: string;
 };
 
+// Reload session RPC params
+export type ReloadSessionRpcParams = {
+	sessionId: string;
+	cwd: string;
+};
+
 /** Payload for sessions:discovered event */
 export type SessionsDiscoveredPayload = {
 	sessions: AcpSessionInfo[];
@@ -253,6 +259,7 @@ export interface GatewayToCliEvents {
 		request: RpcRequest<DiscoverSessionsRpcParams>,
 	) => void;
 	"rpc:session:load": (request: RpcRequest<LoadSessionRpcParams>) => void;
+	"rpc:session:reload": (request: RpcRequest<ReloadSessionRpcParams>) => void;
 
 	// Git RPC requests
 	"rpc:git:status": (request: RpcRequest<GitStatusParams>) => void;

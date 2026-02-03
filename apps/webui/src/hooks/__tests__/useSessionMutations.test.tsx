@@ -22,6 +22,7 @@ vi.mock("@/lib/api", async () => {
 		createMessageId: vi.fn(),
 		sendPermissionDecision: vi.fn(),
 		loadSession: vi.fn(),
+		reloadSession: vi.fn(),
 	};
 });
 

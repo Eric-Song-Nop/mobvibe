@@ -63,7 +63,13 @@
 		"backendPlaceholder": "选择后端",
 		"cwdLabel": "工作目录",
 		"cwdPlaceholder": "输入或粘贴 Home 内路径",
-		"browse": "浏览"
+		"browse": "浏览",
+		"forceReload": "强制重载",
+		"forceReloadTitle": "强制重载会话？",
+		"forceReloadDescription": "重载会清空本地消息并从代理重新加载历史。",
+		"forceReloadConfirm": "确认重载",
+		"loadingHistory": "正在加载历史...",
+		"reloadingHistory": "正在重载历史..."
 	},
 	"errors": {
 		"selectBackend": "请选择后端",
@@ -92,7 +98,8 @@
 		"rootLoadFailed": "根目录加载失败",
 		"previewLoadFailed": "预览加载失败",
 		"pathLoadFailed": "路径加载失败",
-		"loadSessionFailed": "加载会话失败"
+		"loadSessionFailed": "加载会话失败",
+		"reloadSessionFailed": "重载会话失败"
 	},
 	"workingDirectory": {
 		"dialogTitle": "选择工作目录",

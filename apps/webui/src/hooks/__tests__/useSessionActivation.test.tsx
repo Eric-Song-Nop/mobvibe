@@ -25,10 +25,14 @@ vi.mock("@/lib/socket", () => ({
 const loadSessionMutation = {
 	mutateAsync: vi.fn(),
 };
+const reloadSessionMutation = {
+	mutateAsync: vi.fn(),
+};
 
 vi.mock("../useSessionMutations", () => ({
 	useSessionMutations: () => ({
 		loadSessionMutation,
+		reloadSessionMutation,
 	}),
 }));
 
@@ -86,6 +90,7 @@ describe("useSessionActivation", () => {
 	beforeEach(() => {
 		machinesState = { machines: {} };
 		loadSessionMutation.mutateAsync.mockReset();
+		reloadSessionMutation.mutateAsync.mockReset();
 		mockGatewaySocket.subscribeToSession.mockReset();
 		mockGatewaySocket.unsubscribeFromSession.mockReset();
 	});
@@ -183,6 +188,35 @@ describe("useSessionActivation", () => {
 		});
 		expect(store.setActiveSessionId).toHaveBeenCalledWith("session-1");
 		expect(store.setSessionLoading).toHaveBeenCalledWith("session-1", false);
+	});
+
+	it("uses reload when forcing activation", async () => {
+		const store = createStore();
+		const session = buildSession({
+			cwd: "/home/user/project",
+			machineId: "machine-1",
+			isAttached: true,
+		});
+
+		machinesState = {
+			machines: { "machine-1": { capabilities: { list: true, load: true } } },
+		};
+		reloadSessionMutation.mutateAsync.mockResolvedValue({
+			sessionId: "session-1",
+		});
+
+		const { result } = renderHook(() => useSessionActivation(store));
+
+		await act(async () => {
+			await result.current.activateSession(session, { force: true });
+		});
+
+		expect(reloadSessionMutation.mutateAsync).toHaveBeenCalledWith({
+			sessionId: "session-1",
+			cwd: "/home/user/project",
+			machineId: "machine-1",
+		});
+		expect(loadSessionMutation.mutateAsync).not.toHaveBeenCalled();
 	});
 
 	it("restores messages when load fails", async () => {

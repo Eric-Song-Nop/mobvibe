@@ -121,3 +121,10 @@ export type LoadSessionParams = {
 	cwd: string;
 	machineId?: string;
 };
+
+/** Parameters for reloading a historical session */
+export type ReloadSessionParams = {
+	sessionId: string;
+	cwd: string;
+	machineId?: string;
+};

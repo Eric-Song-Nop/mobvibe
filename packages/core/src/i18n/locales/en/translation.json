@@ -63,7 +63,13 @@
 		"backendPlaceholder": "Select backend",
 		"cwdLabel": "Working directory",
 		"cwdPlaceholder": "Enter or paste a Home path",
-		"browse": "Browse"
+		"browse": "Browse",
+		"forceReload": "Force reload",
+		"forceReloadTitle": "Force reload session?",
+		"forceReloadDescription": "Reloading clears local messages and replays history from the agent.",
+		"forceReloadConfirm": "Reload",
+		"loadingHistory": "Loading session history...",
+		"reloadingHistory": "Reloading session history..."
 	},
 	"errors": {
 		"selectBackend": "Please select a backend",
@@ -92,7 +98,8 @@
 		"rootLoadFailed": "Failed to load root directory",
 		"previewLoadFailed": "Failed to load preview",
 		"pathLoadFailed": "Failed to load path",
-		"loadSessionFailed": "Failed to load session"
+		"loadSessionFailed": "Failed to load session",
+		"reloadSessionFailed": "Failed to reload session"
 	},
 	"workingDirectory": {
 		"dialogTitle": "Select working directory",

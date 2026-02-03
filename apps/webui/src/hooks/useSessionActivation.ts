@@ -9,15 +9,16 @@ import { useSessionMutations } from "./useSessionMutations";
 export type ActivationState = "idle" | "loading";
 
 /**
- * Hook for session activation via session/load (no resume).
+ * Hook for session activation via session/load (or reload when forced).
  * - Attached session: set active immediately (unless forced)
- * - Otherwise: call load, clear local messages, restore on failure
+ * - Otherwise: call load/reload, clear local messages, restore on failure
  * - Active session ID is set only after load succeeds
  */
 export function useSessionActivation(store: ChatStoreActions) {
 	const [activationState, setActivationState] =
 		useState<ActivationState>("idle");
-	const { loadSessionMutation } = useSessionMutations(store);
+	const { loadSessionMutation, reloadSessionMutation } =
+		useSessionMutations(store);
 	const machines = useMachinesStore((state) => state.machines);
 
 	const activateSession = useCallback(
@@ -56,7 +57,8 @@ export function useSessionActivation(store: ChatStoreActions) {
 			gatewaySocket.subscribeToSession(session.sessionId);
 
 			try {
-				await loadSessionMutation.mutateAsync(params);
+				const mutation = force ? reloadSessionMutation : loadSessionMutation;
+				await mutation.mutateAsync(params);
 				store.setActiveSessionId(session.sessionId);
 			} catch {
 				store.restoreSessionMessages(session.sessionId, backupMessages);
@@ -66,7 +68,7 @@ export function useSessionActivation(store: ChatStoreActions) {
 				setActivationState("idle");
 			}
 		},
-		[loadSessionMutation, machines, store],
+		[loadSessionMutation, reloadSessionMutation, machines, store],
 	);
 
 	return {

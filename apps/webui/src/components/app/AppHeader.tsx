@@ -21,6 +21,7 @@ export type AppHeaderProps = {
 	backendLabel?: string;
 	statusMessage?: string;
 	streamError?: ChatSession["streamError"];
+	loadingMessage?: string;
 	onOpenMobileMenu: () => void;
 	onOpenFileExplorer?: () => void;
 	onForceReload?: () => void;
@@ -34,6 +35,7 @@ export function AppHeader({
 	backendLabel,
 	statusMessage,
 	streamError,
+	loadingMessage,
 	onOpenMobileMenu,
 	onOpenFileExplorer,
 	onForceReload,
@@ -71,10 +73,6 @@ export function AppHeader({
 								disabled={forceReloadDisabled}
 							>
 								<HugeiconsIcon icon={Refresh01Icon} strokeWidth={2} />
-								<span className="sr-only">{t("session.forceReload")}</span>
-								<span className="hidden sm:inline">
-									{t("session.forceReload")}
-								</span>
 							</Button>
 						</AlertDialogTrigger>
 						<AlertDialogContent size="sm">
@@ -112,6 +110,11 @@ export function AppHeader({
 				<UserMenu />
 			</div>
 
+			{loadingMessage ? (
+				<div className="text-muted-foreground mx-auto mt-2 w-full max-w-5xl text-xs">
+					{loadingMessage}
+				</div>
+			) : null}
 			{statusMessage ? (
 				<div className="text-muted-foreground mx-auto mt-2 w-full max-w-5xl text-xs">
 					{statusMessage}

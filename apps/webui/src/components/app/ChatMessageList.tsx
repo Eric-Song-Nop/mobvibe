@@ -6,6 +6,7 @@ import { useUiStore } from "@/lib/ui-store";
 
 export type ChatMessageListProps = {
 	activeSession?: ChatSession;
+	loadingMessage?: string;
 	onPermissionDecision: (payload: {
 		requestId: string;
 		outcome: PermissionResultNotification["outcome"];
@@ -14,6 +15,7 @@ export type ChatMessageListProps = {
 
 export function ChatMessageList({
 	activeSession,
+	loadingMessage,
 	onPermissionDecision,
 }: ChatMessageListProps) {
 	const { setFileExplorerOpen, setFilePreviewPath } = useUiStore();
@@ -35,7 +37,14 @@ export function ChatMessageList({
 							{t("chat.selectSession")}
 						</div>
 					) : null}
-					{activeSession && activeSession.messages.length === 0 ? (
+					{activeSession && activeSession.isLoading ? (
+						<div className="text-muted-foreground mt-8 text-center text-sm whitespace-pre font-mono">
+							{loadingMessage ?? t("common.loading")}
+						</div>
+					) : null}
+					{activeSession &&
+					!activeSession.isLoading &&
+					activeSession.messages.length === 0 ? (
 						<div className="text-muted-foreground mt-8 text-center text-sm whitespace-pre font-mono">
 							{t("chat.startConversation")}
 						</div>

@@ -840,6 +840,59 @@ export class SessionManager {
 		}
 	}
 
+	/**
+	 * Reload a historical session from the ACP agent.
+	 * Replays session history even if the session is already loaded.
+	 */
+	async reloadSession(
+		sessionId: string,
+		cwd: string,
+		backendId?: string,
+	): Promise<SessionSummary> {
+		const existing = this.sessions.get(sessionId);
+		if (!existing) {
+			return this.loadSession(sessionId, cwd, backendId);
+		}
+
+		if (!existing.connection.supportsSessionLoad()) {
+			throw createCapabilityNotSupportedError(
+				"Agent does not support session loading",
+			);
+		}
+
+		const response = await existing.connection.loadSession(sessionId, cwd);
+		const { modelId, modelName, availableModels } = resolveModelState(
+			response.models,
+		);
+		const { modeId, modeName, availableModes } = resolveModeState(
+			response.modes,
+		);
+		const agentInfo = existing.connection.getAgentInfo();
+
+		existing.cwd = cwd;
+		existing.agentName =
+			agentInfo?.title ?? agentInfo?.name ?? existing.agentName;
+		existing.modelId = modelId;
+		existing.modelName = modelName;
+		existing.availableModels = availableModels;
+		existing.modeId = modeId;
+		existing.modeName = modeName;
+		existing.availableModes = availableModes;
+		existing.updatedAt = new Date();
+
+		const summary = this.buildSummary(existing);
+		this.emitSessionsChanged({
+			added: [],
+			updated: [summary],
+			removed: [],
+		});
+		this.emitSessionAttached(sessionId);
+
+		logger.info({ sessionId, backendId }, "session_reloaded");
+
+		return summary;
+	}
+
 	private applySessionUpdateToRecord(
 		record: SessionRecord,
 		notification: SessionNotification,
