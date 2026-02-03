@@ -233,6 +233,34 @@ describe("SessionManager", () => {
 				manager.loadSession("session-1", "/home/user/project"),
 			).rejects.toThrow("Agent does not support session loading");
 		});
+
+		it("emits session:attached event when loading already-loaded session", async () => {
+			const attachedListener = vi.fn();
+			sessionManager.onSessionAttached(attachedListener);
+
+			// First load
+			await sessionManager.loadSession("test-session", "/home/user/project");
+			expect(attachedListener).toHaveBeenCalledTimes(1);
+
+			// Second load (same session) - should still emit due to force flag
+			await sessionManager.loadSession("test-session", "/home/user/project");
+			expect(attachedListener).toHaveBeenCalledTimes(2);
+		});
+	});
+
+	describe("reloadSession", () => {
+		it("emits session:attached event even if already attached", async () => {
+			const attachedListener = vi.fn();
+			sessionManager.onSessionAttached(attachedListener);
+
+			// First load
+			await sessionManager.loadSession("test-session", "/home/user/project");
+			expect(attachedListener).toHaveBeenCalledTimes(1);
+
+			// Reload - should emit again due to force flag
+			await sessionManager.reloadSession("test-session", "/home/user/project");
+			expect(attachedListener).toHaveBeenCalledTimes(2);
+		});
 	});
 
 	describe("listSessions", () => {

@@ -236,12 +236,12 @@ export class SessionManager {
 		this.sessionsChangedEmitter.emit("changed", payload);
 	}
 
-	private emitSessionAttached(sessionId: string) {
+	private emitSessionAttached(sessionId: string, force = false) {
 		const record = this.sessions.get(sessionId);
 		if (!record) {
 			return;
 		}
-		if (record.isAttached) {
+		if (record.isAttached && !force) {
 			return;
 		}
 		const attachedAt = new Date();
@@ -744,7 +744,7 @@ export class SessionManager {
 		// Check if session is already loaded
 		const existing = this.sessions.get(sessionId);
 		if (existing) {
-			this.emitSessionAttached(sessionId);
+			this.emitSessionAttached(sessionId, true);
 			return this.buildSummary(existing);
 		}
 
@@ -886,7 +886,7 @@ export class SessionManager {
 			updated: [summary],
 			removed: [],
 		});
-		this.emitSessionAttached(sessionId);
+		this.emitSessionAttached(sessionId, true);
 
 		logger.info({ sessionId, backendId }, "session_reloaded");
 
