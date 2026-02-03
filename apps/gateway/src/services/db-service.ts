@@ -421,6 +421,12 @@ export async function createAcpSessionDirect(params: {
 	backendId: string;
 	cwd?: string;
 }): Promise<{ _id: string } | null> {
+	const isUniqueViolation = (error: unknown) =>
+		typeof error === "object" &&
+		error !== null &&
+		"code" in error &&
+		(error as { code?: string }).code === "23505";
+
 	try {
 		const id = randomUUID();
 
@@ -437,7 +443,72 @@ export async function createAcpSessionDirect(params: {
 
 		return { _id: id };
 	} catch (error) {
-		logger.error({ err: error }, "db_create_session_direct_error");
-		return null;
+		if (!isUniqueViolation(error)) {
+			logger.error({ err: error }, "db_create_session_direct_error");
+			return null;
+		}
+
+		try {
+			const existing = await db
+				.select({
+					id: acpSessions.id,
+					userId: acpSessions.userId,
+					machineId: acpSessions.machineId,
+				})
+				.from(acpSessions)
+				.where(eq(acpSessions.sessionId, params.sessionId))
+				.limit(1);
+
+			if (existing.length === 0) {
+				logger.error(
+					{ err: error, sessionId: params.sessionId },
+					"db_create_session_direct_conflict_missing",
+				);
+				return null;
+			}
+
+			const record = existing[0];
+			if (
+				record.userId !== params.userId ||
+				record.machineId !== params.machineId
+			) {
+				logger.error(
+					{
+						sessionId: params.sessionId,
+						userId: params.userId,
+						machineId: params.machineId,
+						existingUserId: record.userId,
+						existingMachineId: record.machineId,
+					},
+					"db_create_session_direct_conflict_owner_mismatch",
+				);
+				return null;
+			}
+
+			const updateData: Record<string, unknown> = {
+				title: params.title,
+				backendId: params.backendId,
+				state: "active",
+				updatedAt: new Date(),
+				closedAt: null,
+			};
+
+			if (params.cwd !== undefined) {
+				updateData.cwd = params.cwd ?? null;
+			}
+
+			await db
+				.update(acpSessions)
+				.set(updateData)
+				.where(eq(acpSessions.sessionId, params.sessionId));
+
+			return { _id: record.id };
+		} catch (retryError) {
+			logger.error(
+				{ err: retryError, sessionId: params.sessionId },
+				"db_create_session_direct_retry_error",
+			);
+			return null;
+		}
 	}
 }
