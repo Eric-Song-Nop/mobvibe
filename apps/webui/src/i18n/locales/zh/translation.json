@@ -16,7 +16,8 @@
 		"creating": "创建中...",
 		"new": "新建",
 		"empty": "暂无内容",
-		"unknown": "未知"
+		"unknown": "未知",
+		"back": "返回"
 	},
 	"status": {
 		"idle": "空闲",
@@ -205,7 +206,31 @@
 		"haveAccount": "已有账号？",
 		"signOut": "退出登录",
 		"profile": "个人资料",
-		"settings": "设置"
+		"settings": "设置",
+		"emailNotVerified": "请在登录前验证您的邮箱。",
+		"verificationEmailSent": "验证邮件已发送，请查收。",
+		"pleaseVerifyEmail": "请验证邮箱后继续。",
+		"resendVerification": "重新发送验证邮件",
+		"resending": "发送中...",
+		"resendCooldown": "{{seconds}}秒后可重发",
+		"resendFailed": "发送验证邮件失败",
+		"loginFailed": "登录失败",
+		"registrationFailed": "注册失败",
+		"errorOccurred": "发生错误",
+		"emailVerified": "邮箱验证成功"
+	},
+	"settings": {
+		"title": "设置",
+		"description": "管理账号设置",
+		"changePassword": "修改密码",
+		"currentPassword": "当前密码",
+		"newPassword": "新密码",
+		"confirmPassword": "确认新密码",
+		"updatePassword": "更新密码",
+		"passwordChanged": "密码修改成功",
+		"changePasswordFailed": "修改密码失败",
+		"passwordMismatch": "两次输入的密码不一致",
+		"passwordTooShort": "密码至少8个字符"
 	},
 	"machines": {
 		"title": "设备",

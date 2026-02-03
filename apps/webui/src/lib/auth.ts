@@ -78,7 +78,10 @@ export const signIn = {
 		if (!authClient) {
 			throw new Error("Auth not configured");
 		}
-		return authClient.signIn.email(credentials);
+		return authClient.signIn.email({
+			...credentials,
+			callbackURL: `${window.location.origin}/login?verified=1`,
+		});
 	},
 };
 
@@ -86,7 +89,10 @@ export const sendVerificationEmail = async (params: { email: string }) => {
 	if (!authClient) {
 		throw new Error("Auth not configured");
 	}
-	return authClient.sendVerificationEmail(params);
+	return authClient.sendVerificationEmail({
+		...params,
+		callbackURL: `${window.location.origin}/login?verified=1`,
+	});
 };
 
 export const signUp = {
@@ -94,7 +100,10 @@ export const signUp = {
 		if (!authClient) {
 			throw new Error("Auth not configured");
 		}
-		return authClient.signUp.email(data);
+		return authClient.signUp.email({
+			...data,
+			callbackURL: `${window.location.origin}/login?verified=1`,
+		});
 	},
 };
 
@@ -103,6 +112,16 @@ export const signOut = async () => {
 		throw new Error("Auth not configured");
 	}
 	return authClient.signOut();
+};
+
+export const changePassword = async (data: {
+	currentPassword: string;
+	newPassword: string;
+}) => {
+	if (!authClient) {
+		throw new Error("Auth not configured");
+	}
+	return authClient.changePassword(data);
 };
 
 // API Key methods

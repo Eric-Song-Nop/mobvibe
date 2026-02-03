@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,16 +22,35 @@ type LoginPageProps = {
 export function LoginPage({ onSuccess }: LoginPageProps) {
 	const { t } = useTranslation();
 	const { signIn, signUp } = useAuth();
+	const [searchParams] = useSearchParams();
 	const [mode, setMode] = useState<"login" | "register">("login");
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [showVerificationMessage, setShowVerificationMessage] = useState(false);
 	const [resendingEmail, setResendingEmail] = useState(false);
+	const [resendCooldown, setResendCooldown] = useState(0);
+	const [emailVerifiedSuccess, setEmailVerifiedSuccess] = useState(false);
 	const [formData, setFormData] = useState({
 		email: "",
 		password: "",
 		name: "",
 	});
+
+	// Handle ?verified=1 URL param
+	useEffect(() => {
+		if (searchParams.get("verified") === "1") {
+			setEmailVerifiedSuccess(true);
+		}
+	}, [searchParams]);
+
+	// Countdown timer for resend cooldown
+	useEffect(() => {
+		if (resendCooldown <= 0) return;
+		const timer = setInterval(() => {
+			setResendCooldown((prev) => Math.max(0, prev - 1));
+		}, 1000);
+		return () => clearInterval(timer);
+	}, [resendCooldown]);
 
 	const handleSubmit = async (event: React.FormEvent) => {
 		event.preventDefault();
@@ -83,6 +103,9 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 			const result = await sendVerificationEmail({ email: formData.email });
 			if (result.error) {
 				setError(result.error.message ?? t("auth.resendFailed"));
+			} else {
+				// Set 60s cooldown on success
+				setResendCooldown(60);
 			}
 		} catch (err) {
 			setError(err instanceof Error ? err.message : t("auth.resendFailed"));
@@ -151,6 +174,12 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 							/>
 						</div>
 
+						{emailVerifiedSuccess && (
+							<div className="rounded-sm bg-green-500/10 p-3 text-green-600 dark:text-green-400 text-xs">
+								{t("auth.emailVerified")}
+							</div>
+						)}
+
 						{error && (
 							<div className="rounded-sm bg-destructive/10 p-3 text-destructive text-xs">
 								{error}
@@ -168,11 +197,13 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 									size="sm"
 									className="h-auto p-0 ml-1"
 									onClick={handleResendVerification}
-									disabled={resendingEmail}
+									disabled={resendingEmail || resendCooldown > 0}
 								>
 									{resendingEmail
 										? t("auth.resending")
-										: t("auth.resendVerification")}
+										: resendCooldown > 0
+											? t("auth.resendCooldown", { seconds: resendCooldown })
+											: t("auth.resendVerification")}
 								</Button>
 							</div>
 						)}

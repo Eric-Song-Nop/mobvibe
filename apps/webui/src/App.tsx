@@ -34,6 +34,7 @@ import { buildSessionTitle } from "@/lib/ui-utils";
 import { collectWorkspaces } from "@/lib/workspace-utils";
 import { ApiKeysPage } from "@/pages/ApiKeysPage";
 import { LoginPage } from "@/pages/LoginPage";
+import { SettingsPage } from "@/pages/SettingsPage";
 
 function MainApp() {
 	const { t } = useTranslation();
@@ -725,6 +726,18 @@ export function App() {
 							<ApiKeysPage />
 						) : (
 							<Navigate to="/login?returnUrl=/api-keys" replace />
+						)
+					}
+				/>
+
+				{/* Settings page */}
+				<Route
+					path="/settings"
+					element={
+						!isAuthEnabled || isAuthenticated ? (
+							<SettingsPage />
+						) : (
+							<Navigate to="/login?returnUrl=/settings" replace />
 						)
 					}
 				/>

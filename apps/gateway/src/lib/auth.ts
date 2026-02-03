@@ -23,6 +23,7 @@ const tauriOrigins = [
 
 const trustedOrigins = [
 	config.siteUrl,
+	config.webUrl,
 	...config.corsOrigins,
 	"http://localhost:5173",
 	"http://127.0.0.1:5173",
@@ -64,6 +65,7 @@ export const auth = betterAuth({
 			});
 		},
 		sendOnSignUp: true,
+		sendOnSignIn: true,
 	},
 	emailAndPassword: {
 		enabled: true,

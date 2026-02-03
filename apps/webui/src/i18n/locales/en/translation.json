@@ -16,7 +16,8 @@
 		"creating": "Creating...",
 		"new": "New",
 		"empty": "No items",
-		"unknown": "Unknown"
+		"unknown": "Unknown",
+		"back": "Back"
 	},
 	"status": {
 		"idle": "Idle",
@@ -205,7 +206,31 @@
 		"haveAccount": "Already have an account?",
 		"signOut": "Sign out",
 		"profile": "Profile",
-		"settings": "Settings"
+		"settings": "Settings",
+		"emailNotVerified": "Please verify your email before signing in.",
+		"verificationEmailSent": "Verification email sent. Please check your inbox.",
+		"pleaseVerifyEmail": "Please verify your email to continue.",
+		"resendVerification": "Resend verification email",
+		"resending": "Sending...",
+		"resendCooldown": "Resend in {{seconds}}s",
+		"resendFailed": "Failed to send verification email",
+		"loginFailed": "Login failed",
+		"registrationFailed": "Registration failed",
+		"errorOccurred": "An error occurred",
+		"emailVerified": "Email verified successfully"
+	},
+	"settings": {
+		"title": "Settings",
+		"description": "Manage your account settings",
+		"changePassword": "Change Password",
+		"currentPassword": "Current Password",
+		"newPassword": "New Password",
+		"confirmPassword": "Confirm New Password",
+		"updatePassword": "Update Password",
+		"passwordChanged": "Password changed successfully",
+		"changePasswordFailed": "Failed to change password",
+		"passwordMismatch": "New passwords do not match",
+		"passwordTooShort": "Password must be at least 8 characters"
 	},
 	"machines": {
 		"title": "Machines",

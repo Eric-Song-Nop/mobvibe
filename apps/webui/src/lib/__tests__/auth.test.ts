@@ -48,6 +48,7 @@ describe("auth", () => {
 
 			expect(mockSendVerificationEmail).toHaveBeenCalledWith({
 				email: "user@example.com",
+				callbackURL: "http://localhost:3000/login?verified=1",
 			});
 		});
 
@@ -93,6 +94,7 @@ describe("auth", () => {
 			expect(mockSignInEmail).toHaveBeenCalledWith({
 				email: "user@example.com",
 				password: "password123",
+				callbackURL: "http://localhost:3000/login?verified=1",
 			});
 		});
 	});
@@ -113,6 +115,7 @@ describe("auth", () => {
 				email: "newuser@example.com",
 				password: "password123",
 				name: "New User",
+				callbackURL: "http://localhost:3000/login?verified=1",
 			});
 		});
 	});

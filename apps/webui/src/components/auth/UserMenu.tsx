@@ -1,4 +1,4 @@
-import { Key01Icon } from "@hugeicons/core-free-icons";
+import { Key01Icon, Settings02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -63,6 +63,10 @@ export function UserMenu() {
 				<DropdownMenuItem onClick={() => navigate("/api-keys")}>
 					<HugeiconsIcon icon={Key01Icon} className="mr-2 h-4 w-4" />
 					API Keys
+				</DropdownMenuItem>
+				<DropdownMenuItem onClick={() => navigate("/settings")}>
+					<HugeiconsIcon icon={Settings02Icon} className="mr-2 h-4 w-4" />
+					{t("auth.settings")}
 				</DropdownMenuItem>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem
