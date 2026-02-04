@@ -2,6 +2,7 @@ import type {
 	CliStatusPayload,
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
+	SessionEvent,
 	SessionNotification,
 	SessionsChangedPayload,
 	StreamErrorPayload,
@@ -257,6 +258,9 @@ export function setupWebuiHandlers(
 		emitToUser,
 		emitSessionUpdate: (notification: SessionNotification) => {
 			emitToSubscribers(notification.sessionId, "session:update", notification);
+		},
+		emitSessionEvent: (event: SessionEvent) => {
+			emitToSubscribers(event.sessionId, "session:event", event);
 		},
 		emitPermissionRequest: (payload: PermissionRequestPayload) => {
 			emitToSubscribers(payload.sessionId, "permission:request", payload);

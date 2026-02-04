@@ -164,7 +164,10 @@ export class WalStore {
 			});
 
 			// Initialize sequence generator
-			const maxSeq = this.getMaxSeq(params.sessionId, existing.current_revision);
+			const maxSeq = this.getMaxSeq(
+				params.sessionId,
+				existing.current_revision,
+			);
 			this.seqGenerator.initialize(
 				params.sessionId,
 				existing.current_revision,
@@ -195,9 +198,9 @@ export class WalStore {
 	 * Get a session by ID.
 	 */
 	getSession(sessionId: string): WalSession | null {
-		const row = this.stmtGetSession.get({ $sessionId: sessionId }) as
-			| WalSessionRow
-			| null;
+		const row = this.stmtGetSession.get({
+			$sessionId: sessionId,
+		}) as WalSessionRow | null;
 		if (!row) return null;
 		return this.rowToSession(row);
 	}

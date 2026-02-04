@@ -78,9 +78,7 @@ describe("MessageItem", () => {
 				},
 			],
 		} as ChatMessage;
-		const { container, getByText } = render(
-			<MessageItem message={message} />,
-		);
+		const { container, getByText } = render(<MessageItem message={message} />);
 		// Open the "Details" accordion to reveal output
 		const detailsSummary = getByText(i18n.t("toolCall.details"));
 		expect(detailsSummary).toBeTruthy();

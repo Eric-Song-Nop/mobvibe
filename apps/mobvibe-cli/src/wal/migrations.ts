@@ -66,7 +66,9 @@ export function runMigrations(db: Database): void {
 	for (const migration of MIGRATIONS) {
 		if (migration.version > currentVersion) {
 			db.exec(migration.up);
-			db.exec(`INSERT INTO schema_version (version) VALUES (${migration.version})`);
+			db.exec(
+				`INSERT INTO schema_version (version) VALUES (${migration.version})`,
+			);
 		}
 	}
 }

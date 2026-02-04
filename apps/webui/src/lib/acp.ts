@@ -25,6 +25,7 @@ export type {
 	// Backwards-compatible aliases
 	SessionContent,
 	SessionDetachedPayload,
+	SessionEvent,
 	SessionInfoPayload,
 	SessionModeUpdate,
 	// Session types

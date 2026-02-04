@@ -1,10 +1,10 @@
-export { WalStore } from "./wal-store.js";
-export type {
-	WalSession,
-	WalEvent,
-	AppendEventParams,
-	QueryEventsParams,
-	EnsureSessionParams,
-} from "./wal-store.js";
-export { SeqGenerator } from "./seq-generator.js";
 export { runMigrations } from "./migrations.js";
+export { SeqGenerator } from "./seq-generator.js";
+export type {
+	AppendEventParams,
+	EnsureSessionParams,
+	QueryEventsParams,
+	WalEvent,
+	WalSession,
+} from "./wal-store.js";
+export { WalStore } from "./wal-store.js";

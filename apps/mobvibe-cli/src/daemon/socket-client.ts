@@ -10,9 +10,9 @@ import type {
 	GatewayToCliEvents,
 	HostFsRootsResponse,
 	RpcResponse,
+	SessionEventsResponse,
 	SessionFsFilePreview,
 	SessionFsResourceEntry,
-	SessionEventsResponse,
 	StopReason,
 } from "@mobvibe/shared";
 import ignore, { type Ignore } from "ignore";

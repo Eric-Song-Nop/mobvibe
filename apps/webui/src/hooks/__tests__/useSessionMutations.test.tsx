@@ -63,6 +63,9 @@ describe("useSessionMutations", () => {
 		handleSessionsChanged: vi.fn(),
 		clearSessionMessages: vi.fn(),
 		restoreSessionMessages: vi.fn(),
+		updateSessionCursor: vi.fn(),
+		setSessionBackfilling: vi.fn(),
+		resetSessionForRevision: vi.fn(),
 	});
 
 	const wrapper = ({ children }: { children: ReactNode }) => (

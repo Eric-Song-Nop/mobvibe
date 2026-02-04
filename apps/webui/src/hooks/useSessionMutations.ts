@@ -131,6 +131,14 @@ export interface ChatStoreActions {
 	handleSessionsChanged: (payload: SessionsChangedPayload) => void;
 	clearSessionMessages: (sessionId: string) => void;
 	restoreSessionMessages: (sessionId: string, messages: ChatMessage[]) => void;
+	// Session cursor tracking for backfill
+	updateSessionCursor: (
+		sessionId: string,
+		revision: number,
+		lastAppliedSeq: number,
+	) => void;
+	setSessionBackfilling: (sessionId: string, isBackfilling: boolean) => void;
+	resetSessionForRevision: (sessionId: string, newRevision: number) => void;
 }
 
 const applySessionSummary = (

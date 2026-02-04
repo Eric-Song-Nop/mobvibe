@@ -159,25 +159,42 @@ export function useSocket({
 	const MAX_REVISION_MISMATCH_RETRIES = 3;
 
 	// Handler refs for stable listener registration
-	const handleSessionUpdateRef = useRef<(n: SessionNotification) => void>();
-	const handleSessionErrorRef = useRef<(p: StreamErrorPayload) => void>();
-	const handleSessionAttachedRef =
-		useRef<(p: SessionAttachedPayload) => void>();
-	const handleSessionDetachedRef =
-		useRef<(p: SessionDetachedPayload) => void>();
-	const handlePermissionRequestRef =
-		useRef<(p: PermissionRequestPayload) => void>();
-	const handlePermissionResultRef =
-		useRef<(p: PermissionDecisionPayload) => void>();
-	const handleTerminalOutputRef = useRef<(p: TerminalOutputEvent) => void>();
-	const handleSessionsChangedRef =
-		useRef<(p: SessionsChangedPayload) => void>();
-	const handleSessionEventRef = useRef<(e: SessionEvent) => void>();
-	const triggerBackfillRef =
-		useRef<(sessionId: string, revision: number, afterSeq: number) => void>();
+	const handleSessionUpdateRef = useRef<
+		((n: SessionNotification) => void) | undefined
+	>(undefined);
+	const handleSessionErrorRef = useRef<
+		((p: StreamErrorPayload) => void) | undefined
+	>(undefined);
+	const handleSessionAttachedRef = useRef<
+		((p: SessionAttachedPayload) => void) | undefined
+	>(undefined);
+	const handleSessionDetachedRef = useRef<
+		((p: SessionDetachedPayload) => void) | undefined
+	>(undefined);
+	const handlePermissionRequestRef = useRef<
+		((p: PermissionRequestPayload) => void) | undefined
+	>(undefined);
+	const handlePermissionResultRef = useRef<
+		((p: PermissionDecisionPayload) => void) | undefined
+	>(undefined);
+	const handleTerminalOutputRef = useRef<
+		((p: TerminalOutputEvent) => void) | undefined
+	>(undefined);
+	const handleSessionsChangedRef = useRef<
+		((p: SessionsChangedPayload) => void) | undefined
+	>(undefined);
+	const handleSessionEventRef = useRef<((e: SessionEvent) => void) | undefined>(
+		undefined,
+	);
+	const triggerBackfillRef = useRef<
+		| ((sessionId: string, revision: number, afterSeq: number) => void)
+		| undefined
+	>(undefined);
 
 	// Apply a session:event to the chat store (ref for stable access)
-	const applySessionEventRef = useRef<(event: SessionEvent) => void>();
+	const applySessionEventRef = useRef<
+		((event: SessionEvent) => void) | undefined
+	>(undefined);
 	applySessionEventRef.current = (event: SessionEvent) => {
 		// Process event based on kind
 		switch (event.kind) {
@@ -293,7 +310,9 @@ export function useSocket({
 	};
 
 	// Flush pending events that are now in order (ref for stable access)
-	const flushPendingEventsRef = useRef<(sessionId: string) => void>();
+	const flushPendingEventsRef = useRef<
+		((sessionId: string) => void) | undefined
+	>(undefined);
 	flushPendingEventsRef.current = (sessionId: string) => {
 		// P0-6: Use getCursor for synchronous cursor reads
 		const cursor = getCursor(sessionId);
@@ -658,7 +677,7 @@ export function useSocket({
 		const unsubDisconnect = gatewaySocket.onDisconnect(() => {
 			const now = new Date().toISOString();
 			for (const session of Object.values(sessionsRef.current)) {
-				if (session.isAttached) {
+				if (session.isAttached && session.machineId) {
 					handleSessionDetachedRef.current?.({
 						sessionId: session.sessionId,
 						machineId: session.machineId,

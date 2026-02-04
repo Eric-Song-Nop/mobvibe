@@ -75,6 +75,9 @@ function MainApp() {
 		handleSessionsChanged,
 		clearSessionMessages,
 		restoreSessionMessages,
+		updateSessionCursor,
+		setSessionBackfilling,
+		resetSessionForRevision,
 	} = useChatStore();
 	const {
 		createDialogOpen,
@@ -150,6 +153,9 @@ function MainApp() {
 		handleSessionsChanged,
 		clearSessionMessages,
 		restoreSessionMessages,
+		updateSessionCursor,
+		setSessionBackfilling,
+		resetSessionForRevision,
 	});
 
 	const { activateSession, isActivating } = useSessionActivation({
@@ -185,6 +191,9 @@ function MainApp() {
 		handleSessionsChanged,
 		clearSessionMessages,
 		restoreSessionMessages,
+		updateSessionCursor,
+		setSessionBackfilling,
+		resetSessionForRevision,
 	});
 
 	useSocket({
@@ -203,6 +212,9 @@ function MainApp() {
 		markSessionAttached,
 		markSessionDetached,
 		createLocalSession,
+		updateSessionCursor,
+		setSessionBackfilling,
+		resetSessionForRevision,
 	});
 
 	const { machines, selectedMachineId, setMachineCapabilities } =

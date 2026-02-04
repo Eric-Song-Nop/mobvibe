@@ -509,9 +509,10 @@ const sanitizeSessionForPersist = (session: ChatSession): ChatSession => ({
 	detachedReason: undefined,
 	// Only persist cursors if set, otherwise persist messages (backwards compat)
 	// When cursors are set, clear messages as they will be backfilled
-	messages: session.revision !== undefined
-		? []
-		: session.messages.map(sanitizeMessageForPersist),
+	messages:
+		session.revision !== undefined
+			? []
+			: session.messages.map(sanitizeMessageForPersist),
 	// Preserve cursor for backfill on reload
 	revision: session.revision,
 	lastAppliedSeq: session.lastAppliedSeq,

@@ -140,6 +140,11 @@ setupCliHandlers(io, cliRegistry, sessionRouter, (event, payload) => {
 				payload as Parameters<typeof webuiEmitter.emitTerminalOutput>[0],
 			);
 			break;
+		case "session:event":
+			webuiEmitter.emitSessionEvent(
+				payload as Parameters<typeof webuiEmitter.emitSessionEvent>[0],
+			);
+			break;
 		default:
 			webuiEmitter.emitToAll(event, payload);
 	}

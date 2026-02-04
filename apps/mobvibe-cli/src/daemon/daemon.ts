@@ -229,7 +229,7 @@ export class DaemonManager {
 
 			try {
 				socketClient.disconnect();
-				await sessionManager.closeAll();
+				await sessionManager.shutdown();
 				await this.removePidFile();
 				logger.info({ signal }, "daemon_shutdown_complete");
 			} catch (error) {

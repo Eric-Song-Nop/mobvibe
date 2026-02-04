@@ -928,11 +928,10 @@ export class SessionRouter {
 			"session_events_rpc_start",
 		);
 
-		const result = await this.sendRpc<SessionEventsParams, SessionEventsResponse>(
-			cli.socket,
-			"rpc:session:events",
-			params,
-		);
+		const result = await this.sendRpc<
+			SessionEventsParams,
+			SessionEventsResponse
+		>(cli.socket, "rpc:session:events", params);
 
 		logger.debug(
 			{

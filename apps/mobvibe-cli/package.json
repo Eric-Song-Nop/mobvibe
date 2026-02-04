@@ -36,7 +36,7 @@
 		}
 	},
 	"scripts": {
-		"dev": "bun --watch src/index.ts",
+		"dev": "bun run build.ts",
 		"build": "bun run build.ts",
 		"start": "bun dist/index.js",
 		"lint": "biome check --write .",
