@@ -24,8 +24,7 @@
 		"connecting": "连接中",
 		"ready": "就绪",
 		"error": "错误",
-		"stopped": "已停止",
-		"backend": "后端"
+		"stopped": "已停止"
 	},
 	"chat": {
 		"placeholder": "输入消息，Enter 发送，Shift+Enter 换行",
@@ -165,7 +164,8 @@
 		"statusInProgress": "进行中",
 		"statusCompleted": "完成",
 		"statusFailed": "失败",
-		"statusUnknown": "未知"
+		"statusUnknown": "未知",
+		"details": "详情"
 	},
 	"languageSwitcher": {
 		"label": "语言",

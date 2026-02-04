@@ -24,8 +24,7 @@
 		"connecting": "Connecting",
 		"ready": "Ready",
 		"error": "Error",
-		"stopped": "Stopped",
-		"backend": "Backend"
+		"stopped": "Stopped"
 	},
 	"chat": {
 		"placeholder": "Type a message, Enter to send, Shift+Enter for newline",
@@ -165,7 +164,8 @@
 		"statusInProgress": "In progress",
 		"statusCompleted": "Completed",
 		"statusFailed": "Failed",
-		"statusUnknown": "Unknown"
+		"statusUnknown": "Unknown",
+		"details": "Details"
 	},
 	"languageSwitcher": {
 		"label": "Language",

@@ -709,59 +709,69 @@ export const MessageItem = ({
 				(terminalIds && terminalIds.length > 0) ||
 				message.rawOutput,
 		);
+		// Determine if this is a Task (agent) tool call
+		const isTaskTool = message.name === "Task" || message.name === "task";
 		return (
-			<div className="flex flex-col gap-1 items-start">
-				<Card size="sm" className="max-w-[85%] border-border bg-background">
-					<CardContent className="flex flex-col gap-3 text-sm">
-						<details className="group">
-							<summary className="flex flex-wrap items-center gap-2 text-xs cursor-pointer list-none">
-								<Badge variant="outline">{getLabel("toolCall.toolCall")}</Badge>
-								<span className="text-foreground font-medium">{label}</span>
-								{message.status ? (
-									<Badge variant={statusBadgeVariant}>{statusLabel}</Badge>
+			<div className="flex flex-col gap-0.5 items-start">
+				<div className="flex items-start gap-2">
+					<span
+						className={cn(
+							"mt-1 size-2 shrink-0 rounded-full",
+							isTaskTool ? "bg-green-600" : "bg-muted-foreground",
+						)}
+					/>
+					<div className="flex flex-col gap-0.5 min-w-0">
+						<div className="flex flex-wrap items-center gap-1.5 text-sm">
+							<span className="font-medium text-foreground">
+								{isTaskTool ? "Task" : label}
+							</span>
+							{isTaskTool ? (
+								<span className="text-muted-foreground italic">{label}</span>
+							) : null}
+							{message.status === "failed" ? (
+								<Badge variant={statusBadgeVariant} className="text-[10px]">
+									{statusLabel}
+								</Badge>
+							) : null}
+						</div>
+						{summaryPaths.length > 0 ? (
+							<div className="flex flex-wrap items-center gap-1 text-xs">
+								{summaryPaths.map((item) => (
+									<button
+										key={item.path}
+										type="button"
+										className="text-primary hover:underline"
+										onClick={(event) => {
+											event.preventDefault();
+											onOpenFilePreview?.(item.path);
+										}}
+										disabled={!onOpenFilePreview}
+									>
+										{item.name}
+									</button>
+								))}
+								{overflowCount > 0 ? (
+									<span className="text-muted-foreground">
+										+{overflowCount}
+									</span>
 								) : null}
-								{durationLabel ? (
-									<span className="text-muted-foreground">{durationLabel}</span>
-								) : null}
-								{summaryPaths.length > 0 ? (
-									<div className="flex flex-wrap items-center gap-1">
-										{summaryPaths.map((item) => (
-											<button
-												key={item.path}
-												type="button"
-												className="text-xs text-primary hover:underline"
-												onClick={(event) => {
-													event.preventDefault();
-													onOpenFilePreview?.(item.path);
-												}}
-												disabled={!onOpenFilePreview}
-											>
-												{item.name}
-											</button>
-										))}
-										{overflowCount > 0 ? (
-											<span className="text-muted-foreground">
-												+{overflowCount}
-											</span>
-										) : null}
-									</div>
-								) : null}
-							</summary>
-							<div className="mt-2 flex flex-col gap-2 text-xs">
-								{commandLine ? (
-									<div className="text-muted-foreground">{commandLine}</div>
-								) : null}
-								{message.error ? (
-									<div className="text-destructive">{message.error}</div>
-								) : null}
-								{hasOutputs ? (
-									<details className="rounded border border-border bg-muted/30 px-2 py-1">
-										<summary className="cursor-pointer text-xs text-muted-foreground">
-											{getLabel("toolCall.output")}
-										</summary>
-										<div className="mt-2 flex flex-col gap-2 text-xs">
+							</div>
+						) : null}
+						{commandLine || message.error || hasOutputs ? (
+							<details className="mt-1 text-xs">
+								<summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+									{getLabel("toolCall.details")}
+								</summary>
+								<div className="mt-1 flex flex-col gap-2 pl-2 border-l border-border">
+									{commandLine ? (
+										<div className="text-muted-foreground">{commandLine}</div>
+									) : null}
+									{message.error ? (
+										<div className="text-destructive">{message.error}</div>
+									) : null}
+									{hasOutputs ? (
+										<div className="flex flex-col gap-2">
 											{outputBlocks?.filter(Boolean)}
-
 											{terminalIds?.map((terminalId) => {
 												const output = terminalOutputMap?.[terminalId];
 												return (
@@ -777,45 +787,56 @@ export const MessageItem = ({
 											})}
 											{message.rawOutput ? (
 												<details className="rounded border border-border bg-background/80 px-2 py-1">
-													<summary className="cursor-pointer text-xs text-muted-foreground">
+													<summary className="cursor-pointer text-muted-foreground">
 														{getLabel("toolCall.rawOutput")}
 													</summary>
-													<pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-muted-foreground">
+													<pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-muted-foreground">
 														{JSON.stringify(message.rawOutput, null, 2)}
 													</pre>
 												</details>
 											) : null}
 										</div>
-									</details>
-								) : null}
-							</div>
-						</details>
+									) : null}
+								</div>
+							</details>
+						) : null}
+					</div>
+				</div>
+			</div>
+		);
+	}
+	// User messages: keep bubble style
+	if (isUser) {
+		return (
+			<div className="flex flex-col gap-1 items-end">
+				<Card
+					size="sm"
+					className={cn(
+						"max-w-[85%] border-primary/30 bg-primary/10",
+						message.isStreaming ? "opacity-90" : "opacity-100",
+					)}
+				>
+					<CardContent className="text-sm">
+						{renderUserContent(message, onOpenFilePreview)}
 					</CardContent>
 				</Card>
 			</div>
 		);
 	}
+	// Assistant messages: no bubble, just bullet point + content
 	return (
-		<div
-			className={cn(
-				"flex flex-col gap-1",
-				isUser ? "items-end" : "items-start",
-			)}
-		>
-			<Card
-				size="sm"
-				className={cn(
-					"max-w-[85%]",
-					isUser
-						? "border-primary/30 bg-primary/10"
-						: "border-border bg-background",
-					message.isStreaming ? "opacity-90" : "opacity-100",
-				)}
-			>
-				<CardContent className="text-sm">
-					{renderUserContent(message, onOpenFilePreview)}
-				</CardContent>
-			</Card>
+		<div className="flex flex-col gap-1 items-start">
+			<div className="flex items-start gap-2 max-w-full">
+				<span className="mt-1.5 size-2 shrink-0 rounded-full bg-foreground" />
+				<div
+					className={cn(
+						"min-w-0 text-sm",
+						message.isStreaming ? "opacity-90" : "opacity-100",
+					)}
+				>
+					<Streamdown>{message.content}</Streamdown>
+				</div>
+			</div>
 		</div>
 	);
 };

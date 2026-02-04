@@ -993,7 +993,7 @@ export function ChatFooter({
 							>
 								<SelectTrigger
 									size="sm"
-									className="h-auto w-auto border-0 bg-transparent px-1 py-0.5 text-xs text-muted-foreground hover:text-foreground focus:ring-0"
+									className="h-auto w-auto max-w-32 truncate border-0 bg-transparent px-1 py-0.5 text-xs text-muted-foreground hover:text-foreground focus:ring-0"
 								>
 									<SelectValue placeholder={t("chat.modelLabel")} />
 								</SelectTrigger>
@@ -1006,7 +1006,7 @@ export function ChatFooter({
 								</SelectContent>
 							</Select>
 						) : modelLabel ? (
-							<span className="px-1 py-0.5 text-xs text-muted-foreground">
+							<span className="max-w-32 truncate px-1 py-0.5 text-xs text-muted-foreground">
 								{modelLabel}
 							</span>
 						) : null}
@@ -1019,7 +1019,7 @@ export function ChatFooter({
 							>
 								<SelectTrigger
 									size="sm"
-									className="h-auto w-auto border-0 bg-transparent px-1 py-0.5 text-xs text-muted-foreground hover:text-foreground focus:ring-0"
+									className="h-auto w-auto max-w-32 truncate border-0 bg-transparent px-1 py-0.5 text-xs text-muted-foreground hover:text-foreground focus:ring-0"
 								>
 									<SelectValue placeholder={t("chat.modeLabel")} />
 								</SelectTrigger>
@@ -1032,7 +1032,7 @@ export function ChatFooter({
 								</SelectContent>
 							</Select>
 						) : modeLabel ? (
-							<span className="px-1 py-0.5 text-xs text-muted-foreground">
+							<span className="max-w-32 truncate px-1 py-0.5 text-xs text-muted-foreground">
 								{modeLabel}
 							</span>
 						) : null}

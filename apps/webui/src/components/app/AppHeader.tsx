@@ -60,7 +60,7 @@ export function AppHeader({
 				<div className="flex flex-1 flex-wrap items-center gap-2">
 					{backendLabel ? (
 						<Badge variant="outline" className="shrink-0">
-							{t("status.backend")}: {backendLabel}
+							{backendLabel}
 						</Badge>
 					) : null}
 				</div>
