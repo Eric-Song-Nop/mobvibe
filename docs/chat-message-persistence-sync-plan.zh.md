@@ -1,6 +1,6 @@
 # 消息持久化与同步架构（CLI 端为唯一真相）实施文档
 
-> **实施状态**：Phase 1 ✅ 已完成 | Phase 2 ✅ 已完成（P0 问题已修复：Fix 2 revision/events 一致性、P0-3 mismatch 终止语义、P0-6 cursorRef 同步游标、P0-7 best-effort 连续应用；单元测试已补充；最后更新：2026-02-04） | Phase 3-5 ⏳ 待实施
+> **实施状态**：Phase 1 ✅ 已完成 | Phase 2 ✅ 已完成（核心链路已打通 + 修复 Fix 2/P0-3/P0-6/P0-7；单元测试已补充） | **Phase 2.2 ✅ 已完成（P0-8/P0-9/P1-2/P1-3/P1-4 已修复；最后更新：2026-02-05）** | Phase 3-5 ⏳ 待实施
 
 ## 背景与约束
 
@@ -344,7 +344,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 - ✅ CLI 重启后仍能从 WAL 查询到历史事件。
 - ✅ CLI 与 Gateway 断线期间，事件仍会写入 WAL（即使发不出去）。
 
-### Phase 2：补拉 RPC + WebUI 缺口恢复 ✅ 已完成
+### Phase 2：补拉 RPC + WebUI 缺口恢复 ✅ 已完成（但需 Phase 2.2 修复新增 P0）
 
 实现"按游标补拉"的最小闭环：
 
@@ -369,11 +369,12 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 | `packages/core/src/stores/chat-store.ts` | ✅ | 添加 revision, lastAppliedSeq, isBackfilling 等游标字段 |
 | `packages/core/src/hooks/use-socket.ts` | ✅ | 增加 session:event 回调（onSessionEvent），供上层做游标推进/触发 backfill |
 
-验收（当前状态：✅ P0 已修复）：
+验收（当前状态：✅ 核心链路已具备，P0/P1 问题已修复）：
 
 - ✅ 补拉 API 与 WAL 查询链路已具备
 - ✅ P0 问题已修复（Fix 2、P0-3、P0-6、P0-7）
 - ✅ 单元测试已补充
+- ✅ Phase 2.2 P0/P1 问题已修复（P0-8、P0-9、P1-2、P1-3、P1-4）
 
 **已完成的测试（2026-02-04）：**
 
@@ -392,6 +393,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 
 - ⏳ Gateway 端补拉接口测试 (`apps/gateway/src/routes/__tests__/sessions.test.ts`)
 - ⏳ 端到端集成测试（断线重连、缺口补拉场景）
+- ⏳ P0-8/P0-9 回归验证：刷新重建不丢、同一 session 重复 load 不重复导入（实现已完成，待补单测）
 
 ## Phase 2 复审记录（2026-02-04）
 
@@ -534,6 +536,114 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 - **验收**：
   - ✅ 人为制造缺口 + backfill 报错时，cursor 不会越过缺口
 
+### 复审新增问题（必须记录为下一步修复）
+
+本节记录在复审实现后新发现的风险/缺陷（不涉及“Gateway 是否转发 `session:update`”的兼容性讨论；该点对本方案不重要）。
+
+#### P0-8: 当前 compaction 会导致"历史不可重建"（✅ 已修复 2026-02-05）
+
+- **现象**：
+  - WebUI 在 session 进入 eventlog 模式后，会在持久化时清空 `messages`（只持久化 cursor：`revision/lastAppliedSeq`），刷新后依赖 `GET /acp/session/events` 回放重建。
+  - Gateway 不落库消息内容（按方案约束）。
+  - 因此 **CLI WAL 是唯一真相**：只要 WAL 中的历史事件被删除，WebUI 就无法重建那段历史。
+- **问题根因**：
+  - 现在的 `events:ack` 语义只是"Gateway/链路已收到，用于断线重放去重"，并不代表"历史已经被安全归档/可删"。
+  - 目前已引入的 compactor 会按 `acked_at + retentionDays` 删除已 ack 的事件（并可能执行 `VACUUM` 回收空间）。
+  - 这会导致：超过保留期后，WebUI 刷新/换浏览器/清缓存时只能重建出"没被删的尾巴"，历史前半段永久不可恢复。
+- **影响**：直接违反本方案的可靠性目标（不丢、不重复、可重建），属于 P0。
+- **已修复点（2026-02-05）**：
+  - `apps/mobvibe-cli/src/config.ts`：`DEFAULT_COMPACTION_CONFIG.enabled = false`（默认禁用 compaction）
+  - `apps/mobvibe-cli/src/config.ts`：`DEFAULT_COMPACTION_CONFIG.runOnStartup = false`（禁用启动时自动运行）
+  - 注释说明：compaction deletes acked events which are the only history source
+  - `mobvibe compact --dry-run` 仍可用于手动观察，但不会自动删除历史
+- **后续计划**：
+  - [P1] 设计并实现 snapshot-based 安全 compaction（Phase 5），并补齐端到端回归测试：任意时刻刷新 WebUI 仍能完整重建历史。
+
+#### P0-9: `session/load` 在 WAL 已存在历史时可能"重复导入"（✅ 已修复 2026-02-05）
+
+- **现象**：
+  - 用户可能对同一个外部 session 重复执行 `session/load`（导入历史）。
+  - 当前 `loadSession()` 只 `ensureSession()` 拿到"当前 revision"，并直接把 replay 的历史事件继续追加到该 revision 的事件流中。
+- **问题**：
+  - 如果该 session 之前已经导入过（WAL 内已有 revision=1 的完整历史），再次导入会把同一段历史再写一遍，导致 WebUI 重复消息/重复 tool call。
+  - 与本方案的 `revision` 设计目标（"每次 load/reload 是一次新的时间线版本"）不一致。
+- **已修复点（2026-02-05）**：
+  - `apps/mobvibe-cli/src/acp/session-manager.ts` 的 `loadSession()` 方法：
+    - 检测 WAL 中是否已存在该 `sessionId` 的历史（`queryEvents` 检查 `events.length > 0`）
+    - 若已有历史 → 调用 `incrementRevision()` bump revision 后再执行 replay 写入
+    - 若无历史 → 正常 `ensureSession()` 创建 revision=1
+  - 添加日志：`"load_session_bump_revision"` 记录 bump 行为
+- **待补充**：
+  - 补单测/集成测：同一 session 连续两次 load，WebUI 只能看到一份历史（或看到新 revision 但不重复）。
+
+#### P1-2: compactor 的并发/资源/锁风险（✅ 已修复 2026-02-05）
+
+- **问题**：
+  - compactor 可能在 session 正在流式写 WAL 时执行 `VACUUM`，存在锁竞争/卡顿/写失败风险。
+  - daemon 内部创建了额外的 WAL DB 连接与 store，但没有明确 close，且 `markSessionActive/inactive` 机制目前未接入任何"活跃会话"信号（等同永远不 skip）。
+- **已修复点（2026-02-05）**：
+  - `apps/mobvibe-cli/src/daemon/daemon.ts` 的 shutdown 函数：
+    - 单独追踪 `compactorWalStore` 和 `compactorDb` 引用
+    - shutdown 时显式调用 `compactorWalStore.close()` 和 `compactorDb.close()` 释放资源
+  - 默认禁用自动 compaction（P0-8 修复的一部分），避免运行期锁竞争
+- **备注**：`markSessionActive/inactive` 机制暂未集成，因为 compaction 默认禁用。后续若启用需要补齐。
+
+#### P1-3: compaction 配置与实现不一致（✅ 已修复 2026-02-05）
+
+- **问题**：
+  - `keepOldRevisionsDays`、`consolidateChunksAfterSec` 等配置项目前并未真实生效；存在"配置看起来可控但实际没用"的风险。
+- **已修复点（2026-02-05）**：
+  - `apps/mobvibe-cli/src/config.ts`：从 `CompactionConfig` 类型中删除了未实现的配置项：
+    - `consolidateChunksAfterSec`（chunk 合并功能未实现）
+    - `keepOldRevisionsDays`（仅 `keepLatestRevisionsCount` 被使用）
+  - 添加注释说明删除原因
+  - `apps/mobvibe-cli/src/wal/compactor.ts`：删除了未使用的 `revisionCutoff` 计算逻辑
+
+#### P1-4: WebUI cursorRef reset 仍有短窗口 stale read 风险（✅ 已修复 2026-02-05）
+
+- **问题**：
+  - 在 revision reset/mismatch 处理时当前实现直接 `cursorRef.delete(sessionId)`，随后若在 React rerender 之前到达新的 `session:event`，`getCursor()` 可能 fallback 到旧的 `sessionsRef.current`，出现短窗口误判（重复 reset / 重复触发 backfill / 额外 pending）。
+  - P0-7 的"best-effort 不越过缺口"逻辑已改为只连续应用，但缺少覆盖 backfill error/retry 耗尽路径的单测来保证不会回归。
+- **已修复点（2026-02-05）**：
+  - `apps/webui/src/hooks/useSocket.ts` 中所有 `cursorRef.current.delete(sessionId)` 改为 `cursorRef.current.set(sessionId, { revision: newRevision, lastAppliedSeq: 0 })`：
+    - `onRevisionMismatch` 回调（line ~415-418）
+    - revision bump 分支（line ~570-573）
+    - pending overflow reset（line ~614-617）
+  - 这样避免 fallback 到旧的 `sessionsRef.current`，消除短窗口竞态
+- **待补充**：
+  - 增补 WebUI 单测：backfill error + pending gap 场景。
+
+#### P2-1: 测试隔离问题（建议修复）
+
+- **问题**：
+  - `useSessionBackfill` 的单测直接覆盖 `global.fetch` 且不恢复，可能污染其他测试用例（取决于 Vitest 隔离策略）。
+- **解决方案/计划**：
+  - [P2] 使用 `vi.stubGlobal('fetch', ...)` 并在 `afterEach/afterAll` 恢复。
+
+#### P2-2: WAL 事件覆盖不完整（未知 sessionUpdate 丢弃）
+
+- **问题**：
+  - `writeSessionUpdateToWal()` 对未知 `sessionUpdate` 类型直接 return，不写入 WAL；这会让“唯一真相”在协议扩展时出现静默缺口。
+- **解决方案/计划**：
+  - [P2] 至少写入一种兜底事件（例如 `session_update_raw/unknown_session_update`），保证不丢。
+  - [P2] 随协议演进逐步补齐 kind 映射，或将 payload 统一存为原始 `SessionNotification` 并在 WebUI 投影时解释。
+
+#### P2-3: packages/core `use-socket` 实现质量（可选）
+
+- **问题**：
+  - `packages/core/src/hooks/use-socket.ts` 仍保留较多未使用的参数解构，容易引起 lint/no-unused-vars 或误导 hook API。
+- **解决方案/计划**：
+  - [P2] 清理未使用参数或在 hook 里实际使用（视 packages/core 的对外 API 稳定性决定）。
+
+#### P2-4: discovered sessions 持久化尚未形成闭环（可选）
+
+- **现象/问题**：
+  - 目前已把 `discoverSessions()` 的结果写入 WAL（`discovered_sessions`），但 WebUI/CLI 侧尚未形成“读取 WAL 并展示”的稳定闭环。
+  - 例如：如果 agent discovery 临时失败/CLI 重启后未主动 discover，WebUI 可能看不到之前已发现的外部会话列表（即使 WAL 里有记录）。
+- **解决方案/计划**：
+  - [P2] 在 CLI 注册到 Gateway 后，先从 WAL 读出 `discovered_sessions` 并 emit 给 Gateway/WebUI（作为“缓存列表”），再异步跑一次真实 discover 做校验与更新。
+  - [P2] 明确 stale 策略：cwd 不存在/长期未验证的记录如何展示与清理。
+
 ### 仍建议修复（P1）
 
 #### P1-1: CLI reconnect replay 触发条件可能漏判
@@ -627,15 +737,16 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 
 - 用同一 agent 在 terminal 单独创建的会话，可以在 WebUI discover -> load -> 得到完整历史并后续不丢。
 
-### Phase 5：Compaction 与性能 ⏳ 待实施（可选，持续优化）
+### Phase 5：Compaction 与性能 ⏳ 待实施（需实现安全 compaction）
 
 - chunk 合并、terminal snapshot、按时间/大小清理旧 revision。
 - 目标是控制 `~/.mobvibe/` 数据体积并加速事件查询与 UI 重建。
 
 **当前状态：**
 
-- 暂未实现 compaction 和 TTL 清理
-- WAL 文件会持续增长，需要后续优化
+- 已引入初版 compactor（清理 acked 事件/旧 revision + `VACUUM`），但该策略会导致"历史不可重建"。
+- **P0-8 已修复**：compaction 默认禁用（`enabled: false`, `runOnStartup: false`），`mobvibe compact --dry-run` 仅作为观察工具。
+- Phase 5 的目标是实现 **snapshot-based + 不丢语义** 的安全 compaction，并补齐测试与验收。
 
 ## 测试与验证
 
@@ -673,7 +784,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
   - revision 切换（reload/load）与 revision mismatch 自愈（无竞态，不会被旧 backfill 覆盖状态）
   - backfill error/mismatch 重试耗尽时不应推进 cursor 越过缺口（避免 silent loss）
   - 过渡期双路事件（`session:update`/`session:event`）的屏蔽策略（避免重复追加）
-- ⏳ compaction 测试（Phase 5 实现后）
+- ⏳ safe compaction 测试（snapshot/压缩后仍可完整重建历史）
 
 ### 手动/集成测试场景（必须覆盖）
 
@@ -687,7 +798,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 
 ## 风险与应对
 
-- 日志体积增长：通过 compaction/TTL 控制。
+- 日志体积增长：短期先禁用删除型 compaction 并观测；中期通过 snapshot-based 安全 compaction/压缩控制体积（禁止仅凭 ack 删除唯一真相）。
 - 多端同时订阅：按 seq 去重即可；补拉可按 socket 单独触发，避免广播大量历史。
 - 兼容旧 UI：通过 feature flag/双发事件过渡。
 
@@ -700,11 +811,13 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 | `src/wal/wal-store.ts` | ✅ 新增 | WAL 存储核心 |
 | `src/wal/migrations.ts` | ✅ 新增 | Schema 迁移 |
 | `src/wal/seq-generator.ts` | ✅ 新增 | 序号生成器 |
+| `src/wal/compactor.ts` | ✅ 新增 | WAL compactor；**P1-3: 删除未使用的 revisionCutoff 计算** |
 | `src/wal/index.ts` | ✅ 新增 | 导出 |
-| `src/config.ts` | ✅ 修改 | 添加 `walDbPath` |
-| `src/acp/session-manager.ts` | ✅ 修改 | 事件源头落盘 + revision/seq；**Fix 2: 返回真实 revision** |
+| `src/config.ts` | ✅ 修改 | 添加 `walDbPath` + compaction 配置；**P0-8: 默认禁用 compaction**；**P1-3: 删除未实现配置项** |
+| `src/acp/session-manager.ts` | ✅ 修改 | 事件源头落盘 + revision/seq；**Fix 2: 返回真实 revision**；**P0-9: loadSession 检测已有历史时 bump revision** |
 | `src/daemon/socket-client.ts` | ✅ 修改 | 新增 `rpc:session:events` |
-| `src/daemon/daemon.ts` | ✅ 修改 | **Fix 4: shutdown 改调 `sessionManager.shutdown()`** |
+| `src/daemon/daemon.ts` | ✅ 修改 | **Fix 4: shutdown 改调 `sessionManager.shutdown()`**；**P1-2: 关闭 compactor 资源** |
+| `src/index.ts` | ✅ 修改 | 新增 `mobvibe compact` 命令（仅作为手动观察工具） |
 
 ### Gateway (apps/gateway)
 
@@ -729,7 +842,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 |------|------|------|
 | `src/lib/socket.ts` | ✅ 修改 | **Fix 3: 添加 `onSessionEvent()` 方法** |
 | `src/lib/acp.ts` | ✅ 修改 | **Fix 3: 导出 `SessionEvent` 类型** |
-| `src/hooks/useSocket.ts` | ✅ 修改 | **P0-6/P0-7 已修复**：引入 cursorRef + getCursor + updateCursorSync；best-effort 只连续应用 |
+| `src/hooks/useSocket.ts` | ✅ 修改 | **P0-6/P0-7 已修复**：引入 cursorRef + getCursor + updateCursorSync；best-effort 只连续应用；**P1-4: cursorRef delete 改为 set** |
 | `src/hooks/useSessionMutations.ts` | ✅ 修改 | **Fix 3: 添加 cursor 管理方法** |
 | `src/hooks/__tests__/useSocket.test.tsx` | ✅ 修改 | 覆盖 P0-6（同步游标）、P0-7（gap 检测）测试 |
 | `src/hooks/__tests__/useSessionBackfill.test.tsx` | ✅ 新增 | 覆盖 P0-3（mismatch 终止语义）测试 |
@@ -747,10 +860,11 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 ```
 Phase 0: 规格与兼容策略     ✅ 完成（类型定义、事件模型）
 Phase 1: CLI 本地 WAL       ✅ 完成（bun:sqlite WAL + 单元测试）
-Phase 2: 补拉 RPC + WebUI   ✅ 完成（P0 已修复：Fix 2/P0-3/P0-6/P0-7 + 单元测试；最后更新：2026-02-04）
+Phase 2: 补拉 RPC + WebUI   ✅ 完成（核心链路 + Fix 2/P0-3/P0-6/P0-7）
+Phase 2.2: 安全修复          ✅ 完成（P0-8/P0-9/P1-2/P1-3/P1-4 已修复；最后更新：2026-02-05）
 Phase 3: 统一实时推送为 session:event ⏳ 待实施（建议：停用 session:update 内容级推送）
 Phase 4: 外部会话导入完善   ⏳ 待实施（可选优化）
-Phase 5: Compaction 与性能  ⏳ 待实施（可选优化）
+Phase 5: Compaction 与性能  ⏳ 待实施（需实现 snapshot-based 安全 compaction）
 ```
 
 ### 2026-02-04 修复总结
@@ -766,9 +880,22 @@ Phase 5: Compaction 与性能  ⏳ 待实施（可选优化）
 | Backfill cookie auth | P1 鉴权 | ✅ | 与 WebUI 认证对齐 |
 | CLI reconnect replay 触发 | P1 可靠性 | ⚠️ 建议改进 | 当前依赖 connect_error 推断重连，建议改为"每次 connect/registered 都 replay（幂等）" |
 
+### 2026-02-05 修复总结（Phase 2.2）
+
+| 修复 | 严重性 | 状态 | 说明 |
+|------|--------|------|------|
+| P0-8: 删除型 compaction 导致历史不可重建 | P0 可靠性 | ✅ | 默认禁用 compaction（`enabled: false`, `runOnStartup: false`） |
+| P0-9: session/load 可能重复导入 | P0 功能 | ✅ | `loadSession()` 检测已有历史时 bump revision |
+| P1-2: compactor 资源泄漏 | P1 资源 | ✅ | shutdown 时关闭 compactorWalStore 和 compactorDb |
+| P1-3: compaction 配置与实现不一致 | P1 配置 | ✅ | 删除未实现的配置项（consolidateChunksAfterSec, keepOldRevisionsDays） |
+| P1-4: cursorRef delete 导致 stale read | P1 竞态 | ✅ | cursorRef delete 改为 set 新值，避免 fallback 到旧快照 |
+
 ### 下一步建议
 
 1. **端到端验证**：WebUI 断网/重连、Gateway 重启、CLI-Gateway 断线、外部会话导入、反复 reload（revision 切换）。
-2. **再推进 Phase 3**：在验证无重复/不丢后，逐步停用 `session:update` 的内容级推送，统一以 `session:event` 为准。
-3. **补充 Gateway 测试**：`apps/gateway/src/routes/__tests__/sessions.test.ts` 覆盖 events 接口。
+2. **补充单元测试**：
+   - P0-8/P0-9 回归测试：刷新重建不丢、同一 session 重复 load 不重复导入
+   - P1-4 回归测试：backfill error + pending gap 场景
+   - Gateway 端补拉接口测试 (`apps/gateway/src/routes/__tests__/sessions.test.ts`)
+3. **再推进 Phase 3**：在验证无重复/不丢后，逐步停用 `session:update` 的内容级推送，统一以 `session:event` 为准。
 4. **改进 CLI reconnect replay**：每次 connect/registered 都 replay（幂等），不依赖 connect_error 推断。

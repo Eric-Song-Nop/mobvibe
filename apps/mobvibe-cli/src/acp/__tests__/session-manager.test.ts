@@ -102,9 +102,7 @@ const createMockConfig = (): CliConfig => ({
 	platform: "linux",
 	compaction: {
 		enabled: false,
-		consolidateChunksAfterSec: 3600,
 		ackedEventRetentionDays: 7,
-		keepOldRevisionsDays: 30,
 		keepLatestRevisionsCount: 2,
 		runOnStartup: false,
 		runIntervalHours: 24,

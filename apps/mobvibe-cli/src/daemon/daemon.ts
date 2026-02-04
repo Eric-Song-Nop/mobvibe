@@ -221,11 +221,18 @@ export class DaemonManager {
 		// Initialize compactor if enabled
 		let compactor: WalCompactor | undefined;
 		let compactionInterval: NodeJS.Timeout | undefined;
+		// P1-2: Track compactor resources for cleanup on shutdown
+		let compactorWalStore: WalStore | undefined;
+		let compactorDb: Database | undefined;
 
 		if (this.config.compaction.enabled) {
-			const walStore = new WalStore(this.config.walDbPath);
-			const db = new Database(this.config.walDbPath);
-			compactor = new WalCompactor(walStore, this.config.compaction, db);
+			compactorWalStore = new WalStore(this.config.walDbPath);
+			compactorDb = new Database(this.config.walDbPath);
+			compactor = new WalCompactor(
+				compactorWalStore,
+				this.config.compaction,
+				compactorDb,
+			);
 
 			// Run compaction on startup
 			if (this.config.compaction.runOnStartup) {
@@ -266,6 +273,14 @@ export class DaemonManager {
 				// Stop compaction interval
 				if (compactionInterval) {
 					clearInterval(compactionInterval);
+				}
+
+				// P1-2: Close compactor resources to prevent connection leak
+				if (compactorWalStore) {
+					compactorWalStore.close();
+				}
+				if (compactorDb) {
+					compactorDb.close();
 				}
 
 				socketClient.disconnect();

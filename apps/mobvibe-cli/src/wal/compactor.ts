@@ -189,16 +189,12 @@ export class WalCompactor {
 			.slice(0, this.config.keepLatestRevisionsCount)
 			.map((r) => r.revision);
 
-		// Calculate cutoff dates
+		// Calculate cutoff date for acked events
 		const ackedCutoff = new Date();
 		ackedCutoff.setDate(
 			ackedCutoff.getDate() - this.config.ackedEventRetentionDays,
 		);
-
-		const revisionCutoff = new Date();
-		revisionCutoff.setDate(
-			revisionCutoff.getDate() - this.config.keepOldRevisionsDays,
-		);
+		// P1-3: Removed unused revisionCutoff - only keepLatestRevisionsCount is used
 
 		// Process each revision
 		for (const { revision } of revisions) {

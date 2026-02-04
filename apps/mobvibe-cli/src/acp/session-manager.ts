@@ -989,13 +989,33 @@ export class SessionManager {
 				);
 			}
 
-			// Initialize WAL session
-			const { revision } = this.walStore.ensureSession({
-				sessionId,
-				machineId: this.config.machineId,
-				backendId: backend.id,
-				cwd,
-			});
+			// P0-9: Check if WAL already has history for this session
+			// If so, bump revision to avoid duplicate imports
+			const existingWalSession = this.walStore.getSession(sessionId);
+			const hasExistingHistory =
+				existingWalSession !== null &&
+				this.walStore.queryEvents({
+					sessionId,
+					revision: existingWalSession.currentRevision,
+					afterSeq: 0,
+					limit: 1,
+				}).length > 0;
+
+			let revision: number;
+			if (hasExistingHistory) {
+				// Already have history → bump revision to avoid duplicates
+				revision = this.walStore.incrementRevision(sessionId);
+				logger.info({ sessionId, revision }, "load_session_bump_revision");
+			} else {
+				// First time import → create or get existing revision
+				const result = this.walStore.ensureSession({
+					sessionId,
+					machineId: this.config.machineId,
+					backendId: backend.id,
+					cwd,
+				});
+				revision = result.revision;
+			}
 
 			const bufferedUpdates: SessionNotification[] = [];
 			let recordRef: SessionRecord | undefined;

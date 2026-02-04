@@ -411,8 +411,11 @@ export function useSocket({
 			);
 			resetSessionForRevision(sessionId, newRevision);
 			pendingEventsRef.current.delete(sessionId);
-			// P0-6: Clear cursorRef on reset, will re-init from store/new revision
-			cursorRef.current.delete(sessionId);
+			// P1-4: Set cursorRef to new value instead of deleting to prevent stale fallback
+			cursorRef.current.set(sessionId, {
+				revision: newRevision,
+				lastAppliedSeq: 0,
+			});
 
 			// P0-3: Defer restart to let old backfill's cleanup complete
 			// This prevents race condition where old backfill's finally block
@@ -563,8 +566,11 @@ export function useSocket({
 			// Reset session state for new revision
 			resetSessionForRevision(event.sessionId, event.revision);
 			pendingEventsRef.current.delete(event.sessionId);
-			// P0-6: Clear cursorRef on reset
-			cursorRef.current.delete(event.sessionId);
+			// P1-4: Set cursorRef to new value instead of deleting to prevent stale fallback
+			cursorRef.current.set(event.sessionId, {
+				revision: event.revision,
+				lastAppliedSeq: 0,
+			});
 			// Buffer current event for after backfill completes
 			const pending = pendingEventsRef.current.get(event.sessionId) ?? [];
 			pending.push(event);
@@ -604,8 +610,11 @@ export function useSocket({
 				);
 				pendingEventsRef.current.delete(event.sessionId);
 				resetSessionForRevision(event.sessionId, event.revision);
-				// P0-6: Clear cursorRef on reset
-				cursorRef.current.delete(event.sessionId);
+				// P1-4: Set cursorRef to new value instead of deleting to prevent stale fallback
+				cursorRef.current.set(event.sessionId, {
+					revision: event.revision,
+					lastAppliedSeq: 0,
+				});
 				triggerBackfillRef.current?.(event.sessionId, event.revision, 0);
 				return;
 			}

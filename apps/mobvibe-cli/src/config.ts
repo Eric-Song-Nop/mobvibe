@@ -16,29 +16,26 @@ export type AcpBackendConfig = {
 export type CompactionConfig = {
 	/** Enable automatic compaction */
 	enabled: boolean;
-	/** Consolidate chunks after this many seconds (default: 3600 = 1 hour) */
-	consolidateChunksAfterSec: number;
 	/** Keep acked events for this many days (default: 7) */
 	ackedEventRetentionDays: number;
-	/** Keep old revisions for this many days (default: 30) */
-	keepOldRevisionsDays: number;
 	/** Always keep this many latest revisions (default: 2) */
 	keepLatestRevisionsCount: number;
-	/** Run compaction on daemon startup (default: true) */
+	/** Run compaction on daemon startup (default: false) */
 	runOnStartup: boolean;
 	/** Run compaction every N hours (default: 24) */
 	runIntervalHours: number;
 	/** Safety: minimum events to keep per session (default: 1000) */
 	minEventsToKeep: number;
+	// P1-3: Removed unused config items:
+	// - consolidateChunksAfterSec: chunk consolidation not implemented
+	// - keepOldRevisionsDays: only keepLatestRevisionsCount is used
 };
 
 export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
-	enabled: true,
-	consolidateChunksAfterSec: 3600, // 1 hour
+	enabled: false, // P0-8: Disabled by default - compaction deletes acked events which are the only history source
 	ackedEventRetentionDays: 7,
-	keepOldRevisionsDays: 30,
 	keepLatestRevisionsCount: 2,
-	runOnStartup: true,
+	runOnStartup: false, // P0-8: Disabled - only run via explicit `mobvibe compact` command
 	runIntervalHours: 24,
 	minEventsToKeep: 1000,
 };
@@ -162,8 +159,8 @@ export const getCliConfig = async (): Promise<CliConfig> => {
 			userConfigResult.errors.length > 0 ? userConfigResult.errors : undefined,
 		compaction: {
 			...DEFAULT_COMPACTION_CONFIG,
-			// Allow disabling via env var
-			enabled: env.MOBVIBE_COMPACTION_ENABLED !== "false",
+			// Allow enabling via env var
+			enabled: env.MOBVIBE_COMPACTION_ENABLED === "true",
 		},
 	};
 };
