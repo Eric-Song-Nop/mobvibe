@@ -1,4 +1,4 @@
-import { ComputerIcon, SettingsIcon } from "@hugeicons/core-free-icons";
+import { ArrowUp01Icon, StopIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { type ChatSession, useChatStore } from "@mobvibe/core";
 import { useQuery } from "@tanstack/react-query";
@@ -14,7 +14,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { CommandCombobox } from "@/components/app/CommandCombobox";
 import { ResourceCombobox } from "@/components/app/ResourceCombobox";
-import { Badge, badgeVariants } from "@/components/ui/badge";
+import { badgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
 	Select,
@@ -652,15 +652,6 @@ export function ChatFooter({
 		return true;
 	}, [commandMatches, effectiveCommandHighlight, handleCommandClick]);
 
-	const showModelModeControls = Boolean(
-		availableModels.length > 0 ||
-			modelLabel ||
-			availableModes.length > 0 ||
-			modeLabel,
-	);
-	const showFooterMeta = Boolean(
-		activeSession && (showModelModeControls || activeSession.sending),
-	);
 	const editorRef = useRef<HTMLDivElement | null>(null);
 	const isComposingRef = useRef(false);
 	const fileExplorerAvailable = Boolean(activeSession?.cwd && activeSessionId);
@@ -943,8 +934,14 @@ export function ChatFooter({
 
 	return (
 		<footer className="bg-background/90 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shrink-0">
-			<div className="mx-auto flex w-full max-w-5xl flex-col gap-3">
-				<div className="relative flex w-full items-end gap-2">
+			<div className="mx-auto w-full max-w-5xl">
+				<div
+					className={cn(
+						"relative flex flex-col border border-input",
+						"focus-within:ring-1 focus-within:ring-ring/50",
+						!activeSessionId ? "opacity-50" : null,
+					)}
+				>
 					{shouldShowResourcePicker ? (
 						<ResourceCombobox
 							resources={resourceMatches}
@@ -965,102 +962,15 @@ export function ChatFooter({
 							className="absolute bottom-full left-0 mb-2"
 						/>
 					) : null}
-					{showModelModeControls ? (
-						<div className="flex flex-col gap-2 md:hidden">
-							{availableModels.length > 0 ? (
-								<Select
-									value={activeSession?.modelId ?? ""}
-									onValueChange={onModelChange}
-									disabled={!activeSessionId || !isReady || isModelSwitching}
-								>
-									<SelectTrigger
-										size="sm"
-										className="h-7 w-12 justify-center px-1"
-									>
-										<HugeiconsIcon
-											icon={ComputerIcon}
-											strokeWidth={2}
-											className="size-4"
-										/>
-										<SelectValue
-											placeholder={t("chat.modelLabel")}
-											className="sr-only"
-										/>
-									</SelectTrigger>
-									<SelectContent>
-										{availableModels.map((model) => (
-											<SelectItem key={model.id} value={model.id}>
-												{t("chat.modelLabelWithValue", { value: model.name })}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-							) : modelLabel ? (
-								<Badge variant="outline" className="flex items-center gap-1">
-									<HugeiconsIcon
-										icon={ComputerIcon}
-										strokeWidth={2}
-										className="size-4"
-									/>
-									<span className="sr-only">
-										{t("chat.modelLabelWithValue", { value: modelLabel })}
-									</span>
-								</Badge>
-							) : null}
-							{availableModes.length > 0 ? (
-								<Select
-									value={activeSession?.modeId ?? ""}
-									onValueChange={onModeChange}
-									disabled={!activeSessionId || !isReady || isModeSwitching}
-								>
-									<SelectTrigger
-										size="sm"
-										className="h-7 w-12 justify-center px-1"
-									>
-										<HugeiconsIcon
-											icon={SettingsIcon}
-											strokeWidth={2}
-											className="size-4"
-										/>
-										<SelectValue
-											placeholder={t("chat.modeLabel")}
-											className="sr-only"
-										/>
-									</SelectTrigger>
-									<SelectContent>
-										{availableModes.map((mode) => (
-											<SelectItem key={mode.id} value={mode.id}>
-												{t("chat.modeLabelWithValue", { value: mode.name })}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-							) : modeLabel ? (
-								<Badge variant="outline" className="flex items-center gap-1">
-									<HugeiconsIcon
-										icon={SettingsIcon}
-										strokeWidth={2}
-										className="size-4"
-									/>
-									<span className="sr-only">
-										{t("chat.modeLabelWithValue", { value: modeLabel })}
-									</span>
-								</Badge>
-							) : null}
-						</div>
-					) : null}
+
+					{/* Text input */}
 					<div
 						ref={editorRef}
 						role="textbox"
 						aria-multiline="true"
 						contentEditable={Boolean(activeSessionId)}
 						suppressContentEditableWarning
-						className={cn(
-							"flex-1 min-h-10 md:min-h-16 border border-input bg-transparent px-2.5 py-2 text-xs",
-							"outline-none focus-visible:ring-1 focus-visible:ring-ring/50",
-							"whitespace-pre-wrap break-words",
-							!activeSessionId ? "opacity-50" : null,
-						)}
+						className="min-h-10 whitespace-pre-wrap break-words px-2.5 py-2 text-xs outline-none md:min-h-16"
 						aria-label={t("chat.placeholder")}
 						data-placeholder={t("chat.placeholder")}
 						tabIndex={0}
@@ -1073,124 +983,88 @@ export function ChatFooter({
 						onCompositionEnd={handleCompositionEnd}
 					/>
 
-					<div className="flex flex-col gap-2 md:flex-row md:items-center">
-						{activeSession?.sending ? (
-							<Button
-								size="sm"
-								variant="outline"
-								onClick={onCancel}
-								disabled={
-									!activeSessionId || activeSession.canceling || !isReady
-								}
+					{/* Bottom toolbar */}
+					<div className="flex items-center gap-1 px-2 pb-2">
+						{availableModels.length > 0 ? (
+							<Select
+								value={activeSession?.modelId ?? ""}
+								onValueChange={onModelChange}
+								disabled={!activeSessionId || !isReady || isModelSwitching}
 							>
-								{activeSession.canceling ? t("chat.stopping") : t("chat.stop")}
-							</Button>
+								<SelectTrigger
+									size="sm"
+									className="h-auto w-auto border-0 bg-transparent px-1 py-0.5 text-xs text-muted-foreground hover:text-foreground focus:ring-0"
+								>
+									<SelectValue placeholder={t("chat.modelLabel")} />
+								</SelectTrigger>
+								<SelectContent>
+									{availableModels.map((model) => (
+										<SelectItem key={model.id} value={model.id}>
+											{t("chat.modelLabelWithValue", { value: model.name })}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						) : modelLabel ? (
+							<span className="px-1 py-0.5 text-xs text-muted-foreground">
+								{modelLabel}
+							</span>
 						) : null}
+
+						{availableModes.length > 0 ? (
+							<Select
+								value={activeSession?.modeId ?? ""}
+								onValueChange={onModeChange}
+								disabled={!activeSessionId || !isReady || isModeSwitching}
+							>
+								<SelectTrigger
+									size="sm"
+									className="h-auto w-auto border-0 bg-transparent px-1 py-0.5 text-xs text-muted-foreground hover:text-foreground focus:ring-0"
+								>
+									<SelectValue placeholder={t("chat.modeLabel")} />
+								</SelectTrigger>
+								<SelectContent>
+									{availableModes.map((mode) => (
+										<SelectItem key={mode.id} value={mode.id}>
+											{t("chat.modeLabelWithValue", { value: mode.name })}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						) : modeLabel ? (
+							<span className="px-1 py-0.5 text-xs text-muted-foreground">
+								{modeLabel}
+							</span>
+						) : null}
+
+						<div className="flex-1" />
+
+						{/* Combined Send/Stop button */}
 						<Button
-							size="sm"
-							onClick={onSend}
+							size="icon-sm"
+							onClick={activeSession?.sending ? onCancel : onSend}
 							disabled={
 								!activeSessionId ||
-								!activeSession?.input.trim() ||
-								activeSession.sending ||
-								!isReady
+								!isReady ||
+								activeSession?.canceling ||
+								(!activeSession?.sending && !activeSession?.input.trim())
 							}
 						>
-							{t("chat.send")}
+							<HugeiconsIcon
+								icon={activeSession?.sending ? StopIcon : ArrowUp01Icon}
+								strokeWidth={2}
+								className="size-4"
+							/>
+							<span className="sr-only">
+								{activeSession?.sending
+									? activeSession?.canceling
+										? t("chat.stopping")
+										: t("chat.stop")
+									: t("chat.send")}
+							</span>
 						</Button>
 					</div>
 				</div>
-				{showFooterMeta ? (
-					<div className="hidden flex-wrap items-center justify-between gap-2 text-xs md:flex">
-						<div className="flex flex-wrap items-center gap-2">
-							{availableModels.length > 0 ? (
-								<Select
-									value={activeSession?.modelId ?? ""}
-									onValueChange={onModelChange}
-									disabled={!activeSessionId || !isReady || isModelSwitching}
-								>
-									<SelectTrigger
-										size="sm"
-										className="h-7 w-12 justify-center px-1 md:w-auto md:justify-between md:px-2"
-									>
-										<HugeiconsIcon
-											icon={ComputerIcon}
-											strokeWidth={2}
-											className="size-4"
-										/>
-										<SelectValue
-											placeholder={t("chat.modelLabel")}
-											className="sr-only md:not-sr-only"
-										/>
-									</SelectTrigger>
-									<SelectContent>
-										{availableModels.map((model) => (
-											<SelectItem key={model.id} value={model.id}>
-												{t("chat.modelLabelWithValue", { value: model.name })}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-							) : modelLabel ? (
-								<Badge variant="outline" className="flex items-center gap-1">
-									<HugeiconsIcon
-										icon={ComputerIcon}
-										strokeWidth={2}
-										className="size-4"
-									/>
-									<span className="sr-only md:not-sr-only">
-										{t("chat.modelLabelWithValue", { value: modelLabel })}
-									</span>
-								</Badge>
-							) : null}
-							{availableModes.length > 0 ? (
-								<Select
-									value={activeSession?.modeId ?? ""}
-									onValueChange={onModeChange}
-									disabled={!activeSessionId || !isReady || isModeSwitching}
-								>
-									<SelectTrigger
-										size="sm"
-										className="h-7 w-12 justify-center px-1 md:w-auto md:justify-between md:px-2"
-									>
-										<HugeiconsIcon
-											icon={SettingsIcon}
-											strokeWidth={2}
-											className="size-4"
-										/>
-										<SelectValue
-											placeholder={t("chat.modeLabel")}
-											className="sr-only md:not-sr-only"
-										/>
-									</SelectTrigger>
-									<SelectContent>
-										{availableModes.map((mode) => (
-											<SelectItem key={mode.id} value={mode.id}>
-												{t("chat.modeLabelWithValue", { value: mode.name })}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-							) : modeLabel ? (
-								<Badge variant="outline" className="flex items-center gap-1">
-									<HugeiconsIcon
-										icon={SettingsIcon}
-										strokeWidth={2}
-										className="size-4"
-									/>
-									<span className="sr-only md:not-sr-only">
-										{t("chat.modeLabelWithValue", { value: modeLabel })}
-									</span>
-								</Badge>
-							) : null}
-						</div>
-						{activeSession?.sending ? (
-							<span className="text-muted-foreground text-xs">
-								{t("chat.sending")}
-							</span>
-						) : null}
-					</div>
-				) : null}
 			</div>
 		</footer>
 	);
