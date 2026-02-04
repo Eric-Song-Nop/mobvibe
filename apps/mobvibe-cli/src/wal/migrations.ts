@@ -44,6 +44,55 @@ const MIGRATIONS = [
       );
     `,
 	},
+	{
+		version: 2,
+		up: `
+      -- Discovered sessions table for persisting sessions found via discoverSessions()
+      CREATE TABLE IF NOT EXISTS discovered_sessions (
+        session_id TEXT PRIMARY KEY,
+        backend_id TEXT NOT NULL,
+        cwd TEXT,
+        title TEXT,
+        agent_updated_at TEXT,      -- agent-reported update time
+        discovered_at TEXT NOT NULL,
+        last_verified_at TEXT,      -- last time cwd was verified to exist
+        is_stale INTEGER DEFAULT 0  -- marked stale when cwd no longer exists
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_discovered_sessions_backend
+        ON discovered_sessions (backend_id);
+
+      -- Add agent_updated_at to sessions table
+      ALTER TABLE sessions ADD COLUMN agent_updated_at TEXT;
+    `,
+	},
+	{
+		version: 3,
+		up: `
+      -- Compaction support
+      ALTER TABLE session_events ADD COLUMN compacted_at TEXT;
+
+      -- Index for finding acked events eligible for cleanup
+      CREATE INDEX IF NOT EXISTS idx_session_events_acked_at
+        ON session_events (session_id, revision, acked_at)
+        WHERE acked_at IS NOT NULL;
+
+      -- Index for finding events by kind (for chunk consolidation)
+      CREATE INDEX IF NOT EXISTS idx_session_events_kind
+        ON session_events (session_id, revision, kind);
+
+      -- Compaction operation log
+      CREATE TABLE IF NOT EXISTS compaction_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        revision INTEGER,
+        operation TEXT NOT NULL,
+        events_affected INTEGER NOT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+    `,
+	},
 ];
 
 export function runMigrations(db: Database): void {

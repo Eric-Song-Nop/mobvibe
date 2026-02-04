@@ -49,6 +49,17 @@ export type EnsureSessionParams = {
 	title?: string;
 };
 
+export type DiscoveredSession = {
+	sessionId: string;
+	backendId: string;
+	cwd?: string;
+	title?: string;
+	agentUpdatedAt?: string;
+	discoveredAt: string;
+	lastVerifiedAt?: string;
+	isStale: boolean;
+};
+
 const DEFAULT_QUERY_LIMIT = 100;
 
 export class WalStore {
@@ -65,6 +76,13 @@ export class WalStore {
 	private stmtAckEvents: ReturnType<Database["query"]>;
 	private stmtIncrementRevision: ReturnType<Database["query"]>;
 	private stmtGetMaxSeq: ReturnType<Database["query"]>;
+
+	// Discovered sessions statements
+	private stmtUpsertDiscoveredSession: ReturnType<Database["query"]>;
+	private stmtGetDiscoveredSessions: ReturnType<Database["query"]>;
+	private stmtGetDiscoveredSessionsByBackend: ReturnType<Database["query"]>;
+	private stmtMarkDiscoveredSessionStale: ReturnType<Database["query"]>;
+	private stmtDeleteStaleDiscoveredSessions: ReturnType<Database["query"]>;
 
 	constructor(dbPath: string) {
 		// Ensure directory exists
@@ -141,6 +159,51 @@ export class WalStore {
       SELECT MAX(seq) as max_seq
       FROM session_events
       WHERE session_id = $sessionId AND revision = $revision
+    `);
+
+		// Discovered sessions statements
+		this.stmtUpsertDiscoveredSession = this.db.query(`
+      INSERT INTO discovered_sessions (
+        session_id, backend_id, cwd, title, agent_updated_at,
+        discovered_at, last_verified_at, is_stale
+      ) VALUES (
+        $sessionId, $backendId, $cwd, $title, $agentUpdatedAt,
+        $discoveredAt, $lastVerifiedAt, 0
+      )
+      ON CONFLICT (session_id) DO UPDATE SET
+        backend_id = $backendId,
+        cwd = COALESCE($cwd, discovered_sessions.cwd),
+        title = COALESCE($title, discovered_sessions.title),
+        agent_updated_at = COALESCE($agentUpdatedAt, discovered_sessions.agent_updated_at),
+        last_verified_at = $lastVerifiedAt,
+        is_stale = 0
+    `);
+
+		this.stmtGetDiscoveredSessions = this.db.query(`
+      SELECT session_id, backend_id, cwd, title, agent_updated_at,
+             discovered_at, last_verified_at, is_stale
+      FROM discovered_sessions
+      WHERE is_stale = 0
+      ORDER BY discovered_at DESC
+    `);
+
+		this.stmtGetDiscoveredSessionsByBackend = this.db.query(`
+      SELECT session_id, backend_id, cwd, title, agent_updated_at,
+             discovered_at, last_verified_at, is_stale
+      FROM discovered_sessions
+      WHERE backend_id = $backendId AND is_stale = 0
+      ORDER BY discovered_at DESC
+    `);
+
+		this.stmtMarkDiscoveredSessionStale = this.db.query(`
+      UPDATE discovered_sessions
+      SET is_stale = 1
+      WHERE session_id = $sessionId
+    `);
+
+		this.stmtDeleteStaleDiscoveredSessions = this.db.query(`
+      DELETE FROM discovered_sessions
+      WHERE is_stale = 1 AND discovered_at < $olderThan
     `);
 	}
 
@@ -301,6 +364,61 @@ export class WalStore {
 		return this.seqGenerator.current(sessionId, revision);
 	}
 
+	// ========== Discovered Sessions Methods ==========
+
+	/**
+	 * Save discovered sessions (upsert).
+	 * Marks sessions as non-stale and updates verification time.
+	 */
+	saveDiscoveredSessions(sessions: DiscoveredSession[]): void {
+		const now = new Date().toISOString();
+		for (const session of sessions) {
+			this.stmtUpsertDiscoveredSession.run({
+				$sessionId: session.sessionId,
+				$backendId: session.backendId,
+				$cwd: session.cwd ?? null,
+				$title: session.title ?? null,
+				$agentUpdatedAt: session.agentUpdatedAt ?? null,
+				$discoveredAt: session.discoveredAt,
+				$lastVerifiedAt: now,
+			});
+		}
+	}
+
+	/**
+	 * Get all non-stale discovered sessions.
+	 */
+	getDiscoveredSessions(backendId?: string): DiscoveredSession[] {
+		let rows: DiscoveredSessionRow[];
+		if (backendId) {
+			rows = this.stmtGetDiscoveredSessionsByBackend.all({
+				$backendId: backendId,
+			}) as DiscoveredSessionRow[];
+		} else {
+			rows = this.stmtGetDiscoveredSessions.all() as DiscoveredSessionRow[];
+		}
+		return rows.map((row) => this.rowToDiscoveredSession(row));
+	}
+
+	/**
+	 * Mark a discovered session as stale (cwd no longer exists).
+	 */
+	markDiscoveredSessionStale(sessionId: string): void {
+		this.stmtMarkDiscoveredSessionStale.run({
+			$sessionId: sessionId,
+		});
+	}
+
+	/**
+	 * Delete stale discovered sessions older than a given date.
+	 */
+	deleteStaleDiscoveredSessions(olderThan: Date): number {
+		const result = this.stmtDeleteStaleDiscoveredSessions.run({
+			$olderThan: olderThan.toISOString(),
+		});
+		return result.changes;
+	}
+
 	/**
 	 * Close the database connection.
 	 */
@@ -341,6 +459,19 @@ export class WalStore {
 			ackedAt: row.acked_at ?? undefined,
 		};
 	}
+
+	private rowToDiscoveredSession(row: DiscoveredSessionRow): DiscoveredSession {
+		return {
+			sessionId: row.session_id,
+			backendId: row.backend_id,
+			cwd: row.cwd ?? undefined,
+			title: row.title ?? undefined,
+			agentUpdatedAt: row.agent_updated_at ?? undefined,
+			discoveredAt: row.discovered_at,
+			lastVerifiedAt: row.last_verified_at ?? undefined,
+			isStale: row.is_stale === 1,
+		};
+	}
 }
 
 // Internal row types for SQLite results
@@ -364,4 +495,15 @@ type WalEventRow = {
 	payload: string;
 	created_at: string;
 	acked_at: string | null;
+};
+
+type DiscoveredSessionRow = {
+	session_id: string;
+	backend_id: string;
+	cwd: string | null;
+	title: string | null;
+	agent_updated_at: string | null;
+	discovered_at: string;
+	last_verified_at: string | null;
+	is_stale: number;
 };

@@ -14,7 +14,6 @@ import {
 	AppError,
 	createErrorDetail,
 	type DiscoverSessionsRpcResult,
-	type ErrorDetail,
 	type PermissionDecisionPayload,
 	type PermissionRequestPayload,
 	type SessionEvent,
@@ -23,7 +22,6 @@ import {
 	type SessionEventsResponse,
 	type SessionSummary,
 	type SessionsChangedPayload,
-	type TerminalOutputEvent,
 } from "@mobvibe/shared";
 import type { AcpBackendConfig, CliConfig } from "../config.js";
 import { logger } from "../lib/logger.js";
@@ -138,11 +136,8 @@ export class SessionManager {
 	private backendById: Map<string, AcpBackendConfig>;
 	private defaultBackendId: string;
 	private permissionRequests = new Map<string, PermissionRequestRecord>();
-	private readonly sessionUpdateEmitter = new EventEmitter();
-	private readonly sessionErrorEmitter = new EventEmitter();
 	private readonly permissionRequestEmitter = new EventEmitter();
 	private readonly permissionResultEmitter = new EventEmitter();
-	private readonly terminalOutputEmitter = new EventEmitter();
 	private readonly sessionsChangedEmitter = new EventEmitter();
 	private readonly sessionAttachedEmitter = new EventEmitter();
 	private readonly sessionDetachedEmitter = new EventEmitter();
@@ -174,22 +169,6 @@ export class SessionManager {
 		return this.sessions.get(sessionId)?.revision;
 	}
 
-	onSessionUpdate(listener: (notification: SessionNotification) => void) {
-		this.sessionUpdateEmitter.on("update", listener);
-		return () => {
-			this.sessionUpdateEmitter.off("update", listener);
-		};
-	}
-
-	onSessionError(
-		listener: (payload: { sessionId: string; error: ErrorDetail }) => void,
-	) {
-		this.sessionErrorEmitter.on("error", listener);
-		return () => {
-			this.sessionErrorEmitter.off("error", listener);
-		};
-	}
-
 	onPermissionRequest(listener: (payload: PermissionRequestPayload) => void) {
 		this.permissionRequestEmitter.on("request", listener);
 		return () => {
@@ -201,13 +180,6 @@ export class SessionManager {
 		this.permissionResultEmitter.on("result", listener);
 		return () => {
 			this.permissionResultEmitter.off("result", listener);
-		};
-	}
-
-	onTerminalOutput(listener: (event: TerminalOutputEvent) => void) {
-		this.terminalOutputEmitter.on("output", listener);
-		return () => {
-			this.terminalOutputEmitter.off("output", listener);
 		};
 	}
 
@@ -552,35 +524,29 @@ export class SessionManager {
 			record.unsubscribe = connection.onSessionUpdate(
 				(notification: SessionNotification) => {
 					record.updatedAt = new Date();
-					// Write to WAL first, then emit
+					// Write to WAL and emit via session:event (unified event channel)
 					this.writeSessionUpdateToWal(record, notification);
-					this.sessionUpdateEmitter.emit("update", notification);
 					this.applySessionUpdateToRecord(record, notification);
 				},
 			);
 			record.unsubscribeTerminal = connection.onTerminalOutput((event) => {
-				// Write terminal output to WAL
+				// Write terminal output to WAL (emits via session:event)
 				this.writeAndEmitEvent(
 					record.sessionId,
 					record.revision,
 					"terminal_output",
 					event,
 				);
-				this.terminalOutputEmitter.emit("output", event);
 			});
 			connection.onStatusChange((status) => {
 				if (status.error) {
-					// Write error to WAL
+					// Write error to WAL (emits via session:event)
 					this.writeAndEmitEvent(
 						record.sessionId,
 						record.revision,
 						"session_error",
 						{ error: status.error },
 					);
-					this.sessionErrorEmitter.emit("error", {
-						sessionId: session.sessionId,
-						error: status.error,
-					});
 					this.emitSessionDetached(session.sessionId, "agent_exit");
 				}
 			});
@@ -863,6 +829,24 @@ export class SessionManager {
 	}
 
 	/**
+	 * Get previously discovered sessions from WAL storage.
+	 * Filters out sessions that are already loaded.
+	 * @param backendId Optional backend ID to filter by
+	 * @returns List of discovered sessions not currently loaded
+	 */
+	getPersistedDiscoveredSessions(backendId?: string): AcpSessionInfo[] {
+		return this.walStore
+			.getDiscoveredSessions(backendId)
+			.filter((s) => !this.sessions.has(s.sessionId) && s.cwd !== undefined)
+			.map((s) => ({
+				sessionId: s.sessionId,
+				cwd: s.cwd as string, // Safe because we filter above
+				title: s.title,
+				updatedAt: s.agentUpdatedAt,
+			}));
+	}
+
+	/**
 	 * Discover sessions persisted by the ACP agent.
 	 * Creates a temporary connection to query sessions.
 	 * @param options Optional parameters for discovery
@@ -902,9 +886,23 @@ export class SessionManager {
 							: false,
 					})),
 				);
+
+				const now = new Date().toISOString();
+				const discoveredRecords: Array<{
+					sessionId: string;
+					backendId: string;
+					cwd?: string;
+					title?: string;
+					agentUpdatedAt?: string;
+					discoveredAt: string;
+					isStale: boolean;
+				}> = [];
+
 				for (const { session, isValid } of validity) {
 					if (!isValid) {
 						this.discoveredSessions.delete(session.sessionId);
+						// Mark as stale in WAL
+						this.walStore.markDiscoveredSessionStale(session.sessionId);
 						continue;
 					}
 					this.discoveredSessions.set(session.sessionId, {
@@ -919,6 +917,22 @@ export class SessionManager {
 						title: session.title ?? undefined,
 						updatedAt: session.updatedAt ?? undefined,
 					});
+
+					// Collect for WAL persistence
+					discoveredRecords.push({
+						sessionId: session.sessionId,
+						backendId: backend.id,
+						cwd: session.cwd,
+						title: session.title ?? undefined,
+						agentUpdatedAt: session.updatedAt ?? undefined,
+						discoveredAt: now,
+						isStale: false,
+					});
+				}
+
+				// Persist to WAL
+				if (discoveredRecords.length > 0) {
+					this.walStore.saveDiscoveredSessions(discoveredRecords);
 				}
 			}
 
@@ -987,12 +1001,9 @@ export class SessionManager {
 			let recordRef: SessionRecord | undefined;
 			const unsubscribe = connection.onSessionUpdate(
 				(notification: SessionNotification) => {
-					// Write to WAL first
+					// Write to WAL (emits via session:event)
 					if (recordRef) {
 						this.writeSessionUpdateToWal(recordRef, notification);
-					}
-					this.sessionUpdateEmitter.emit("update", notification);
-					if (recordRef) {
 						recordRef.updatedAt = new Date();
 						this.applySessionUpdateToRecord(recordRef, notification);
 					} else {
@@ -1210,33 +1221,27 @@ export class SessionManager {
 			record.unsubscribe = connection.onSessionUpdate(
 				(notification: SessionNotification) => {
 					record.updatedAt = new Date();
-					// Write to WAL first, then emit
+					// Write to WAL and emit via session:event (unified event channel)
 					this.writeSessionUpdateToWal(record, notification);
-					this.sessionUpdateEmitter.emit("update", notification);
 					this.applySessionUpdateToRecord(record, notification);
 				},
 			);
 		}
 
 		record.unsubscribeTerminal = connection.onTerminalOutput((event) => {
-			// Write terminal output to WAL
+			// Write terminal output to WAL (emits via session:event)
 			this.writeAndEmitEvent(
 				sessionId,
 				record.revision,
 				"terminal_output",
 				event,
 			);
-			this.terminalOutputEmitter.emit("output", event);
 		});
 
 		connection.onStatusChange((status) => {
 			if (status.error) {
-				// Write error to WAL
+				// Write error to WAL (emits via session:event)
 				this.writeAndEmitEvent(sessionId, record.revision, "session_error", {
-					error: status.error,
-				});
-				this.sessionErrorEmitter.emit("error", {
-					sessionId,
 					error: status.error,
 				});
 				this.emitSessionDetached(sessionId, "agent_exit");

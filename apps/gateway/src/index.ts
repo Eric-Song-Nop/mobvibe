@@ -94,12 +94,8 @@ const webuiEmitter = setupWebuiHandlers(io, cliRegistry, sessionRouter);
 // Setup CLI handlers with webui emitter
 setupCliHandlers(io, cliRegistry, sessionRouter, (event, payload) => {
 	// Route events to appropriate webui subscribers
+	// Note: session:update is deprecated - content updates use session:event
 	switch (event) {
-		case "session:update":
-			webuiEmitter.emitSessionUpdate(
-				payload as Parameters<typeof webuiEmitter.emitSessionUpdate>[0],
-			);
-			break;
 		case "session:error":
 			webuiEmitter.emitSessionError(
 				payload as Parameters<typeof webuiEmitter.emitSessionError>[0],

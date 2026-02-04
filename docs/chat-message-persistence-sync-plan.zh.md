@@ -3,9 +3,11 @@
 > **实施状态**：Phase 1 ✅ 已完成 | Phase 2 ✅ 已完成（P0 问题已修复：Fix 2 revision/events 一致性、P0-3 mismatch 终止语义、P0-6 cursorRef 同步游标、P0-7 best-effort 连续应用；单元测试已补充；最后更新：2026-02-04） | Phase 3-5 ⏳ 待实施
 
 ## 背景与约束
+
 Mobvibe 是一个分布式 ACP WebUI：WebUI 通过 Gateway 与本机 mobvibe-cli（再与 ACP Agent 进程）通信。
 
 本方案的核心约束（来自需求）：
+
 - **仅在 CLI 端持久化**会话消息与事件（source of truth 在本机磁盘）。
 - Gateway **不持久化**任何消息内容（降低安全/合规风险）。
 - CLI 断开时 WebUI 可以暂时看不到新增内容，但 **CLI 重新连接后必须可补齐断线期间漏掉的数据**。
@@ -14,24 +16,30 @@ Mobvibe 是一个分布式 ACP WebUI：WebUI 通过 Gateway 与本机 mobvibe-cl
 ## 现状（基于代码的真实链路）
 
 ### 当前事件流
+
 1) ACP Agent -> mobvibe-cli
+
 - CLI 通过 `apps/mobvibe-cli/src/acp/session-manager.ts` 持有 `AcpConnection`，监听 `onSessionUpdate/onTerminalOutput/...`，并向上游发出事件。
 
-2) mobvibe-cli -> Gateway（Socket.io /cli）
+1) mobvibe-cli -> Gateway（Socket.io /cli）
+
 - `apps/mobvibe-cli/src/daemon/socket-client.ts` 将 session/update、terminal/output、permission 等事件 emit 给 Gateway。
 
-3) Gateway -> WebUI（Socket.io /webui）
+1) Gateway -> WebUI（Socket.io /webui）
+
 - `apps/gateway/src/socket/cli-handlers.ts` 收到 CLI 的 `session:update` 直接转发给 WebUI（订阅者）。
 - `apps/gateway/src/socket/cli-handlers.ts` 也会转发 `session:event`（WAL 事件流，带 `revision/seq`），并向 CLI 回 `events:ack`。
 - `apps/gateway/src/socket/webui-handlers.ts` 的 `subscribe:session` 只登记订阅关系；历史补拉通过 REST `GET /acp/session/events` 完成（不经 socket 回放）。
 
-4) WebUI 本地记录与持久化
+1) WebUI 本地记录与持久化
+
 - WebUI 使用 `packages/core/src/stores/chat-store.ts`（zustand persist）保存会话 UI 状态。
   - 当 session 已进入 eventlog 同步模式（`revision` 已建立）时：仅持久化游标（`revision/lastAppliedSeq`），不再持久化 `messages`。
   - 未进入 eventlog 模式时：仍会持久化 `messages`（兼容旧数据）。
 - localStorage 的写入通过 `packages/core/src/stores/storage-adapter.ts`，其中 `setItem` 的异常会被吞掉。
 
 ### ACP session/list & session/load
+
 - CLI 通过 `apps/mobvibe-cli/src/acp/session-manager.ts` 的 `discoverSessions/loadSession/reloadSession` 支持：
   - `session/list`：发现 agent 持久化的会话（包括外部会话）。
   - `session/load`：让 agent 重放历史（replay），CLI 将重放输出写入 WAL，并通过 `session:event`（目前也可能仍有 `session:update`）同步给 Gateway/WebUI。
@@ -42,45 +50,60 @@ Mobvibe 是一个分布式 ACP WebUI：WebUI 通过 Gateway 与本机 mobvibe-cl
 注意：本节描述的是引入 WAL/eventlog 之前的主要问题；Phase 1-2 已在基础设施层面解决或缓解这些问题，但 WebUI 投影层仍有新的 P0（见“Phase 2 复审记录”）。
 
 ### P0：CLI->Gateway 断线期间，实时事件会断流（旧架构不可恢复）
+
 在 `apps/mobvibe-cli/src/daemon/socket-client.ts` 中：
+
 - 所有 emit 都受 `if (this.connected)` 保护。
 - 断线期间没有缓冲/落盘/重发逻辑。
 
 结果：
+
 - 旧架构下：只要 CLI 与 Gateway 之间出现短暂网络抖动、Gateway 重启、CLI 重连等，期间产生的流式 chunk/工具调用更新等会 **永久丢失**（WebUI 无法补齐）。
 - 新架构下：事件会先写入 CLI WAL，理论上可在重连后通过 replay/backfill 补齐；但目前仍需完成 WebUI 投影层的 P0 修复与验收（P0-2/3/4/5/6/7；P0-1 已实现但仍需验收）。
 
 ### P0：Gateway->WebUI 断线/切订阅期间，旧架构缺口不可恢复
+
 在 `apps/gateway/src/socket/webui-handlers.ts`：
+
 - `subscribe:session` 仅维护订阅集合，没有“按游标回放”的能力。
 
 结果：
+
 - 旧架构下：WebUI 切后台、刷新、网络切换、socket 重连后，会话期间的事件缺口无法补拉。
 - 新架构下：缺口由 `GET /acp/session/events`（CLI WAL）补拉；但 WebUI 投影层仍需完成 P0 修复与验收（P0-2/3/4/5/6/7；P0-1 已实现但仍需验收）。
 
 ### P1：WebUI localStorage 持久化并不可靠，且失败静默
+
 在 `packages/core/src/stores/storage-adapter.ts`：
+
 - localStorage `setItem` 失败会被 catch 并忽略（配额满、隐私模式限制、浏览器策略等）。
 
 结果：
+
 - 旧架构下： “内存里有，刷新后没了/缺一段”的情况很难被发现和纠正，且 WebUI 的 `messages` 既承担 UI 状态又承担持久化真相，风险过高。
 - 新架构目标：WebUI 仅持久化游标（`revision/lastAppliedSeq`），消息内容以 CLI WAL 为准；仍需完成 Phase 2 的 P0 修复后才能彻底兑现。
 
 ### P1：旧链路缺少全链路序号/游标（无法检测缺口、无法去重）
+
 目前 `session:update` 是 ACP `SessionNotification`（无 `seq/eventId`）：
+
 - 客户端无法判断是否漏了 chunk。
 - Gateway 无法为新订阅者补历史。
 - CLI 无法按“已发送/已确认”进行重发或清理。
 
 新架构改进：
+
 - 引入 `session:event`（带 `revision/seq`）作为可回放的事件流，并通过 `events:ack` + backfill 补齐缺口。
 
 ### P2：过度依赖 agent 的 `session/load` 作为“救命”机制
+
 虽然 `session/load` 可以重放历史，但它并不能解决运行期断线导致的丢事件：
+
 - `load` 是“事后全量重放”，不是运行期可靠传输。
 - 并非所有 agent 支持 `session/load`；外部会话能否恢复也取决于 agent 能力。
 
 ## 目标（本方案要达到什么）
+
 - **可靠性**：任何断线（WebUI-Gateway 或 CLI-Gateway）都不应导致“永久丢失”；恢复连接后可补齐缺口。
 - **端侧真相**：CLI 本地磁盘为唯一真相；WebUI 仅保存游标/缓存（不再依赖 localStorage 成功写入全量历史）。
 - **兼容 ACP**：
@@ -89,6 +112,7 @@ Mobvibe 是一个分布式 ACP WebUI：WebUI 通过 Gateway 与本机 mobvibe-cl
 - **低安全风险**：Gateway 不落库消息内容；所有消息仅经过内存转发。
 
 非目标：
+
 - CLI 离线时仍能在 WebUI 查看历史（本方案允许此时不可用）。
 - 端到端加密（E2E）与合规审计（若未来需要，可在 CLI 本地加密存储，但不在本方案范围内）。
 
@@ -99,32 +123,39 @@ Mobvibe 是一个分布式 ACP WebUI：WebUI 通过 Gateway 与本机 mobvibe-cl
 ### 组件职责重划分
 
 CLI（source of truth）：
+
 - 维护本地 WAL（Write-Ahead Log）：**先落盘**再对外发。
 - 为每个 session 生成单调递增 `seq`，对所有会话事件打序号。
 - 提供“按游标查询事件”的 RPC：用于 WebUI/Gateway 断线后的补拉。
 - 与 ACP `session/list/load` 协同：把 `load` 的历史 replay 也写入 WAL，变成可回放的本地真相。
 
 Gateway（无持久化）：
+
 - 仍然做鉴权/路由/转发。
 - 增加“向 CLI 请求补拉事件并转发给指定 WebUI socket”的能力（消息内容不落库，仅内存中转）。
 
 WebUI（projection + cursor）：
+
 - UI 消息列表不再作为真相持久化；改为事件流的投影（projection）。
 - 仅持久化 `lastAppliedSeq`（以及当前 revision），用于重连后补齐缺口。
 
 ### 为什么 event log 能解决“丢消息”
+
 - 任何链路断线导致的“实时推送缺口”，都可以通过“按游标补拉”恢复。
 - 关键前提是：缺口期间的事件必须存在于某个可查询的地方；本方案选择 **CLI 本地 WAL**。
 
 ## 事件模型（建议的最小规范）
 
 ### SessionRevision（时间线版本）
+
 同一个 `sessionId` 可能因为 `session/load` / `session/reload` 被多次“全量重放”。
 为避免重复导入污染同一条日志，引入 `revision`（时间线版本）：
+
 - 每次执行 `session/load` 或强制 `reload`，产生一个新的 `revision`（例如 +1）。
 - WebUI 展示“当前 revision”；当 revision 变化时，WebUI 清空投影并从新 revision 的事件流重建。
 
 ### SessionEvent
+
 建议统一所有可呈现/可重放的内容：
 
 ```ts
@@ -140,7 +171,9 @@ type SessionEvent = {
 ```
 
 ### 建议的事件类型（kind）
+
 最小可用集合（可逐步扩展）：
+
 - `user_message`：用户输入（包含 messageId + prompt blocks）
 - `agent_message_chunk`：assistant 流式 chunk（来自 ACP `agent_message_chunk`）
 - `user_message_chunk`：user 流式 chunk（来自 ACP `user_message_chunk`，可选）
@@ -152,16 +185,19 @@ type SessionEvent = {
 - `session_error`
 
 说明：
+
 - 事件越“原子”，回放越精确，但日志增长更快；可以用 compaction（见下）控制体积。
 - 只要 `seq` 连续，WebUI 就能检测缺口并补拉。
 
 ## 持久化设计（CLI 本地 WAL）
 
 ### 存储介质与位置
+
 推荐 sqlite（可高效按 sessionId+revision+seq 范围查询、支持索引与 compaction）。
 建议位置：`~/.mobvibe/`（与现有 credentials/logs/pid 同目录，见 `apps/mobvibe-cli/src/config.ts`）。
 
 ### 表结构建议（示意）
+
 - `sessions`
   - `session_id`（PK）
   - `current_revision`
@@ -176,7 +212,9 @@ type SessionEvent = {
   - `state_json`（投影结果快照，例如消息列表的压缩版）
 
 ### Compaction（可选但强烈建议）
+
 为控制日志增长：
+
 - 对于 `agent_message_chunk` 可在 `turn_end` 后合并为一条“最终消息”事件或生成 snapshot。
 - 对于 `terminal_output` 可定期写 snapshot 并丢弃过老 delta。
 - 对历史很长的会话：保留关键事件（用户消息、最终 assistant、tool call、权限结果）并丢弃中间 chunk（可配置）。
@@ -184,30 +222,39 @@ type SessionEvent = {
 ## 同步协议（不落库前提下的补拉）
 
 ### 核心：游标（cursor）
+
 WebUI 为每个 sessionId+revision 维护：
+
 - `lastAppliedSeq`：已应用到投影的最大 seq。
 
 WebUI 断线重连后使用该 cursor 补拉缺口。
 
 ### 建议的 RPC：`session/events`
+
 新增 CLI RPC（Gateway 转发，不落库）：
+
 - Request: `{ sessionId, revision, afterSeq, limit }`
 - Response: `{ events: SessionEvent[], nextAfterSeq?: number }`
 
 用途：
+
 - WebUI 订阅时补历史
 - WebUI 发现 seq 缺口时补洞
 - WebUI 刷新后快速重建（只要 CLI 在线）
 
 ### 实时推送：`session:event`
+
 把当前 `session:update/terminal:output/...` 逐步升级为统一推送：
+
 - CLI -> Gateway: `session:event`（带 seq）
 - Gateway -> WebUI: `session:event`（原样转发）
 
 兼容性：
+
 - 可在过渡期同时发送旧事件（`session:update`）与新事件（`session:event`），或只对新 UI 启用。
 
 ### 订阅流程建议（无竞态/可补偿）
+
 1. WebUI 发送 `subscribe:session(sessionId)`（开始收实时事件）。
 2. WebUI 立即调用一次 `session/events(afterSeq=lastAppliedSeq)` 拉取缺口。
 3. WebUI 对实时事件与补拉事件统一按 `seq` 应用：
@@ -220,12 +267,16 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 ## 与 ACP `session/list` / `session/load` 的协同（外部会话支持）
 
 ### 外部会话发现：`session/list`
+
 继续使用现有 `discoverSessions`（见 `apps/mobvibe-cli/src/acp/session-manager.ts`）：
+
 - 将发现到的会话显示在 WebUI（可标记为“外部会话/未导入”）。
 - 建议把 discovered session 的元信息也落到 CLI 本地（可选），避免 CLI 重启后丢“发现列表”。
 
 ### 外部会话导入：`session/load` 作为 import
+
 当用户在 WebUI 选择打开外部会话：
+
 1) WebUI 调用 `/acp/session/load`（Gateway RPC 到 CLI）
 2) CLI 执行 ACP `session/load(sessionId,cwd)`：
    - agent 会 replay 历史（以 `session:update` 流形式输出）
@@ -237,14 +288,18 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 重要点：`session/load` 不再是 WebUI 的“唯一恢复手段”，它只是“把 agent 的历史导入 CLI WAL”。
 
 ### `session/reload` 与 revision
+
 `reload` 会触发一次新的全量重放：
+
 - CLI：`revision += 1`，从 seq=1 重新记录该 revision 的事件流。
 - WebUI：检测到 revision 变化后清屏并重放新 revision。
 
 ## 需要补齐的关键一致性点：messageId 贯通
+
 目前 `messageId` 只用于 WebUI 乐观更新（Gateway `/acp/message/id`），但发送消息 RPC（`SendMessageParams`）不携带 messageId。
 
 建议：
+
 - 扩展 `SendMessageParams`：加入 `messageId`（以及可选 `clientCreatedAt`）。
 - CLI 在收到 sendMessage 请求时就写入 WAL 一条 `user_message`（使用该 messageId）。
 - WebUI 乐观渲染同 messageId；后续事件回放时按 messageId+seq 去重/合并，避免重复显示。
@@ -252,17 +307,20 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 ## 实施计划（分阶段、可回滚）
 
 ### Phase 0：规格与兼容策略（1-2 天）
+
 - 定义 `SessionEvent`、`revision`、`seq`、kind 列表与 payload 规范。
 - 确定“按 seq 应用 + 缺口补拉”的 WebUI 投影算法。
 - 兼容策略：
   - 新旧事件并行一段时间，或用 feature flag 切换（例如 `MOBVIBE_EVENTLOG_SYNC=1`）。
 
 交付物：
+
 - 更新本文件中的 mini-spec 为最终规范（作为实现依据）。
 
 ### Phase 1：CLI 本地 WAL ✅ 已完成
 
 在 CLI 增加事件落盘能力：
+
 - 选型 sqlite（建议）并建立 schema/migrations（CLI 自管理）。
 - 在 `SessionManager` 的事件源头统一"先落盘后 emit"：
   - `onSessionUpdate`：把 ACP update 写入 WAL（kind=...，payload=原始 update 或规范化结构）
@@ -270,6 +328,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 - 为每个 sessionId+revision 维护 seq 生成器（保证单调递增）。
 
 **实现的文件：**
+
 | 文件 | 状态 | 说明 |
 |------|------|------|
 | `apps/mobvibe-cli/src/wal/wal-store.ts` | ✅ | WAL 存储核心（bun:sqlite） |
@@ -281,12 +340,14 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 | `apps/mobvibe-cli/src/wal/__tests__/wal-store.test.ts` | ✅ | 单元测试（16 个测试） |
 
 验收：
+
 - ✅ CLI 重启后仍能从 WAL 查询到历史事件。
 - ✅ CLI 与 Gateway 断线期间，事件仍会写入 WAL（即使发不出去）。
 
 ### Phase 2：补拉 RPC + WebUI 缺口恢复 ✅ 已完成
 
 实现"按游标补拉"的最小闭环：
+
 - CLI 增加 RPC：`rpc:session:events`
 - Gateway 增加 REST 或 RPC 转发：
   - 推荐 REST：`GET /acp/session/events?sessionId&revision&afterSeq&limit`
@@ -297,6 +358,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
   - 仅持久化 `lastAppliedSeq`（不再依赖全量 messages 持久化）
 
 **实现的文件：**
+
 | 文件 | 状态 | 说明 |
 |------|------|------|
 | `packages/shared/src/types/socket-events.ts` | ✅ | 添加 SessionEvent, SessionEventKind 等类型 |
@@ -308,11 +370,13 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 | `packages/core/src/hooks/use-socket.ts` | ✅ | 增加 session:event 回调（onSessionEvent），供上层做游标推进/触发 backfill |
 
 验收（当前状态：✅ P0 已修复）：
+
 - ✅ 补拉 API 与 WAL 查询链路已具备
 - ✅ P0 问题已修复（Fix 2、P0-3、P0-6、P0-7）
 - ✅ 单元测试已补充
 
 **已完成的测试（2026-02-04）：**
+
 - ✅ CLI `getSessionEvents` revision mismatch 测试 (`apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts`)
 - ✅ WebUI 补拉 Hook 测试 (`apps/webui/src/hooks/__tests__/useSessionBackfill.test.tsx`)
   - P0-3: mismatch 不触发 onComplete
@@ -325,6 +389,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
   - P0-7: gap 检测触发 backfill 而非直接应用
 
 **待补充的测试：**
+
 - ⏳ Gateway 端补拉接口测试 (`apps/gateway/src/routes/__tests__/sessions.test.ts`)
 - ⏳ 端到端集成测试（断线重连、缺口补拉场景）
 
@@ -335,6 +400,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 ### 已修复/基本正确（但仍需补充测试/验收）
 
 #### Fix 1: Gateway `session:event` 订阅隔离（P0 安全）
+
 - **已修复点**：
   - `apps/gateway/src/index.ts` 增加 `"session:event"` case，避免落入 default 的 `emitToAll()`
   - `apps/gateway/src/socket/webui-handlers.ts` 增加 `emitSessionEvent()`，使用 `emitToSubscribers()` 按 `sessionId` 隔离转发
@@ -346,6 +412,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 > 为什么要关心 authentication：即使 Gateway 不落库消息内容，`session:event`/`/acp/session/events` 仍携带聊天与工具数据；项目也支持“多用户/多 CLI”。因此必须保证实时转发与补拉接口按用户与 session 进行隔离，否则会造成越权数据泄漏（安全风险与合规风险）。
 
 #### Fix 2: `getSessionEvents` 返回真实 revision（P0 功能，✅ 已修复）
+
 - **已修复点**：
   - `apps/mobvibe-cli/src/acp/session-manager.ts` 的 `getSessionEvents()` 返回活跃 session 或 WAL 中的真实 revision
   - **2026-02-04 新增**：当 `params.revision !== actualRevision` 时，返回空 `events=[]` + 真实 `revision`，确保 `response.revision === events[].revision` 一致性
@@ -356,14 +423,17 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 - **单元测试**：`apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts` 已覆盖 mismatch 场景
 
 #### Fix 4: CLI shutdown 资源释放（P1 资源）
+
 - **已修复点**：`apps/mobvibe-cli/src/daemon/daemon.ts` shutdown 改为调用 `sessionManager.shutdown()`，确保 WAL SQLite 连接关闭。
 
 #### Fix 5: Backfill hook 的 cookie auth（P1 鉴权对齐）
+
 - **已修复点**：`packages/core/src/hooks/use-session-backfill.ts` fetch 添加 `credentials: "include"`，与 WebUI 的 cookie-based auth 对齐。
 
 ### 仍需修复/未验收（P0 阻塞）
 
 #### P0-1: WebUI 首包事件（seq=1）丢失/卡死（已修复，待验收）
+
 - **之前现象**：首次收到 `session:event(revision=1, seq=1)` 时被误判为 revision 变化并 early-return，丢 `seq=1`，后续 pending 永远 flush 不出来。
 - **当前实现**：
   - 当 `session.revision === undefined` 时，将其视为“首次初始化游标”，先初始化 `revision/lastAppliedSeq`，再继续正常按 seq 应用事件。
@@ -373,6 +443,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
   - `session/reload`/外部 `session/load` 导入触发 revision bump 时：UI 会清屏并完整重建，不丢第一条事件。
 
 #### P0-2: 重复渲染/重复追加仍存在（`session:update`/`terminal:output` 与 `session:event` 并存）
+
 - **当前实现的改进**：
   - WebUI 已在“session 进入 eventlog 同步模式（`revision` 已建立）”后，跳过 `session:update` 的内容级更新（chunk/tool call），仅保留 meta 更新（mode/info/commands）。
   - WebUI 也尝试在 eventlog 模式下跳过 `terminal:output`（避免与 `session:event(kind=terminal_output)` 叠加）。
@@ -389,6 +460,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
   - chunk、tool call、terminal output 在任何重连/backfill/刷新后都不重复、不翻倍。
 
 #### P0-3: revision mismatch 的"自愈重建"（✅ 已修复）
+
 - **已修复点（2026-02-04）**：
   - `useSessionBackfill` mismatch 时直接 `return`（不触发 `onComplete`）
   - mismatch 前先清理 `activeBackfills` 状态（同 generation 检查）
@@ -404,6 +476,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
   - ✅ `session/reload` 或外部 `session/load` 导入期间，WebUI 能稳定切换 revision 并完整重建
 
 #### P0-4: gap 补洞的触发与节流仍需验收（避免缺口长期不补/过度补拉）
+
 - **当前实现**：gap 分支已开始主动触发 `triggerBackfill(sessionId, revision, lastAppliedSeq)`，并在 pending 超限时触发 reset+backfill。
 - **仍需验收/潜在问题**：
   - 触发 backfill 使用的 `lastAppliedSeq` 若来自 React 快照，可能误判 gap（见 P0-6）。
@@ -414,6 +487,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 - **验收**：在不刷新/不重连的情况下，只要出现 gap，WebUI 会自动补齐并 flush pending；且在高频输出下不会 backfill 风暴。
 
 #### P0-5: pending 事件缓冲的清理策略需验收（避免堆积/卡死）
+
 - **当前实现**：
   - flush 会过滤 `seq <= lastAppliedSeq` 与错误 revision 的事件，并清理 pending。
   - pending 设定了上限，超限会触发 reset+backfill。
@@ -425,6 +499,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 - **验收**：长会话/多次重连/多次 reload 下 pending 不会无限增长，flush 行为稳定。
 
 #### P0-6: WebUI 事件处理依赖 React/Zustand "状态快照"（✅ 已修复）
+
 - **问题**：
   - `useSocket` 的 handler 读取 `sessionsRef.current[sessionId]` 判断游标
   - `sessionsRef.current` 只在 React rerender 后更新，handler 内 `updateSessionCursor` 不会同步改变快照
@@ -443,6 +518,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
   - ✅ 不依赖 rerender 也能正确推进游标、去重、补洞
 
 #### P0-7: backfill 失败/放弃时的"best-effort 应用 pending"（✅ 已修复）
+
 - **问题**：
   - `applyPendingEventsBestEffort()` 在 backfill error 时会尽可能应用 pending
   - 若 pending 中 `seq` 不连续（有缺口），仍会应用并推进 cursor 到更大的 seq
@@ -461,6 +537,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 ### 仍建议修复（P1）
 
 #### P1-1: CLI reconnect replay 触发条件可能漏判
+
 - **现象**：当前 `replayUnackedEvents()` 仅在 `wasReconnect` 为 true 时触发，而 `wasReconnect` 由 `connect_error` 计数推断，可能漏判某些实际发生的断线/重连路径。
 - **修复计划**：
   - 让 replay 触发更“保守但幂等”：在每次 `connect`/`cli:registered` 后都执行一次 replay（由 seq+ack 保证去重），避免漏重放。
@@ -511,6 +588,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
    - 手动/集成测试：按本文件“手动/集成测试场景”表逐项验收。
 
 ### P2（质量/性能/测试，待后续优化）
+
 - 测试隔离：`apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts` 的 `walDbPath` 若仍使用固定路径，建议改为 per-test 临时目录，避免并行/复跑污染。
 - 性能优化：`events:ack` 目前是“每条事件 ack 一次”（`apps/gateway/src/socket/cli-handlers.ts`），可能造成高频输出时的额外 RTT/DB 写放大；可考虑按 session 批量/节流 ack（例如定时 ack upToSeq）。
 
@@ -521,15 +599,18 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 - WebUI 投影完全基于 `SessionEvent`，旧 `SessionNotification` 解析逻辑可逐步下线。
 
 **当前状态：**
+
 - 已引入 `session:event`（WAL 事件流）并在链路中转发，但与旧的 `session:update` 仍并存。
 - Phase 3 的目标是：对“消息投影/终端输出/tool call 等内容级 UI”，统一只使用 `session:event + backfill`，并逐步停用 `session:update` 的内容推送（保留必要的兼容/元信息，或最终也迁移为 WAL 的 `session_info_update`）。
 
 验收：
+
 - 同一 session 在多次断线/重连下，WebUI 不会重复消息、不缺 chunk。
 
 ### Phase 4：ACP 外部会话导入完善 ⏳ 待实施（可选）
 
 目标：外部会话通过 `session/list` 发现，通过 `session/load` 导入 WAL 并可持续同步。
+
 - `discoverSessions` 的结果持久化（可选）：
   - CLI 重启后仍能展示外部会话列表（不必重新 discover 才出现）。
 - `session/load` 导入时的 revision 策略固化：
@@ -537,11 +618,13 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
   - reload 导入 revision+=1
 
 **当前状态：**
+
 - `session/load` 和 `session/reload` 基础功能已实现
 - 外部会话的事件会写入 WAL 并同步
 - revision 策略部分实现（需要进一步固化）
 
 验收：
+
 - 用同一 agent 在 terminal 单独创建的会话，可以在 WebUI discover -> load -> 得到完整历史并后续不丢。
 
 ### Phase 5：Compaction 与性能 ⏳ 待实施（可选，持续优化）
@@ -550,6 +633,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 - 目标是控制 `~/.mobvibe/` 数据体积并加速事件查询与 UI 重建。
 
 **当前状态：**
+
 - 暂未实现 compaction 和 TTL 清理
 - WAL 文件会持续增长，需要后续优化
 
@@ -558,6 +642,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 ### 单元测试
 
 **已完成：**
+
 - ✅ CLI WAL Store (`apps/mobvibe-cli/src/wal/__tests__/wal-store.test.ts`)
   - `ensureSession` - 创建和更新会话
   - `appendEvent` - 追加事件，seq 单调递增
@@ -575,6 +660,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
   - `closeSession` - 关闭会话，`sessions:changed` 事件
 
 **待完成：**
+
 - ⏳ Gateway 补拉接口测试 (`apps/gateway/src/routes/__tests__/sessions.test.ts`)
 - ⏳ WebUI 补拉 Hook 测试 (`packages/core/src/hooks/__tests__/use-session-backfill.test.ts`)
 - ⏳ WebUI 投影测试：
@@ -590,6 +676,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 - ⏳ compaction 测试（Phase 5 实现后）
 
 ### 手动/集成测试场景（必须覆盖）
+
 | 场景 | 状态 | 说明 |
 |------|------|------|
 | WebUI 断网 10s -> 恢复 | ⏳ | 期间 agent 仍在流式输出；恢复后应补齐缺口 |
@@ -599,6 +686,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 | reload | ⏳ | 同一 session 多次 reload，revision 正确切换 |
 
 ## 风险与应对
+
 - 日志体积增长：通过 compaction/TTL 控制。
 - 多端同时订阅：按 seq 去重即可；补拉可按 socket 单独触发，避免广播大量历史。
 - 兼容旧 UI：通过 feature flag/双发事件过渡。
@@ -606,6 +694,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 ## 代码影响范围（已实现）
 
 ### CLI (apps/mobvibe-cli)
+
 | 文件 | 状态 | 说明 |
 |------|------|------|
 | `src/wal/wal-store.ts` | ✅ 新增 | WAL 存储核心 |
@@ -618,6 +707,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 | `src/daemon/daemon.ts` | ✅ 修改 | **Fix 4: shutdown 改调 `sessionManager.shutdown()`** |
 
 ### Gateway (apps/gateway)
+
 | 文件 | 状态 | 说明 |
 |------|------|------|
 | `src/services/session-router.ts` | ✅ 修改 | 新增 `getSessionEvents()` |
@@ -626,6 +716,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 | `src/socket/webui-handlers.ts` | ✅ 修改 | **Fix 1: 添加 `emitSessionEvent()` 方法** |
 
 ### Core (packages/core)
+
 | 文件 | 状态 | 说明 |
 |------|------|------|
 | `src/stores/chat-store.ts` | ✅ 修改 | 添加 revision, lastAppliedSeq, isBackfilling 等游标字段（持久化游标，不持久化 messages） |
@@ -633,6 +724,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 | `src/hooks/use-socket.ts` | ✅ 修改 | 增加 `session:event` 回调（onSessionEvent），供上层实现游标推进/补拉 |
 
 ### WebUI (apps/webui)
+
 | 文件 | 状态 | 说明 |
 |------|------|------|
 | `src/lib/socket.ts` | ✅ 修改 | **Fix 3: 添加 `onSessionEvent()` 方法** |
@@ -643,6 +735,7 @@ WebUI 断线重连后使用该 cursor 补拉缺口。
 | `src/hooks/__tests__/useSessionBackfill.test.tsx` | ✅ 新增 | 覆盖 P0-3（mismatch 终止语义）测试 |
 
 ### Shared (packages/shared)
+
 | 文件 | 状态 | 说明 |
 |------|------|------|
 | `src/types/socket-events.ts` | ✅ 修改 | 添加 SessionEvent, SessionEventKind 等类型 |

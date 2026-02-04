@@ -13,6 +13,36 @@ export type AcpBackendConfig = {
 	envOverrides?: Record<string, string>;
 };
 
+export type CompactionConfig = {
+	/** Enable automatic compaction */
+	enabled: boolean;
+	/** Consolidate chunks after this many seconds (default: 3600 = 1 hour) */
+	consolidateChunksAfterSec: number;
+	/** Keep acked events for this many days (default: 7) */
+	ackedEventRetentionDays: number;
+	/** Keep old revisions for this many days (default: 30) */
+	keepOldRevisionsDays: number;
+	/** Always keep this many latest revisions (default: 2) */
+	keepLatestRevisionsCount: number;
+	/** Run compaction on daemon startup (default: true) */
+	runOnStartup: boolean;
+	/** Run compaction every N hours (default: 24) */
+	runIntervalHours: number;
+	/** Safety: minimum events to keep per session (default: 1000) */
+	minEventsToKeep: number;
+};
+
+export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
+	enabled: true,
+	consolidateChunksAfterSec: 3600, // 1 hour
+	ackedEventRetentionDays: 7,
+	keepOldRevisionsDays: 30,
+	keepLatestRevisionsCount: 2,
+	runOnStartup: true,
+	runIntervalHours: 24,
+	minEventsToKeep: 1000,
+};
+
 export type CliConfig = {
 	gatewayUrl: string;
 	acpBackends: AcpBackendConfig[];
@@ -28,6 +58,7 @@ export type CliConfig = {
 	platform: string;
 	userConfigPath?: string;
 	userConfigErrors?: string[];
+	compaction: CompactionConfig;
 };
 
 // Default opencode backend
@@ -129,5 +160,10 @@ export const getCliConfig = async (): Promise<CliConfig> => {
 		userConfigPath: userConfigResult.path,
 		userConfigErrors:
 			userConfigResult.errors.length > 0 ? userConfigResult.errors : undefined,
+		compaction: {
+			...DEFAULT_COMPACTION_CONFIG,
+			// Allow disabling via env var
+			enabled: env.MOBVIBE_COMPACTION_ENABLED !== "false",
+		},
 	};
 };

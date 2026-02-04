@@ -15,8 +15,6 @@ import {
 	extractAvailableCommandsUpdate,
 	extractSessionInfoUpdate,
 	extractSessionModeUpdate,
-	extractTextChunk,
-	extractToolCallUpdate,
 } from "../api/types";
 import type { GatewaySocket } from "../socket/gateway-socket";
 import type { ChatSession } from "../stores/chat-store";
@@ -104,18 +102,15 @@ export function useSocket({
 		const socket = gatewaySocket.connect();
 
 		// Session update handler
+		// Note: session:update is deprecated - content updates now come via session:event
+		// This handler is kept for backwards compatibility with older CLI versions
+		// and only processes meta updates (mode/info/commands)
 		const handleSessionUpdate = (notification: SessionNotification) => {
 			const session = sessionsRef.current[notification.sessionId];
 			if (!session) return;
 
 			try {
-				const textChunk = extractTextChunk(notification);
-				if (textChunk?.role === "assistant") {
-					appendAssistantChunk(notification.sessionId, textChunk.text);
-				} else if (textChunk?.role === "user") {
-					appendUserChunk(notification.sessionId, textChunk.text);
-				}
-
+				// Only process meta updates - content updates go through session:event
 				const modeUpdate = extractSessionModeUpdate(notification);
 				if (modeUpdate) {
 					const modeName = session.availableModes?.find(
@@ -135,15 +130,6 @@ export function useSocket({
 				const availableCommands = extractAvailableCommandsUpdate(notification);
 				if (availableCommands !== null) {
 					updateSessionMeta(notification.sessionId, { availableCommands });
-				}
-
-				const toolCallUpdate = extractToolCallUpdate(notification);
-				if (toolCallUpdate) {
-					if (toolCallUpdate.sessionUpdate === "tool_call") {
-						addToolCall(notification.sessionId, toolCallUpdate);
-					} else {
-						updateToolCall(notification.sessionId, toolCallUpdate);
-					}
 				}
 			} catch (parseError) {
 				setStreamError(
@@ -264,9 +250,6 @@ export function useSocket({
 	}, [
 		gatewaySocket,
 		addPermissionRequest,
-		addToolCall,
-		appendAssistantChunk,
-		appendUserChunk,
 		appendTerminalOutput,
 		markSessionAttached,
 		markSessionDetached,
@@ -276,7 +259,6 @@ export function useSocket({
 		t,
 		updateMachine,
 		updateSessionMeta,
-		updateToolCall,
 		onPermissionRequest,
 		onSessionError,
 		onSessionEvent,

@@ -6,7 +6,6 @@ import type {
 	SessionAttachedPayload,
 	SessionDetachedPayload,
 	SessionEvent,
-	SessionNotification,
 	SessionSummary,
 	SessionsChangedPayload,
 	SessionsDiscoveredPayload,
@@ -222,28 +221,8 @@ export function setupCliHandlers(
 			);
 		});
 
-		// Session update
-		socket.on("session:update", async (notification: SessionNotification) => {
-			logger.debug(
-				{ sessionId: notification.sessionId, socketId: socket.id },
-				"session_update_received",
-			);
-			emitToWebui("session:update", notification);
-
-			// Sync session info to database if this is a session_info_update
-			if (
-				notification.sessionId &&
-				notification.update?.sessionUpdate === "session_info_update"
-			) {
-				const update = notification.update as { title?: string | null };
-				await sessionRouter.syncSessionState(
-					notification.sessionId,
-					"ready",
-					update.title ?? undefined,
-					undefined,
-				);
-			}
-		});
+		// Note: session:update is deprecated - all content updates now go through
+		// session:event (WAL-persisted events with seq/revision)
 
 		// Session error
 		socket.on("session:error", (payload: StreamErrorPayload) => {

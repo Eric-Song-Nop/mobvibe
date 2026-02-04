@@ -859,21 +859,8 @@ export class SocketClient extends EventEmitter {
 	private setupSessionManagerListeners() {
 		const { sessionManager } = this.options;
 
-		sessionManager.onSessionUpdate((notification) => {
-			if (this.connected) {
-				// Cast through unknown since SDK and shared SessionNotification types are structurally compatible
-				this.socket.emit(
-					"session:update",
-					notification as unknown as import("@mobvibe/shared").SessionNotification,
-				);
-			}
-		});
-
-		sessionManager.onSessionError((payload) => {
-			if (this.connected) {
-				this.socket.emit("session:error", payload);
-			}
-		});
+		// Note: session:update, session:error, and terminal:output are no longer
+		// emitted separately - they're unified through session:event (WAL-persisted)
 
 		sessionManager.onPermissionRequest((payload) => {
 			if (this.connected) {
@@ -884,12 +871,6 @@ export class SocketClient extends EventEmitter {
 		sessionManager.onPermissionResult((payload) => {
 			if (this.connected) {
 				this.socket.emit("permission:result", payload);
-			}
-		});
-
-		sessionManager.onTerminalOutput((event) => {
-			if (this.connected) {
-				this.socket.emit("terminal:output", event);
 			}
 		});
 
@@ -919,7 +900,8 @@ export class SocketClient extends EventEmitter {
 			}
 		});
 
-		// Listen for WAL-persisted session events
+		// Unified event channel - all content updates (messages, tool calls,
+		// terminal output, errors) are WAL-persisted and emitted via session:event
 		sessionManager.onSessionEvent((event) => {
 			if (this.connected) {
 				this.socket.emit("session:event", event);

@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -5,6 +6,7 @@ import { SessionManager } from "../acp/session-manager.js";
 import { getApiKey } from "../auth/credentials.js";
 import type { CliConfig } from "../config.js";
 import { logger } from "../lib/logger.js";
+import { WalCompactor, WalStore } from "../wal/index.js";
 import { SocketClient } from "./socket-client.js";
 
 type DaemonStatus = {
@@ -216,6 +218,39 @@ export class DaemonManager {
 			apiKey,
 		});
 
+		// Initialize compactor if enabled
+		let compactor: WalCompactor | undefined;
+		let compactionInterval: NodeJS.Timeout | undefined;
+
+		if (this.config.compaction.enabled) {
+			const walStore = new WalStore(this.config.walDbPath);
+			const db = new Database(this.config.walDbPath);
+			compactor = new WalCompactor(walStore, this.config.compaction, db);
+
+			// Run compaction on startup
+			if (this.config.compaction.runOnStartup) {
+				logger.info("compaction_startup_start");
+				compactor.compactAll().catch((error) => {
+					logger.error({ err: error }, "compaction_startup_error");
+				});
+			}
+
+			// Schedule periodic compaction
+			const intervalMs =
+				this.config.compaction.runIntervalHours * 60 * 60 * 1000;
+			compactionInterval = setInterval(() => {
+				logger.info("compaction_scheduled_start");
+				compactor?.compactAll().catch((error) => {
+					logger.error({ err: error }, "compaction_scheduled_error");
+				});
+			}, intervalMs);
+
+			logger.info(
+				{ intervalHours: this.config.compaction.runIntervalHours },
+				"compaction_scheduled",
+			);
+		}
+
 		let shuttingDown = false;
 
 		const shutdown = async (signal: string) => {
@@ -228,6 +263,11 @@ export class DaemonManager {
 			logger.info({ signal }, "daemon_shutdown_start");
 
 			try {
+				// Stop compaction interval
+				if (compactionInterval) {
+					clearInterval(compactionInterval);
+				}
+
 				socketClient.disconnect();
 				await sessionManager.shutdown();
 				await this.removePidFile();

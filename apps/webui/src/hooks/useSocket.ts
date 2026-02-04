@@ -439,41 +439,22 @@ export function useSocket({
 	};
 
 	// Update handler refs on each render (handlers always use latest closures)
+	// Note: session:update is deprecated - content updates now come via session:event
+	// This handler is kept for backwards compatibility with older CLI versions
+	// and only processes meta updates (mode/info/commands)
 	handleSessionUpdateRef.current = (notification: SessionNotification) => {
-		let session = sessionsRef.current[notification.sessionId];
+		const session = sessionsRef.current[notification.sessionId];
 		if (!session) {
-			createLocalSession(notification.sessionId);
-			session = sessionsRef.current[notification.sessionId];
+			// Skip notifications for unknown sessions since we can't process meta updates
+			// without an existing session context
+			return;
 		}
 
-		// If session has entered eventlog sync mode (revision is defined),
-		// skip content-level updates - they come via session:event + backfill
-		const useEventlogSync = session?.revision !== undefined;
-
 		try {
-			// Only process content updates in non-eventlog mode
-			if (!useEventlogSync) {
-				const textChunk = extractTextChunk(notification);
-				if (textChunk?.role === "assistant") {
-					appendAssistantChunk(notification.sessionId, textChunk.text);
-				} else if (textChunk?.role === "user") {
-					appendUserChunk(notification.sessionId, textChunk.text);
-				}
-
-				const toolCallUpdate = extractToolCallUpdate(notification);
-				if (toolCallUpdate) {
-					if (toolCallUpdate.sessionUpdate === "tool_call") {
-						addToolCall(notification.sessionId, toolCallUpdate);
-					} else {
-						updateToolCall(notification.sessionId, toolCallUpdate);
-					}
-				}
-			}
-
-			// Meta updates are always processed (mode/info/commands don't duplicate)
+			// Only process meta updates - content updates go through session:event
 			const modeUpdate = extractSessionModeUpdate(notification);
 			if (modeUpdate) {
-				const modeName = session?.availableModes?.find(
+				const modeName = session.availableModes?.find(
 					(mode) => mode.id === modeUpdate.modeId,
 				)?.name;
 				updateSessionMeta(notification.sessionId, {
@@ -534,8 +515,10 @@ export function useSocket({
 		setPermissionDecisionState(payload.sessionId, payload.requestId, "idle");
 	};
 
+	// Note: terminal:output is deprecated - terminal output now comes via session:event
+	// This handler is kept for backwards compatibility with older CLI versions
 	handleTerminalOutputRef.current = (payload: TerminalOutputEvent) => {
-		// P0-2: Skip in eventlog sync mode (terminal output comes via session:event)
+		// Skip in eventlog sync mode (terminal output comes via session:event)
 		const session = sessionsRef.current[payload.sessionId];
 		if (session?.revision !== undefined) return;
 

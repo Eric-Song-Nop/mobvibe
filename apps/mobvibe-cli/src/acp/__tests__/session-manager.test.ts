@@ -100,6 +100,16 @@ const createMockConfig = (): CliConfig => ({
 	machineId: "test-machine-id",
 	hostname: "test-host",
 	platform: "linux",
+	compaction: {
+		enabled: false,
+		consolidateChunksAfterSec: 3600,
+		ackedEventRetentionDays: 7,
+		keepOldRevisionsDays: 30,
+		keepLatestRevisionsCount: 2,
+		runOnStartup: false,
+		runIntervalHours: 24,
+		minEventsToKeep: 1000,
+	},
 });
 
 describe("SessionManager", () => {

@@ -1,8 +1,10 @@
+import { Database } from "bun:sqlite";
 import { Command } from "commander";
 import { login, loginStatus, logout } from "./auth/login.js";
 import { getCliConfig } from "./config.js";
 import { DaemonManager } from "./daemon/daemon.js";
 import { logger } from "./lib/logger.js";
+import { WalCompactor, WalStore } from "./wal/index.js";
 
 const program = new Command();
 
@@ -94,6 +96,83 @@ program
 	.description("Show authentication status")
 	.action(async () => {
 		await loginStatus();
+	});
+
+program
+	.command("compact")
+	.description("Compact the WAL database to reclaim space")
+	.option("--session <id>", "Compact a specific session only")
+	.option("--dry-run", "Show what would be deleted without actually deleting")
+	.option("-v, --verbose", "Show detailed output")
+	.action(async (options) => {
+		const config = await getCliConfig();
+
+		if (!config.compaction.enabled && !options.dryRun) {
+			console.log("Compaction is disabled in configuration.");
+			console.log("Set MOBVIBE_COMPACTION_ENABLED=true to enable.");
+			return;
+		}
+
+		const walStore = new WalStore(config.walDbPath);
+		const db = new Database(config.walDbPath);
+		const compactor = new WalCompactor(walStore, config.compaction, db);
+
+		console.log(
+			options.dryRun
+				? "Dry run - no changes will be made"
+				: "Starting compaction...",
+		);
+
+		try {
+			if (options.session) {
+				const stats = await compactor.compactSession(options.session, {
+					dryRun: options.dryRun,
+				});
+				console.log(`Session ${options.session}:`);
+				console.log(`  Acked events deleted: ${stats.ackedEventsDeleted}`);
+				console.log(`  Old revisions deleted: ${stats.oldRevisionsDeleted}`);
+				console.log(`  Duration: ${stats.durationMs.toFixed(2)}ms`);
+			} else {
+				const result = await compactor.compactAll({
+					dryRun: options.dryRun,
+				});
+
+				if (options.verbose) {
+					for (const stats of result.stats) {
+						if (stats.ackedEventsDeleted > 0 || stats.oldRevisionsDeleted > 0) {
+							console.log(`\nSession ${stats.sessionId}:`);
+							console.log(
+								`  Acked events deleted: ${stats.ackedEventsDeleted}`,
+							);
+							console.log(
+								`  Old revisions deleted: ${stats.oldRevisionsDeleted}`,
+							);
+						}
+					}
+					if (result.skipped.length > 0) {
+						console.log(
+							`\nSkipped (active sessions): ${result.skipped.join(", ")}`,
+						);
+					}
+				}
+
+				const totalDeleted = result.stats.reduce(
+					(sum, s) => sum + s.ackedEventsDeleted + s.oldRevisionsDeleted,
+					0,
+				);
+
+				console.log(`\nSummary:`);
+				console.log(`  Sessions processed: ${result.stats.length}`);
+				console.log(`  Sessions skipped: ${result.skipped.length}`);
+				console.log(
+					`  Total events ${options.dryRun ? "to delete" : "deleted"}: ${totalDeleted}`,
+				);
+				console.log(`  Duration: ${result.totalDurationMs.toFixed(2)}ms`);
+			}
+		} finally {
+			walStore.close();
+			db.close();
+		}
 	});
 
 export async function run() {

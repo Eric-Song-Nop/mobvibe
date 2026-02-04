@@ -1,7 +1,13 @@
+export type {
+	CompactionResult,
+	CompactionStats,
+} from "./compactor.js";
+export { WalCompactor } from "./compactor.js";
 export { runMigrations } from "./migrations.js";
 export { SeqGenerator } from "./seq-generator.js";
 export type {
 	AppendEventParams,
+	DiscoveredSession,
 	EnsureSessionParams,
 	QueryEventsParams,
 	WalEvent,
