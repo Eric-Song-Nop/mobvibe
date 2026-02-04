@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, mock } from "bun:test";
 
 // Mock child_process
-const mockExecAsync = vi.fn();
-vi.mock("node:util", () => ({
+const mockExecAsync = mock(() => Promise.resolve({ stdout: "", stderr: "" }));
+mock.module("node:util", () => ({
 	promisify: () => mockExecAsync,
 }));
 
@@ -17,7 +17,7 @@ const {
 
 describe("git-utils", () => {
 	beforeEach(() => {
-		vi.clearAllMocks();
+		mockExecAsync.mockReset();
 	});
 
 	describe("isGitRepo", () => {

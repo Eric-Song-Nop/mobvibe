@@ -16,7 +16,7 @@
 		"cli"
 	],
 	"engines": {
-		"node": ">=22"
+		"bun": ">=1.0.0"
 	},
 	"publishConfig": {
 		"access": "public"
@@ -36,13 +36,13 @@
 		}
 	},
 	"scripts": {
-		"dev": "tsx watch src/index.ts",
-		"build": "tsup",
-		"start": "node dist/index.js",
+		"dev": "bun --watch src/index.ts",
+		"build": "bun run build.ts",
+		"start": "bun dist/index.js",
 		"lint": "biome check --write .",
 		"format": "biome format --write .",
-		"test": "vitest --passWithNoTests",
-		"test:run": "vitest run --passWithNoTests",
+		"test": "bun test",
+		"test:run": "bun test",
 		"prepublishOnly": "pnpm build"
 	},
 	"dependencies": {
@@ -57,10 +57,7 @@
 	"devDependencies": {
 		"@biomejs/biome": "2.3.11",
 		"@mobvibe/shared": "workspace:*",
-		"@types/node": "^24.10.1",
-		"tsup": "^8.5.0",
-		"tsx": "^4.19.3",
-		"typescript": "~5.9.3",
-		"vitest": "^2.1.8"
+		"@types/bun": "latest",
+		"typescript": "~5.9.3"
 	}
 }

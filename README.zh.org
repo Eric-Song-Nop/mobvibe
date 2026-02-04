@@ -16,7 +16,7 @@ Mobvibe 是一个分布式 ACP（Agent Client Protocol）WebUI，用于本地 Ag
 #+begin_src
 ┌─────────────────────────┐     Socket.io      ┌──────────────┐     Socket.io     ┌───────────────┐
 │        webui            │◄──────────────────►│   gateway    │◄─────────────────►│  mobvibe-cli  │
-│  (React + Tauri v2)     │    /webui ns       │  (Express)   │    /cli ns        │  (Node CLI)   │
+│  (React + Tauri v2)     │    /webui ns       │  (Express)   │    /cli ns        │   (Bun CLI)   │
 │  Web / Desktop / Mobile │                    └──────────────┘                   └───────┬───────┘
 └─────────────────────────┘                           │                                   │
                                                  REST API                           stdin/stdout
@@ -29,7 +29,8 @@ Mobvibe 是一个分布式 ACP（Agent Client Protocol）WebUI，用于本地 Ag
 
 ** 前置要求
 
-- Node.js 18+
+- Node.js 18+（用于 gateway/webui）
+- Bun 1.0+（用于 mobvibe-cli）
 - pnpm（包管理器）
 - ACP CLI 工具：=opencode=（默认）、=claude-code=、=codex=、=gemini-cli=，或其他 ACP 兼容 agent
 

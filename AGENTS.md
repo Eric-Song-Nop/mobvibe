@@ -7,7 +7,7 @@ A distributed ACP (Agent Client Protocol) WebUI for local agent workflows. Conne
 ```
 ┌─────────────┐     Socket.io      ┌──────────────┐     Socket.io     ┌───────────────┐
 │   webui     │◄──────────────────►│   gateway    │◄─────────────────►│  mobvibe-cli  │
-│  (React)    │    /webui ns       │  (Express)   │    /cli ns        │  (Node CLI)   │
+│  (React)    │    /webui ns       │  (Express)   │    /cli ns        │   (Bun CLI)   │
 └─────────────┘                    └──────────────┘                   └───────┬───────┘
        ▲                                  │                                   │
        │                             REST API                           stdin/stdout
@@ -39,11 +39,11 @@ mobvibe/
 |---------|-----------------|
 | **gateway** | Express, Socket.io, Drizzle ORM, Better Auth, PostgreSQL |
 | **webui** | React 19, Vite, Zustand, TanStack Query, Shadcn UI, Tailwind, Tree-sitter |
-| **mobvibe-cli** | Commander.js, @agentclientprotocol/sdk, Socket.io-client |
+| **mobvibe-cli** | Bun, Commander.js, @agentclientprotocol/sdk, Socket.io-client |
 | **mobile** | Expo SDK 53, Expo Router, React Native Paper, React Navigation |
 | **core** | Zustand, Socket.io-client, i18next |
 | **shared** | TypeScript types only |
-| **Monorepo** | pnpm workspaces, Turborepo, Biome, Vitest |
+| **Monorepo** | pnpm workspaces, Turborepo, Biome, Vitest (Bun test for mobvibe-cli) |
 
 ## Quick Start
 

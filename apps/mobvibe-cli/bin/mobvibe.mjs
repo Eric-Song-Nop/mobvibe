@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 

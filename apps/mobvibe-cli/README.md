@@ -4,6 +4,8 @@ CLI daemon for remote-claude (mobvibe) - connects ACP-compatible agents to the g
 
 ## Installation
 
+Requires [Bun](https://bun.sh/) 1.0+.
+
 ```bash
 npm install -g @mobvibe/cli
 ```

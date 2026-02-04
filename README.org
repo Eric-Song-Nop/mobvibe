@@ -16,7 +16,7 @@ Mobvibe is a distributed ACP (Agent Client Protocol) WebUI for local agent workf
 #+begin_src
 ┌─────────────────────────┐     Socket.io      ┌──────────────┐     Socket.io     ┌───────────────┐
 │        webui            │◄──────────────────►│   gateway    │◄─────────────────►│  mobvibe-cli  │
-│  (React + Tauri v2)     │    /webui ns       │  (Express)   │    /cli ns        │  (Node CLI)   │
+│  (React + Tauri v2)     │    /webui ns       │  (Express)   │    /cli ns        │   (Bun CLI)   │
 │  Web / Desktop / Mobile │                    └──────────────┘                   └───────┬───────┘
 └─────────────────────────┘                           │                                   │
                                                  REST API                           stdin/stdout
@@ -29,7 +29,8 @@ Mobvibe is a distributed ACP (Agent Client Protocol) WebUI for local agent workf
 
 ** Prerequisites
 
-- Node.js 18+
+- Node.js 18+ (for gateway/webui)
+- Bun 1.0+ (for mobvibe-cli)
 - pnpm (package manager)
 - ACP CLI tools: =opencode= (default), =claude-code=, =codex=, =gemini-cli=, or any ACP-compatible agent
 

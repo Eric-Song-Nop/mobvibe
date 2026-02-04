@@ -1,21 +1,21 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, mock } from "bun:test";
 
 // Mock the SDK
-vi.mock("@agentclientprotocol/sdk", () => ({
-	ClientSideConnection: vi.fn(),
-	ndJsonStream: vi.fn(),
+mock.module("@agentclientprotocol/sdk", () => ({
+	ClientSideConnection: mock(() => {}),
+	ndJsonStream: mock(() => {}),
 	PROTOCOL_VERSION: "0.1.0",
 }));
 
 // Mock child_process
-vi.mock("node:child_process", () => ({
-	spawn: vi.fn(() => ({
-		stdin: { pipe: vi.fn() },
-		stdout: { pipe: vi.fn() },
-		stderr: { pipe: vi.fn() },
-		on: vi.fn(),
-		once: vi.fn(),
-		kill: vi.fn(),
+mock.module("node:child_process", () => ({
+	spawn: mock(() => ({
+		stdin: { pipe: mock(() => {}) },
+		stdout: { pipe: mock(() => {}) },
+		stderr: { pipe: mock(() => {}) },
+		on: mock(() => {}),
+		once: mock(() => {}),
+		kill: mock(() => {}),
 		exitCode: null,
 		killed: false,
 		pid: 12345,
@@ -23,9 +23,9 @@ vi.mock("node:child_process", () => ({
 }));
 
 // Mock stream
-vi.mock("node:stream", () => ({
-	Readable: { toWeb: vi.fn(() => ({})) },
-	Writable: { toWeb: vi.fn(() => ({})) },
+mock.module("node:stream", () => ({
+	Readable: { toWeb: mock(() => ({})) },
+	Writable: { toWeb: mock(() => ({})) },
 }));
 
 import type { AcpBackendConfig } from "../../config.js";
@@ -43,7 +43,6 @@ describe("AcpConnection", () => {
 	let mockBackend: AcpBackendConfig;
 
 	beforeEach(() => {
-		vi.clearAllMocks();
 		mockBackend = createMockBackendConfig();
 		connection = new AcpConnection({
 			backend: mockBackend,
