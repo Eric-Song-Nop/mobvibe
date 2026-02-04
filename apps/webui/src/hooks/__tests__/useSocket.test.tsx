@@ -14,8 +14,10 @@ const mockGatewaySocket = vi.hoisted(() => ({
 	subscribeToSession: vi.fn(),
 	unsubscribeFromSession: vi.fn(),
 	getSubscribedSessions: vi.fn(() => []),
+	getGatewayUrl: vi.fn(() => "http://localhost:3005"),
 	onSessionUpdate: vi.fn(),
 	onSessionError: vi.fn(),
+	onSessionEvent: vi.fn(),
 	onPermissionRequest: vi.fn(),
 	onPermissionResult: vi.fn(),
 	onTerminalOutput: vi.fn(),
@@ -77,6 +79,9 @@ const createStore = (): ChatStoreActions =>
 		handleSessionsChanged: vi.fn(),
 		clearSessionMessages: vi.fn(),
 		restoreSessionMessages: vi.fn(),
+		updateSessionCursor: vi.fn(),
+		setSessionBackfilling: vi.fn(),
+		resetSessionForRevision: vi.fn(),
 	}) as unknown as ChatStoreActions;
 
 const buildSession = (overrides: Partial<ChatSession> = {}): ChatSession => ({
@@ -151,6 +156,14 @@ describe("useSocket (webui)", () => {
 				};
 			},
 		);
+		mockGatewaySocket.onSessionEvent.mockImplementation(
+			(handler: (event: unknown) => void) => {
+				handlers.sessionEvent = handler;
+				return () => {
+					handlers.sessionEvent = undefined;
+				};
+			},
+		);
 		mockGatewaySocket.onSessionAttached.mockImplementation(
 			(handler: (payload: unknown) => void) => {
 				handlers.sessionAttached = handler;
@@ -208,6 +221,9 @@ describe("useSocket (webui)", () => {
 					markSessionAttached: store.markSessionAttached,
 					markSessionDetached: store.markSessionDetached,
 					createLocalSession: store.createLocalSession,
+					updateSessionCursor: store.updateSessionCursor,
+					setSessionBackfilling: store.setSessionBackfilling,
+					resetSessionForRevision: store.resetSessionForRevision,
 				}),
 			{ initialProps: { sessions } },
 		);
@@ -253,6 +269,9 @@ describe("useSocket (webui)", () => {
 				markSessionAttached: store.markSessionAttached,
 				markSessionDetached: store.markSessionDetached,
 				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				setSessionBackfilling: store.setSessionBackfilling,
+				resetSessionForRevision: store.resetSessionForRevision,
 			}),
 		);
 
@@ -296,6 +315,9 @@ describe("useSocket (webui)", () => {
 				markSessionAttached: store.markSessionAttached,
 				markSessionDetached: store.markSessionDetached,
 				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				setSessionBackfilling: store.setSessionBackfilling,
+				resetSessionForRevision: store.resetSessionForRevision,
 			}),
 		);
 
@@ -308,5 +330,231 @@ describe("useSocket (webui)", () => {
 				reason: "gateway_disconnect",
 			}),
 		);
+	});
+
+	it("P0-6: updates cursor synchronously for consecutive events in same tick", async () => {
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				revision: 1,
+				lastAppliedSeq: 0,
+			}),
+		};
+
+		renderHook(() =>
+			useSocket({
+				sessions,
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendUserChunk: store.appendUserChunk,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				setSessionBackfilling: store.setSessionBackfilling,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		// Simulate receiving multiple events in quick succession (same tick)
+		handlers.sessionEvent?.({
+			sessionId: "session-1",
+			revision: 1,
+			seq: 1,
+			kind: "agent_message_chunk",
+			payload: {
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "Hello" },
+				},
+			},
+		});
+		handlers.sessionEvent?.({
+			sessionId: "session-1",
+			revision: 1,
+			seq: 2,
+			kind: "agent_message_chunk",
+			payload: {
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: " world" },
+				},
+			},
+		});
+		handlers.sessionEvent?.({
+			sessionId: "session-1",
+			revision: 1,
+			seq: 3,
+			kind: "agent_message_chunk",
+			payload: {
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "!" },
+				},
+			},
+		});
+
+		// With P0-6 fix, all three events should be applied (cursor updates synchronously)
+		// Each event should trigger updateSessionCursor with incrementing seq
+		expect(store.updateSessionCursor).toHaveBeenCalledTimes(3);
+		expect(store.updateSessionCursor).toHaveBeenNthCalledWith(
+			1,
+			"session-1",
+			1,
+			1,
+		);
+		expect(store.updateSessionCursor).toHaveBeenNthCalledWith(
+			2,
+			"session-1",
+			1,
+			2,
+		);
+		expect(store.updateSessionCursor).toHaveBeenNthCalledWith(
+			3,
+			"session-1",
+			1,
+			3,
+		);
+	});
+
+	it("P0-6: skips duplicate events based on cursor", async () => {
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				revision: 1,
+				lastAppliedSeq: 5,
+			}),
+		};
+
+		renderHook(() =>
+			useSocket({
+				sessions,
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendUserChunk: store.appendUserChunk,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				setSessionBackfilling: store.setSessionBackfilling,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		// Event with seq <= lastAppliedSeq should be skipped
+		handlers.sessionEvent?.({
+			sessionId: "session-1",
+			revision: 1,
+			seq: 3, // Already applied (lastAppliedSeq is 5)
+			kind: "agent_message_chunk",
+			payload: {
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "old" },
+				},
+			},
+		});
+
+		// Should not update cursor for already applied event
+		expect(store.updateSessionCursor).not.toHaveBeenCalled();
+		expect(store.appendAssistantChunk).not.toHaveBeenCalled();
+	});
+
+	it("P0-7: detects gap and triggers backfill instead of skipping", async () => {
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				revision: 1,
+				lastAppliedSeq: 0,
+			}),
+		};
+
+		renderHook(() =>
+			useSocket({
+				sessions,
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendUserChunk: store.appendUserChunk,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				setSessionBackfilling: store.setSessionBackfilling,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		// Event seq=1 arrives first - should be applied
+		handlers.sessionEvent?.({
+			sessionId: "session-1",
+			revision: 1,
+			seq: 1,
+			kind: "agent_message_chunk",
+			payload: {
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "first" },
+				},
+			},
+		});
+
+		expect(store.updateSessionCursor).toHaveBeenCalledWith("session-1", 1, 1);
+
+		// Event seq=5 arrives (gap: missing 2,3,4) - should NOT be applied directly
+		// Instead, should trigger backfill
+		handlers.sessionEvent?.({
+			sessionId: "session-1",
+			revision: 1,
+			seq: 5,
+			kind: "agent_message_chunk",
+			payload: {
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "fifth" },
+				},
+			},
+		});
+
+		// Should only have one cursor update (for seq=1), not for seq=5
+		// Because seq=5 has a gap and should be buffered, not applied
+		expect(store.updateSessionCursor).toHaveBeenCalledTimes(1);
+		// Backfill should be triggered
+		expect(store.setSessionBackfilling).toHaveBeenCalledWith("session-1", true);
 	});
 });

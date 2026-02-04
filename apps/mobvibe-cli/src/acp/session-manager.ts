@@ -264,11 +264,36 @@ export class SessionManager {
 	 */
 	getSessionEvents(params: SessionEventsParams): SessionEventsResponse {
 		const record = this.sessions.get(params.sessionId);
-		if (!record) {
+
+		// Determine the actual revision from WAL or active session
+		let actualRevision: number;
+		if (record) {
+			actualRevision = record.revision;
+		} else {
+			// Session not active, check WAL for persisted revision
+			const walSession = this.walStore.getSession(params.sessionId);
+			actualRevision = walSession?.currentRevision ?? params.revision;
+		}
+
+		// If no events in WAL for this session, return empty with actual revision
+		if (!record && !this.walStore.getSession(params.sessionId)) {
 			return {
 				sessionId: params.sessionId,
 				machineId: this.config.machineId,
-				revision: params.revision,
+				revision: actualRevision,
+				events: [],
+				hasMore: false,
+			};
+		}
+
+		// Fix 2: If requested revision doesn't match actual revision, return empty events
+		// This ensures response.revision === events[].revision consistency
+		// Client will see mismatch, reset, and re-request with afterSeq=0
+		if (params.revision !== actualRevision) {
+			return {
+				sessionId: params.sessionId,
+				machineId: this.config.machineId,
+				revision: actualRevision,
 				events: [],
 				hasMore: false,
 			};
@@ -277,7 +302,7 @@ export class SessionManager {
 		const limit = params.limit ?? 100;
 		const events = this.walStore.queryEvents({
 			sessionId: params.sessionId,
-			revision: params.revision,
+			revision: actualRevision, // Use consistent revision
 			afterSeq: params.afterSeq,
 			limit: limit + 1, // Query one extra to check hasMore
 		});
@@ -288,7 +313,7 @@ export class SessionManager {
 		return {
 			sessionId: params.sessionId,
 			machineId: this.config.machineId,
-			revision: params.revision,
+			revision: actualRevision,
 			events: resultEvents.map((e) => ({
 				sessionId: e.sessionId,
 				machineId: this.config.machineId,
@@ -309,10 +334,7 @@ export class SessionManager {
 	/**
 	 * Get unacked events for a session/revision (for reconnection replay).
 	 */
-	getUnackedEvents(
-		sessionId: string,
-		revision: number,
-	): SessionEvent[] {
+	getUnackedEvents(sessionId: string, revision: number): SessionEvent[] {
 		const events = this.walStore.getUnackedEvents(sessionId, revision);
 		return events.map((e) => ({
 			sessionId: e.sessionId,
@@ -1095,7 +1117,10 @@ export class SessionManager {
 		});
 		this.emitSessionAttached(sessionId, true);
 
-		logger.info({ sessionId, backendId, revision: newRevision }, "session_reloaded");
+		logger.info(
+			{ sessionId, backendId, revision: newRevision },
+			"session_reloaded",
+		);
 
 		return summary;
 	}
@@ -1164,7 +1189,12 @@ export class SessionManager {
 				return;
 		}
 
-		this.writeAndEmitEvent(record.sessionId, record.revision, kind, notification);
+		this.writeAndEmitEvent(
+			record.sessionId,
+			record.revision,
+			kind,
+			notification,
+		);
 	}
 
 	/**
@@ -1202,12 +1232,9 @@ export class SessionManager {
 		connection.onStatusChange((status) => {
 			if (status.error) {
 				// Write error to WAL
-				this.writeAndEmitEvent(
-					sessionId,
-					record.revision,
-					"session_error",
-					{ error: status.error },
-				);
+				this.writeAndEmitEvent(sessionId, record.revision, "session_error", {
+					error: status.error,
+				});
 				this.sessionErrorEmitter.emit("error", {
 					sessionId,
 					error: status.error,

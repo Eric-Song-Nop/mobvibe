@@ -273,4 +273,58 @@ describe("SessionManager", () => {
 			expect(result).toBe(false);
 		});
 	});
+
+	describe("getSessionEvents", () => {
+		it("returns empty events when requested revision does not match actual revision (Fix 2)", async () => {
+			// Create a session first to have it in WAL
+			await sessionManager.createSession({
+				cwd: "/home/user/project",
+			});
+			const sessions = sessionManager.listSessions();
+			const sessionId = sessions[0].sessionId;
+
+			// Query with a different revision than what the session has
+			const result = sessionManager.getSessionEvents({
+				sessionId,
+				revision: 999, // Wrong revision
+				afterSeq: 0,
+			});
+
+			// Should return empty events but with actual revision
+			expect(result.events).toHaveLength(0);
+			expect(result.revision).toBe(1); // Actual revision is 1
+			expect(result.hasMore).toBe(false);
+		});
+
+		it("returns events when requested revision matches actual revision", async () => {
+			// Create a session
+			await sessionManager.createSession({
+				cwd: "/home/user/project",
+			});
+			const sessions = sessionManager.listSessions();
+			const sessionId = sessions[0].sessionId;
+
+			// Query with correct revision
+			const result = sessionManager.getSessionEvents({
+				sessionId,
+				revision: 1, // Correct revision
+				afterSeq: 0,
+			});
+
+			// Should return events (may be empty if no events written yet, but no error)
+			expect(result.revision).toBe(1);
+			expect(Array.isArray(result.events)).toBe(true);
+		});
+
+		it("returns empty for non-existent session", () => {
+			const result = sessionManager.getSessionEvents({
+				sessionId: "non-existent-session",
+				revision: 1,
+				afterSeq: 0,
+			});
+
+			expect(result.events).toHaveLength(0);
+			expect(result.hasMore).toBe(false);
+		});
+	});
 });

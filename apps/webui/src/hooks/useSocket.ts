@@ -78,8 +78,81 @@ export function useSocket({
 	const sessionsRef = useRef(sessions);
 	sessionsRef.current = sessions;
 
+	// P0-6: Synchronous cursor state for correct reads within same tick
+	// sessionsRef updates only on re-render, which can cause stale reads
+	// cursorRef is updated synchronously alongside store updates
+	const cursorRef = useRef<
+		Map<string, { revision: number | undefined; lastAppliedSeq: number }>
+	>(new Map());
+
+	// Helper to update cursor both synchronously (cursorRef) and in store
+	const updateCursorSync = (
+		sessionId: string,
+		revision: number,
+		seq: number,
+	) => {
+		cursorRef.current.set(sessionId, { revision, lastAppliedSeq: seq });
+		updateSessionCursor(sessionId, revision, seq);
+	};
+
+	// Helper to get current cursor (sync version)
+	const getCursor = (sessionId: string) => {
+		const syncCursor = cursorRef.current.get(sessionId);
+		if (syncCursor) return syncCursor;
+		// Fall back to store state (for initial load)
+		const session = sessionsRef.current[sessionId];
+		return {
+			revision: session?.revision,
+			lastAppliedSeq: session?.lastAppliedSeq ?? 0,
+		};
+	};
+
 	// Pending events buffer for out-of-order events
 	const pendingEventsRef = useRef<Map<string, SessionEvent[]>>(new Map());
+	const applyPendingEventsBestEffort = (sessionId: string) => {
+		const pending = pendingEventsRef.current.get(sessionId);
+		if (!pending || pending.length === 0) {
+			return;
+		}
+
+		// P0-6: Use getCursor for synchronous cursor reads
+		const cursor = getCursor(sessionId);
+		const currentRevision = cursor.revision;
+		const sorted = pending
+			.filter((event) =>
+				currentRevision === undefined
+					? true
+					: event.revision === currentRevision,
+			)
+			.sort((a, b) => a.seq - b.seq);
+
+		let lastSeq = cursor.lastAppliedSeq;
+		const remaining: SessionEvent[] = [];
+
+		for (const event of sorted) {
+			if (event.seq <= lastSeq) {
+				continue;
+			}
+
+			// P0-7: Only apply consecutive events, stop at gaps
+			if (event.seq !== lastSeq + 1) {
+				remaining.push(event);
+				continue; // Keep events after gap for later
+			}
+
+			applySessionEventRef.current?.(event);
+			lastSeq = event.seq;
+			// P0-6: Use updateCursorSync for synchronous updates
+			updateCursorSync(sessionId, event.revision, event.seq);
+		}
+
+		// P0-7: Preserve events that couldn't be applied (after gap)
+		if (remaining.length > 0) {
+			pendingEventsRef.current.set(sessionId, remaining);
+		} else {
+			pendingEventsRef.current.delete(sessionId);
+		}
+	};
 
 	// Track revision mismatch retry counts to prevent infinite loops
 	const revisionMismatchRetryRef = useRef<Map<string, number>>(new Map());
@@ -222,24 +295,32 @@ export function useSocket({
 	// Flush pending events that are now in order (ref for stable access)
 	const flushPendingEventsRef = useRef<(sessionId: string) => void>();
 	flushPendingEventsRef.current = (sessionId: string) => {
-		const session = sessionsRef.current[sessionId];
-		if (!session) return;
+		// P0-6: Use getCursor for synchronous cursor reads
+		const cursor = getCursor(sessionId);
+		if (cursor.revision === undefined) return;
 
 		const pending = pendingEventsRef.current.get(sessionId);
 		if (!pending || pending.length === 0) return;
 
-		let lastSeq = session.lastAppliedSeq ?? 0;
+		let lastSeq = cursor.lastAppliedSeq;
+		const currentRevision = cursor.revision;
+
+		// P0-5: Filter out stale events (seq <= lastSeq or wrong revision)
+		const validPending = pending.filter(
+			(e) => e.seq > lastSeq && e.revision === currentRevision,
+		);
 
 		// Sort by seq
-		pending.sort((a, b) => a.seq - b.seq);
+		validPending.sort((a, b) => a.seq - b.seq);
 
 		// Apply consecutive events
 		const remaining: SessionEvent[] = [];
-		for (const event of pending) {
+		for (const event of validPending) {
 			if (event.seq === lastSeq + 1) {
 				applySessionEventRef.current?.(event);
 				lastSeq = event.seq;
-				updateSessionCursor(sessionId, event.revision, event.seq);
+				// P0-6: Use updateCursorSync for synchronous updates
+				updateCursorSync(sessionId, event.revision, event.seq);
 			} else {
 				remaining.push(event);
 			}
@@ -262,8 +343,9 @@ export function useSocket({
 		onEvents: (sessionId, events) => {
 			// Apply backfilled events in order
 			for (const event of events) {
-				const session = sessionsRef.current[sessionId];
-				const lastSeq = session?.lastAppliedSeq ?? 0;
+				// P0-6: Use getCursor for synchronous cursor reads
+				const cursor = getCursor(sessionId);
+				const lastSeq = cursor.lastAppliedSeq;
 
 				// Skip already applied
 				if (event.seq <= lastSeq) continue;
@@ -271,7 +353,8 @@ export function useSocket({
 				// Apply if next in sequence
 				if (event.seq === lastSeq + 1) {
 					applySessionEventRef.current?.(event);
-					updateSessionCursor(sessionId, event.revision, event.seq);
+					// P0-6: Use updateCursorSync for synchronous updates
+					updateCursorSync(sessionId, event.revision, event.seq);
 				}
 			}
 			// Try to flush any pending events
@@ -285,6 +368,8 @@ export function useSocket({
 		onError: (sessionId, error) => {
 			console.error(`[backfill] Error for session ${sessionId}:`, error);
 			setSessionBackfilling(sessionId, false);
+			// Fall back to applying pending events so the stream can continue
+			applyPendingEventsBestEffort(sessionId);
 		},
 		onRevisionMismatch: (sessionId, newRevision) => {
 			// Track retry count to prevent infinite loops
@@ -297,6 +382,8 @@ export function useSocket({
 					`[backfill] Max revision mismatch retries exceeded for session ${sessionId}`,
 				);
 				setSessionBackfilling(sessionId, false);
+				// Apply pending events to avoid stalling the stream
+				applyPendingEventsBestEffort(sessionId);
 				return;
 			}
 
@@ -305,9 +392,16 @@ export function useSocket({
 			);
 			resetSessionForRevision(sessionId, newRevision);
 			pendingEventsRef.current.delete(sessionId);
-			// Restart backfill with new revision from the beginning
-			setSessionBackfilling(sessionId, true);
-			startBackfill(sessionId, newRevision, 0);
+			// P0-6: Clear cursorRef on reset, will re-init from store/new revision
+			cursorRef.current.delete(sessionId);
+
+			// P0-3: Defer restart to let old backfill's cleanup complete
+			// This prevents race condition where old backfill's finally block
+			// could interfere with the new backfill's state
+			queueMicrotask(() => {
+				setSessionBackfilling(sessionId, true);
+				startBackfill(sessionId, newRevision, 0);
+			});
 		},
 	});
 
@@ -422,6 +516,10 @@ export function useSocket({
 	};
 
 	handleTerminalOutputRef.current = (payload: TerminalOutputEvent) => {
+		// P0-2: Skip in eventlog sync mode (terminal output comes via session:event)
+		const session = sessionsRef.current[payload.sessionId];
+		if (session?.revision !== undefined) return;
+
 		appendTerminalOutput(payload.sessionId, {
 			terminalId: payload.terminalId,
 			delta: payload.delta,
@@ -435,6 +533,9 @@ export function useSocket({
 		handleSessionsChanged(payload);
 	};
 
+	// P0-5: Max pending queue size before forcing reset
+	const MAX_PENDING_SIZE = 1000;
+
 	handleSessionEventRef.current = (event: SessionEvent) => {
 		let session = sessionsRef.current[event.sessionId];
 		if (!session) {
@@ -442,21 +543,26 @@ export function useSocket({
 			session = sessionsRef.current[event.sessionId];
 		}
 
-		const currentRevision = session?.revision;
+		// P0-6: Use getCursor for synchronous cursor reads
+		let cursor = getCursor(event.sessionId);
+		const currentRevision = cursor.revision;
 
 		// Case 1: First revision initialization (from undefined to a value)
 		// This happens for new sessions - just initialize the cursor and continue
 		if (currentRevision === undefined) {
 			// Initialize cursor without reset, then continue normal seq processing
-			updateSessionCursor(event.sessionId, event.revision, 0);
-			// Re-read session after cursor update
-			session = sessionsRef.current[event.sessionId];
+			// P0-6: Use updateCursorSync for synchronous updates
+			updateCursorSync(event.sessionId, event.revision, 0);
+			// Re-read cursor after update
+			cursor = getCursor(event.sessionId);
 		}
 		// Case 2: Revision bump (e.g., session reload/load with new revision)
 		else if (event.revision > currentRevision) {
 			// Reset session state for new revision
 			resetSessionForRevision(event.sessionId, event.revision);
 			pendingEventsRef.current.delete(event.sessionId);
+			// P0-6: Clear cursorRef on reset
+			cursorRef.current.delete(event.sessionId);
 			// Buffer current event for after backfill completes
 			const pending = pendingEventsRef.current.get(event.sessionId) ?? [];
 			pending.push(event);
@@ -470,7 +576,7 @@ export function useSocket({
 			return;
 		}
 
-		const lastSeq = session?.lastAppliedSeq ?? 0;
+		const lastSeq = cursor.lastAppliedSeq;
 
 		// Skip already applied events (deduplication)
 		if (event.seq <= lastSeq) {
@@ -481,16 +587,34 @@ export function useSocket({
 		if (event.seq === lastSeq + 1) {
 			// Apply directly
 			applySessionEventRef.current?.(event);
-			updateSessionCursor(event.sessionId, event.revision, event.seq);
+			// P0-6: Use updateCursorSync for synchronous updates
+			updateCursorSync(event.sessionId, event.revision, event.seq);
 			// Try to flush any pending events that are now in order
 			flushPendingEventsRef.current?.(event.sessionId);
-		} else {
-			// Gap detected - buffer the event
+		} else if (event.seq > lastSeq + 1) {
+			// P0-4 & P0-5: Gap detected - buffer the event and trigger backfill
 			const pending = pendingEventsRef.current.get(event.sessionId) ?? [];
+
+			// P0-5: Check pending overflow - force reset if too large
+			if (pending.length >= MAX_PENDING_SIZE) {
+				console.warn(
+					`[socket] Pending overflow for ${event.sessionId}, forcing reset`,
+				);
+				pendingEventsRef.current.delete(event.sessionId);
+				resetSessionForRevision(event.sessionId, event.revision);
+				// P0-6: Clear cursorRef on reset
+				cursorRef.current.delete(event.sessionId);
+				triggerBackfillRef.current?.(event.sessionId, event.revision, 0);
+				return;
+			}
+
 			pending.push(event);
 			pendingEventsRef.current.set(event.sessionId, pending);
-			// Note: Backfill will be triggered by the subscription effect
+
+			// P0-4: Trigger backfill to fill the gap (throttled by isBackfillActive check)
+			triggerBackfillRef.current?.(event.sessionId, event.revision, lastSeq);
 		}
+		// else: seq <= lastSeq, already applied, ignore (handled above)
 	};
 
 	// Connect to gateway and register listeners on mount only

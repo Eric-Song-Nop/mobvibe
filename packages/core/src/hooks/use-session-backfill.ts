@@ -6,6 +6,8 @@ type BackfillState = {
 	revision: number;
 	afterSeq: number;
 	abortController: AbortController;
+	/** P0-3: Generation token to detect stale backfills */
+	generation: number;
 };
 
 type BackfillOptions = {
@@ -19,6 +21,8 @@ type BackfillOptions = {
 	onComplete?: (sessionId: string, totalEvents: number) => void;
 	/** Called on error */
 	onError?: (sessionId: string, error: Error) => void;
+	/** Called when revision mismatch detected (session was reloaded) */
+	onRevisionMismatch?: (sessionId: string, newRevision: number) => void;
 	/** Page size for fetching events */
 	pageSize?: number;
 };
@@ -33,9 +37,12 @@ export function useSessionBackfill({
 	onEvents,
 	onComplete,
 	onError,
+	onRevisionMismatch,
 	pageSize = 100,
 }: BackfillOptions) {
 	const activeBackfills = useRef<Map<string, BackfillState>>(new Map());
+	// P0-3: Global generation counter for detecting stale backfills
+	const backfillGenerationRef = useRef(0);
 
 	/**
 	 * Fetch events from the gateway REST API.
@@ -64,11 +71,14 @@ export function useSessionBackfill({
 				method: "GET",
 				headers,
 				signal,
+				credentials: "include",
 			});
 
 			if (!response.ok) {
 				const errorText = await response.text();
-				throw new Error(`Failed to fetch events: ${response.status} ${errorText}`);
+				throw new Error(
+					`Failed to fetch events: ${response.status} ${errorText}`,
+				);
 			}
 
 			return response.json() as Promise<SessionEventsResponse>;
@@ -92,12 +102,15 @@ export function useSessionBackfill({
 				existing.abortController.abort();
 			}
 
+			// P0-3: Assign unique generation to this backfill
+			const generation = ++backfillGenerationRef.current;
 			const abortController = new AbortController();
 			const state: BackfillState = {
 				sessionId,
 				revision,
 				afterSeq,
 				abortController,
+				generation,
 			};
 			activeBackfills.current.set(sessionId, state);
 
@@ -106,6 +119,13 @@ export function useSessionBackfill({
 
 			try {
 				while (true) {
+					// P0-3: Check if this backfill is still current before each fetch
+					const currentState = activeBackfills.current.get(sessionId);
+					if (!currentState || currentState.generation !== generation) {
+						// Stale backfill, abort silently
+						return;
+					}
+
 					const response = await fetchEvents(
 						sessionId,
 						revision,
@@ -113,10 +133,24 @@ export function useSessionBackfill({
 						abortController.signal,
 					);
 
+					// P0-3: Check again after fetch completes
+					const stateAfterFetch = activeBackfills.current.get(sessionId);
+					if (!stateAfterFetch || stateAfterFetch.generation !== generation) {
+						// Stale backfill, abort silently
+						return;
+					}
+
 					// Check if revision changed (should reset and restart)
 					if (response.revision !== revision) {
-						// Revision changed, caller should handle this
-						break;
+						// P0-3: Mismatch is termination, not completion
+						// Cleanup state but don't call onComplete
+						const cleanupState = activeBackfills.current.get(sessionId);
+						if (cleanupState?.generation === generation) {
+							activeBackfills.current.delete(sessionId);
+						}
+						// Notify caller about revision mismatch so they can reset and retry
+						onRevisionMismatch?.(sessionId, response.revision);
+						return; // Exit directly, don't trigger onComplete
 					}
 
 					if (response.events.length > 0) {
@@ -130,18 +164,33 @@ export function useSessionBackfill({
 					}
 				}
 
-				onComplete?.(sessionId, totalEvents);
+				// P0-3: Only call onComplete if this backfill is still current
+				const finalState = activeBackfills.current.get(sessionId);
+				if (finalState?.generation === generation) {
+					onComplete?.(sessionId, totalEvents);
+				}
 			} catch (error) {
 				if (error instanceof Error && error.name === "AbortError") {
 					// Backfill was cancelled, not an error
 					return;
 				}
-				onError?.(sessionId, error instanceof Error ? error : new Error(String(error)));
+				// P0-3: Only call onError if this backfill is still current
+				const errorState = activeBackfills.current.get(sessionId);
+				if (errorState?.generation === generation) {
+					onError?.(
+						sessionId,
+						error instanceof Error ? error : new Error(String(error)),
+					);
+				}
 			} finally {
-				activeBackfills.current.delete(sessionId);
+				// P0-3: Only cleanup if this backfill is still current
+				const cleanupState = activeBackfills.current.get(sessionId);
+				if (cleanupState?.generation === generation) {
+					activeBackfills.current.delete(sessionId);
+				}
 			}
 		},
-		[fetchEvents, onEvents, onComplete, onError],
+		[fetchEvents, onEvents, onComplete, onError, onRevisionMismatch],
 	);
 
 	/**
