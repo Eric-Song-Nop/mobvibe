@@ -78,22 +78,16 @@ describe("MessageItem", () => {
 				},
 			],
 		} as ChatMessage;
-		const { container, getAllByText, getByText } = render(
+		const { container, getByText } = render(
 			<MessageItem message={message} />,
 		);
-		const details = getAllByText(i18n.t("toolCall.toolCall"))[0]?.closest(
-			"details",
-		);
+		// Open the "Details" accordion to reveal output
+		const detailsSummary = getByText(i18n.t("toolCall.details"));
+		expect(detailsSummary).toBeTruthy();
+		const details = detailsSummary.closest("details");
 		expect(details).toBeTruthy();
 		if (details) {
 			details.open = true;
-		}
-		const outputDetails = getByText(i18n.t("toolCall.output")).closest(
-			"details",
-		);
-		expect(outputDetails).toBeTruthy();
-		if (outputDetails) {
-			outputDetails.open = true;
 		}
 		const output = container.querySelector(
 			"pre.whitespace-pre-wrap.break-words",
@@ -178,19 +172,13 @@ describe("MessageItem", () => {
 		const { getAllByText, getByText, getByRole } = render(
 			<MessageItem message={message} />,
 		);
-		const details = getAllByText(i18n.t("toolCall.toolCall"))[0]?.closest(
-			"details",
-		);
+		// Open the "Details" accordion to reveal content
+		const detailsSummary = getByText(i18n.t("toolCall.details"));
+		expect(detailsSummary).toBeTruthy();
+		const details = detailsSummary.closest("details");
 		expect(details).toBeTruthy();
 		if (details) {
 			details.open = true;
-		}
-		const outputDetails = getByText(i18n.t("toolCall.output")).closest(
-			"details",
-		);
-		expect(outputDetails).toBeTruthy();
-		if (outputDetails) {
-			outputDetails.open = true;
 		}
 		expect(getAllByText(i18n.t("toolCall.image")).length).toBeGreaterThan(0);
 		expect(getAllByText(i18n.t("toolCall.audio")).length).toBeGreaterThan(0);
