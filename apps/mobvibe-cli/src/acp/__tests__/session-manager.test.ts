@@ -96,6 +96,7 @@ const createMockConfig = (): CliConfig => ({
 	homePath: "/tmp/mobvibe-test",
 	logPath: "/tmp/mobvibe-test/logs",
 	pidFile: "/tmp/mobvibe-test/daemon.pid",
+	walDbPath: "/tmp/mobvibe-test/events.db",
 	machineId: "test-machine-id",
 	hostname: "test-host",
 	platform: "linux",

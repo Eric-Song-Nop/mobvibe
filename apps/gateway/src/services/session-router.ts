@@ -24,6 +24,8 @@ import type {
 	RpcRequest,
 	RpcResponse,
 	SendMessageParams,
+	SessionEventsParams,
+	SessionEventsResponse,
 	SessionFsFilePreview,
 	SessionSummary,
 	SetSessionModelParams,
@@ -891,6 +893,56 @@ export class SessionRouter {
 		logger.debug(
 			{ sessionId: params.sessionId, path: params.path, userId },
 			"git_file_diff_rpc_complete",
+		);
+		return result;
+	}
+
+	/**
+	 * Get session events for backfill.
+	 * @param params - Session events parameters
+	 * @param userId - Optional user ID for authorization
+	 */
+	async getSessionEvents(
+		params: SessionEventsParams,
+		userId?: string,
+	): Promise<SessionEventsResponse> {
+		const cli = this.cliRegistry.getCliForSession(params.sessionId);
+		if (!cli) {
+			throw new Error("Session not found");
+		}
+
+		if (
+			userId &&
+			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
+		) {
+			throw new Error("Not authorized to access this session");
+		}
+
+		logger.debug(
+			{
+				sessionId: params.sessionId,
+				revision: params.revision,
+				afterSeq: params.afterSeq,
+				userId,
+			},
+			"session_events_rpc_start",
+		);
+
+		const result = await this.sendRpc<SessionEventsParams, SessionEventsResponse>(
+			cli.socket,
+			"rpc:session:events",
+			params,
+		);
+
+		logger.debug(
+			{
+				sessionId: params.sessionId,
+				revision: params.revision,
+				eventCount: result.events.length,
+				hasMore: result.hasMore,
+				userId,
+			},
+			"session_events_rpc_complete",
 		);
 		return result;
 	}

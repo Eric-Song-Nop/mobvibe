@@ -665,8 +665,6 @@ export const MessageItem = ({
 		const label =
 			message.title ?? message.name ?? getLabel("toolCall.toolCall");
 		const statusLabel = resolveStatusLabel(message.status, getLabel);
-		const durationLabel =
-			message.duration !== undefined ? `${message.duration}ms` : undefined;
 		const statusBadgeVariant =
 			message.status === "failed" ? "destructive" : "secondary";
 		const commandLine =

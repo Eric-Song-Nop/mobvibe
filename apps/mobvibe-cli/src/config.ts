@@ -22,6 +22,7 @@ export type CliConfig = {
 	homePath: string;
 	logPath: string;
 	pidFile: string;
+	walDbPath: string;
 	machineId: string;
 	hostname: string;
 	platform: string;
@@ -121,6 +122,7 @@ export const getCliConfig = async (): Promise<CliConfig> => {
 		homePath,
 		logPath: path.join(homePath, "logs"),
 		pidFile: path.join(homePath, "daemon.pid"),
+		walDbPath: path.join(homePath, "events.db"),
 		machineId: env.MOBVIBE_MACHINE_ID ?? generateMachineId(),
 		hostname: os.hostname(),
 		platform: os.platform(),

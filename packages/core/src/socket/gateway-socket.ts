@@ -6,6 +6,7 @@ import type {
 	PermissionRequestPayload,
 	SessionAttachedPayload,
 	SessionDetachedPayload,
+	SessionEvent,
 	SessionNotification,
 	SessionSummary,
 	SessionsChangedPayload,
@@ -159,6 +160,13 @@ export class GatewaySocket {
 		this.socket?.on("sessions:changed", handler);
 		return () => {
 			this.socket?.off("sessions:changed", handler);
+		};
+	}
+
+	onSessionEvent(handler: (event: SessionEvent) => void) {
+		this.socket?.on("session:event", handler);
+		return () => {
+			this.socket?.off("session:event", handler);
 		};
 	}
 

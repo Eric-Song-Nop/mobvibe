@@ -17,12 +17,17 @@ import {
 	type ErrorDetail,
 	type PermissionDecisionPayload,
 	type PermissionRequestPayload,
+	type SessionEvent,
+	type SessionEventKind,
+	type SessionEventsParams,
+	type SessionEventsResponse,
 	type SessionSummary,
 	type SessionsChangedPayload,
 	type TerminalOutputEvent,
 } from "@mobvibe/shared";
 import type { AcpBackendConfig, CliConfig } from "../config.js";
 import { logger } from "../lib/logger.js";
+import { WalStore } from "../wal/index.js";
 import { AcpConnection } from "./acp-connection.js";
 
 type SessionRecord = {
@@ -50,6 +55,8 @@ type SessionRecord = {
 	unsubscribeTerminal?: () => void;
 	isAttached?: boolean;
 	attachedAt?: Date;
+	/** Current WAL revision for this session */
+	revision: number;
 };
 
 type PermissionRequestRecord = {
@@ -139,12 +146,15 @@ export class SessionManager {
 	private readonly sessionsChangedEmitter = new EventEmitter();
 	private readonly sessionAttachedEmitter = new EventEmitter();
 	private readonly sessionDetachedEmitter = new EventEmitter();
+	private readonly sessionEventEmitter = new EventEmitter();
+	private readonly walStore: WalStore;
 
 	constructor(private readonly config: CliConfig) {
 		this.backendById = new Map(
 			config.acpBackends.map((backend) => [backend.id, backend]),
 		);
 		this.defaultBackendId = config.defaultAcpBackendId;
+		this.walStore = new WalStore(config.walDbPath);
 	}
 
 	listSessions(): SessionSummary[] {
@@ -155,6 +165,13 @@ export class SessionManager {
 
 	getSession(sessionId: string): SessionRecord | undefined {
 		return this.sessions.get(sessionId);
+	}
+
+	/**
+	 * Get the current WAL revision for a session.
+	 */
+	getSessionRevision(sessionId: string): number | undefined {
+		return this.sessions.get(sessionId)?.revision;
 	}
 
 	onSessionUpdate(listener: (notification: SessionNotification) => void) {
@@ -232,6 +249,119 @@ export class SessionManager {
 		};
 	}
 
+	/**
+	 * Listen for session events (WAL-persisted events with seq/revision).
+	 */
+	onSessionEvent(listener: (event: SessionEvent) => void) {
+		this.sessionEventEmitter.on("event", listener);
+		return () => {
+			this.sessionEventEmitter.off("event", listener);
+		};
+	}
+
+	/**
+	 * Query session events from the WAL.
+	 */
+	getSessionEvents(params: SessionEventsParams): SessionEventsResponse {
+		const record = this.sessions.get(params.sessionId);
+		if (!record) {
+			return {
+				sessionId: params.sessionId,
+				machineId: this.config.machineId,
+				revision: params.revision,
+				events: [],
+				hasMore: false,
+			};
+		}
+
+		const limit = params.limit ?? 100;
+		const events = this.walStore.queryEvents({
+			sessionId: params.sessionId,
+			revision: params.revision,
+			afterSeq: params.afterSeq,
+			limit: limit + 1, // Query one extra to check hasMore
+		});
+
+		const hasMore = events.length > limit;
+		const resultEvents = hasMore ? events.slice(0, limit) : events;
+
+		return {
+			sessionId: params.sessionId,
+			machineId: this.config.machineId,
+			revision: params.revision,
+			events: resultEvents.map((e) => ({
+				sessionId: e.sessionId,
+				machineId: this.config.machineId,
+				revision: e.revision,
+				seq: e.seq,
+				kind: e.kind,
+				createdAt: e.createdAt,
+				payload: e.payload,
+			})),
+			nextAfterSeq:
+				resultEvents.length > 0
+					? resultEvents[resultEvents.length - 1].seq
+					: undefined,
+			hasMore,
+		};
+	}
+
+	/**
+	 * Get unacked events for a session/revision (for reconnection replay).
+	 */
+	getUnackedEvents(
+		sessionId: string,
+		revision: number,
+	): SessionEvent[] {
+		const events = this.walStore.getUnackedEvents(sessionId, revision);
+		return events.map((e) => ({
+			sessionId: e.sessionId,
+			machineId: this.config.machineId,
+			revision: e.revision,
+			seq: e.seq,
+			kind: e.kind,
+			createdAt: e.createdAt,
+			payload: e.payload,
+		}));
+	}
+
+	/**
+	 * Acknowledge events up to a given sequence.
+	 */
+	ackEvents(sessionId: string, revision: number, upToSeq: number): void {
+		this.walStore.ackEvents(sessionId, revision, upToSeq);
+	}
+
+	/**
+	 * Write an event to the WAL and emit it.
+	 */
+	private writeAndEmitEvent(
+		sessionId: string,
+		revision: number,
+		kind: SessionEventKind,
+		payload: unknown,
+	): SessionEvent {
+		const walEvent = this.walStore.appendEvent({
+			sessionId,
+			revision,
+			kind,
+			payload,
+		});
+
+		const event: SessionEvent = {
+			sessionId: walEvent.sessionId,
+			machineId: this.config.machineId,
+			revision: walEvent.revision,
+			seq: walEvent.seq,
+			kind: walEvent.kind,
+			createdAt: walEvent.createdAt,
+			payload: walEvent.payload,
+		};
+
+		this.sessionEventEmitter.emit("event", event);
+		return event;
+	}
+
 	private emitSessionsChanged(payload: SessionsChangedPayload) {
 		this.sessionsChangedEmitter.emit("changed", payload);
 	}
@@ -286,8 +416,8 @@ export class SessionManager {
 		outcome: RequestPermissionResponse["outcome"],
 	): PermissionDecisionPayload {
 		const key = buildPermissionKey(sessionId, requestId);
-		const record = this.permissionRequests.get(key);
-		if (!record) {
+		const permRecord = this.permissionRequests.get(key);
+		if (!permRecord) {
 			throw new AppError(
 				createErrorDetail({
 					code: "REQUEST_VALIDATION_FAILED",
@@ -299,13 +429,25 @@ export class SessionManager {
 			);
 		}
 		const response: RequestPermissionResponse = { outcome };
-		record.resolve(response);
+		permRecord.resolve(response);
 		this.permissionRequests.delete(key);
 		const payload: PermissionDecisionPayload = {
 			sessionId,
 			requestId,
 			outcome,
 		};
+
+		// Write permission result to WAL
+		const sessionRecord = this.sessions.get(sessionId);
+		if (sessionRecord) {
+			this.writeAndEmitEvent(
+				sessionId,
+				sessionRecord.revision,
+				"permission_result",
+				payload,
+			);
+		}
+
 		this.permissionResultEmitter.emit("result", payload);
 		return payload;
 	}
@@ -356,6 +498,16 @@ export class SessionManager {
 			const { modeId, modeName, availableModes } = resolveModeState(
 				session.modes,
 			);
+
+			// Initialize WAL session
+			const { revision } = this.walStore.ensureSession({
+				sessionId: session.sessionId,
+				machineId: this.config.machineId,
+				backendId: backend.id,
+				cwd: options?.cwd,
+				title: options?.title ?? `Session ${this.sessions.size + 1}`,
+			});
+
 			const record: SessionRecord = {
 				sessionId: session.sessionId,
 				title: options?.title ?? `Session ${this.sessions.size + 1}`,
@@ -373,19 +525,36 @@ export class SessionManager {
 				availableModes,
 				availableModels,
 				availableCommands: undefined,
+				revision,
 			};
 			record.unsubscribe = connection.onSessionUpdate(
 				(notification: SessionNotification) => {
 					record.updatedAt = new Date();
+					// Write to WAL first, then emit
+					this.writeSessionUpdateToWal(record, notification);
 					this.sessionUpdateEmitter.emit("update", notification);
 					this.applySessionUpdateToRecord(record, notification);
 				},
 			);
 			record.unsubscribeTerminal = connection.onTerminalOutput((event) => {
+				// Write terminal output to WAL
+				this.writeAndEmitEvent(
+					record.sessionId,
+					record.revision,
+					"terminal_output",
+					event,
+				);
 				this.terminalOutputEmitter.emit("output", event);
 			});
 			connection.onStatusChange((status) => {
 				if (status.error) {
+					// Write error to WAL
+					this.writeAndEmitEvent(
+						record.sessionId,
+						record.revision,
+						"session_error",
+						{ error: status.error },
+					);
 					this.sessionErrorEmitter.emit("error", {
 						sessionId: session.sessionId,
 						error: status.error,
@@ -449,18 +618,28 @@ export class SessionManager {
 		const promise = new Promise<RequestPermissionResponse>((resolve) => {
 			resolver = resolve;
 		});
-		const record: PermissionRequestRecord = {
+		const permRecord: PermissionRequestRecord = {
 			sessionId,
 			requestId,
 			params,
 			promise,
 			resolve: resolver,
 		};
-		this.permissionRequests.set(key, record);
-		this.permissionRequestEmitter.emit(
-			"request",
-			this.buildPermissionRequestPayload(record),
-		);
+		this.permissionRequests.set(key, permRecord);
+		const payload = this.buildPermissionRequestPayload(permRecord);
+
+		// Write permission request to WAL
+		const sessionRecord = this.sessions.get(sessionId);
+		if (sessionRecord) {
+			this.writeAndEmitEvent(
+				sessionId,
+				sessionRecord.revision,
+				"permission_request",
+				payload,
+			);
+		}
+
+		this.permissionRequestEmitter.emit("request", payload);
 		return promise;
 	}
 
@@ -654,6 +833,14 @@ export class SessionManager {
 	}
 
 	/**
+	 * Shutdown the session manager and close resources.
+	 */
+	async shutdown(): Promise<void> {
+		await this.closeAll();
+		this.walStore.close();
+	}
+
+	/**
 	 * Discover sessions persisted by the ACP agent.
 	 * Creates a temporary connection to query sessions.
 	 * @param options Optional parameters for discovery
@@ -766,10 +953,22 @@ export class SessionManager {
 				);
 			}
 
+			// Initialize WAL session
+			const { revision } = this.walStore.ensureSession({
+				sessionId,
+				machineId: this.config.machineId,
+				backendId: backend.id,
+				cwd,
+			});
+
 			const bufferedUpdates: SessionNotification[] = [];
 			let recordRef: SessionRecord | undefined;
 			const unsubscribe = connection.onSessionUpdate(
 				(notification: SessionNotification) => {
+					// Write to WAL first
+					if (recordRef) {
+						this.writeSessionUpdateToWal(recordRef, notification);
+					}
 					this.sessionUpdateEmitter.emit("update", notification);
 					if (recordRef) {
 						recordRef.updatedAt = new Date();
@@ -812,11 +1011,15 @@ export class SessionManager {
 				availableModes,
 				availableModels,
 				availableCommands: undefined,
+				revision,
 			};
 
 			recordRef = record;
 			record.unsubscribe = unsubscribe;
+
+			// Write buffered updates to WAL
 			for (const notification of bufferedUpdates) {
+				this.writeSessionUpdateToWal(record, notification);
 				this.applySessionUpdateToRecord(record, notification);
 			}
 
@@ -860,6 +1063,10 @@ export class SessionManager {
 			);
 		}
 
+		// Increment revision in WAL (signals a fresh replay)
+		const newRevision = this.walStore.incrementRevision(sessionId);
+		existing.revision = newRevision;
+
 		const response = await existing.connection.loadSession(sessionId, cwd);
 		const { modelId, modelName, availableModels } = resolveModelState(
 			response.models,
@@ -888,7 +1095,7 @@ export class SessionManager {
 		});
 		this.emitSessionAttached(sessionId, true);
 
-		logger.info({ sessionId, backendId }, "session_reloaded");
+		logger.info({ sessionId, backendId, revision: newRevision }, "session_reloaded");
 
 		return summary;
 	}
@@ -921,6 +1128,46 @@ export class SessionManager {
 	}
 
 	/**
+	 * Map a SessionNotification to WAL event kind and write to WAL.
+	 */
+	private writeSessionUpdateToWal(
+		record: SessionRecord,
+		notification: SessionNotification,
+	): void {
+		const update = notification.update;
+		let kind: SessionEventKind;
+
+		switch (update.sessionUpdate) {
+			case "user_message_chunk":
+				kind = "user_message";
+				break;
+			case "agent_message_chunk":
+				kind = "agent_message_chunk";
+				break;
+			case "tool_call":
+				kind = "tool_call";
+				break;
+			case "tool_call_update":
+				kind = "tool_call_update";
+				break;
+			case "session_info_update":
+			case "current_mode_update":
+			case "available_commands_update":
+				kind = "session_info_update";
+				break;
+			default:
+				// For unknown types, log but don't write to WAL
+				logger.debug(
+					{ sessionId: record.sessionId, updateType: update.sessionUpdate },
+					"unknown_session_update_type",
+				);
+				return;
+		}
+
+		this.writeAndEmitEvent(record.sessionId, record.revision, kind, notification);
+	}
+
+	/**
 	 * Set up event subscriptions for a session record.
 	 */
 	private setupSessionSubscriptions(
@@ -933,6 +1180,8 @@ export class SessionManager {
 			record.unsubscribe = connection.onSessionUpdate(
 				(notification: SessionNotification) => {
 					record.updatedAt = new Date();
+					// Write to WAL first, then emit
+					this.writeSessionUpdateToWal(record, notification);
 					this.sessionUpdateEmitter.emit("update", notification);
 					this.applySessionUpdateToRecord(record, notification);
 				},
@@ -940,11 +1189,25 @@ export class SessionManager {
 		}
 
 		record.unsubscribeTerminal = connection.onTerminalOutput((event) => {
+			// Write terminal output to WAL
+			this.writeAndEmitEvent(
+				sessionId,
+				record.revision,
+				"terminal_output",
+				event,
+			);
 			this.terminalOutputEmitter.emit("output", event);
 		});
 
 		connection.onStatusChange((status) => {
 			if (status.error) {
+				// Write error to WAL
+				this.writeAndEmitEvent(
+					sessionId,
+					record.revision,
+					"session_error",
+					{ error: status.error },
+				);
 				this.sessionErrorEmitter.emit("error", {
 					sessionId,
 					error: status.error,

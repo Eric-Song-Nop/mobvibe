@@ -20,6 +20,57 @@ import type {
 	SessionsChangedPayload,
 } from "./session.js";
 
+// Session event types for WAL-based persistence
+
+/** Event kinds stored in the CLI WAL */
+export type SessionEventKind =
+	| "user_message"
+	| "agent_message_chunk"
+	| "turn_end"
+	| "tool_call"
+	| "tool_call_update"
+	| "permission_request"
+	| "permission_result"
+	| "terminal_output"
+	| "session_info_update"
+	| "session_error";
+
+/** A persisted session event with sequence tracking */
+export type SessionEvent = {
+	sessionId: string;
+	machineId: string;
+	revision: number;
+	seq: number;
+	kind: SessionEventKind;
+	createdAt: string;
+	payload: unknown;
+};
+
+/** Parameters for fetching session events (backfill) */
+export type SessionEventsParams = {
+	sessionId: string;
+	revision: number;
+	afterSeq: number;
+	limit?: number;
+};
+
+/** Response from session events query */
+export type SessionEventsResponse = {
+	sessionId: string;
+	machineId: string;
+	revision: number;
+	events: SessionEvent[];
+	nextAfterSeq?: number;
+	hasMore: boolean;
+};
+
+/** Acknowledgment payload for events received by gateway */
+export type EventsAckPayload = {
+	sessionId: string;
+	revision: number;
+	upToSeq: number;
+};
+
 // Permission request payload sent through Socket.io
 export type PermissionRequestPayload = {
 	sessionId: string;
@@ -216,6 +267,7 @@ export interface CliToGatewayEvents {
 	"cli:register": (info: CliRegistrationInfo) => void;
 	"cli:heartbeat": () => void;
 	"session:update": (notification: SessionNotification) => void;
+	"session:event": (event: SessionEvent) => void;
 	"session:error": (payload: StreamErrorPayload) => void;
 	"session:attached": (payload: SessionAttachedPayload) => void;
 	"session:detached": (payload: SessionDetachedPayload) => void;
@@ -234,6 +286,7 @@ export interface CliToGatewayEvents {
 export interface GatewayToCliEvents {
 	"cli:registered": (info: { machineId: string; userId?: string }) => void;
 	"cli:error": (payload: CliErrorPayload) => void;
+	"events:ack": (payload: EventsAckPayload) => void;
 
 	// RPC requests
 	"rpc:session:create": (request: RpcRequest<CreateSessionParams>) => void;
@@ -245,6 +298,7 @@ export interface GatewayToCliEvents {
 	"rpc:permission:decision": (
 		request: RpcRequest<PermissionDecisionPayload>,
 	) => void;
+	"rpc:session:events": (request: RpcRequest<SessionEventsParams>) => void;
 
 	// File system RPC requests
 	"rpc:fs:roots": (request: RpcRequest<{ sessionId: string }>) => void;
@@ -276,6 +330,7 @@ export interface WebuiToGatewayEvents {
 // Gateway -> Webui events
 export interface GatewayToWebuiEvents {
 	"session:update": (notification: SessionNotification) => void;
+	"session:event": (event: SessionEvent) => void;
 	"session:error": (payload: StreamErrorPayload) => void;
 	"session:attached": (payload: SessionAttachedPayload) => void;
 	"session:detached": (payload: SessionDetachedPayload) => void;

@@ -5,6 +5,7 @@ import type {
 	RpcResponse,
 	SessionAttachedPayload,
 	SessionDetachedPayload,
+	SessionEvent,
 	SessionNotification,
 	SessionSummary,
 	SessionsChangedPayload,
@@ -308,6 +309,28 @@ export function setupCliHandlers(
 				"terminal_output_received",
 			);
 			emitToWebui("terminal:output", event);
+		});
+
+		// Session event (WAL-persisted events with seq/revision)
+		socket.on("session:event", (event: SessionEvent) => {
+			logger.debug(
+				{
+					sessionId: event.sessionId,
+					revision: event.revision,
+					seq: event.seq,
+					kind: event.kind,
+					socketId: socket.id,
+				},
+				"session_event_received",
+			);
+			emitToWebui("session:event", event);
+
+			// Send acknowledgment back to CLI
+			socket.emit("events:ack", {
+				sessionId: event.sessionId,
+				revision: event.revision,
+				upToSeq: event.seq,
+			});
 		});
 
 		// RPC response

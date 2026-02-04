@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type {
 	CliToGatewayEvents,
+	EventsAckPayload,
 	FsEntry,
 	FsRoot,
 	GatewayToCliEvents,
@@ -11,6 +12,7 @@ import type {
 	RpcResponse,
 	SessionFsFilePreview,
 	SessionFsResourceEntry,
+	SessionEventsResponse,
 	StopReason,
 } from "@mobvibe/shared";
 import ignore, { type Ignore } from "ignore";
@@ -155,8 +157,12 @@ export class SocketClient extends EventEmitter {
 
 	private setupEventHandlers() {
 		this.socket.on("connect", () => {
+			const wasReconnect = this.reconnectAttempts > 0;
 			logger.info(
-				{ gatewayUrl: this.options.config.gatewayUrl },
+				{
+					gatewayUrl: this.options.config.gatewayUrl,
+					wasReconnect,
+				},
 				"gateway_connected",
 			);
 			this.connected = true;
@@ -164,6 +170,12 @@ export class SocketClient extends EventEmitter {
 			logger.info("gateway_register_start");
 			this.register();
 			this.startHeartbeat();
+
+			// On reconnect, replay unacked events for all active sessions
+			if (wasReconnect) {
+				this.replayUnackedEvents();
+			}
+
 			this.emit("connected");
 		});
 
@@ -217,6 +229,23 @@ export class SocketClient extends EventEmitter {
 		this.socket.on("cli:error", (error) => {
 			logger.error({ err: error }, "gateway_auth_error");
 			this.emit("auth_error", error);
+		});
+
+		// Handle event acknowledgments from gateway
+		this.socket.on("events:ack", (payload: EventsAckPayload) => {
+			logger.debug(
+				{
+					sessionId: payload.sessionId,
+					revision: payload.revision,
+					upToSeq: payload.upToSeq,
+				},
+				"events_acked",
+			);
+			this.options.sessionManager.ackEvents(
+				payload.sessionId,
+				payload.revision,
+				payload.upToSeq,
+			);
 		});
 	}
 
@@ -789,6 +818,42 @@ export class SocketClient extends EventEmitter {
 				this.sendRpcError(request.requestId, error);
 			}
 		});
+
+		// Session events RPC handler (for backfill)
+		this.socket.on("rpc:session:events", (request) => {
+			try {
+				const { sessionId, revision, afterSeq, limit } = request.params;
+				logger.debug(
+					{
+						requestId: request.requestId,
+						sessionId,
+						revision,
+						afterSeq,
+						limit,
+					},
+					"rpc_session_events",
+				);
+
+				const result = sessionManager.getSessionEvents({
+					sessionId,
+					revision,
+					afterSeq,
+					limit,
+				});
+
+				this.sendRpcResponse<SessionEventsResponse>(request.requestId, result);
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_session_events_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
 	}
 
 	private setupSessionManagerListeners() {
@@ -851,6 +916,13 @@ export class SocketClient extends EventEmitter {
 		sessionManager.onSessionDetached((payload) => {
 			if (this.connected) {
 				this.socket.emit("session:detached", payload);
+			}
+		});
+
+		// Listen for WAL-persisted session events
+		sessionManager.onSessionEvent((event) => {
+			if (this.connected) {
+				this.socket.emit("session:event", event);
 			}
 		});
 	}
@@ -965,6 +1037,39 @@ export class SocketClient extends EventEmitter {
 		if (this.heartbeatInterval) {
 			clearInterval(this.heartbeatInterval);
 			this.heartbeatInterval = undefined;
+		}
+	}
+
+	/**
+	 * Replay unacked events for all active sessions after reconnection.
+	 */
+	private replayUnackedEvents() {
+		const { sessionManager } = this.options;
+		const sessions = sessionManager.listSessions();
+
+		for (const session of sessions) {
+			const revision = sessionManager.getSessionRevision(session.sessionId);
+			if (revision === undefined) continue;
+
+			const unackedEvents = sessionManager.getUnackedEvents(
+				session.sessionId,
+				revision,
+			);
+
+			if (unackedEvents.length > 0) {
+				logger.info(
+					{
+						sessionId: session.sessionId,
+						revision,
+						count: unackedEvents.length,
+					},
+					"replaying_unacked_events",
+				);
+
+				for (const event of unackedEvents) {
+					this.socket.emit("session:event", event);
+				}
+			}
 		}
 	}
 

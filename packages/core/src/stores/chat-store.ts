@@ -131,6 +131,11 @@ export type ChatSession = {
 		| "gateway_disconnect"
 		| "unknown";
 	isLoading?: boolean;
+	/** WAL cursor tracking for sync */
+	revision?: number;
+	lastAppliedSeq?: number;
+	/** Whether backfill is in progress */
+	isBackfilling?: boolean;
 };
 
 type ChatState = {
@@ -249,6 +254,16 @@ type ChatState = {
 		},
 	) => void;
 	finalizeAssistantMessage: (sessionId: string) => void;
+	/** Update session cursor (revision + lastAppliedSeq) */
+	updateSessionCursor: (
+		sessionId: string,
+		revision: number,
+		lastAppliedSeq: number,
+	) => void;
+	/** Set backfilling state for a session */
+	setSessionBackfilling: (sessionId: string, isBackfilling: boolean) => void;
+	/** Reset session cursor when revision changes (clear messages) */
+	resetSessionForRevision: (sessionId: string, newRevision: number) => void;
 };
 
 type PersistedChatState = Pick<
@@ -488,10 +503,18 @@ const sanitizeSessionForPersist = (session: ChatSession): ChatSession => ({
 	streamingMessageRole: undefined,
 	isAttached: false,
 	isLoading: false,
+	isBackfilling: false,
 	attachedAt: undefined,
 	detachedAt: undefined,
 	detachedReason: undefined,
-	messages: session.messages.map(sanitizeMessageForPersist),
+	// Only persist cursors if set, otherwise persist messages (backwards compat)
+	// When cursors are set, clear messages as they will be backfilled
+	messages: session.revision !== undefined
+		? []
+		: session.messages.map(sanitizeMessageForPersist),
+	// Preserve cursor for backfill on reload
+	revision: session.revision,
+	lastAppliedSeq: session.lastAppliedSeq,
 });
 
 const partializeChatState = (state: ChatState): PersistedChatState => ({
@@ -1207,6 +1230,54 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
+			updateSessionCursor: (sessionId, revision, lastAppliedSeq) =>
+				set((state: ChatState) => {
+					const session = state.sessions[sessionId];
+					if (!session) return state;
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: {
+								...session,
+								revision,
+								lastAppliedSeq,
+							},
+						},
+					};
+				}),
+			setSessionBackfilling: (sessionId, isBackfilling) =>
+				set((state: ChatState) => {
+					const session = state.sessions[sessionId];
+					if (!session) return state;
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: {
+								...session,
+								isBackfilling,
+							},
+						},
+					};
+				}),
+			resetSessionForRevision: (sessionId, newRevision) =>
+				set((state: ChatState) => {
+					const session = state.sessions[sessionId];
+					if (!session) return state;
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: {
+								...session,
+								messages: [],
+								terminalOutputs: {},
+								streamingMessageId: undefined,
+								streamingMessageRole: undefined,
+								revision: newRevision,
+								lastAppliedSeq: 0,
+							},
+						},
+					};
+				}),
 		}),
 		{
 			name: STORAGE_KEY,
@@ -1226,3 +1297,20 @@ export const useChatStore = create<ChatState>()(
 		},
 	),
 );
+
+/**
+ * Get session cursor for backfill purposes.
+ * Use this to determine where to start backfilling events.
+ */
+export function getSessionCursor(sessionId: string): {
+	revision: number;
+	lastAppliedSeq: number;
+} | null {
+	const state = useChatStore.getState();
+	const session = state.sessions[sessionId];
+	if (!session || session.revision === undefined) return null;
+	return {
+		revision: session.revision,
+		lastAppliedSeq: session.lastAppliedSeq ?? 0,
+	};
+}

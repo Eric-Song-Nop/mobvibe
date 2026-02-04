@@ -5,6 +5,7 @@ import type {
 	PermissionRequestPayload,
 	SessionAttachedPayload,
 	SessionDetachedPayload,
+	SessionEvent,
 	SessionNotification,
 	StreamErrorPayload,
 	TerminalOutputEvent,
@@ -69,6 +70,8 @@ type UseSocketOptions = {
 	) => void;
 	onPermissionRequest?: (payload: PermissionRequestPayload) => void;
 	onSessionError?: (payload: StreamErrorPayload) => void;
+	/** Called when a session:event is received (for cursor tracking) */
+	onSessionEvent?: (event: SessionEvent) => void;
 };
 
 export function useSocket({
@@ -90,6 +93,7 @@ export function useSocket({
 	markSessionDetached,
 	onPermissionRequest,
 	onSessionError,
+	onSessionEvent,
 }: UseSocketOptions) {
 	const subscribedSessionsRef = useRef<Set<string>>(new Set());
 	const sessionsRef = useRef(sessions);
@@ -204,6 +208,11 @@ export function useSocket({
 			updateMachine(payload);
 		};
 
+		// Session event handler (WAL-persisted events)
+		const handleSessionEvent = (event: SessionEvent) => {
+			onSessionEvent?.(event);
+		};
+
 		// Set up listeners
 		const unsubUpdate = gatewaySocket.onSessionUpdate(handleSessionUpdate);
 		const unsubError = gatewaySocket.onSessionError(handleSessionError);
@@ -221,6 +230,7 @@ export function useSocket({
 		const unsubSessionDetached = gatewaySocket.onSessionDetached(
 			handleSessionDetached,
 		);
+		const unsubSessionEvent = gatewaySocket.onSessionEvent(handleSessionEvent);
 
 		const handleDisconnect = () => {
 			const now = new Date().toISOString();
@@ -248,6 +258,7 @@ export function useSocket({
 			unsubCliStatus();
 			unsubSessionAttached();
 			unsubSessionDetached();
+			unsubSessionEvent();
 			gatewaySocket.disconnect();
 		};
 	}, [
@@ -268,6 +279,7 @@ export function useSocket({
 		updateToolCall,
 		onPermissionRequest,
 		onSessionError,
+		onSessionEvent,
 	]);
 
 	// Subscribe to sessions while attached or loading (load replays history)

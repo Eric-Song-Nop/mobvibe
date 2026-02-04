@@ -577,5 +577,87 @@ export function setupSessionRoutes(
 		},
 	);
 
+	// Get session events for backfill
+	router.get(
+		"/session/events",
+		async (request: AuthenticatedRequest, response) => {
+			const { sessionId, revision, afterSeq, limit } = request.query ?? {};
+			if (
+				typeof sessionId !== "string" ||
+				typeof revision !== "string" ||
+				typeof afterSeq !== "string"
+			) {
+				respondError(
+					response,
+					buildRequestValidationError(
+						"sessionId, revision, and afterSeq required",
+					),
+					400,
+				);
+				return;
+			}
+
+			const revisionNum = Number.parseInt(revision, 10);
+			const afterSeqNum = Number.parseInt(afterSeq, 10);
+			const limitNum =
+				typeof limit === "string" ? Number.parseInt(limit, 10) : undefined;
+
+			if (Number.isNaN(revisionNum) || Number.isNaN(afterSeqNum)) {
+				respondError(
+					response,
+					buildRequestValidationError("revision and afterSeq must be numbers"),
+					400,
+				);
+				return;
+			}
+
+			try {
+				const userId = getUserId(request);
+				logger.debug(
+					{ sessionId, revision: revisionNum, afterSeq: afterSeqNum, userId },
+					"session_events_request",
+				);
+				const result = await sessionRouter.getSessionEvents(
+					{
+						sessionId,
+						revision: revisionNum,
+						afterSeq: afterSeqNum,
+						limit: limitNum,
+					},
+					userId,
+				);
+				logger.debug(
+					{
+						sessionId,
+						eventCount: result.events.length,
+						hasMore: result.hasMore,
+						userId,
+					},
+					"session_events_success",
+				);
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				logger.error({ err: error, sessionId }, "session_events_error");
+				if (message.includes("Not authorized")) {
+					respondError(response, buildAuthorizationError(message), 403);
+				} else if (message.includes("Session not found")) {
+					respondError(
+						response,
+						createErrorDetail({
+							code: "SESSION_NOT_FOUND",
+							message,
+							retryable: false,
+							scope: "session",
+						}),
+						404,
+					);
+				} else {
+					respondError(response, createInternalError("session", message));
+				}
+			}
+		},
+	);
+
 	return router;
 }
