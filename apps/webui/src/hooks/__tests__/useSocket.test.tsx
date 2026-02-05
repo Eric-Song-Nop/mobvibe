@@ -8,6 +8,30 @@ const handlers = vi.hoisted(
 	() => ({}) as Record<string, ((payload?: unknown) => void) | undefined>,
 );
 
+// Store state that can be mutated by tests
+const mockStoreState = vi.hoisted(
+	() =>
+		({
+			sessions: {} as Record<string, ChatSession>,
+		}) as { sessions: Record<string, ChatSession> },
+);
+
+// Mock useChatStore.getState() to return our controlled state
+vi.mock("@mobvibe/core", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@mobvibe/core")>();
+	return {
+		...actual,
+		useChatStore: {
+			getState: () => mockStoreState,
+		},
+		useSessionBackfill: () => ({
+			startBackfill: vi.fn(),
+			cancelBackfill: vi.fn(),
+			isBackfilling: vi.fn(() => false),
+		}),
+	};
+});
+
 const mockGatewaySocket = vi.hoisted(() => ({
 	connect: vi.fn(),
 	disconnect: vi.fn(),
@@ -15,12 +39,9 @@ const mockGatewaySocket = vi.hoisted(() => ({
 	unsubscribeFromSession: vi.fn(),
 	getSubscribedSessions: vi.fn(() => []),
 	getGatewayUrl: vi.fn(() => "http://localhost:3005"),
-	onSessionUpdate: vi.fn(),
-	onSessionError: vi.fn(),
 	onSessionEvent: vi.fn(),
 	onPermissionRequest: vi.fn(),
 	onPermissionResult: vi.fn(),
-	onTerminalOutput: vi.fn(),
 	onSessionsChanged: vi.fn(),
 	onSessionAttached: vi.fn(),
 	onSessionDetached: vi.fn(),
@@ -45,8 +66,36 @@ vi.mock("react-i18next", async (importOriginal) => {
 	};
 });
 
-const createStore = (): ChatStoreActions =>
-	({
+const createStore = (): ChatStoreActions => {
+	// Create updateSessionCursor that also updates the mock store state
+	const updateSessionCursor = vi.fn(
+		(sessionId: string, revision: number, seq: number) => {
+			const session = mockStoreState.sessions[sessionId];
+			if (session) {
+				mockStoreState.sessions[sessionId] = {
+					...session,
+					revision,
+					lastAppliedSeq: seq,
+				};
+			}
+		},
+	);
+
+	// Create resetSessionForRevision that resets the session
+	const resetSessionForRevision = vi.fn(
+		(sessionId: string, revision: number) => {
+			const session = mockStoreState.sessions[sessionId];
+			if (session) {
+				mockStoreState.sessions[sessionId] = {
+					...session,
+					revision,
+					lastAppliedSeq: 0,
+				};
+			}
+		},
+	);
+
+	return {
 		sessions: {},
 		setActiveSessionId: vi.fn(),
 		setLastCreatedCwd: vi.fn(),
@@ -79,10 +128,10 @@ const createStore = (): ChatStoreActions =>
 		handleSessionsChanged: vi.fn(),
 		clearSessionMessages: vi.fn(),
 		restoreSessionMessages: vi.fn(),
-		updateSessionCursor: vi.fn(),
-		setSessionBackfilling: vi.fn(),
-		resetSessionForRevision: vi.fn(),
-	}) as unknown as ChatStoreActions;
+		updateSessionCursor,
+		resetSessionForRevision,
+	} as unknown as ChatStoreActions;
+};
 
 const buildSession = (overrides: Partial<ChatSession> = {}): ChatSession => ({
 	sessionId: "session-1",
@@ -100,6 +149,9 @@ const buildSession = (overrides: Partial<ChatSession> = {}): ChatSession => ({
 
 describe("useSocket (webui)", () => {
 	beforeEach(() => {
+		// Reset mock store state
+		mockStoreState.sessions = {};
+
 		for (const key of Object.keys(handlers)) {
 			delete handlers[key];
 		}
@@ -108,22 +160,6 @@ describe("useSocket (webui)", () => {
 		mockGatewaySocket.subscribeToSession.mockReset();
 		mockGatewaySocket.unsubscribeFromSession.mockReset();
 
-		mockGatewaySocket.onSessionUpdate.mockImplementation(
-			(handler: () => void) => {
-				handlers.sessionUpdate = handler;
-				return () => {
-					handlers.sessionUpdate = undefined;
-				};
-			},
-		);
-		mockGatewaySocket.onSessionError.mockImplementation(
-			(handler: () => void) => {
-				handlers.sessionError = handler;
-				return () => {
-					handlers.sessionError = undefined;
-				};
-			},
-		);
 		mockGatewaySocket.onPermissionRequest.mockImplementation(
 			(handler: () => void) => {
 				handlers.permissionRequest = handler;
@@ -137,14 +173,6 @@ describe("useSocket (webui)", () => {
 				handlers.permissionResult = handler;
 				return () => {
 					handlers.permissionResult = undefined;
-				};
-			},
-		);
-		mockGatewaySocket.onTerminalOutput.mockImplementation(
-			(handler: () => void) => {
-				handlers.terminalOutput = handler;
-				return () => {
-					handlers.terminalOutput = undefined;
 				};
 			},
 		);
@@ -222,7 +250,6 @@ describe("useSocket (webui)", () => {
 					markSessionDetached: store.markSessionDetached,
 					createLocalSession: store.createLocalSession,
 					updateSessionCursor: store.updateSessionCursor,
-					setSessionBackfilling: store.setSessionBackfilling,
 					resetSessionForRevision: store.resetSessionForRevision,
 				}),
 			{ initialProps: { sessions } },
@@ -270,7 +297,6 @@ describe("useSocket (webui)", () => {
 				markSessionDetached: store.markSessionDetached,
 				createLocalSession: store.createLocalSession,
 				updateSessionCursor: store.updateSessionCursor,
-				setSessionBackfilling: store.setSessionBackfilling,
 				resetSessionForRevision: store.resetSessionForRevision,
 			}),
 		);
@@ -316,7 +342,6 @@ describe("useSocket (webui)", () => {
 				markSessionDetached: store.markSessionDetached,
 				createLocalSession: store.createLocalSession,
 				updateSessionCursor: store.updateSessionCursor,
-				setSessionBackfilling: store.setSessionBackfilling,
 				resetSessionForRevision: store.resetSessionForRevision,
 			}),
 		);
@@ -342,6 +367,8 @@ describe("useSocket (webui)", () => {
 				lastAppliedSeq: 0,
 			}),
 		};
+		// Set up mock store state so getCursor returns correct values
+		mockStoreState.sessions = { ...sessions };
 
 		renderHook(() =>
 			useSocket({
@@ -361,7 +388,6 @@ describe("useSocket (webui)", () => {
 				markSessionDetached: store.markSessionDetached,
 				createLocalSession: store.createLocalSession,
 				updateSessionCursor: store.updateSessionCursor,
-				setSessionBackfilling: store.setSessionBackfilling,
 				resetSessionForRevision: store.resetSessionForRevision,
 			}),
 		);
@@ -440,6 +466,8 @@ describe("useSocket (webui)", () => {
 				lastAppliedSeq: 5,
 			}),
 		};
+		// Set up mock store state so getCursor returns correct values
+		mockStoreState.sessions = { ...sessions };
 
 		renderHook(() =>
 			useSocket({
@@ -459,7 +487,6 @@ describe("useSocket (webui)", () => {
 				markSessionDetached: store.markSessionDetached,
 				createLocalSession: store.createLocalSession,
 				updateSessionCursor: store.updateSessionCursor,
-				setSessionBackfilling: store.setSessionBackfilling,
 				resetSessionForRevision: store.resetSessionForRevision,
 			}),
 		);
@@ -494,6 +521,8 @@ describe("useSocket (webui)", () => {
 				lastAppliedSeq: 0,
 			}),
 		};
+		// Set up mock store state so getCursor returns correct values
+		mockStoreState.sessions = { ...sessions };
 
 		renderHook(() =>
 			useSocket({
@@ -513,7 +542,6 @@ describe("useSocket (webui)", () => {
 				markSessionDetached: store.markSessionDetached,
 				createLocalSession: store.createLocalSession,
 				updateSessionCursor: store.updateSessionCursor,
-				setSessionBackfilling: store.setSessionBackfilling,
 				resetSessionForRevision: store.resetSessionForRevision,
 			}),
 		);
@@ -554,7 +582,15 @@ describe("useSocket (webui)", () => {
 		// Should only have one cursor update (for seq=1), not for seq=5
 		// Because seq=5 has a gap and should be buffered, not applied
 		expect(store.updateSessionCursor).toHaveBeenCalledTimes(1);
-		// Backfill should be triggered
-		expect(store.setSessionBackfilling).toHaveBeenCalledWith("session-1", true);
+		// The event with gap should NOT trigger appendAssistantChunk for "fifth"
+		// (it should be buffered until backfill fills the gap)
+		expect(store.appendAssistantChunk).toHaveBeenCalledWith(
+			"session-1",
+			"first",
+		);
+		expect(store.appendAssistantChunk).not.toHaveBeenCalledWith(
+			"session-1",
+			"fifth",
+		);
 	});
 });

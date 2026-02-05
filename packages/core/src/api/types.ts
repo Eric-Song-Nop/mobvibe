@@ -4,7 +4,6 @@ export * from "@mobvibe/shared";
 // Import types needed for extraction functions and local types
 import type {
 	AvailableCommand,
-	FsEntry,
 	FsRoot,
 	PermissionOutcome,
 	SessionFsFilePreviewType,

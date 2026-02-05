@@ -7,11 +7,8 @@ import type {
 	SessionAttachedPayload,
 	SessionDetachedPayload,
 	SessionEvent,
-	SessionNotification,
 	SessionSummary,
 	SessionsChangedPayload,
-	StreamErrorPayload,
-	TerminalOutputEvent,
 	WebuiToGatewayEvents,
 } from "../api/types";
 
@@ -93,17 +90,25 @@ export class GatewaySocket {
 		this.socket?.emit("permission:decision", payload);
 	}
 
-	onSessionUpdate(handler: (notification: SessionNotification) => void) {
-		this.socket?.on("session:update", handler);
+	getGatewayUrl(): string {
+		return this.config.getGatewayUrl();
+	}
+
+	getSubscribedSessions(): Set<string> {
+		return new Set(this.subscribedSessions);
+	}
+
+	onConnect(handler: () => void) {
+		this.socket?.on("connect", handler);
 		return () => {
-			this.socket?.off("session:update", handler);
+			this.socket?.off("connect", handler);
 		};
 	}
 
-	onSessionError(handler: (payload: StreamErrorPayload) => void) {
-		this.socket?.on("session:error", handler);
+	onDisconnect(handler: (reason: string) => void) {
+		this.socket?.on("disconnect", handler);
 		return () => {
-			this.socket?.off("session:error", handler);
+			this.socket?.off("disconnect", handler);
 		};
 	}
 
@@ -132,13 +137,6 @@ export class GatewaySocket {
 		this.socket?.on("permission:result", handler);
 		return () => {
 			this.socket?.off("permission:result", handler);
-		};
-	}
-
-	onTerminalOutput(handler: (event: TerminalOutputEvent) => void) {
-		this.socket?.on("terminal:output", handler);
-		return () => {
-			this.socket?.off("terminal:output", handler);
 		};
 	}
 

@@ -3,10 +3,7 @@ import type {
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
 	SessionEvent,
-	SessionNotification,
 	SessionsChangedPayload,
-	StreamErrorPayload,
-	TerminalOutputEvent,
 } from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
 import { auth } from "../lib/auth.js";
@@ -256,9 +253,6 @@ export function setupWebuiHandlers(
 		emitToAll,
 		emitToSubscribers,
 		emitToUser,
-		emitSessionUpdate: (notification: SessionNotification) => {
-			emitToSubscribers(notification.sessionId, "session:update", notification);
-		},
 		emitSessionEvent: (event: SessionEvent) => {
 			emitToSubscribers(event.sessionId, "session:event", event);
 		},
@@ -267,12 +261,6 @@ export function setupWebuiHandlers(
 		},
 		emitPermissionResult: (payload: PermissionDecisionPayload) => {
 			emitToSubscribers(payload.sessionId, "permission:result", payload);
-		},
-		emitTerminalOutput: (event: TerminalOutputEvent) => {
-			emitToSubscribers(event.sessionId, "terminal:output", event);
-		},
-		emitSessionError: (payload: StreamErrorPayload) => {
-			emitToSubscribers(payload.sessionId, "session:error", payload);
 		},
 	};
 }

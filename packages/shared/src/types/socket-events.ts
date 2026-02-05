@@ -3,9 +3,7 @@ import type {
 	PermissionOption,
 	PermissionOutcome,
 	PermissionToolCall,
-	SessionNotification,
 	StopReason,
-	TerminalOutputEvent,
 } from "./acp.js";
 import type { ErrorDetail } from "./errors.js";
 import type {
@@ -263,17 +261,16 @@ export type SessionDetachedPayload = {
 };
 
 // CLI -> Gateway events
+// Note: session:update, session:error, terminal:output are deprecated
+// All content now flows through session:event with appropriate kind
 export interface CliToGatewayEvents {
 	"cli:register": (info: CliRegistrationInfo) => void;
 	"cli:heartbeat": () => void;
-	"session:update": (notification: SessionNotification) => void;
 	"session:event": (event: SessionEvent) => void;
-	"session:error": (payload: StreamErrorPayload) => void;
 	"session:attached": (payload: SessionAttachedPayload) => void;
 	"session:detached": (payload: SessionDetachedPayload) => void;
 	"permission:request": (payload: PermissionRequestPayload) => void;
 	"permission:result": (payload: PermissionDecisionPayload) => void;
-	"terminal:output": (event: TerminalOutputEvent) => void;
 	"sessions:list": (sessions: SessionSummary[]) => void;
 	"sessions:changed": (payload: SessionsChangedPayload) => void;
 	"sessions:discovered": (payload: SessionsDiscoveredPayload) => void;
@@ -328,15 +325,14 @@ export interface WebuiToGatewayEvents {
 }
 
 // Gateway -> Webui events
+// Note: session:update, session:error, terminal:output are deprecated
+// All content now flows through session:event with appropriate kind
 export interface GatewayToWebuiEvents {
-	"session:update": (notification: SessionNotification) => void;
 	"session:event": (event: SessionEvent) => void;
-	"session:error": (payload: StreamErrorPayload) => void;
 	"session:attached": (payload: SessionAttachedPayload) => void;
 	"session:detached": (payload: SessionDetachedPayload) => void;
 	"permission:request": (payload: PermissionRequestPayload) => void;
 	"permission:result": (payload: PermissionDecisionPayload) => void;
-	"terminal:output": (event: TerminalOutputEvent) => void;
 	"cli:status": (payload: CliStatusPayload) => void;
 	"sessions:list": (sessions: SessionSummary[]) => void;
 	"sessions:changed": (payload: SessionsChangedPayload) => void;

@@ -335,6 +335,11 @@ export class SessionManager {
 		kind: SessionEventKind,
 		payload: unknown,
 	): SessionEvent {
+		logger.debug(
+			{ sessionId, revision, kind },
+			"session_write_and_emit_event_start",
+		);
+
 		const walEvent = this.walStore.appendEvent({
 			sessionId,
 			revision,
@@ -352,7 +357,23 @@ export class SessionManager {
 			payload: walEvent.payload,
 		};
 
+		logger.info(
+			{
+				sessionId: event.sessionId,
+				revision: event.revision,
+				seq: event.seq,
+				kind: event.kind,
+			},
+			"session_event_emitting",
+		);
+
 		this.sessionEventEmitter.emit("event", event);
+
+		logger.debug(
+			{ sessionId: event.sessionId, seq: event.seq },
+			"session_event_emitted",
+		);
+
 		return event;
 	}
 
@@ -523,6 +544,13 @@ export class SessionManager {
 			};
 			record.unsubscribe = connection.onSessionUpdate(
 				(notification: SessionNotification) => {
+					logger.debug(
+						{
+							sessionId: session.sessionId,
+							updateType: notification.update.sessionUpdate,
+						},
+						"acp_session_update_received",
+					);
 					record.updatedAt = new Date();
 					// Write to WAL and emit via session:event (unified event channel)
 					this.writeSessionUpdateToWal(record, notification);
@@ -530,6 +558,10 @@ export class SessionManager {
 				},
 			);
 			record.unsubscribeTerminal = connection.onTerminalOutput((event) => {
+				logger.debug(
+					{ sessionId: record.sessionId },
+					"acp_terminal_output_received",
+				);
 				// Write terminal output to WAL (emits via session:event)
 				this.writeAndEmitEvent(
 					record.sessionId,
@@ -1193,6 +1225,15 @@ export class SessionManager {
 		const update = notification.update;
 		let kind: SessionEventKind;
 
+		logger.debug(
+			{
+				sessionId: record.sessionId,
+				revision: record.revision,
+				updateType: update.sessionUpdate,
+			},
+			"write_session_update_to_wal_start",
+		);
+
 		switch (update.sessionUpdate) {
 			case "user_message_chunk":
 				kind = "user_message";
@@ -1213,12 +1254,22 @@ export class SessionManager {
 				break;
 			default:
 				// For unknown types, log but don't write to WAL
-				logger.debug(
+				logger.warn(
 					{ sessionId: record.sessionId, updateType: update.sessionUpdate },
-					"unknown_session_update_type",
+					"unknown_session_update_type_skipped",
 				);
 				return;
 		}
+
+		logger.info(
+			{
+				sessionId: record.sessionId,
+				revision: record.revision,
+				updateType: update.sessionUpdate,
+				kind,
+			},
+			"write_session_update_to_wal_mapped",
+		);
 
 		this.writeAndEmitEvent(
 			record.sessionId,
@@ -1237,9 +1288,21 @@ export class SessionManager {
 	): void {
 		const { sessionId, connection } = record;
 
+		logger.debug(
+			{ sessionId, skipSessionUpdates: options?.skipSessionUpdates },
+			"setup_session_subscriptions",
+		);
+
 		if (!options?.skipSessionUpdates) {
 			record.unsubscribe = connection.onSessionUpdate(
 				(notification: SessionNotification) => {
+					logger.debug(
+						{
+							sessionId,
+							updateType: notification.update.sessionUpdate,
+						},
+						"acp_session_update_received_via_setup",
+					);
 					record.updatedAt = new Date();
 					// Write to WAL and emit via session:event (unified event channel)
 					this.writeSessionUpdateToWal(record, notification);
@@ -1249,6 +1312,7 @@ export class SessionManager {
 		}
 
 		record.unsubscribeTerminal = connection.onTerminalOutput((event) => {
+			logger.debug({ sessionId }, "acp_terminal_output_received_via_setup");
 			// Write terminal output to WAL (emits via session:event)
 			this.writeAndEmitEvent(
 				sessionId,
@@ -1259,6 +1323,10 @@ export class SessionManager {
 		});
 
 		connection.onStatusChange((status) => {
+			logger.debug(
+				{ sessionId, hasError: !!status.error },
+				"acp_status_change",
+			);
 			if (status.error) {
 				// Write error to WAL (emits via session:event)
 				this.writeAndEmitEvent(sessionId, record.revision, "session_error", {

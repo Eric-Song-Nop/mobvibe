@@ -92,15 +92,11 @@ const sessionRouter = new SessionRouter(cliRegistry);
 const webuiEmitter = setupWebuiHandlers(io, cliRegistry, sessionRouter);
 
 // Setup CLI handlers with webui emitter
+// Note: session:update, session:error, and terminal:output are deprecated
+// All content now flows through session:event (WAL-persisted with seq/revision)
 setupCliHandlers(io, cliRegistry, sessionRouter, (event, payload) => {
 	// Route events to appropriate webui subscribers
-	// Note: session:update is deprecated - content updates use session:event
 	switch (event) {
-		case "session:error":
-			webuiEmitter.emitSessionError(
-				payload as Parameters<typeof webuiEmitter.emitSessionError>[0],
-			);
-			break;
 		case "session:attached": {
 			const machineId = (payload as { machineId: string }).machineId;
 			const cli = cliRegistry.getCliByMachineId(machineId);
@@ -129,11 +125,6 @@ setupCliHandlers(io, cliRegistry, sessionRouter, (event, payload) => {
 		case "permission:result":
 			webuiEmitter.emitPermissionResult(
 				payload as Parameters<typeof webuiEmitter.emitPermissionResult>[0],
-			);
-			break;
-		case "terminal:output":
-			webuiEmitter.emitTerminalOutput(
-				payload as Parameters<typeof webuiEmitter.emitTerminalOutput>[0],
 			);
 			break;
 		case "session:event":

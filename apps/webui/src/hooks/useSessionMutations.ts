@@ -137,7 +137,6 @@ export interface ChatStoreActions {
 		revision: number,
 		lastAppliedSeq: number,
 	) => void;
-	setSessionBackfilling: (sessionId: string, isBackfilling: boolean) => void;
 	resetSessionForRevision: (sessionId: string, newRevision: number) => void;
 }
 

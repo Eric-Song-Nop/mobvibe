@@ -903,8 +903,43 @@ export class SocketClient extends EventEmitter {
 		// Unified event channel - all content updates (messages, tool calls,
 		// terminal output, errors) are WAL-persisted and emitted via session:event
 		sessionManager.onSessionEvent((event) => {
+			logger.info(
+				{
+					sessionId: event.sessionId,
+					revision: event.revision,
+					seq: event.seq,
+					kind: event.kind,
+					connected: this.connected,
+				},
+				"session_event_received_from_manager",
+			);
 			if (this.connected) {
+				logger.debug(
+					{
+						sessionId: event.sessionId,
+						revision: event.revision,
+						seq: event.seq,
+						kind: event.kind,
+					},
+					"session_event_emitting_to_gateway",
+				);
 				this.socket.emit("session:event", event);
+				logger.debug(
+					{
+						sessionId: event.sessionId,
+						seq: event.seq,
+					},
+					"session_event_emitted_to_gateway",
+				);
+			} else {
+				logger.warn(
+					{
+						sessionId: event.sessionId,
+						seq: event.seq,
+						kind: event.kind,
+					},
+					"session_event_dropped_not_connected",
+				);
 			}
 		});
 	}

@@ -6,10 +6,7 @@ import type {
 	SessionAttachedPayload,
 	SessionDetachedPayload,
 	SessionEvent,
-	SessionNotification,
 	SessionsChangedPayload,
-	StreamErrorPayload,
-	TerminalOutputEvent,
 	WebuiToGatewayEvents,
 } from "./acp";
 import { getDefaultGatewayUrl } from "./gateway-config";
@@ -98,20 +95,6 @@ class GatewaySocket {
 		this.socket?.emit("permission:decision", payload);
 	}
 
-	onSessionUpdate(handler: (notification: SessionNotification) => void) {
-		this.socket?.on("session:update", handler);
-		return () => {
-			this.socket?.off("session:update", handler);
-		};
-	}
-
-	onSessionError(handler: (payload: StreamErrorPayload) => void) {
-		this.socket?.on("session:error", handler);
-		return () => {
-			this.socket?.off("session:error", handler);
-		};
-	}
-
 	onSessionAttached(handler: (payload: SessionAttachedPayload) => void) {
 		this.socket?.on("session:attached", handler);
 		return () => {
@@ -137,13 +120,6 @@ class GatewaySocket {
 		this.socket?.on("permission:result", handler);
 		return () => {
 			this.socket?.off("permission:result", handler);
-		};
-	}
-
-	onTerminalOutput(handler: (event: TerminalOutputEvent) => void) {
-		this.socket?.on("terminal:output", handler);
-		return () => {
-			this.socket?.off("terminal:output", handler);
 		};
 	}
 

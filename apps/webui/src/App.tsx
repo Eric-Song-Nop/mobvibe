@@ -76,7 +76,6 @@ function MainApp() {
 		clearSessionMessages,
 		restoreSessionMessages,
 		updateSessionCursor,
-		setSessionBackfilling,
 		resetSessionForRevision,
 	} = useChatStore();
 	const {
@@ -154,7 +153,6 @@ function MainApp() {
 		clearSessionMessages,
 		restoreSessionMessages,
 		updateSessionCursor,
-		setSessionBackfilling,
 		resetSessionForRevision,
 	});
 
@@ -192,7 +190,6 @@ function MainApp() {
 		clearSessionMessages,
 		restoreSessionMessages,
 		updateSessionCursor,
-		setSessionBackfilling,
 		resetSessionForRevision,
 	});
 
@@ -213,7 +210,6 @@ function MainApp() {
 		markSessionDetached,
 		createLocalSession,
 		updateSessionCursor,
-		setSessionBackfilling,
 		resetSessionForRevision,
 	});
 

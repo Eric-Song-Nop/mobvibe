@@ -6,24 +6,14 @@ import type {
 	SessionAttachedPayload,
 	SessionDetachedPayload,
 	SessionEvent,
-	SessionNotification,
-	StreamErrorPayload,
-	TerminalOutputEvent,
 	ToolCallUpdate,
-} from "../api/types";
-import {
-	extractAvailableCommandsUpdate,
-	extractSessionInfoUpdate,
-	extractSessionModeUpdate,
 } from "../api/types";
 import type { GatewaySocket } from "../socket/gateway-socket";
 import type { ChatSession } from "../stores/chat-store";
-import { createFallbackError, isErrorDetail, normalizeError } from "../utils";
 
 type UseSocketOptions = {
 	gatewaySocket: GatewaySocket;
 	sessions: Record<string, ChatSession>;
-	t: (key: string) => string;
 	appendAssistantChunk: (sessionId: string, text: string) => void;
 	appendUserChunk: (sessionId: string, text: string) => void;
 	updateSessionMeta: (sessionId: string, payload: Partial<ChatSession>) => void;
@@ -67,7 +57,6 @@ type UseSocketOptions = {
 		payload: Omit<SessionDetachedPayload, "machineId"> & { machineId?: string },
 	) => void;
 	onPermissionRequest?: (payload: PermissionRequestPayload) => void;
-	onSessionError?: (payload: StreamErrorPayload) => void;
 	/** Called when a session:event is received (for cursor tracking) */
 	onSessionEvent?: (event: SessionEvent) => void;
 };
@@ -75,22 +64,15 @@ type UseSocketOptions = {
 export function useSocket({
 	gatewaySocket,
 	sessions,
-	t,
-	appendAssistantChunk,
-	appendUserChunk,
-	updateSessionMeta,
 	setStreamError,
 	addPermissionRequest,
 	setPermissionDecisionState,
 	setPermissionOutcome,
-	addToolCall,
-	updateToolCall,
 	appendTerminalOutput,
 	updateMachine,
 	markSessionAttached,
 	markSessionDetached,
 	onPermissionRequest,
-	onSessionError,
 	onSessionEvent,
 }: UseSocketOptions) {
 	const subscribedSessionsRef = useRef<Set<string>>(new Set());
@@ -100,55 +82,6 @@ export function useSocket({
 	// Connect to gateway on mount
 	useEffect(() => {
 		const socket = gatewaySocket.connect();
-
-		// Session update handler
-		// Note: session:update is deprecated - content updates now come via session:event
-		// This handler is kept for backwards compatibility with older CLI versions
-		// and only processes meta updates (mode/info/commands)
-		const handleSessionUpdate = (notification: SessionNotification) => {
-			const session = sessionsRef.current[notification.sessionId];
-			if (!session) return;
-
-			try {
-				// Only process meta updates - content updates go through session:event
-				const modeUpdate = extractSessionModeUpdate(notification);
-				if (modeUpdate) {
-					const modeName = session.availableModes?.find(
-						(mode) => mode.id === modeUpdate.modeId,
-					)?.name;
-					updateSessionMeta(notification.sessionId, {
-						modeId: modeUpdate.modeId,
-						modeName,
-					});
-				}
-
-				const infoUpdate = extractSessionInfoUpdate(notification);
-				if (infoUpdate) {
-					updateSessionMeta(notification.sessionId, infoUpdate);
-				}
-
-				const availableCommands = extractAvailableCommandsUpdate(notification);
-				if (availableCommands !== null) {
-					updateSessionMeta(notification.sessionId, { availableCommands });
-				}
-			} catch (parseError) {
-				setStreamError(
-					notification.sessionId,
-					normalizeError(
-						parseError,
-						createFallbackError(t("errors.streamParseFailed"), "stream"),
-					),
-				);
-			}
-		};
-
-		// Session error handler
-		const handleSessionError = (payload: StreamErrorPayload) => {
-			if (isErrorDetail(payload.error)) {
-				setStreamError(payload.sessionId, payload.error);
-				onSessionError?.(payload);
-			}
-		};
 
 		const handleSessionAttached = (payload: SessionAttachedPayload) => {
 			markSessionAttached(payload);
@@ -178,37 +111,23 @@ export function useSocket({
 			setPermissionDecisionState(payload.sessionId, payload.requestId, "idle");
 		};
 
-		// Terminal output handler
-		const handleTerminalOutput = (payload: TerminalOutputEvent) => {
-			appendTerminalOutput(payload.sessionId, {
-				terminalId: payload.terminalId,
-				delta: payload.delta,
-				truncated: payload.truncated,
-				output: payload.output,
-				exitStatus: payload.exitStatus ?? undefined,
-			});
-		};
-
 		// CLI status handler
 		const handleCliStatus = (payload: CliStatusPayload) => {
 			updateMachine(payload);
 		};
 
-		// Session event handler (WAL-persisted events)
+		// Session event handler (WAL-persisted events with seq/revision)
 		const handleSessionEvent = (event: SessionEvent) => {
 			onSessionEvent?.(event);
 		};
 
 		// Set up listeners
-		const unsubUpdate = gatewaySocket.onSessionUpdate(handleSessionUpdate);
-		const unsubError = gatewaySocket.onSessionError(handleSessionError);
 		const unsubPermReq = gatewaySocket.onPermissionRequest(
 			handlePermissionRequest,
 		);
 		const unsubPermRes = gatewaySocket.onPermissionResult(
 			handlePermissionResult,
 		);
-		const unsubTerminal = gatewaySocket.onTerminalOutput(handleTerminalOutput);
 		const unsubCliStatus = gatewaySocket.onCliStatus(handleCliStatus);
 		const unsubSessionAttached = gatewaySocket.onSessionAttached(
 			handleSessionAttached,
@@ -236,11 +155,8 @@ export function useSocket({
 
 		return () => {
 			socket.off("disconnect", handleDisconnect);
-			unsubUpdate();
-			unsubError();
 			unsubPermReq();
 			unsubPermRes();
-			unsubTerminal();
 			unsubCliStatus();
 			unsubSessionAttached();
 			unsubSessionDetached();
@@ -250,17 +166,12 @@ export function useSocket({
 	}, [
 		gatewaySocket,
 		addPermissionRequest,
-		appendTerminalOutput,
 		markSessionAttached,
 		markSessionDetached,
 		setPermissionDecisionState,
 		setPermissionOutcome,
-		setStreamError,
-		t,
 		updateMachine,
-		updateSessionMeta,
 		onPermissionRequest,
-		onSessionError,
 		onSessionEvent,
 	]);
 

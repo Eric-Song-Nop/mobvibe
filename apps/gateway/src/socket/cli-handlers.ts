@@ -9,8 +9,6 @@ import type {
 	SessionSummary,
 	SessionsChangedPayload,
 	SessionsDiscoveredPayload,
-	StreamErrorPayload,
-	TerminalOutputEvent,
 } from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
 import { auth } from "../lib/auth.js";
@@ -221,17 +219,8 @@ export function setupCliHandlers(
 			);
 		});
 
-		// Note: session:update is deprecated - all content updates now go through
-		// session:event (WAL-persisted events with seq/revision)
-
-		// Session error
-		socket.on("session:error", (payload: StreamErrorPayload) => {
-			logger.warn(
-				{ sessionId: payload.sessionId, socketId: socket.id },
-				"session_error_received",
-			);
-			emitToWebui("session:error", payload);
-		});
+		// Note: session:update and session:error are deprecated - all content updates
+		// now go through session:event (WAL-persisted events with seq/revision)
 
 		// Session attached
 		socket.on("session:attached", (payload: SessionAttachedPayload) => {
@@ -281,16 +270,9 @@ export function setupCliHandlers(
 			emitToWebui("permission:result", payload);
 		});
 
-		// Terminal output
-		socket.on("terminal:output", (event: TerminalOutputEvent) => {
-			logger.debug(
-				{ sessionId: event.sessionId, socketId: socket.id },
-				"terminal_output_received",
-			);
-			emitToWebui("terminal:output", event);
-		});
-
 		// Session event (WAL-persisted events with seq/revision)
+		// Note: terminal:output is deprecated - terminal output now goes through
+		// session:event with kind="terminal_output"
 		socket.on("session:event", (event: SessionEvent) => {
 			logger.debug(
 				{

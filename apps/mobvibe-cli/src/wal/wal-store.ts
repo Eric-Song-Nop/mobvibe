@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import fs from "node:fs";
 import path from "node:path";
 import type { SessionEventKind } from "@mobvibe/shared";
+import { logger } from "../lib/logger.js";
 import { runMigrations } from "./migrations.js";
 import { SeqGenerator } from "./seq-generator.js";
 
@@ -217,6 +218,11 @@ export class WalStore {
 			$sessionId: params.sessionId,
 		}) as WalSessionRow | null;
 
+		logger.debug(
+			{ sessionId: params.sessionId, exists: !!existing },
+			"wal_ensure_session",
+		);
+
 		if (existing) {
 			// Update metadata
 			this.stmtUpdateSession.run({
@@ -237,6 +243,15 @@ export class WalStore {
 				maxSeq,
 			);
 
+			logger.debug(
+				{
+					sessionId: params.sessionId,
+					revision: existing.current_revision,
+					maxSeq,
+				},
+				"wal_session_existing",
+			);
+
 			return { revision: existing.current_revision };
 		}
 
@@ -253,6 +268,11 @@ export class WalStore {
 
 		// Initialize sequence generator at 0
 		this.seqGenerator.initialize(params.sessionId, 1, 0);
+
+		logger.info(
+			{ sessionId: params.sessionId, revision: 1 },
+			"wal_session_created",
+		);
 
 		return { revision: 1 };
 	}
@@ -275,6 +295,16 @@ export class WalStore {
 		const seq = this.seqGenerator.next(params.sessionId, params.revision);
 		const now = new Date().toISOString();
 
+		logger.debug(
+			{
+				sessionId: params.sessionId,
+				revision: params.revision,
+				seq,
+				kind: params.kind,
+			},
+			"wal_append_event",
+		);
+
 		this.stmtInsertEvent.run({
 			$sessionId: params.sessionId,
 			$revision: params.revision,
@@ -288,6 +318,17 @@ export class WalStore {
 		const lastId = this.db.query("SELECT last_insert_rowid() as id").get() as {
 			id: number;
 		};
+
+		logger.info(
+			{
+				sessionId: params.sessionId,
+				revision: params.revision,
+				seq,
+				kind: params.kind,
+				eventId: lastId.id,
+			},
+			"wal_event_appended",
+		);
 
 		return {
 			id: lastId.id,
@@ -304,12 +345,35 @@ export class WalStore {
 	 * Query events for a session/revision after a given sequence.
 	 */
 	queryEvents(params: QueryEventsParams): WalEvent[] {
+		logger.debug(
+			{
+				sessionId: params.sessionId,
+				revision: params.revision,
+				afterSeq: params.afterSeq ?? 0,
+				limit: params.limit ?? DEFAULT_QUERY_LIMIT,
+			},
+			"wal_query_events",
+		);
+
 		const rows = this.stmtQueryEvents.all({
 			$sessionId: params.sessionId,
 			$revision: params.revision,
 			$afterSeq: params.afterSeq ?? 0,
 			$limit: params.limit ?? DEFAULT_QUERY_LIMIT,
 		}) as WalEventRow[];
+
+		logger.debug(
+			{
+				sessionId: params.sessionId,
+				revision: params.revision,
+				count: rows.length,
+				seqRange:
+					rows.length > 0
+						? `${rows[0].seq}-${rows[rows.length - 1].seq}`
+						: "empty",
+			},
+			"wal_query_events_result",
+		);
 
 		return rows.map((row) => this.rowToEvent(row));
 	}
@@ -330,29 +394,44 @@ export class WalStore {
 	 * Mark events as acknowledged up to a given sequence.
 	 */
 	ackEvents(sessionId: string, revision: number, upToSeq: number): void {
-		this.stmtAckEvents.run({
+		logger.debug({ sessionId, revision, upToSeq }, "wal_ack_events");
+
+		const result = this.stmtAckEvents.run({
 			$sessionId: sessionId,
 			$revision: revision,
 			$upToSeq: upToSeq,
 			$ackedAt: new Date().toISOString(),
 		});
+
+		logger.debug(
+			{ sessionId, revision, upToSeq, changes: result.changes },
+			"wal_ack_events_result",
+		);
 	}
 
 	/**
 	 * Increment the revision for a session (used when session is reloaded).
 	 */
 	incrementRevision(sessionId: string): number {
+		logger.info({ sessionId }, "wal_increment_revision");
+
 		const result = this.stmtIncrementRevision.get({
 			$sessionId: sessionId,
 			$updatedAt: new Date().toISOString(),
 		}) as { current_revision: number } | null;
 
 		if (!result) {
+			logger.error({ sessionId }, "wal_increment_revision_session_not_found");
 			throw new Error(`Session not found: ${sessionId}`);
 		}
 
 		// Reset sequence generator for new revision
 		this.seqGenerator.reset(sessionId, result.current_revision);
+
+		logger.info(
+			{ sessionId, newRevision: result.current_revision },
+			"wal_revision_incremented",
+		);
 
 		return result.current_revision;
 	}

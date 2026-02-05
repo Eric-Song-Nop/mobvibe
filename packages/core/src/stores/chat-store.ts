@@ -134,8 +134,6 @@ export type ChatSession = {
 	/** WAL cursor tracking for sync */
 	revision?: number;
 	lastAppliedSeq?: number;
-	/** Whether backfill is in progress */
-	isBackfilling?: boolean;
 };
 
 type ChatState = {
@@ -260,8 +258,6 @@ type ChatState = {
 		revision: number,
 		lastAppliedSeq: number,
 	) => void;
-	/** Set backfilling state for a session */
-	setSessionBackfilling: (sessionId: string, isBackfilling: boolean) => void;
 	/** Reset session cursor when revision changes (clear messages) */
 	resetSessionForRevision: (sessionId: string, newRevision: number) => void;
 };
@@ -503,7 +499,6 @@ const sanitizeSessionForPersist = (session: ChatSession): ChatSession => ({
 	streamingMessageRole: undefined,
 	isAttached: false,
 	isLoading: false,
-	isBackfilling: false,
 	attachedAt: undefined,
 	detachedAt: undefined,
 	detachedReason: undefined,
@@ -1242,20 +1237,6 @@ export const useChatStore = create<ChatState>()(
 								...session,
 								revision,
 								lastAppliedSeq,
-							},
-						},
-					};
-				}),
-			setSessionBackfilling: (sessionId, isBackfilling) =>
-				set((state: ChatState) => {
-					const session = state.sessions[sessionId];
-					if (!session) return state;
-					return {
-						sessions: {
-							...state.sessions,
-							[sessionId]: {
-								...session,
-								isBackfilling,
 							},
 						},
 					};
