@@ -196,7 +196,7 @@ function MainApp() {
 		resetSessionForRevision,
 	});
 
-	useSocket({
+	const { syncSessionHistory, isBackfilling } = useSocket({
 		sessions,
 		appendAssistantChunk,
 		appendThoughtChunk,
@@ -355,6 +355,15 @@ function MainApp() {
 	}, [createDialogOpen, defaultBackendId, draftBackendId, setDraftBackendId]);
 
 	const fileExplorerAvailable = Boolean(activeSessionId && activeSession?.cwd);
+	const syncHistoryAvailable = Boolean(activeSessionId);
+	const syncHistoryDisabled =
+		!syncHistoryAvailable ||
+		Boolean(
+			activeSession?.isLoading ||
+				isActivating ||
+				isForceReloading ||
+				(activeSessionId && isBackfilling(activeSessionId)),
+		);
 	const forceReloadAvailable = Boolean(
 		activeSessionId &&
 			activeSession?.machineId &&
@@ -529,6 +538,13 @@ function MainApp() {
 		}
 	};
 
+	const handleSyncHistory = () => {
+		if (!activeSessionId) {
+			return;
+		}
+		syncSessionHistory(activeSessionId);
+	};
+
 	const handleSend = async () => {
 		if (!activeSessionId || !activeSession) {
 			return;
@@ -659,9 +675,12 @@ function MainApp() {
 						loadingMessage={loadingMessage}
 						onOpenMobileMenu={() => setMobileMenuOpen(true)}
 						onOpenFileExplorer={() => setFileExplorerOpen(true)}
+						onSyncHistory={handleSyncHistory}
 						onForceReload={handleForceReload}
 						showFileExplorer={fileExplorerAvailable}
+						showSyncHistory={syncHistoryAvailable}
 						showForceReload={Boolean(activeSessionId)}
+						syncHistoryDisabled={syncHistoryDisabled}
 						forceReloadDisabled={forceReloadDisabled}
 					/>
 					<ChatMessageList

@@ -51,6 +51,7 @@
 		"closeTitle": "关闭对话？",
 		"closeDescription": "关闭后将断开后端会话进程，前端仍保留消息记录。",
 		"closeConfirm": "确认关闭",
+		"syncHistory": "同步历史",
 		"forceReloadTitle": "强制停止并加载？",
 		"forceReloadDescription": "将先停止当前生成，再从代理重放历史。",
 		"forceReloadConfirm": "确认重载",

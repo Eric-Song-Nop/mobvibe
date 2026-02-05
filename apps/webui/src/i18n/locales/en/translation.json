@@ -51,6 +51,7 @@
 		"closeTitle": "Close session?",
 		"closeDescription": "Closing ends the backend session while keeping local history.",
 		"closeConfirm": "Confirm close",
+		"syncHistory": "Sync history",
 		"forceReloadTitle": "Force stop and reload?",
 		"forceReloadDescription": "This stops the current generation and reloads history from the agent.",
 		"forceReloadConfirm": "Force reload",

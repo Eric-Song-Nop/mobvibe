@@ -3,7 +3,7 @@ import {
 	useChatStore,
 	useSessionBackfill,
 } from "@mobvibe/core";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { ChatStoreActions } from "@/hooks/useSessionMutations";
 import {
 	extractAvailableCommandsUpdate,
@@ -348,6 +348,19 @@ export function useSocket({
 		},
 	});
 
+	const syncSessionHistory = useCallback(
+		(sessionId: string, options?: { fromStart?: boolean }) => {
+			const session = useChatStore.getState().sessions[sessionId];
+			if (!session) {
+				return;
+			}
+			const revision = session.revision ?? 1;
+			const afterSeq = options?.fromStart ? 0 : (session.lastAppliedSeq ?? 0);
+			startBackfill(sessionId, revision, afterSeq);
+		},
+		[startBackfill],
+	);
+
 	// Trigger backfill helper
 	triggerBackfillRef.current = (
 		sessionId: string,
@@ -580,4 +593,9 @@ export function useSocket({
 		const unsubscribe = gatewaySocket.onConnect(handleConnect);
 		return unsubscribe;
 	}, []);
+
+	return {
+		syncSessionHistory,
+		isBackfilling,
+	};
 }

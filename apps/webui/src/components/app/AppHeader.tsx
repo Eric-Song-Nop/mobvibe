@@ -1,4 +1,8 @@
-import { FolderOpenIcon, Refresh01Icon } from "@hugeicons/core-free-icons";
+import {
+	FolderOpenIcon,
+	Refresh01Icon,
+	Refresh03Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ChatSession } from "@mobvibe/core";
 import { useTranslation } from "react-i18next";
@@ -24,9 +28,12 @@ export type AppHeaderProps = {
 	loadingMessage?: string;
 	onOpenMobileMenu: () => void;
 	onOpenFileExplorer?: () => void;
+	onSyncHistory?: () => void;
 	onForceReload?: () => void;
 	showFileExplorer?: boolean;
+	showSyncHistory?: boolean;
 	fileExplorerDisabled?: boolean;
+	syncHistoryDisabled?: boolean;
 	showForceReload?: boolean;
 	forceReloadDisabled?: boolean;
 };
@@ -38,9 +45,12 @@ export function AppHeader({
 	loadingMessage,
 	onOpenMobileMenu,
 	onOpenFileExplorer,
+	onSyncHistory,
 	onForceReload,
 	showFileExplorer = false,
+	showSyncHistory = false,
 	fileExplorerDisabled = false,
+	syncHistoryDisabled = false,
 	showForceReload = false,
 	forceReloadDisabled = false,
 }: AppHeaderProps) {
@@ -64,12 +74,26 @@ export function AppHeader({
 						</Badge>
 					) : null}
 				</div>
+				{showSyncHistory ? (
+					<Button
+						variant="outline"
+						size="sm"
+						aria-label={t("session.syncHistory")}
+						title={t("session.syncHistory")}
+						disabled={syncHistoryDisabled}
+						onClick={() => onSyncHistory?.()}
+					>
+						<HugeiconsIcon icon={Refresh03Icon} strokeWidth={2} />
+					</Button>
+				) : null}
 				{showForceReload ? (
 					<AlertDialog>
 						<AlertDialogTrigger asChild>
 							<Button
-								variant="outline"
+								variant="destructive"
 								size="sm"
+								aria-label={t("session.forceReloadTitle")}
+								title={t("session.forceReloadTitle")}
 								disabled={forceReloadDisabled}
 							>
 								<HugeiconsIcon icon={Refresh01Icon} strokeWidth={2} />
