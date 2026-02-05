@@ -74,6 +74,7 @@ export interface ChatStoreActions {
 		sessionId: string;
 		machineId?: string;
 		attachedAt: string;
+		revision?: number;
 	}) => void;
 	markSessionDetached: (payload: {
 		sessionId: string;
@@ -367,6 +368,11 @@ export function useSessionMutations(store: ChatStoreActions) {
 	const loadSessionMutation = useMutation({
 		mutationFn: loadSession,
 		onSuccess: (data) => {
+			// If revision is provided, reset cursor to trigger backfill
+			if (data.revision !== undefined) {
+				store.resetSessionForRevision(data.sessionId, data.revision);
+			}
+
 			store.updateSessionMeta(data.sessionId, {
 				updatedAt: data.updatedAt,
 				cwd: data.cwd,
@@ -395,6 +401,11 @@ export function useSessionMutations(store: ChatStoreActions) {
 	const reloadSessionMutation = useMutation({
 		mutationFn: reloadSession,
 		onSuccess: (data) => {
+			// If revision is provided, reset cursor to trigger backfill
+			if (data.revision !== undefined) {
+				store.resetSessionForRevision(data.sessionId, data.revision);
+			}
+
 			store.updateSessionMeta(data.sessionId, {
 				updatedAt: data.updatedAt,
 				cwd: data.cwd,

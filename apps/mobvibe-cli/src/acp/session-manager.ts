@@ -396,6 +396,7 @@ export class SessionManager {
 			sessionId,
 			machineId: this.config.machineId,
 			attachedAt: attachedAt.toISOString(),
+			revision: record.revision,
 		});
 	}
 
@@ -1396,6 +1397,7 @@ export class SessionManager {
 			availableModes: record.availableModes,
 			availableModels: record.availableModels,
 			availableCommands: record.availableCommands,
+			revision: record.revision,
 		};
 	}
 }

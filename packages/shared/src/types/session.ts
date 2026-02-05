@@ -46,6 +46,8 @@ export type SessionSummary = {
 	availableCommands?: AvailableCommand[];
 	/** Machine ID that owns this session (populated by gateway) */
 	machineId?: string;
+	/** Current WAL revision for this session */
+	revision?: number;
 };
 
 /** Sessions changed event payload for incremental sync */

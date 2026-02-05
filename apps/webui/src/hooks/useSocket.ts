@@ -361,6 +361,18 @@ export function useSocket({
 	// Update handler refs
 	handleSessionAttachedRef.current = (payload: SessionAttachedPayload) => {
 		markSessionAttached(payload);
+
+		// If revision is provided, trigger backfill
+		if (payload.revision !== undefined) {
+			const session = sessionsRef.current[payload.sessionId];
+			if (
+				session &&
+				!initialBackfillTriggeredRef.current.has(payload.sessionId)
+			) {
+				initialBackfillTriggeredRef.current.add(payload.sessionId);
+				triggerBackfillRef.current?.(payload.sessionId, payload.revision, 0);
+			}
+		}
 	};
 
 	handleSessionDetachedRef.current = (payload: SessionDetachedPayload) => {

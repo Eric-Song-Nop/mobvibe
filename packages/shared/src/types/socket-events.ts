@@ -252,6 +252,8 @@ export type SessionAttachedPayload = {
 	sessionId: string;
 	machineId: string;
 	attachedAt: string;
+	/** Current WAL revision for this session */
+	revision?: number;
 };
 
 export type SessionDetachedPayload = {

@@ -162,6 +162,7 @@ type ChatState = {
 		sessionId: string;
 		machineId?: string;
 		attachedAt: string;
+		revision?: number;
 	}) => void;
 	markSessionDetached: (payload: {
 		sessionId: string;
@@ -572,6 +573,11 @@ export const useChatStore = create<ChatState>()(
 					const session =
 						state.sessions[payload.sessionId] ??
 						createSessionState(payload.sessionId);
+
+					// Only initialize cursor if revision is provided and not already set
+					const shouldInitCursor =
+						payload.revision !== undefined && session.revision === undefined;
+
 					return {
 						sessions: {
 							...state.sessions,
@@ -582,6 +588,9 @@ export const useChatStore = create<ChatState>()(
 								detachedAt: undefined,
 								detachedReason: undefined,
 								machineId: payload.machineId ?? session.machineId,
+								...(shouldInitCursor
+									? { revision: payload.revision, lastAppliedSeq: 0 }
+									: {}),
 							},
 						},
 					};
