@@ -92,9 +92,15 @@ export function useSessionBackfill({
 			revision: number,
 			afterSeq: number,
 		): Promise<void> => {
+			console.log("[backfill] startBackfill called", {
+				sessionId,
+				revision,
+				afterSeq,
+			});
 			// Cancel any existing backfill for this session
 			const existing = activeBackfills.current.get(sessionId);
 			if (existing) {
+				console.log("[backfill] cancelling existing backfill", { sessionId });
 				existing.abortController.abort();
 				activeBackfills.current.delete(sessionId);
 			}
@@ -118,26 +124,49 @@ export function useSessionBackfill({
 						return;
 					}
 
+					console.log("[backfill] fetching events", {
+						sessionId,
+						revision,
+						afterSeq: currentAfterSeq,
+					});
 					const response = await fetchEvents(
 						sessionId,
 						revision,
 						currentAfterSeq,
 						abortController.signal,
 					);
+					console.log("[backfill] fetch response", {
+						sessionId,
+						responseRevision: response.revision,
+						eventCount: response.events.length,
+						hasMore: response.hasMore,
+						nextAfterSeq: response.nextAfterSeq,
+					});
 
 					// Check if aborted after fetch
 					if (abortController.signal.aborted) {
+						console.log("[backfill] aborted after fetch", { sessionId });
 						return;
 					}
 
 					// Check if revision changed (session was reloaded)
 					if (response.revision !== revision) {
+						console.log("[backfill] revision mismatch", {
+							sessionId,
+							expected: revision,
+							actual: response.revision,
+						});
 						activeBackfills.current.delete(sessionId);
 						onRevisionMismatch?.(sessionId, response.revision);
 						return;
 					}
 
 					if (response.events.length > 0) {
+						console.log("[backfill] applying events", {
+							sessionId,
+							eventCount: response.events.length,
+							eventKinds: response.events.map((e) => e.kind),
+						});
 						onEvents(sessionId, response.events);
 						totalEvents += response.events.length;
 						currentAfterSeq = response.nextAfterSeq ?? currentAfterSeq;
@@ -145,16 +174,23 @@ export function useSessionBackfill({
 
 					// Guard against infinite loops
 					if (!response.hasMore || response.events.length === 0) {
+						console.log("[backfill] no more events", {
+							sessionId,
+							hasMore: response.hasMore,
+						});
 						break;
 					}
 				}
 
+				console.log("[backfill] complete", { sessionId, totalEvents });
 				onComplete?.(sessionId, totalEvents);
 			} catch (error) {
 				if (error instanceof Error && error.name === "AbortError") {
 					// Backfill was cancelled, not an error
+					console.log("[backfill] cancelled (abort)", { sessionId });
 					return;
 				}
+				console.error("[backfill] error", { sessionId, error });
 				onError?.(
 					sessionId,
 					error instanceof Error ? error : new Error(String(error)),

@@ -184,6 +184,10 @@
 	"statusMessages": {
 		"cancelled": "Generation cancelled"
 	},
+	"thought": {
+		"thinking": "Thinking...",
+		"thought": "Thought"
+	},
 	"notifications": {
 		"withSession": "{{sessionTitle}}: {{title}}",
 		"permissionRequest": "Permission required",

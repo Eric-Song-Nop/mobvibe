@@ -37,6 +37,7 @@ const mockChatStore = vi.hoisted(() => ({
 		addUserMessage: vi.fn(),
 		addStatusMessage: vi.fn(),
 		appendAssistantChunk: vi.fn(),
+		appendThoughtChunk: vi.fn(),
 		appendUserChunk: vi.fn(),
 		addPermissionRequest: vi.fn(),
 		setPermissionDecisionState: vi.fn(),

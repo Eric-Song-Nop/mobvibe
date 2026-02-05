@@ -184,6 +184,10 @@
 	"statusMessages": {
 		"cancelled": "已取消本次生成"
 	},
+	"thought": {
+		"thinking": "思考中...",
+		"thought": "思考"
+	},
 	"notifications": {
 		"withSession": "{{sessionTitle}}：{{title}}",
 		"permissionRequest": "需要权限确认",

@@ -996,9 +996,12 @@ export class SessionManager {
 		cwd: string,
 		backendId?: string,
 	): Promise<SessionSummary> {
+		logger.info({ sessionId, cwd, backendId }, "load_session_start");
+
 		// Check if session is already loaded
 		const existing = this.sessions.get(sessionId);
 		if (existing) {
+			logger.info({ sessionId }, "load_session_already_loaded");
 			this.emitSessionAttached(sessionId, true);
 			return this.buildSummary(existing);
 		}
@@ -1053,6 +1056,14 @@ export class SessionManager {
 			let recordRef: SessionRecord | undefined;
 			const unsubscribe = connection.onSessionUpdate(
 				(notification: SessionNotification) => {
+					logger.info(
+						{
+							sessionId,
+							updateType: notification.update.sessionUpdate,
+							hasRecordRef: !!recordRef,
+						},
+						"load_session_update_received",
+					);
 					// Write to WAL (emits via session:event)
 					if (recordRef) {
 						this.writeSessionUpdateToWal(recordRef, notification);
@@ -1060,11 +1071,25 @@ export class SessionManager {
 						this.applySessionUpdateToRecord(recordRef, notification);
 					} else {
 						bufferedUpdates.push(notification);
+						logger.debug(
+							{ sessionId, bufferedCount: bufferedUpdates.length },
+							"load_session_buffered",
+						);
 					}
 				},
 			);
 
+			logger.info({ sessionId }, "load_session_calling_acp");
 			const response = await connection.loadSession(sessionId, cwd);
+			logger.info(
+				{
+					sessionId,
+					bufferedCount: bufferedUpdates.length,
+					hasModels: !!response.models,
+					hasModes: !!response.modes,
+				},
+				"load_session_acp_returned",
+			);
 			connection.setPermissionHandler((params) =>
 				this.handlePermissionRequest(sessionId, params),
 			);
@@ -1103,7 +1128,15 @@ export class SessionManager {
 			record.unsubscribe = unsubscribe;
 
 			// Write buffered updates to WAL
+			logger.info(
+				{ sessionId, bufferedCount: bufferedUpdates.length },
+				"load_session_writing_buffered",
+			);
 			for (const notification of bufferedUpdates) {
+				logger.debug(
+					{ sessionId, updateType: notification.update.sessionUpdate },
+					"load_session_writing_buffered_event",
+				);
 				this.writeSessionUpdateToWal(record, notification);
 				this.applySessionUpdateToRecord(record, notification);
 			}
@@ -1119,7 +1152,10 @@ export class SessionManager {
 			});
 			this.emitSessionAttached(sessionId);
 
-			logger.info({ sessionId, backendId: backend.id }, "session_loaded");
+			logger.info(
+				{ sessionId, backendId: backend.id, revision: record.revision },
+				"load_session_complete",
+			);
 
 			return summary;
 		} catch (error) {
@@ -1240,6 +1276,9 @@ export class SessionManager {
 				break;
 			case "agent_message_chunk":
 				kind = "agent_message_chunk";
+				break;
+			case "agent_thought_chunk":
+				kind = "agent_thought_chunk";
 				break;
 			case "tool_call":
 				kind = "tool_call";

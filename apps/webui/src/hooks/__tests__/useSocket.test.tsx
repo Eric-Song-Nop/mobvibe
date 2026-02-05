@@ -117,6 +117,7 @@ const createStore = (): ChatStoreActions => {
 		addUserMessage: vi.fn(),
 		addStatusMessage: vi.fn(),
 		appendAssistantChunk: vi.fn(),
+		appendThoughtChunk: vi.fn(),
 		appendUserChunk: vi.fn(),
 		finalizeAssistantMessage: vi.fn(),
 		addPermissionRequest: vi.fn(),
@@ -236,6 +237,7 @@ describe("useSocket (webui)", () => {
 				useSocket({
 					sessions: props.sessions,
 					appendAssistantChunk: store.appendAssistantChunk,
+					appendThoughtChunk: store.appendThoughtChunk,
 					appendUserChunk: store.appendUserChunk,
 					updateSessionMeta: store.updateSessionMeta,
 					setStreamError: store.setStreamError,
@@ -283,6 +285,7 @@ describe("useSocket (webui)", () => {
 			useSocket({
 				sessions: {},
 				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
 				appendUserChunk: store.appendUserChunk,
 				updateSessionMeta: store.updateSessionMeta,
 				setStreamError: store.setStreamError,
@@ -328,6 +331,7 @@ describe("useSocket (webui)", () => {
 			useSocket({
 				sessions,
 				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
 				appendUserChunk: store.appendUserChunk,
 				updateSessionMeta: store.updateSessionMeta,
 				setStreamError: store.setStreamError,
@@ -374,6 +378,7 @@ describe("useSocket (webui)", () => {
 			useSocket({
 				sessions,
 				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
 				appendUserChunk: store.appendUserChunk,
 				updateSessionMeta: store.updateSessionMeta,
 				setStreamError: store.setStreamError,
@@ -473,6 +478,7 @@ describe("useSocket (webui)", () => {
 			useSocket({
 				sessions,
 				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
 				appendUserChunk: store.appendUserChunk,
 				updateSessionMeta: store.updateSessionMeta,
 				setStreamError: store.setStreamError,
@@ -528,6 +534,7 @@ describe("useSocket (webui)", () => {
 			useSocket({
 				sessions,
 				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
 				appendUserChunk: store.appendUserChunk,
 				updateSessionMeta: store.updateSessionMeta,
 				setStreamError: store.setStreamError,

@@ -32,6 +32,15 @@ type TextMessage = {
 	isStreaming: boolean;
 };
 
+type ThoughtMessage = {
+	id: string;
+	role: "assistant";
+	kind: "thought";
+	content: string;
+	createdAt: string;
+	isStreaming: boolean;
+};
+
 export type PermissionDecisionState = "idle" | "submitting";
 
 export type StatusVariant = "info" | "success" | "warning" | "error";
@@ -83,6 +92,7 @@ export type StatusMessage = {
 
 export type ChatMessage =
 	| TextMessage
+	| ThoughtMessage
 	| PermissionMessage
 	| ToolCallMessage
 	| StatusMessage;
@@ -103,6 +113,7 @@ export type ChatSession = {
 	terminalOutputs: Record<string, TerminalOutputSnapshot>;
 	streamingMessageId?: string;
 	streamingMessageRole?: ChatRole;
+	streamingThoughtId?: string;
 	sending: boolean;
 	canceling: boolean;
 	error?: ErrorDetail;
@@ -220,6 +231,7 @@ type ChatState = {
 		},
 	) => void;
 	appendAssistantChunk: (sessionId: string, content: string) => void;
+	appendThoughtChunk: (sessionId: string, content: string) => void;
 	appendUserChunk: (sessionId: string, content: string) => void;
 	addPermissionRequest: (
 		sessionId: string,
@@ -450,6 +462,7 @@ const createSessionState = (
 	terminalOutputs: {},
 	streamingMessageId: undefined,
 	streamingMessageRole: undefined,
+	streamingThoughtId: undefined,
 	sending: false,
 	canceling: false,
 	error: undefined,
@@ -497,6 +510,7 @@ const sanitizeSessionForPersist = (session: ChatSession): ChatSession => ({
 	streamError: undefined,
 	streamingMessageId: undefined,
 	streamingMessageRole: undefined,
+	streamingThoughtId: undefined,
 	isAttached: false,
 	isLoading: false,
 	attachedAt: undefined,
@@ -692,6 +706,7 @@ export const useChatStore = create<ChatState>()(
 								terminalOutputs: {},
 								streamingMessageId: undefined,
 								streamingMessageRole: undefined,
+								streamingThoughtId: undefined,
 							},
 						},
 					};
@@ -996,6 +1011,39 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
+			appendThoughtChunk: (sessionId, content) =>
+				set((state: ChatState) => {
+					const session =
+						state.sessions[sessionId] ?? createSessionState(sessionId);
+					let { streamingThoughtId } = session;
+					let messages = [...session.messages];
+
+					if (!streamingThoughtId) {
+						const thought: ThoughtMessage = {
+							id: createLocalId(),
+							role: "assistant",
+							kind: "thought",
+							content: "",
+							createdAt: new Date().toISOString(),
+							isStreaming: true,
+						};
+						streamingThoughtId = thought.id;
+						messages = [...messages, thought];
+					}
+
+					messages = messages.map((msg) =>
+						msg.id === streamingThoughtId && msg.kind === "thought"
+							? { ...msg, content: msg.content + content }
+							: msg,
+					);
+
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: { ...session, messages, streamingThoughtId },
+						},
+					};
+				}),
 			appendUserChunk: (sessionId, content) =>
 				set((state: ChatState) => {
 					const session =
@@ -1205,7 +1253,7 @@ export const useChatStore = create<ChatState>()(
 			finalizeAssistantMessage: (sessionId) =>
 				set((state: ChatState) => {
 					const session = state.sessions[sessionId];
-					if (!session?.streamingMessageId) {
+					if (!session?.streamingMessageId && !session?.streamingThoughtId) {
 						return state;
 					}
 					return {
@@ -1213,15 +1261,24 @@ export const useChatStore = create<ChatState>()(
 							...state.sessions,
 							[sessionId]: {
 								...session,
-								messages: session.messages.map((message: ChatMessage) =>
-									message.id === session.streamingMessageId &&
-									isTextMessage(message)
-										? { ...message, isStreaming: false }
-										: message,
-								),
-
+								messages: session.messages.map((message: ChatMessage) => {
+									if (
+										message.id === session.streamingMessageId &&
+										isTextMessage(message)
+									) {
+										return { ...message, isStreaming: false };
+									}
+									if (
+										message.id === session.streamingThoughtId &&
+										message.kind === "thought"
+									) {
+										return { ...message, isStreaming: false };
+									}
+									return message;
+								}),
 								streamingMessageId: undefined,
 								streamingMessageRole: undefined,
+								streamingThoughtId: undefined,
 							},
 						},
 					};
@@ -1254,6 +1311,7 @@ export const useChatStore = create<ChatState>()(
 								terminalOutputs: {},
 								streamingMessageId: undefined,
 								streamingMessageRole: undefined,
+								streamingThoughtId: undefined,
 								revision: newRevision,
 								lastAppliedSeq: 0,
 							},

@@ -33,6 +33,7 @@ type UseSocketOptions = {
 } & Pick<
 	ChatStoreActions,
 	| "appendAssistantChunk"
+	| "appendThoughtChunk"
 	| "appendUserChunk"
 	| "updateSessionMeta"
 	| "setStreamError"
@@ -62,6 +63,7 @@ const getCursor = (sessionId: string) => {
 export function useSocket({
 	sessions,
 	appendAssistantChunk,
+	appendThoughtChunk,
 	appendUserChunk,
 	updateSessionMeta,
 	setStreamError,
@@ -136,6 +138,14 @@ export function useSocket({
 				const textChunk = extractTextChunk(notification);
 				if (textChunk?.role === "assistant") {
 					appendAssistantChunk(event.sessionId, textChunk.text);
+				}
+				break;
+			}
+			case "agent_thought_chunk": {
+				const notification = event.payload as SessionNotification;
+				const textChunk = extractTextChunk(notification);
+				if (textChunk) {
+					appendThoughtChunk(event.sessionId, textChunk.text);
 				}
 				break;
 			}

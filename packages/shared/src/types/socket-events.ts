@@ -24,6 +24,7 @@ import type {
 export type SessionEventKind =
 	| "user_message"
 	| "agent_message_chunk"
+	| "agent_thought_chunk"
 	| "turn_end"
 	| "tool_call"
 	| "tool_call_update"

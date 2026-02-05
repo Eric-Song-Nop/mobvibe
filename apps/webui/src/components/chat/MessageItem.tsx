@@ -803,6 +803,26 @@ export const MessageItem = ({
 			</div>
 		);
 	}
+	// Thought messages: collapsible light block
+	if (message.kind === "thought") {
+		return (
+			<div className="flex flex-col gap-1 items-start">
+				<details className="w-full max-w-[85%]">
+					<summary className="flex items-center gap-2 cursor-pointer text-xs text-muted-foreground hover:text-foreground transition-colors">
+						<span className="size-1.5 rounded-full bg-muted-foreground/50" />
+						<span className="italic">
+							{message.isStreaming
+								? t("thought.thinking")
+								: t("thought.thought")}
+						</span>
+					</summary>
+					<div className="mt-1 ml-3.5 pl-2 border-l border-muted text-xs text-muted-foreground">
+						<Streamdown>{message.content}</Streamdown>
+					</div>
+				</details>
+			</div>
+		);
+	}
 	// User messages: keep bubble style
 	if (isUser) {
 		return (

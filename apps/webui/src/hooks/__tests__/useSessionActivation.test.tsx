@@ -73,6 +73,7 @@ const createStore = (): ChatStoreActions =>
 		addUserMessage: vi.fn(),
 		addStatusMessage: vi.fn(),
 		appendAssistantChunk: vi.fn(),
+		appendThoughtChunk: vi.fn(),
 		appendUserChunk: vi.fn(),
 		finalizeAssistantMessage: vi.fn(),
 		addPermissionRequest: vi.fn(),
