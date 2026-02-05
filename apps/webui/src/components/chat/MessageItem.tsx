@@ -1,4 +1,8 @@
-import { type ChatMessage, type ToolCallStatus, useChatStore } from "@mobvibe/core";
+import {
+	type ChatMessage,
+	type ToolCallStatus,
+	useChatStore,
+} from "@mobvibe/core";
 import { useTranslation } from "react-i18next";
 import { Streamdown } from "streamdown";
 import { DiffView, UnifiedDiffView } from "@/components/chat/DiffView";
