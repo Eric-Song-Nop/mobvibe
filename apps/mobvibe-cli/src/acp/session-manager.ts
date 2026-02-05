@@ -1002,7 +1002,7 @@ export class SessionManager {
 		// Check if session is already loaded
 		const existing = this.sessions.get(sessionId);
 		if (existing) {
-			logger.info({ sessionId }, "load_session_already_loaded");
+			logger.debug({ sessionId }, "load_session_already_loaded");
 			this.emitSessionAttached(sessionId, true);
 			return this.buildSummary(existing);
 		}
@@ -1041,7 +1041,7 @@ export class SessionManager {
 			if (hasExistingHistory) {
 				// Already have history → bump revision to avoid duplicates
 				revision = this.walStore.incrementRevision(sessionId);
-				logger.info({ sessionId, revision }, "load_session_bump_revision");
+				logger.debug({ sessionId, revision }, "load_session_bump_revision");
 			} else {
 				// First time import → create or get existing revision
 				const result = this.walStore.ensureSession({
@@ -1057,7 +1057,7 @@ export class SessionManager {
 			let recordRef: SessionRecord | undefined;
 			const unsubscribe = connection.onSessionUpdate(
 				(notification: SessionNotification) => {
-					logger.info(
+					logger.debug(
 						{
 							sessionId,
 							updateType: notification.update.sessionUpdate,
@@ -1080,9 +1080,9 @@ export class SessionManager {
 				},
 			);
 
-			logger.info({ sessionId }, "load_session_calling_acp");
+			logger.debug({ sessionId }, "load_session_calling_acp");
 			const response = await connection.loadSession(sessionId, cwd);
-			logger.info(
+			logger.debug(
 				{
 					sessionId,
 					bufferedCount: bufferedUpdates.length,
@@ -1129,7 +1129,7 @@ export class SessionManager {
 			record.unsubscribe = unsubscribe;
 
 			// Write buffered updates to WAL
-			logger.info(
+			logger.debug(
 				{ sessionId, bufferedCount: bufferedUpdates.length },
 				"load_session_writing_buffered",
 			);

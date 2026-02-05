@@ -6,6 +6,7 @@ node_modules/
 
 # Build outputs
 dist/
+dist-bin/
 
 # Tree-sitter WASM files (copied during postinstall)
 apps/webui/public/*.wasm
