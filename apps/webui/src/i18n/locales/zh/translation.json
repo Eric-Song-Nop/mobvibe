@@ -152,6 +152,7 @@
 		"original": "原始",
 		"updated": "更新",
 		"newFile": "(新文件)",
+		"changes": "变更",
 		"status": "状态",
 		"permissionRequest": "权限请求",
 		"permissionSubmitting": "正在提交权限选择...",

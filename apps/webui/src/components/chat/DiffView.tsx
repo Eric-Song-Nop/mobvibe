@@ -1,7 +1,12 @@
 import type { Language, Token } from "prism-react-renderer";
-import { Highlight, themes } from "prism-react-renderer";
+import { Highlight } from "prism-react-renderer";
 import type { RefObject, UIEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef } from "react";
+import {
+	getGruvboxTheme,
+	normalizeCode,
+	useResolvedTheme,
+} from "@/lib/code-highlight";
 import { resolveLanguageFromPath } from "@/lib/file-preview-utils";
 import { cn } from "@/lib/utils";
 
@@ -10,6 +15,13 @@ type DiffViewProps = {
 	label: string;
 	oldText?: string | null;
 	newText: string;
+	getLabel: (key: string, options?: Record<string, unknown>) => string;
+	onOpenFilePreview?: (path: string) => void;
+};
+
+type UnifiedDiffViewProps = {
+	diff: string;
+	path: string;
 	getLabel: (key: string, options?: Record<string, unknown>) => string;
 	onOpenFilePreview?: (path: string) => void;
 };
@@ -25,12 +37,14 @@ type DiffLine = {
 	variant: "unchanged" | "added" | "removed";
 };
 
-const splitLines = (value: string) => value.split(/\r?\n/);
-
-const normalizeCode = (code: string) => {
-	const trimmed = code.replace(/\t/g, "  ");
-	return trimmed.length > 0 ? trimmed : " ";
+type UnifiedDiffLine = {
+	type: "context" | "added" | "removed" | "hunk";
+	content: string;
+	oldLineNum?: number;
+	newLineNum?: number;
 };
+
+const splitLines = (value: string) => value.split(/\r?\n/);
 
 const buildDiffOps = (oldLines: string[], newLines: string[]): DiffOp[] => {
 	const oldCount = oldLines.length;
@@ -206,24 +220,6 @@ const trimTrailingEmptyTokens = (tokens: Token[][], code: string) => {
 	return tokens;
 };
 
-const useResolvedTheme = () => {
-	const [theme, setTheme] = useState<"light" | "dark">("light");
-
-	useEffect(() => {
-		const root = document.documentElement;
-		const updateTheme = () => {
-			setTheme(root.classList.contains("dark") ? "dark" : "light");
-		};
-
-		updateTheme();
-		const observer = new MutationObserver(() => updateTheme());
-		observer.observe(root, { attributes: true, attributeFilter: ["class"] });
-		return () => observer.disconnect();
-	}, []);
-
-	return theme;
-};
-
 type DiffPanelProps = {
 	title: string;
 	lines: DiffLine[];
@@ -245,10 +241,7 @@ const DiffPanel = ({
 	onScroll,
 	themeMode,
 }: DiffPanelProps) => {
-	const theme =
-		themeMode === "dark"
-			? themes.gruvboxMaterialDark
-			: themes.gruvboxMaterialLight;
+	const theme = getGruvboxTheme(themeMode);
 	const normalizedCode = useMemo(() => normalizeCode(code), [code]);
 
 	return (
@@ -410,6 +403,257 @@ export const DiffView = ({
 					}
 					themeMode={themeMode}
 				/>
+			</div>
+		</div>
+	);
+};
+
+/**
+ * Parse unified diff format into structured lines
+ */
+const parseUnifiedDiff = (diff: string): UnifiedDiffLine[] => {
+	const lines: UnifiedDiffLine[] = [];
+	const rawLines = diff.split(/\r?\n/);
+
+	let oldLine = 0;
+	let newLine = 0;
+
+	for (const raw of rawLines) {
+		// Skip header lines: Index:, ===, ---, +++
+		if (
+			raw.startsWith("Index:") ||
+			raw.startsWith("===") ||
+			raw.startsWith("---") ||
+			raw.startsWith("+++")
+		) {
+			continue;
+		}
+
+		// Parse hunk header: @@ -oldStart,oldCount +newStart,newCount @@
+		const hunkMatch = raw.match(
+			/^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/,
+		);
+		if (hunkMatch) {
+			oldLine = Number.parseInt(hunkMatch[1], 10);
+			newLine = Number.parseInt(hunkMatch[2], 10);
+			lines.push({
+				type: "hunk",
+				content: raw,
+			});
+			continue;
+		}
+
+		// Added line
+		if (raw.startsWith("+")) {
+			lines.push({
+				type: "added",
+				content: raw.slice(1),
+				newLineNum: newLine,
+			});
+			newLine += 1;
+			continue;
+		}
+
+		// Removed line
+		if (raw.startsWith("-")) {
+			lines.push({
+				type: "removed",
+				content: raw.slice(1),
+				oldLineNum: oldLine,
+			});
+			oldLine += 1;
+			continue;
+		}
+
+		// Context line (starts with space or is empty in context)
+		if (raw.startsWith(" ") || raw === "") {
+			lines.push({
+				type: "context",
+				content: raw.startsWith(" ") ? raw.slice(1) : raw,
+				oldLineNum: oldLine,
+				newLineNum: newLine,
+			});
+			oldLine += 1;
+			newLine += 1;
+		}
+	}
+
+	return lines;
+};
+
+const unifiedLineTone = (type: UnifiedDiffLine["type"]) => {
+	switch (type) {
+		case "added":
+			return "bg-emerald-500/10";
+		case "removed":
+			return "bg-destructive/10";
+		case "hunk":
+			return "bg-muted/50";
+		default:
+			return "";
+	}
+};
+
+const unifiedIndicatorTone = (type: UnifiedDiffLine["type"]) => {
+	switch (type) {
+		case "added":
+			return "text-emerald-600";
+		case "removed":
+			return "text-destructive";
+		case "hunk":
+			return "text-muted-foreground";
+		default:
+			return "text-muted-foreground";
+	}
+};
+
+const getIndicatorChar = (type: UnifiedDiffLine["type"]) => {
+	switch (type) {
+		case "added":
+			return "+";
+		case "removed":
+			return "-";
+		case "hunk":
+			return "@";
+		default:
+			return " ";
+	}
+};
+
+const resolveFileName = (pathValue: string) => {
+	const parts = pathValue.split(/[/\\]/).filter(Boolean);
+	return parts.at(-1) ?? pathValue;
+};
+
+export const UnifiedDiffView = ({
+	diff,
+	path,
+	getLabel,
+	onOpenFilePreview,
+}: UnifiedDiffViewProps) => {
+	const themeMode = useResolvedTheme();
+	const theme = getGruvboxTheme(themeMode);
+	const lines = useMemo(() => parseUnifiedDiff(diff), [diff]);
+	const language = useMemo(
+		() => resolveLanguageFromPath(path) as Language,
+		[path],
+	);
+	const label = useMemo(() => resolveFileName(path), [path]);
+
+	// Build code string for syntax highlighting (excluding hunks)
+	const codeLines = useMemo(
+		() => lines.filter((l) => l.type !== "hunk").map((l) => l.content),
+		[lines],
+	);
+	const code = useMemo(() => normalizeCode(codeLines.join("\n")), [codeLines]);
+
+	return (
+		<div className="rounded border border-border bg-background/80 px-2 py-1 text-xs text-muted-foreground">
+			<div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+				<span>{getLabel("toolCall.changes")}</span>
+				{onOpenFilePreview ? (
+					<button
+						type="button"
+						className="text-xs text-primary hover:underline"
+						onClick={(event) => {
+							event.preventDefault();
+							onOpenFilePreview(path);
+						}}
+					>
+						{label}
+					</button>
+				) : (
+					<span className="text-xs text-foreground">{label}</span>
+				)}
+			</div>
+			<div className="mt-2 rounded border border-border bg-muted/30">
+				<Highlight code={code} language={language} theme={theme}>
+					{({ tokens, getTokenProps, style }) => {
+						const renderTokens = trimTrailingEmptyTokens(tokens, code);
+						let tokenIndex = 0;
+
+						return (
+							<div
+								className="max-h-56 overflow-auto"
+								style={{ ...style, backgroundColor: "transparent" }}
+							>
+								{lines.map((line, lineIdx) => {
+									// Hunk lines are rendered differently
+									if (line.type === "hunk") {
+										return (
+											<div
+												key={`hunk-${lineIdx}`}
+												className={cn(
+													"grid grid-cols-[minmax(2.5rem,auto)_minmax(2.5rem,auto)_1ch_1fr] gap-1 px-2 py-0.5 font-mono text-[11px] leading-5",
+													unifiedLineTone(line.type),
+												)}
+											>
+												<span className="text-right text-muted-foreground">
+													...
+												</span>
+												<span className="text-right text-muted-foreground">
+													...
+												</span>
+												<span
+													className={cn(
+														"text-center",
+														unifiedIndicatorTone(line.type),
+													)}
+												>
+													{getIndicatorChar(line.type)}
+												</span>
+												<span className="whitespace-pre text-muted-foreground italic">
+													{line.content.replace(/^@@.*@@/, "").trim() ||
+														line.content}
+												</span>
+											</div>
+										);
+									}
+
+									const tokenLine = renderTokens[tokenIndex];
+									tokenIndex += 1;
+
+									return (
+										<div
+											key={`line-${lineIdx}`}
+											className={cn(
+												"grid grid-cols-[minmax(2.5rem,auto)_minmax(2.5rem,auto)_1ch_1fr] gap-1 px-2 py-0.5 font-mono text-[11px] leading-5",
+												unifiedLineTone(line.type),
+											)}
+										>
+											<span className="text-right text-muted-foreground">
+												{line.oldLineNum ?? ""}
+											</span>
+											<span className="text-right text-muted-foreground">
+												{line.newLineNum ?? ""}
+											</span>
+											<span
+												className={cn(
+													"text-center",
+													unifiedIndicatorTone(line.type),
+												)}
+											>
+												{getIndicatorChar(line.type)}
+											</span>
+											<span className="whitespace-pre text-foreground">
+												{tokenLine
+													? tokenLine.map((token, tIdx) => (
+															<span
+																key={`token-${lineIdx}-${tIdx}`}
+																{...getTokenProps({ token, key: tIdx })}
+															/>
+														))
+													: line.content.length > 0
+														? line.content
+														: " "}
+											</span>
+										</div>
+									);
+								})}
+							</div>
+						);
+					}}
+				</Highlight>
 			</div>
 		</div>
 	);

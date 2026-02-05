@@ -7,7 +7,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import type { Language, RenderProps, Token } from "prism-react-renderer";
-import { Highlight, themes } from "prism-react-renderer";
+import { Highlight } from "prism-react-renderer";
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -16,6 +16,11 @@ import { Parser, Query, Language as TreeSitterLanguage } from "web-tree-sitter";
 import { Button } from "@/components/ui/button";
 import type { SessionFsFilePreviewResponse } from "@/lib/api";
 import { fetchSessionGitDiff } from "@/lib/api";
+import {
+	getGruvboxTheme,
+	normalizeCode,
+	useResolvedTheme,
+} from "@/lib/code-highlight";
 import { resolveLanguageFromPath } from "@/lib/file-preview-utils";
 import { cn } from "@/lib/utils";
 
@@ -647,30 +652,6 @@ const buildOutlineItems = (rootNode: Node, query: Query) => {
 	return buildOutlineTree(sorted);
 };
 
-const useResolvedTheme = () => {
-	const [theme, setTheme] = useState<"light" | "dark">("light");
-
-	useEffect(() => {
-		const root = document.documentElement;
-		const updateTheme = () => {
-			setTheme(root.classList.contains("dark") ? "dark" : "light");
-		};
-
-		updateTheme();
-
-		const observer = new MutationObserver(() => updateTheme());
-		observer.observe(root, { attributes: true, attributeFilter: ["class"] });
-		return () => observer.disconnect();
-	}, []);
-
-	return theme;
-};
-
-const normalizeCode = (code: string) => {
-	const trimmed = code.replace(/\t/g, "  ");
-	return trimmed.length > 0 ? trimmed : " ";
-};
-
 const computeSymbolGitStatus = (
 	item: OutlineItem,
 	addedLines: Set<number>,
@@ -765,10 +746,7 @@ export function CodePreview({ payload, sessionId }: CodePreviewProps) {
 		return Math.max(count, 1);
 	}, [code]);
 	const prismLanguage = language as Language;
-	const theme =
-		themeMode === "dark"
-			? themes.gruvboxMaterialDark
-			: themes.gruvboxMaterialLight;
+	const theme = getGruvboxTheme(themeMode);
 	const codeBytes = useMemo(() => {
 		if (typeof TextEncoder === "undefined") {
 			return null;

@@ -1,7 +1,7 @@
-import { type ChatMessage, useChatStore } from "@mobvibe/core";
+import { type ChatMessage, type ToolCallStatus, useChatStore } from "@mobvibe/core";
 import { useTranslation } from "react-i18next";
 import { Streamdown } from "streamdown";
-import { DiffView } from "@/components/chat/DiffView";
+import { DiffView, UnifiedDiffView } from "@/components/chat/DiffView";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -537,6 +537,27 @@ const resolveStatusLabel = (
 
 const TOOL_CALL_PATH_SUMMARY_LIMIT = 3;
 
+const getStatusDotColor = (status: ToolCallStatus | undefined) => {
+	switch (status) {
+		case "completed":
+			return "bg-green-600";
+		case "failed":
+			return "bg-destructive";
+		default:
+			return "bg-muted-foreground";
+	}
+};
+
+const extractUnifiedDiff = (
+	rawOutput: Record<string, unknown> | undefined,
+): string | undefined => {
+	if (!rawOutput) return undefined;
+	const metadata = rawOutput.metadata as Record<string, unknown> | undefined;
+	if (!metadata) return undefined;
+	const diff = metadata.diff;
+	return typeof diff === "string" ? diff : undefined;
+};
+
 export const MessageItem = ({
 	message,
 	onPermissionDecision,
@@ -702,9 +723,11 @@ export const MessageItem = ({
 		const terminalOutputMap = message.sessionId
 			? terminalOutputs[message.sessionId]?.terminalOutputs
 			: undefined;
+		const unifiedDiff = extractUnifiedDiff(message.rawOutput);
 		const hasOutputs = Boolean(
 			outputBlocks?.some(Boolean) ||
 				(terminalIds && terminalIds.length > 0) ||
+				unifiedDiff ||
 				message.rawOutput,
 		);
 		// Determine if this is a Task (agent) tool call
@@ -715,7 +738,7 @@ export const MessageItem = ({
 					<span
 						className={cn(
 							"mt-1 size-2 shrink-0 rounded-full",
-							isTaskTool ? "bg-green-600" : "bg-muted-foreground",
+							getStatusDotColor(message.status),
 						)}
 					/>
 					<div className="flex flex-col gap-0.5 min-w-0">
@@ -783,6 +806,14 @@ export const MessageItem = ({
 													/>
 												);
 											})}
+											{unifiedDiff ? (
+												<UnifiedDiffView
+													diff={unifiedDiff}
+													path={displayPaths[0]?.path ?? ""}
+													getLabel={getLabel}
+													onOpenFilePreview={onOpenFilePreview}
+												/>
+											) : null}
 											{message.rawOutput ? (
 												<details className="rounded border border-border bg-background/80 px-2 py-1">
 													<summary className="cursor-pointer text-muted-foreground">

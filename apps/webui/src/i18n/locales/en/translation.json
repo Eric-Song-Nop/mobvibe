@@ -152,6 +152,7 @@
 		"original": "Original",
 		"updated": "Updated",
 		"newFile": "(New file)",
+		"changes": "Changes",
 		"status": "Status",
 		"permissionRequest": "Permission request",
 		"permissionSubmitting": "Submitting permission selection...",
