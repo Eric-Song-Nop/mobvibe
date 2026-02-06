@@ -1,4 +1,5 @@
 import type { ChatSession } from "@mobvibe/core";
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { MessageItem } from "@/components/chat/MessageItem";
 import type { PermissionResultNotification } from "@/lib/acp";
@@ -20,13 +21,16 @@ export function ChatMessageList({
 }: ChatMessageListProps) {
 	const { setFileExplorerOpen, setFilePreviewPath } = useUiStore();
 	const { t } = useTranslation();
-	const handleOpenFilePreview = (path: string) => {
-		if (!activeSession?.cwd) {
-			return;
-		}
-		setFilePreviewPath(path);
-		setFileExplorerOpen(true);
-	};
+	const handleOpenFilePreview = useCallback(
+		(path: string) => {
+			if (!activeSession?.cwd) {
+				return;
+			}
+			setFilePreviewPath(path);
+			setFileExplorerOpen(true);
+		},
+		[activeSession?.cwd, setFilePreviewPath, setFileExplorerOpen],
+	);
 
 	return (
 		<main className="flex min-h-0 flex-1 flex-col overflow-hidden">

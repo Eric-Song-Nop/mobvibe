@@ -1,6 +1,6 @@
 import { useBetterAuthTauri } from "@daveyplate/better-auth-tauri/react";
 import { useChatStore } from "@mobvibe/core";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { AppHeader } from "@/components/app/AppHeader";
@@ -230,6 +230,8 @@ function MainApp() {
 		[sessions, selectedMachineId],
 	);
 	const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
+	const activeSessionRef = useRef(activeSession);
+	activeSessionRef.current = activeSession;
 	const activeWorkspaceCwd =
 		activeSession?.machineId === selectedMachineId
 			? activeSession.cwd
@@ -448,23 +450,28 @@ function MainApp() {
 		}
 	};
 
-	const handlePermissionDecision = (payload: {
-		requestId: string;
-		outcome: PermissionResultNotification["outcome"];
-	}) => {
-		if (!activeSessionId || !activeSession) {
-			return;
-		}
-		if (!activeSession.isAttached) {
-			setError(activeSessionId, buildSessionNotReadyError());
-			return;
-		}
-		permissionDecisionMutation.mutate({
-			sessionId: activeSessionId,
-			requestId: payload.requestId,
-			outcome: payload.outcome,
-		});
-	};
+	const handlePermissionDecision = useCallback(
+		(payload: {
+			requestId: string;
+			outcome: PermissionResultNotification["outcome"];
+		}) => {
+			const session = activeSessionRef.current;
+			const sessionId = session?.sessionId;
+			if (!sessionId || !session) {
+				return;
+			}
+			if (!session.isAttached) {
+				setError(sessionId, buildSessionNotReadyError());
+				return;
+			}
+			permissionDecisionMutation.mutate({
+				sessionId,
+				requestId: payload.requestId,
+				outcome: payload.outcome,
+			});
+		},
+		[permissionDecisionMutation, setError],
+	);
 
 	const handleModeChange = (modeId: string) => {
 		if (!activeSessionId || !activeSession) {

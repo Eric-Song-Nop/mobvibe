@@ -3,6 +3,7 @@ import {
 	type ToolCallStatus,
 	useChatStore,
 } from "@mobvibe/core";
+import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import { Streamdown } from "streamdown";
 import {
@@ -570,7 +571,7 @@ const extractUnifiedDiff = (
 	return typeof diff === "string" ? diff : undefined;
 };
 
-export const MessageItem = ({
+const MessageItemInner = ({
 	message,
 	onPermissionDecision,
 	onOpenFilePreview,
@@ -579,7 +580,10 @@ export const MessageItem = ({
 	const getLabel = (key: string, options?: Record<string, unknown>) =>
 		t(key, { defaultValue: key, ...options });
 	const isUser = message.role === "user";
-	const terminalOutputs = useChatStore((state) => state.sessions);
+	const terminalOutputMap = useChatStore((state) => {
+		if (message.kind !== "tool_call" || !message.sessionId) return undefined;
+		return state.sessions[message.sessionId]?.terminalOutputs;
+	});
 	if (message.kind === "status") {
 		const badgeVariant =
 			message.variant === "success"
@@ -732,9 +736,6 @@ export const MessageItem = ({
 		const terminalIds = message.content?.flatMap((contentBlock) =>
 			contentBlock.type === "terminal" ? [contentBlock.terminalId] : [],
 		);
-		const terminalOutputMap = message.sessionId
-			? terminalOutputs[message.sessionId]?.terminalOutputs
-			: undefined;
 		const unifiedDiff = extractUnifiedDiff(message.rawOutput);
 		const hasOutputs = Boolean(
 			outputBlocks?.some(Boolean) ||
@@ -901,3 +902,5 @@ export const MessageItem = ({
 		</div>
 	);
 };
+
+export const MessageItem = memo(MessageItemInner);
