@@ -269,7 +269,7 @@ const DiffPanel = ({
 										<div
 											key={`${line.lineNumber}-${line.text}`}
 											className={cn(
-												"grid grid-cols-[minmax(2.5rem,auto)_1fr] gap-2 px-2 py-0.5 font-mono text-[11px] leading-5",
+												"grid grid-cols-[minmax(2rem,auto)_1fr] gap-1.5 px-2 py-0.5 font-mono text-[11px] leading-5",
 												lineTone(line.variant),
 											)}
 										>
@@ -584,7 +584,7 @@ export const UnifiedDiffView = ({
 											<div
 												key={`hunk-${lineIdx}`}
 												className={cn(
-													"grid grid-cols-[minmax(2.5rem,auto)_minmax(2.5rem,auto)_1ch_1fr] gap-1 px-2 py-0.5 font-mono text-[11px] leading-5",
+													"grid grid-cols-[minmax(2rem,auto)_minmax(2rem,auto)_1ch_1fr] gap-1 px-2 py-0.5 font-mono text-[11px] leading-5",
 													unifiedLineTone(line.type),
 												)}
 											>
@@ -617,7 +617,7 @@ export const UnifiedDiffView = ({
 										<div
 											key={`line-${lineIdx}`}
 											className={cn(
-												"grid grid-cols-[minmax(2.5rem,auto)_minmax(2.5rem,auto)_1ch_1fr] gap-1 px-2 py-0.5 font-mono text-[11px] leading-5",
+												"grid grid-cols-[minmax(2rem,auto)_minmax(2rem,auto)_1ch_1fr] gap-1 px-2 py-0.5 font-mono text-[11px] leading-5",
 												unifiedLineTone(line.type),
 											)}
 										>

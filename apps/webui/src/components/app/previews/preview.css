@@ -121,16 +121,16 @@
 
 .file-preview-code__line {
 	display: grid;
-	grid-template-columns: 0.75rem 3rem 1fr;
+	grid-template-columns: 0.6rem 2.25rem 1fr;
 	align-items: flex-start;
-	column-gap: 0.5rem;
+	column-gap: 0.375rem;
 	line-height: 1.5;
 	white-space: pre-wrap;
 	word-break: break-word;
 }
 
 .file-preview-code__diff-indicator {
-	width: 0.75rem;
+	width: 0.6rem;
 	text-align: center;
 	font-size: 0.625rem;
 	line-height: 1.5;
@@ -158,9 +158,9 @@
 .file-preview-code__line-number {
 	display: inline-flex;
 	justify-content: flex-end;
-	padding-right: 0.5rem;
+	padding-right: 0.35rem;
 	color: hsl(var(--muted-foreground));
-	font-size: 0.7rem;
+	font-size: 0.65rem;
 	font-variant-numeric: tabular-nums;
 	font-feature-settings: "tnum";
 	user-select: none;
