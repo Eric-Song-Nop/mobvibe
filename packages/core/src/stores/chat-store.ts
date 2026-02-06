@@ -597,15 +597,39 @@ export const useChatStore = create<ChatState>()(
 					const session =
 						state.sessions[payload.sessionId] ??
 						createSessionState(payload.sessionId);
+					const messages =
+						session.streamingMessageId || session.streamingThoughtId
+							? session.messages.map((message: ChatMessage) => {
+									if (
+										message.id === session.streamingMessageId &&
+										isTextMessage(message)
+									) {
+										return { ...message, isStreaming: false };
+									}
+									if (
+										message.id === session.streamingThoughtId &&
+										message.kind === "thought"
+									) {
+										return { ...message, isStreaming: false };
+									}
+									return message;
+								})
+							: session.messages;
 					return {
 						sessions: {
 							...state.sessions,
 							[payload.sessionId]: {
 								...session,
+								messages,
 								isAttached: false,
 								detachedAt: payload.detachedAt,
 								detachedReason: payload.reason,
 								machineId: payload.machineId ?? session.machineId,
+								sending: false,
+								canceling: false,
+								streamingMessageId: undefined,
+								streamingMessageRole: undefined,
+								streamingThoughtId: undefined,
 							},
 						},
 					};

@@ -27,6 +27,7 @@ export const getGatewayUrl = async (): Promise<string> => {
 		} catch {
 			// Store not available, fall through to default
 		}
+		return "http://localhost:3005";
 	}
 
 	// Default: derive from current window location
@@ -80,6 +81,10 @@ export const getDefaultGatewayUrl = (): string => {
 	const envUrl = import.meta.env.VITE_GATEWAY_URL as string | undefined;
 	if (envUrl) {
 		return envUrl;
+	}
+
+	if (isInTauri()) {
+		return "http://localhost:3005";
 	}
 
 	if (typeof window === "undefined") {

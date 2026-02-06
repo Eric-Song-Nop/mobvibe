@@ -1,23 +1,14 @@
-import type { Language, Token } from "prism-react-renderer";
+import type { Token } from "prism-react-renderer";
 import { Highlight } from "prism-react-renderer";
-import type { RefObject, UIEvent } from "react";
-import { useMemo, useRef } from "react";
+import { useMemo } from "react";
 import {
 	getGruvboxTheme,
 	normalizeCode,
+	resolvePrismLanguage,
 	useResolvedTheme,
 } from "@/lib/code-highlight";
 import { resolveLanguageFromPath } from "@/lib/file-preview-utils";
 import { cn } from "@/lib/utils";
-
-type DiffViewProps = {
-	path: string;
-	label: string;
-	oldText?: string | null;
-	newText: string;
-	getLabel: (key: string, options?: Record<string, unknown>) => string;
-	onOpenFilePreview?: (path: string) => void;
-};
 
 type UnifiedDiffViewProps = {
 	diff: string;
@@ -29,12 +20,6 @@ type UnifiedDiffViewProps = {
 type DiffOp = {
 	type: "equal" | "insert" | "delete";
 	text: string;
-};
-
-type DiffLine = {
-	lineNumber: number;
-	text: string;
-	variant: "unchanged" | "added" | "removed";
 };
 
 type UnifiedDiffLine = {
@@ -143,70 +128,102 @@ const backtrackDiff = (
 	return ops.reverse();
 };
 
-const buildDiffLines = (ops: DiffOp[]) => {
-	const oldLines: DiffLine[] = [];
-	const newLines: DiffLine[] = [];
-	let oldNumber = 1;
-	let newNumber = 1;
-	ops.forEach((op) => {
-		switch (op.type) {
-			case "equal":
-				oldLines.push({
-					lineNumber: oldNumber,
-					text: op.text,
-					variant: "unchanged",
-				});
-				newLines.push({
-					lineNumber: newNumber,
-					text: op.text,
-					variant: "unchanged",
-				});
-				oldNumber += 1;
-				newNumber += 1;
-				break;
-			case "delete":
-				oldLines.push({
-					lineNumber: oldNumber,
-					text: op.text,
-					variant: "removed",
-				});
-				oldNumber += 1;
-				break;
-			case "insert":
-				newLines.push({
-					lineNumber: newNumber,
-					text: op.text,
-					variant: "added",
-				});
-				newNumber += 1;
-				break;
-			default:
-				break;
+export const buildUnifiedDiffString = (
+	oldText: string | null | undefined,
+	newText: string,
+	path = "",
+	contextLines = 3,
+): string => {
+	const isNewFile = oldText === null || oldText === undefined;
+	const oldSource = isNewFile ? "" : oldText;
+	const oldLinesArr = isNewFile ? [] : splitLines(oldSource);
+	const newLinesArr = splitLines(newText);
+	const ops = buildDiffOps(oldLinesArr, newLinesArr);
+
+	const hasChanges = ops.some((op) => op.type !== "equal");
+	if (!hasChanges) {
+		return "";
+	}
+
+	// Find indices of changed ops
+	const changeIndices: number[] = [];
+	for (let i = 0; i < ops.length; i++) {
+		if (ops[i].type !== "equal") {
+			changeIndices.push(i);
 		}
-	});
-	return { oldLines, newLines };
-};
-
-const lineTone = (variant: DiffLine["variant"]) => {
-	switch (variant) {
-		case "added":
-			return "bg-emerald-500/10";
-		case "removed":
-			return "bg-destructive/10";
-		default:
-			return "";
 	}
-};
 
-const lineNumberTone = (variant: DiffLine["variant"]) => {
-	switch (variant) {
-		case "added":
-			return "text-emerald-600";
-		case "removed":
-			return "text-destructive";
-		default:
-			return "text-muted-foreground";
+	// Group change indices into hunk ranges with context
+	type HunkRange = { start: number; end: number };
+	const hunkRanges: HunkRange[] = [];
+	let currentStart = Math.max(0, changeIndices[0] - contextLines);
+	let currentEnd = Math.min(
+		ops.length - 1,
+		changeIndices[0] + contextLines,
+	);
+
+	for (let i = 1; i < changeIndices.length; i++) {
+		const nextStart = Math.max(0, changeIndices[i] - contextLines);
+		const nextEnd = Math.min(
+			ops.length - 1,
+			changeIndices[i] + contextLines,
+		);
+		if (nextStart <= currentEnd + 1) {
+			currentEnd = nextEnd;
+		} else {
+			hunkRanges.push({ start: currentStart, end: currentEnd });
+			currentStart = nextStart;
+			currentEnd = nextEnd;
+		}
 	}
+	hunkRanges.push({ start: currentStart, end: currentEnd });
+
+	// Build output lines
+	const output: string[] = [];
+	output.push(`--- a/${path}`);
+	output.push(`+++ b/${path}`);
+
+	for (const range of hunkRanges) {
+		// Compute line numbers for the hunk header
+		let oldStart = 1;
+		let newStart = 1;
+		for (let i = 0; i < range.start; i++) {
+			if (ops[i].type === "equal" || ops[i].type === "delete") {
+				oldStart += 1;
+			}
+			if (ops[i].type === "equal" || ops[i].type === "insert") {
+				newStart += 1;
+			}
+		}
+
+		let oldCount = 0;
+		let newCount = 0;
+		const hunkLines: string[] = [];
+
+		for (let i = range.start; i <= range.end; i++) {
+			const op = ops[i];
+			switch (op.type) {
+				case "equal":
+					hunkLines.push(` ${op.text}`);
+					oldCount += 1;
+					newCount += 1;
+					break;
+				case "delete":
+					hunkLines.push(`-${op.text}`);
+					oldCount += 1;
+					break;
+				case "insert":
+					hunkLines.push(`+${op.text}`);
+					newCount += 1;
+					break;
+			}
+		}
+
+		output.push(`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`);
+		output.push(...hunkLines);
+	}
+
+	return output.join("\n");
 };
 
 const trimTrailingEmptyTokens = (tokens: Token[][], code: string) => {
@@ -218,194 +235,6 @@ const trimTrailingEmptyTokens = (tokens: Token[][], code: string) => {
 		return tokens.slice(0, -1);
 	}
 	return tokens;
-};
-
-type DiffPanelProps = {
-	title: string;
-	lines: DiffLine[];
-	emptyLabel?: string;
-	code: string;
-	language: Language;
-	containerRef: RefObject<HTMLDivElement | null>;
-	onScroll: (event: UIEvent<HTMLDivElement>) => void;
-	themeMode: "light" | "dark";
-};
-
-const DiffPanel = ({
-	title,
-	lines,
-	emptyLabel,
-	code,
-	language,
-	containerRef,
-	onScroll,
-	themeMode,
-}: DiffPanelProps) => {
-	const theme = getGruvboxTheme(themeMode);
-	const normalizedCode = useMemo(() => normalizeCode(code), [code]);
-
-	return (
-		<div className="rounded border border-border bg-muted/30">
-			<div className="border-b border-border px-2 py-1 text-[11px] text-muted-foreground">
-				{title}
-			</div>
-			{lines.length > 0 ? (
-				<Highlight code={normalizedCode} language={language} theme={theme}>
-					{({ tokens, getTokenProps, style }) => {
-						const renderTokens = trimTrailingEmptyTokens(
-							tokens,
-							normalizedCode,
-						);
-						return (
-							<div
-								className="max-h-56 overflow-auto"
-								ref={containerRef}
-								onScroll={onScroll}
-								style={{ ...style, backgroundColor: "transparent" }}
-							>
-								{lines.map((line) => {
-									const tokenLine = renderTokens[line.lineNumber - 1];
-									return (
-										<div
-											key={`${line.lineNumber}-${line.text}`}
-											className={cn(
-												"grid grid-cols-[minmax(2rem,auto)_1fr] gap-1.5 px-2 py-0.5 font-mono text-[11px] leading-5",
-												lineTone(line.variant),
-											)}
-										>
-											<span
-												className={cn(
-													"text-right",
-													lineNumberTone(line.variant),
-												)}
-											>
-												{line.lineNumber}
-											</span>
-											<span className="whitespace-pre text-foreground">
-												{tokenLine
-													? tokenLine.map((token, tokenIndex) => (
-															<span
-																key={`token-${line.lineNumber}-${tokenIndex}`}
-																{...getTokenProps({ token, key: tokenIndex })}
-															/>
-														))
-													: line.text.length > 0
-														? line.text
-														: " "}
-											</span>
-										</div>
-									);
-								})}
-							</div>
-						);
-					}}
-				</Highlight>
-			) : (
-				<div className="px-2 py-2 text-[11px] text-muted-foreground">
-					{emptyLabel ?? ""}
-				</div>
-			)}
-		</div>
-	);
-};
-
-export const DiffView = ({
-	path,
-	label,
-	oldText,
-	newText,
-	getLabel,
-	onOpenFilePreview,
-}: DiffViewProps) => {
-	const oldSource = oldText ?? "";
-	const newSource = newText ?? "";
-	const isNewFile = oldText === null || oldText === undefined;
-	const oldLinesSource = useMemo(
-		() => (isNewFile ? [] : splitLines(oldSource)),
-		[isNewFile, oldSource],
-	);
-	const newLinesSource = useMemo(() => splitLines(newSource), [newSource]);
-	const diffOps = useMemo(
-		() => buildDiffOps(oldLinesSource, newLinesSource),
-		[oldLinesSource, newLinesSource],
-	);
-	const { oldLines, newLines } = useMemo(
-		() => buildDiffLines(diffOps),
-		[diffOps],
-	);
-	const language = useMemo(
-		() => resolveLanguageFromPath(path) as Language,
-		[path],
-	);
-	const themeMode = useResolvedTheme();
-	const oldContainerRef = useRef<HTMLDivElement | null>(null);
-	const newContainerRef = useRef<HTMLDivElement | null>(null);
-	const isSyncingRef = useRef(false);
-
-	const syncScroll = (
-		source: HTMLDivElement,
-		target: HTMLDivElement | null,
-	) => {
-		if (!target) {
-			return;
-		}
-		if (isSyncingRef.current) {
-			return;
-		}
-		isSyncingRef.current = true;
-		target.scrollTop = source.scrollTop;
-		target.scrollLeft = source.scrollLeft;
-		requestAnimationFrame(() => {
-			isSyncingRef.current = false;
-		});
-	};
-
-	return (
-		<div className="rounded border border-border bg-background/80 px-2 py-1 text-xs text-muted-foreground">
-			<div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-				<span>{getLabel("toolCall.diff")}</span>
-				{onOpenFilePreview ? (
-					<button
-						type="button"
-						className="text-xs text-primary hover:underline"
-						onClick={(event) => {
-							event.preventDefault();
-							onOpenFilePreview(path);
-						}}
-					>
-						{label}
-					</button>
-				) : (
-					<span className="text-xs text-foreground">{label}</span>
-				)}
-			</div>
-			<div className="mt-2 grid gap-3">
-				<DiffPanel
-					title={getLabel("toolCall.original")}
-					lines={oldLines}
-					emptyLabel={isNewFile ? getLabel("toolCall.newFile") : undefined}
-					code={oldSource}
-					language={language}
-					containerRef={oldContainerRef}
-					onScroll={(event) =>
-						syncScroll(event.currentTarget, newContainerRef.current)
-					}
-					themeMode={themeMode}
-				/>
-				<DiffPanel
-					title={getLabel("toolCall.updated")}
-					lines={newLines}
-					code={newSource}
-					language={language}
-					containerRef={newContainerRef}
-					onScroll={(event) =>
-						syncScroll(event.currentTarget, oldContainerRef.current)
-					}
-					themeMode={themeMode}
-				/>
-			</div>
-		</div>
-	);
 };
 
 /**
@@ -535,7 +364,7 @@ export const UnifiedDiffView = ({
 	const theme = getGruvboxTheme(themeMode);
 	const lines = useMemo(() => parseUnifiedDiff(diff), [diff]);
 	const language = useMemo(
-		() => resolveLanguageFromPath(path) as Language,
+		() => resolvePrismLanguage(resolveLanguageFromPath(path)),
 		[path],
 	);
 	const label = useMemo(() => resolveFileName(path), [path]);
@@ -635,7 +464,7 @@ export const UnifiedDiffView = ({
 											>
 												{getIndicatorChar(line.type)}
 											</span>
-											<span className="whitespace-pre text-foreground">
+											<span className="whitespace-pre">
 												{tokenLine
 													? tokenLine.map((token, tIdx) => (
 															<span

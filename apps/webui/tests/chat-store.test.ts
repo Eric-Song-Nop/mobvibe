@@ -53,18 +53,26 @@ describe("useChatStore", () => {
 	});
 
 	it("marks session attached and detached", () => {
-		useChatStore.getState().markSessionAttached({
+		const store = useChatStore.getState();
+		store.markSessionAttached({
 			sessionId: "session-1",
 			machineId: "machine-1",
 			attachedAt: "2024-01-01T00:00:00Z",
 		});
+		store.appendAssistantChunk("session-1", "streaming");
+		store.setSending("session-1", true);
+		store.setCanceling("session-1", true);
 
 		let session = useChatStore.getState().sessions["session-1"];
 		expect(session.isAttached).toBe(true);
 		expect(session.machineId).toBe("machine-1");
 		expect(session.attachedAt).toBe("2024-01-01T00:00:00Z");
+		expect(session.sending).toBe(true);
+		expect(session.canceling).toBe(true);
+		expect(session.streamingMessageId).toBeTruthy();
+		expect(session.messages[0]?.isStreaming).toBe(true);
 
-		useChatStore.getState().markSessionDetached({
+		store.markSessionDetached({
 			sessionId: "session-1",
 			machineId: "machine-1",
 			detachedAt: "2024-01-01T01:00:00Z",
@@ -75,6 +83,11 @@ describe("useChatStore", () => {
 		expect(session.isAttached).toBe(false);
 		expect(session.detachedAt).toBe("2024-01-01T01:00:00Z");
 		expect(session.detachedReason).toBe("cli_disconnect");
+		expect(session.sending).toBe(false);
+		expect(session.canceling).toBe(false);
+		expect(session.streamingMessageId).toBeUndefined();
+		expect(session.streamingThoughtId).toBeUndefined();
+		expect(session.messages[0]?.isStreaming).toBe(false);
 	});
 
 	it("streams assistant messages and finalizes", () => {

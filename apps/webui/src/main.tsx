@@ -4,6 +4,10 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 
 import { AuthProvider } from "@/components/auth/AuthProvider";
+import { setApiBaseUrl } from "@/lib/api";
+import { isInTauri } from "@/lib/auth";
+import { getGatewayUrl } from "@/lib/gateway-config";
+import { gatewaySocket } from "@/lib/socket";
 import "./i18n";
 import "./index.css";
 import App from "./App.tsx";
@@ -24,14 +28,29 @@ const renderApp = () => {
 	);
 };
 
+const initTauriGateway = async () => {
+	try {
+		const gatewayUrl = await getGatewayUrl();
+		setApiBaseUrl(gatewayUrl);
+		gatewaySocket.setGatewayUrl(gatewayUrl);
+	} catch (error) {
+		console.warn("Failed to load Tauri gateway URL, using default:", error);
+	}
+};
+
 // Initialize Tauri storage adapter if running in Tauri
-if ("__TAURI_INTERNALS__" in window) {
+if (isInTauri()) {
 	import("./lib/tauri-storage-adapter")
 		.then(({ initTauriStorage }) => initTauriStorage())
+		.then(initTauriGateway)
 		.then(renderApp)
 		.catch((error) => {
 			console.warn("Failed to initialize Tauri storage, using default:", error);
-			renderApp();
+			initTauriGateway()
+				.finally(renderApp)
+				.catch(() => {
+					renderApp();
+				});
 		});
 } else {
 	renderApp();

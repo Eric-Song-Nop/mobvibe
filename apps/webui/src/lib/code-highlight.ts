@@ -1,4 +1,5 @@
-import { themes } from "prism-react-renderer";
+import type { Language } from "prism-react-renderer";
+import { Prism, themes } from "prism-react-renderer";
 import { useEffect, useState } from "react";
 
 /**
@@ -35,3 +36,30 @@ export const normalizeCode = (code: string) => {
  */
 export const getGruvboxTheme = (mode: "light" | "dark") =>
 	mode === "dark" ? themes.gruvboxMaterialDark : themes.gruvboxMaterialLight;
+
+const prismLanguageFallbacks: Record<string, string[]> = {
+	astro: ["tsx", "jsx", "markup"],
+	bash: ["python"],
+	csharp: ["clike", "c"],
+	java: ["clike"],
+	mdx: ["jsx", "markdown"],
+	php: ["markup", "html"],
+	ruby: ["python"],
+	scss: ["css"],
+	toml: ["yaml"],
+	vue: ["markup", "html", "xml"],
+};
+
+/**
+ * Resolve a prism language that is actually available in bundled grammars
+ */
+export const resolvePrismLanguage = (language: string): Language => {
+	const normalized = language.trim().toLowerCase();
+	const candidates = [
+		normalized,
+		...(prismLanguageFallbacks[normalized] ?? []),
+		"text",
+	];
+	const resolved = candidates.find((candidate) => Prism.languages[candidate]);
+	return (resolved ?? "text") as Language;
+};
