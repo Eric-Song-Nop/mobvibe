@@ -1,5 +1,6 @@
 import type { ChatSession } from "@mobvibe/core";
-import { useCallback } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { MessageItem } from "@/components/chat/MessageItem";
 import type { PermissionResultNotification } from "@/lib/acp";
@@ -14,6 +15,8 @@ export type ChatMessageListProps = {
 	}) => void;
 };
 
+const SCROLL_BOTTOM_THRESHOLD = 64;
+
 export function ChatMessageList({
 	activeSession,
 	loadingMessage,
@@ -21,6 +24,20 @@ export function ChatMessageList({
 }: ChatMessageListProps) {
 	const { setFileExplorerOpen, setFilePreviewPath } = useUiStore();
 	const { t } = useTranslation();
+	const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+	const isPinnedToBottomRef = useRef(true);
+	const activeSessionId = activeSession?.sessionId;
+	const messages = activeSession?.messages ?? [];
+
+	const virtualizer = useVirtualizer({
+		count: messages.length,
+		getScrollElement: () => scrollContainerRef.current,
+		estimateSize: () => 112,
+		overscan: 8,
+		getItemKey: (index) => messages[index]?.id ?? index,
+	});
+	const virtualItems = virtualizer.getVirtualItems();
+
 	const handleOpenFilePreview = useCallback(
 		(path: string) => {
 			if (!activeSession?.cwd) {
@@ -32,6 +49,39 @@ export function ChatMessageList({
 		[activeSession?.cwd, setFilePreviewPath, setFileExplorerOpen],
 	);
 
+	useEffect(() => {
+		if (activeSessionId) {
+			isPinnedToBottomRef.current = true;
+		}
+		const scrollElement = scrollContainerRef.current;
+		if (!scrollElement) {
+			return;
+		}
+		const updatePinnedState = () => {
+			const distanceToBottom =
+				scrollElement.scrollHeight -
+				scrollElement.scrollTop -
+				scrollElement.clientHeight;
+			isPinnedToBottomRef.current = distanceToBottom <= SCROLL_BOTTOM_THRESHOLD;
+		};
+		updatePinnedState();
+		scrollElement.addEventListener("scroll", updatePinnedState, {
+			passive: true,
+		});
+		return () => {
+			scrollElement.removeEventListener("scroll", updatePinnedState);
+		};
+	}, [activeSessionId]);
+
+	useLayoutEffect(() => {
+		if (messages.length === 0 || !isPinnedToBottomRef.current) {
+			return;
+		}
+		virtualizer.scrollToIndex(messages.length - 1, {
+			align: "end",
+		});
+	}, [messages, virtualizer]);
+
 	return (
 		<main className="flex min-h-0 flex-1 flex-col overflow-hidden">
 			<div className="mx-auto flex w-full max-w-5xl flex-1 min-h-0 flex-col gap-4 px-4 py-6">
@@ -41,7 +91,7 @@ export function ChatMessageList({
 							{t("chat.selectSession")}
 						</div>
 					) : null}
-					{activeSession && activeSession.isLoading ? (
+					{activeSession?.isLoading ? (
 						<div className="text-muted-foreground mt-8 text-center text-sm whitespace-pre font-mono">
 							{loadingMessage ?? t("common.loading")}
 						</div>
@@ -53,15 +103,38 @@ export function ChatMessageList({
 							{t("chat.startConversation")}
 						</div>
 					) : null}
-					<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-4">
-						{activeSession?.messages.map((message) => (
-							<MessageItem
-								key={message.id}
-								message={message}
-								onPermissionDecision={onPermissionDecision}
-								onOpenFilePreview={handleOpenFilePreview}
-							/>
-						))}
+					<div
+						ref={scrollContainerRef}
+						className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-4"
+					>
+						<div
+							className="relative w-full"
+							style={{ height: `${virtualizer.getTotalSize()}px` }}
+						>
+							{virtualItems.map((item) => {
+								const message = messages[item.index];
+								if (!message) {
+									return null;
+								}
+								return (
+									<div
+										key={item.key}
+										data-index={item.index}
+										ref={virtualizer.measureElement}
+										className="absolute left-0 top-0 w-full pb-3"
+										style={{
+											transform: `translateY(${item.start}px)`,
+										}}
+									>
+										<MessageItem
+											message={message}
+											onPermissionDecision={onPermissionDecision}
+											onOpenFilePreview={handleOpenFilePreview}
+										/>
+									</div>
+								);
+							})}
+						</div>
 					</div>
 				</div>
 			</div>
