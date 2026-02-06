@@ -407,13 +407,10 @@ export const UnifiedDiffView = ({
 											<div
 												key={`hunk-${lineIdx}`}
 												className={cn(
-													"grid grid-cols-[minmax(2rem,auto)_minmax(2rem,auto)_1ch_1fr] gap-1 px-2 py-0.5 font-mono text-[11px] leading-5",
+													"grid grid-cols-[minmax(2rem,auto)_1ch_1fr] gap-1 px-2 py-0.5 font-mono text-[11px] leading-5",
 													unifiedLineTone(line.type),
 												)}
 											>
-												<span className="text-right text-muted-foreground">
-													...
-												</span>
 												<span className="text-right text-muted-foreground">
 													...
 												</span>
@@ -440,15 +437,14 @@ export const UnifiedDiffView = ({
 										<div
 											key={`line-${lineIdx}`}
 											className={cn(
-												"grid grid-cols-[minmax(2rem,auto)_minmax(2rem,auto)_1ch_1fr] gap-1 px-2 py-0.5 font-mono text-[11px] leading-5",
+												"grid grid-cols-[minmax(2rem,auto)_1ch_1fr] gap-1 px-2 py-0.5 font-mono text-[11px] leading-5",
 												unifiedLineTone(line.type),
 											)}
 										>
 											<span className="text-right text-muted-foreground">
-												{line.oldLineNum ?? ""}
-											</span>
-											<span className="text-right text-muted-foreground">
-												{line.newLineNum ?? ""}
+												{line.type === "removed"
+													? line.oldLineNum
+													: line.newLineNum}
 											</span>
 											<span
 												className={cn(
