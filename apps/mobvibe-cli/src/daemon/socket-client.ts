@@ -403,6 +403,10 @@ export class SocketClient extends EventEmitter {
 					prompt as unknown as import("@agentclientprotocol/sdk").ContentBlock[],
 				);
 				sessionManager.touchSession(sessionId);
+				sessionManager.recordTurnEnd(
+					sessionId,
+					result.stopReason as StopReason,
+				);
 				this.sendRpcResponse<{ stopReason: StopReason }>(request.requestId, {
 					stopReason: result.stopReason as StopReason,
 				});

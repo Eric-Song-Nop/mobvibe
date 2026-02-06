@@ -184,9 +184,7 @@ describe("MessageItem", () => {
 		expect(
 			getAllByText(i18n.t("toolCall.resourceLink")).length,
 		).toBeGreaterThan(0);
-		expect(
-			getAllByText(i18n.t("toolCall.changes")).length,
-		).toBeGreaterThan(0);
+		expect(getAllByText(i18n.t("toolCall.changes")).length).toBeGreaterThan(0);
 		expect(getByText("terminal output")).toBeInTheDocument();
 		const link = getByRole("link", { name: "resource" });
 		expect(link).toHaveAttribute("href", "https://example.com/resource");

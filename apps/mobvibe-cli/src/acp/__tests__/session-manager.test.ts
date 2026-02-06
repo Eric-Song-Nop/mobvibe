@@ -282,6 +282,37 @@ describe("SessionManager", () => {
 		});
 	});
 
+	describe("recordTurnEnd", () => {
+		it("writes and emits turn_end event for active session", async () => {
+			await sessionManager.createSession({
+				cwd: "/home/user/project",
+			});
+			const sessions = sessionManager.listSessions();
+			const sessionId = sessions[0].sessionId;
+			const eventListener = mock(() => {});
+			sessionManager.onSessionEvent(eventListener);
+
+			sessionManager.recordTurnEnd(sessionId, "end_turn");
+
+			expect(eventListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId,
+					kind: "turn_end",
+					payload: expect.objectContaining({ stopReason: "end_turn" }),
+				}),
+			);
+
+			const events = sessionManager.getSessionEvents({
+				sessionId,
+				revision: 1,
+				afterSeq: 0,
+			});
+			expect(events.events.some((event) => event.kind === "turn_end")).toBe(
+				true,
+			);
+		});
+	});
+
 	describe("getSessionEvents", () => {
 		it("returns empty events when requested revision does not match actual revision (Fix 2)", async () => {
 			// Create a session first to have it in WAL

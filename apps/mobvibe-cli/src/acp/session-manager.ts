@@ -22,6 +22,7 @@ import {
 	type SessionEventsResponse,
 	type SessionSummary,
 	type SessionsChangedPayload,
+	type StopReason,
 } from "@mobvibe/shared";
 import type { AcpBackendConfig, CliConfig } from "../config.js";
 import { logger } from "../lib/logger.js";
@@ -324,6 +325,17 @@ export class SessionManager {
 	 */
 	ackEvents(sessionId: string, revision: number, upToSeq: number): void {
 		this.walStore.ackEvents(sessionId, revision, upToSeq);
+	}
+
+	recordTurnEnd(sessionId: string, stopReason: StopReason): void {
+		const record = this.sessions.get(sessionId);
+		if (!record) {
+			return;
+		}
+		record.updatedAt = new Date();
+		this.writeAndEmitEvent(sessionId, record.revision, "turn_end", {
+			stopReason,
+		});
 	}
 
 	/**

@@ -6,8 +6,8 @@ import {
 import { useTranslation } from "react-i18next";
 import { Streamdown } from "streamdown";
 import {
-	UnifiedDiffView,
 	buildUnifiedDiffString,
+	UnifiedDiffView,
 } from "@/components/chat/DiffView";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

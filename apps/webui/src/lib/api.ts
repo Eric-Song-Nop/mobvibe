@@ -73,6 +73,7 @@ export type MachinesResponse = {
 };
 
 let API_BASE_URL = getDefaultGatewayUrl();
+const SEND_MESSAGE_TIMEOUT_MS = 120_000;
 
 /**
  * Update the API base URL. Used when Tauri app loads a stored gateway URL.
@@ -137,6 +138,38 @@ const requestJson = async <ResponseType>(
 	}
 
 	return (await response.json()) as ResponseType;
+};
+
+const isAbortError = (error: unknown): boolean =>
+	error instanceof DOMException
+		? error.name === "AbortError"
+		: error instanceof Error && error.name === "AbortError";
+
+const requestJsonWithTimeout = async <ResponseType>(
+	path: string,
+	timeoutMs: number,
+	options?: Omit<RequestInit, "signal">,
+): Promise<ResponseType> => {
+	const controller = new AbortController();
+	const timeoutId = setTimeout(() => {
+		controller.abort();
+	}, timeoutMs);
+
+	try {
+		return await requestJson<ResponseType>(path, {
+			...options,
+			signal: controller.signal,
+		});
+	} catch (error) {
+		if (isAbortError(error)) {
+			throw new ApiError(
+				buildRequestError(`Request timed out after ${timeoutMs}ms`),
+			);
+		}
+		throw error;
+	} finally {
+		clearTimeout(timeoutId);
+	}
 };
 
 export const fetchAcpBackends = async (): Promise<AcpBackendsResponse> =>
@@ -318,10 +351,14 @@ export const sendMessage = async (payload: {
 	sessionId: string;
 	prompt: ContentBlock[];
 }): Promise<SendMessageResponse> =>
-	requestJson<SendMessageResponse>("/acp/message", {
-		method: "POST",
-		body: JSON.stringify(payload),
-	});
+	requestJsonWithTimeout<SendMessageResponse>(
+		"/acp/message",
+		SEND_MESSAGE_TIMEOUT_MS,
+		{
+			method: "POST",
+			body: JSON.stringify(payload),
+		},
+	);
 
 export const sendPermissionDecision = async (
 	payload: PermissionDecisionPayload,

@@ -198,6 +198,9 @@ function MainApp() {
 
 	const { syncSessionHistory, isBackfilling } = useSocket({
 		sessions,
+		setSending,
+		setCanceling,
+		finalizeAssistantMessage,
 		appendAssistantChunk,
 		appendThoughtChunk,
 		appendUserChunk,

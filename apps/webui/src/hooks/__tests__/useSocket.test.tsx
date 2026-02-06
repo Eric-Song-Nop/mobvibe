@@ -600,4 +600,59 @@ describe("useSocket (webui)", () => {
 			"fifth",
 		);
 	});
+
+	it("resets sending state when turn_end event is received", async () => {
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				revision: 1,
+				lastAppliedSeq: 0,
+				sending: true,
+				canceling: true,
+			}),
+		};
+		mockStoreState.sessions = { ...sessions };
+
+		renderHook(() =>
+			useSocket({
+				sessions,
+				setSending: store.setSending,
+				setCanceling: store.setCanceling,
+				finalizeAssistantMessage: store.finalizeAssistantMessage,
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				appendUserChunk: store.appendUserChunk,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		handlers.sessionEvent?.({
+			sessionId: "session-1",
+			revision: 1,
+			seq: 1,
+			kind: "turn_end",
+			payload: {
+				stopReason: "end_turn",
+			},
+		});
+
+		expect(store.finalizeAssistantMessage).toHaveBeenCalledWith("session-1");
+		expect(store.setSending).toHaveBeenCalledWith("session-1", false);
+		expect(store.setCanceling).toHaveBeenCalledWith("session-1", false);
+	});
 });

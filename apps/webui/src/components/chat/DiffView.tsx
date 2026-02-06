@@ -157,17 +157,11 @@ export const buildUnifiedDiffString = (
 	type HunkRange = { start: number; end: number };
 	const hunkRanges: HunkRange[] = [];
 	let currentStart = Math.max(0, changeIndices[0] - contextLines);
-	let currentEnd = Math.min(
-		ops.length - 1,
-		changeIndices[0] + contextLines,
-	);
+	let currentEnd = Math.min(ops.length - 1, changeIndices[0] + contextLines);
 
 	for (let i = 1; i < changeIndices.length; i++) {
 		const nextStart = Math.max(0, changeIndices[i] - contextLines);
-		const nextEnd = Math.min(
-			ops.length - 1,
-			changeIndices[i] + contextLines,
-		);
+		const nextEnd = Math.min(ops.length - 1, changeIndices[i] + contextLines);
 		if (nextStart <= currentEnd + 1) {
 			currentEnd = nextEnd;
 		} else {

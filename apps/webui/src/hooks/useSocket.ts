@@ -30,6 +30,9 @@ import { gatewaySocket } from "@/lib/socket";
 
 type UseSocketOptions = {
 	sessions: Record<string, ChatSession>;
+	setSending?: ChatStoreActions["setSending"];
+	setCanceling?: ChatStoreActions["setCanceling"];
+	finalizeAssistantMessage?: ChatStoreActions["finalizeAssistantMessage"];
 } & Pick<
 	ChatStoreActions,
 	| "appendAssistantChunk"
@@ -62,6 +65,9 @@ const getCursor = (sessionId: string) => {
 
 export function useSocket({
 	sessions,
+	setSending,
+	setCanceling,
+	finalizeAssistantMessage,
 	appendAssistantChunk,
 	appendThoughtChunk,
 	appendUserChunk,
@@ -242,6 +248,12 @@ export function useSocket({
 						{ sessions: sessionsRef.current },
 					);
 				}
+				break;
+			}
+			case "turn_end": {
+				finalizeAssistantMessage?.(event.sessionId);
+				setSending?.(event.sessionId, false);
+				setCanceling?.(event.sessionId, false);
 				break;
 			}
 		}
