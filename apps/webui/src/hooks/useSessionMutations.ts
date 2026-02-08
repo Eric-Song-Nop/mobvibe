@@ -68,7 +68,7 @@ type PermissionRequestPayload = {
 export interface ChatStoreActions {
 	sessions: Record<string, ChatSession>;
 	setActiveSessionId: (id: string | undefined) => void;
-	setLastCreatedCwd: (value?: string) => void;
+	setLastCreatedCwd: (machineId: string, cwd: string) => void;
 	setSessionLoading: (sessionId: string, value: boolean) => void;
 	markSessionAttached: (payload: {
 		sessionId: string;
@@ -187,7 +187,9 @@ export function useSessionMutations(store: ChatStoreActions) {
 			});
 
 			store.setActiveSessionId(data.sessionId);
-			store.setLastCreatedCwd(data.cwd);
+			if (data.machineId && data.cwd) {
+				store.setLastCreatedCwd(data.machineId, data.cwd);
+			}
 			store.setAppError(undefined);
 		},
 

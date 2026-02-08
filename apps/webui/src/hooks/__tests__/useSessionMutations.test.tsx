@@ -103,6 +103,7 @@ describe("useSessionMutations", () => {
 				availableModes: [],
 				availableModels: [],
 				availableCommands: [],
+				machineId: "machine-1",
 			};
 			vi.mocked(apiModule.createSession).mockResolvedValue(mockSession);
 
@@ -131,7 +132,10 @@ describe("useSessionMutations", () => {
 			});
 
 			expect(mockStore.setActiveSessionId).toHaveBeenCalledWith("new-session");
-			expect(mockStore.setLastCreatedCwd).toHaveBeenCalledWith(mockSession.cwd);
+			expect(mockStore.setLastCreatedCwd).toHaveBeenCalledWith(
+				"machine-1",
+				mockSession.cwd,
+			);
 			expect(mockStore.setAppError).toHaveBeenCalledWith(undefined);
 		});
 

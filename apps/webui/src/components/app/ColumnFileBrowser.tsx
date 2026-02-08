@@ -101,6 +101,7 @@ export type ColumnFileBrowserState = {
 	buildColumnsForPath: (
 		targetPath: string,
 		notifySelect?: boolean,
+		fallbackPath?: string,
 	) => Promise<void>;
 	handleEntrySelect: (entry: FsEntry, columnIndex: number) => Promise<void>;
 	handleColumnSelect: (columnIndex: number) => void;
@@ -135,7 +136,11 @@ export function useColumnFileBrowser({
 	);
 
 	const buildColumnsForPath = useCallback(
-		async (targetPath: string, notifySelect = false) => {
+		async (
+			targetPath: string,
+			notifySelect = false,
+			fallbackPath?: string,
+		) => {
 			if (!rootPath) {
 				return;
 			}
@@ -168,6 +173,39 @@ export function useColumnFileBrowser({
 					onSelect?.(targetResponse.path);
 				}
 			} catch (error) {
+				if (fallbackPath && fallbackPath !== targetPath) {
+					try {
+						const fbResponse = await fetchEntries({ path: fallbackPath });
+						const fbSegments = buildPathSegments(
+							rootPath,
+							fbResponse.path,
+							rootLabel,
+						);
+						const fbResponses = await Promise.all(
+							fbSegments.map((segment) =>
+								segment.path === fbResponse.path
+									? Promise.resolve(fbResponse)
+									: fetchEntries({ path: segment.path }),
+							),
+						);
+						const fbColumns = fbSegments.map((segment, index) => ({
+							name: segment.name,
+							path: fbResponses[index].path,
+							entries: fbResponses[index].entries,
+						}));
+						setColumns(fbColumns);
+						if (fbResponse.path !== value) {
+							onChange(fbResponse.path);
+						}
+						if (notifySelect) {
+							onSelect?.(fbResponse.path);
+						}
+						return;
+					} catch (fbError) {
+						setPathError(normalizeErrorMessage(fbError));
+						return;
+					}
+				}
 				setPathError(normalizeErrorMessage(error));
 			} finally {
 				setIsLoading(false);
@@ -286,7 +324,11 @@ export function useColumnFileBrowser({
 			return;
 		}
 		const initialPath = value ?? rootPath;
-		void buildColumnsForPath(initialPath);
+		void buildColumnsForPath(
+			initialPath,
+			false,
+			initialPath !== rootPath ? rootPath : undefined,
+		);
 		setInitialized(true);
 	}, [buildColumnsForPath, initialized, open, rootPath, value]);
 

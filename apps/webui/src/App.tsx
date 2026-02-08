@@ -390,7 +390,9 @@ function MainApp() {
 	const handleOpenCreateDialog = () => {
 		setDraftTitle(buildSessionTitle(sessionList, t));
 		setDraftBackendId(defaultBackendId);
-		setDraftCwd(lastCreatedCwd);
+		setDraftCwd(
+			selectedMachineId ? lastCreatedCwd[selectedMachineId] : undefined,
+		);
 		setCreateDialogOpen(true);
 	};
 

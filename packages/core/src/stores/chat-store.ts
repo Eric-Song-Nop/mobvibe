@@ -151,12 +151,12 @@ type ChatState = {
 	sessions: Record<string, ChatSession>;
 	activeSessionId?: string;
 	appError?: ErrorDetail;
-	lastCreatedCwd?: string;
+	lastCreatedCwd: Record<string, string>;
 	syncStatus: "idle" | "syncing" | "error";
 	lastSyncAt?: string;
 	setActiveSessionId: (value?: string) => void;
 	setAppError: (value?: ErrorDetail) => void;
-	setLastCreatedCwd: (value?: string) => void;
+	setLastCreatedCwd: (machineId: string, cwd: string) => void;
 	setSessionLoading: (sessionId: string, value: boolean) => void;
 	markSessionAttached: (payload: {
 		sessionId: string;
@@ -546,12 +546,16 @@ export const useChatStore = create<ChatState>()(
 		(set) => ({
 			sessions: {},
 			activeSessionId: undefined,
+			lastCreatedCwd: {},
 			appError: undefined,
 			syncStatus: "idle",
 			lastSyncAt: undefined,
 			setActiveSessionId: (value?: string) => set({ activeSessionId: value }),
 			setAppError: (value?: ErrorDetail) => set({ appError: value }),
-			setLastCreatedCwd: (value?: string) => set({ lastCreatedCwd: value }),
+			setLastCreatedCwd: (machineId: string, cwd: string) =>
+				set((state) => ({
+					lastCreatedCwd: { ...state.lastCreatedCwd, [machineId]: cwd },
+				})),
 			setSessionLoading: (sessionId, value) =>
 				set((state) => {
 					const session = state.sessions[sessionId];
@@ -1351,6 +1355,15 @@ export const useChatStore = create<ChatState>()(
 		}),
 		{
 			name: STORAGE_KEY,
+			version: 1,
+			migrate: (persisted, version) => {
+				if (version === 0) {
+					const state = persisted as Record<string, unknown>;
+					// v0 had lastCreatedCwd as string | undefined; discard it
+					state.lastCreatedCwd = {};
+				}
+				return persisted as PersistedChatState;
+			},
 			partialize: partializeChatState,
 			storage: {
 				getItem: (name) => {
