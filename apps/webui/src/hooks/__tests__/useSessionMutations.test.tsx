@@ -249,6 +249,26 @@ describe("useSessionMutations", () => {
 			expect(errorCall[0]?.message).toBe("Failed to close");
 			expect(errorCall[0]?.scope).toBe("session");
 		});
+
+		it("should remove session locally even when close API fails", async () => {
+			vi.mocked(apiModule.closeSession).mockRejectedValue(
+				new Error("Gateway unreachable"),
+			);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			try {
+				await result.current.closeSessionMutation.mutateAsync({
+					sessionId: "broken-session",
+				});
+			} catch {
+				// Expected error
+			}
+
+			expect(mockStore.removeSession).toHaveBeenCalledWith("broken-session");
+		});
 	});
 
 	describe("cancelSessionMutation", () => {

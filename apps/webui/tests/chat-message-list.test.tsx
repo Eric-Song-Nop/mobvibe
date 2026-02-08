@@ -157,9 +157,7 @@ describe("ChatMessageList", () => {
 	});
 
 	it("does not show create button when onCreateSession is not provided", () => {
-		render(
-			<ChatMessageList hasMachineSelected onPermissionDecision={noop} />,
-		);
+		render(<ChatMessageList hasMachineSelected onPermissionDecision={noop} />);
 		expect(
 			screen.getByText(i18n.t("chat.welcomeCreateSession")),
 		).toBeInTheDocument();
