@@ -1,6 +1,14 @@
 import { useBetterAuthTauri } from "@daveyplate/better-auth-tauri/react";
 import { useChatStore } from "@mobvibe/core";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	lazy,
+	Suspense,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { AppHeader } from "@/components/app/AppHeader";
@@ -32,9 +40,21 @@ import { ensureNotificationPermission } from "@/lib/notifications";
 import { useUiStore } from "@/lib/ui-store";
 import { buildSessionTitle } from "@/lib/ui-utils";
 import { collectWorkspaces } from "@/lib/workspace-utils";
-import { ApiKeysPage } from "@/pages/ApiKeysPage";
-import { LoginPage } from "@/pages/LoginPage";
-import { SettingsPage } from "@/pages/SettingsPage";
+
+const ApiKeysPage = lazy(async () => {
+	const module = await import("@/pages/ApiKeysPage");
+	return { default: module.ApiKeysPage };
+});
+
+const SettingsPage = lazy(async () => {
+	const module = await import("@/pages/SettingsPage");
+	return { default: module.SettingsPage };
+});
+
+const LoginPage = lazy(async () => {
+	const module = await import("@/pages/LoginPage");
+	return { default: module.LoginPage };
+});
 
 function MainApp() {
 	const { t } = useTranslation();
@@ -740,6 +760,14 @@ function TauriAuthHandler({
 	return null;
 }
 
+function RoutePending() {
+	return (
+		<div className="text-muted-foreground flex min-h-screen items-center justify-center bg-muted/40">
+			Loading...
+		</div>
+	);
+}
+
 export function App() {
 	const { isAuthenticated, isLoading, isAuthEnabled } = useAuth();
 	const navigate = useNavigate();
@@ -768,7 +796,9 @@ export function App() {
 					path="/api-keys"
 					element={
 						!isAuthEnabled || isAuthenticated ? (
-							<ApiKeysPage />
+							<Suspense fallback={<RoutePending />}>
+								<ApiKeysPage />
+							</Suspense>
 						) : (
 							<Navigate to="/login?returnUrl=/api-keys" replace />
 						)
@@ -780,7 +810,9 @@ export function App() {
 					path="/settings"
 					element={
 						!isAuthEnabled || isAuthenticated ? (
-							<SettingsPage />
+							<Suspense fallback={<RoutePending />}>
+								<SettingsPage />
+							</Suspense>
 						) : (
 							<Navigate to="/login?returnUrl=/settings" replace />
 						)
@@ -795,17 +827,21 @@ export function App() {
 							<Navigate to="/" replace />
 						) : (
 							<ThemeProvider>
-								<LoginPage
-									onSuccess={() => {
-										const params = new URLSearchParams(window.location.search);
-										const returnUrl = params.get("returnUrl");
-										if (returnUrl) {
-											window.location.href = returnUrl;
-										} else {
-											navigate("/");
-										}
-									}}
-								/>
+								<Suspense fallback={<RoutePending />}>
+									<LoginPage
+										onSuccess={() => {
+											const params = new URLSearchParams(
+												window.location.search,
+											);
+											const returnUrl = params.get("returnUrl");
+											if (returnUrl) {
+												window.location.href = returnUrl;
+											} else {
+												navigate("/");
+											}
+										}}
+									/>
+								</Suspense>
 							</ThemeProvider>
 						)
 					}

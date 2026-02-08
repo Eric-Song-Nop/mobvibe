@@ -1,4 +1,10 @@
-import { createContext, type ReactNode, useContext } from "react";
+import {
+	createContext,
+	type ReactNode,
+	useCallback,
+	useContext,
+	useMemo,
+} from "react";
 import { isAuthEnabled, signIn, signOut, signUp, useSession } from "@/lib/auth";
 
 type User = {
@@ -36,19 +42,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
 			}
 		: null;
 
-	const handleSignOut = async () => {
+	const handleSignOut = useCallback(async () => {
 		await signOut();
-	};
+	}, []);
 
-	const value: AuthContextValue = {
-		user,
-		isLoading: session.isPending,
-		isAuthenticated: !!user,
-		isAuthEnabled: isAuthEnabled(),
-		signIn,
-		signUp,
-		signOut: handleSignOut,
-	};
+	const value = useMemo<AuthContextValue>(
+		() => ({
+			user,
+			isLoading: session.isPending,
+			isAuthenticated: !!user,
+			isAuthEnabled: isAuthEnabled(),
+			signIn,
+			signUp,
+			signOut: handleSignOut,
+		}),
+		[handleSignOut, user, session.isPending],
+	);
 
 	return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
