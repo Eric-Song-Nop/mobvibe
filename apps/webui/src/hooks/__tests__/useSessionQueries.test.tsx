@@ -229,7 +229,7 @@ describe("useSessionQueries", () => {
 		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
 		vi.mocked(api.fetchAcpBackends).mockResolvedValue({
 			defaultBackendId: "backend-1",
-			backends: [],
+			backends: [{ backendId: "backend-1", backendLabel: "Backend 1" }],
 		});
 		vi.mocked(api.discoverSessions).mockResolvedValueOnce({
 			sessions: [],
@@ -255,13 +255,91 @@ describe("useSessionQueries", () => {
 			machineId: "machine-1",
 			cwd: undefined,
 			cursor: undefined,
+			backendId: "backend-1",
 		});
 		expect(api.discoverSessions).toHaveBeenCalledWith({
 			machineId: "machine-1",
 			cwd: undefined,
 			cursor: "next",
+			backendId: "backend-1",
 		});
 		expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["sessions"] });
+	});
+
+	it("discovers sessions across all available backends", async () => {
+		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
+		vi.mocked(api.fetchAcpBackends).mockResolvedValue({
+			defaultBackendId: "opencode",
+			backends: [
+				{ backendId: "opencode", backendLabel: "OpenCode" },
+				{ backendId: "codex-acp", backendLabel: "Codex ACP" },
+			],
+		});
+		vi.mocked(api.discoverSessions).mockResolvedValue({
+			sessions: [],
+			capabilities: { list: true, load: true },
+			nextCursor: undefined,
+		});
+
+		const { result } = renderHook(() => useSessionQueries(), { wrapper });
+		await waitFor(() => {
+			expect(result.current.backendsQuery.isSuccess).toBe(true);
+		});
+
+		await result.current.discoverSessionsMutation.mutateAsync({
+			machineId: "machine-1",
+			cwd: "/workspace/project",
+		});
+
+		expect(api.discoverSessions).toHaveBeenCalledTimes(2);
+		expect(api.discoverSessions).toHaveBeenNthCalledWith(1, {
+			machineId: "machine-1",
+			cwd: "/workspace/project",
+			cursor: undefined,
+			backendId: "opencode",
+		});
+		expect(api.discoverSessions).toHaveBeenNthCalledWith(2, {
+			machineId: "machine-1",
+			cwd: "/workspace/project",
+			cursor: undefined,
+			backendId: "codex-acp",
+		});
+	});
+
+	it("continues discovery when a non-explicit backend is unsupported", async () => {
+		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
+		vi.mocked(api.fetchAcpBackends).mockResolvedValue({
+			defaultBackendId: "opencode",
+			backends: [
+				{ backendId: "opencode", backendLabel: "OpenCode" },
+				{ backendId: "codex-acp", backendLabel: "Codex ACP" },
+			],
+		});
+		vi.mocked(api.discoverSessions).mockImplementation(async (payload) => {
+			if (payload?.backendId === "opencode") {
+				throw new Error("Backend not found");
+			}
+			return {
+				sessions: [],
+				capabilities: { list: true, load: true },
+				nextCursor: undefined,
+			};
+		});
+
+		const { result } = renderHook(() => useSessionQueries(), { wrapper });
+		await waitFor(() => {
+			expect(result.current.backendsQuery.isSuccess).toBe(true);
+		});
+
+		await expect(
+			result.current.discoverSessionsMutation.mutateAsync({
+				machineId: "machine-1",
+			}),
+		).resolves.toEqual({
+			machineId: "machine-1",
+			capabilities: { list: true, load: true },
+		});
+		expect(api.discoverSessions).toHaveBeenCalledTimes(2);
 	});
 
 	it("should use correct query keys", async () => {

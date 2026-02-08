@@ -244,7 +244,7 @@ export class CliRegistry extends EventEmitter {
 
 	/**
 	 * Add discovered sessions to a CLI record by machineId.
-	 * Only adds sessions that don't already exist (to avoid overwriting active sessions).
+	 * Adds new discovered sessions and merges metadata for existing entries.
 	 */
 	addDiscoveredSessionsForMachine(
 		machineId: string,
@@ -257,23 +257,35 @@ export class CliRegistry extends EventEmitter {
 		}
 
 		const added: SessionSummary[] = [];
+		const updated: SessionSummary[] = [];
 		for (const session of sessions) {
-			const exists = record.sessions.some(
+			const existingIndex = record.sessions.findIndex(
 				(existing) => existing.sessionId === session.sessionId,
 			);
-			if (!exists) {
+			if (existingIndex === -1) {
 				record.sessions.push(session);
 				added.push(session);
+				continue;
+			}
+
+			const existing = record.sessions[existingIndex];
+			const merged: SessionSummary = { ...existing, ...session };
+			const hasChanges = (
+				Object.keys(session) as Array<keyof SessionSummary>
+			).some((key) => existing[key] !== merged[key]);
+			if (hasChanges) {
+				record.sessions[existingIndex] = merged;
+				updated.push(merged);
 			}
 		}
 
-		if (added.length > 0) {
+		if (added.length > 0 || updated.length > 0) {
 			this.emit(
 				"sessions:changed",
 				record.machineId,
 				{
 					added,
-					updated: [],
+					updated,
 					removed: [],
 				} as SessionsChangedPayload,
 				userId ?? record.userId,

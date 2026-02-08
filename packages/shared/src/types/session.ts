@@ -107,6 +107,7 @@ export type AgentSessionCapabilities = {
 export type DiscoverSessionsParams = {
 	machineId?: string;
 	cwd?: string;
+	backendId?: string;
 	cursor?: string;
 };
 

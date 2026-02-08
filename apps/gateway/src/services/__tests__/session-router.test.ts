@@ -172,6 +172,44 @@ describe("SessionRouter", () => {
 				}),
 			);
 		});
+
+		it("forwards backendId to discover RPC", async () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			cliRegistry.register(socket, info, authInfo);
+
+			const mockResult = createMockDiscoverResult();
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:sessions:discover") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							result: mockResult,
+						});
+					}, 0);
+				}
+			});
+
+			const result = await sessionRouter.discoverSessions(
+				"machine-1",
+				"/home/user/project",
+				"user-1",
+				undefined,
+				"codex-acp",
+			);
+
+			expect(result.sessions).toHaveLength(2);
+			expect(socket.emit).toHaveBeenCalledWith(
+				"rpc:sessions:discover",
+				expect.objectContaining({
+					params: expect.objectContaining({
+						cwd: "/home/user/project",
+						backendId: "codex-acp",
+					}),
+				}),
+			);
+		});
 	});
 
 	describe("loadSession", () => {

@@ -201,19 +201,61 @@ describe("CliRegistry", () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
 			registry.register(socket, info);
+			const existingSession = createMockSessionSummary({
+				sessionId: "session-1",
+			});
+
+			registry.updateSessions("socket-1", [existingSession]);
+
+			const listener = vi.fn();
+			registry.onSessionsChanged(listener);
+
+			registry.addDiscoveredSessionsForMachine("machine-1", [existingSession]);
+
+			expect(listener).not.toHaveBeenCalled();
+		});
+
+		it("updates existing sessions when discovered metadata changes", () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			registry.register(socket, info);
 
 			registry.updateSessions("socket-1", [
-				createMockSessionSummary({ sessionId: "session-1" }),
+				createMockSessionSummary({
+					sessionId: "session-1",
+					backendId: "opencode",
+					backendLabel: "OpenCode",
+				}),
 			]);
 
 			const listener = vi.fn();
 			registry.onSessionsChanged(listener);
 
 			registry.addDiscoveredSessionsForMachine("machine-1", [
-				createMockSessionSummary({ sessionId: "session-1" }),
+				createMockSessionSummary({
+					sessionId: "session-1",
+					backendId: "codex-acp",
+					backendLabel: "Codex ACP",
+				}),
 			]);
 
-			expect(listener).not.toHaveBeenCalled();
+			const record = registry.getCliByMachineId("machine-1");
+			expect(record?.sessions[0].backendId).toBe("codex-acp");
+			expect(record?.sessions[0].backendLabel).toBe("Codex ACP");
+			expect(listener).toHaveBeenCalledWith(
+				"machine-1",
+				expect.objectContaining({
+					added: [],
+					updated: expect.arrayContaining([
+						expect.objectContaining({
+							sessionId: "session-1",
+							backendId: "codex-acp",
+						}),
+					]),
+					removed: [],
+				}),
+				undefined,
+			);
 		});
 	});
 

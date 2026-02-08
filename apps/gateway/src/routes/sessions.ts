@@ -413,28 +413,41 @@ export function setupSessionRoutes(
 		"/sessions/discover",
 		async (request: AuthenticatedRequest, response) => {
 			const userId = getUserId(request);
-			const { machineId, cwd, cursor } = request.query ?? {};
+			const { machineId, cwd, cursor, backendId } = request.query ?? {};
+			const requestedBackendId =
+				typeof backendId === "string" && backendId.trim().length > 0
+					? backendId.trim()
+					: undefined;
 
 			try {
-				logger.info({ userId, machineId, cwd }, "sessions_discover_request");
+				logger.info(
+					{ userId, machineId, cwd, backendId: requestedBackendId },
+					"sessions_discover_request",
+				);
 				const result = await sessionRouter.discoverSessions(
 					typeof machineId === "string" ? machineId : undefined,
 					typeof cwd === "string" ? cwd : undefined,
 					userId,
 					typeof cursor === "string" ? cursor : undefined,
+					requestedBackendId,
 				);
 				if (typeof machineId === "string") {
 					const cli = cliRegistry.getCliByMachineId(machineId);
 					if (cli) {
+						const discoveredBackendId =
+							requestedBackendId ?? cli.defaultBackendId ?? "";
+						const discoveredBackendLabel =
+							cli.backends.find(
+								(backend) => backend.backendId === discoveredBackendId,
+							)?.backendLabel ?? discoveredBackendId;
 						const summaries: SessionSummary[] = result.sessions.map((s) => ({
 							sessionId: s.sessionId,
 							title: s.title ?? `Session ${s.sessionId.slice(0, 8)}`,
 							cwd: s.cwd,
 							updatedAt: s.updatedAt ?? new Date().toISOString(),
 							createdAt: s.updatedAt ?? new Date().toISOString(),
-							backendId: cli.defaultBackendId ?? "",
-							backendLabel:
-								cli.backends[0]?.backendLabel ?? cli.defaultBackendId ?? "",
+							backendId: discoveredBackendId,
+							backendLabel: discoveredBackendLabel,
 							machineId: cli.machineId,
 						}));
 						cliRegistry.addDiscoveredSessionsForMachine(

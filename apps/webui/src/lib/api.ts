@@ -184,6 +184,7 @@ export const fetchMachines = async (): Promise<MachinesResponse> =>
 const buildSessionsDiscoverPath = (payload?: {
 	machineId?: string;
 	cwd?: string;
+	backendId?: string;
 	cursor?: string;
 }) => {
 	const params = new URLSearchParams();
@@ -192,6 +193,9 @@ const buildSessionsDiscoverPath = (payload?: {
 	}
 	if (payload?.cwd) {
 		params.set("cwd", payload.cwd);
+	}
+	if (payload?.backendId) {
+		params.set("backendId", payload.backendId);
 	}
 	if (payload?.cursor) {
 		params.set("cursor", payload.cursor);
@@ -243,6 +247,7 @@ export const fetchFsRoots = async (payload?: {
 export const discoverSessions = async (payload?: {
 	machineId?: string;
 	cwd?: string;
+	backendId?: string;
 	cursor?: string;
 }): Promise<DiscoverSessionsResult> =>
 	requestJson<DiscoverSessionsResult>(buildSessionsDiscoverPath(payload));

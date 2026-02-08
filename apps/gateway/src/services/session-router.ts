@@ -624,6 +624,7 @@ export class SessionRouter {
 		cwd?: string,
 		userId?: string,
 		cursor?: string,
+		backendId?: string,
 	): Promise<DiscoverSessionsRpcResult> {
 		const cli = machineId
 			? this.cliRegistry.getCliByMachineId(machineId)
@@ -648,11 +649,11 @@ export class SessionRouter {
 		}
 
 		logger.info(
-			{ machineId: cli.machineId, cwd, userId },
+			{ machineId: cli.machineId, cwd, userId, backendId },
 			"sessions_discover_rpc_start",
 		);
 
-		const params: DiscoverSessionsRpcParams = { cwd, cursor };
+		const params: DiscoverSessionsRpcParams = { cwd, cursor, backendId };
 		const result = await this.sendRpc<
 			DiscoverSessionsRpcParams,
 			DiscoverSessionsRpcResult
