@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { useShallow } from "zustand/react/shallow";
 import { AppHeader } from "@/components/app/AppHeader";
 import { AppSidebar } from "@/components/app/AppSidebar";
 import { ChatFooter } from "@/components/app/ChatFooter";
@@ -59,46 +60,58 @@ const LoginPage = lazy(async () => {
 function MainApp() {
 	const { t } = useTranslation();
 	const [isForceReloading, setIsForceReloading] = useState(false);
-	const {
-		sessions,
-		activeSessionId,
-		appError,
-		lastCreatedCwd,
-		setActiveSessionId,
-		setAppError,
-		setLastCreatedCwd,
-		setSessionLoading,
-		markSessionAttached,
-		markSessionDetached,
-		createLocalSession,
-		syncSessions,
-		removeSession,
-		renameSession: renameSessionLocal,
-		setError,
-		setInput,
-		setInputContents,
-		setSending,
-		setCanceling,
-		setStreamError,
-		updateSessionMeta,
-		addUserMessage,
-		addStatusMessage,
-		appendAssistantChunk,
-		appendThoughtChunk,
-		appendUserChunk,
-		finalizeAssistantMessage,
-		addPermissionRequest,
-		setPermissionDecisionState,
-		setPermissionOutcome,
-		addToolCall,
-		updateToolCall,
-		appendTerminalOutput,
-		handleSessionsChanged,
-		clearSessionMessages,
-		restoreSessionMessages,
-		updateSessionCursor,
-		resetSessionForRevision,
-	} = useChatStore();
+
+	// Reactive state — re-renders only when these values change
+	const { sessions, activeSessionId, appError, lastCreatedCwd } = useChatStore(
+		useShallow((s) => ({
+			sessions: s.sessions,
+			activeSessionId: s.activeSessionId,
+			appError: s.appError,
+			lastCreatedCwd: s.lastCreatedCwd,
+		})),
+	);
+
+	// Actions — stable refs, never trigger re-renders
+	const chatActions = useChatStore(
+		useShallow((s) => ({
+			setActiveSessionId: s.setActiveSessionId,
+			setAppError: s.setAppError,
+			setLastCreatedCwd: s.setLastCreatedCwd,
+			setSessionLoading: s.setSessionLoading,
+			markSessionAttached: s.markSessionAttached,
+			markSessionDetached: s.markSessionDetached,
+			createLocalSession: s.createLocalSession,
+			syncSessions: s.syncSessions,
+			removeSession: s.removeSession,
+			renameSession: s.renameSession,
+			setError: s.setError,
+			setInput: s.setInput,
+			setInputContents: s.setInputContents,
+			setSending: s.setSending,
+			setCanceling: s.setCanceling,
+			setStreamError: s.setStreamError,
+			updateSessionMeta: s.updateSessionMeta,
+			addUserMessage: s.addUserMessage,
+			addStatusMessage: s.addStatusMessage,
+			appendAssistantChunk: s.appendAssistantChunk,
+			appendThoughtChunk: s.appendThoughtChunk,
+			appendUserChunk: s.appendUserChunk,
+			finalizeAssistantMessage: s.finalizeAssistantMessage,
+			addPermissionRequest: s.addPermissionRequest,
+			setPermissionDecisionState: s.setPermissionDecisionState,
+			setPermissionOutcome: s.setPermissionOutcome,
+			addToolCall: s.addToolCall,
+			updateToolCall: s.updateToolCall,
+			appendTerminalOutput: s.appendTerminalOutput,
+			handleSessionsChanged: s.handleSessionsChanged,
+			clearSessionMessages: s.clearSessionMessages,
+			restoreSessionMessages: s.restoreSessionMessages,
+			updateSessionCursor: s.updateSessionCursor,
+			resetSessionForRevision: s.resetSessionForRevision,
+		})),
+	);
+
+	// UI store — reactive state
 	const {
 		createDialogOpen,
 		fileExplorerOpen,
@@ -109,16 +122,34 @@ function MainApp() {
 		draftBackendId,
 		draftCwd,
 		selectedWorkspaceByMachine,
-		setMobileMenuOpen,
-		setCreateDialogOpen,
-		setFileExplorerOpen,
-		setFilePreviewPath,
-		clearEditingSession,
-		setDraftTitle,
-		setDraftBackendId,
-		setDraftCwd,
-		setSelectedWorkspace,
-	} = useUiStore();
+	} = useUiStore(
+		useShallow((s) => ({
+			createDialogOpen: s.createDialogOpen,
+			fileExplorerOpen: s.fileExplorerOpen,
+			filePreviewPath: s.filePreviewPath,
+			editingSessionId: s.editingSessionId,
+			editingTitle: s.editingTitle,
+			draftTitle: s.draftTitle,
+			draftBackendId: s.draftBackendId,
+			draftCwd: s.draftCwd,
+			selectedWorkspaceByMachine: s.selectedWorkspaceByMachine,
+		})),
+	);
+
+	// UI store — actions (stable refs)
+	const uiActions = useUiStore(
+		useShallow((s) => ({
+			setMobileMenuOpen: s.setMobileMenuOpen,
+			setCreateDialogOpen: s.setCreateDialogOpen,
+			setFileExplorerOpen: s.setFileExplorerOpen,
+			setFilePreviewPath: s.setFilePreviewPath,
+			clearEditingSession: s.clearEditingSession,
+			setDraftTitle: s.setDraftTitle,
+			setDraftBackendId: s.setDraftBackendId,
+			setDraftCwd: s.setDraftCwd,
+			setSelectedWorkspace: s.setSelectedWorkspace,
+		})),
+	);
 
 	const {
 		sessionsQuery,
@@ -142,106 +173,49 @@ function MainApp() {
 		permissionDecisionMutation,
 	} = useSessionMutations({
 		sessions,
-		setActiveSessionId,
-		setLastCreatedCwd,
-		setSessionLoading,
-		markSessionAttached,
-		markSessionDetached,
-		createLocalSession,
-		syncSessions,
-		removeSession,
-		renameSession: renameSessionLocal,
-		setError,
-		setAppError,
-		setInput,
-		setInputContents,
-		setSending,
-		setCanceling,
-		setStreamError,
-		updateSessionMeta,
-		addUserMessage,
-		addStatusMessage,
-		appendAssistantChunk,
-		appendThoughtChunk,
-		appendUserChunk,
-		finalizeAssistantMessage,
-		addPermissionRequest,
-		setPermissionDecisionState,
-		setPermissionOutcome,
-		addToolCall,
-		updateToolCall,
-		appendTerminalOutput,
-		handleSessionsChanged,
-		clearSessionMessages,
-		restoreSessionMessages,
-		updateSessionCursor,
-		resetSessionForRevision,
+		...chatActions,
 	});
 
 	const { activateSession, isActivating } = useSessionActivation({
 		sessions,
-		setActiveSessionId,
-		setLastCreatedCwd,
-		setSessionLoading,
-		markSessionAttached,
-		markSessionDetached,
-		createLocalSession,
-		syncSessions,
-		removeSession,
-		renameSession: renameSessionLocal,
-		setError,
-		setAppError,
-		setInput,
-		setInputContents,
-		setSending,
-		setCanceling,
-		setStreamError,
-		updateSessionMeta,
-		addUserMessage,
-		addStatusMessage,
-		appendAssistantChunk,
-		appendThoughtChunk,
-		appendUserChunk,
-		finalizeAssistantMessage,
-		addPermissionRequest,
-		setPermissionDecisionState,
-		setPermissionOutcome,
-		addToolCall,
-		updateToolCall,
-		appendTerminalOutput,
-		handleSessionsChanged,
-		clearSessionMessages,
-		restoreSessionMessages,
-		updateSessionCursor,
-		resetSessionForRevision,
+		...chatActions,
 	});
 
 	const { syncSessionHistory, isBackfilling } = useSocket({
 		sessions,
-		setSending,
-		setCanceling,
-		finalizeAssistantMessage,
-		appendAssistantChunk,
-		appendThoughtChunk,
-		appendUserChunk,
-		updateSessionMeta,
-		setStreamError,
-		addPermissionRequest,
-		setPermissionDecisionState,
-		setPermissionOutcome,
-		addToolCall,
-		updateToolCall,
-		appendTerminalOutput,
-		handleSessionsChanged,
-		markSessionAttached,
-		markSessionDetached,
-		createLocalSession,
-		updateSessionCursor,
-		resetSessionForRevision,
+		setSending: chatActions.setSending,
+		setCanceling: chatActions.setCanceling,
+		finalizeAssistantMessage: chatActions.finalizeAssistantMessage,
+		appendAssistantChunk: chatActions.appendAssistantChunk,
+		appendThoughtChunk: chatActions.appendThoughtChunk,
+		appendUserChunk: chatActions.appendUserChunk,
+		updateSessionMeta: chatActions.updateSessionMeta,
+		setStreamError: chatActions.setStreamError,
+		addPermissionRequest: chatActions.addPermissionRequest,
+		setPermissionDecisionState: chatActions.setPermissionDecisionState,
+		setPermissionOutcome: chatActions.setPermissionOutcome,
+		addToolCall: chatActions.addToolCall,
+		updateToolCall: chatActions.updateToolCall,
+		appendTerminalOutput: chatActions.appendTerminalOutput,
+		handleSessionsChanged: chatActions.handleSessionsChanged,
+		markSessionAttached: chatActions.markSessionAttached,
+		markSessionDetached: chatActions.markSessionDetached,
+		createLocalSession: chatActions.createLocalSession,
+		updateSessionCursor: chatActions.updateSessionCursor,
+		resetSessionForRevision: chatActions.resetSessionForRevision,
 	});
 
-	const { machines, selectedMachineId, setMachineCapabilities } =
-		useMachinesStore();
+	const { machines, selectedMachineId } = useMachinesStore(
+		useShallow((s) => ({
+			machines: s.machines,
+			selectedMachineId: s.selectedMachineId,
+		})),
+	);
+	const { setMachineCapabilities } = useMachinesStore(
+		useShallow((s) => ({
+			setMachineCapabilities: s.setMachineCapabilities,
+		})),
+	);
 	const discoveryInFlightRef = useRef(new Set<string>());
 	const previousConnectionRef = useRef<Record<string, boolean>>({});
 
@@ -325,9 +299,9 @@ function MainApp() {
 
 	useEffect(() => {
 		if (sessionsQuery.data?.sessions) {
-			syncSessions(sessionsQuery.data.sessions);
+			chatActions.syncSessions(sessionsQuery.data.sessions);
 		}
-	}, [sessionsQuery.data?.sessions, syncSessions]);
+	}, [sessionsQuery.data?.sessions, chatActions.syncSessions]);
 
 	useEffect(() => {
 		ensureNotificationPermission();
@@ -336,7 +310,7 @@ function MainApp() {
 	useEffect(() => {
 		if (sessionList.length === 0) {
 			if (activeSessionId) {
-				setActiveSessionId(undefined);
+				chatActions.setActiveSessionId(undefined);
 			}
 			return;
 		}
@@ -344,16 +318,20 @@ function MainApp() {
 			(session) => session.sessionId === activeSessionId,
 		);
 		if (!isActiveInList) {
-			setActiveSessionId(sessionList[0].sessionId);
+			chatActions.setActiveSessionId(sessionList[0].sessionId);
 		}
-	}, [activeSessionId, sessionList, setActiveSessionId]);
+	}, [activeSessionId, sessionList, chatActions.setActiveSessionId]);
 
 	useEffect(() => {
 		if (!activeSession?.machineId || !activeSession.cwd) {
 			return;
 		}
-		setSelectedWorkspace(activeSession.machineId, activeSession.cwd);
-	}, [activeSession?.cwd, activeSession?.machineId, setSelectedWorkspace]);
+		uiActions.setSelectedWorkspace(activeSession.machineId, activeSession.cwd);
+	}, [
+		activeSession?.cwd,
+		activeSession?.machineId,
+		uiActions.setSelectedWorkspace,
+	]);
 
 	useEffect(() => {
 		if (!selectedMachineId) {
@@ -362,11 +340,11 @@ function MainApp() {
 		if (selectedWorkspaceCwd || workspaceList.length === 0) {
 			return;
 		}
-		setSelectedWorkspace(selectedMachineId, workspaceList[0].cwd);
+		uiActions.setSelectedWorkspace(selectedMachineId, workspaceList[0].cwd);
 	}, [
 		selectedMachineId,
 		selectedWorkspaceCwd,
-		setSelectedWorkspace,
+		uiActions.setSelectedWorkspace,
 		workspaceList,
 	]);
 
@@ -375,9 +353,14 @@ function MainApp() {
 			return;
 		}
 		if (!draftBackendId && defaultBackendId) {
-			setDraftBackendId(defaultBackendId);
+			uiActions.setDraftBackendId(defaultBackendId);
 		}
-	}, [createDialogOpen, defaultBackendId, draftBackendId, setDraftBackendId]);
+	}, [
+		createDialogOpen,
+		defaultBackendId,
+		draftBackendId,
+		uiActions.setDraftBackendId,
+	]);
 
 	const fileExplorerAvailable = Boolean(activeSessionId && activeSession?.cwd);
 	const syncHistoryAvailable = Boolean(activeSessionId);
@@ -403,34 +386,44 @@ function MainApp() {
 		if (fileExplorerAvailable) {
 			return;
 		}
-		setFileExplorerOpen(false);
-		setFilePreviewPath(undefined);
-	}, [fileExplorerAvailable, setFileExplorerOpen, setFilePreviewPath]);
+		uiActions.setFileExplorerOpen(false);
+		uiActions.setFilePreviewPath(undefined);
+	}, [
+		fileExplorerAvailable,
+		uiActions.setFileExplorerOpen,
+		uiActions.setFilePreviewPath,
+	]);
 
 	const handleOpenCreateDialog = () => {
-		setDraftTitle(buildSessionTitle(sessionList, t));
-		setDraftBackendId(defaultBackendId);
-		setDraftCwd(
+		uiActions.setDraftTitle(buildSessionTitle(sessionList, t));
+		uiActions.setDraftBackendId(defaultBackendId);
+		uiActions.setDraftCwd(
 			selectedMachineId ? lastCreatedCwd[selectedMachineId] : undefined,
 		);
-		setCreateDialogOpen(true);
+		uiActions.setCreateDialogOpen(true);
 	};
 
 	const handleCreateSession = async () => {
 		if (!selectedMachineId) {
-			setAppError(createFallbackError(t("errors.selectMachine"), "request"));
+			chatActions.setAppError(
+				createFallbackError(t("errors.selectMachine"), "request"),
+			);
 			return;
 		}
 		if (!draftBackendId) {
-			setAppError(createFallbackError(t("errors.selectBackend"), "request"));
+			chatActions.setAppError(
+				createFallbackError(t("errors.selectBackend"), "request"),
+			);
 			return;
 		}
 		if (!draftCwd) {
-			setAppError(createFallbackError(t("errors.selectDirectory"), "request"));
+			chatActions.setAppError(
+				createFallbackError(t("errors.selectDirectory"), "request"),
+			);
 			return;
 		}
 		const title = draftTitle.trim();
-		setAppError(undefined);
+		chatActions.setAppError(undefined);
 		try {
 			await createSessionMutation.mutateAsync({
 				backendId: draftBackendId,
@@ -438,8 +431,8 @@ function MainApp() {
 				title: title.length > 0 ? title : undefined,
 				machineId: selectedMachineId,
 			});
-			setCreateDialogOpen(false);
-			setMobileMenuOpen(false);
+			uiActions.setCreateDialogOpen(false);
+			uiActions.setMobileMenuOpen(false);
 		} catch {
 			return;
 		}
@@ -453,9 +446,9 @@ function MainApp() {
 		if (title.length === 0) {
 			return;
 		}
-		renameSessionLocal(editingSessionId, title);
+		chatActions.renameSession(editingSessionId, title);
 		renameSessionMutation.mutate({ sessionId: editingSessionId, title });
-		clearEditingSession();
+		uiActions.clearEditingSession();
 	};
 
 	const handleCloseSession = async (sessionId: string) => {
@@ -465,7 +458,7 @@ function MainApp() {
 				const nextSession = sessionList.find(
 					(session) => session.sessionId !== sessionId,
 				);
-				setActiveSessionId(nextSession?.sessionId);
+				chatActions.setActiveSessionId(nextSession?.sessionId);
 			}
 		} catch {
 			return;
@@ -483,7 +476,7 @@ function MainApp() {
 				return;
 			}
 			if (!session.isAttached) {
-				setError(sessionId, buildSessionNotReadyError());
+				chatActions.setError(sessionId, buildSessionNotReadyError());
 				return;
 			}
 			permissionDecisionMutation.mutate({
@@ -492,7 +485,7 @@ function MainApp() {
 				outcome: payload.outcome,
 			});
 		},
-		[permissionDecisionMutation, setError],
+		[permissionDecisionMutation, chatActions.setError],
 	);
 
 	const handleModeChange = (modeId: string) => {
@@ -500,13 +493,13 @@ function MainApp() {
 			return;
 		}
 		if (!activeSession.isAttached) {
-			setError(activeSessionId, buildSessionNotReadyError());
+			chatActions.setError(activeSessionId, buildSessionNotReadyError());
 			return;
 		}
 		if (modeId === activeSession.modeId) {
 			return;
 		}
-		setError(activeSessionId, undefined);
+		chatActions.setError(activeSessionId, undefined);
 		setSessionModeMutation.mutate({ sessionId: activeSessionId, modeId });
 	};
 
@@ -515,13 +508,13 @@ function MainApp() {
 			return;
 		}
 		if (!activeSession.isAttached) {
-			setError(activeSessionId, buildSessionNotReadyError());
+			chatActions.setError(activeSessionId, buildSessionNotReadyError());
 			return;
 		}
 		if (modelId === activeSession.modelId) {
 			return;
 		}
-		setError(activeSessionId, undefined);
+		chatActions.setError(activeSessionId, undefined);
 		setSessionModelMutation.mutate({ sessionId: activeSessionId, modelId });
 	};
 
@@ -533,7 +526,7 @@ function MainApp() {
 			return;
 		}
 		if (!activeSession.isAttached) {
-			setError(activeSessionId, buildSessionNotReadyError());
+			chatActions.setError(activeSessionId, buildSessionNotReadyError());
 			return;
 		}
 		cancelSessionMutation.mutate({ sessionId: activeSessionId });
@@ -586,15 +579,15 @@ function MainApp() {
 			return;
 		}
 		if (!activeSession.isAttached) {
-			setError(activeSessionId, buildSessionNotReadyError());
+			chatActions.setError(activeSessionId, buildSessionNotReadyError());
 			return;
 		}
 
-		setSending(activeSessionId, true);
-		setCanceling(activeSessionId, false);
-		setError(activeSessionId, undefined);
-		setInput(activeSessionId, "");
-		setInputContents(activeSessionId, [{ type: "text", text: "" }]);
+		chatActions.setSending(activeSessionId, true);
+		chatActions.setCanceling(activeSessionId, false);
+		chatActions.setError(activeSessionId, undefined);
+		chatActions.setInput(activeSessionId, "");
+		chatActions.setInputContents(activeSessionId, [{ type: "text", text: "" }]);
 
 		let messageId: string;
 		try {
@@ -606,7 +599,7 @@ function MainApp() {
 			return;
 		}
 
-		addUserMessage(activeSessionId, activeSession.input ?? "", {
+		chatActions.addUserMessage(activeSessionId, activeSession.input ?? "", {
 			messageId,
 			contentBlocks: promptContents,
 		});
@@ -660,7 +653,7 @@ function MainApp() {
 				<Toaster />
 				<CreateSessionDialog
 					open={createDialogOpen}
-					onOpenChange={setCreateDialogOpen}
+					onOpenChange={uiActions.setCreateDialogOpen}
 					availableBackends={availableBackends}
 					isCreating={createSessionMutation.isPending}
 					onCreate={handleCreateSession}
@@ -668,9 +661,9 @@ function MainApp() {
 				<FileExplorerDialog
 					open={fileExplorerOpen && fileExplorerAvailable}
 					onOpenChange={(isOpen) => {
-						setFileExplorerOpen(isOpen);
+						uiActions.setFileExplorerOpen(isOpen);
 						if (!isOpen) {
-							setFilePreviewPath(undefined);
+							uiActions.setFilePreviewPath(undefined);
 						}
 					}}
 					sessionId={activeSessionId}
@@ -688,7 +681,7 @@ function MainApp() {
 						if (session) {
 							void activateSession(session);
 						} else {
-							setActiveSessionId(sessionId);
+							chatActions.setActiveSessionId(sessionId);
 						}
 					}}
 					onEditSubmit={handleRenameSubmit}
@@ -705,8 +698,8 @@ function MainApp() {
 						statusMessage={statusMessage}
 						streamError={streamError}
 						loadingMessage={loadingMessage}
-						onOpenMobileMenu={() => setMobileMenuOpen(true)}
-						onOpenFileExplorer={() => setFileExplorerOpen(true)}
+						onOpenMobileMenu={() => uiActions.setMobileMenuOpen(true)}
+						onOpenFileExplorer={() => uiActions.setFileExplorerOpen(true)}
 						onSyncHistory={handleSyncHistory}
 						onForceReload={handleForceReload}
 						showFileExplorer={fileExplorerAvailable}

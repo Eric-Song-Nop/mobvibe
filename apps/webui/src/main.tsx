@@ -12,7 +12,14 @@ import "./i18n";
 import "./index.css";
 import App from "./App.tsx";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+	defaultOptions: {
+		queries: {
+			staleTime: 60_000,
+			refetchOnWindowFocus: false,
+		},
+	},
+});
 
 const renderApp = () => {
 	createRoot(document.getElementById("root")!).render(

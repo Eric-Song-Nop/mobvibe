@@ -145,14 +145,18 @@ export function useDiscoverSessionsMutation() {
  */
 export function useSessionQueries(): UseSessionQueriesReturn {
 	// Fetch sessions once on mount; real-time updates come via sessions:changed socket event
+	// Sessions — socket-driven, never refetch automatically
 	const sessionsQuery = useQuery({
 		queryKey: queryKeys.sessions,
 		queryFn: fetchSessions,
+		staleTime: Number.POSITIVE_INFINITY,
 	});
 
+	// Backends — rarely changes
 	const backendsQuery = useQuery({
 		queryKey: queryKeys.backends,
 		queryFn: fetchAcpBackends,
+		staleTime: 5 * 60_000,
 	});
 
 	const availableBackends = backendsQuery.data?.backends ?? [];

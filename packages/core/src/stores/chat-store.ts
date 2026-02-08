@@ -1010,7 +1010,8 @@ export const useChatStore = create<ChatState>()(
 					const session =
 						state.sessions[sessionId] ?? createSessionState(sessionId);
 					let { streamingMessageId, streamingMessageRole } = session;
-					let messages = [...session.messages];
+					let messages = session.messages;
+
 					if (!streamingMessageId || streamingMessageRole !== "assistant") {
 						const message = createMessage("assistant", "");
 						streamingMessageId = message.id;
@@ -1018,20 +1019,22 @@ export const useChatStore = create<ChatState>()(
 						messages = [...messages, message];
 					}
 
-					messages = messages.map((message: ChatMessage) => {
-						if (message.id !== streamingMessageId || !isTextMessage(message)) {
-							return message;
-						}
-						const nextContent = `${message.content}${content}`;
-						const nextBlocks = message.contentBlocks.map((block) =>
-							block.type === "text" ? { ...block, text: nextContent } : block,
-						);
-						return {
-							...message,
-							content: nextContent,
-							contentBlocks: nextBlocks,
-						};
-					});
+					const idx = messages.findIndex((m) => m.id === streamingMessageId);
+					if (idx === -1) return state;
+
+					const msg = messages[idx];
+					if (!isTextMessage(msg)) return state;
+
+					const nextContent = `${msg.content}${content}`;
+					const nextBlocks = msg.contentBlocks.map((b) =>
+						b.type === "text" ? { ...b, text: nextContent } : b,
+					);
+
+					messages = [
+						...messages.slice(0, idx),
+						{ ...msg, content: nextContent, contentBlocks: nextBlocks },
+						...messages.slice(idx + 1),
+					];
 
 					return {
 						sessions: {
@@ -1050,7 +1053,7 @@ export const useChatStore = create<ChatState>()(
 					const session =
 						state.sessions[sessionId] ?? createSessionState(sessionId);
 					let { streamingThoughtId } = session;
-					let messages = [...session.messages];
+					let messages = session.messages;
 
 					if (!streamingThoughtId) {
 						const thought: ThoughtMessage = {
@@ -1065,11 +1068,17 @@ export const useChatStore = create<ChatState>()(
 						messages = [...messages, thought];
 					}
 
-					messages = messages.map((msg) =>
-						msg.id === streamingThoughtId && msg.kind === "thought"
-							? { ...msg, content: msg.content + content }
-							: msg,
-					);
+					const idx = messages.findIndex((m) => m.id === streamingThoughtId);
+					if (idx === -1) return state;
+
+					const msg = messages[idx];
+					if (msg.kind !== "thought") return state;
+
+					messages = [
+						...messages.slice(0, idx),
+						{ ...msg, content: msg.content + content },
+						...messages.slice(idx + 1),
+					];
 
 					return {
 						sessions: {
@@ -1083,7 +1092,8 @@ export const useChatStore = create<ChatState>()(
 					const session =
 						state.sessions[sessionId] ?? createSessionState(sessionId);
 					let { streamingMessageId, streamingMessageRole } = session;
-					let messages = [...session.messages];
+					let messages = session.messages;
+
 					if (!streamingMessageId || streamingMessageRole !== "user") {
 						const message = createMessage("user", "");
 						streamingMessageId = message.id;
@@ -1091,20 +1101,22 @@ export const useChatStore = create<ChatState>()(
 						messages = [...messages, message];
 					}
 
-					messages = messages.map((message: ChatMessage) => {
-						if (message.id !== streamingMessageId || !isTextMessage(message)) {
-							return message;
-						}
-						const nextContent = `${message.content}${content}`;
-						const nextBlocks = message.contentBlocks.map((block) =>
-							block.type === "text" ? { ...block, text: nextContent } : block,
-						);
-						return {
-							...message,
-							content: nextContent,
-							contentBlocks: nextBlocks,
-						};
-					});
+					const idx = messages.findIndex((m) => m.id === streamingMessageId);
+					if (idx === -1) return state;
+
+					const msg = messages[idx];
+					if (!isTextMessage(msg)) return state;
+
+					const nextContent = `${msg.content}${content}`;
+					const nextBlocks = msg.contentBlocks.map((b) =>
+						b.type === "text" ? { ...b, text: nextContent } : b,
+					);
+
+					messages = [
+						...messages.slice(0, idx),
+						{ ...msg, content: nextContent, contentBlocks: nextBlocks },
+						...messages.slice(idx + 1),
+					];
 
 					return {
 						sessions: {
