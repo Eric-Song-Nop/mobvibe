@@ -69,7 +69,6 @@ vi.mock("@/hooks/useSessionQueries", () => ({
 			isError: false,
 		},
 		availableBackends: [],
-		defaultBackendId: undefined,
 		discoverSessionsMutation: {
 			mutate: vi.fn(),
 			mutateAsync: vi.fn(),

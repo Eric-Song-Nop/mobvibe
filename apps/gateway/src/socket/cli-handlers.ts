@@ -188,11 +188,8 @@ export function setupCliHandlers(
 				cwd: s.cwd,
 				updatedAt: s.updatedAt ?? new Date().toISOString(),
 				createdAt: s.updatedAt ?? new Date().toISOString(),
-				backendId: cliRecord.defaultBackendId ?? "",
-				backendLabel:
-					cliRecord.backends[0]?.backendLabel ??
-					cliRecord.defaultBackendId ??
-					"",
+				backendId: payload.backendId,
+				backendLabel: payload.backendLabel,
 				machineId: cliRecord.machineId,
 			}));
 

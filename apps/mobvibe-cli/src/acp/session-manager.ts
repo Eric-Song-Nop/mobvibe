@@ -135,7 +135,6 @@ export class SessionManager {
 	private sessions = new Map<string, SessionRecord>();
 	private discoveredSessions = new Map<string, AcpSessionInfo>();
 	private backendById: Map<string, AcpBackendConfig>;
-	private defaultBackendId: string;
 	private permissionRequests = new Map<string, PermissionRequestRecord>();
 	private readonly permissionRequestEmitter = new EventEmitter();
 	private readonly permissionResultEmitter = new EventEmitter();
@@ -149,7 +148,6 @@ export class SessionManager {
 		this.backendById = new Map(
 			config.acpBackends.map((backend) => [backend.id, backend]),
 		);
-		this.defaultBackendId = config.defaultAcpBackendId;
 		this.walStore = new WalStore(config.walDbPath);
 	}
 
@@ -480,11 +478,20 @@ export class SessionManager {
 		return payload;
 	}
 
-	private resolveBackend(backendId?: string) {
-		const normalized = backendId?.trim();
-		const resolvedId =
-			normalized && normalized.length > 0 ? normalized : this.defaultBackendId;
-		const backend = this.backendById.get(resolvedId);
+	private resolveBackend(backendId: string) {
+		const normalized = backendId.trim();
+		if (!normalized) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "backendId is required",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		const backend = this.backendById.get(normalized);
 		if (!backend) {
 			throw new AppError(
 				createErrorDetail({
@@ -499,12 +506,12 @@ export class SessionManager {
 		return backend;
 	}
 
-	async createSession(options?: {
+	async createSession(options: {
 		cwd?: string;
 		title?: string;
-		backendId?: string;
+		backendId: string;
 	}): Promise<SessionSummary> {
-		const backend = this.resolveBackend(options?.backendId);
+		const backend = this.resolveBackend(options.backendId);
 		const connection = new AcpConnection({
 			backend,
 			client: {
@@ -897,12 +904,12 @@ export class SessionManager {
 	 * @param options Optional parameters for discovery
 	 * @returns List of discovered sessions and agent capabilities
 	 */
-	async discoverSessions(options?: {
+	async discoverSessions(options: {
 		cwd?: string;
-		backendId?: string;
+		backendId: string;
 		cursor?: string;
 	}): Promise<DiscoverSessionsRpcResult> {
-		const backend = this.resolveBackend(options?.backendId);
+		const backend = this.resolveBackend(options.backendId);
 		const connection = new AcpConnection({
 			backend,
 			client: {
@@ -1007,7 +1014,7 @@ export class SessionManager {
 	async loadSession(
 		sessionId: string,
 		cwd: string,
-		backendId?: string,
+		backendId: string,
 	): Promise<SessionSummary> {
 		logger.info({ sessionId, cwd, backendId }, "load_session_start");
 
@@ -1184,7 +1191,7 @@ export class SessionManager {
 	async reloadSession(
 		sessionId: string,
 		cwd: string,
-		backendId?: string,
+		backendId: string,
 	): Promise<SessionSummary> {
 		const existing = this.sessions.get(sessionId);
 		if (!existing) {

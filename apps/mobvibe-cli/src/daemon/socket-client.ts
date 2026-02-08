@@ -199,29 +199,44 @@ export class SocketClient extends EventEmitter {
 		this.socket.on("cli:registered", async (info) => {
 			logger.info({ machineId: info.machineId }, "gateway_registered");
 
-			// Auto-discover historical sessions from ACP agent
-			try {
-				let cursor: string | undefined;
-				let page = 0;
-				do {
-					const { sessions, capabilities, nextCursor } =
-						await this.options.sessionManager.discoverSessions({ cursor });
-					cursor = nextCursor;
-					if (sessions.length > 0) {
-						this.socket.emit("sessions:discovered", {
-							sessions,
-							capabilities,
-							nextCursor,
-						});
-						logger.info(
-							{ count: sessions.length, capabilities, page },
-							"historical_sessions_discovered",
-						);
-					}
-					page += 1;
-				} while (cursor);
-			} catch (error) {
-				logger.warn({ err: error }, "session_discovery_failed");
+			// Auto-discover historical sessions from all backends
+			for (const backend of this.options.config.acpBackends) {
+				try {
+					let cursor: string | undefined;
+					let page = 0;
+					do {
+						const { sessions, capabilities, nextCursor } =
+							await this.options.sessionManager.discoverSessions({
+								backendId: backend.id,
+								cursor,
+							});
+						cursor = nextCursor;
+						if (sessions.length > 0) {
+							this.socket.emit("sessions:discovered", {
+								sessions,
+								capabilities,
+								nextCursor,
+								backendId: backend.id,
+								backendLabel: backend.label,
+							});
+							logger.info(
+								{
+									count: sessions.length,
+									capabilities,
+									page,
+									backendId: backend.id,
+								},
+								"historical_sessions_discovered",
+							);
+						}
+						page += 1;
+					} while (cursor);
+				} catch (error) {
+					logger.warn(
+						{ err: error, backendId: backend.id },
+						"session_discovery_failed",
+					);
+				}
 			}
 		});
 
@@ -684,12 +699,16 @@ export class SocketClient extends EventEmitter {
 		// Load historical session from ACP agent
 		this.socket.on("rpc:session:load", async (request) => {
 			try {
-				const { sessionId, cwd } = request.params;
+				const { sessionId, cwd, backendId } = request.params;
 				logger.info(
-					{ requestId: request.requestId, sessionId, cwd },
+					{ requestId: request.requestId, sessionId, cwd, backendId },
 					"rpc_session_load",
 				);
-				const session = await sessionManager.loadSession(sessionId, cwd);
+				const session = await sessionManager.loadSession(
+					sessionId,
+					cwd,
+					backendId,
+				);
 				this.sendRpcResponse(request.requestId, session);
 			} catch (error) {
 				logger.error(
@@ -707,12 +726,16 @@ export class SocketClient extends EventEmitter {
 		// Reload historical session from ACP agent
 		this.socket.on("rpc:session:reload", async (request) => {
 			try {
-				const { sessionId, cwd } = request.params;
+				const { sessionId, cwd, backendId } = request.params;
 				logger.info(
-					{ requestId: request.requestId, sessionId, cwd },
+					{ requestId: request.requestId, sessionId, cwd, backendId },
 					"rpc_session_reload",
 				);
-				const session = await sessionManager.reloadSession(sessionId, cwd);
+				const session = await sessionManager.reloadSession(
+					sessionId,
+					cwd,
+					backendId,
+				);
 				this.sendRpcResponse(request.requestId, session);
 			} catch (error) {
 				logger.error(
@@ -1034,7 +1057,6 @@ export class SocketClient extends EventEmitter {
 				backendId: backend.id,
 				backendLabel: backend.label,
 			})),
-			defaultBackendId: config.defaultAcpBackendId,
 		});
 		logger.info({ machineId: config.machineId }, "cli_register_sessions_list");
 		// Send current sessions list

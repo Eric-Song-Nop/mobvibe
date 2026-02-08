@@ -60,7 +60,6 @@ describe("useSessionQueries", () => {
 
 		vi.mocked(api.fetchSessions).mockResolvedValue(mockSessions);
 		vi.mocked(api.fetchAcpBackends).mockResolvedValue({
-			defaultBackendId: "backend-1",
 			backends: [],
 		});
 
@@ -76,7 +75,6 @@ describe("useSessionQueries", () => {
 
 	it("should fetch backends successfully", async () => {
 		const mockBackends = {
-			defaultBackendId: "backend-1",
 			backends: [
 				{
 					backendId: "backend-1",
@@ -104,7 +102,6 @@ describe("useSessionQueries", () => {
 
 	it("should extract availableBackends from data", async () => {
 		const mockBackends = {
-			defaultBackendId: "backend-1",
 			backends: [
 				{
 					backendId: "backend-1",
@@ -129,56 +126,9 @@ describe("useSessionQueries", () => {
 		expect(result.current.availableBackends).toEqual(mockBackends.backends);
 	});
 
-	it("should extract defaultBackendId from data", async () => {
-		const mockBackends = {
-			defaultBackendId: "backend-1",
-			backends: [
-				{
-					backendId: "backend-1",
-					backendLabel: "Backend 1",
-				},
-			],
-		};
-
-		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
-		vi.mocked(api.fetchAcpBackends).mockResolvedValue(mockBackends);
-
-		const { result } = renderHook(() => useSessionQueries(), { wrapper });
-
-		await waitFor(() => {
-			expect(result.current.backendsQuery.isSuccess).toBe(true);
-		});
-
-		expect(result.current.defaultBackendId).toBe("backend-1");
-	});
-
-	it("should use first backend as default if defaultBackendId is missing", async () => {
-		const mockBackends = {
-			defaultBackendId: "",
-			backends: [
-				{
-					backendId: "backend-2",
-					backendLabel: "Backend 2",
-				},
-			],
-		};
-
-		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
-		vi.mocked(api.fetchAcpBackends).mockResolvedValue(mockBackends);
-
-		const { result } = renderHook(() => useSessionQueries(), { wrapper });
-
-		await waitFor(() => {
-			expect(result.current.backendsQuery.isSuccess).toBe(true);
-		});
-
-		expect(result.current.defaultBackendId).toBe("backend-2");
-	});
-
-	it("should return undefined defaultBackendId when no backends available", async () => {
+	it("should return empty availableBackends when no backends available", async () => {
 		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
 		vi.mocked(api.fetchAcpBackends).mockResolvedValue({
-			defaultBackendId: "",
 			backends: [],
 		});
 
@@ -188,7 +138,6 @@ describe("useSessionQueries", () => {
 			expect(result.current.backendsQuery.isSuccess).toBe(true);
 		});
 
-		expect(result.current.defaultBackendId).toBeUndefined();
 		expect(result.current.availableBackends).toEqual([]);
 	});
 
@@ -197,7 +146,6 @@ describe("useSessionQueries", () => {
 			new Error("Failed to fetch sessions"),
 		);
 		vi.mocked(api.fetchAcpBackends).mockResolvedValue({
-			defaultBackendId: "backend-1",
 			backends: [],
 		});
 
@@ -228,7 +176,6 @@ describe("useSessionQueries", () => {
 	it("discovers sessions and invalidates sessions query", async () => {
 		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
 		vi.mocked(api.fetchAcpBackends).mockResolvedValue({
-			defaultBackendId: "backend-1",
 			backends: [{ backendId: "backend-1", backendLabel: "Backend 1" }],
 		});
 		vi.mocked(api.discoverSessions).mockResolvedValueOnce({
@@ -269,7 +216,6 @@ describe("useSessionQueries", () => {
 	it("discovers sessions across all available backends", async () => {
 		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
 		vi.mocked(api.fetchAcpBackends).mockResolvedValue({
-			defaultBackendId: "opencode",
 			backends: [
 				{ backendId: "opencode", backendLabel: "OpenCode" },
 				{ backendId: "codex-acp", backendLabel: "Codex ACP" },
@@ -309,7 +255,6 @@ describe("useSessionQueries", () => {
 	it("continues discovery when a non-explicit backend is unsupported", async () => {
 		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
 		vi.mocked(api.fetchAcpBackends).mockResolvedValue({
-			defaultBackendId: "opencode",
 			backends: [
 				{ backendId: "opencode", backendLabel: "OpenCode" },
 				{ backendId: "codex-acp", backendLabel: "Codex ACP" },
@@ -345,7 +290,6 @@ describe("useSessionQueries", () => {
 	it("should use correct query keys", async () => {
 		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
 		vi.mocked(api.fetchAcpBackends).mockResolvedValue({
-			defaultBackendId: "backend-1",
 			backends: [],
 		});
 

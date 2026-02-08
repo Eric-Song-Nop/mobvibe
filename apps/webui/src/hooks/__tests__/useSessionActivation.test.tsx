@@ -165,6 +165,7 @@ describe("useSessionActivation", () => {
 		const session = buildSession({
 			cwd: "/home/user/project",
 			machineId: "machine-1",
+			backendId: "backend-1",
 		});
 
 		machinesState = {
@@ -185,6 +186,7 @@ describe("useSessionActivation", () => {
 		expect(loadSessionMutation.mutateAsync).toHaveBeenCalledWith({
 			sessionId: "session-1",
 			cwd: "/home/user/project",
+			backendId: "backend-1",
 			machineId: "machine-1",
 		});
 		expect(store.setActiveSessionId).toHaveBeenCalledWith("session-1");
@@ -196,6 +198,7 @@ describe("useSessionActivation", () => {
 		const session = buildSession({
 			cwd: "/home/user/project",
 			machineId: "machine-1",
+			backendId: "backend-1",
 			isAttached: true,
 		});
 
@@ -215,6 +218,7 @@ describe("useSessionActivation", () => {
 		expect(reloadSessionMutation.mutateAsync).toHaveBeenCalledWith({
 			sessionId: "session-1",
 			cwd: "/home/user/project",
+			backendId: "backend-1",
 			machineId: "machine-1",
 		});
 		expect(loadSessionMutation.mutateAsync).not.toHaveBeenCalled();
@@ -225,6 +229,7 @@ describe("useSessionActivation", () => {
 		const session = buildSession({
 			cwd: "/home/user/project",
 			machineId: "machine-1",
+			backendId: "backend-1",
 			messages: [
 				{
 					id: "msg-1",

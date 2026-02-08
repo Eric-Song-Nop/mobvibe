@@ -31,7 +31,6 @@ export type SessionInfoPayload = {
 
 // API Response types (core-specific)
 export type AcpBackendsResponse = {
-	defaultBackendId: string;
 	backends: { backendId: string; backendLabel: string }[];
 };
 

@@ -91,7 +91,6 @@ export type CliRegistrationInfo = {
 	hostname: string;
 	version?: string;
 	backends?: AcpBackendSummary[];
-	defaultBackendId?: string;
 };
 
 // CLI error payload (sent when auth fails)
@@ -133,7 +132,7 @@ export type RpcResponse<TResult> = {
 export type CreateSessionParams = {
 	cwd?: string;
 	title?: string;
-	backendId?: AcpBackendId;
+	backendId: AcpBackendId;
 	machineId?: string;
 };
 
@@ -218,7 +217,7 @@ export type HostFsRootsResponse = {
 // Session discovery RPC params
 export type DiscoverSessionsRpcParams = {
 	cwd?: string;
-	backendId?: string;
+	backendId: string;
 	cursor?: string;
 };
 
@@ -233,12 +232,14 @@ export type DiscoverSessionsRpcResult = {
 export type LoadSessionRpcParams = {
 	sessionId: string;
 	cwd: string;
+	backendId: string;
 };
 
 // Reload session RPC params
 export type ReloadSessionRpcParams = {
 	sessionId: string;
 	cwd: string;
+	backendId: string;
 };
 
 /** Payload for sessions:discovered event */
@@ -246,6 +247,8 @@ export type SessionsDiscoveredPayload = {
 	sessions: AcpSessionInfo[];
 	capabilities: AgentSessionCapabilities;
 	nextCursor?: string;
+	backendId: string;
+	backendLabel: string;
 };
 
 export type SessionAttachedPayload = {

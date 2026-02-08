@@ -181,27 +181,24 @@ export const fetchSessions = async (): Promise<SessionsResponse> =>
 export const fetchMachines = async (): Promise<MachinesResponse> =>
 	requestJson<MachinesResponse>("/api/machines");
 
-const buildSessionsDiscoverPath = (payload?: {
+const buildSessionsDiscoverPath = (payload: {
 	machineId?: string;
 	cwd?: string;
-	backendId?: string;
+	backendId: string;
 	cursor?: string;
 }) => {
 	const params = new URLSearchParams();
-	if (payload?.machineId) {
+	if (payload.machineId) {
 		params.set("machineId", payload.machineId);
 	}
-	if (payload?.cwd) {
+	if (payload.cwd) {
 		params.set("cwd", payload.cwd);
 	}
-	if (payload?.backendId) {
-		params.set("backendId", payload.backendId);
-	}
-	if (payload?.cursor) {
+	params.set("backendId", payload.backendId);
+	if (payload.cursor) {
 		params.set("cursor", payload.cursor);
 	}
-	const query = params.toString();
-	return query ? `/acp/sessions/discover?${query}` : "/acp/sessions/discover";
+	return `/acp/sessions/discover?${params.toString()}`;
 };
 
 const buildFsRootsPath = (machineId?: string) => {
@@ -244,10 +241,10 @@ export const fetchFsRoots = async (payload?: {
 }): Promise<FsRootsResponse> =>
 	requestJson<FsRootsResponse>(buildFsRootsPath(payload?.machineId));
 
-export const discoverSessions = async (payload?: {
+export const discoverSessions = async (payload: {
 	machineId?: string;
 	cwd?: string;
-	backendId?: string;
+	backendId: string;
 	cursor?: string;
 }): Promise<DiscoverSessionsResult> =>
 	requestJson<DiscoverSessionsResult>(buildSessionsDiscoverPath(payload));
@@ -376,6 +373,7 @@ export const sendPermissionDecision = async (
 export const loadSession = async (payload: {
 	sessionId: string;
 	cwd: string;
+	backendId: string;
 	machineId?: string;
 }): Promise<SessionSummary> =>
 	requestJson<SessionSummary>("/acp/session/load", {
@@ -386,6 +384,7 @@ export const loadSession = async (payload: {
 export const reloadSession = async (payload: {
 	sessionId: string;
 	cwd: string;
+	backendId: string;
 	machineId?: string;
 }): Promise<SessionSummary> =>
 	requestJson<SessionSummary>("/acp/session/reload", {

@@ -37,7 +37,6 @@ const createMockRegistrationInfo = (
 	hostname: "test-host",
 	version: "1.0.0",
 	backends: [{ backendId: "backend-1", backendLabel: "Claude Code" }],
-	defaultBackendId: "backend-1",
 	...overrides,
 });
 
@@ -168,7 +167,9 @@ describe("SessionRouter", () => {
 			expect(socket.emit).toHaveBeenCalledWith(
 				"rpc:sessions:discover",
 				expect.objectContaining({
-					params: { cwd: "/home/user/project" },
+					params: expect.objectContaining({
+						cwd: "/home/user/project",
+					}),
 				}),
 			);
 		});
@@ -241,6 +242,7 @@ describe("SessionRouter", () => {
 					sessionId: "loaded-session-1",
 					cwd: "/home/user/project",
 					machineId: "machine-1",
+					backendId: "backend-1",
 				},
 				"user-1",
 			);
@@ -253,6 +255,7 @@ describe("SessionRouter", () => {
 					params: {
 						sessionId: "loaded-session-1",
 						cwd: "/home/user/project",
+						backendId: "backend-1",
 					},
 				}),
 			);
@@ -265,6 +268,7 @@ describe("SessionRouter", () => {
 						sessionId: "session-1",
 						cwd: "/home/user",
 						machineId: "unknown-machine",
+						backendId: "backend-1",
 					},
 					"user-1",
 				),
@@ -283,6 +287,7 @@ describe("SessionRouter", () => {
 						sessionId: "session-1",
 						cwd: "/home/user",
 						machineId: "machine-1",
+						backendId: "backend-1",
 					},
 					"user-2",
 				),
@@ -314,6 +319,7 @@ describe("SessionRouter", () => {
 				{
 					sessionId: "loaded-session-1",
 					cwd: "/home/user/project",
+					backendId: "backend-1",
 				},
 				"user-1",
 			);

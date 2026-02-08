@@ -92,7 +92,6 @@ const createMockConfig = (): CliConfig => ({
 			args: [],
 		},
 	],
-	defaultAcpBackendId: "backend-1",
 	homePath: "/tmp/mobvibe-test",
 	logPath: "/tmp/mobvibe-test/logs",
 	pidFile: "/tmp/mobvibe-test/daemon.pid",
@@ -121,7 +120,9 @@ describe("SessionManager", () => {
 
 	describe("discoverSessions", () => {
 		it("discovers sessions from agent", async () => {
-			const result = await sessionManager.discoverSessions();
+			const result = await sessionManager.discoverSessions({
+				backendId: "backend-1",
+			});
 
 			expect(result.sessions).toHaveLength(2);
 			expect(result.sessions[0].sessionId).toBe("discovered-1");
@@ -134,6 +135,7 @@ describe("SessionManager", () => {
 
 		it("discovers sessions with cwd filter", async () => {
 			const result = await sessionManager.discoverSessions({
+				backendId: "backend-1",
 				cwd: "/home/user/project1",
 			});
 
@@ -161,6 +163,7 @@ describe("SessionManager", () => {
 			const result = await sessionManager.loadSession(
 				"session-to-load",
 				"/home/user/project",
+				"backend-1",
 			);
 
 			expect(result.sessionId).toBe("session-to-load");
@@ -173,12 +176,14 @@ describe("SessionManager", () => {
 			// First, create a session
 			const created = await sessionManager.createSession({
 				cwd: "/home/user/project",
+				backendId: "backend-1",
 			});
 
 			// Try to load the same session
 			const loaded = await sessionManager.loadSession(
 				created.sessionId,
 				"/home/user/project",
+				"backend-1",
 			);
 
 			expect(loaded.sessionId).toBe(created.sessionId);
@@ -188,7 +193,11 @@ describe("SessionManager", () => {
 			const changedListener = mock(() => {});
 			sessionManager.onSessionsChanged(changedListener);
 
-			await sessionManager.loadSession("session-to-load", "/home/user/project");
+			await sessionManager.loadSession(
+				"session-to-load",
+				"/home/user/project",
+				"backend-1",
+			);
 
 			expect(changedListener).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -206,11 +215,19 @@ describe("SessionManager", () => {
 			sessionManager.onSessionAttached(attachedListener);
 
 			// First load
-			await sessionManager.loadSession("test-session", "/home/user/project");
+			await sessionManager.loadSession(
+				"test-session",
+				"/home/user/project",
+				"backend-1",
+			);
 			expect(attachedListener).toHaveBeenCalledTimes(1);
 
 			// Second load (same session) - should still emit due to force flag
-			await sessionManager.loadSession("test-session", "/home/user/project");
+			await sessionManager.loadSession(
+				"test-session",
+				"/home/user/project",
+				"backend-1",
+			);
 			expect(attachedListener).toHaveBeenCalledTimes(2);
 		});
 	});
@@ -221,11 +238,19 @@ describe("SessionManager", () => {
 			sessionManager.onSessionAttached(attachedListener);
 
 			// First load
-			await sessionManager.loadSession("test-session", "/home/user/project");
+			await sessionManager.loadSession(
+				"test-session",
+				"/home/user/project",
+				"backend-1",
+			);
 			expect(attachedListener).toHaveBeenCalledTimes(1);
 
 			// Reload - should emit again due to force flag
-			await sessionManager.reloadSession("test-session", "/home/user/project");
+			await sessionManager.reloadSession(
+				"test-session",
+				"/home/user/project",
+				"backend-1",
+			);
 			expect(attachedListener).toHaveBeenCalledTimes(2);
 		});
 	});
@@ -237,7 +262,10 @@ describe("SessionManager", () => {
 		});
 
 		it("returns sessions after creating one", async () => {
-			await sessionManager.createSession({ cwd: "/home/user/project" });
+			await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
 
 			const sessions = sessionManager.listSessions();
 			expect(sessions).toHaveLength(1);
@@ -249,6 +277,7 @@ describe("SessionManager", () => {
 		it("closes and removes session", async () => {
 			const created = await sessionManager.createSession({
 				cwd: "/home/user/project",
+				backendId: "backend-1",
 			});
 
 			const result = await sessionManager.closeSession(created.sessionId);
@@ -260,6 +289,7 @@ describe("SessionManager", () => {
 		it("emits sessions:changed event when session closed", async () => {
 			const created = await sessionManager.createSession({
 				cwd: "/home/user/project",
+				backendId: "backend-1",
 			});
 
 			const changedListener = mock(() => {});
@@ -286,6 +316,7 @@ describe("SessionManager", () => {
 		it("writes and emits turn_end event for active session", async () => {
 			await sessionManager.createSession({
 				cwd: "/home/user/project",
+				backendId: "backend-1",
 			});
 			const sessions = sessionManager.listSessions();
 			const sessionId = sessions[0].sessionId;
@@ -318,6 +349,7 @@ describe("SessionManager", () => {
 			// Create a session first to have it in WAL
 			await sessionManager.createSession({
 				cwd: "/home/user/project",
+				backendId: "backend-1",
 			});
 			const sessions = sessionManager.listSessions();
 			const sessionId = sessions[0].sessionId;
@@ -339,6 +371,7 @@ describe("SessionManager", () => {
 			// Create a session
 			await sessionManager.createSession({
 				cwd: "/home/user/project",
+				backendId: "backend-1",
 			});
 			const sessions = sessionManager.listSessions();
 			const sessionId = sessions[0].sessionId;

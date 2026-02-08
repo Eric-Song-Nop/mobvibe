@@ -43,7 +43,6 @@ export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
 export type CliConfig = {
 	gatewayUrl: string;
 	acpBackends: AcpBackendConfig[];
-	defaultAcpBackendId: AcpBackendId;
 	clientName: string;
 	clientVersion: string;
 	homePath: string;
@@ -87,10 +86,10 @@ const userAgentToBackendConfig = (
 const mergeBackends = (
 	defaultBackend: AcpBackendConfig,
 	userAgents: UserAgentConfig[] | undefined,
-): { backends: AcpBackendConfig[]; defaultId: AcpBackendId } => {
+): AcpBackendConfig[] => {
 	// No user agents: use default opencode only
 	if (!userAgents || userAgents.length === 0) {
-		return { backends: [defaultBackend], defaultId: defaultBackend.id };
+		return [defaultBackend];
 	}
 
 	// Check if user defined opencode (override case)
@@ -98,17 +97,11 @@ const mergeBackends = (
 
 	if (userOpencode) {
 		// User overrides opencode - use only user-defined agents
-		return {
-			backends: userAgents.map(userAgentToBackendConfig),
-			defaultId: userAgents[0].id,
-		};
+		return userAgents.map(userAgentToBackendConfig);
 	}
 
 	// User didn't define opencode - prepend default opencode to user agents
-	return {
-		backends: [defaultBackend, ...userAgents.map(userAgentToBackendConfig)],
-		defaultId: defaultBackend.id,
-	};
+	return [defaultBackend, ...userAgents.map(userAgentToBackendConfig)];
 };
 
 export const getCliConfig = async (): Promise<CliConfig> => {
@@ -126,17 +119,10 @@ export const getCliConfig = async (): Promise<CliConfig> => {
 	}
 
 	// Merge backends
-	const { backends, defaultId } = mergeBackends(
+	const backends = mergeBackends(
 		DEFAULT_OPENCODE_BACKEND,
 		userConfigResult.config?.agents,
 	);
-
-	// Override default if user specified one
-	const resolvedDefaultId =
-		userConfigResult.config?.defaultAgentId &&
-		backends.some((b) => b.id === userConfigResult.config?.defaultAgentId)
-			? userConfigResult.config.defaultAgentId
-			: defaultId;
 
 	// Get gateway URL (env var > credentials file > default production URL)
 	const gatewayUrl = await getGatewayUrl();
@@ -144,7 +130,6 @@ export const getCliConfig = async (): Promise<CliConfig> => {
 	return {
 		gatewayUrl,
 		acpBackends: backends,
-		defaultAcpBackendId: resolvedDefaultId,
 		clientName: env.MOBVIBE_ACP_CLIENT_NAME ?? "mobvibe-cli",
 		clientVersion: env.MOBVIBE_ACP_CLIENT_VERSION ?? "0.0.0",
 		homePath,

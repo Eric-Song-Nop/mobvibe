@@ -44,9 +44,21 @@ export function useSessionActivation(store: ChatStoreActions) {
 				return;
 			}
 
+			if (!session.backendId) {
+				store.setError(
+					session.sessionId,
+					createFallbackError(
+						"Session is missing backend information and cannot be loaded",
+						"session",
+					),
+				);
+				return;
+			}
+
 			const params = {
 				sessionId: session.sessionId,
 				cwd: session.cwd,
+				backendId: session.backendId,
 				machineId: session.machineId,
 			};
 

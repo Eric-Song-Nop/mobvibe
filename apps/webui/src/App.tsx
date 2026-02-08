@@ -155,9 +155,9 @@ function MainApp() {
 		sessionsQuery,
 		backendsQuery,
 		availableBackends,
-		defaultBackendId,
 		discoverSessionsMutation,
 	} = useSessionQueries();
+	const defaultBackendId = availableBackends[0]?.backendId;
 	useMachinesQuery();
 	useMachinesStream();
 

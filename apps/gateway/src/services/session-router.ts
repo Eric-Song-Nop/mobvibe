@@ -653,7 +653,11 @@ export class SessionRouter {
 			"sessions_discover_rpc_start",
 		);
 
-		const params: DiscoverSessionsRpcParams = { cwd, cursor, backendId };
+		const params: DiscoverSessionsRpcParams = {
+			cwd,
+			cursor,
+			backendId: backendId ?? "",
+		};
 		const result = await this.sendRpc<
 			DiscoverSessionsRpcParams,
 			DiscoverSessionsRpcResult
@@ -679,7 +683,12 @@ export class SessionRouter {
 	 * @returns The loaded session summary
 	 */
 	async loadSession(
-		params: { sessionId: string; cwd: string; machineId?: string },
+		params: {
+			sessionId: string;
+			cwd: string;
+			backendId: string;
+			machineId?: string;
+		},
 		userId?: string,
 	): Promise<SessionSummary> {
 		const cli = params.machineId
@@ -709,6 +718,7 @@ export class SessionRouter {
 				sessionId: params.sessionId,
 				machineId: cli.machineId,
 				cwd: params.cwd,
+				backendId: params.backendId,
 				userId,
 			},
 			"session_load_rpc_start",
@@ -717,6 +727,7 @@ export class SessionRouter {
 		const rpcParams: LoadSessionRpcParams = {
 			sessionId: params.sessionId,
 			cwd: params.cwd,
+			backendId: params.backendId,
 		};
 		const result = await this.sendRpc<LoadSessionRpcParams, SessionSummary>(
 			cli.socket,
@@ -752,7 +763,12 @@ export class SessionRouter {
 	 * @returns The reloaded session summary
 	 */
 	async reloadSession(
-		params: { sessionId: string; cwd: string; machineId?: string },
+		params: {
+			sessionId: string;
+			cwd: string;
+			backendId: string;
+			machineId?: string;
+		},
 		userId?: string,
 	): Promise<SessionSummary> {
 		const cli = params.machineId
@@ -782,6 +798,7 @@ export class SessionRouter {
 				sessionId: params.sessionId,
 				machineId: cli.machineId,
 				cwd: params.cwd,
+				backendId: params.backendId,
 				userId,
 			},
 			"session_reload_rpc_start",
@@ -790,6 +807,7 @@ export class SessionRouter {
 		const rpcParams: ReloadSessionRpcParams = {
 			sessionId: params.sessionId,
 			cwd: params.cwd,
+			backendId: params.backendId,
 		};
 		const result = await this.sendRpc<ReloadSessionRpcParams, SessionSummary>(
 			cli.socket,

@@ -13,7 +13,6 @@ export interface UseSessionQueriesReturn {
 	sessionsQuery: ReturnType<typeof useQuery<SessionsResponse>>;
 	backendsQuery: ReturnType<typeof useQuery<AcpBackendsResponse>>;
 	availableBackends: AcpBackendSummary[];
-	defaultBackendId: string | undefined;
 	discoverSessionsMutation: ReturnType<typeof useDiscoverSessionsMutation>;
 }
 
@@ -72,11 +71,9 @@ export function useDiscoverSessionsMutation() {
 				const cachedBackends = queryClient.getQueryData<AcpBackendsResponse>(
 					queryKeys.backends,
 				);
-				backendIds = normalizeBackendIds([
-					cachedBackends?.defaultBackendId,
-					...(cachedBackends?.backends.map((backend) => backend.backendId) ??
-						[]),
-				]);
+				backendIds = normalizeBackendIds(
+					cachedBackends?.backends.map((backend) => backend.backendId) ?? [],
+				);
 			}
 
 			if (backendIds.length === 0) {
@@ -85,18 +82,19 @@ export function useDiscoverSessionsMutation() {
 						queryKey: queryKeys.backends,
 						queryFn: fetchAcpBackends,
 					});
-					backendIds = normalizeBackendIds([
-						fetchedBackends.defaultBackendId,
-						...fetchedBackends.backends.map((backend) => backend.backendId),
-					]);
+					backendIds = normalizeBackendIds(
+						fetchedBackends.backends.map((backend) => backend.backendId),
+					);
 				} catch {
-					// Fall back to the agent's default backend.
+					// No backends available — cannot discover.
 				}
 			}
 
-			const backendsToDiscover: Array<string | undefined> =
-				backendIds.length > 0 ? backendIds : [undefined];
-			for (const backendId of backendsToDiscover) {
+			if (backendIds.length === 0) {
+				throw new Error("No backends available for session discovery");
+			}
+
+			for (const backendId of backendIds) {
 				let cursor: string | undefined;
 				try {
 					do {
@@ -104,7 +102,7 @@ export function useDiscoverSessionsMutation() {
 							machineId: variables.machineId,
 							cwd: variables.cwd,
 							cursor,
-							...(backendId ? { backendId } : {}),
+							backendId,
 						});
 						if (!capabilities) {
 							capabilities = { ...result.capabilities };
@@ -118,7 +116,7 @@ export function useDiscoverSessionsMutation() {
 					} while (cursor);
 				} catch (error) {
 					lastError = error;
-					if (hasExplicitBackendSelection || backendsToDiscover.length === 1) {
+					if (hasExplicitBackendSelection || backendIds.length === 1) {
 						throw error;
 					}
 				}
@@ -160,15 +158,12 @@ export function useSessionQueries(): UseSessionQueriesReturn {
 	});
 
 	const availableBackends = backendsQuery.data?.backends ?? [];
-	const defaultBackendId =
-		backendsQuery.data?.defaultBackendId || availableBackends[0]?.backendId;
 	const discoverSessionsMutation = useDiscoverSessionsMutation();
 
 	return {
 		sessionsQuery,
 		backendsQuery,
 		availableBackends,
-		defaultBackendId,
 		discoverSessionsMutation,
 	};
 }

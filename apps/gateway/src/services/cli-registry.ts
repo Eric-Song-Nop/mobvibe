@@ -16,7 +16,6 @@ export type CliRecord = {
 	connectedAt: Date;
 	sessions: SessionSummary[];
 	backends: AcpBackendSummary[];
-	defaultBackendId?: string;
 	/** User ID from auth */
 	userId?: string;
 	/** API key used to authenticate this CLI */
@@ -64,7 +63,6 @@ export class CliRegistry extends EventEmitter {
 			connectedAt: new Date(),
 			sessions: [],
 			backends: info.backends ?? [],
-			defaultBackendId: info.defaultBackendId,
 			userId: authInfo?.userId,
 			apiKey: authInfo?.apiKey,
 		};
@@ -407,11 +405,9 @@ export class CliRegistry extends EventEmitter {
 	 */
 	getBackendsForUser(userId?: string): {
 		backends: AcpBackendSummary[];
-		defaultBackendId: string | undefined;
 	} {
 		const clis = userId ? this.getClisForUser(userId) : this.getAllClis();
 		const backendsMap = new Map<string, AcpBackendSummary>();
-		let defaultBackendId: string | undefined;
 
 		for (const record of clis) {
 			for (const backend of record.backends) {
@@ -419,24 +415,18 @@ export class CliRegistry extends EventEmitter {
 					backendsMap.set(backend.backendId, backend);
 				}
 			}
-			if (!defaultBackendId && record.defaultBackendId) {
-				defaultBackendId = record.defaultBackendId;
-			}
 		}
 
 		return {
 			backends: Array.from(backendsMap.values()),
-			defaultBackendId,
 		};
 	}
 
 	getAllBackends(): {
 		backends: AcpBackendSummary[];
-		defaultBackendId: string | undefined;
 	} {
 		// Aggregate backends from all connected CLIs
 		const backendsMap = new Map<string, AcpBackendSummary>();
-		let defaultBackendId: string | undefined;
 
 		for (const record of this.cliByMachineId.values()) {
 			for (const backend of record.backends) {
@@ -444,14 +434,10 @@ export class CliRegistry extends EventEmitter {
 					backendsMap.set(backend.backendId, backend);
 				}
 			}
-			if (!defaultBackendId && record.defaultBackendId) {
-				defaultBackendId = record.defaultBackendId;
-			}
 		}
 
 		return {
 			backends: Array.from(backendsMap.values()),
-			defaultBackendId,
 		};
 	}
 

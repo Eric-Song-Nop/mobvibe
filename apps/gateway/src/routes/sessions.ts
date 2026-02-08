@@ -66,9 +66,8 @@ export function setupSessionRoutes(
 	// List available backends - returns only user's backends if authenticated
 	router.get("/backends", (request: AuthenticatedRequest, response) => {
 		const userId = getUserId(request);
-		const { backends, defaultBackendId } =
-			cliRegistry.getBackendsForUser(userId);
-		response.json({ backends, defaultBackendId });
+		const { backends } = cliRegistry.getBackendsForUser(userId);
+		response.json({ backends });
 	});
 
 	// Create session - routes to user's machine if authenticated
@@ -76,6 +75,15 @@ export function setupSessionRoutes(
 		const userId = getUserId(request);
 		try {
 			const { cwd, title, backendId, machineId } = request.body ?? {};
+
+			if (typeof backendId !== "string" || backendId.trim().length === 0) {
+				respondError(
+					response,
+					buildRequestValidationError("backendId required"),
+					400,
+				);
+				return;
+			}
 
 			logger.info({ userId, backendId, machineId }, "session_create_request");
 
@@ -87,7 +95,7 @@ export function setupSessionRoutes(
 						typeof title === "string" && title.trim().length > 0
 							? title.trim()
 							: undefined,
-					backendId: typeof backendId === "string" ? backendId : undefined,
+					backendId,
 					machineId:
 						typeof machineId === "string" && machineId.trim().length > 0
 							? machineId.trim()
@@ -419,6 +427,15 @@ export function setupSessionRoutes(
 					? backendId.trim()
 					: undefined;
 
+			if (!requestedBackendId) {
+				respondError(
+					response,
+					buildRequestValidationError("backendId required"),
+					400,
+				);
+				return;
+			}
+
 			try {
 				logger.info(
 					{ userId, machineId, cwd, backendId: requestedBackendId },
@@ -434,19 +451,17 @@ export function setupSessionRoutes(
 				if (typeof machineId === "string") {
 					const cli = cliRegistry.getCliByMachineId(machineId);
 					if (cli) {
-						const discoveredBackendId =
-							requestedBackendId ?? cli.defaultBackendId ?? "";
 						const discoveredBackendLabel =
 							cli.backends.find(
-								(backend) => backend.backendId === discoveredBackendId,
-							)?.backendLabel ?? discoveredBackendId;
+								(backend) => backend.backendId === requestedBackendId,
+							)?.backendLabel ?? requestedBackendId;
 						const summaries: SessionSummary[] = result.sessions.map((s) => ({
 							sessionId: s.sessionId,
 							title: s.title ?? `Session ${s.sessionId.slice(0, 8)}`,
 							cwd: s.cwd,
 							updatedAt: s.updatedAt ?? new Date().toISOString(),
 							createdAt: s.updatedAt ?? new Date().toISOString(),
-							backendId: discoveredBackendId,
+							backendId: requestedBackendId,
 							backendLabel: discoveredBackendLabel,
 							machineId: cli.machineId,
 						}));
@@ -484,7 +499,7 @@ export function setupSessionRoutes(
 	router.post(
 		"/session/load",
 		async (request: AuthenticatedRequest, response) => {
-			const { sessionId, cwd, machineId } = request.body ?? {};
+			const { sessionId, cwd, backendId, machineId } = request.body ?? {};
 			if (typeof sessionId !== "string" || typeof cwd !== "string") {
 				respondError(
 					response,
@@ -493,17 +508,26 @@ export function setupSessionRoutes(
 				);
 				return;
 			}
+			if (typeof backendId !== "string" || backendId.trim().length === 0) {
+				respondError(
+					response,
+					buildRequestValidationError("backendId required"),
+					400,
+				);
+				return;
+			}
 
 			try {
 				const userId = getUserId(request);
 				logger.info(
-					{ sessionId, cwd, machineId, userId },
+					{ sessionId, cwd, backendId, machineId, userId },
 					"session_load_request",
 				);
 				const session = await sessionRouter.loadSession(
 					{
 						sessionId,
 						cwd,
+						backendId,
 						machineId: typeof machineId === "string" ? machineId : undefined,
 					},
 					userId,
@@ -539,7 +563,7 @@ export function setupSessionRoutes(
 	router.post(
 		"/session/reload",
 		async (request: AuthenticatedRequest, response) => {
-			const { sessionId, cwd, machineId } = request.body ?? {};
+			const { sessionId, cwd, backendId, machineId } = request.body ?? {};
 			if (typeof sessionId !== "string" || typeof cwd !== "string") {
 				respondError(
 					response,
@@ -548,17 +572,26 @@ export function setupSessionRoutes(
 				);
 				return;
 			}
+			if (typeof backendId !== "string" || backendId.trim().length === 0) {
+				respondError(
+					response,
+					buildRequestValidationError("backendId required"),
+					400,
+				);
+				return;
+			}
 
 			try {
 				const userId = getUserId(request);
 				logger.info(
-					{ sessionId, cwd, machineId, userId },
+					{ sessionId, cwd, backendId, machineId, userId },
 					"session_reload_request",
 				);
 				const session = await sessionRouter.reloadSession(
 					{
 						sessionId,
 						cwd,
+						backendId,
 						machineId: typeof machineId === "string" ? machineId : undefined,
 					},
 					userId,

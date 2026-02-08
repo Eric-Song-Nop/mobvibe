@@ -24,7 +24,6 @@ const createMockRegistrationInfo = (
 	hostname: "test-host",
 	version: "1.0.0",
 	backends: [{ backendId: "backend-1", backendLabel: "Claude Code" }],
-	defaultBackendId: "backend-1",
 	...overrides,
 });
 
