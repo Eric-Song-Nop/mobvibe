@@ -136,11 +136,7 @@ export function useColumnFileBrowser({
 	);
 
 	const buildColumnsForPath = useCallback(
-		async (
-			targetPath: string,
-			notifySelect = false,
-			fallbackPath?: string,
-		) => {
+		async (targetPath: string, notifySelect = false, fallbackPath?: string) => {
 			if (!rootPath) {
 				return;
 			}

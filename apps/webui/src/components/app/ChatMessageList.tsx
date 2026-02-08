@@ -1,14 +1,19 @@
+import { Add01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import type { ChatSession } from "@mobvibe/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { MessageItem } from "@/components/chat/MessageItem";
+import { Button } from "@/components/ui/button";
 import type { PermissionResultNotification } from "@/lib/acp";
 import { useUiStore } from "@/lib/ui-store";
 
 export type ChatMessageListProps = {
 	activeSession?: ChatSession;
 	loadingMessage?: string;
+	hasMachineSelected?: boolean;
+	onCreateSession?: () => void;
 	onPermissionDecision: (payload: {
 		requestId: string;
 		outcome: PermissionResultNotification["outcome"];
@@ -20,6 +25,8 @@ const SCROLL_BOTTOM_THRESHOLD = 64;
 export function ChatMessageList({
 	activeSession,
 	loadingMessage,
+	hasMachineSelected,
+	onCreateSession,
 	onPermissionDecision,
 }: ChatMessageListProps) {
 	const { setFileExplorerOpen, setFilePreviewPath } = useUiStore();
@@ -87,8 +94,18 @@ export function ChatMessageList({
 			<div className="mx-auto flex w-full max-w-5xl flex-1 min-h-0 flex-col gap-4 px-4 py-6">
 				<div className="flex min-h-0 flex-1 flex-col gap-4">
 					{!activeSession ? (
-						<div className="text-muted-foreground mt-8 text-center text-sm">
-							{t("chat.selectSession")}
+						<div className="flex flex-1 flex-col items-center justify-center gap-3">
+							<p className="text-muted-foreground text-sm">
+								{hasMachineSelected
+									? t("chat.welcomeCreateSession")
+									: t("chat.welcomeSelectMachine")}
+							</p>
+							{hasMachineSelected && onCreateSession ? (
+								<Button variant="outline" onClick={onCreateSession}>
+									<HugeiconsIcon icon={Add01Icon} className="mr-1 h-4 w-4" />
+									{t("chat.createSession")}
+								</Button>
+							) : null}
 						</div>
 					) : null}
 					{activeSession?.isLoading ? (

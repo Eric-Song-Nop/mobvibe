@@ -122,9 +122,71 @@ const buildSession = (overrides?: Partial<ChatSession>): ChatSession =>
 const noop = () => {};
 
 describe("ChatMessageList", () => {
-	it("shows 'select session' when no active session", () => {
+	it("shows welcome message when no active session and no machine selected", () => {
 		render(<ChatMessageList onPermissionDecision={noop} />);
-		expect(screen.getByText(i18n.t("chat.selectSession"))).toBeInTheDocument();
+		expect(
+			screen.getByText(i18n.t("chat.welcomeSelectMachine")),
+		).toBeInTheDocument();
+	});
+
+	it("shows create session button when machine is selected but no session", () => {
+		const handleCreate = vi.fn();
+		render(
+			<ChatMessageList
+				hasMachineSelected
+				onCreateSession={handleCreate}
+				onPermissionDecision={noop}
+			/>,
+		);
+		expect(
+			screen.getByText(i18n.t("chat.welcomeCreateSession")),
+		).toBeInTheDocument();
+		const button = screen.getByRole("button", {
+			name: i18n.t("chat.createSession"),
+		});
+		expect(button).toBeInTheDocument();
+		button.click();
+		expect(handleCreate).toHaveBeenCalledOnce();
+	});
+
+	it("does not show create button when no machine is selected", () => {
+		render(<ChatMessageList onPermissionDecision={noop} />);
+		expect(
+			screen.queryByRole("button", { name: i18n.t("chat.createSession") }),
+		).not.toBeInTheDocument();
+	});
+
+	it("does not show create button when onCreateSession is not provided", () => {
+		render(
+			<ChatMessageList hasMachineSelected onPermissionDecision={noop} />,
+		);
+		expect(
+			screen.getByText(i18n.t("chat.welcomeCreateSession")),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: i18n.t("chat.createSession") }),
+		).not.toBeInTheDocument();
+	});
+
+	it("does not show welcome states when activeSession is present", () => {
+		const session = buildSession({ messages: [] });
+		render(
+			<ChatMessageList
+				activeSession={session}
+				hasMachineSelected
+				onCreateSession={vi.fn()}
+				onPermissionDecision={noop}
+			/>,
+		);
+		expect(
+			screen.queryByText(i18n.t("chat.welcomeSelectMachine")),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByText(i18n.t("chat.welcomeCreateSession")),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: i18n.t("chat.createSession") }),
+		).not.toBeInTheDocument();
 	});
 
 	it("shows loading message when session is loading", () => {

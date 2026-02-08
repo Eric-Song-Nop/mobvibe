@@ -87,7 +87,13 @@ export function MachineWorkspaces({
 			(workspace) => workspace.cwd === selectedWorkspaceCwd,
 		);
 		if (workspaceIndex === -1) {
-			setSelectedWorkspace(machineId, undefined);
+			// Workspace no longer exists in the list — pick a valid fallback
+			const fallback = validWorkspaces.find(
+				(ws) => ws.cwd !== selectedWorkspaceCwd,
+			);
+			if (fallback) {
+				setSelectedWorkspace(machineId, fallback.cwd);
+			}
 			return;
 		}
 		const query = workspaceValidityQueries[workspaceIndex];
@@ -95,13 +101,22 @@ export function MachineWorkspaces({
 			return;
 		}
 		if (query.isError) {
-			setSelectedWorkspace(machineId, undefined);
+			// CWD no longer valid on filesystem — pick a valid fallback instead
+			// of clearing to undefined (which would cause an oscillation with
+			// the auto-select effect in App.tsx)
+			const fallback = validWorkspaces.find(
+				(ws) => ws.cwd !== selectedWorkspaceCwd,
+			);
+			if (fallback) {
+				setSelectedWorkspace(machineId, fallback.cwd);
+			}
 		}
 	}, [
 		canValidateWorkspaces,
 		machineId,
 		selectedWorkspaceCwd,
 		setSelectedWorkspace,
+		validWorkspaces,
 		workspaceList,
 		workspaceValidityQueries,
 	]);

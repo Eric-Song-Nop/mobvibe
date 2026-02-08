@@ -221,7 +221,10 @@ export function useSessionMutations(store: ChatStoreActions) {
 			store.removeSession(variables.sessionId);
 			store.setAppError(undefined);
 		},
-		onError: (mutationError: unknown) => {
+		onError: (mutationError: unknown, variables) => {
+			// Remove the session locally even if the gateway rejects the close,
+			// so the user can always get rid of a broken session.
+			store.removeSession(variables.sessionId);
 			store.setAppError(
 				normalizeError(
 					mutationError,

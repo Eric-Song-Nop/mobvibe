@@ -698,6 +698,8 @@ function MainApp() {
 					<ChatMessageList
 						activeSession={activeSession}
 						loadingMessage={loadingMessage}
+						hasMachineSelected={Boolean(selectedMachineId)}
+						onCreateSession={handleOpenCreateDialog}
 						onPermissionDecision={handlePermissionDecision}
 					/>
 					<Separator />
