@@ -33,6 +33,7 @@ export function ChatMessageList({
 	const { setFileExplorerOpen, setFilePreviewPath } = useUiStore();
 	const { t } = useTranslation();
 	const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+	const indicatorRef = useRef<HTMLDivElement>(null);
 	const isPinnedToBottomRef = useRef(true);
 	const activeSessionId = activeSession?.sessionId;
 	const messages = activeSession?.messages ?? [];
@@ -84,22 +85,14 @@ export function ChatMessageList({
 	}, [activeSessionId]);
 
 	useLayoutEffect(() => {
-		if (messages.length === 0 || !isPinnedToBottomRef.current) {
+		if (!isPinnedToBottomRef.current) {
 			return;
 		}
-		virtualizer.scrollToIndex(messages.length - 1, {
-			align: "end",
-		});
-		if (!showIndicator) {
-			return;
+		if (showIndicator && indicatorRef.current) {
+			indicatorRef.current.scrollIntoView({ block: "end" });
+		} else if (messages.length > 0) {
+			virtualizer.scrollToIndex(messages.length - 1, { align: "end" });
 		}
-		const rafId = requestAnimationFrame(() => {
-			const el = scrollContainerRef.current;
-			if (el) {
-				el.scrollTop = el.scrollHeight;
-			}
-		});
-		return () => cancelAnimationFrame(rafId);
 	}, [messages, virtualizer, showIndicator]);
 
 	return (
@@ -179,7 +172,9 @@ export function ChatMessageList({
 							})}
 						</div>
 						{showIndicator ? (
-							<ThinkingIndicator isThinking={isThinking} />
+							<div ref={indicatorRef}>
+								<ThinkingIndicator isThinking={isThinking} />
+							</div>
 						) : null}
 					</div>
 				</div>

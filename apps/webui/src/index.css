@@ -140,26 +140,23 @@
 	}
 }
 
-@keyframes breathing {
+@keyframes sparkle-breathing {
 	0%,
 	100% {
-		transform: scale(0.85);
 		opacity: 0.4;
 	}
 	50% {
-		transform: scale(1.15);
 		opacity: 1;
 	}
 }
 
+.sparkle-breathing {
+	animation: sparkle-breathing 1.5s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
-	@keyframes breathing {
-		0%,
-		100% {
-			opacity: 0.4;
-		}
-		50% {
-			opacity: 1;
-		}
+	.sparkle-breathing {
+		animation: none;
+		opacity: 0.7;
 	}
 }

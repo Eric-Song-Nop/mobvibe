@@ -1,18 +1,25 @@
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-const GLYPHS =
-	"░▒▓█▄▀▐▌─│┌┐└┘├┤┬┴┼╌╍╎╏═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬∀∂∃∅∇∈∉∋∏∑−∗√∝∞∠∧∨∩∪∫≈≠≡≤≥⊂⊃⊄⊆⊇⊕⊗⊥⋅";
+const THINKING_VERBS = [
+	"Pondering",
+	"Moseying",
+	"Mulling",
+	"Noodling",
+	"Ruminating",
+	"Cogitating",
+];
 
-const GIBBERISH_LENGTH = 12;
-const TICK_MS = 80;
+const STREAMING_VERBS = [
+	"Scribbling",
+	"Composing",
+	"Typing",
+	"Penning",
+	"Drafting",
+];
 
-function generateGibberish(): string {
-	let result = "";
-	for (let i = 0; i < GIBBERISH_LENGTH; i++) {
-		result += GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
-	}
-	return result;
+function pickRandom(list: string[]): string {
+	return list[Math.floor(Math.random() * list.length)];
 }
 
 export const ThinkingIndicator = memo(function ThinkingIndicator({
@@ -21,44 +28,26 @@ export const ThinkingIndicator = memo(function ThinkingIndicator({
 	isThinking?: boolean;
 }) {
 	const { t } = useTranslation();
-	const textRef = useRef<HTMLSpanElement>(null);
+	const [verb, setVerb] = useState(() =>
+		pickRandom(isThinking ? THINKING_VERBS : STREAMING_VERBS),
+	);
 
 	useEffect(() => {
-		const prefersReduced = window.matchMedia(
-			"(prefers-reduced-motion: reduce)",
-		).matches;
-		if (prefersReduced) {
-			return;
-		}
-
-		const prefix = isThinking ? "thinking: " : "";
-		const id = setInterval(() => {
-			if (textRef.current) {
-				textRef.current.textContent = `${prefix}${generateGibberish()}`;
-			}
-		}, TICK_MS);
-		return () => clearInterval(id);
+		setVerb(pickRandom(isThinking ? THINKING_VERBS : STREAMING_VERBS));
 	}, [isThinking]);
-
-	const prefix = isThinking ? "thinking: " : "";
 
 	return (
 		<output
-			className="flex items-start gap-2 px-0 py-2"
+			className="flex items-center gap-1.5 px-0 py-2 text-amber-500"
 			aria-label={
 				isThinking ? t("chat.agentThinking") : t("chat.agentResponding")
 			}
 		>
-			<span
-				className="mt-1.5 size-2 shrink-0 rounded-full bg-foreground"
-				style={{ animation: "breathing 1.5s ease-in-out infinite" }}
-			/>
-			<span
-				ref={textRef}
-				className="text-muted-foreground select-none text-sm"
-				aria-hidden="true"
-			>
-				{`${prefix}${generateGibberish()}`}
+			<span className="sparkle-breathing" aria-hidden="true">
+				✦
+			</span>
+			<span className="select-none text-sm" aria-hidden="true">
+				{verb}...
 			</span>
 		</output>
 	);
