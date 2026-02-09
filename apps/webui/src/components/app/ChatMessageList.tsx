@@ -2,7 +2,7 @@ import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ChatSession } from "@mobvibe/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { MessageItem } from "@/components/chat/MessageItem";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
@@ -20,9 +20,6 @@ export type ChatMessageListProps = {
 		outcome: PermissionResultNotification["outcome"];
 	}) => void;
 };
-
-const SCROLL_BOTTOM_THRESHOLD = 64;
-
 export function ChatMessageList({
 	activeSession,
 	loadingMessage,
@@ -33,19 +30,20 @@ export function ChatMessageList({
 	const { setFileExplorerOpen, setFilePreviewPath } = useUiStore();
 	const { t } = useTranslation();
 	const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-	const indicatorRef = useRef<HTMLDivElement>(null);
-	const isPinnedToBottomRef = useRef(true);
-	const activeSessionId = activeSession?.sessionId;
 	const messages = activeSession?.messages ?? [];
 	const showIndicator = !!activeSession?.sending;
 	const isThinking = showIndicator && !activeSession?.streamingMessageId;
+	const totalItems = messages.length + (showIndicator ? 1 : 0);
 
 	const virtualizer = useVirtualizer({
-		count: messages.length,
+		count: totalItems,
 		getScrollElement: () => scrollContainerRef.current,
 		estimateSize: () => 112,
 		overscan: 8,
-		getItemKey: (index) => messages[index]?.id ?? index,
+		getItemKey: (index) =>
+			showIndicator && index === messages.length
+				? "__thinking-indicator__"
+				: (messages[index]?.id ?? `message-${index}`),
 	});
 	const virtualItems = virtualizer.getVirtualItems();
 
@@ -59,41 +57,6 @@ export function ChatMessageList({
 		},
 		[activeSession?.cwd, setFilePreviewPath, setFileExplorerOpen],
 	);
-
-	useEffect(() => {
-		if (activeSessionId) {
-			isPinnedToBottomRef.current = true;
-		}
-		const scrollElement = scrollContainerRef.current;
-		if (!scrollElement) {
-			return;
-		}
-		const updatePinnedState = () => {
-			const distanceToBottom =
-				scrollElement.scrollHeight -
-				scrollElement.scrollTop -
-				scrollElement.clientHeight;
-			isPinnedToBottomRef.current = distanceToBottom <= SCROLL_BOTTOM_THRESHOLD;
-		};
-		updatePinnedState();
-		scrollElement.addEventListener("scroll", updatePinnedState, {
-			passive: true,
-		});
-		return () => {
-			scrollElement.removeEventListener("scroll", updatePinnedState);
-		};
-	}, [activeSessionId]);
-
-	useLayoutEffect(() => {
-		if (!isPinnedToBottomRef.current) {
-			return;
-		}
-		if (showIndicator && indicatorRef.current) {
-			indicatorRef.current.scrollIntoView({ block: "end" });
-		} else if (messages.length > 0) {
-			virtualizer.scrollToIndex(messages.length - 1, { align: "end" });
-		}
-	}, [messages, virtualizer, showIndicator]);
 
 	return (
 		<main className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -148,6 +111,21 @@ export function ChatMessageList({
 							style={{ height: `${virtualizer.getTotalSize()}px` }}
 						>
 							{virtualItems.map((item) => {
+								if (showIndicator && item.index === messages.length) {
+									return (
+										<div
+											key={item.key}
+											data-index={item.index}
+											ref={virtualizer.measureElement}
+											className="absolute left-0 top-0 w-full pb-3"
+											style={{
+												transform: `translateY(${item.start}px)`,
+											}}
+										>
+											<ThinkingIndicator isThinking={isThinking} />
+										</div>
+									);
+								}
 								const message = messages[item.index];
 								if (!message) {
 									return null;
@@ -171,11 +149,6 @@ export function ChatMessageList({
 								);
 							})}
 						</div>
-						{showIndicator ? (
-							<div ref={indicatorRef}>
-								<ThinkingIndicator isThinking={isThinking} />
-							</div>
-						) : null}
 					</div>
 				</div>
 			</div>
