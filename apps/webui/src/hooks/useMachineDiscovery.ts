@@ -1,12 +1,17 @@
 import { useEffect, useRef } from "react";
 import type { AgentSessionCapabilities } from "@/lib/acp";
 import type { Machine } from "@/lib/machines-store";
-import type { useDiscoverSessionsMutation } from "./useSessionQueries";
 
 export type UseMachineDiscoveryParams = {
 	machines: Record<string, Machine>;
 	selectedWorkspaceByMachine: Record<string, string>;
-	discoverSessionsMutation: ReturnType<typeof useDiscoverSessionsMutation>;
+	discoverMachines: (
+		variables: { machineId: string; cwd: string },
+		options: {
+			onSuccess: (result: { capabilities: AgentSessionCapabilities }) => void;
+			onSettled: () => void;
+		},
+	) => void;
 	setMachineCapabilities: (
 		machineId: string,
 		caps: AgentSessionCapabilities,
@@ -16,11 +21,13 @@ export type UseMachineDiscoveryParams = {
 export function useMachineDiscovery({
 	machines,
 	selectedWorkspaceByMachine,
-	discoverSessionsMutation,
+	discoverMachines,
 	setMachineCapabilities,
 }: UseMachineDiscoveryParams): void {
 	const discoveryInFlightRef = useRef(new Set<string>());
 	const previousConnectionRef = useRef<Record<string, boolean>>({});
+	const discoverRef = useRef(discoverMachines);
+	discoverRef.current = discoverMachines;
 
 	useEffect(() => {
 		const previous = previousConnectionRef.current;
@@ -44,7 +51,7 @@ export function useMachineDiscovery({
 			}
 
 			discoveryInFlightRef.current.add(machine.machineId);
-			discoverSessionsMutation.mutate(
+			discoverRef.current(
 				{ machineId: machine.machineId, cwd: workspaceCwd },
 				{
 					onSuccess: (result) => {
@@ -56,10 +63,5 @@ export function useMachineDiscovery({
 				},
 			);
 		}
-	}, [
-		discoverSessionsMutation,
-		machines,
-		selectedWorkspaceByMachine,
-		setMachineCapabilities,
-	]);
+	}, [machines, selectedWorkspaceByMachine, setMachineCapabilities]);
 }

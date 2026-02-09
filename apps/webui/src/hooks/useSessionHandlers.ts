@@ -8,6 +8,7 @@ import {
 	createFallbackError,
 } from "@/lib/error-utils";
 import type { Machine } from "@/lib/machines-store";
+import { useUiStore } from "@/lib/ui-store";
 import { buildSessionTitle } from "@/lib/ui-utils";
 
 type Mutations = {
@@ -95,11 +96,6 @@ export type UseSessionHandlersParams = {
 	sessionList: ChatSession[];
 	selectedMachineId: string | null;
 	lastCreatedCwd: Record<string, string>;
-	editingSessionId: string | null;
-	editingTitle: string;
-	draftTitle: string;
-	draftBackendId: string | undefined;
-	draftCwd: string | undefined;
 	machines: Record<string, Machine>;
 	defaultBackendId: string | undefined;
 	chatActions: ChatActions;
@@ -119,11 +115,6 @@ export function useSessionHandlers({
 	sessionList,
 	selectedMachineId,
 	lastCreatedCwd,
-	editingSessionId,
-	editingTitle,
-	draftTitle,
-	draftBackendId,
-	draftCwd,
 	machines,
 	defaultBackendId,
 	chatActions,
@@ -148,6 +139,7 @@ export function useSessionHandlers({
 	};
 
 	const handleCreateSession = async () => {
+		const { draftTitle, draftBackendId, draftCwd } = useUiStore.getState();
 		if (!selectedMachineId) {
 			chatActions.setAppError(
 				createFallbackError(t("errors.selectMachine"), "request"),
@@ -183,6 +175,7 @@ export function useSessionHandlers({
 	};
 
 	const handleRenameSubmit = () => {
+		const { editingSessionId, editingTitle } = useUiStore.getState();
 		if (!editingSessionId) {
 			return;
 		}

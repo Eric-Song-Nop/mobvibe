@@ -103,22 +103,14 @@ function MainApp() {
 		createDialogOpen,
 		fileExplorerOpen,
 		filePreviewPath,
-		editingSessionId,
-		editingTitle,
-		draftTitle,
 		draftBackendId,
-		draftCwd,
 		selectedWorkspaceByMachine,
 	} = useUiStore(
 		useShallow((s) => ({
 			createDialogOpen: s.createDialogOpen,
 			fileExplorerOpen: s.fileExplorerOpen,
 			filePreviewPath: s.filePreviewPath,
-			editingSessionId: s.editingSessionId,
-			editingTitle: s.editingTitle,
-			draftTitle: s.draftTitle,
 			draftBackendId: s.draftBackendId,
-			draftCwd: s.draftCwd,
 			selectedWorkspaceByMachine: s.selectedWorkspaceByMachine,
 		})),
 	);
@@ -207,7 +199,7 @@ function MainApp() {
 	useMachineDiscovery({
 		machines,
 		selectedWorkspaceByMachine,
-		discoverSessionsMutation,
+		discoverMachines: discoverSessionsMutation.mutate,
 		setMachineCapabilities,
 	});
 
@@ -231,11 +223,6 @@ function MainApp() {
 		sessionList,
 		selectedMachineId,
 		lastCreatedCwd,
-		editingSessionId,
-		editingTitle,
-		draftTitle,
-		draftBackendId,
-		draftCwd,
 		machines,
 		defaultBackendId,
 		chatActions,
