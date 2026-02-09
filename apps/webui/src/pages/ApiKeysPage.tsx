@@ -7,7 +7,7 @@ import {
 	Key01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -21,91 +21,56 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { type ApiKeyData, apiKey } from "@/lib/auth";
+import {
+	useApiKeysQuery,
+	useCreateApiKeyMutation,
+	useDeleteApiKeyMutation,
+} from "@/hooks/useApiKeyQueries";
+import type { ApiKeyData } from "@/lib/auth";
 
 type ApiKeyWithKey = ApiKeyData & { key?: string };
 
 export function ApiKeysPage() {
 	const navigate = useNavigate();
 	const { isAuthenticated, isLoading: authLoading } = useAuth();
-	const [apiKeys, setApiKeys] = useState<ApiKeyData[]>([]);
-	const [isLoading, setIsLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
 	const [showCreateForm, setShowCreateForm] = useState(false);
 	const [newKeyName, setNewKeyName] = useState("");
-	const [isCreating, setIsCreating] = useState(false);
 	const [newlyCreatedKey, setNewlyCreatedKey] = useState<ApiKeyWithKey | null>(
 		null,
 	);
 	const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
-	const [deletingKeyId, setDeletingKeyId] = useState<string | null>(null);
 
-	const loadApiKeys = useCallback(async () => {
-		try {
-			setIsLoading(true);
-			setError(null);
-			const result = await apiKey.list();
-			if (result.error) {
-				setError(result.error.message ?? "Failed to load API keys");
-				return;
-			}
-			setApiKeys(result.data ?? []);
-		} catch (err) {
-			setError(err instanceof Error ? err.message : "Failed to load API keys");
-		} finally {
-			setIsLoading(false);
-		}
-	}, []);
+	const apiKeysQuery = useApiKeysQuery(isAuthenticated);
+	const createMutation = useCreateApiKeyMutation();
+	const deleteMutation = useDeleteApiKeyMutation();
 
-	useEffect(() => {
-		if (isAuthenticated) {
-			loadApiKeys();
-		}
-	}, [isAuthenticated, loadApiKeys]);
+	const apiKeys = apiKeysQuery.data ?? [];
+	const isLoading = apiKeysQuery.isLoading;
+	const error =
+		apiKeysQuery.error?.message ??
+		createMutation.error?.message ??
+		deleteMutation.error?.message ??
+		null;
+	const isCreating = createMutation.isPending;
+	const deletingKeyId = deleteMutation.isPending
+		? deleteMutation.variables?.keyId
+		: null;
 
-	const handleCreateKey = async () => {
-		setIsCreating(true);
-		setError(null);
-
-		try {
-			const result = await apiKey.create({
-				name: newKeyName.trim() || undefined,
-			});
-
-			if (result.error) {
-				setError(result.error.message ?? "Failed to create API key");
-				return;
-			}
-
-			setNewlyCreatedKey(result.data ?? null);
-			setShowCreateForm(false);
-			setNewKeyName("");
-			await loadApiKeys();
-		} catch (err) {
-			setError(err instanceof Error ? err.message : "Failed to create API key");
-		} finally {
-			setIsCreating(false);
-		}
+	const handleCreateKey = () => {
+		createMutation.mutate(
+			{ name: newKeyName.trim() || undefined },
+			{
+				onSuccess: (result) => {
+					setNewlyCreatedKey(result.data ?? null);
+					setShowCreateForm(false);
+					setNewKeyName("");
+				},
+			},
+		);
 	};
 
-	const handleRevokeKey = async (keyId: string) => {
-		setDeletingKeyId(keyId);
-		setError(null);
-
-		try {
-			const result = await apiKey.delete({ keyId });
-
-			if (result.error) {
-				setError(result.error.message ?? "Failed to revoke API key");
-				return;
-			}
-
-			await loadApiKeys();
-		} catch (err) {
-			setError(err instanceof Error ? err.message : "Failed to revoke API key");
-		} finally {
-			setDeletingKeyId(null);
-		}
+	const handleRevokeKey = (keyId: string) => {
+		deleteMutation.mutate({ keyId });
 	};
 
 	const handleCopyKey = async (key: string, keyId: string) => {
@@ -114,7 +79,7 @@ export function ApiKeysPage() {
 			setCopiedKeyId(keyId);
 			setTimeout(() => setCopiedKeyId(null), 2000);
 		} catch {
-			setError("Failed to copy to clipboard");
+			// clipboard write failed — no error state needed since this is best-effort
 		}
 	};
 

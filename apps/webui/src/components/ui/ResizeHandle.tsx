@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 type ResizeHandleProps = {
@@ -7,37 +7,32 @@ type ResizeHandleProps = {
 };
 
 export function ResizeHandle({ onResize, className }: ResizeHandleProps) {
+	const onResizeRef = useRef(onResize);
+	onResizeRef.current = onResize;
 	const dragState = useRef<{ startX: number } | null>(null);
 
-	useEffect(() => {
-		const handlePointerMove = (event: PointerEvent) => {
-			if (!dragState.current) {
-				return;
-			}
-			const deltaX = event.clientX - dragState.current.startX;
-			dragState.current.startX = event.clientX;
-			onResize(deltaX);
+	const handlePointerDown = useCallback((event: React.PointerEvent) => {
+		dragState.current = { startX: event.clientX };
+		const onMove = (e: PointerEvent) => {
+			if (!dragState.current) return;
+			const delta = e.clientX - dragState.current.startX;
+			dragState.current.startX = e.clientX;
+			onResizeRef.current(delta);
 		};
-
-		const handlePointerUp = () => {
+		const onUp = () => {
 			dragState.current = null;
+			window.removeEventListener("pointermove", onMove);
+			window.removeEventListener("pointerup", onUp);
 		};
-
-		window.addEventListener("pointermove", handlePointerMove);
-		window.addEventListener("pointerup", handlePointerUp);
-		return () => {
-			window.removeEventListener("pointermove", handlePointerMove);
-			window.removeEventListener("pointerup", handlePointerUp);
-		};
-	}, [onResize]);
+		window.addEventListener("pointermove", onMove);
+		window.addEventListener("pointerup", onUp);
+	}, []);
 
 	return (
 		<div
 			role="separator"
 			aria-orientation="vertical"
-			onPointerDown={(event) => {
-				dragState.current = { startX: event.clientX };
-			}}
+			onPointerDown={handlePointerDown}
 			className={cn(
 				"w-1.5 cursor-col-resize bg-transparent hover:bg-border/60 active:bg-border/80",
 				className,

@@ -79,31 +79,29 @@ export function MachineWorkspaces({
 	const selectedWorkspaceCwd = selectedWorkspaceByMachine[machineId];
 	const effectiveWorkspaceCwd = activeWorkspaceCwd ?? selectedWorkspaceCwd;
 
-	useEffect(() => {
-		if (!canValidateWorkspaces || !selectedWorkspaceCwd) {
-			return;
-		}
-		const workspaceIndex = workspaceList.findIndex(
-			(workspace) => workspace.cwd === selectedWorkspaceCwd,
+	const selectedWorkspaceQueryState = useMemo(() => {
+		if (!canValidateWorkspaces || !selectedWorkspaceCwd) return undefined;
+		const index = workspaceList.findIndex(
+			(w) => w.cwd === selectedWorkspaceCwd,
 		);
-		if (workspaceIndex === -1) {
-			// Workspace no longer exists in the list — pick a valid fallback
-			const fallback = validWorkspaces.find(
-				(ws) => ws.cwd !== selectedWorkspaceCwd,
-			);
-			if (fallback) {
-				setSelectedWorkspace(machineId, fallback.cwd);
-			}
-			return;
-		}
-		const query = workspaceValidityQueries[workspaceIndex];
-		if (!query || query.isFetching) {
-			return;
-		}
-		if (query.isError) {
-			// CWD no longer valid on filesystem — pick a valid fallback instead
-			// of clearing to undefined (which would cause an oscillation with
-			// the auto-select effect in App.tsx)
+		if (index === -1) return "not-found" as const;
+		const q = workspaceValidityQueries[index];
+		if (!q || q.isFetching) return "pending" as const;
+		if (q.isError) return "error" as const;
+		return "success" as const;
+	}, [
+		canValidateWorkspaces,
+		selectedWorkspaceCwd,
+		workspaceList,
+		workspaceValidityQueries,
+	]);
+
+	useEffect(() => {
+		if (!canValidateWorkspaces || !selectedWorkspaceCwd) return;
+		if (
+			selectedWorkspaceQueryState === "not-found" ||
+			selectedWorkspaceQueryState === "error"
+		) {
 			const fallback = validWorkspaces.find(
 				(ws) => ws.cwd !== selectedWorkspaceCwd,
 			);
@@ -115,10 +113,9 @@ export function MachineWorkspaces({
 		canValidateWorkspaces,
 		machineId,
 		selectedWorkspaceCwd,
+		selectedWorkspaceQueryState,
 		setSelectedWorkspace,
 		validWorkspaces,
-		workspaceList,
-		workspaceValidityQueries,
 	]);
 
 	if (!isExpanded) {

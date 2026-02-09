@@ -701,16 +701,12 @@ export function ChatFooter({
 						badgeVariants({ variant: "outline" }),
 						"cursor-pointer text-primary hover:text-primary/80",
 					);
-					button.addEventListener("click", (event) => {
-						event.preventDefault();
-						handleOpenResourcePreview(block);
-					});
 					target.appendChild(button);
 				}
 			});
 			setSelectionOffset(target, selectionOffset);
 		},
-		[handleOpenResourcePreview],
+		[],
 	);
 
 	const handleEditorInput = useCallback(() => {
@@ -883,9 +879,24 @@ export function ChatFooter({
 		setInputCursor(getSelectionOffset(editor));
 	}, []);
 
-	const handleEditorClick = useCallback(() => {
-		updateCursorFromSelection();
-	}, [updateCursorFromSelection]);
+	const handleEditorClick = useCallback(
+		(event: React.MouseEvent<HTMLDivElement>) => {
+			const resourceBtn = (event.target as HTMLElement).closest<HTMLElement>(
+				"[data-resource-link]",
+			);
+			if (resourceBtn) {
+				event.preventDefault();
+				const uri = resourceBtn.dataset.resourceUri;
+				const name = resourceBtn.dataset.resourceName;
+				if (uri && name) {
+					handleOpenResourcePreview({ uri, name });
+				}
+				return;
+			}
+			updateCursorFromSelection();
+		},
+		[handleOpenResourcePreview, updateCursorFromSelection],
+	);
 
 	const handleEditorPaste = useCallback(
 		(event: ClipboardEvent<HTMLDivElement>) => {
