@@ -2,13 +2,15 @@ import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ChatSession } from "@mobvibe/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { MessageItem } from "@/components/chat/MessageItem";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { Button } from "@/components/ui/button";
 import type { PermissionResultNotification } from "@/lib/acp";
 import { useUiStore } from "@/lib/ui-store";
+
+const SCROLL_THRESHOLD = 64;
 
 export type ChatMessageListProps = {
 	activeSession?: ChatSession;
@@ -30,6 +32,7 @@ export function ChatMessageList({
 	const { setFileExplorerOpen, setFilePreviewPath } = useUiStore();
 	const { t } = useTranslation();
 	const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+	const isPinnedRef = useRef(true);
 	const messages = activeSession?.messages ?? [];
 	const showIndicator = !!activeSession?.sending;
 	const isThinking = showIndicator && !activeSession?.streamingMessageId;
@@ -57,6 +60,42 @@ export function ChatMessageList({
 		},
 		[activeSession?.cwd, setFilePreviewPath, setFileExplorerOpen],
 	);
+
+	// Effect A — scroll listener + session switch reset
+	// biome-ignore lint/correctness/useExhaustiveDependencies: sessionId triggers reset on session switch
+	useEffect(() => {
+		isPinnedRef.current = true;
+		const el = scrollContainerRef.current;
+		if (!el) return;
+		const onScroll = () => {
+			isPinnedRef.current =
+				el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_THRESHOLD;
+		};
+		el.addEventListener("scroll", onScroll, { passive: true });
+		return () => el.removeEventListener("scroll", onScroll);
+	}, [activeSession?.sessionId]);
+
+	// Effect B — scroll to bottom on new items (non-streaming)
+	useEffect(() => {
+		if (totalItems === 0 || !isPinnedRef.current || showIndicator) return;
+		virtualizer.scrollToIndex(totalItems - 1, { align: "end" });
+	}, [totalItems, showIndicator, virtualizer]);
+
+	// Effect C — RAF loop to follow streaming content
+	useEffect(() => {
+		if (!showIndicator) return;
+		const el = scrollContainerRef.current;
+		if (!el) return;
+		let rafId: number;
+		const tick = () => {
+			if (isPinnedRef.current) {
+				el.scrollTop = el.scrollHeight - el.clientHeight;
+			}
+			rafId = requestAnimationFrame(tick);
+		};
+		rafId = requestAnimationFrame(tick);
+		return () => cancelAnimationFrame(rafId);
+	}, [showIndicator]);
 
 	return (
 		<main className="flex min-h-0 flex-1 flex-col overflow-hidden">
