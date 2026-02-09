@@ -1,9 +1,10 @@
-import { exec } from "node:child_process";
+import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { GitFileStatus } from "@mobvibe/shared";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const MAX_BUFFER = 10 * 1024 * 1024; // 10MB buffer for large repos
 
 /**
@@ -11,7 +12,7 @@ const MAX_BUFFER = 10 * 1024 * 1024; // 10MB buffer for large repos
  */
 export async function isGitRepo(cwd: string): Promise<boolean> {
 	try {
-		await execAsync("git rev-parse --is-inside-work-tree", {
+		await execFileAsync("git", ["rev-parse", "--is-inside-work-tree"], {
 			cwd,
 			maxBuffer: MAX_BUFFER,
 		});
@@ -26,19 +27,24 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
  */
 export async function getGitBranch(cwd: string): Promise<string | undefined> {
 	try {
-		const { stdout } = await execAsync("git branch --show-current", {
-			cwd,
-			maxBuffer: MAX_BUFFER,
-		});
+		const { stdout } = await execFileAsync(
+			"git",
+			["branch", "--show-current"],
+			{
+				cwd,
+				maxBuffer: MAX_BUFFER,
+			},
+		);
 		const branch = stdout.trim();
 		if (branch) {
 			return branch;
 		}
 		// Detached HEAD state - try to get the short commit hash
-		const { stdout: hashOut } = await execAsync("git rev-parse --short HEAD", {
-			cwd,
-			maxBuffer: MAX_BUFFER,
-		});
+		const { stdout: hashOut } = await execFileAsync(
+			"git",
+			["rev-parse", "--short", "HEAD"],
+			{ cwd, maxBuffer: MAX_BUFFER },
+		);
 		return hashOut.trim() || undefined;
 	} catch {
 		return undefined;
@@ -104,10 +110,11 @@ export async function getGitStatus(
 	cwd: string,
 ): Promise<Array<{ path: string; status: GitFileStatus }>> {
 	try {
-		const { stdout } = await execAsync("git status --porcelain=v1", {
-			cwd,
-			maxBuffer: MAX_BUFFER,
-		});
+		const { stdout } = await execFileAsync(
+			"git",
+			["status", "--porcelain=v1"],
+			{ cwd, maxBuffer: MAX_BUFFER },
+		);
 		return parseGitStatus(stdout);
 	} catch {
 		return [];
@@ -228,25 +235,29 @@ export async function getFileDiff(
 			? path.relative(cwd, filePath)
 			: filePath;
 
-		const { stdout } = await execAsync(`git diff HEAD -- "${relativePath}"`, {
-			cwd,
-			maxBuffer: MAX_BUFFER,
-		});
+		const { stdout } = await execFileAsync(
+			"git",
+			["diff", "HEAD", "--", relativePath],
+			{ cwd, maxBuffer: MAX_BUFFER },
+		);
 
 		if (!stdout.trim()) {
 			// No diff - file might be untracked, check status
-			const { stdout: statusOut } = await execAsync(
-				`git status --porcelain=v1 -- "${relativePath}"`,
+			const { stdout: statusOut } = await execFileAsync(
+				"git",
+				["status", "--porcelain=v1", "--", relativePath],
 				{ cwd, maxBuffer: MAX_BUFFER },
 			);
 
 			if (statusOut.startsWith("?") || statusOut.startsWith("A")) {
 				// Untracked or newly added file - all lines are "added"
-				const { stdout: wcOut } = await execAsync(`wc -l < "${relativePath}"`, {
-					cwd,
-					maxBuffer: MAX_BUFFER,
-				});
-				const lineCount = Number.parseInt(wcOut.trim(), 10) || 0;
+				const absPath = path.isAbsolute(filePath)
+					? filePath
+					: path.resolve(cwd, relativePath);
+				const content = await readFile(absPath, "utf-8");
+				const lineCount = content
+					.split("\n")
+					.filter((l) => l.length > 0).length;
 				return {
 					addedLines: Array.from({ length: lineCount }, (_, i) => i + 1),
 					modifiedLines: [],

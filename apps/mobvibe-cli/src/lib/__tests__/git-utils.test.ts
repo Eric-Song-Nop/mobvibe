@@ -1,9 +1,20 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 
 // Mock child_process
-const mockExecAsync = mock(() => Promise.resolve({ stdout: "", stderr: "" }));
+const mockExecFileAsync = mock(() =>
+	Promise.resolve({ stdout: "", stderr: "" }),
+);
 mock.module("node:util", () => ({
-	promisify: () => mockExecAsync,
+	promisify: () => mockExecFileAsync,
+}));
+
+// Mock fs/promises for readFile
+const mockReadFile = mock(() => Promise.resolve(""));
+const actualFsPromises = await import("node:fs/promises");
+mock.module("node:fs/promises", () => ({
+	...actualFsPromises,
+	default: { ...actualFsPromises, readFile: mockReadFile },
+	readFile: mockReadFile,
 }));
 
 // Import after mocking
@@ -17,24 +28,28 @@ const {
 
 describe("git-utils", () => {
 	beforeEach(() => {
-		mockExecAsync.mockReset();
+		mockExecFileAsync.mockReset();
+		mockReadFile.mockReset();
 	});
 
 	describe("isGitRepo", () => {
 		it("returns true when directory is a git repo", async () => {
-			mockExecAsync.mockResolvedValueOnce({ stdout: "true\n", stderr: "" });
+			mockExecFileAsync.mockResolvedValueOnce({ stdout: "true\n", stderr: "" });
 
 			const result = await isGitRepo("/home/user/project");
 
 			expect(result).toBe(true);
-			expect(mockExecAsync).toHaveBeenCalledWith(
-				"git rev-parse --is-inside-work-tree",
+			expect(mockExecFileAsync).toHaveBeenCalledWith(
+				"git",
+				["rev-parse", "--is-inside-work-tree"],
 				expect.objectContaining({ cwd: "/home/user/project" }),
 			);
 		});
 
 		it("returns false when directory is not a git repo", async () => {
-			mockExecAsync.mockRejectedValueOnce(new Error("Not a git repository"));
+			mockExecFileAsync.mockRejectedValueOnce(
+				new Error("Not a git repository"),
+			);
 
 			const result = await isGitRepo("/home/user/not-a-repo");
 
@@ -44,19 +59,20 @@ describe("git-utils", () => {
 
 	describe("getGitBranch", () => {
 		it("returns branch name when on a branch", async () => {
-			mockExecAsync.mockResolvedValueOnce({ stdout: "main\n", stderr: "" });
+			mockExecFileAsync.mockResolvedValueOnce({ stdout: "main\n", stderr: "" });
 
 			const result = await getGitBranch("/home/user/project");
 
 			expect(result).toBe("main");
-			expect(mockExecAsync).toHaveBeenCalledWith(
-				"git branch --show-current",
+			expect(mockExecFileAsync).toHaveBeenCalledWith(
+				"git",
+				["branch", "--show-current"],
 				expect.objectContaining({ cwd: "/home/user/project" }),
 			);
 		});
 
 		it("returns short commit hash when in detached HEAD state", async () => {
-			mockExecAsync
+			mockExecFileAsync
 				.mockResolvedValueOnce({ stdout: "\n", stderr: "" }) // branch --show-current returns empty
 				.mockResolvedValueOnce({ stdout: "abc1234\n", stderr: "" }); // rev-parse --short HEAD
 
@@ -66,7 +82,7 @@ describe("git-utils", () => {
 		});
 
 		it("returns undefined when git command fails", async () => {
-			mockExecAsync.mockRejectedValueOnce(new Error("Git error"));
+			mockExecFileAsync.mockRejectedValueOnce(new Error("Git error"));
 
 			const result = await getGitBranch("/home/user/project");
 
@@ -76,7 +92,7 @@ describe("git-utils", () => {
 
 	describe("getGitStatus", () => {
 		it("parses modified files correctly", async () => {
-			mockExecAsync.mockResolvedValueOnce({
+			mockExecFileAsync.mockResolvedValueOnce({
 				stdout: " M src/file1.ts\nM  src/file2.ts\nMM src/file3.ts\n",
 				stderr: "",
 			});
@@ -91,7 +107,7 @@ describe("git-utils", () => {
 		});
 
 		it("parses added files correctly", async () => {
-			mockExecAsync.mockResolvedValueOnce({
+			mockExecFileAsync.mockResolvedValueOnce({
 				stdout: "A  src/new-file.ts\n",
 				stderr: "",
 			});
@@ -102,7 +118,7 @@ describe("git-utils", () => {
 		});
 
 		it("parses deleted files correctly", async () => {
-			mockExecAsync.mockResolvedValueOnce({
+			mockExecFileAsync.mockResolvedValueOnce({
 				stdout: " D src/deleted.ts\nD  src/staged-delete.ts\n",
 				stderr: "",
 			});
@@ -116,7 +132,7 @@ describe("git-utils", () => {
 		});
 
 		it("parses untracked files correctly", async () => {
-			mockExecAsync.mockResolvedValueOnce({
+			mockExecFileAsync.mockResolvedValueOnce({
 				stdout: "?? src/untracked.ts\n?? docs/\n",
 				stderr: "",
 			});
@@ -130,7 +146,7 @@ describe("git-utils", () => {
 		});
 
 		it("parses renamed files correctly", async () => {
-			mockExecAsync.mockResolvedValueOnce({
+			mockExecFileAsync.mockResolvedValueOnce({
 				stdout: "R  old-name.ts -> new-name.ts\n",
 				stderr: "",
 			});
@@ -141,7 +157,7 @@ describe("git-utils", () => {
 		});
 
 		it("returns empty array when git command fails", async () => {
-			mockExecAsync.mockRejectedValueOnce(new Error("Git error"));
+			mockExecFileAsync.mockRejectedValueOnce(new Error("Git error"));
 
 			const result = await getGitStatus("/home/user/project");
 
@@ -149,7 +165,7 @@ describe("git-utils", () => {
 		});
 
 		it("handles mixed status output", async () => {
-			mockExecAsync.mockResolvedValueOnce({
+			mockExecFileAsync.mockResolvedValueOnce({
 				stdout:
 					" M src/modified.ts\nA  src/added.ts\n D src/deleted.ts\n?? src/untracked.ts\n",
 				stderr: "",
@@ -228,7 +244,10 @@ index abc123..def456 100644
 +const c = 3;
  const d = 4;
 `;
-			mockExecAsync.mockResolvedValueOnce({ stdout: diffOutput, stderr: "" });
+			mockExecFileAsync.mockResolvedValueOnce({
+				stdout: diffOutput,
+				stderr: "",
+			});
 
 			const result = await getFileDiff("/home/user/project", "src/file.ts");
 
@@ -247,7 +266,10 @@ index abc123..def456 100644
 -const c = 3;
  const d = 4;
 `;
-			mockExecAsync.mockResolvedValueOnce({ stdout: diffOutput, stderr: "" });
+			mockExecFileAsync.mockResolvedValueOnce({
+				stdout: diffOutput,
+				stderr: "",
+			});
 
 			const result = await getFileDiff("/home/user/project", "src/file.ts");
 
@@ -268,7 +290,10 @@ index abc123..def456 100644
 -another removed line
  line12
 `;
-			mockExecAsync.mockResolvedValueOnce({ stdout: diffOutput, stderr: "" });
+			mockExecFileAsync.mockResolvedValueOnce({
+				stdout: diffOutput,
+				stderr: "",
+			});
 
 			const result = await getFileDiff("/home/user/project", "src/file.ts");
 
@@ -277,14 +302,16 @@ index abc123..def456 100644
 
 		it("handles untracked files by marking all lines as added", async () => {
 			// First call: git diff HEAD returns empty (no diff)
-			mockExecAsync.mockResolvedValueOnce({ stdout: "", stderr: "" });
+			mockExecFileAsync.mockResolvedValueOnce({ stdout: "", stderr: "" });
 			// Second call: git status shows untracked
-			mockExecAsync.mockResolvedValueOnce({
+			mockExecFileAsync.mockResolvedValueOnce({
 				stdout: "?? src/new.ts",
 				stderr: "",
 			});
-			// Third call: wc -l returns line count
-			mockExecAsync.mockResolvedValueOnce({ stdout: "10\n", stderr: "" });
+			// readFile returns file content with 10 lines
+			mockReadFile.mockResolvedValueOnce(
+				"line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n",
+			);
 
 			const result = await getFileDiff("/home/user/project", "src/new.ts");
 
@@ -295,9 +322,9 @@ index abc123..def456 100644
 
 		it("returns empty arrays when file has no changes", async () => {
 			// First call: git diff HEAD returns empty
-			mockExecAsync.mockResolvedValueOnce({ stdout: "", stderr: "" });
+			mockExecFileAsync.mockResolvedValueOnce({ stdout: "", stderr: "" });
 			// Second call: git status shows no changes
-			mockExecAsync.mockResolvedValueOnce({ stdout: "", stderr: "" });
+			mockExecFileAsync.mockResolvedValueOnce({ stdout: "", stderr: "" });
 
 			const result = await getFileDiff(
 				"/home/user/project",
@@ -310,7 +337,7 @@ index abc123..def456 100644
 		});
 
 		it("returns empty arrays when git command fails", async () => {
-			mockExecAsync.mockRejectedValueOnce(new Error("Git error"));
+			mockExecFileAsync.mockRejectedValueOnce(new Error("Git error"));
 
 			const result = await getFileDiff("/home/user/project", "src/file.ts");
 
@@ -332,7 +359,10 @@ index abc123..def456 100644
 +newline11
  line12
 `;
-			mockExecAsync.mockResolvedValueOnce({ stdout: diffOutput, stderr: "" });
+			mockExecFileAsync.mockResolvedValueOnce({
+				stdout: diffOutput,
+				stderr: "",
+			});
 
 			const result = await getFileDiff("/home/user/project", "src/file.ts");
 
