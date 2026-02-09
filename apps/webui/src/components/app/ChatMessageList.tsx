@@ -36,8 +36,8 @@ export function ChatMessageList({
 	const isPinnedToBottomRef = useRef(true);
 	const activeSessionId = activeSession?.sessionId;
 	const messages = activeSession?.messages ?? [];
-	const showThinking =
-		!!activeSession?.sending && !activeSession?.streamingMessageId;
+	const showIndicator = !!activeSession?.sending;
+	const isThinking = showIndicator && !activeSession?.streamingMessageId;
 
 	const virtualizer = useVirtualizer({
 		count: messages.length,
@@ -90,7 +90,7 @@ export function ChatMessageList({
 		virtualizer.scrollToIndex(messages.length - 1, {
 			align: "end",
 		});
-		if (!showThinking) {
+		if (!showIndicator) {
 			return;
 		}
 		const rafId = requestAnimationFrame(() => {
@@ -100,7 +100,7 @@ export function ChatMessageList({
 			}
 		});
 		return () => cancelAnimationFrame(rafId);
-	}, [messages, virtualizer, showThinking]);
+	}, [messages, virtualizer, showIndicator]);
 
 	return (
 		<main className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -178,7 +178,9 @@ export function ChatMessageList({
 								);
 							})}
 						</div>
-						{showThinking ? <ThinkingIndicator /> : null}
+						{showIndicator ? (
+							<ThinkingIndicator isThinking={isThinking} />
+						) : null}
 					</div>
 				</div>
 			</div>

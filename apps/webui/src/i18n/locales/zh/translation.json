@@ -34,6 +34,7 @@
 		"stopping": "停止中...",
 		"sending": "正在发送中...",
 		"agentThinking": "代理正在思考中…",
+		"agentResponding": "代理正在响应中…",
 		"selectSession": "请选择或新建对话开始使用。",
 		"welcomeSelectMachine": "请从左侧栏选择一台机器以开始使用。",
 		"welcomeCreateSession": "创建一个对话以开始聊天。",
