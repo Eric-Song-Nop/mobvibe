@@ -131,13 +131,6 @@ export function setupMachineRoutes(
 			}
 			const sessionUserId = userId;
 
-			const origin = req.headers.origin;
-			if (origin) {
-				res.setHeader("Access-Control-Allow-Origin", origin);
-				res.setHeader("Access-Control-Allow-Credentials", "true");
-				res.setHeader("Vary", "Origin");
-			}
-
 			res.writeHead(200, {
 				"Content-Type": "text/event-stream",
 				"Cache-Control": "no-cache",

@@ -7,7 +7,7 @@ import type { Router } from "express";
 import {
 	type AuthenticatedRequest,
 	getUserId,
-	optionalAuth,
+	requireAuth,
 } from "../middleware/auth.js";
 import type { SessionRouter } from "../services/session-router.js";
 
@@ -43,8 +43,8 @@ const buildAuthorizationError = (message = "Not authorized") =>
 	});
 
 export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
-	// Apply optional auth to all routes
-	router.use(optionalAuth);
+	// Require authentication on all FS routes
+	router.use(requireAuth);
 
 	// Get host filesystem roots (for creating sessions)
 	router.get("/roots", async (request, response) => {
@@ -69,7 +69,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 			if (message.includes("Not authorized")) {
 				respondError(response, buildAuthorizationError(message), 403);
 			} else {
-				respondError(response, createInternalError("request", message));
+				respondError(response, createInternalError("request"));
 			}
 		}
 	});
@@ -107,7 +107,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 			if (message.includes("Not authorized")) {
 				respondError(response, buildAuthorizationError(message), 403);
 			} else {
-				respondError(response, createInternalError("request", message));
+				respondError(response, createInternalError("request"));
 			}
 		}
 	});
@@ -138,7 +138,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				if (message.includes("Not authorized")) {
 					respondError(response, buildAuthorizationError(message), 403);
 				} else {
-					respondError(response, createInternalError("request", message));
+					respondError(response, createInternalError("request"));
 				}
 			}
 		},
@@ -175,7 +175,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				if (message.includes("Not authorized")) {
 					respondError(response, buildAuthorizationError(message), 403);
 				} else {
-					respondError(response, createInternalError("request", message));
+					respondError(response, createInternalError("request"));
 				}
 			}
 		},
@@ -212,7 +212,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				if (message.includes("Not authorized")) {
 					respondError(response, buildAuthorizationError(message), 403);
 				} else {
-					respondError(response, createInternalError("request", message));
+					respondError(response, createInternalError("request"));
 				}
 			}
 		},
@@ -247,7 +247,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				if (message.includes("Not authorized")) {
 					respondError(response, buildAuthorizationError(message), 403);
 				} else {
-					respondError(response, createInternalError("request", message));
+					respondError(response, createInternalError("request"));
 				}
 			}
 		},
@@ -279,7 +279,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				if (message.includes("Not authorized")) {
 					respondError(response, buildAuthorizationError(message), 403);
 				} else {
-					respondError(response, createInternalError("request", message));
+					respondError(response, createInternalError("request"));
 				}
 			}
 		},
@@ -316,7 +316,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				if (message.includes("Not authorized")) {
 					respondError(response, buildAuthorizationError(message), 403);
 				} else {
-					respondError(response, createInternalError("request", message));
+					respondError(response, createInternalError("request"));
 				}
 			}
 		},

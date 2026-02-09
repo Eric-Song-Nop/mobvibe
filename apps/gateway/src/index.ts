@@ -41,7 +41,6 @@ const io = new Server(httpServer, {
 	path: "/socket.io",
 	cors: {
 		origin: (origin, callback) => {
-			// Allow localhost and private IPs
 			if (!origin) {
 				callback(null, true);
 				return;
@@ -51,20 +50,6 @@ const io = new Server(httpServer, {
 				if (hostname === "localhost" || hostname === "127.0.0.1") {
 					callback(null, true);
 					return;
-				}
-				// Check private IPv4
-				const parts = hostname.split(".");
-				if (parts.length === 4) {
-					const [first, second] = parts.map((p) => Number.parseInt(p, 10));
-					if (
-						first === 10 ||
-						first === 127 ||
-						(first === 192 && second === 168) ||
-						(first === 172 && second >= 16 && second <= 31)
-					) {
-						callback(null, true);
-						return;
-					}
 				}
 				// Check allowed origins (including Tauri origins)
 				if (

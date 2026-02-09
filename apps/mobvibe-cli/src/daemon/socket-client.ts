@@ -1023,7 +1023,12 @@ export class SocketClient extends EventEmitter {
 
 	private sendRpcError(requestId: string, error: unknown) {
 		const message = error instanceof Error ? error.message : "Unknown error";
-		const detail = error instanceof Error ? error.stack : undefined;
+		const detail =
+			process.env.NODE_ENV === "development"
+				? error instanceof Error
+					? error.stack
+					: undefined
+				: undefined;
 		logger.error(
 			{
 				requestId,

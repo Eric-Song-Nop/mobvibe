@@ -10,7 +10,7 @@ import { logger } from "../lib/logger.js";
 import {
 	type AuthenticatedRequest,
 	getUserId,
-	optionalAuth,
+	requireAuth,
 } from "../middleware/auth.js";
 import type { CliRegistry } from "../services/cli-registry.js";
 import type { SessionRouter } from "../services/session-router.js";
@@ -51,8 +51,8 @@ export function setupSessionRoutes(
 	cliRegistry: CliRegistry,
 	sessionRouter: SessionRouter,
 ) {
-	// Apply optional auth to all routes - userId will be available if authenticated
-	router.use(optionalAuth);
+	// Require authentication on all session routes
+	router.use(requireAuth);
 
 	// List sessions - returns only user's sessions if authenticated
 	router.get("/sessions", (request: AuthenticatedRequest, response) => {
@@ -118,7 +118,7 @@ export function setupSessionRoutes(
 			) {
 				respondError(response, buildAuthorizationError(message), 403);
 			} else {
-				respondError(response, createInternalError("service", message));
+				respondError(response, createInternalError("service"));
 			}
 		}
 	});
@@ -149,7 +149,7 @@ export function setupSessionRoutes(
 				if (message.includes("Not authorized")) {
 					respondError(response, buildAuthorizationError(message), 403);
 				} else {
-					respondError(response, createInternalError("session", message));
+					respondError(response, createInternalError("session"));
 				}
 			}
 		},
@@ -181,7 +181,7 @@ export function setupSessionRoutes(
 				if (message.includes("Not authorized")) {
 					respondError(response, buildAuthorizationError(message), 403);
 				} else {
-					respondError(response, createInternalError("session", message));
+					respondError(response, createInternalError("session"));
 				}
 			}
 		},
@@ -216,7 +216,7 @@ export function setupSessionRoutes(
 				if (message.includes("Not authorized")) {
 					respondError(response, buildAuthorizationError(message), 403);
 				} else {
-					respondError(response, createInternalError("session", message));
+					respondError(response, createInternalError("session"));
 				}
 			}
 		},
@@ -251,7 +251,7 @@ export function setupSessionRoutes(
 				if (message.includes("Not authorized")) {
 					respondError(response, buildAuthorizationError(message), 403);
 				} else {
-					respondError(response, createInternalError("session", message));
+					respondError(response, createInternalError("session"));
 				}
 			}
 		},
@@ -367,7 +367,7 @@ export function setupSessionRoutes(
 			if (message.includes("Not authorized")) {
 				respondError(response, buildAuthorizationError(message), 403);
 			} else {
-				respondError(response, createInternalError("session", message));
+				respondError(response, createInternalError("session"));
 			}
 		}
 	});
@@ -410,7 +410,7 @@ export function setupSessionRoutes(
 				if (message.includes("Not authorized")) {
 					respondError(response, buildAuthorizationError(message), 403);
 				} else {
-					respondError(response, createInternalError("session", message));
+					respondError(response, createInternalError("session"));
 				}
 			}
 		},
@@ -489,7 +489,7 @@ export function setupSessionRoutes(
 				} else if (message.includes("No CLI connected")) {
 					respondError(response, buildAuthorizationError(message), 503);
 				} else {
-					respondError(response, createInternalError("service", message));
+					respondError(response, createInternalError("service"));
 				}
 			}
 		},
@@ -553,7 +553,7 @@ export function setupSessionRoutes(
 						409,
 					);
 				} else {
-					respondError(response, createInternalError("session", message));
+					respondError(response, createInternalError("session"));
 				}
 			}
 		},
@@ -617,7 +617,7 @@ export function setupSessionRoutes(
 						409,
 					);
 				} else {
-					respondError(response, createInternalError("session", message));
+					respondError(response, createInternalError("session"));
 				}
 			}
 		},
@@ -699,7 +699,7 @@ export function setupSessionRoutes(
 						404,
 					);
 				} else {
-					respondError(response, createInternalError("session", message));
+					respondError(response, createInternalError("session"));
 				}
 			}
 		},

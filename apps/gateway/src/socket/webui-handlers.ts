@@ -100,45 +100,36 @@ export function setupWebuiHandlers(
 		},
 	);
 
-	webuiNamespace.on("connection", async (socket: Socket) => {
-		const authSocket = socket as AuthenticatedSocket;
-		authSocket.data = {};
-
-		logger.info({ socketId: socket.id }, "webui_connected");
-
-		// Authenticate via handshake cookies
+	// Authenticate WebSocket connections before allowing them
+	webuiNamespace.use(async (socket, next) => {
 		try {
-			// Get cookies from handshake headers for session validation
 			const cookies = socket.handshake.headers.cookie;
-			if (cookies) {
-				const session = await auth.api.getSession({
-					headers: new Headers({ cookie: cookies }),
-				});
-				if (session?.user) {
-					authSocket.data.userId = session.user.id;
-					authSocket.data.userEmail = session.user.email;
-					socketUserMap.set(socket.id, session.user.id);
-					logger.info(
-						{ socketId: socket.id, userId: session.user.id },
-						"webui_authenticated",
-					);
-				} else {
-					logger.warn({ socketId: socket.id }, "webui_auth_missing_session");
-				}
-			} else {
-				logger.info({ socketId: socket.id }, "webui_connected_no_cookies");
+			if (!cookies) {
+				next(new Error("AUTH_REQUIRED"));
+				return;
 			}
+			const session = await auth.api.getSession({
+				headers: new Headers({ cookie: cookies }),
+			});
+			if (!session?.user) {
+				next(new Error("AUTH_REQUIRED"));
+				return;
+			}
+			socket.data.userId = session.user.id;
+			socket.data.userEmail = session.user.email;
+			next();
 		} catch (error) {
-			logger.error(
-				{
-					socketId: socket.id,
-					error,
-				},
-				"webui_auth_error",
-			);
+			logger.error({ socketId: socket.id, error }, "webui_auth_error");
+			next(new Error("AUTH_REQUIRED"));
 		}
+	});
 
+	webuiNamespace.on("connection", (socket: Socket) => {
+		const authSocket = socket as AuthenticatedSocket;
 		const userId = authSocket.data.userId;
+		socketUserMap.set(socket.id, userId);
+
+		logger.info({ socketId: socket.id, userId }, "webui_authenticated");
 
 		// Send current CLI status - filtered by user if authenticated
 		const clis = userId
