@@ -79,29 +79,30 @@ const webuiEmitter = setupWebuiHandlers(io, cliRegistry, sessionRouter);
 // Setup CLI handlers with webui emitter
 // Note: session:update, session:error, and terminal:output are deprecated
 // All content now flows through session:event (WAL-persisted with seq/revision)
-setupCliHandlers(io, cliRegistry, sessionRouter, (event, payload) => {
-	// Route events to appropriate webui subscribers
+setupCliHandlers(io, cliRegistry, sessionRouter, (event, payload, userId) => {
+	// Route events to the appropriate user's webui connections
 	switch (event) {
-		case "session:attached": {
-			const machineId = (payload as { machineId: string }).machineId;
-			const cli = cliRegistry.getCliByMachineId(machineId);
-			if (cli?.userId) {
-				webuiEmitter.emitToUser(cli.userId, "session:attached", payload);
+		case "session:attached":
+			if (userId) {
+				webuiEmitter.emitToUser(userId, "session:attached", payload);
 			} else {
-				webuiEmitter.emitToAll("session:attached", payload);
+				logger.warn({ event }, "emitToWebui_missing_userId");
 			}
 			break;
-		}
-		case "session:detached": {
-			const machineId = (payload as { machineId: string }).machineId;
-			const cli = cliRegistry.getCliByMachineId(machineId);
-			if (cli?.userId) {
-				webuiEmitter.emitToUser(cli.userId, "session:detached", payload);
+		case "session:detached":
+			if (userId) {
+				webuiEmitter.emitToUser(userId, "session:detached", payload);
 			} else {
-				webuiEmitter.emitToAll("session:detached", payload);
+				logger.warn({ event }, "emitToWebui_missing_userId");
 			}
 			break;
-		}
+		case "sessions:changed":
+			if (userId) {
+				webuiEmitter.emitToUser(userId, "sessions:changed", payload);
+			} else {
+				logger.warn({ event }, "emitToWebui_missing_userId");
+			}
+			break;
 		case "permission:request":
 			webuiEmitter.emitPermissionRequest(
 				payload as Parameters<typeof webuiEmitter.emitPermissionRequest>[0],
@@ -118,7 +119,7 @@ setupCliHandlers(io, cliRegistry, sessionRouter, (event, payload) => {
 			);
 			break;
 		default:
-			webuiEmitter.emitToAll(event, payload);
+			logger.warn({ event }, "emitToWebui_unhandled_event");
 	}
 });
 

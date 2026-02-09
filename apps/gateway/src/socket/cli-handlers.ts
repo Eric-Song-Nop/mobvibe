@@ -33,7 +33,7 @@ export function setupCliHandlers(
 	io: Server,
 	cliRegistry: CliRegistry,
 	sessionRouter: SessionRouter,
-	emitToWebui: (event: string, payload: unknown) => void,
+	emitToWebui: (event: string, payload: unknown, userId?: string) => void,
 ) {
 	const cliNamespace = io.of("/cli");
 
@@ -199,11 +199,11 @@ export function setupCliHandlers(
 			// Emit sessions:changed to webui for the user
 			if (cliRecord.userId && historicalSessions.length > 0) {
 				// Use the same event pattern as updateSessionsIncremental
-				emitToWebui("sessions:changed", {
-					added: historicalSessions,
-					updated: [],
-					removed: [],
-				});
+				emitToWebui(
+					"sessions:changed",
+					{ added: historicalSessions, updated: [], removed: [] },
+					cliRecord.userId,
+				);
 			}
 
 			logger.info(
@@ -222,55 +222,92 @@ export function setupCliHandlers(
 		// Session attached
 		socket.on("session:attached", (payload: SessionAttachedPayload) => {
 			const record = cliRegistry.getCliBySocketId(socket.id);
+			if (!record) {
+				logger.warn(
+					{ socketId: socket.id },
+					"session_attached_unregistered_cli",
+				);
+				return;
+			}
 			logger.info(
-				{ sessionId: payload.sessionId, machineId: payload.machineId },
+				{ sessionId: payload.sessionId, machineId: record.machineId },
 				"session_attached_received",
 			);
-			emitToWebui("session:attached", {
-				...payload,
-				machineId: record?.machineId ?? payload.machineId,
-			});
+			emitToWebui(
+				"session:attached",
+				{ ...payload, machineId: record.machineId },
+				record.userId,
+			);
 		});
 
 		// Session detached
 		socket.on("session:detached", (payload: SessionDetachedPayload) => {
 			const record = cliRegistry.getCliBySocketId(socket.id);
+			if (!record) {
+				logger.warn(
+					{ socketId: socket.id },
+					"session_detached_unregistered_cli",
+				);
+				return;
+			}
 			logger.info(
 				{
 					sessionId: payload.sessionId,
-					machineId: payload.machineId,
+					machineId: record.machineId,
 					reason: payload.reason,
 				},
 				"session_detached_received",
 			);
-			emitToWebui("session:detached", {
-				...payload,
-				machineId: record?.machineId ?? payload.machineId,
-			});
+			emitToWebui(
+				"session:detached",
+				{ ...payload, machineId: record.machineId },
+				record.userId,
+			);
 		});
 
 		// Permission request from CLI
 		socket.on("permission:request", (payload: PermissionRequestPayload) => {
+			const record = cliRegistry.getCliBySocketId(socket.id);
+			if (!record) {
+				logger.warn(
+					{ socketId: socket.id },
+					"permission_request_unregistered_cli",
+				);
+				return;
+			}
 			logger.info(
 				{ sessionId: payload.sessionId, requestId: payload.requestId },
 				"permission_request_received",
 			);
-			emitToWebui("permission:request", payload);
+			emitToWebui("permission:request", payload, record.userId);
 		});
 
 		// Permission result from CLI
 		socket.on("permission:result", (payload: PermissionDecisionPayload) => {
+			const record = cliRegistry.getCliBySocketId(socket.id);
+			if (!record) {
+				logger.warn(
+					{ socketId: socket.id },
+					"permission_result_unregistered_cli",
+				);
+				return;
+			}
 			logger.info(
 				{ sessionId: payload.sessionId, requestId: payload.requestId },
 				"permission_result_received",
 			);
-			emitToWebui("permission:result", payload);
+			emitToWebui("permission:result", payload, record.userId);
 		});
 
 		// Session event (WAL-persisted events with seq/revision)
 		// Note: terminal:output is deprecated - terminal output now goes through
 		// session:event with kind="terminal_output"
 		socket.on("session:event", (event: SessionEvent) => {
+			const record = cliRegistry.getCliBySocketId(socket.id);
+			if (!record) {
+				logger.warn({ socketId: socket.id }, "session_event_unregistered_cli");
+				return;
+			}
 			logger.debug(
 				{
 					sessionId: event.sessionId,
@@ -281,7 +318,7 @@ export function setupCliHandlers(
 				},
 				"session_event_received",
 			);
-			emitToWebui("session:event", event);
+			emitToWebui("session:event", event, record.userId);
 
 			// Send acknowledgment back to CLI
 			socket.emit("events:ack", {
@@ -306,6 +343,10 @@ export function setupCliHandlers(
 
 		// Disconnect
 		socket.on("disconnect", async (reason) => {
+			// Cache userId before unregister (unregister deletes the userId mapping)
+			const preRecord = cliRegistry.getCliBySocketId(socket.id);
+			const cachedUserId = preRecord?.userId;
+
 			const record = cliRegistry.unregister(socket.id);
 			if (record) {
 				logger.info(
@@ -313,12 +354,16 @@ export function setupCliHandlers(
 					"cli_disconnected",
 				);
 				for (const session of record.sessions) {
-					emitToWebui("session:detached", {
-						sessionId: session.sessionId,
-						machineId: record.machineId,
-						detachedAt: new Date().toISOString(),
-						reason: "cli_disconnect",
-					});
+					emitToWebui(
+						"session:detached",
+						{
+							sessionId: session.sessionId,
+							machineId: record.machineId,
+							detachedAt: new Date().toISOString(),
+							reason: "cli_disconnect",
+						},
+						cachedUserId,
+					);
 				}
 
 				// Update machine status and close sessions in database

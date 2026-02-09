@@ -308,6 +308,27 @@ export class CliRegistry extends EventEmitter {
 		return undefined;
 	}
 
+	/**
+	 * Get the CLI record that owns a session, scoped to a specific user.
+	 * Only searches among the user's machines, preventing cross-user collision.
+	 */
+	getCliForSessionByUser(
+		sessionId: string,
+		userId: string,
+	): CliRecord | undefined {
+		const machineIds = this.clisByUserId.get(userId);
+		if (!machineIds) {
+			return undefined;
+		}
+		for (const machineId of machineIds) {
+			const record = this.cliByMachineId.get(machineId);
+			if (record?.sessions.some((s) => s.sessionId === sessionId)) {
+				return record;
+			}
+		}
+		return undefined;
+	}
+
 	getAllClis(): CliRecord[] {
 		return Array.from(this.cliByMachineId.values());
 	}

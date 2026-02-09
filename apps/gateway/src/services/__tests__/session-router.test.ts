@@ -444,7 +444,7 @@ describe("SessionRouter", () => {
 			).rejects.toThrow("Session not found");
 		});
 
-		it("throws error when user not authorized for session", async () => {
+		it("throws 'Session not found' when user not authorized for session", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
 			const authInfo = { userId: "user-1", apiKey: "key-123" };
@@ -457,7 +457,7 @@ describe("SessionRouter", () => {
 
 			await expect(
 				sessionRouter.getGitStatus("session-1", "user-2"),
-			).rejects.toThrow("Not authorized to access this session");
+			).rejects.toThrow("Session not found");
 		});
 	});
 
@@ -557,7 +557,7 @@ describe("SessionRouter", () => {
 			).rejects.toThrow("Session not found");
 		});
 
-		it("throws error when user not authorized for session", async () => {
+		it("throws 'Session not found' when user not authorized for session", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
 			const authInfo = { userId: "user-1", apiKey: "key-123" };
@@ -573,7 +573,7 @@ describe("SessionRouter", () => {
 					{ sessionId: "session-1", path: "src/file.ts" },
 					"user-2",
 				),
-			).rejects.toThrow("Not authorized to access this session");
+			).rejects.toThrow("Session not found");
 		});
 	});
 });

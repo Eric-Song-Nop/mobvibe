@@ -66,7 +66,8 @@ export function setupWebuiHandlers(
 		}
 	};
 
-	// Emit to all webui clients (filtered by user if auth enabled)
+	// Broadcast to all webui clients — only used internally as fallback
+	// when userId is absent (pre-auth CLIs / auth disabled).
 	const emitToAll = (event: string, payload: unknown) => {
 		webuiNamespace.emit(event, payload);
 	};
@@ -239,9 +240,8 @@ export function setupWebuiHandlers(
 		});
 	});
 
-	// Return emitter function for CLI handlers to use
+	// Return emitter functions for CLI handlers to use
 	return {
-		emitToAll,
 		emitToSubscribers,
 		emitToUser,
 		emitSessionEvent: (event: SessionEvent) => {

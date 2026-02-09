@@ -34,7 +34,7 @@ import type {
 } from "@mobvibe/shared";
 import type { Socket } from "socket.io";
 import { logger } from "../lib/logger.js";
-import type { CliRegistry } from "./cli-registry.js";
+import type { CliRecord, CliRegistry } from "./cli-registry.js";
 import {
 	closeAcpSession,
 	createAcpSessionDirect,
@@ -54,6 +54,23 @@ export class SessionRouter {
 	private pendingRpcs = new Map<string, PendingRpc<unknown>>();
 
 	constructor(private readonly cliRegistry: CliRegistry) {}
+
+	/**
+	 * Resolve the CLI that owns a session, scoped to the given user.
+	 * Uses a single user-scoped lookup when userId is provided,
+	 * eliminating the TOCTOU gap of separate lookup + auth check.
+	 * Returns generic "Session not found" for both missing and unauthorized
+	 * to avoid leaking session existence to other users.
+	 */
+	private resolveCliForSession(sessionId: string, userId?: string): CliRecord {
+		const cli = userId
+			? this.cliRegistry.getCliForSessionByUser(sessionId, userId)
+			: this.cliRegistry.getCliForSession(sessionId);
+		if (!cli) {
+			throw new Error("Session not found");
+		}
+		return cli;
+	}
 
 	handleRpcResponse(response: RpcResponse<unknown>) {
 		const pending = this.pendingRpcs.get(response.requestId);
@@ -160,18 +177,7 @@ export class SessionRouter {
 		params: CloseSessionParams,
 		userId?: string,
 	): Promise<{ ok: boolean }> {
-		const cli = this.cliRegistry.getCliForSession(params.sessionId);
-		if (!cli) {
-			throw new Error("Session not found");
-		}
-
-		// Authorization check if userId provided
-		if (
-			userId &&
-			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
-		) {
-			throw new Error("Not authorized to close this session");
-		}
+		const cli = this.resolveCliForSession(params.sessionId, userId);
 
 		logger.info(
 			{ sessionId: params.sessionId, userId },
@@ -203,18 +209,7 @@ export class SessionRouter {
 		params: CancelSessionParams,
 		userId?: string,
 	): Promise<{ ok: boolean }> {
-		const cli = this.cliRegistry.getCliForSession(params.sessionId);
-		if (!cli) {
-			throw new Error("Session not found");
-		}
-
-		// Authorization check if userId provided
-		if (
-			userId &&
-			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
-		) {
-			throw new Error("Not authorized to cancel this session");
-		}
+		const cli = this.resolveCliForSession(params.sessionId, userId);
 
 		logger.info(
 			{ sessionId: params.sessionId, userId },
@@ -244,17 +239,7 @@ export class SessionRouter {
 		params: SetSessionModeParams,
 		userId?: string,
 	): Promise<SessionSummary> {
-		const cli = this.cliRegistry.getCliForSession(params.sessionId);
-		if (!cli) {
-			throw new Error("Session not found");
-		}
-
-		if (
-			userId &&
-			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
-		) {
-			throw new Error("Not authorized to modify this session");
-		}
+		const cli = this.resolveCliForSession(params.sessionId, userId);
 
 		logger.info(
 			{ sessionId: params.sessionId, modeId: params.modeId, userId },
@@ -284,17 +269,7 @@ export class SessionRouter {
 		params: SetSessionModelParams,
 		userId?: string,
 	): Promise<SessionSummary> {
-		const cli = this.cliRegistry.getCliForSession(params.sessionId);
-		if (!cli) {
-			throw new Error("Session not found");
-		}
-
-		if (
-			userId &&
-			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
-		) {
-			throw new Error("Not authorized to modify this session");
-		}
+		const cli = this.resolveCliForSession(params.sessionId, userId);
 
 		logger.info(
 			{ sessionId: params.sessionId, modelId: params.modelId, userId },
@@ -324,17 +299,7 @@ export class SessionRouter {
 		params: SendMessageParams,
 		userId?: string,
 	): Promise<{ stopReason: StopReason }> {
-		const cli = this.cliRegistry.getCliForSession(params.sessionId);
-		if (!cli) {
-			throw new Error("Session not found");
-		}
-
-		if (
-			userId &&
-			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
-		) {
-			throw new Error("Not authorized to send messages to this session");
-		}
+		const cli = this.resolveCliForSession(params.sessionId, userId);
 
 		logger.info(
 			{ sessionId: params.sessionId, userId },
@@ -361,19 +326,7 @@ export class SessionRouter {
 		params: PermissionDecisionPayload,
 		userId?: string,
 	): Promise<{ ok: boolean }> {
-		const cli = this.cliRegistry.getCliForSession(params.sessionId);
-		if (!cli) {
-			throw new Error("Session not found");
-		}
-
-		if (
-			userId &&
-			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
-		) {
-			throw new Error(
-				"Not authorized to make permission decisions for this session",
-			);
-		}
+		const cli = this.resolveCliForSession(params.sessionId, userId);
 
 		logger.info(
 			{ sessionId: params.sessionId, requestId: params.requestId, userId },
@@ -402,14 +355,7 @@ export class SessionRouter {
 		sessionId: string,
 		userId?: string,
 	): Promise<FsRootsResponse> {
-		const cli = this.cliRegistry.getCliForSession(sessionId);
-		if (!cli) {
-			throw new Error("Session not found");
-		}
-
-		if (userId && !this.cliRegistry.isSessionOwnedByUser(sessionId, userId)) {
-			throw new Error("Not authorized to access this session");
-		}
+		const cli = this.resolveCliForSession(sessionId, userId);
 
 		logger.debug({ sessionId, userId }, "fs_roots_rpc_start");
 
@@ -432,17 +378,7 @@ export class SessionRouter {
 		params: FsEntriesParams,
 		userId?: string,
 	): Promise<FsEntriesResponse> {
-		const cli = this.cliRegistry.getCliForSession(params.sessionId);
-		if (!cli) {
-			throw new Error("Session not found");
-		}
-
-		if (
-			userId &&
-			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
-		) {
-			throw new Error("Not authorized to access this session");
-		}
+		const cli = this.resolveCliForSession(params.sessionId, userId);
 
 		logger.debug(
 			{ sessionId: params.sessionId, userId },
@@ -472,17 +408,7 @@ export class SessionRouter {
 		params: FsFileParams,
 		userId?: string,
 	): Promise<SessionFsFilePreview> {
-		const cli = this.cliRegistry.getCliForSession(params.sessionId);
-		if (!cli) {
-			throw new Error("Session not found");
-		}
-
-		if (
-			userId &&
-			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
-		) {
-			throw new Error("Not authorized to access this session");
-		}
+		const cli = this.resolveCliForSession(params.sessionId, userId);
 
 		logger.debug({ sessionId: params.sessionId, userId }, "fs_file_rpc_start");
 
@@ -509,17 +435,7 @@ export class SessionRouter {
 		params: FsResourcesParams,
 		userId?: string,
 	): Promise<FsResourcesResponse> {
-		const cli = this.cliRegistry.getCliForSession(params.sessionId);
-		if (!cli) {
-			throw new Error("Session not found");
-		}
-
-		if (
-			userId &&
-			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
-		) {
-			throw new Error("Not authorized to access this session");
-		}
+		const cli = this.resolveCliForSession(params.sessionId, userId);
 
 		logger.debug(
 			{ sessionId: params.sessionId, userId },
@@ -856,14 +772,7 @@ export class SessionRouter {
 		sessionId: string,
 		userId?: string,
 	): Promise<GitStatusResponse> {
-		const cli = this.cliRegistry.getCliForSession(sessionId);
-		if (!cli) {
-			throw new Error("Session not found");
-		}
-
-		if (userId && !this.cliRegistry.isSessionOwnedByUser(sessionId, userId)) {
-			throw new Error("Not authorized to access this session");
-		}
+		const cli = this.resolveCliForSession(sessionId, userId);
 
 		logger.debug({ sessionId, userId }, "git_status_rpc_start");
 
@@ -886,17 +795,7 @@ export class SessionRouter {
 		params: GitFileDiffParams,
 		userId?: string,
 	): Promise<GitFileDiffResponse> {
-		const cli = this.cliRegistry.getCliForSession(params.sessionId);
-		if (!cli) {
-			throw new Error("Session not found");
-		}
-
-		if (
-			userId &&
-			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
-		) {
-			throw new Error("Not authorized to access this session");
-		}
+		const cli = this.resolveCliForSession(params.sessionId, userId);
 
 		logger.debug(
 			{ sessionId: params.sessionId, path: params.path, userId },
@@ -925,17 +824,7 @@ export class SessionRouter {
 		params: SessionEventsParams,
 		userId?: string,
 	): Promise<SessionEventsResponse> {
-		const cli = this.cliRegistry.getCliForSession(params.sessionId);
-		if (!cli) {
-			throw new Error("Session not found");
-		}
-
-		if (
-			userId &&
-			!this.cliRegistry.isSessionOwnedByUser(params.sessionId, userId)
-		) {
-			throw new Error("Not authorized to access this session");
-		}
+		const cli = this.resolveCliForSession(params.sessionId, userId);
 
 		logger.debug(
 			{

@@ -99,20 +99,32 @@ describe("setupCliHandlers", () => {
 	});
 
 	it("forwards session:attached events to webui", () => {
+		// Register the socket first so the guard passes
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		registry.register(socket, info, { userId: "user-1", apiKey: "key-123" });
+
 		socketHandlers["session:attached"]?.({
 			sessionId: "session-1",
 			machineId: "machine-1",
 			attachedAt: "2024-01-01T00:00:00Z",
 		});
 
-		expect(emitToWebui).toHaveBeenCalledWith("session:attached", {
-			sessionId: "session-1",
-			machineId: "machine-1",
-			attachedAt: "2024-01-01T00:00:00Z",
-		});
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"session:attached",
+			{
+				sessionId: "session-1",
+				machineId: "machine-1",
+				attachedAt: "2024-01-01T00:00:00Z",
+			},
+			"user-1",
+		);
 	});
 
 	it("forwards session:detached events to webui", () => {
+		// Register the socket first so the guard passes
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		registry.register(socket, info, { userId: "user-1", apiKey: "key-123" });
+
 		socketHandlers["session:detached"]?.({
 			sessionId: "session-1",
 			machineId: "machine-1",
@@ -120,12 +132,16 @@ describe("setupCliHandlers", () => {
 			reason: "agent_exit",
 		});
 
-		expect(emitToWebui).toHaveBeenCalledWith("session:detached", {
-			sessionId: "session-1",
-			machineId: "machine-1",
-			detachedAt: "2024-01-01T00:00:00Z",
-			reason: "agent_exit",
-		});
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"session:detached",
+			{
+				sessionId: "session-1",
+				machineId: "machine-1",
+				detachedAt: "2024-01-01T00:00:00Z",
+				reason: "agent_exit",
+			},
+			"user-1",
+		);
 	});
 
 	it("emits detached events for active sessions on disconnect", async () => {
@@ -146,6 +162,7 @@ describe("setupCliHandlers", () => {
 				reason: "cli_disconnect",
 				detachedAt: expect.any(String),
 			}),
+			"user-1",
 		);
 		expect(emitToWebui).toHaveBeenCalledWith(
 			"session:detached",
@@ -155,6 +172,7 @@ describe("setupCliHandlers", () => {
 				reason: "cli_disconnect",
 				detachedAt: expect.any(String),
 			}),
+			"user-1",
 		);
 		expect(updateMachineStatusById).toHaveBeenCalledWith("machine-1", false);
 		expect(closeSessionsForMachineById).toHaveBeenCalledWith("machine-1");
