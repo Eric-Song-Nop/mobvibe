@@ -132,7 +132,11 @@ export interface ChatStoreActions {
 	) => void;
 	handleSessionsChanged: (payload: SessionsChangedPayload) => void;
 	clearSessionMessages: (sessionId: string) => void;
-	restoreSessionMessages: (sessionId: string, messages: ChatMessage[]) => void;
+	restoreSessionMessages: (
+		sessionId: string,
+		messages: ChatMessage[],
+		cursor?: { lastAppliedSeq?: number },
+	) => void;
 	// Session cursor tracking for backfill
 	updateSessionCursor: (
 		sessionId: string,

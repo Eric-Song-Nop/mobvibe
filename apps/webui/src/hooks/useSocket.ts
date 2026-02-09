@@ -395,7 +395,12 @@ export function useSocket({
 				!initialBackfillTriggeredRef.current.has(payload.sessionId)
 			) {
 				initialBackfillTriggeredRef.current.add(payload.sessionId);
-				triggerBackfillRef.current?.(payload.sessionId, payload.revision, 0);
+				const { lastAppliedSeq } = getCursor(payload.sessionId);
+				triggerBackfillRef.current?.(
+					payload.sessionId,
+					payload.revision,
+					lastAppliedSeq,
+				);
 			}
 		}
 	};
@@ -568,9 +573,13 @@ export function useSocket({
 				const session = sessions[sessionId];
 				if (session && !initialBackfillTriggeredRef.current.has(sessionId)) {
 					initialBackfillTriggeredRef.current.add(sessionId);
-					const revision = session.revision ?? 1;
-					const afterSeq = session.lastAppliedSeq ?? 0;
-					triggerBackfillRef.current?.(sessionId, revision, afterSeq);
+					const cursor = getCursor(sessionId);
+					const revision = cursor.revision ?? 1;
+					triggerBackfillRef.current?.(
+						sessionId,
+						revision,
+						cursor.lastAppliedSeq,
+					);
 				}
 			}
 		}

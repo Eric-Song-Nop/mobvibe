@@ -65,6 +65,7 @@ export function useSessionActivation(store: ChatStoreActions) {
 			setActivationState("loading");
 			store.setSessionLoading(session.sessionId, true);
 			const backupMessages: ChatMessage[] = [...session.messages];
+			const backupLastAppliedSeq = session.lastAppliedSeq;
 			store.clearSessionMessages(session.sessionId);
 			gatewaySocket.subscribeToSession(session.sessionId);
 
@@ -73,7 +74,9 @@ export function useSessionActivation(store: ChatStoreActions) {
 				await mutation.mutateAsync(params);
 				store.setActiveSessionId(session.sessionId);
 			} catch {
-				store.restoreSessionMessages(session.sessionId, backupMessages);
+				store.restoreSessionMessages(session.sessionId, backupMessages, {
+					lastAppliedSeq: backupLastAppliedSeq,
+				});
 				gatewaySocket.unsubscribeFromSession(session.sessionId);
 			} finally {
 				store.setSessionLoading(session.sessionId, false);

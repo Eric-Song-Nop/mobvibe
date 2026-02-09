@@ -172,7 +172,11 @@ type ChatState = {
 	}) => void;
 	handleSessionsChanged: (payload: SessionsChangedPayload) => void;
 	clearSessionMessages: (sessionId: string) => void;
-	restoreSessionMessages: (sessionId: string, messages: ChatMessage[]) => void;
+	restoreSessionMessages: (
+		sessionId: string,
+		messages: ChatMessage[],
+		cursor?: { lastAppliedSeq?: number },
+	) => void;
 	createLocalSession: (
 		sessionId: string,
 		options?: {
@@ -741,11 +745,16 @@ export const useChatStore = create<ChatState>()(
 								streamingMessageId: undefined,
 								streamingMessageRole: undefined,
 								streamingThoughtId: undefined,
+								lastAppliedSeq: 0,
 							},
 						},
 					};
 				}),
-			restoreSessionMessages: (sessionId: string, messages: ChatMessage[]) =>
+			restoreSessionMessages: (
+				sessionId: string,
+				messages: ChatMessage[],
+				cursor?: { lastAppliedSeq?: number },
+			) =>
 				set((state: ChatState) => {
 					const session = state.sessions[sessionId];
 					if (!session) return state;
@@ -755,6 +764,9 @@ export const useChatStore = create<ChatState>()(
 							[sessionId]: {
 								...session,
 								messages,
+								...(cursor?.lastAppliedSeq !== undefined
+									? { lastAppliedSeq: cursor.lastAppliedSeq }
+									: {}),
 							},
 						},
 					};

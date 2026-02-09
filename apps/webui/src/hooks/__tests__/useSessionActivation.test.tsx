@@ -257,6 +257,7 @@ describe("useSessionActivation", () => {
 		expect(store.restoreSessionMessages).toHaveBeenCalledWith(
 			"session-1",
 			session.messages,
+			{ lastAppliedSeq: session.lastAppliedSeq },
 		);
 		expect(store.setSessionLoading).toHaveBeenCalledWith("session-1", false);
 	});
