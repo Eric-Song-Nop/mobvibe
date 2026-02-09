@@ -66,8 +66,8 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 			response.json(result);
 		} catch (error) {
 			const message = getErrorMessage(error);
-			if (message.includes("Not authorized")) {
-				respondError(response, buildAuthorizationError(message), 403);
+			if (message.includes("Machine not found")) {
+				respondError(response, buildAuthorizationError(message), 404);
 			} else {
 				respondError(response, createInternalError("request"));
 			}
@@ -104,8 +104,8 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 			response.json(result);
 		} catch (error) {
 			const message = getErrorMessage(error);
-			if (message.includes("Not authorized")) {
-				respondError(response, buildAuthorizationError(message), 403);
+			if (message.includes("Machine not found")) {
+				respondError(response, buildAuthorizationError(message), 404);
 			} else {
 				respondError(response, createInternalError("request"));
 			}
@@ -135,8 +135,8 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				response.json(result);
 			} catch (error) {
 				const message = getErrorMessage(error);
-				if (message.includes("Not authorized")) {
-					respondError(response, buildAuthorizationError(message), 403);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
 				} else {
 					respondError(response, createInternalError("request"));
 				}
@@ -172,8 +172,8 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				response.json(result);
 			} catch (error) {
 				const message = getErrorMessage(error);
-				if (message.includes("Not authorized")) {
-					respondError(response, buildAuthorizationError(message), 403);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
 				} else {
 					respondError(response, createInternalError("request"));
 				}
@@ -209,8 +209,8 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				response.json(result);
 			} catch (error) {
 				const message = getErrorMessage(error);
-				if (message.includes("Not authorized")) {
-					respondError(response, buildAuthorizationError(message), 403);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
 				} else {
 					respondError(response, createInternalError("request"));
 				}
@@ -244,8 +244,8 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				response.json(result);
 			} catch (error) {
 				const message = getErrorMessage(error);
-				if (message.includes("Not authorized")) {
-					respondError(response, buildAuthorizationError(message), 403);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
 				} else {
 					respondError(response, createInternalError("request"));
 				}
@@ -276,8 +276,8 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				response.json(result);
 			} catch (error) {
 				const message = getErrorMessage(error);
-				if (message.includes("Not authorized")) {
-					respondError(response, buildAuthorizationError(message), 403);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
 				} else {
 					respondError(response, createInternalError("request"));
 				}
@@ -313,8 +313,8 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				response.json(result);
 			} catch (error) {
 				const message = getErrorMessage(error);
-				if (message.includes("Not authorized")) {
-					respondError(response, buildAuthorizationError(message), 403);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
 				} else {
 					respondError(response, createInternalError("request"));
 				}

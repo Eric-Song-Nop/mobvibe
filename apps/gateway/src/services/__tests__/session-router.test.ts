@@ -118,7 +118,7 @@ describe("SessionRouter", () => {
 		it("throws error when no CLI connected for machine", async () => {
 			await expect(
 				sessionRouter.discoverSessions("unknown-machine", undefined, "user-1"),
-			).rejects.toThrow("No CLI connected for this machine");
+			).rejects.toThrow("Machine not found");
 		});
 
 		it("throws error when no CLI connected for user", async () => {
@@ -127,7 +127,7 @@ describe("SessionRouter", () => {
 			).rejects.toThrow("No CLI connected for this user");
 		});
 
-		it("throws error when user not authorized for machine", async () => {
+		it("throws 'Machine not found' when user not authorized for machine", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
 			const authInfo = { userId: "user-1", apiKey: "key-123" };
@@ -135,7 +135,7 @@ describe("SessionRouter", () => {
 
 			await expect(
 				sessionRouter.discoverSessions("machine-1", undefined, "user-2"),
-			).rejects.toThrow("Not authorized to access this machine");
+			).rejects.toThrow("Machine not found");
 		});
 
 		it("uses first CLI for user when no machineId specified", async () => {
@@ -272,10 +272,10 @@ describe("SessionRouter", () => {
 					},
 					"user-1",
 				),
-			).rejects.toThrow("No CLI connected for this machine");
+			).rejects.toThrow("Machine not found");
 		});
 
-		it("throws error when user not authorized for machine", async () => {
+		it("throws 'Machine not found' when user not authorized for machine", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
 			const authInfo = { userId: "user-1", apiKey: "key-123" };
@@ -291,7 +291,7 @@ describe("SessionRouter", () => {
 					},
 					"user-2",
 				),
-			).rejects.toThrow("Not authorized to access this machine");
+			).rejects.toThrow("Machine not found");
 		});
 
 		it("uses first CLI for user when no machineId specified", async () => {

@@ -122,6 +122,23 @@ const readDirectoryEntries = async (dirPath: string): Promise<FsEntry[]> => {
 const filterVisibleEntries = (entries: FsEntry[]) =>
 	entries.filter((entry) => !entry.hidden);
 
+/**
+ * Resolve a request path within the given cwd.
+ * Rejects absolute paths and paths that escape the cwd via "..".
+ * Returns the resolved absolute path.
+ */
+const resolveWithinCwd = (cwd: string, requestPath: string): string => {
+	if (path.isAbsolute(requestPath)) {
+		throw new Error("Absolute paths are not allowed");
+	}
+	const resolved = path.resolve(cwd, requestPath);
+	// Ensure resolved path is within cwd (cwd itself or a descendant)
+	if (resolved !== cwd && !resolved.startsWith(`${cwd}/`)) {
+		throw new Error("Path escapes working directory");
+	}
+	return resolved;
+};
+
 const buildHostFsRoots = async (): Promise<HostFsRootsResponse> => {
 	const homePath = homedir();
 	return {
@@ -576,9 +593,7 @@ export class SocketClient extends EventEmitter {
 					throw new Error("Session not found or no working directory");
 				}
 				const resolved = requestPath
-					? path.isAbsolute(requestPath)
-						? requestPath
-						: path.join(record.cwd, requestPath)
+					? resolveWithinCwd(record.cwd, requestPath)
 					: record.cwd;
 				const entries = await readDirectoryEntries(resolved);
 				this.sendRpcResponse(request.requestId, { path: resolved, entries });
@@ -606,9 +621,7 @@ export class SocketClient extends EventEmitter {
 				if (!record || !record.cwd) {
 					throw new Error("Session not found or no working directory");
 				}
-				const resolved = path.isAbsolute(requestPath)
-					? requestPath
-					: path.join(record.cwd, requestPath);
+				const resolved = resolveWithinCwd(record.cwd, requestPath);
 				const mimeType = resolveImageMimeType(resolved);
 				if (mimeType) {
 					const buffer = await fs.readFile(resolved);
@@ -810,6 +823,9 @@ export class SocketClient extends EventEmitter {
 				if (!record || !record.cwd) {
 					throw new Error("Session not found or no working directory");
 				}
+
+				// Validate filePath stays within cwd
+				resolveWithinCwd(record.cwd, filePath);
 
 				const isRepo = await isGitRepo(record.cwd);
 				if (!isRepo) {
