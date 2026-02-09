@@ -5,6 +5,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { MessageItem } from "@/components/chat/MessageItem";
+import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { Button } from "@/components/ui/button";
 import type { PermissionResultNotification } from "@/lib/acp";
 import { useUiStore } from "@/lib/ui-store";
@@ -35,6 +36,8 @@ export function ChatMessageList({
 	const isPinnedToBottomRef = useRef(true);
 	const activeSessionId = activeSession?.sessionId;
 	const messages = activeSession?.messages ?? [];
+	const showThinking =
+		!!activeSession?.sending && !activeSession?.streamingMessageId;
 
 	const virtualizer = useVirtualizer({
 		count: messages.length,
@@ -87,7 +90,17 @@ export function ChatMessageList({
 		virtualizer.scrollToIndex(messages.length - 1, {
 			align: "end",
 		});
-	}, [messages, virtualizer]);
+		if (!showThinking) {
+			return;
+		}
+		const rafId = requestAnimationFrame(() => {
+			const el = scrollContainerRef.current;
+			if (el) {
+				el.scrollTop = el.scrollHeight;
+			}
+		});
+		return () => cancelAnimationFrame(rafId);
+	}, [messages, virtualizer, showThinking]);
 
 	return (
 		<main className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -165,6 +178,7 @@ export function ChatMessageList({
 								);
 							})}
 						</div>
+						{showThinking ? <ThinkingIndicator /> : null}
 					</div>
 				</div>
 			</div>

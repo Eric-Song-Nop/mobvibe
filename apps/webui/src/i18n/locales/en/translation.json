@@ -33,6 +33,7 @@
 		"stop": "Stop",
 		"stopping": "Stopping...",
 		"sending": "Sending...",
+		"agentThinking": "Agent is thinking…",
 		"selectSession": "Select or create a conversation to get started.",
 		"welcomeSelectMachine": "Select a machine from the sidebar to get started.",
 		"welcomeCreateSession": "Create a session to start chatting.",
