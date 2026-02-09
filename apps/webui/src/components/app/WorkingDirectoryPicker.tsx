@@ -119,6 +119,8 @@ export function WorkingDirectoryPicker({
 			<InputGroup>
 				<InputGroupInput
 					id={inputId}
+					name="working-directory"
+					autoComplete="off"
 					value={inputValue}
 					onChange={(event) => setInputValue(event.target.value)}
 					onKeyDown={(event) => {

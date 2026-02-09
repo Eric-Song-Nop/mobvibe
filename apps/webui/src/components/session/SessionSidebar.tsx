@@ -230,6 +230,7 @@ export const SessionSidebar = ({
 							<button
 								type="button"
 								className="text-muted-foreground hover:text-foreground flex items-center gap-2 text-xs font-semibold"
+								aria-expanded={isExpanded}
 								onClick={() =>
 									setExpandedGroups((prev) => ({
 										...prev,
@@ -314,6 +315,9 @@ const SessionListItem = ({
 				<div className="flex items-center justify-between gap-2">
 					{isEditing ? (
 						<Input
+							aria-label="Session title"
+							name="session-title"
+							autoComplete="off"
 							value={editingTitle}
 							onChange={(event) => onEditingTitleChange(event.target.value)}
 							onClick={(event) => event.stopPropagation()}

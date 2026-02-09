@@ -93,6 +93,7 @@ export function AppSidebar({
 					<button
 						type="button"
 						className="bg-black/30 flex-1"
+						aria-label="Close menu"
 						onClick={() => setMobileMenuOpen(false)}
 					/>
 				</div>
@@ -160,8 +161,17 @@ function MobileMachineColumn() {
 					<span>{t("machines.title")}</span>
 					<Tooltip>
 						<TooltipTrigger asChild>
-							<Button variant="ghost" size="icon-sm" onClick={handleRefresh}>
-								<HugeiconsIcon icon={Refresh01Icon} strokeWidth={2} />
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								onClick={handleRefresh}
+								aria-label={t("machines.refresh")}
+							>
+								<HugeiconsIcon
+									icon={Refresh01Icon}
+									strokeWidth={2}
+									aria-hidden="true"
+								/>
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent side="right">
@@ -209,8 +219,13 @@ function MobileMachineColumn() {
 							size="icon-sm"
 							onClick={() => setRegisterDialogOpen(true)}
 							className="mt-auto"
+							aria-label={t("machines.register")}
 						>
-							<HugeiconsIcon icon={AddCircleIcon} strokeWidth={2} />
+							<HugeiconsIcon
+								icon={AddCircleIcon}
+								strokeWidth={2}
+								aria-hidden="true"
+							/>
 						</Button>
 					</TooltipTrigger>
 					<TooltipContent side="right">{t("machines.register")}</TooltipContent>
@@ -255,6 +270,7 @@ function MachineIcon({
 				>
 					<span className="text-xs font-medium">{initials}</span>
 					<span
+						aria-hidden="true"
 						className={cn(
 							"absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-background",
 							machine.connected ? "bg-green-500" : "bg-gray-400",

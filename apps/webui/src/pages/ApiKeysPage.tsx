@@ -122,7 +122,7 @@ export function ApiKeysPage() {
 		return (
 			<ThemeProvider>
 				<div className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
-					<div className="text-muted-foreground">Loading...</div>
+					<div className="text-muted-foreground">Loading…</div>
 				</div>
 			</ThemeProvider>
 		);
@@ -143,7 +143,11 @@ export function ApiKeysPage() {
 						className="mb-4"
 						onClick={() => navigate("/")}
 					>
-						<HugeiconsIcon icon={ArrowLeft02Icon} className="mr-2 h-4 w-4" />
+						<HugeiconsIcon
+							icon={ArrowLeft02Icon}
+							className="mr-2 h-4 w-4"
+							aria-hidden="true"
+						/>
 						Back
 					</Button>
 
@@ -152,7 +156,11 @@ export function ApiKeysPage() {
 							<div className="flex items-center justify-between">
 								<div>
 									<CardTitle className="flex items-center gap-2">
-										<HugeiconsIcon icon={Key01Icon} className="h-5 w-5" />
+										<HugeiconsIcon
+											icon={Key01Icon}
+											className="h-5 w-5"
+											aria-hidden="true"
+										/>
 										API Keys
 									</CardTitle>
 									<CardDescription>
@@ -161,7 +169,11 @@ export function ApiKeysPage() {
 								</div>
 								{!showCreateForm && !newlyCreatedKey && (
 									<Button onClick={() => setShowCreateForm(true)}>
-										<HugeiconsIcon icon={Add01Icon} className="mr-2 h-4 w-4" />
+										<HugeiconsIcon
+											icon={Add01Icon}
+											className="mr-2 h-4 w-4"
+											aria-hidden="true"
+										/>
 										Create Key
 									</Button>
 								)}
@@ -190,6 +202,7 @@ export function ApiKeysPage() {
 										<Button
 											variant="outline"
 											size="icon"
+											aria-label="Copy"
 											onClick={() => {
 												if (newlyCreatedKey.key) {
 													handleCopyKey(
@@ -234,6 +247,8 @@ export function ApiKeysPage() {
 											<Label htmlFor="keyName">Key Name (optional)</Label>
 											<Input
 												id="keyName"
+												name="keyName"
+												autoComplete="off"
 												placeholder="My CLI Key"
 												value={newKeyName}
 												onChange={(e) => setNewKeyName(e.target.value)}
@@ -253,7 +268,7 @@ export function ApiKeysPage() {
 												Cancel
 											</Button>
 											<Button onClick={handleCreateKey} disabled={isCreating}>
-												{isCreating ? "Creating..." : "Create Key"}
+												{isCreating ? "Creating…" : "Create Key"}
 											</Button>
 										</div>
 									</div>
@@ -262,7 +277,7 @@ export function ApiKeysPage() {
 
 							{isLoading ? (
 								<div className="py-8 text-center text-muted-foreground">
-									Loading...
+									Loading…
 								</div>
 							) : apiKeys.length === 0 ? (
 								<div className="py-8 text-center text-muted-foreground">
@@ -287,15 +302,20 @@ export function ApiKeysPage() {
 													{key.name ?? "Unnamed key"}
 												</div>
 												<div className="text-sm text-muted-foreground">
-													{key.start}...
+													{key.start}…
 												</div>
 												<div className="text-xs text-muted-foreground">
-													Created {new Date(key.createdAt).toLocaleDateString()}
+													Created{" "}
+													{new Intl.DateTimeFormat().format(
+														new Date(key.createdAt),
+													)}
 													{key.expiresAt && (
 														<>
 															{" "}
 															· Expires{" "}
-															{new Date(key.expiresAt).toLocaleDateString()}
+															{new Intl.DateTimeFormat().format(
+																new Date(key.expiresAt),
+															)}
 														</>
 													)}
 												</div>

@@ -94,7 +94,10 @@ export function ChatMessageList({
 			<div className="mx-auto flex w-full max-w-5xl flex-1 min-h-0 flex-col gap-4 px-4 py-6">
 				<div className="flex min-h-0 flex-1 flex-col gap-4">
 					{!activeSession ? (
-						<div className="flex flex-1 flex-col items-center justify-center gap-3">
+						<div
+							className="flex flex-1 flex-col items-center justify-center gap-3"
+							aria-live="polite"
+						>
 							<p className="text-muted-foreground text-sm">
 								{hasMachineSelected
 									? t("chat.welcomeCreateSession")
@@ -102,21 +105,31 @@ export function ChatMessageList({
 							</p>
 							{hasMachineSelected && onCreateSession ? (
 								<Button variant="outline" onClick={onCreateSession}>
-									<HugeiconsIcon icon={Add01Icon} className="mr-1 h-4 w-4" />
+									<HugeiconsIcon
+										icon={Add01Icon}
+										className="mr-1 h-4 w-4"
+										aria-hidden="true"
+									/>
 									{t("chat.createSession")}
 								</Button>
 							) : null}
 						</div>
 					) : null}
 					{activeSession?.isLoading ? (
-						<div className="text-muted-foreground mt-8 text-center text-sm whitespace-pre font-mono">
+						<div
+							className="text-muted-foreground mt-8 text-center text-sm whitespace-pre font-mono"
+							aria-live="polite"
+						>
 							{loadingMessage ?? t("common.loading")}
 						</div>
 					) : null}
 					{activeSession &&
 					!activeSession.isLoading &&
 					activeSession.messages.length === 0 ? (
-						<div className="text-muted-foreground mt-8 text-center text-sm whitespace-pre font-mono">
+						<div
+							className="text-muted-foreground mt-8 text-center text-sm whitespace-pre font-mono"
+							aria-live="polite"
+						>
 							{t("chat.startConversation")}
 						</div>
 					) : null}

@@ -87,7 +87,7 @@ export function GatewaySettings() {
 	if (isLoading) {
 		return (
 			<div className="p-4 text-muted-foreground">
-				{t("settings.loading", "Loading...")}
+				{t("settings.loading", "Loading\u2026")}
 			</div>
 		);
 	}
@@ -108,6 +108,8 @@ export function GatewaySettings() {
 				</FieldDescription>
 				<Input
 					id="gateway-url"
+					name="gateway-url"
+					autoComplete="off"
 					type="url"
 					value={url}
 					onChange={(e) => {
@@ -126,7 +128,7 @@ export function GatewaySettings() {
 					size="sm"
 				>
 					{isSaving
-						? t("settings.saving", "Saving...")
+						? t("settings.saving", "Saving\u2026")
 						: t("settings.save", "Save")}
 				</Button>
 				<Button onClick={handleReset} variant="outline" size="sm">

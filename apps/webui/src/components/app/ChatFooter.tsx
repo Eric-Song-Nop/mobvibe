@@ -1054,6 +1054,7 @@ export function ChatFooter({
 								icon={activeSession?.sending ? StopIcon : ArrowUp01Icon}
 								strokeWidth={2}
 								className="size-4"
+								aria-hidden="true"
 							/>
 							<span className="sr-only">
 								{activeSession?.sending

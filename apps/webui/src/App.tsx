@@ -756,7 +756,7 @@ function TauriAuthHandler({
 function RoutePending() {
 	return (
 		<div className="text-muted-foreground flex min-h-screen items-center justify-center bg-muted/40">
-			Loading...
+			Loading…
 		</div>
 	);
 }
@@ -774,7 +774,7 @@ export function App() {
 		return (
 			<ThemeProvider>
 				<div className="flex min-h-screen items-center justify-center bg-muted/40">
-					<div className="text-muted-foreground">Loading...</div>
+					<div className="text-muted-foreground">Loading…</div>
 				</div>
 			</ThemeProvider>
 		);

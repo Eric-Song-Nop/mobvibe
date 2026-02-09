@@ -100,14 +100,22 @@ export function SettingsPage() {
 						className="mb-4"
 						onClick={() => navigate("/")}
 					>
-						<HugeiconsIcon icon={ArrowLeft02Icon} className="mr-2 h-4 w-4" />
+						<HugeiconsIcon
+							icon={ArrowLeft02Icon}
+							className="mr-2 h-4 w-4"
+							aria-hidden="true"
+						/>
 						{t("common.back")}
 					</Button>
 
 					<Card>
 						<CardHeader>
 							<CardTitle className="flex items-center gap-2">
-								<HugeiconsIcon icon={Settings02Icon} className="h-5 w-5" />
+								<HugeiconsIcon
+									icon={Settings02Icon}
+									className="h-5 w-5"
+									aria-hidden="true"
+								/>
 								{t("settings.title")}
 							</CardTitle>
 							<CardDescription>{t("settings.description")}</CardDescription>
@@ -125,6 +133,8 @@ export function SettingsPage() {
 										</Label>
 										<Input
 											id="currentPassword"
+											name="current-password"
+											autoComplete="current-password"
 											type="password"
 											value={formData.currentPassword}
 											onChange={(e) =>
@@ -143,6 +153,8 @@ export function SettingsPage() {
 										</Label>
 										<Input
 											id="newPassword"
+											name="new-password"
+											autoComplete="new-password"
 											type="password"
 											value={formData.newPassword}
 											onChange={(e) =>
@@ -162,6 +174,8 @@ export function SettingsPage() {
 										</Label>
 										<Input
 											id="confirmPassword"
+											name="confirm-password"
+											autoComplete="new-password"
 											type="password"
 											value={formData.confirmPassword}
 											onChange={(e) =>
@@ -177,13 +191,19 @@ export function SettingsPage() {
 									</div>
 
 									{error && (
-										<div className="rounded-sm bg-destructive/10 p-3 text-destructive text-sm">
+										<div
+											className="rounded-sm bg-destructive/10 p-3 text-destructive text-sm"
+											aria-live="polite"
+										>
 											{error}
 										</div>
 									)}
 
 									{success && (
-										<div className="rounded-sm bg-green-500/10 p-3 text-green-600 dark:text-green-400 text-sm">
+										<div
+											className="rounded-sm bg-green-500/10 p-3 text-green-600 dark:text-green-400 text-sm"
+											aria-live="polite"
+										>
 											{success}
 										</div>
 									)}

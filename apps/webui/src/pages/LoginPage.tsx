@@ -134,6 +134,8 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 								<Label htmlFor="name">{t("auth.name")}</Label>
 								<Input
 									id="name"
+									name="name"
+									autoComplete="name"
 									type="text"
 									placeholder={t("auth.namePlaceholder")}
 									value={formData.name}
@@ -148,6 +150,8 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 							<Label htmlFor="email">{t("auth.email")}</Label>
 							<Input
 								id="email"
+								name="email"
+								autoComplete="email"
 								type="email"
 								placeholder={t("auth.emailPlaceholder")}
 								value={formData.email}
@@ -162,6 +166,10 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 							<Label htmlFor="password">{t("auth.password")}</Label>
 							<Input
 								id="password"
+								name="password"
+								autoComplete={
+									mode === "login" ? "current-password" : "new-password"
+								}
 								type="password"
 								placeholder={t("auth.passwordPlaceholder")}
 								value={formData.password}

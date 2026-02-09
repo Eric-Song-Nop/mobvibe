@@ -51,7 +51,7 @@ export function MachineCard({
 			</CardHeader>
 			<CardContent className="space-y-2">
 				<div className="text-xs text-muted-foreground">
-					<div>ID: {machine.machineId.slice(0, 12)}...</div>
+					<div>ID: {machine.machineId.slice(0, 12)}…</div>
 					{machine.sessionCount !== undefined && (
 						<div>{t("machines.sessions", { count: machine.sessionCount })}</div>
 					)}

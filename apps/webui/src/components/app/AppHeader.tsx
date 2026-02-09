@@ -64,6 +64,7 @@ export function AppHeader({
 					size="icon"
 					className="md:hidden"
 					onClick={onOpenMobileMenu}
+					aria-label={t("common.toggleMenu", "Toggle menu")}
 				>
 					☰
 				</Button>
@@ -83,7 +84,11 @@ export function AppHeader({
 						disabled={syncHistoryDisabled}
 						onClick={() => onSyncHistory?.()}
 					>
-						<HugeiconsIcon icon={Refresh03Icon} strokeWidth={2} />
+						<HugeiconsIcon
+							icon={Refresh03Icon}
+							strokeWidth={2}
+							aria-hidden="true"
+						/>
 					</Button>
 				) : null}
 				{showForceReload ? (
@@ -96,7 +101,11 @@ export function AppHeader({
 								title={t("session.forceReloadTitle")}
 								disabled={forceReloadDisabled}
 							>
-								<HugeiconsIcon icon={Refresh01Icon} strokeWidth={2} />
+								<HugeiconsIcon
+									icon={Refresh01Icon}
+									strokeWidth={2}
+									aria-hidden="true"
+								/>
 							</Button>
 						</AlertDialogTrigger>
 						<AlertDialogContent size="sm">
@@ -128,7 +137,11 @@ export function AppHeader({
 						disabled={fileExplorerDisabled}
 						onClick={() => onOpenFileExplorer?.()}
 					>
-						<HugeiconsIcon icon={FolderOpenIcon} strokeWidth={2} />
+						<HugeiconsIcon
+							icon={FolderOpenIcon}
+							strokeWidth={2}
+							aria-hidden="true"
+						/>
 					</Button>
 				) : null}
 				<UserMenu />

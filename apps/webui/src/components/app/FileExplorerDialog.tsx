@@ -237,7 +237,11 @@ export function FileExplorerDialog({
 				<AlertDialogHeader className="gap-3">
 					<div className="flex w-full items-center justify-between gap-3">
 						<AlertDialogTitle className="flex items-center gap-2">
-							<HugeiconsIcon icon={FolderOpenIcon} strokeWidth={2} />
+							<HugeiconsIcon
+								icon={FolderOpenIcon}
+								strokeWidth={2}
+								aria-hidden="true"
+							/>
 							{t("fileExplorer.sessionFiles")}
 							{gitStatus?.isGitRepo && gitStatus.branch ? (
 								<span className="text-muted-foreground flex items-center gap-1 text-xs font-normal">
@@ -245,6 +249,7 @@ export function FileExplorerDialog({
 										icon={GitBranchIcon}
 										strokeWidth={2}
 										className="h-3.5 w-3.5"
+										aria-hidden="true"
 									/>
 									{gitStatus.branch}
 								</span>
@@ -336,6 +341,7 @@ export function FileExplorerDialog({
 											icon={Loading03Icon}
 											strokeWidth={2}
 											className="animate-spin"
+											aria-hidden="true"
 										/>
 										{t("fileExplorer.loadingPreview")}
 									</div>

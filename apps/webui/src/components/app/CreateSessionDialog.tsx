@@ -102,6 +102,8 @@ export function CreateSessionDialog({
 						<Label htmlFor="session-title">{t("session.titleLabel")}</Label>
 						<Input
 							id="session-title"
+							name="session-title"
+							autoComplete="off"
 							value={draftTitle}
 							onChange={(event) => setDraftTitle(event.target.value)}
 							placeholder={t("session.titlePlaceholder")}
@@ -137,6 +139,8 @@ export function CreateSessionDialog({
 						<InputGroup>
 							<InputGroupInput
 								id="session-cwd"
+								name="session-cwd"
+								autoComplete="off"
 								value={draftCwd ?? ""}
 								onChange={(event) => setDraftCwd(event.target.value)}
 								placeholder={t("session.cwdPlaceholder")}

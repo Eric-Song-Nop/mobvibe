@@ -75,7 +75,11 @@ export function ResourceCombobox({
 								onMouseDown={(event) => event.preventDefault()}
 								onClick={() => onSelect(resource)}
 							>
-								<HugeiconsIcon icon={File01Icon} strokeWidth={2} />
+								<HugeiconsIcon
+									icon={File01Icon}
+									strokeWidth={2}
+									aria-hidden="true"
+								/>
 								<div className="flex min-w-0 flex-1 flex-col gap-1">
 									<span className="font-medium">{resource.relativePath}</span>
 								</div>

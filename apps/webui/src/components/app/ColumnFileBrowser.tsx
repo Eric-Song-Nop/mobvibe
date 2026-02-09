@@ -425,7 +425,11 @@ export function ColumnFileBrowser({
 									)}
 									onClick={() => onColumnSelect(columnIndex)}
 								>
-									<HugeiconsIcon icon={FolderIcon} strokeWidth={2} />
+									<HugeiconsIcon
+										icon={FolderIcon}
+										strokeWidth={2}
+										aria-hidden="true"
+									/>
 									<span className="truncate">{column.name}</span>
 								</button>
 								<div className="flex min-h-0 flex-col overflow-y-auto">
@@ -455,6 +459,7 @@ export function ColumnFileBrowser({
 														icon={icon}
 														strokeWidth={2}
 														className="shrink-0"
+														aria-hidden="true"
 													/>
 													<span className="truncate">{entry.name}</span>
 													{gitStatus ? (
@@ -474,6 +479,7 @@ export function ColumnFileBrowser({
 								icon={Loading03Icon}
 								strokeWidth={2}
 								className="animate-spin"
+								aria-hidden="true"
 							/>
 							{t("fileBrowser.loading")}
 						</div>

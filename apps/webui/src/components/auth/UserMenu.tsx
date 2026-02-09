@@ -40,7 +40,12 @@ export function UserMenu() {
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger asChild>
-				<Button variant="outline" size="icon-sm" className="shrink-0">
+				<Button
+					variant="outline"
+					size="icon-sm"
+					className="shrink-0"
+					aria-label="User menu"
+				>
 					{user.image ? (
 						<img
 							src={user.image}
@@ -61,11 +66,19 @@ export function UserMenu() {
 				</DropdownMenuLabel>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem onClick={() => navigate("/api-keys")}>
-					<HugeiconsIcon icon={Key01Icon} className="mr-2 h-4 w-4" />
+					<HugeiconsIcon
+						icon={Key01Icon}
+						className="mr-2 h-4 w-4"
+						aria-hidden="true"
+					/>
 					API Keys
 				</DropdownMenuItem>
 				<DropdownMenuItem onClick={() => navigate("/settings")}>
-					<HugeiconsIcon icon={Settings02Icon} className="mr-2 h-4 w-4" />
+					<HugeiconsIcon
+						icon={Settings02Icon}
+						className="mr-2 h-4 w-4"
+						aria-hidden="true"
+					/>
 					{t("auth.settings")}
 				</DropdownMenuItem>
 				<DropdownMenuSeparator />

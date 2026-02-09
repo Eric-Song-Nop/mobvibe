@@ -102,8 +102,17 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 					<span>{t("machines.title")}</span>
 					<Tooltip>
 						<TooltipTrigger asChild>
-							<Button variant="ghost" size="icon-sm" onClick={handleRefresh}>
-								<HugeiconsIcon icon={Refresh01Icon} strokeWidth={2} />
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								onClick={handleRefresh}
+								aria-label="Refresh"
+							>
+								<HugeiconsIcon
+									icon={Refresh01Icon}
+									strokeWidth={2}
+									aria-hidden="true"
+								/>
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent side="right">
@@ -151,8 +160,13 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 							size="icon-sm"
 							onClick={handleAddMachine}
 							className="mt-auto"
+							aria-label="Add machine"
 						>
-							<HugeiconsIcon icon={AddCircleIcon} strokeWidth={2} />
+							<HugeiconsIcon
+								icon={AddCircleIcon}
+								strokeWidth={2}
+								aria-hidden="true"
+							/>
 						</Button>
 					</TooltipTrigger>
 					<TooltipContent side="right">{t("machines.register")}</TooltipContent>
@@ -206,6 +220,7 @@ function MachineIcon({
 
 						{/* Connection status indicator */}
 						<span
+							aria-hidden="true"
 							className={cn(
 								"absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-background",
 								machine.connected ? "bg-green-500" : "bg-gray-400",
