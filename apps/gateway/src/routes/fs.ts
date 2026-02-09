@@ -60,8 +60,12 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 			);
 			return;
 		}
+		const userId = getUserId(request);
+		if (!userId) {
+			respondError(response, buildAuthorizationError(), 401);
+			return;
+		}
 		try {
-			const userId = getUserId(request);
 			const result = await sessionRouter.getHostFsRoots({ machineId }, userId);
 			response.json(result);
 		} catch (error) {
@@ -95,8 +99,12 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 			return;
 		}
 
+		const userId = getUserId(request);
+		if (!userId) {
+			respondError(response, buildAuthorizationError(), 401);
+			return;
+		}
 		try {
-			const userId = getUserId(request);
 			const result = await sessionRouter.getHostFsEntries(
 				{ machineId, path },
 				userId,
@@ -129,8 +137,12 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				return;
 			}
 
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
 			try {
-				const userId = getUserId(request);
 				const result = await sessionRouter.getFsRoots(sessionId, userId);
 				response.json(result);
 			} catch (error) {
@@ -163,8 +175,12 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				return;
 			}
 
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
 			try {
-				const userId = getUserId(request);
 				const result = await sessionRouter.getFsEntries(
 					{ sessionId, path },
 					userId,
@@ -200,8 +216,12 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				return;
 			}
 
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
 			try {
-				const userId = getUserId(request);
 				const result = await sessionRouter.getFsFile(
 					{ sessionId, path },
 					userId,
@@ -235,8 +255,12 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				return;
 			}
 
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
 			try {
-				const userId = getUserId(request);
 				const result = await sessionRouter.getFsResources(
 					{ sessionId },
 					userId,
@@ -270,8 +294,12 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				return;
 			}
 
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
 			try {
-				const userId = getUserId(request);
 				const result = await sessionRouter.getGitStatus(sessionId, userId);
 				response.json(result);
 			} catch (error) {
@@ -304,8 +332,12 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				return;
 			}
 
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
 			try {
-				const userId = getUserId(request);
 				const result = await sessionRouter.getGitFileDiff(
 					{ sessionId, path },
 					userId,

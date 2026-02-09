@@ -79,6 +79,10 @@ export function setupSessionRoutes(
 	// Create session - routes to user's machine if authenticated
 	router.post("/session", async (request: AuthenticatedRequest, response) => {
 		const userId = getUserId(request);
+		if (!userId) {
+			respondError(response, buildAuthorizationError(), 401);
+			return;
+		}
 		try {
 			const { cwd, title, backendId, machineId } = request.body ?? {};
 
@@ -142,8 +146,12 @@ export function setupSessionRoutes(
 				return;
 			}
 
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
 			try {
-				const userId = getUserId(request);
 				logger.info({ sessionId, userId }, "session_close_request");
 				await sessionRouter.closeSession({ sessionId }, userId);
 				logger.info({ sessionId, userId }, "session_close_success");
@@ -174,8 +182,12 @@ export function setupSessionRoutes(
 				return;
 			}
 
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
 			try {
-				const userId = getUserId(request);
 				logger.info({ sessionId, userId }, "session_cancel_request");
 				await sessionRouter.cancelSession({ sessionId }, userId);
 				logger.info({ sessionId, userId }, "session_cancel_success");
@@ -206,8 +218,12 @@ export function setupSessionRoutes(
 				return;
 			}
 
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
 			try {
-				const userId = getUserId(request);
 				logger.info({ sessionId, modeId, userId }, "session_mode_request");
 				const session = await sessionRouter.setSessionMode(
 					{ sessionId, modeId },
@@ -241,8 +257,12 @@ export function setupSessionRoutes(
 				return;
 			}
 
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
 			try {
-				const userId = getUserId(request);
 				logger.info({ sessionId, modelId, userId }, "session_model_request");
 				const session = await sessionRouter.setSessionModel(
 					{ sessionId, modelId },
@@ -292,8 +312,12 @@ export function setupSessionRoutes(
 			return;
 		}
 
+		const userId = getUserId(request);
+		if (!userId) {
+			respondError(response, buildAuthorizationError(), 401);
+			return;
+		}
 		try {
-			const userId = getUserId(request);
 			const requestId = (
 				request as AuthenticatedRequest & {
 					requestId?: string;
@@ -390,8 +414,12 @@ export function setupSessionRoutes(
 				return;
 			}
 
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
 			try {
-				const userId = getUserId(request);
 				logger.info(
 					{ sessionId, requestId, outcome, userId },
 					"permission_decision_request",
@@ -425,6 +453,10 @@ export function setupSessionRoutes(
 		"/sessions/discover",
 		async (request: AuthenticatedRequest, response) => {
 			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
 			const { machineId, cwd, cursor, backendId } = request.query ?? {};
 			const requestedBackendId =
 				typeof backendId === "string" && backendId.trim().length > 0
@@ -522,8 +554,12 @@ export function setupSessionRoutes(
 				return;
 			}
 
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
 			try {
-				const userId = getUserId(request);
 				logger.info(
 					{ sessionId, cwd, backendId, machineId, userId },
 					"session_load_request",
@@ -587,8 +623,12 @@ export function setupSessionRoutes(
 				return;
 			}
 
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
 			try {
-				const userId = getUserId(request);
 				logger.info(
 					{ sessionId, cwd, backendId, machineId, userId },
 					"session_reload_request",
@@ -664,8 +704,12 @@ export function setupSessionRoutes(
 				return;
 			}
 
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
 			try {
-				const userId = getUserId(request);
 				logger.debug(
 					{ sessionId, revision: revisionNum, afterSeq: afterSeqNum, userId },
 					"session_events_request",
