@@ -54,18 +54,24 @@ export function setupSessionRoutes(
 	// Require authentication on all session routes
 	router.use(requireAuth);
 
-	// List sessions - returns only user's sessions if authenticated
+	// List sessions - returns only user's sessions
 	router.get("/sessions", (request: AuthenticatedRequest, response) => {
 		const userId = getUserId(request);
-		const sessions = userId
-			? cliRegistry.getSessionsForUser(userId)
-			: cliRegistry.getAllSessions();
+		if (!userId) {
+			respondError(response, buildAuthorizationError(), 401);
+			return;
+		}
+		const sessions = cliRegistry.getSessionsForUser(userId);
 		response.json({ sessions });
 	});
 
-	// List available backends - returns only user's backends if authenticated
+	// List available backends - returns only user's backends
 	router.get("/backends", (request: AuthenticatedRequest, response) => {
 		const userId = getUserId(request);
+		if (!userId) {
+			respondError(response, buildAuthorizationError(), 401);
+			return;
+		}
 		const { backends } = cliRegistry.getBackendsForUser(userId);
 		response.json({ backends });
 	});
@@ -112,9 +118,8 @@ export function setupSessionRoutes(
 			const message = getErrorMessage(error);
 			logger.error({ err: error, userId }, "session_create_error");
 			if (
-				message.includes("Not authorized") ||
-				message.includes("No CLI connected for this user") ||
-				message.includes("No CLI connected for this machine")
+				message.includes("No CLI connected") ||
+				message.includes("Machine not found")
 			) {
 				respondError(response, buildAuthorizationError(message), 403);
 			} else {
@@ -146,8 +151,8 @@ export function setupSessionRoutes(
 			} catch (error) {
 				const message = getErrorMessage(error);
 				logger.error({ err: error, sessionId }, "session_close_error");
-				if (message.includes("Not authorized")) {
-					respondError(response, buildAuthorizationError(message), 403);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
 				} else {
 					respondError(response, createInternalError("session"));
 				}
@@ -178,8 +183,8 @@ export function setupSessionRoutes(
 			} catch (error) {
 				const message = getErrorMessage(error);
 				logger.error({ err: error, sessionId }, "session_cancel_error");
-				if (message.includes("Not authorized")) {
-					respondError(response, buildAuthorizationError(message), 403);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
 				} else {
 					respondError(response, createInternalError("session"));
 				}
@@ -213,8 +218,8 @@ export function setupSessionRoutes(
 			} catch (error) {
 				const message = getErrorMessage(error);
 				logger.error({ err: error, sessionId, modeId }, "session_mode_error");
-				if (message.includes("Not authorized")) {
-					respondError(response, buildAuthorizationError(message), 403);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
 				} else {
 					respondError(response, createInternalError("session"));
 				}
@@ -248,8 +253,8 @@ export function setupSessionRoutes(
 			} catch (error) {
 				const message = getErrorMessage(error);
 				logger.error({ err: error, sessionId, modelId }, "session_model_error");
-				if (message.includes("Not authorized")) {
-					respondError(response, buildAuthorizationError(message), 403);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
 				} else {
 					respondError(response, createInternalError("session"));
 				}
@@ -360,12 +365,11 @@ export function setupSessionRoutes(
 					userId: getUserId(request),
 					promptBlocks: Array.isArray(prompt) ? prompt.length : undefined,
 					requestId,
-					isAuthorized: message.includes("Not authorized") ? false : undefined,
 				},
 				"message_send_error",
 			);
-			if (message.includes("Not authorized")) {
-				respondError(response, buildAuthorizationError(message), 403);
+			if (message.includes("Session not found")) {
+				respondError(response, buildAuthorizationError(message), 404);
 			} else {
 				respondError(response, createInternalError("session"));
 			}
@@ -407,8 +411,8 @@ export function setupSessionRoutes(
 					{ err: error, sessionId, requestId },
 					"permission_decision_error",
 				);
-				if (message.includes("Not authorized")) {
-					respondError(response, buildAuthorizationError(message), 403);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
 				} else {
 					respondError(response, createInternalError("session"));
 				}
@@ -448,8 +452,8 @@ export function setupSessionRoutes(
 					typeof cursor === "string" ? cursor : undefined,
 					requestedBackendId,
 				);
-				if (typeof machineId === "string") {
-					const cli = cliRegistry.getCliByMachineId(machineId);
+				if (typeof machineId === "string" && userId) {
+					const cli = cliRegistry.getCliByMachineIdForUser(machineId, userId);
 					if (cli) {
 						const discoveredBackendLabel =
 							cli.backends.find(
@@ -484,9 +488,10 @@ export function setupSessionRoutes(
 			} catch (error) {
 				const message = getErrorMessage(error);
 				logger.error({ err: error, userId }, "sessions_discover_error");
-				if (message.includes("Not authorized")) {
-					respondError(response, buildAuthorizationError(message), 403);
-				} else if (message.includes("No CLI connected")) {
+				if (
+					message.includes("Machine not found") ||
+					message.includes("No CLI connected")
+				) {
 					respondError(response, buildAuthorizationError(message), 503);
 				} else {
 					respondError(response, createInternalError("service"));
@@ -537,9 +542,10 @@ export function setupSessionRoutes(
 			} catch (error) {
 				const message = getErrorMessage(error);
 				logger.error({ err: error, sessionId }, "session_load_error");
-				if (message.includes("Not authorized")) {
-					respondError(response, buildAuthorizationError(message), 403);
-				} else if (message.includes("No CLI connected")) {
+				if (
+					message.includes("Machine not found") ||
+					message.includes("No CLI connected")
+				) {
 					respondError(response, buildAuthorizationError(message), 503);
 				} else if (message.includes("does not support")) {
 					respondError(
@@ -601,9 +607,10 @@ export function setupSessionRoutes(
 			} catch (error) {
 				const message = getErrorMessage(error);
 				logger.error({ err: error, sessionId }, "session_reload_error");
-				if (message.includes("Not authorized")) {
-					respondError(response, buildAuthorizationError(message), 403);
-				} else if (message.includes("No CLI connected")) {
+				if (
+					message.includes("Machine not found") ||
+					message.includes("No CLI connected")
+				) {
 					respondError(response, buildAuthorizationError(message), 503);
 				} else if (message.includes("does not support")) {
 					respondError(
@@ -685,9 +692,7 @@ export function setupSessionRoutes(
 			} catch (error) {
 				const message = getErrorMessage(error);
 				logger.error({ err: error, sessionId }, "session_events_error");
-				if (message.includes("Not authorized")) {
-					respondError(response, buildAuthorizationError(message), 403);
-				} else if (message.includes("Session not found")) {
+				if (message.includes("Session not found")) {
 					respondError(
 						response,
 						createErrorDetail({

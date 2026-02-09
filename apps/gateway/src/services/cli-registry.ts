@@ -295,17 +295,22 @@ export class CliRegistry extends EventEmitter {
 		return this.cliBySocketId.get(socketId);
 	}
 
-	getCliByMachineId(machineId: string): CliRecord | undefined {
-		return this.cliByMachineId.get(machineId);
-	}
-
-	getCliForSession(sessionId: string): CliRecord | undefined {
-		for (const record of this.cliByMachineId.values()) {
-			if (record.sessions.some((s) => s.sessionId === sessionId)) {
-				return record;
-			}
+	/**
+	 * Get CLI by machineId, scoped to a specific user.
+	 * Uses the clisByUserId index to verify ownership in a single step,
+	 * eliminating the TOCTOU gap of separate lookup + auth check.
+	 * Returns undefined for both missing and unauthorized machines
+	 * to avoid leaking machine existence to other users.
+	 */
+	getCliByMachineIdForUser(
+		machineId: string,
+		userId: string,
+	): CliRecord | undefined {
+		const machineIds = this.clisByUserId.get(userId);
+		if (!machineIds || !machineIds.has(machineId)) {
+			return undefined;
 		}
-		return undefined;
+		return this.cliByMachineId.get(machineId);
 	}
 
 	/**
@@ -329,25 +334,6 @@ export class CliRegistry extends EventEmitter {
 		return undefined;
 	}
 
-	getAllClis(): CliRecord[] {
-		return Array.from(this.cliByMachineId.values());
-	}
-
-	getAllSessions(): SessionSummary[] {
-		const sessions: SessionSummary[] = [];
-		for (const record of this.cliByMachineId.values()) {
-			for (const session of record.sessions) {
-				sessions.push({ ...session, machineId: record.machineId });
-			}
-		}
-		return sessions;
-	}
-
-	getFirstCli(): CliRecord | undefined {
-		const clis = this.getAllClis();
-		return clis[0];
-	}
-
 	/**
 	 * Get all CLIs belonging to a specific user.
 	 */
@@ -368,12 +354,8 @@ export class CliRegistry extends EventEmitter {
 
 	/**
 	 * Get the first available CLI for a user.
-	 * Falls back to getFirstCli() if userId is not provided (backwards compatibility).
 	 */
-	getFirstCliForUser(userId?: string): CliRecord | undefined {
-		if (!userId) {
-			return this.getFirstCli();
-		}
+	getFirstCliForUser(userId: string): CliRecord | undefined {
 		const clis = this.getClisForUser(userId);
 		return clis[0];
 	}
@@ -396,60 +378,19 @@ export class CliRegistry extends EventEmitter {
 	 * Check if a session belongs to a specific user.
 	 */
 	isSessionOwnedByUser(sessionId: string, userId: string): boolean {
-		const cli = this.getCliForSession(sessionId);
-		if (!cli) {
-			return false;
-		}
-		// If CLI has no userId (auth disabled), allow access
-		if (!cli.userId) {
-			return true;
-		}
-		return cli.userId === userId;
-	}
-
-	/**
-	 * Check if a machine belongs to a specific user.
-	 */
-	isMachineOwnedByUser(machineId: string, userId: string): boolean {
-		const cli = this.getCliByMachineId(machineId);
-		if (!cli) {
-			return false;
-		}
-		if (!cli.userId) {
-			return true;
-		}
-		return cli.userId === userId;
+		return this.getCliForSessionByUser(sessionId, userId) !== undefined;
 	}
 
 	/**
 	 * Get backends available to a specific user.
 	 */
-	getBackendsForUser(userId?: string): {
+	getBackendsForUser(userId: string): {
 		backends: AcpBackendSummary[];
 	} {
-		const clis = userId ? this.getClisForUser(userId) : this.getAllClis();
+		const clis = this.getClisForUser(userId);
 		const backendsMap = new Map<string, AcpBackendSummary>();
 
 		for (const record of clis) {
-			for (const backend of record.backends) {
-				if (!backendsMap.has(backend.backendId)) {
-					backendsMap.set(backend.backendId, backend);
-				}
-			}
-		}
-
-		return {
-			backends: Array.from(backendsMap.values()),
-		};
-	}
-
-	getAllBackends(): {
-		backends: AcpBackendSummary[];
-	} {
-		// Aggregate backends from all connected CLIs
-		const backendsMap = new Map<string, AcpBackendSummary>();
-
-		for (const record of this.cliByMachineId.values()) {
 			for (const backend of record.backends) {
 				if (!backendsMap.has(backend.backendId)) {
 					backendsMap.set(backend.backendId, backend);

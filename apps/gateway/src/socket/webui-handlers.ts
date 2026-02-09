@@ -66,21 +66,12 @@ export function setupWebuiHandlers(
 		}
 	};
 
-	// Broadcast to all webui clients — only used internally as fallback
-	// when userId is absent (pre-auth CLIs / auth disabled).
-	const emitToAll = (event: string, payload: unknown) => {
-		webuiNamespace.emit(event, payload);
-	};
-
 	// Forward CLI status to webui (user-filtered)
 	cliRegistry.onCliStatus((payload: CliStatusPayload) => {
 		if (payload.userId) {
-			// Only emit to the user who owns this CLI
 			emitToUser(payload.userId, "cli:status", payload);
-		} else {
-			// Auth disabled - emit to all
-			emitToAll("cli:status", payload);
 		}
+		// No userId → silently discard (auth middleware guarantees userId on CLIs)
 	});
 
 	// Forward session updates to subscribers
@@ -90,14 +81,11 @@ export function setupWebuiHandlers(
 
 	// Forward sessions:changed events to webui clients
 	cliRegistry.onSessionsChanged(
-		(machineId: string, payload: SessionsChangedPayload, userId?: string) => {
+		(_machineId: string, payload: SessionsChangedPayload, userId?: string) => {
 			if (userId) {
-				// Only emit to the user who owns this CLI
 				emitToUser(userId, "sessions:changed", payload);
-			} else {
-				// Auth disabled - emit to all
-				emitToAll("sessions:changed", payload);
 			}
+			// No userId → silently discard
 		},
 	);
 
@@ -132,10 +120,8 @@ export function setupWebuiHandlers(
 
 		logger.info({ socketId: socket.id, userId }, "webui_authenticated");
 
-		// Send current CLI status - filtered by user if authenticated
-		const clis = userId
-			? cliRegistry.getClisForUser(userId)
-			: cliRegistry.getAllClis();
+		// Send current CLI status for this user (auth middleware guarantees userId)
+		const clis = cliRegistry.getClisForUser(userId!);
 
 		for (const cli of clis) {
 			socket.emit("cli:status", {
@@ -207,7 +193,7 @@ export function setupWebuiHandlers(
 						return;
 					}
 
-					await sessionRouter.sendPermissionDecision(payload, userId);
+					await sessionRouter.sendPermissionDecision(payload, userId!);
 					logger.info(
 						{
 							sessionId: payload.sessionId,

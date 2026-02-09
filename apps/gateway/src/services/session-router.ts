@@ -57,17 +57,28 @@ export class SessionRouter {
 
 	/**
 	 * Resolve the CLI that owns a session, scoped to the given user.
-	 * Uses a single user-scoped lookup when userId is provided,
-	 * eliminating the TOCTOU gap of separate lookup + auth check.
-	 * Returns generic "Session not found" for both missing and unauthorized
-	 * to avoid leaking session existence to other users.
+	 * Uses a single user-scoped lookup, eliminating the TOCTOU gap of
+	 * separate lookup + auth check. Returns generic "Session not found"
+	 * for both missing and unauthorized to avoid leaking session existence.
 	 */
-	private resolveCliForSession(sessionId: string, userId?: string): CliRecord {
-		const cli = userId
-			? this.cliRegistry.getCliForSessionByUser(sessionId, userId)
-			: this.cliRegistry.getCliForSession(sessionId);
+	private resolveCliForSession(sessionId: string, userId: string): CliRecord {
+		const cli = this.cliRegistry.getCliForSessionByUser(sessionId, userId);
 		if (!cli) {
 			throw new Error("Session not found");
+		}
+		return cli;
+	}
+
+	/**
+	 * Resolve the CLI for a machine, scoped to the given user.
+	 * Uses a single user-scoped lookup, eliminating the TOCTOU gap of
+	 * separate lookup + auth check. Returns generic "Machine not found"
+	 * for both missing and unauthorized to avoid leaking machine existence.
+	 */
+	private resolveMachineForUser(machineId: string, userId: string): CliRecord {
+		const cli = this.cliRegistry.getCliByMachineIdForUser(machineId, userId);
+		if (!cli) {
+			throw new Error("Machine not found");
 		}
 		return cli;
 	}
@@ -105,31 +116,18 @@ export class SessionRouter {
 	/**
 	 * Create a new session.
 	 * @param params - Session creation parameters
-	 * @param userId - Optional user ID for routing to user's machine
+	 * @param userId - User ID for routing to user's machine
 	 */
 	async createSession(
 		params: CreateSessionParams,
-		userId?: string,
+		userId: string,
 	): Promise<SessionSummary> {
 		const targetMachineId = params.machineId;
 		const cli = targetMachineId
-			? this.cliRegistry.getCliByMachineId(targetMachineId)
+			? this.resolveMachineForUser(targetMachineId, userId)
 			: this.cliRegistry.getFirstCliForUser(userId);
 		if (!cli) {
-			throw new Error(
-				targetMachineId
-					? "No CLI connected for this machine"
-					: userId
-						? "No CLI connected for this user"
-						: "No CLI connected",
-			);
-		}
-		if (
-			targetMachineId &&
-			userId &&
-			!this.cliRegistry.isMachineOwnedByUser(targetMachineId, userId)
-		) {
-			throw new Error("Not authorized to access this machine");
+			throw new Error("No CLI connected for this user");
 		}
 
 		logger.info(
@@ -171,11 +169,11 @@ export class SessionRouter {
 	/**
 	 * Close a session.
 	 * @param params - Session close parameters
-	 * @param userId - Optional user ID for authorization
+	 * @param userId - User ID for authorization
 	 */
 	async closeSession(
 		params: CloseSessionParams,
-		userId?: string,
+		userId: string,
 	): Promise<{ ok: boolean }> {
 		const cli = this.resolveCliForSession(params.sessionId, userId);
 
@@ -203,11 +201,11 @@ export class SessionRouter {
 	/**
 	 * Cancel a session's current operation.
 	 * @param params - Session cancel parameters
-	 * @param userId - Optional user ID for authorization
+	 * @param userId - User ID for authorization
 	 */
 	async cancelSession(
 		params: CancelSessionParams,
-		userId?: string,
+		userId: string,
 	): Promise<{ ok: boolean }> {
 		const cli = this.resolveCliForSession(params.sessionId, userId);
 
@@ -233,11 +231,11 @@ export class SessionRouter {
 	/**
 	 * Set session mode.
 	 * @param params - Session mode parameters
-	 * @param userId - Optional user ID for authorization
+	 * @param userId - User ID for authorization
 	 */
 	async setSessionMode(
 		params: SetSessionModeParams,
-		userId?: string,
+		userId: string,
 	): Promise<SessionSummary> {
 		const cli = this.resolveCliForSession(params.sessionId, userId);
 
@@ -263,11 +261,11 @@ export class SessionRouter {
 	/**
 	 * Set session model.
 	 * @param params - Session model parameters
-	 * @param userId - Optional user ID for authorization
+	 * @param userId - User ID for authorization
 	 */
 	async setSessionModel(
 		params: SetSessionModelParams,
-		userId?: string,
+		userId: string,
 	): Promise<SessionSummary> {
 		const cli = this.resolveCliForSession(params.sessionId, userId);
 
@@ -293,11 +291,11 @@ export class SessionRouter {
 	/**
 	 * Send a message to a session.
 	 * @param params - Message send parameters
-	 * @param userId - Optional user ID for authorization
+	 * @param userId - User ID for authorization
 	 */
 	async sendMessage(
 		params: SendMessageParams,
-		userId?: string,
+		userId: string,
 	): Promise<{ stopReason: StopReason }> {
 		const cli = this.resolveCliForSession(params.sessionId, userId);
 
@@ -320,11 +318,11 @@ export class SessionRouter {
 	/**
 	 * Send a permission decision for a session.
 	 * @param params - Permission decision parameters
-	 * @param userId - Optional user ID for authorization
+	 * @param userId - User ID for authorization
 	 */
 	async sendPermissionDecision(
 		params: PermissionDecisionPayload,
-		userId?: string,
+		userId: string,
 	): Promise<{ ok: boolean }> {
 		const cli = this.resolveCliForSession(params.sessionId, userId);
 
@@ -349,11 +347,11 @@ export class SessionRouter {
 	/**
 	 * Get file system roots for a session.
 	 * @param sessionId - Session ID
-	 * @param userId - Optional user ID for authorization
+	 * @param userId - User ID for authorization
 	 */
 	async getFsRoots(
 		sessionId: string,
-		userId?: string,
+		userId: string,
 	): Promise<FsRootsResponse> {
 		const cli = this.resolveCliForSession(sessionId, userId);
 
@@ -372,11 +370,11 @@ export class SessionRouter {
 	/**
 	 * Get file system entries for a session.
 	 * @param params - File system entries parameters
-	 * @param userId - Optional user ID for authorization
+	 * @param userId - User ID for authorization
 	 */
 	async getFsEntries(
 		params: FsEntriesParams,
-		userId?: string,
+		userId: string,
 	): Promise<FsEntriesResponse> {
 		const cli = this.resolveCliForSession(params.sessionId, userId);
 
@@ -402,11 +400,11 @@ export class SessionRouter {
 	/**
 	 * Get file content for a session.
 	 * @param params - File parameters
-	 * @param userId - Optional user ID for authorization
+	 * @param userId - User ID for authorization
 	 */
 	async getFsFile(
 		params: FsFileParams,
-		userId?: string,
+		userId: string,
 	): Promise<SessionFsFilePreview> {
 		const cli = this.resolveCliForSession(params.sessionId, userId);
 
@@ -429,11 +427,11 @@ export class SessionRouter {
 	/**
 	 * Get resources for a session.
 	 * @param params - Resources parameters
-	 * @param userId - Optional user ID for authorization
+	 * @param userId - User ID for authorization
 	 */
 	async getFsResources(
 		params: FsResourcesParams,
-		userId?: string,
+		userId: string,
 	): Promise<FsResourcesResponse> {
 		const cli = this.resolveCliForSession(params.sessionId, userId);
 
@@ -461,18 +459,9 @@ export class SessionRouter {
 	 */
 	async getHostFsRoots(
 		params: HostFsRootsParams,
-		userId?: string,
+		userId: string,
 	): Promise<HostFsRootsResponse> {
-		const cli = this.cliRegistry.getCliByMachineId(params.machineId);
-		if (!cli) {
-			throw new Error("Machine not found");
-		}
-		if (
-			userId &&
-			!this.cliRegistry.isMachineOwnedByUser(params.machineId, userId)
-		) {
-			throw new Error("Not authorized to access this machine");
-		}
+		const cli = this.resolveMachineForUser(params.machineId, userId);
 
 		logger.debug(
 			{ machineId: params.machineId, userId },
@@ -497,18 +486,9 @@ export class SessionRouter {
 	 */
 	async getHostFsEntries(
 		params: HostFsEntriesParams,
-		userId?: string,
+		userId: string,
 	): Promise<FsEntriesResponse> {
-		const cli = this.cliRegistry.getCliByMachineId(params.machineId);
-		if (!cli) {
-			throw new Error("Machine not found");
-		}
-		if (
-			userId &&
-			!this.cliRegistry.isMachineOwnedByUser(params.machineId, userId)
-		) {
-			throw new Error("Not authorized to access this machine");
-		}
+		const cli = this.resolveMachineForUser(params.machineId, userId);
 
 		logger.debug(
 			{ machineId: params.machineId, userId, path: params.path },
@@ -532,36 +512,22 @@ export class SessionRouter {
 	 * Discover sessions persisted by the ACP agent.
 	 * @param machineId - Optional machine ID to target specific CLI
 	 * @param cwd - Optional working directory filter
-	 * @param userId - Optional user ID for authorization
+	 * @param userId - User ID for authorization
 	 * @returns List of discovered sessions and agent capabilities
 	 */
 	async discoverSessions(
-		machineId?: string,
-		cwd?: string,
-		userId?: string,
+		machineId: string | undefined,
+		cwd: string | undefined,
+		userId: string,
 		cursor?: string,
 		backendId?: string,
 	): Promise<DiscoverSessionsRpcResult> {
 		const cli = machineId
-			? this.cliRegistry.getCliByMachineId(machineId)
+			? this.resolveMachineForUser(machineId, userId)
 			: this.cliRegistry.getFirstCliForUser(userId);
 
 		if (!cli) {
-			throw new Error(
-				machineId
-					? "No CLI connected for this machine"
-					: userId
-						? "No CLI connected for this user"
-						: "No CLI connected",
-			);
-		}
-
-		if (
-			machineId &&
-			userId &&
-			!this.cliRegistry.isMachineOwnedByUser(machineId, userId)
-		) {
-			throw new Error("Not authorized to access this machine");
+			throw new Error("No CLI connected for this user");
 		}
 
 		logger.info(
@@ -595,7 +561,7 @@ export class SessionRouter {
 	 * Load a historical session from the ACP agent.
 	 * This will replay the session's message history.
 	 * @param params - Load session parameters
-	 * @param userId - Optional user ID for authorization
+	 * @param userId - User ID for authorization
 	 * @returns The loaded session summary
 	 */
 	async loadSession(
@@ -605,28 +571,14 @@ export class SessionRouter {
 			backendId: string;
 			machineId?: string;
 		},
-		userId?: string,
+		userId: string,
 	): Promise<SessionSummary> {
 		const cli = params.machineId
-			? this.cliRegistry.getCliByMachineId(params.machineId)
+			? this.resolveMachineForUser(params.machineId, userId)
 			: this.cliRegistry.getFirstCliForUser(userId);
 
 		if (!cli) {
-			throw new Error(
-				params.machineId
-					? "No CLI connected for this machine"
-					: userId
-						? "No CLI connected for this user"
-						: "No CLI connected",
-			);
-		}
-
-		if (
-			params.machineId &&
-			userId &&
-			!this.cliRegistry.isMachineOwnedByUser(params.machineId, userId)
-		) {
-			throw new Error("Not authorized to access this machine");
+			throw new Error("No CLI connected for this user");
 		}
 
 		logger.info(
@@ -675,7 +627,7 @@ export class SessionRouter {
 	 * Reload a historical session from the ACP agent.
 	 * This will tear down any existing session and replay history again.
 	 * @param params - Reload session parameters
-	 * @param userId - Optional user ID for authorization
+	 * @param userId - User ID for authorization
 	 * @returns The reloaded session summary
 	 */
 	async reloadSession(
@@ -685,28 +637,14 @@ export class SessionRouter {
 			backendId: string;
 			machineId?: string;
 		},
-		userId?: string,
+		userId: string,
 	): Promise<SessionSummary> {
 		const cli = params.machineId
-			? this.cliRegistry.getCliByMachineId(params.machineId)
+			? this.resolveMachineForUser(params.machineId, userId)
 			: this.cliRegistry.getFirstCliForUser(userId);
 
 		if (!cli) {
-			throw new Error(
-				params.machineId
-					? "No CLI connected for this machine"
-					: userId
-						? "No CLI connected for this user"
-						: "No CLI connected",
-			);
-		}
-
-		if (
-			params.machineId &&
-			userId &&
-			!this.cliRegistry.isMachineOwnedByUser(params.machineId, userId)
-		) {
-			throw new Error("Not authorized to access this machine");
+			throw new Error("No CLI connected for this user");
 		}
 
 		logger.info(
@@ -766,11 +704,11 @@ export class SessionRouter {
 	/**
 	 * Get git status for a session's working directory.
 	 * @param sessionId - Session ID
-	 * @param userId - Optional user ID for authorization
+	 * @param userId - User ID for authorization
 	 */
 	async getGitStatus(
 		sessionId: string,
-		userId?: string,
+		userId: string,
 	): Promise<GitStatusResponse> {
 		const cli = this.resolveCliForSession(sessionId, userId);
 
@@ -789,11 +727,11 @@ export class SessionRouter {
 	/**
 	 * Get git diff for a file in a session's working directory.
 	 * @param params - Git file diff parameters
-	 * @param userId - Optional user ID for authorization
+	 * @param userId - User ID for authorization
 	 */
 	async getGitFileDiff(
 		params: GitFileDiffParams,
-		userId?: string,
+		userId: string,
 	): Promise<GitFileDiffResponse> {
 		const cli = this.resolveCliForSession(params.sessionId, userId);
 
@@ -818,11 +756,11 @@ export class SessionRouter {
 	/**
 	 * Get session events for backfill.
 	 * @param params - Session events parameters
-	 * @param userId - Optional user ID for authorization
+	 * @param userId - User ID for authorization
 	 */
 	async getSessionEvents(
 		params: SessionEventsParams,
-		userId?: string,
+		userId: string,
 	): Promise<SessionEventsResponse> {
 		const cli = this.resolveCliForSession(params.sessionId, userId);
 

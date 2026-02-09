@@ -58,7 +58,6 @@ describe("CliRegistry", () => {
 			expect(record.socket).toBe(socket);
 			expect(record.sessions).toEqual([]);
 			expect(registry.getCliBySocketId("socket-1")).toBe(record);
-			expect(registry.getCliByMachineId("machine-1")).toBe(record);
 		});
 
 		it("registers CLI with auth info", () => {
@@ -83,7 +82,6 @@ describe("CliRegistry", () => {
 
 			expect(registry.getCliBySocketId("socket-1")).toBeUndefined();
 			expect(registry.getCliBySocketId("socket-2")).toBe(newRecord);
-			expect(registry.getCliByMachineId("machine-1")).toBe(newRecord);
 		});
 
 		it("unregisters and emits status event", () => {
@@ -99,7 +97,6 @@ describe("CliRegistry", () => {
 
 			expect(record?.machineId).toBe("machine-1");
 			expect(registry.getCliBySocketId("socket-1")).toBeUndefined();
-			expect(registry.getCliByMachineId("machine-1")).toBeUndefined();
 			expect(statusListener).toHaveBeenCalledWith(
 				expect.objectContaining({
 					machineId: "machine-1",
@@ -182,7 +179,7 @@ describe("CliRegistry", () => {
 				"user-1",
 			);
 
-			const record = registry.getCliByMachineId("machine-1");
+			const record = registry.getCliByMachineIdForUser("machine-1", "user-1");
 			expect(record?.sessions).toHaveLength(1);
 			expect(record?.sessions[0].sessionId).toBe("session-1");
 			expect(listener).toHaveBeenCalledWith(
@@ -238,7 +235,7 @@ describe("CliRegistry", () => {
 				}),
 			]);
 
-			const record = registry.getCliByMachineId("machine-1");
+			const record = registry.getCliBySocketId("socket-1");
 			expect(record?.sessions[0].backendId).toBe("codex-acp");
 			expect(record?.sessions[0].backendLabel).toBe("Codex ACP");
 			expect(listener).toHaveBeenCalledWith(
@@ -475,47 +472,35 @@ describe("CliRegistry", () => {
 		});
 	});
 
-	describe("getCliForSession", () => {
-		it("finds CLI record containing session", () => {
+	describe("getCliByMachineIdForUser", () => {
+		it("returns CLI record when user owns the machine", () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			registry.register(socket, info);
+			const authInfo = { userId: "user-1", apiKey: "key-123" };
 
-			registry.updateSessions("socket-1", [
-				createMockSessionSummary({ sessionId: "session-1" }),
-			]);
+			const record = registry.register(socket, info, authInfo);
 
-			const record = registry.getCliForSession("session-1");
-			expect(record?.machineId).toBe("machine-1");
+			expect(registry.getCliByMachineIdForUser("machine-1", "user-1")).toBe(
+				record,
+			);
 		});
 
-		it("returns undefined for unknown session", () => {
-			const record = registry.getCliForSession("unknown-session");
-			expect(record).toBeUndefined();
+		it("returns undefined when user does not own the machine", () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			const authInfo = { userId: "user-1", apiKey: "key-123" };
+
+			registry.register(socket, info, authInfo);
+
+			expect(
+				registry.getCliByMachineIdForUser("machine-1", "user-2"),
+			).toBeUndefined();
 		});
 
-		it("finds session across multiple machines", () => {
-			const socket1 = createMockSocket("socket-1");
-			const socket2 = createMockSocket("socket-2");
-			const info1 = createMockRegistrationInfo({ machineId: "machine-1" });
-			const info2 = createMockRegistrationInfo({ machineId: "machine-2" });
-
-			registry.register(socket1, info1);
-			registry.register(socket2, info2);
-
-			registry.updateSessions("socket-1", [
-				createMockSessionSummary({ sessionId: "session-1" }),
-			]);
-			registry.updateSessions("socket-2", [
-				createMockSessionSummary({ sessionId: "session-2" }),
-			]);
-
-			expect(registry.getCliForSession("session-1")?.machineId).toBe(
-				"machine-1",
-			);
-			expect(registry.getCliForSession("session-2")?.machineId).toBe(
-				"machine-2",
-			);
+		it("returns undefined when machine does not exist", () => {
+			expect(
+				registry.getCliByMachineIdForUser("unknown-machine", "user-1"),
+			).toBeUndefined();
 		});
 	});
 
@@ -546,36 +531,6 @@ describe("CliRegistry", () => {
 				removed: [],
 			});
 			expect(listener).toHaveBeenCalledTimes(1);
-		});
-	});
-
-	describe("getAllSessions", () => {
-		it("aggregates sessions from all machines with machineId", () => {
-			const socket1 = createMockSocket("socket-1");
-			const socket2 = createMockSocket("socket-2");
-			const info1 = createMockRegistrationInfo({ machineId: "machine-1" });
-			const info2 = createMockRegistrationInfo({ machineId: "machine-2" });
-
-			registry.register(socket1, info1);
-			registry.register(socket2, info2);
-
-			registry.updateSessions("socket-1", [
-				createMockSessionSummary({ sessionId: "session-1" }),
-			]);
-			registry.updateSessions("socket-2", [
-				createMockSessionSummary({ sessionId: "session-2" }),
-				createMockSessionSummary({ sessionId: "session-3" }),
-			]);
-
-			const allSessions = registry.getAllSessions();
-
-			expect(allSessions).toHaveLength(3);
-
-			const session1 = allSessions.find((s) => s.sessionId === "session-1");
-			expect(session1?.machineId).toBe("machine-1");
-
-			const session2 = allSessions.find((s) => s.sessionId === "session-2");
-			expect(session2?.machineId).toBe("machine-2");
 		});
 	});
 
