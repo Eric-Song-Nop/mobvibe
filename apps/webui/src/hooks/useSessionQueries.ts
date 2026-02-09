@@ -94,9 +94,10 @@ export function useDiscoverSessionsMutation() {
 				throw new Error("No backends available for session discovery");
 			}
 
-			for (const backendId of backendIds) {
-				let cursor: string | undefined;
-				try {
+			const results = await Promise.allSettled(
+				backendIds.map(async (backendId) => {
+					let cursor: string | undefined;
+					let caps: DiscoverSessionsResult["capabilities"] | undefined;
 					do {
 						const result = await discoverSessions({
 							machineId: variables.machineId,
@@ -104,21 +105,37 @@ export function useDiscoverSessionsMutation() {
 							cursor,
 							backendId,
 						});
-						if (!capabilities) {
-							capabilities = { ...result.capabilities };
-						} else {
-							capabilities = {
-								list: capabilities.list || result.capabilities.list,
-								load: capabilities.load || result.capabilities.load,
-							};
-						}
+						caps = caps
+							? {
+									list: caps.list || result.capabilities.list,
+									load: caps.load || result.capabilities.load,
+								}
+							: { ...result.capabilities };
 						cursor = result.nextCursor;
 					} while (cursor);
-				} catch (error) {
-					lastError = error;
-					if (hasExplicitBackendSelection || backendIds.length === 1) {
-						throw error;
-					}
+					return caps;
+				}),
+			);
+
+			if (hasExplicitBackendSelection || backendIds.length === 1) {
+				const rejected = results.find(
+					(r): r is PromiseRejectedResult => r.status === "rejected",
+				);
+				if (rejected) {
+					throw rejected.reason;
+				}
+			}
+
+			for (const r of results) {
+				if (r.status === "fulfilled" && r.value) {
+					capabilities = capabilities
+						? {
+								list: capabilities.list || r.value.list,
+								load: capabilities.load || r.value.load,
+							}
+						: { ...r.value };
+				} else if (r.status === "rejected") {
+					lastError = r.reason;
 				}
 			}
 

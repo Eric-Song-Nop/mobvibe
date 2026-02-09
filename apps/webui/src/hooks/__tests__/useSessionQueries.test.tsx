@@ -238,13 +238,13 @@ describe("useSessionQueries", () => {
 		});
 
 		expect(api.discoverSessions).toHaveBeenCalledTimes(2);
-		expect(api.discoverSessions).toHaveBeenNthCalledWith(1, {
+		expect(api.discoverSessions).toHaveBeenCalledWith({
 			machineId: "machine-1",
 			cwd: "/workspace/project",
 			cursor: undefined,
 			backendId: "opencode",
 		});
-		expect(api.discoverSessions).toHaveBeenNthCalledWith(2, {
+		expect(api.discoverSessions).toHaveBeenCalledWith({
 			machineId: "machine-1",
 			cwd: "/workspace/project",
 			cursor: undefined,
