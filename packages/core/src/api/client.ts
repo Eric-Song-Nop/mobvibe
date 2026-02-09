@@ -179,10 +179,10 @@ export const createApiClient = (config: ApiClientConfig) => {
 				body: JSON.stringify(payload),
 			}),
 
-		closeSession: async (payload: {
+		archiveSession: async (payload: {
 			sessionId: string;
 		}): Promise<{ ok: boolean }> =>
-			requestJson<{ ok: boolean }>("/acp/session/close", {
+			requestJson<{ ok: boolean }>("/acp/session/archive", {
 				method: "POST",
 				body: JSON.stringify(payload),
 			}),

@@ -14,7 +14,7 @@ vi.mock("@/lib/api", async () => {
 		...actual,
 		createSession: vi.fn(),
 		renameSession: vi.fn(),
-		closeSession: vi.fn(),
+		archiveSession: vi.fn(),
 		cancelSession: vi.fn(),
 		setSessionMode: vi.fn(),
 		setSessionModel: vi.fn(),
@@ -212,15 +212,15 @@ describe("useSessionMutations", () => {
 		});
 	});
 
-	describe("closeSessionMutation", () => {
-		it("should close session successfully", async () => {
-			vi.mocked(apiModule.closeSession).mockResolvedValue({ ok: true });
+	describe("archiveSessionMutation", () => {
+		it("should archive session successfully", async () => {
+			vi.mocked(apiModule.archiveSession).mockResolvedValue({ ok: true });
 
 			const { result } = renderHook(() => useSessionMutations(mockStore), {
 				wrapper,
 			});
 
-			await result.current.closeSessionMutation.mutateAsync({
+			await result.current.archiveSessionMutation.mutateAsync({
 				sessionId: "session-1",
 			});
 
@@ -228,9 +228,9 @@ describe("useSessionMutations", () => {
 			expect(mockStore.setAppError).toHaveBeenCalledWith(undefined);
 		});
 
-		it("should handle close errors", async () => {
-			vi.mocked(apiModule.closeSession).mockRejectedValue(
-				new Error("Failed to close"),
+		it("should handle archive errors", async () => {
+			vi.mocked(apiModule.archiveSession).mockRejectedValue(
+				new Error("Failed to archive"),
 			);
 
 			const { result } = renderHook(() => useSessionMutations(mockStore), {
@@ -238,7 +238,7 @@ describe("useSessionMutations", () => {
 			});
 
 			try {
-				await result.current.closeSessionMutation.mutateAsync({
+				await result.current.archiveSessionMutation.mutateAsync({
 					sessionId: "session-1",
 				});
 			} catch {
@@ -246,12 +246,12 @@ describe("useSessionMutations", () => {
 			}
 
 			const errorCall = vi.mocked(mockStore.setAppError).mock.calls[0];
-			expect(errorCall[0]?.message).toBe("Failed to close");
+			expect(errorCall[0]?.message).toBe("Failed to archive");
 			expect(errorCall[0]?.scope).toBe("session");
 		});
 
-		it("should remove session locally even when close API fails", async () => {
-			vi.mocked(apiModule.closeSession).mockRejectedValue(
+		it("should remove session locally even when archive API fails", async () => {
+			vi.mocked(apiModule.archiveSession).mockRejectedValue(
 				new Error("Gateway unreachable"),
 			);
 
@@ -260,7 +260,7 @@ describe("useSessionMutations", () => {
 			});
 
 			try {
-				await result.current.closeSessionMutation.mutateAsync({
+				await result.current.archiveSessionMutation.mutateAsync({
 					sessionId: "broken-session",
 				});
 			} catch {

@@ -12,6 +12,7 @@ import { SessionRouter } from "../session-router.js";
 
 // Mock the db-service module
 vi.mock("../db-service.js", () => ({
+	archiveAcpSession: vi.fn().mockResolvedValue(true),
 	createAcpSessionDirect: vi.fn().mockResolvedValue(undefined),
 	closeAcpSession: vi.fn().mockResolvedValue(undefined),
 	updateAcpSessionState: vi.fn().mockResolvedValue(undefined),
@@ -325,6 +326,62 @@ describe("SessionRouter", () => {
 			);
 
 			expect(result.sessionId).toBe("loaded-session-1");
+		});
+	});
+
+	describe("archiveSession", () => {
+		it("sends close RPC and archives in DB when session is active", async () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			cliRegistry.register(socket, info, authInfo);
+
+			const mockSession = createMockSessionSummary({
+				sessionId: "session-1",
+			});
+			cliRegistry.updateSessions(socket.id, [mockSession]);
+
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:session:close") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							result: { ok: true },
+						});
+					}, 0);
+				}
+			});
+
+			const { archiveAcpSession } = await import("../db-service.js");
+
+			const result = await sessionRouter.archiveSession(
+				{ sessionId: "session-1" },
+				"user-1",
+			);
+
+			expect(result).toEqual({ ok: true });
+			expect(socket.emit).toHaveBeenCalledWith(
+				"rpc:session:close",
+				expect.objectContaining({
+					params: { sessionId: "session-1" },
+				}),
+			);
+			expect(archiveAcpSession).toHaveBeenCalledWith("session-1", "user-1");
+		});
+
+		it("archives in DB even when session is not found in registry", async () => {
+			const { archiveAcpSession } = await import("../db-service.js");
+
+			const result = await sessionRouter.archiveSession(
+				{ sessionId: "detached-session" },
+				"user-1",
+			);
+
+			expect(result).toEqual({ ok: true });
+			expect(archiveAcpSession).toHaveBeenCalledWith(
+				"detached-session",
+				"user-1",
+			);
 		});
 	});
 

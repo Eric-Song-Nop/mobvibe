@@ -208,7 +208,7 @@ function MainApp() {
 		handleOpenCreateDialog,
 		handleCreateSession,
 		handleRenameSubmit,
-		handleCloseSession,
+		handleArchiveSession,
 		handlePermissionDecision,
 		handleModeChange,
 		handleModelChange,
@@ -410,8 +410,8 @@ function MainApp() {
 						}
 					}}
 					onEditSubmit={handleRenameSubmit}
-					onCloseSession={(sessionId) => {
-						void handleCloseSession(sessionId);
+					onArchiveSession={(sessionId) => {
+						void handleArchiveSession(sessionId);
 					}}
 					isCreating={mutations.createSessionMutation.isPending}
 					isActivating={isActivating}

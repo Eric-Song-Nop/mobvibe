@@ -27,7 +27,7 @@ export type AppSidebarProps = {
 	onCreateSession: () => void;
 	onSelectSession: (sessionId: string) => void;
 	onEditSubmit: () => void;
-	onCloseSession: (sessionId: string) => void;
+	onArchiveSession: (sessionId: string) => void;
 	isCreating: boolean;
 	/** Whether a session is being activated (restored/loaded) */
 	isActivating?: boolean;
@@ -39,7 +39,7 @@ export function AppSidebar({
 	onCreateSession,
 	onSelectSession,
 	onEditSubmit,
-	onCloseSession,
+	onArchiveSession,
 	isCreating,
 	isActivating: _isActivating,
 }: AppSidebarProps) {
@@ -61,7 +61,7 @@ export function AppSidebar({
 					onCreateSession={onCreateSession}
 					onSelectSession={onSelectSession}
 					onEditSubmit={onEditSubmit}
-					onCloseSession={onCloseSession}
+					onArchiveSession={onArchiveSession}
 					isCreating={isCreating}
 				/>
 			</aside>
@@ -85,7 +85,7 @@ export function AppSidebar({
 									setMobileMenuOpen(false);
 								}}
 								onEditSubmit={onEditSubmit}
-								onCloseSession={onCloseSession}
+								onArchiveSession={onArchiveSession}
 								isCreating={isCreating}
 							/>
 						</div>

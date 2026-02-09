@@ -307,10 +307,10 @@ export const renameSession = async (payload: {
 		body: JSON.stringify(payload),
 	});
 
-export const closeSession = async (payload: {
+export const archiveSession = async (payload: {
 	sessionId: string;
 }): Promise<{ ok: boolean }> =>
-	requestJson<{ ok: boolean }>("/acp/session/close", {
+	requestJson<{ ok: boolean }>("/acp/session/archive", {
 		method: "POST",
 		body: JSON.stringify(payload),
 	});

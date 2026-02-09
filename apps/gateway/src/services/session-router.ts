@@ -36,6 +36,7 @@ import type { Socket } from "socket.io";
 import { logger } from "../lib/logger.js";
 import type { CliRecord, CliRegistry } from "./cli-registry.js";
 import {
+	archiveAcpSession,
 	closeAcpSession,
 	createAcpSessionDirect,
 	updateAcpSessionState,
@@ -196,6 +197,44 @@ export class SessionRouter {
 		);
 
 		return result;
+	}
+
+	/**
+	 * Archive a session: terminate the backend agent (if reachable), then mark as archived in DB.
+	 * @param params - Session archive parameters
+	 * @param userId - User ID for authorization
+	 */
+	async archiveSession(
+		params: CloseSessionParams,
+		userId: string,
+	): Promise<{ ok: boolean }> {
+		logger.info(
+			{ sessionId: params.sessionId, userId },
+			"session_archive_rpc_start",
+		);
+
+		// Try to close the backend agent process; if session is detached/dead, skip
+		try {
+			const cli = this.resolveCliForSession(params.sessionId, userId);
+			await this.sendRpc<CloseSessionParams, { ok: boolean }>(
+				cli.socket,
+				"rpc:session:close",
+				params,
+			);
+		} catch (err) {
+			logger.debug(
+				{ err, sessionId: params.sessionId },
+				"session_archive_cli_unreachable",
+			);
+		}
+
+		await archiveAcpSession(params.sessionId, userId);
+		logger.info(
+			{ sessionId: params.sessionId, userId },
+			"session_archive_rpc_complete",
+		);
+
+		return { ok: true };
 	}
 
 	/**

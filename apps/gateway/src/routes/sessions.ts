@@ -13,6 +13,7 @@ import {
 	requireAuth,
 } from "../middleware/auth.js";
 import type { CliRegistry } from "../services/cli-registry.js";
+import { getArchivedSessionIds } from "../services/db-service.js";
 import type { SessionRouter } from "../services/session-router.js";
 
 const getErrorMessage = (error: unknown) => {
@@ -132,9 +133,9 @@ export function setupSessionRoutes(
 		}
 	});
 
-	// Close session - with authorization check
+	// Archive session - with authorization check
 	router.post(
-		"/session/close",
+		"/session/archive",
 		async (request: AuthenticatedRequest, response) => {
 			const { sessionId } = request.body ?? {};
 			if (typeof sessionId !== "string") {
@@ -152,13 +153,13 @@ export function setupSessionRoutes(
 				return;
 			}
 			try {
-				logger.info({ sessionId, userId }, "session_close_request");
-				await sessionRouter.closeSession({ sessionId }, userId);
-				logger.info({ sessionId, userId }, "session_close_success");
+				logger.info({ sessionId, userId }, "session_archive_request");
+				await sessionRouter.archiveSession({ sessionId }, userId);
+				logger.info({ sessionId, userId }, "session_archive_success");
 				response.json({ ok: true });
 			} catch (error) {
 				const message = getErrorMessage(error);
-				logger.error({ err: error, sessionId }, "session_close_error");
+				logger.error({ err: error, sessionId }, "session_archive_error");
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
 				} else {
@@ -484,6 +485,17 @@ export function setupSessionRoutes(
 					typeof cursor === "string" ? cursor : undefined,
 					requestedBackendId,
 				);
+
+				// Filter out archived sessions
+				const allSessionIds = result.sessions.map((s) => s.sessionId);
+				const archivedIds = await getArchivedSessionIds(allSessionIds, userId);
+				if (archivedIds.length > 0) {
+					const archivedSet = new Set(archivedIds);
+					result.sessions = result.sessions.filter(
+						(s) => !archivedSet.has(s.sessionId),
+					);
+				}
+
 				if (typeof machineId === "string" && userId) {
 					const cli = cliRegistry.getCliByMachineIdForUser(machineId, userId);
 					if (cli) {

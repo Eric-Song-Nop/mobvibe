@@ -24,7 +24,7 @@ type Mutations = {
 	renameSessionMutation: {
 		mutate: (params: { sessionId: string; title: string }) => void;
 	};
-	closeSessionMutation: {
+	archiveSessionMutation: {
 		mutateAsync: (params: { sessionId: string }) => Promise<unknown>;
 	};
 	cancelSessionMutation: {
@@ -191,19 +191,23 @@ export function useSessionHandlers({
 		uiActions.clearEditingSession();
 	};
 
-	const handleCloseSession = async (sessionId: string) => {
-		try {
-			await mutations.closeSessionMutation.mutateAsync({ sessionId });
-			if (activeSessionId === sessionId) {
-				const nextSession = sessionList.find(
-					(session) => session.sessionId !== sessionId,
-				);
-				chatActions.setActiveSessionId(nextSession?.sessionId);
+	const handleArchiveSession = useCallback(
+		async (sessionId: string) => {
+			try {
+				await mutations.archiveSessionMutation.mutateAsync({ sessionId });
+				const { activeSessionId, sessions } = useChatStore.getState();
+				if (activeSessionId === sessionId) {
+					const nextSession = Object.values(sessions).find(
+						(session) => session.sessionId !== sessionId,
+					);
+					chatActions.setActiveSessionId(nextSession?.sessionId);
+				}
+			} catch {
+				return;
 			}
-		} catch {
-			return;
-		}
-	};
+		},
+		[mutations.archiveSessionMutation, chatActions.setActiveSessionId],
+	);
 
 	const handlePermissionDecision = useCallback(
 		(payload: {
@@ -360,7 +364,7 @@ export function useSessionHandlers({
 		handleOpenCreateDialog,
 		handleCreateSession,
 		handleRenameSubmit,
-		handleCloseSession,
+		handleArchiveSession,
 		handlePermissionDecision,
 		handleModeChange,
 		handleModelChange,

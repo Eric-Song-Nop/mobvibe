@@ -81,7 +81,7 @@ vi.mock("@/hooks/useSessionMutations", () => ({
 	useSessionMutations: () => ({
 		createSessionMutation: { isPending: false, mutateAsync: vi.fn() },
 		renameSessionMutation: { mutate: vi.fn() },
-		closeSessionMutation: { mutateAsync: vi.fn() },
+		archiveSessionMutation: { mutateAsync: vi.fn() },
 		cancelSessionMutation: { mutate: vi.fn() },
 		setSessionModeMutation: { mutate: vi.fn(), isPending: false },
 		setSessionModelMutation: { mutate: vi.fn(), isPending: false },
@@ -127,7 +127,7 @@ vi.mock("@/hooks/useSessionHandlers", () => ({
 		handleOpenCreateDialog: vi.fn(),
 		handleCreateSession: vi.fn(),
 		handleRenameSubmit: vi.fn(),
-		handleCloseSession: vi.fn(),
+		handleArchiveSession: vi.fn(),
 		handlePermissionDecision: vi.fn(),
 		handleModeChange: vi.fn(),
 		handleModelChange: vi.fn(),

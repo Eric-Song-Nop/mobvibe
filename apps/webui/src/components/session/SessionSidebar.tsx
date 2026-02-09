@@ -75,7 +75,7 @@ type SessionSidebarProps = {
 	onCreateSession: () => void;
 	onSelectSession: (sessionId: string) => void;
 	onEditSubmit: () => void;
-	onCloseSession: (sessionId: string) => void;
+	onArchiveSession: (sessionId: string) => void;
 	isCreating: boolean;
 };
 
@@ -85,7 +85,7 @@ export const SessionSidebar = ({
 	onCreateSession,
 	onSelectSession,
 	onEditSubmit,
-	onCloseSession,
+	onArchiveSession,
 	isCreating,
 }: SessionSidebarProps) => {
 	const { t } = useTranslation();
@@ -217,7 +217,7 @@ export const SessionSidebar = ({
 					</Button>
 				</div>
 			</div>
-			<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+			<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain">
 				{sessions.length === 0 ? (
 					<div className="text-muted-foreground text-xs">
 						{t("session.empty")}
@@ -259,7 +259,7 @@ export const SessionSidebar = ({
 											onEditCancel={clearEditingSession}
 											onEditSubmit={onEditSubmit}
 											onEditingTitleChange={setEditingTitle}
-											onClose={onCloseSession}
+											onArchive={onArchiveSession}
 										/>
 									))}
 								</div>
@@ -282,7 +282,7 @@ type SessionListItemProps = {
 	onEditCancel: () => void;
 	onEditSubmit: () => void;
 	onEditingTitleChange: (value: string) => void;
-	onClose: (sessionId: string) => void;
+	onArchive: (sessionId: string) => void;
 };
 
 const SessionListItem = ({
@@ -295,7 +295,7 @@ const SessionListItem = ({
 	onEditCancel,
 	onEditSubmit,
 	onEditingTitleChange,
-	onClose,
+	onArchive,
 }: SessionListItemProps) => {
 	const { t } = useTranslation();
 	const cwdLabel = getPathBasename(session.cwd) ?? t("common.unknown");
@@ -310,7 +310,7 @@ const SessionListItem = ({
 			<button
 				type="button"
 				onClick={handleSelect}
-				className="flex flex-1 flex-col gap-1 text-left"
+				className="flex flex-1 flex-col gap-1 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
 			>
 				<div className="flex items-center justify-between gap-2">
 					{isEditing ? (
@@ -362,24 +362,21 @@ const SessionListItem = ({
 				)}
 				<AlertDialog>
 					<AlertDialogTrigger asChild>
-						<Button size="xs" variant="destructive">
-							{t("common.close")}
+						<Button size="xs" variant="outline">
+							{t("common.archive")}
 						</Button>
 					</AlertDialogTrigger>
 					<AlertDialogContent size="sm">
 						<AlertDialogHeader>
-							<AlertDialogTitle>{t("session.closeTitle")}</AlertDialogTitle>
+							<AlertDialogTitle>{t("session.archiveTitle")}</AlertDialogTitle>
 							<AlertDialogDescription>
-								{t("session.closeDescription")}
+								{t("session.archiveDescription")}
 							</AlertDialogDescription>
 						</AlertDialogHeader>
 						<AlertDialogFooter>
 							<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-							<AlertDialogAction
-								variant="destructive"
-								onClick={() => onClose(session.sessionId)}
-							>
-								{t("session.closeConfirm")}
+							<AlertDialogAction onClick={() => onArchive(session.sessionId)}>
+								{t("session.archiveConfirm")}
 							</AlertDialogAction>
 						</AlertDialogFooter>
 					</AlertDialogContent>

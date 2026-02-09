@@ -15,8 +15,8 @@ import type {
 	ToolCallUpdate,
 } from "@/lib/acp";
 import {
+	archiveSession,
 	cancelSession,
-	closeSession,
 	createMessageId,
 	createSession,
 	loadSession,
@@ -215,20 +215,20 @@ export function useSessionMutations(store: ChatStoreActions) {
 		},
 	});
 
-	const closeSessionMutation = useMutation({
-		mutationFn: closeSession,
+	const archiveSessionMutation = useMutation({
+		mutationFn: archiveSession,
 		onSuccess: (_, variables) => {
 			store.removeSession(variables.sessionId);
 			store.setAppError(undefined);
 		},
 		onError: (mutationError: unknown, variables) => {
-			// Remove the session locally even if the gateway rejects the close,
+			// Remove the session locally even if the gateway rejects the archive,
 			// so the user can always get rid of a broken session.
 			store.removeSession(variables.sessionId);
 			store.setAppError(
 				normalizeError(
 					mutationError,
-					createFallbackError(t("errors.closeSessionFailed"), "session"),
+					createFallbackError(t("errors.archiveSessionFailed"), "session"),
 				),
 			);
 		},
@@ -439,7 +439,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 	return {
 		createSessionMutation,
 		renameSessionMutation,
-		closeSessionMutation,
+		archiveSessionMutation,
 		cancelSessionMutation,
 		setSessionModeMutation,
 		setSessionModelMutation,
