@@ -106,6 +106,38 @@ vi.mock("@/hooks/useMachinesStream", () => ({
 	useMachinesStream: () => undefined,
 }));
 
+vi.mock("@/hooks/useSessionList", () => ({
+	useSessionList: () => ({
+		workspaceList: [],
+		activeSession: undefined,
+		activeWorkspaceCwd: undefined,
+		selectedWorkspaceCwd: undefined,
+		effectiveWorkspaceCwd: undefined,
+		sessionList: [],
+	}),
+}));
+
+vi.mock("@/hooks/useMachineDiscovery", () => ({
+	useMachineDiscovery: () => undefined,
+}));
+
+vi.mock("@/hooks/useSessionHandlers", () => ({
+	useSessionHandlers: () => ({
+		isForceReloading: false,
+		handleOpenCreateDialog: vi.fn(),
+		handleCreateSession: vi.fn(),
+		handleRenameSubmit: vi.fn(),
+		handleCloseSession: vi.fn(),
+		handlePermissionDecision: vi.fn(),
+		handleModeChange: vi.fn(),
+		handleModelChange: vi.fn(),
+		handleCancel: vi.fn(),
+		handleForceReload: vi.fn(),
+		handleSyncHistory: vi.fn(),
+		handleSend: vi.fn(),
+	}),
+}));
+
 vi.mock("@/components/app/AppHeader", () => ({
 	AppHeader: () => <div data-testid="app-header" />,
 }));

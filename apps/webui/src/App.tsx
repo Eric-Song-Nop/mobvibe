@@ -1,14 +1,6 @@
 import { useBetterAuthTauri } from "@daveyplate/better-auth-tauri/react";
 import { useChatStore } from "@mobvibe/core";
-import {
-	lazy,
-	Suspense,
-	useCallback,
-	useEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
+import { lazy, Suspense, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
@@ -23,24 +15,20 @@ import { MachinesSidebar } from "@/components/machines/MachinesSidebar";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/toaster";
+import { useMachineDiscovery } from "@/hooks/useMachineDiscovery";
 import { useMachinesQuery } from "@/hooks/useMachinesQuery";
 import { useMachinesStream } from "@/hooks/useMachinesStream";
 import { useSessionActivation } from "@/hooks/useSessionActivation";
+import { useSessionHandlers } from "@/hooks/useSessionHandlers";
+import { useSessionList } from "@/hooks/useSessionList";
 import { useSessionMutations } from "@/hooks/useSessionMutations";
 import { useSessionQueries } from "@/hooks/useSessionQueries";
 import { useSocket } from "@/hooks/useSocket";
-import type { PermissionResultNotification } from "@/lib/acp";
 import { getAuthClient, isInTauri } from "@/lib/auth";
-import {
-	buildSessionNotReadyError,
-	createFallbackError,
-	normalizeError,
-} from "@/lib/error-utils";
+import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { useMachinesStore } from "@/lib/machines-store";
 import { ensureNotificationPermission } from "@/lib/notifications";
 import { useUiStore } from "@/lib/ui-store";
-import { buildSessionTitle } from "@/lib/ui-utils";
-import { collectWorkspaces } from "@/lib/workspace-utils";
 
 const ApiKeysPage = lazy(async () => {
 	const module = await import("@/pages/ApiKeysPage");
@@ -59,7 +47,6 @@ const LoginPage = lazy(async () => {
 
 function MainApp() {
 	const { t } = useTranslation();
-	const [isForceReloading, setIsForceReloading] = useState(false);
 
 	// Reactive state — re-renders only when these values change
 	const { sessions, activeSessionId, appError, lastCreatedCwd } = useChatStore(
@@ -161,17 +148,7 @@ function MainApp() {
 	useMachinesQuery();
 	useMachinesStream();
 
-	const {
-		createSessionMutation,
-		renameSessionMutation,
-		closeSessionMutation,
-		cancelSessionMutation,
-		setSessionModeMutation,
-		setSessionModelMutation,
-		sendMessageMutation,
-		createMessageIdMutation,
-		permissionDecisionMutation,
-	} = useSessionMutations({
+	const mutations = useSessionMutations({
 		sessions,
 		...chatActions,
 	});
@@ -216,86 +193,60 @@ function MainApp() {
 			setMachineCapabilities: s.setMachineCapabilities,
 		})),
 	);
-	const discoveryInFlightRef = useRef(new Set<string>());
-	const previousConnectionRef = useRef<Record<string, boolean>>({});
 
-	const workspaceList = useMemo(
-		() => collectWorkspaces(sessions, selectedMachineId),
-		[sessions, selectedMachineId],
-	);
-	const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
-	const activeSessionRef = useRef(activeSession);
-	activeSessionRef.current = activeSession;
-	const activeWorkspaceCwd =
-		activeSession?.machineId === selectedMachineId
-			? activeSession.cwd
-			: undefined;
-	const selectedWorkspaceCwd = selectedMachineId
-		? selectedWorkspaceByMachine[selectedMachineId]
-		: undefined;
-	const effectiveWorkspaceCwd =
-		activeWorkspaceCwd ?? selectedWorkspaceCwd ?? workspaceList[0]?.cwd;
+	// --- Extracted hooks ---
 
-	useEffect(() => {
-		const previous = previousConnectionRef.current;
+	const { workspaceList, activeSession, selectedWorkspaceCwd, sessionList } =
+		useSessionList({
+			sessions,
+			activeSessionId,
+			selectedMachineId,
+			selectedWorkspaceByMachine,
+		});
 
-		for (const machine of Object.values(machines)) {
-			const wasConnected = previous[machine.machineId];
-			previous[machine.machineId] = machine.connected;
-
-			if (!machine.connected) {
-				continue;
-			}
-			if (machine.lastCapabilitiesAt && wasConnected) {
-				continue;
-			}
-			if (discoveryInFlightRef.current.has(machine.machineId)) {
-				continue;
-			}
-			const workspaceCwd = selectedWorkspaceByMachine[machine.machineId];
-			if (!workspaceCwd) {
-				continue;
-			}
-
-			discoveryInFlightRef.current.add(machine.machineId);
-			discoverSessionsMutation.mutate(
-				{ machineId: machine.machineId, cwd: workspaceCwd },
-				{
-					onSuccess: (result) => {
-						setMachineCapabilities(machine.machineId, result.capabilities);
-					},
-					onSettled: () => {
-						discoveryInFlightRef.current.delete(machine.machineId);
-					},
-				},
-			);
-		}
-	}, [
-		discoverSessionsMutation,
+	useMachineDiscovery({
 		machines,
 		selectedWorkspaceByMachine,
+		discoverSessionsMutation,
 		setMachineCapabilities,
-	]);
+	});
 
-	const sessionList = useMemo(() => {
-		const allSessions = Object.values(sessions);
-		const filtered = selectedMachineId
-			? allSessions.filter((s) => {
-					if (s.machineId !== selectedMachineId) {
-						return false;
-					}
-					if (effectiveWorkspaceCwd) {
-						return s.cwd === effectiveWorkspaceCwd;
-					}
-					return true;
-				})
-			: [];
-		return filtered.sort((left, right) => {
-			const leftStamp = left.updatedAt ?? left.createdAt ?? "";
-			const rightStamp = right.updatedAt ?? right.createdAt ?? "";
-			return rightStamp.localeCompare(leftStamp);
-		});
-	}, [effectiveWorkspaceCwd, sessions, selectedMachineId]);
+	const {
+		isForceReloading,
+		handleOpenCreateDialog,
+		handleCreateSession,
+		handleRenameSubmit,
+		handleCloseSession,
+		handlePermissionDecision,
+		handleModeChange,
+		handleModelChange,
+		handleCancel,
+		handleForceReload,
+		handleSyncHistory,
+		handleSend,
+	} = useSessionHandlers({
+		sessions,
+		activeSessionId,
+		activeSession,
+		sessionList,
+		selectedMachineId,
+		lastCreatedCwd,
+		editingSessionId,
+		editingTitle,
+		draftTitle,
+		draftBackendId,
+		draftCwd,
+		machines,
+		defaultBackendId,
+		chatActions,
+		uiActions,
+		mutations,
+		activateSession,
+		isActivating,
+		syncSessionHistory,
+	});
+
+	// --- Effects ---
 
 	useEffect(() => {
 		if (sessionsQuery.data?.sessions) {
@@ -362,6 +313,8 @@ function MainApp() {
 		uiActions.setDraftBackendId,
 	]);
 
+	// --- Derived display state ---
+
 	const fileExplorerAvailable = Boolean(activeSessionId && activeSession?.cwd);
 	const syncHistoryAvailable = Boolean(activeSessionId);
 	const syncHistoryDisabled =
@@ -393,221 +346,6 @@ function MainApp() {
 		uiActions.setFileExplorerOpen,
 		uiActions.setFilePreviewPath,
 	]);
-
-	const handleOpenCreateDialog = () => {
-		uiActions.setDraftTitle(buildSessionTitle(sessionList, t));
-		uiActions.setDraftBackendId(defaultBackendId);
-		uiActions.setDraftCwd(
-			selectedMachineId ? lastCreatedCwd[selectedMachineId] : undefined,
-		);
-		uiActions.setCreateDialogOpen(true);
-	};
-
-	const handleCreateSession = async () => {
-		if (!selectedMachineId) {
-			chatActions.setAppError(
-				createFallbackError(t("errors.selectMachine"), "request"),
-			);
-			return;
-		}
-		if (!draftBackendId) {
-			chatActions.setAppError(
-				createFallbackError(t("errors.selectBackend"), "request"),
-			);
-			return;
-		}
-		if (!draftCwd) {
-			chatActions.setAppError(
-				createFallbackError(t("errors.selectDirectory"), "request"),
-			);
-			return;
-		}
-		const title = draftTitle.trim();
-		chatActions.setAppError(undefined);
-		try {
-			await createSessionMutation.mutateAsync({
-				backendId: draftBackendId,
-				cwd: draftCwd,
-				title: title.length > 0 ? title : undefined,
-				machineId: selectedMachineId,
-			});
-			uiActions.setCreateDialogOpen(false);
-			uiActions.setMobileMenuOpen(false);
-		} catch {
-			return;
-		}
-	};
-
-	const handleRenameSubmit = () => {
-		if (!editingSessionId) {
-			return;
-		}
-		const title = editingTitle.trim();
-		if (title.length === 0) {
-			return;
-		}
-		chatActions.renameSession(editingSessionId, title);
-		renameSessionMutation.mutate({ sessionId: editingSessionId, title });
-		uiActions.clearEditingSession();
-	};
-
-	const handleCloseSession = async (sessionId: string) => {
-		try {
-			await closeSessionMutation.mutateAsync({ sessionId });
-			if (activeSessionId === sessionId) {
-				const nextSession = sessionList.find(
-					(session) => session.sessionId !== sessionId,
-				);
-				chatActions.setActiveSessionId(nextSession?.sessionId);
-			}
-		} catch {
-			return;
-		}
-	};
-
-	const handlePermissionDecision = useCallback(
-		(payload: {
-			requestId: string;
-			outcome: PermissionResultNotification["outcome"];
-		}) => {
-			const session = activeSessionRef.current;
-			const sessionId = session?.sessionId;
-			if (!sessionId || !session) {
-				return;
-			}
-			if (!session.isAttached) {
-				chatActions.setError(sessionId, buildSessionNotReadyError());
-				return;
-			}
-			permissionDecisionMutation.mutate({
-				sessionId,
-				requestId: payload.requestId,
-				outcome: payload.outcome,
-			});
-		},
-		[permissionDecisionMutation, chatActions.setError],
-	);
-
-	const handleModeChange = (modeId: string) => {
-		if (!activeSessionId || !activeSession) {
-			return;
-		}
-		if (!activeSession.isAttached) {
-			chatActions.setError(activeSessionId, buildSessionNotReadyError());
-			return;
-		}
-		if (modeId === activeSession.modeId) {
-			return;
-		}
-		chatActions.setError(activeSessionId, undefined);
-		setSessionModeMutation.mutate({ sessionId: activeSessionId, modeId });
-	};
-
-	const handleModelChange = (modelId: string) => {
-		if (!activeSessionId || !activeSession) {
-			return;
-		}
-		if (!activeSession.isAttached) {
-			chatActions.setError(activeSessionId, buildSessionNotReadyError());
-			return;
-		}
-		if (modelId === activeSession.modelId) {
-			return;
-		}
-		chatActions.setError(activeSessionId, undefined);
-		setSessionModelMutation.mutate({ sessionId: activeSessionId, modelId });
-	};
-
-	const handleCancel = () => {
-		if (!activeSessionId || !activeSession) {
-			return;
-		}
-		if (!activeSession.sending || activeSession.canceling) {
-			return;
-		}
-		if (!activeSession.isAttached) {
-			chatActions.setError(activeSessionId, buildSessionNotReadyError());
-			return;
-		}
-		cancelSessionMutation.mutate({ sessionId: activeSessionId });
-	};
-
-	const handleForceReload = async () => {
-		if (!activeSessionId || !activeSession) {
-			return;
-		}
-		const capabilities = activeSession.machineId
-			? machines[activeSession.machineId]?.capabilities
-			: undefined;
-		if (!activeSession.cwd || !activeSession.machineId || !capabilities?.load) {
-			return;
-		}
-		if (activeSession.isLoading || isActivating || isForceReloading) {
-			return;
-		}
-
-		setIsForceReloading(true);
-		try {
-			if (activeSession.sending && !activeSession.canceling) {
-				if (activeSession.isAttached) {
-					await cancelSessionMutation.mutateAsync({
-						sessionId: activeSessionId,
-					});
-				}
-			}
-			const latestSession =
-				useChatStore.getState().sessions[activeSessionId] ?? activeSession;
-			await activateSession(latestSession, { force: true });
-		} finally {
-			setIsForceReloading(false);
-		}
-	};
-
-	const handleSyncHistory = () => {
-		if (!activeSessionId) {
-			return;
-		}
-		syncSessionHistory(activeSessionId);
-	};
-
-	const handleSend = async () => {
-		if (!activeSessionId || !activeSession) {
-			return;
-		}
-		const promptContents = activeSession.inputContents;
-		if (!promptContents.length || activeSession.sending) {
-			return;
-		}
-		if (!activeSession.isAttached) {
-			chatActions.setError(activeSessionId, buildSessionNotReadyError());
-			return;
-		}
-
-		chatActions.setSending(activeSessionId, true);
-		chatActions.setCanceling(activeSessionId, false);
-		chatActions.setError(activeSessionId, undefined);
-		chatActions.setInput(activeSessionId, "");
-		chatActions.setInputContents(activeSessionId, [{ type: "text", text: "" }]);
-
-		let messageId: string;
-		try {
-			const response = await createMessageIdMutation.mutateAsync({
-				sessionId: activeSessionId,
-			});
-			messageId = response.messageId;
-		} catch {
-			return;
-		}
-
-		chatActions.addUserMessage(activeSessionId, activeSession.input ?? "", {
-			messageId,
-			contentBlocks: promptContents,
-		});
-		sendMessageMutation.mutate({
-			sessionId: activeSessionId,
-			prompt: promptContents,
-		});
-	};
 
 	const statusMessage = useMemo(() => {
 		if (backendsQuery.isError) {
@@ -641,11 +379,11 @@ function MainApp() {
 	const streamError = activeSession?.streamError;
 	const backendLabel = activeSession?.backendLabel ?? activeSession?.backendId;
 	const isModeSwitching =
-		setSessionModeMutation.isPending &&
-		setSessionModeMutation.variables?.sessionId === activeSessionId;
+		mutations.setSessionModeMutation.isPending &&
+		mutations.setSessionModeMutation.variables?.sessionId === activeSessionId;
 	const isModelSwitching =
-		setSessionModelMutation.isPending &&
-		setSessionModelMutation.variables?.sessionId === activeSessionId;
+		mutations.setSessionModelMutation.isPending &&
+		mutations.setSessionModelMutation.variables?.sessionId === activeSessionId;
 
 	return (
 		<ThemeProvider>
@@ -655,7 +393,7 @@ function MainApp() {
 					open={createDialogOpen}
 					onOpenChange={uiActions.setCreateDialogOpen}
 					availableBackends={availableBackends}
-					isCreating={createSessionMutation.isPending}
+					isCreating={mutations.createSessionMutation.isPending}
 					onCreate={handleCreateSession}
 				/>
 				<FileExplorerDialog
@@ -688,7 +426,7 @@ function MainApp() {
 					onCloseSession={(sessionId) => {
 						void handleCloseSession(sessionId);
 					}}
-					isCreating={createSessionMutation.isPending}
+					isCreating={mutations.createSessionMutation.isPending}
 					isActivating={isActivating}
 				/>
 
