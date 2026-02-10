@@ -157,6 +157,45 @@ export class SessionManager {
 		);
 	}
 
+	/**
+	 * List all sessions: active sessions merged with persisted discovered sessions.
+	 * Used for the gateway heartbeat so that `sessions:list` sends the
+	 * complete set, allowing the gateway to replace its cache.
+	 */
+	listAllSessions(): SessionSummary[] {
+		const active = this.listSessions();
+		const merged = new Map<string, SessionSummary>(
+			active.map((s) => [s.sessionId, s]),
+		);
+
+		for (const s of this.walStore.getDiscoveredSessions()) {
+			if (s.cwd === undefined) continue;
+			const existing = merged.get(s.sessionId);
+			if (existing) {
+				// Keep the latest updatedAt between active and discovered
+				const discoveredUpdatedAt = s.agentUpdatedAt ?? s.discoveredAt;
+				if (discoveredUpdatedAt > existing.updatedAt) {
+					merged.set(s.sessionId, {
+						...existing,
+						updatedAt: discoveredUpdatedAt,
+					});
+				}
+			} else {
+				merged.set(s.sessionId, {
+					sessionId: s.sessionId,
+					title: s.title ?? `Session ${s.sessionId.slice(0, 8)}`,
+					backendId: s.backendId,
+					backendLabel: s.backendId,
+					cwd: s.cwd as string,
+					createdAt: s.discoveredAt,
+					updatedAt: s.agentUpdatedAt ?? s.discoveredAt,
+				} satisfies SessionSummary);
+			}
+		}
+
+		return Array.from(merged.values());
+	}
+
 	getSession(sessionId: string): SessionRecord | undefined {
 		return this.sessions.get(sessionId);
 	}

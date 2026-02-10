@@ -127,19 +127,9 @@ export class CliRegistry extends EventEmitter {
 			return;
 		}
 
-		const merged = new Map<string, SessionSummary>();
-		for (const existing of record.sessions) {
-			merged.set(existing.sessionId, existing);
-		}
-		for (const session of sessions) {
-			const current = merged.get(session.sessionId);
-			merged.set(
-				session.sessionId,
-				current ? { ...current, ...session } : session,
-			);
-		}
-
-		record.sessions = Array.from(merged.values());
+		// Replace the entire list — the CLI now sends the complete set
+		// (active + discovered), so stale entries are cleaned up naturally.
+		record.sessions = sessions;
 		this.emit("sessions:updated", record.machineId, record.sessions);
 	}
 

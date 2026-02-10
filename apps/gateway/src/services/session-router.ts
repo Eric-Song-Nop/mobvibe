@@ -224,6 +224,13 @@ export class SessionRouter {
 			},
 		);
 
+		// Immediately remove from registry so the webui sees it gone
+		this.cliRegistry.updateSessionsIncremental(cli.socket.id, {
+			added: [],
+			updated: [],
+			removed: [params.sessionId],
+		});
+
 		logger.info(
 			{ sessionId: params.sessionId, userId },
 			"session_archive_rpc_complete",
@@ -280,6 +287,14 @@ export class SessionRouter {
 					BulkArchiveSessionsParams,
 					{ archivedCount: number }
 				>(cli.socket, "rpc:session:archive-all", { sessionIds: ids });
+
+				// Immediately remove from registry so the webui sees them gone
+				this.cliRegistry.updateSessionsIncremental(cli.socket.id, {
+					added: [],
+					updated: [],
+					removed: ids,
+				});
+
 				return result.archivedCount;
 			}),
 		);

@@ -124,7 +124,7 @@ describe("CliRegistry", () => {
 	});
 
 	describe("updateSessions", () => {
-		it("merges sessions without dropping existing entries", () => {
+		it("replaces the entire session list", () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
 			registry.register(socket, info);
@@ -140,6 +140,7 @@ describe("CliRegistry", () => {
 				}),
 			]);
 
+			// Second update sends only session-1 with a new title
 			registry.updateSessions("socket-1", [
 				createMockSessionSummary({
 					sessionId: "session-1",
@@ -148,13 +149,10 @@ describe("CliRegistry", () => {
 			]);
 
 			const record = registry.getCliBySocketId("socket-1");
-			expect(record?.sessions).toHaveLength(2);
-			expect(
-				record?.sessions.find((s) => s.sessionId === "session-1")?.title,
-			).toBe("Updated Title");
-			expect(
-				record?.sessions.find((s) => s.sessionId === "session-2")?.title,
-			).toBe("Session 2");
+			// session-2 is gone because CLI now sends the complete list
+			expect(record?.sessions).toHaveLength(1);
+			expect(record?.sessions[0].sessionId).toBe("session-1");
+			expect(record?.sessions[0].title).toBe("Updated Title");
 		});
 	});
 

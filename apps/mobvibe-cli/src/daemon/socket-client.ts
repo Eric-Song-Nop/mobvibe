@@ -1128,8 +1128,8 @@ export class SocketClient extends EventEmitter {
 			})),
 		});
 		logger.info({ machineId: config.machineId }, "cli_register_sessions_list");
-		// Send current sessions list
-		this.socket.emit("sessions:list", sessionManager.listSessions());
+		// Send current sessions list (active + discovered)
+		this.socket.emit("sessions:list", sessionManager.listAllSessions());
 	}
 
 	private startHeartbeat() {
@@ -1139,7 +1139,7 @@ export class SocketClient extends EventEmitter {
 				this.socket.emit("cli:heartbeat");
 				this.socket.emit(
 					"sessions:list",
-					this.options.sessionManager.listSessions(),
+					this.options.sessionManager.listAllSessions(),
 				);
 			}
 		}, 30000);
