@@ -9,13 +9,15 @@ import type {
 	SessionSummary,
 	SessionsChangedPayload,
 	SessionsDiscoveredPayload,
+	SignedAuthToken,
 } from "@mobvibe/shared";
+import { initCrypto, verifySignedToken } from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
-import { auth } from "../lib/auth.js";
 import { logger } from "../lib/logger.js";
 import type { CliRegistry } from "../services/cli-registry.js";
 import {
 	closeSessionsForMachineById,
+	findDeviceByPublicKey,
 	updateMachineStatusById,
 	upsertMachine,
 } from "../services/db-service.js";
@@ -26,7 +28,7 @@ import type { SessionRouter } from "../services/session-router.js";
  */
 interface SocketData {
 	userId?: string;
-	apiKey?: string;
+	deviceId?: string;
 }
 
 export function setupCliHandlers(
@@ -37,31 +39,51 @@ export function setupCliHandlers(
 ) {
 	const cliNamespace = io.of("/cli");
 
-	cliNamespace.use(async (socket: Socket, next) => {
-		const apiKey = socket.handshake.headers["x-api-key"] as string | undefined;
+	// Ensure libsodium is ready for signature verification
+	const cryptoReady = initCrypto();
 
-		if (!apiKey) {
-			logger.warn("cli_rejected_missing_api_key");
+	cliNamespace.use(async (socket: Socket, next) => {
+		await cryptoReady;
+
+		const authToken = socket.handshake.auth as SignedAuthToken | undefined;
+
+		if (
+			!authToken?.payload?.publicKey ||
+			!authToken?.payload?.timestamp ||
+			!authToken?.signature
+		) {
+			logger.warn("cli_rejected_missing_signed_token");
 			return next(new Error("AUTH_REQUIRED"));
 		}
 
 		try {
-			const verification = await auth.api.verifyApiKey({
-				body: { key: apiKey },
-			});
-			if (!verification.valid || !verification.key) {
-				logger.warn("cli_rejected_invalid_api_key");
-				return next(new Error("INVALID_KEY"));
+			const verified = verifySignedToken(authToken, 5 * 60 * 1000);
+			if (!verified) {
+				logger.warn("cli_rejected_invalid_signed_token");
+				return next(new Error("INVALID_TOKEN"));
 			}
+
+			const device = await findDeviceByPublicKey(verified.publicKey);
+			if (!device) {
+				logger.warn(
+					{ publicKey: verified.publicKey },
+					"cli_rejected_unregistered_device",
+				);
+				return next(new Error("DEVICE_NOT_REGISTERED"));
+			}
+
 			const socketData: SocketData = {
-				userId: verification.key.userId,
-				apiKey,
+				userId: device.userId,
+				deviceId: device.id,
 			};
 			(socket as Socket & { data: SocketData }).data = socketData;
-			logger.info({ userId: socketData.userId }, "cli_authenticated");
+			logger.info(
+				{ userId: device.userId, deviceId: device.id },
+				"cli_authenticated",
+			);
 			return next();
 		} catch (error) {
-			logger.error({ err: error }, "cli_api_key_verification_error");
+			logger.error({ err: error }, "cli_signed_token_verification_error");
 			return next(new Error("AUTH_ERROR"));
 		}
 	});
@@ -71,13 +93,13 @@ export function setupCliHandlers(
 
 		const socketData = (socket as Socket & { data: SocketData }).data;
 		const userId = socketData?.userId;
-		const apiKey = socketData?.apiKey;
+		const deviceId = socketData?.deviceId;
 
-		if (!userId || !apiKey) {
+		if (!userId || !deviceId) {
 			logger.warn({ socketId: socket.id }, "cli_rejected_missing_auth_data");
 			socket.emit("cli:error", {
 				code: "AUTH_REQUIRED",
-				message: "API key required. Run 'mobvibe login' to authenticate.",
+				message: "Device not authenticated. Run 'mobvibe login' to register.",
 			});
 			socket.disconnect(true);
 			return;
@@ -121,7 +143,7 @@ export function setupCliHandlers(
 				{ ...info, machineId: resolvedMachineId },
 				{
 					userId,
-					apiKey,
+					deviceId,
 				},
 			);
 

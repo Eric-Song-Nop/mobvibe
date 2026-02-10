@@ -85,7 +85,7 @@ describe("SessionRouter", () => {
 		it("routes discover request to CLI and returns result", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			cliRegistry.register(socket, info, authInfo);
 
 			const mockResult = createMockDiscoverResult();
@@ -130,7 +130,7 @@ describe("SessionRouter", () => {
 		it("throws 'Machine not found' when user not authorized for machine", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			cliRegistry.register(socket, info, authInfo);
 
 			await expect(
@@ -141,7 +141,7 @@ describe("SessionRouter", () => {
 		it("uses first CLI for user when no machineId specified", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			cliRegistry.register(socket, info, authInfo);
 
 			const mockResult = createMockDiscoverResult();
@@ -177,7 +177,7 @@ describe("SessionRouter", () => {
 		it("forwards backendId to discover RPC", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			cliRegistry.register(socket, info, authInfo);
 
 			const mockResult = createMockDiscoverResult();
@@ -217,7 +217,7 @@ describe("SessionRouter", () => {
 		it("routes load request to CLI and returns session", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			cliRegistry.register(socket, info, authInfo);
 
 			const mockSession = createMockSessionSummary({
@@ -278,7 +278,7 @@ describe("SessionRouter", () => {
 		it("throws 'Machine not found' when user not authorized for machine", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			cliRegistry.register(socket, info, authInfo);
 
 			await expect(
@@ -297,7 +297,7 @@ describe("SessionRouter", () => {
 		it("uses first CLI for user when no machineId specified", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			cliRegistry.register(socket, info, authInfo);
 
 			const mockSession = createMockSessionSummary({
@@ -332,7 +332,7 @@ describe("SessionRouter", () => {
 		it("sends archive RPC to CLI", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			cliRegistry.register(socket, info, authInfo);
 
 			const mockSession = createMockSessionSummary({
@@ -379,7 +379,7 @@ describe("SessionRouter", () => {
 		it("sends archive-all RPC grouped by machine", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			cliRegistry.register(socket, info, authInfo);
 
 			const sessions = [
@@ -418,7 +418,7 @@ describe("SessionRouter", () => {
 		it("falls back to first CLI when session not in registry", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			cliRegistry.register(socket, info, authInfo);
 
 			socket.emit.mockImplementation((event, request) => {
@@ -445,7 +445,7 @@ describe("SessionRouter", () => {
 		it("rejects promise when RPC returns error", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			cliRegistry.register(socket, info, authInfo);
 
 			socket.emit.mockImplementation((event, request) => {
@@ -474,7 +474,7 @@ describe("SessionRouter", () => {
 		it("routes git status request to CLI and returns result", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			cliRegistry.register(socket, info, authInfo);
 
 			const mockSession = createMockSessionSummary({
@@ -520,7 +520,7 @@ describe("SessionRouter", () => {
 		it("returns isGitRepo false for non-git directories", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			cliRegistry.register(socket, info, authInfo);
 
 			const mockSession = createMockSessionSummary({
@@ -560,7 +560,7 @@ describe("SessionRouter", () => {
 		it("throws 'Session not found' when user not authorized for session", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			cliRegistry.register(socket, info, authInfo);
 
 			const mockSession = createMockSessionSummary({
@@ -578,7 +578,7 @@ describe("SessionRouter", () => {
 		it("routes git file diff request to CLI and returns result", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			cliRegistry.register(socket, info, authInfo);
 
 			const mockSession = createMockSessionSummary({
@@ -625,7 +625,7 @@ describe("SessionRouter", () => {
 		it("returns empty arrays for non-git directories", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			cliRegistry.register(socket, info, authInfo);
 
 			const mockSession = createMockSessionSummary({
@@ -673,7 +673,7 @@ describe("SessionRouter", () => {
 		it("throws 'Session not found' when user not authorized for session", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			cliRegistry.register(socket, info, authInfo);
 
 			const mockSession = createMockSessionSummary({

@@ -63,12 +63,12 @@ describe("CliRegistry", () => {
 		it("registers CLI with auth info", () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 
 			const record = registry.register(socket, info, authInfo);
 
 			expect(record.userId).toBe("user-1");
-			expect(record.apiKey).toBe("key-123");
+			expect(record.deviceId).toBe("device-123");
 			expect(registry.getClisForUser("user-1")).toContain(record);
 		});
 
@@ -113,7 +113,7 @@ describe("CliRegistry", () => {
 		it("removes from user index on unregister", () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 
 			registry.register(socket, info, authInfo);
 			expect(registry.getClisForUser("user-1")).toHaveLength(1);
@@ -160,7 +160,7 @@ describe("CliRegistry", () => {
 		it("adds new sessions and emits sessions:changed", () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			registry.register(socket, info, authInfo);
 
 			const listener = vi.fn();
@@ -377,7 +377,7 @@ describe("CliRegistry", () => {
 		it("emits sessions:changed event with userId", () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			const changeListener = vi.fn();
 
 			registry.register(socket, info, authInfo);
@@ -474,7 +474,7 @@ describe("CliRegistry", () => {
 		it("returns CLI record when user owns the machine", () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 
 			const record = registry.register(socket, info, authInfo);
 
@@ -486,7 +486,7 @@ describe("CliRegistry", () => {
 		it("returns undefined when user does not own the machine", () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
-			const authInfo = { userId: "user-1", apiKey: "key-123" };
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
 
 			registry.register(socket, info, authInfo);
 
@@ -539,8 +539,14 @@ describe("CliRegistry", () => {
 			const info1 = createMockRegistrationInfo({ machineId: "machine-1" });
 			const info2 = createMockRegistrationInfo({ machineId: "machine-2" });
 
-			registry.register(socket1, info1, { userId: "user-1", apiKey: "key-1" });
-			registry.register(socket2, info2, { userId: "user-2", apiKey: "key-2" });
+			registry.register(socket1, info1, {
+				userId: "user-1",
+				deviceId: "device-1",
+			});
+			registry.register(socket2, info2, {
+				userId: "user-2",
+				deviceId: "device-2",
+			});
 
 			registry.updateSessions("socket-1", [
 				createMockSessionSummary({ sessionId: "session-1" }),

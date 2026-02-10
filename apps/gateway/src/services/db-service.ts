@@ -6,8 +6,38 @@
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { acpSessions, machines } from "../db/schema.js";
+import { acpSessions, deviceKeys, machines } from "../db/schema.js";
 import { logger } from "../lib/logger.js";
+
+/**
+ * Find a device key record by its public key.
+ */
+export async function findDeviceByPublicKey(
+	publicKey: string,
+): Promise<{ id: string; userId: string } | null> {
+	try {
+		const result = await db
+			.select({ id: deviceKeys.id, userId: deviceKeys.userId })
+			.from(deviceKeys)
+			.where(eq(deviceKeys.publicKey, publicKey))
+			.limit(1);
+
+		if (result.length === 0) {
+			return null;
+		}
+
+		// Update lastSeenAt
+		await db
+			.update(deviceKeys)
+			.set({ lastSeenAt: new Date() })
+			.where(eq(deviceKeys.id, result[0].id));
+
+		return result[0];
+	} catch (error) {
+		logger.error({ err: error }, "db_find_device_by_public_key_error");
+		return null;
+	}
+}
 
 export type MachineTokenValidation = {
 	machineId: string;
@@ -420,6 +450,7 @@ export async function createAcpSessionDirect(params: {
 	title: string;
 	backendId: string;
 	cwd?: string;
+	wrappedDek?: string;
 }): Promise<{ _id: string } | null> {
 	const isUniqueViolation = (error: unknown) =>
 		typeof error === "object" &&
@@ -438,6 +469,7 @@ export async function createAcpSessionDirect(params: {
 			title: params.title,
 			backendId: params.backendId,
 			cwd: params.cwd ?? null,
+			wrappedDek: params.wrappedDek ?? null,
 			state: "active",
 		});
 

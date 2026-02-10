@@ -20,17 +20,7 @@ vi.mock("better-auth/react", () => ({
 		},
 		signOut: mockSignOut,
 		useSession: vi.fn(() => ({ data: null, isPending: false, error: null })),
-		apiKey: {
-			create: vi.fn(),
-			list: vi.fn(),
-			delete: vi.fn(),
-		},
 	})),
-}));
-
-// Mock better-auth/client/plugins
-vi.mock("better-auth/client/plugins", () => ({
-	apiKeyClient: vi.fn(() => ({})),
 }));
 
 describe("auth", () => {

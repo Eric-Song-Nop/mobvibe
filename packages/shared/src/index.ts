@@ -1,4 +1,27 @@
 // ACP types - re-exported from SDK
+
+export type {
+	CryptoKeyPair,
+	EncryptedPayload,
+	SignedAuthToken,
+	SodiumLib,
+} from "./crypto/index.js";
+// Crypto (E2EE)
+export {
+	createSignedToken,
+	decryptPayload,
+	deriveAuthKeyPair,
+	deriveContentKeyPair,
+	encryptPayload,
+	generateDEK,
+	generateMasterSecret,
+	getSodium,
+	initCrypto,
+	isEncryptedPayload,
+	unwrapDEK,
+	verifySignedToken,
+	wrapDEK,
+} from "./crypto/index.js";
 export type {
 	// SDK types (directly from SDK)
 	AudioContent,

@@ -2,9 +2,11 @@ import { Database } from "bun:sqlite";
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { getSodium, initCrypto } from "@mobvibe/shared";
 import { SessionManager } from "../acp/session-manager.js";
-import { getApiKey } from "../auth/credentials.js";
+import { getMasterSecret } from "../auth/credentials.js";
 import type { CliConfig } from "../config.js";
+import { CliCryptoService } from "../e2ee/crypto-service.js";
 import { logger } from "../lib/logger.js";
 import { WalCompactor, WalStore } from "../wal/index.js";
 import { SocketClient } from "./socket-client.js";
@@ -199,23 +201,30 @@ export class DaemonManager {
 		logger.info({ gatewayUrl: this.config.gatewayUrl }, "daemon_gateway_url");
 		logger.info({ machineId: this.config.machineId }, "daemon_machine_id");
 
-		// Load API key for authentication
-		const apiKey = await getApiKey();
-		if (!apiKey) {
-			logger.error("daemon_api_key_missing");
+		// Initialize crypto and load master secret
+		await initCrypto();
+		const masterSecretBase64 = await getMasterSecret();
+		if (!masterSecretBase64) {
+			logger.error("daemon_master_secret_missing");
 			console.error(
-				`[mobvibe-cli] No API key found. Run 'mobvibe login' to authenticate.`,
+				`[mobvibe-cli] No credentials found. Run 'mobvibe login' to authenticate.`,
 			);
-			logger.warn("daemon_exit_missing_api_key");
+			logger.warn("daemon_exit_missing_master_secret");
 			process.exit(1);
 		}
-		logger.info("daemon_api_key_loaded");
+		const sodium = getSodium();
+		const masterSecret = sodium.from_base64(
+			masterSecretBase64,
+			sodium.base64_variants.ORIGINAL,
+		);
+		const cryptoService = new CliCryptoService(masterSecret);
+		logger.info("daemon_crypto_initialized");
 
-		const sessionManager = new SessionManager(this.config);
+		const sessionManager = new SessionManager(this.config, cryptoService);
 		const socketClient = new SocketClient({
 			config: this.config,
 			sessionManager,
-			apiKey,
+			cryptoService,
 		});
 
 		// Initialize compactor if enabled

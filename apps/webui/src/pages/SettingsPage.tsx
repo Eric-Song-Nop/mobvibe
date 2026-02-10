@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { E2EESettings } from "@/components/settings/E2EESettings";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
 import {
@@ -214,6 +215,21 @@ export function SettingsPage() {
 											: t("settings.updatePassword")}
 									</Button>
 								</form>
+							</div>
+						</CardContent>
+					</Card>
+
+					{/* E2EE Section */}
+					<Card className="mt-4">
+						<CardHeader>
+							<CardTitle>End-to-End Encryption</CardTitle>
+							<CardDescription>
+								Pair this device with your CLI to decrypt session content.
+							</CardDescription>
+						</CardHeader>
+						<CardContent>
+							<div className="rounded-lg border bg-card p-4">
+								<E2EESettings />
 							</div>
 						</CardContent>
 					</Card>

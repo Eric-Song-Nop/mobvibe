@@ -8,8 +8,8 @@ import os from "node:os";
 import path from "node:path";
 
 export interface Credentials {
-	/** API key for gateway authentication */
-	apiKey: string;
+	/** Base64-encoded master secret (32 bytes) — the single root credential */
+	masterSecret: string;
 	/** When the credentials were created */
 	createdAt: number;
 	/** Optional: custom gateway URL (user can manually set this) */
@@ -37,7 +37,7 @@ export async function loadCredentials(): Promise<Credentials | null> {
 		const credentials = JSON.parse(data) as Credentials;
 
 		// Validate required fields
-		if (!credentials.apiKey) {
+		if (!credentials.masterSecret) {
 			return null;
 		}
 
@@ -79,17 +79,18 @@ export async function hasCredentials(): Promise<boolean> {
 }
 
 /**
- * Get the API key from credentials.
- * Also checks MOBVIBE_API_KEY env var as override.
+ * Get the master secret from credentials.
+ * Also checks MOBVIBE_MASTER_SECRET env var as override.
+ * Returns base64-encoded string.
  */
-export async function getApiKey(): Promise<string | undefined> {
+export async function getMasterSecret(): Promise<string | undefined> {
 	// Environment variable takes precedence
-	if (process.env.MOBVIBE_API_KEY) {
-		return process.env.MOBVIBE_API_KEY;
+	if (process.env.MOBVIBE_MASTER_SECRET) {
+		return process.env.MOBVIBE_MASTER_SECRET;
 	}
 
 	const credentials = await loadCredentials();
-	return credentials?.apiKey;
+	return credentials?.masterSecret;
 }
 
 /** Default production gateway URL */

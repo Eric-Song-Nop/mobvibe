@@ -25,6 +25,7 @@ import {
 	type StopReason,
 } from "@mobvibe/shared";
 import type { AcpBackendConfig, CliConfig } from "../config.js";
+import type { CliCryptoService } from "../e2ee/crypto-service.js";
 import { logger } from "../lib/logger.js";
 import { WalStore } from "../wal/index.js";
 import { AcpConnection } from "./acp-connection.js";
@@ -143,12 +144,17 @@ export class SessionManager {
 	private readonly sessionDetachedEmitter = new EventEmitter();
 	private readonly sessionEventEmitter = new EventEmitter();
 	private readonly walStore: WalStore;
+	private readonly cryptoService?: CliCryptoService;
 
-	constructor(private readonly config: CliConfig) {
+	constructor(
+		private readonly config: CliConfig,
+		cryptoService?: CliCryptoService,
+	) {
 		this.backendById = new Map(
 			config.acpBackends.map((backend) => [backend.id, backend]),
 		);
 		this.walStore = new WalStore(config.walDbPath);
+		this.cryptoService = cryptoService;
 	}
 
 	listSessions(): SessionSummary[] {
@@ -581,6 +587,11 @@ export class SessionManager {
 				cwd: options?.cwd,
 				title: options?.title ?? `Session ${this.sessions.size + 1}`,
 			});
+
+			// Initialize DEK for E2EE
+			if (this.cryptoService) {
+				this.cryptoService.initSessionDek(session.sessionId);
+			}
 
 			const record: SessionRecord = {
 				sessionId: session.sessionId,
@@ -1225,6 +1236,11 @@ export class SessionManager {
 			recordRef = record;
 			record.unsubscribe = unsubscribe;
 
+			// Initialize DEK for E2EE (new revision = new key)
+			if (this.cryptoService) {
+				this.cryptoService.initSessionDek(sessionId);
+			}
+
 			// Write buffered updates to WAL
 			logger.debug(
 				{ sessionId, bufferedCount: bufferedUpdates.length },
@@ -1240,6 +1256,7 @@ export class SessionManager {
 			}
 
 			this.setupSessionSubscriptions(record, { skipSessionUpdates: true });
+
 			this.sessions.set(sessionId, record);
 
 			const summary = this.buildSummary(record);
@@ -1495,6 +1512,8 @@ export class SessionManager {
 			availableModels: record.availableModels,
 			availableCommands: record.availableCommands,
 			revision: record.revision,
+			wrappedDek:
+				this.cryptoService?.getWrappedDek(record.sessionId) ?? undefined,
 		};
 	}
 }

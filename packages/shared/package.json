@@ -38,10 +38,12 @@
 		"format": "biome format --write ."
 	},
 	"dependencies": {
-		"@agentclientprotocol/sdk": "^0.12.0"
+		"@agentclientprotocol/sdk": "^0.12.0",
+		"libsodium-wrappers": "^0.7.15"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.3.11",
+		"@types/libsodium-wrappers": "^0.7.14",
 		"@types/node": "^24.10.1",
 		"typescript": "~5.9.3"
 	}

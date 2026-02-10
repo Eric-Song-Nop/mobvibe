@@ -18,8 +18,8 @@ export type CliRecord = {
 	backends: AcpBackendSummary[];
 	/** User ID from auth */
 	userId?: string;
-	/** API key used to authenticate this CLI */
-	apiKey?: string;
+	/** Device key ID used to authenticate this CLI */
+	deviceId?: string;
 };
 
 export class CliRegistry extends EventEmitter {
@@ -32,12 +32,12 @@ export class CliRegistry extends EventEmitter {
 	 * Register a CLI connection.
 	 * @param socket - The Socket.io socket
 	 * @param info - CLI registration info
-	 * @param authInfo - Optional auth info (userId, apiKey) from API key validation
+	 * @param authInfo - Auth info (userId, deviceId) from signed token verification
 	 */
 	register(
 		socket: Socket,
 		info: CliRegistrationInfo,
-		authInfo?: { userId: string; apiKey: string },
+		authInfo?: { userId: string; deviceId: string },
 	): CliRecord {
 		// Remove any existing connection for this machine
 		const existing = this.cliByMachineId.get(info.machineId);
@@ -64,7 +64,7 @@ export class CliRegistry extends EventEmitter {
 			sessions: [],
 			backends: info.backends ?? [],
 			userId: authInfo?.userId,
-			apiKey: authInfo?.apiKey,
+			deviceId: authInfo?.deviceId,
 		};
 
 		this.cliByMachineId.set(info.machineId, record);

@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { Command } from "commander";
+import { loadCredentials } from "./auth/credentials.js";
 import { login, loginStatus, logout } from "./auth/login.js";
 import { getCliConfig } from "./config.js";
 import { DaemonManager } from "./daemon/daemon.js";
@@ -96,6 +97,58 @@ program
 	.description("Show authentication status")
 	.action(async () => {
 		await loginStatus();
+	});
+
+const e2eeCmd = program.command("e2ee").description("E2EE key management");
+
+e2eeCmd
+	.command("show")
+	.description("Display the master secret for pairing other devices")
+	.action(async () => {
+		const credentials = await loadCredentials();
+		if (!credentials) {
+			console.error("Not logged in. Run 'mobvibe login' first.");
+			process.exit(1);
+		}
+		console.log("Master secret (for pairing WebUI/Tauri devices):");
+		console.log(`  ${credentials.masterSecret}`);
+		console.log(
+			"\nPaste this into WebUI Settings > End-to-End Encryption > Pair.",
+		);
+	});
+
+e2eeCmd
+	.command("status")
+	.description("Show E2EE key status")
+	.action(async () => {
+		const { initCrypto, deriveAuthKeyPair, deriveContentKeyPair, getSodium } =
+			await import("@mobvibe/shared");
+		const credentials = await loadCredentials();
+		if (!credentials) {
+			console.log("Status: Not logged in");
+			console.log("Run 'mobvibe login' to authenticate.");
+			return;
+		}
+		await initCrypto();
+		const sodium = getSodium();
+		const masterSecret = sodium.from_base64(
+			credentials.masterSecret,
+			sodium.base64_variants.ORIGINAL,
+		);
+		const authKp = deriveAuthKeyPair(masterSecret);
+		const contentKp = deriveContentKeyPair(masterSecret);
+		const authPub = sodium.to_base64(
+			authKp.publicKey,
+			sodium.base64_variants.ORIGINAL,
+		);
+		const contentPub = sodium.to_base64(
+			contentKp.publicKey,
+			sodium.base64_variants.ORIGINAL,
+		);
+		console.log("Status: E2EE enabled");
+		console.log(`Auth public key:    ${authPub.slice(0, 16)}...`);
+		console.log(`Content public key: ${contentPub.slice(0, 16)}...`);
+		console.log(`Saved: ${new Date(credentials.createdAt).toLocaleString()}`);
 	});
 
 program

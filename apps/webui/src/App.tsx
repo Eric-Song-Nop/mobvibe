@@ -25,15 +25,11 @@ import { useSessionMutations } from "@/hooks/useSessionMutations";
 import { useSessionQueries } from "@/hooks/useSessionQueries";
 import { useSocket } from "@/hooks/useSocket";
 import { getAuthClient, isInTauri } from "@/lib/auth";
+import { e2ee } from "@/lib/e2ee";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { useMachinesStore } from "@/lib/machines-store";
 import { ensureNotificationPermission } from "@/lib/notifications";
 import { useUiStore } from "@/lib/ui-store";
-
-const ApiKeysPage = lazy(async () => {
-	const module = await import("@/pages/ApiKeysPage");
-	return { default: module.ApiKeysPage };
-});
 
 const SettingsPage = lazy(async () => {
 	const module = await import("@/pages/SettingsPage");
@@ -239,6 +235,14 @@ function MainApp() {
 
 	useEffect(() => {
 		if (sessionsQuery.data?.sessions) {
+			// Unwrap DEKs from initial session list
+			if (e2ee.isEnabled()) {
+				for (const session of sessionsQuery.data.sessions) {
+					if (session.wrappedDek) {
+						e2ee.unwrapSessionDek(session.sessionId, session.wrappedDek);
+					}
+				}
+			}
 			chatActions.syncSessions(sessionsQuery.data.sessions);
 		}
 	}, [sessionsQuery.data?.sessions, chatActions.syncSessions]);
@@ -515,20 +519,6 @@ export function App() {
 		<>
 			{shouldSetupTauriAuth && <TauriAuthHandler authClient={authClient!} />}
 			<Routes>
-				{/* API Keys page */}
-				<Route
-					path="/api-keys"
-					element={
-						!isAuthEnabled || isAuthenticated ? (
-							<Suspense fallback={<RoutePending />}>
-								<ApiKeysPage />
-							</Suspense>
-						) : (
-							<Navigate to="/login?returnUrl=/api-keys" replace />
-						)
-					}
-				/>
-
 				{/* Settings page */}
 				<Route
 					path="/settings"

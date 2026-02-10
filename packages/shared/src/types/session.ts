@@ -48,6 +48,8 @@ export type SessionSummary = {
 	machineId?: string;
 	/** Current WAL revision for this session */
 	revision?: number;
+	/** Base64-encoded sealed DEK for E2EE (crypto_box_seal) */
+	wrappedDek?: string;
 };
 
 /** Sessions changed event payload for incremental sync */

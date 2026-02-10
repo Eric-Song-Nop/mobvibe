@@ -8,18 +8,16 @@ import {
 } from "../../services/db-service.js";
 import { setupCliHandlers } from "../cli-handlers.js";
 
-vi.mock("../../lib/auth.js", () => ({
-	auth: {
-		api: {
-			verifyApiKey: vi.fn(),
-		},
-	},
+vi.mock("@mobvibe/shared", () => ({
+	initCrypto: vi.fn().mockResolvedValue(undefined),
+	verifySignedToken: vi.fn(),
 }));
 
 vi.mock("../../services/db-service.js", () => ({
 	upsertMachine: vi.fn(),
 	updateMachineStatusById: vi.fn(),
 	closeSessionsForMachineById: vi.fn(),
+	findDeviceByPublicKey: vi.fn(),
 }));
 
 vi.mock("../../lib/logger.js", () => ({
@@ -67,7 +65,7 @@ describe("setupCliHandlers", () => {
 		socket = {
 			id: "socket-1",
 			handshake: { headers: {} },
-			data: { userId: "user-1", apiKey: "key-123" },
+			data: { userId: "user-1", deviceId: "device-123" },
 			on: vi.fn((event: string, handler: (payload?: any) => void) => {
 				socketHandlers[event] = handler;
 			}),
@@ -101,7 +99,10 @@ describe("setupCliHandlers", () => {
 	it("forwards session:attached events to webui", () => {
 		// Register the socket first so the guard passes
 		const info = createMockRegistrationInfo({ machineId: "machine-1" });
-		registry.register(socket, info, { userId: "user-1", apiKey: "key-123" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
 
 		socketHandlers["session:attached"]?.({
 			sessionId: "session-1",
@@ -123,7 +124,10 @@ describe("setupCliHandlers", () => {
 	it("forwards session:detached events to webui", () => {
 		// Register the socket first so the guard passes
 		const info = createMockRegistrationInfo({ machineId: "machine-1" });
-		registry.register(socket, info, { userId: "user-1", apiKey: "key-123" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
 
 		socketHandlers["session:detached"]?.({
 			sessionId: "session-1",
@@ -146,7 +150,10 @@ describe("setupCliHandlers", () => {
 
 	it("emits detached events for active sessions on disconnect", async () => {
 		const info = createMockRegistrationInfo({ machineId: "machine-1" });
-		registry.register(socket, info, { userId: "user-1", apiKey: "key-123" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
 		registry.updateSessions("socket-1", [
 			createMockSessionSummary({ sessionId: "session-1" }),
 			createMockSessionSummary({ sessionId: "session-2" }),

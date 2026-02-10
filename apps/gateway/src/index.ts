@@ -9,6 +9,7 @@ import { getGatewayConfig } from "./config.js";
 import { closeDb } from "./db/index.js";
 import { auth } from "./lib/auth.js";
 import { logger } from "./lib/logger.js";
+import { setupDeviceRoutes } from "./routes/device.js";
 import { setupFsRoutes } from "./routes/fs.js";
 import { setupHealthRoutes } from "./routes/health.js";
 import { setupMachineRoutes } from "./routes/machines.js";
@@ -184,6 +185,11 @@ app.use(express.json());
 const machineRouter = express.Router();
 setupMachineRoutes(machineRouter, cliRegistry);
 app.use("/", machineRouter);
+
+// Device key routes (for E2EE device registration)
+const deviceRouter = express.Router();
+setupDeviceRoutes(deviceRouter);
+app.use("/", deviceRouter);
 
 // Routes
 const acpRouter = express.Router();

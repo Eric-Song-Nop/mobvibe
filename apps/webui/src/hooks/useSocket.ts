@@ -21,6 +21,7 @@ import {
 	type SessionsChangedPayload,
 	type TerminalOutputEvent,
 } from "@/lib/acp";
+import { e2ee } from "@/lib/e2ee";
 import { isErrorDetail } from "@/lib/error-utils";
 import {
 	notifyPermissionRequest,
@@ -304,7 +305,10 @@ export function useSocket({
 	const { startBackfill, cancelBackfill, isBackfilling } = useSessionBackfill({
 		gatewayUrl: gatewaySocket.getGatewayUrl(),
 		onEvents: (sessionId, events) => {
-			for (const event of events) {
+			for (const rawEvent of events) {
+				// Decrypt event payload if encrypted
+				const event = e2ee.decryptEvent(rawEvent);
+
 				const cursor = getCursor(sessionId);
 				const lastSeq = cursor.lastAppliedSeq;
 
@@ -424,10 +428,21 @@ export function useSocket({
 	};
 
 	handleSessionsChangedRef.current = (payload: SessionsChangedPayload) => {
+		// Unwrap DEKs from new/updated sessions
+		if (e2ee.isEnabled()) {
+			for (const session of [...payload.added, ...payload.updated]) {
+				if (session.wrappedDek) {
+					e2ee.unwrapSessionDek(session.sessionId, session.wrappedDek);
+				}
+			}
+		}
 		handleSessionsChanged(payload);
 	};
 
-	handleSessionEventRef.current = (event: SessionEvent) => {
+	handleSessionEventRef.current = (incomingEvent: SessionEvent) => {
+		// Decrypt event payload if encrypted
+		const event = e2ee.decryptEvent(incomingEvent);
+
 		let session = sessionsRef.current[event.sessionId];
 		if (!session) {
 			createLocalSession(event.sessionId);

@@ -2,7 +2,6 @@ import { relations } from "drizzle-orm";
 import {
 	boolean,
 	index,
-	integer,
 	pgTable,
 	text,
 	timestamp,
@@ -81,66 +80,6 @@ export const verification = pgTable(
 	(table) => [index("verification_identifier_idx").on(table.identifier)],
 );
 
-export const apikey = pgTable(
-	"apikey",
-	{
-		id: text("id").primaryKey(),
-		name: text("name"),
-		start: text("start"),
-		prefix: text("prefix"),
-		key: text("key").notNull(),
-		userId: text("user_id")
-			.notNull()
-			.references(() => user.id, { onDelete: "cascade" }),
-		refillInterval: integer("refill_interval"),
-		refillAmount: integer("refill_amount"),
-		lastRefillAt: timestamp("last_refill_at"),
-		enabled: boolean("enabled").default(true),
-		rateLimitEnabled: boolean("rate_limit_enabled").default(true),
-		rateLimitTimeWindow: integer("rate_limit_time_window").default(86400000),
-		rateLimitMax: integer("rate_limit_max").default(10),
-		requestCount: integer("request_count").default(0),
-		remaining: integer("remaining"),
-		lastRequest: timestamp("last_request"),
-		expiresAt: timestamp("expires_at"),
-		createdAt: timestamp("created_at").notNull(),
-		updatedAt: timestamp("updated_at").notNull(),
-		permissions: text("permissions"),
-		metadata: text("metadata"),
-	},
-	(table) => [
-		index("apikey_key_idx").on(table.key),
-		index("apikey_userId_idx").on(table.userId),
-	],
-);
-
-export const userRelations = relations(user, ({ many }) => ({
-	sessions: many(session),
-	accounts: many(account),
-	apikeys: many(apikey),
-}));
-
-export const sessionRelations = relations(session, ({ one }) => ({
-	user: one(user, {
-		fields: [session.userId],
-		references: [user.id],
-	}),
-}));
-
-export const accountRelations = relations(account, ({ one }) => ({
-	user: one(user, {
-		fields: [account.userId],
-		references: [user.id],
-	}),
-}));
-
-export const apikeyRelations = relations(apikey, ({ one }) => ({
-	user: one(user, {
-		fields: [apikey.userId],
-		references: [user.id],
-	}),
-}));
-
 // ============================================
 // Application Tables
 // ============================================
@@ -185,6 +124,7 @@ export const acpSessions = pgTable(
 		createdAt: timestamp("created_at").notNull().defaultNow(),
 		updatedAt: timestamp("updated_at").notNull().defaultNow(),
 		closedAt: timestamp("closed_at"),
+		wrappedDek: text("wrapped_dek"),
 	},
 	(table) => [
 		index("acp_sessions_user_id_idx").on(table.userId),
@@ -192,6 +132,55 @@ export const acpSessions = pgTable(
 		index("acp_sessions_session_id_idx").on(table.sessionId),
 	],
 );
+
+export const deviceKeys = pgTable(
+	"device_keys",
+	{
+		id: text("id").primaryKey(),
+		userId: text("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		publicKey: text("public_key").notNull().unique(),
+		deviceName: text("device_name"),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		lastSeenAt: timestamp("last_seen_at"),
+	},
+	(table) => [
+		index("device_keys_user_id_idx").on(table.userId),
+		index("device_keys_public_key_idx").on(table.publicKey),
+	],
+);
+
+// ============================================
+// Relations
+// ============================================
+
+export const userRelations = relations(user, ({ many }) => ({
+	sessions: many(session),
+	accounts: many(account),
+	deviceKeys: many(deviceKeys),
+}));
+
+export const sessionRelations = relations(session, ({ one }) => ({
+	user: one(user, {
+		fields: [session.userId],
+		references: [user.id],
+	}),
+}));
+
+export const accountRelations = relations(account, ({ one }) => ({
+	user: one(user, {
+		fields: [account.userId],
+		references: [user.id],
+	}),
+}));
+
+export const deviceKeyRelations = relations(deviceKeys, ({ one }) => ({
+	user: one(user, {
+		fields: [deviceKeys.userId],
+		references: [user.id],
+	}),
+}));
 
 // Type exports
 export type User = typeof user.$inferSelect;
@@ -202,9 +191,9 @@ export type Account = typeof account.$inferSelect;
 export type NewAccount = typeof account.$inferInsert;
 export type Verification = typeof verification.$inferSelect;
 export type NewVerification = typeof verification.$inferInsert;
-export type ApiKey = typeof apikey.$inferSelect;
-export type NewApiKey = typeof apikey.$inferInsert;
 export type Machine = typeof machines.$inferSelect;
 export type NewMachine = typeof machines.$inferInsert;
 export type AcpSession = typeof acpSessions.$inferSelect;
 export type NewAcpSession = typeof acpSessions.$inferInsert;
+export type DeviceKey = typeof deviceKeys.$inferSelect;
+export type NewDeviceKey = typeof deviceKeys.$inferInsert;

@@ -15,10 +15,12 @@ import type {
 	SessionFsResourceEntry,
 	StopReason,
 } from "@mobvibe/shared";
+import { createSignedToken } from "@mobvibe/shared";
 import ignore, { type Ignore } from "ignore";
 import { io, type Socket } from "socket.io-client";
 import type { SessionManager } from "../acp/session-manager.js";
 import type { CliConfig } from "../config.js";
+import type { CliCryptoService } from "../e2ee/crypto-service.js";
 import {
 	aggregateDirStatus,
 	getFileDiff,
@@ -31,8 +33,8 @@ import { logger } from "../lib/logger.js";
 type SocketClientOptions = {
 	config: CliConfig;
 	sessionManager: SessionManager;
-	/** API key for authentication (loaded from credentials) */
-	apiKey: string;
+	/** Crypto service for E2EE */
+	cryptoService: CliCryptoService;
 };
 
 const SESSION_ROOT_NAME = "Working Directory";
@@ -155,6 +157,7 @@ export class SocketClient extends EventEmitter {
 
 	constructor(private readonly options: SocketClientOptions) {
 		super();
+		const { cryptoService } = options;
 		this.socket = io(`${options.config.gatewayUrl}/cli`, {
 			path: "/socket.io",
 			reconnection: true,
@@ -163,9 +166,7 @@ export class SocketClient extends EventEmitter {
 			reconnectionDelayMax: 30000,
 			transports: ["websocket"],
 			autoConnect: false,
-			extraHeaders: {
-				"x-api-key": options.apiKey,
-			},
+			auth: (cb) => cb(createSignedToken(cryptoService.authKeyPair)),
 		});
 		this.setupEventHandlers();
 		this.setupRpcHandlers();
@@ -932,6 +933,11 @@ export class SocketClient extends EventEmitter {
 					limit,
 				});
 
+				// Encrypt event payloads before sending
+				result.events = result.events.map((e) =>
+					this.options.cryptoService.encryptEvent(e),
+				);
+
 				this.sendRpcResponse<SessionEventsResponse>(request.requestId, result);
 			} catch (error) {
 				logger.error(
@@ -1005,6 +1011,8 @@ export class SocketClient extends EventEmitter {
 				"session_event_received_from_manager",
 			);
 			if (this.connected) {
+				// Encrypt payload before sending to gateway
+				const encrypted = this.options.cryptoService.encryptEvent(event);
 				logger.debug(
 					{
 						sessionId: event.sessionId,
@@ -1014,7 +1022,7 @@ export class SocketClient extends EventEmitter {
 					},
 					"session_event_emitting_to_gateway",
 				);
-				this.socket.emit("session:event", event);
+				this.socket.emit("session:event", encrypted);
 				logger.debug(
 					{
 						sessionId: event.sessionId,
@@ -1179,7 +1187,8 @@ export class SocketClient extends EventEmitter {
 				);
 
 				for (const event of unackedEvents) {
-					this.socket.emit("session:event", event);
+					const encrypted = this.options.cryptoService.encryptEvent(event);
+					this.socket.emit("session:event", encrypted);
 				}
 			}
 		}

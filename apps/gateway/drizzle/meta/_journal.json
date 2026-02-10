@@ -15,6 +15,13 @@
 			"when": 1769242292051,
 			"tag": "0001_nasty_scrambler",
 			"breakpoints": true
+		},
+		{
+			"idx": 2,
+			"version": "7",
+			"when": 1739184000000,
+			"tag": "0002_e2ee_schema",
+			"breakpoints": true
 		}
 	]
 }
