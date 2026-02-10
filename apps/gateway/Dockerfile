@@ -7,6 +7,7 @@ WORKDIR /app
 
 # Copy workspace root files
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY scripts/ ./scripts/
 
 # Copy all workspace packages needed by gateway
 COPY packages/shared ./packages/shared
@@ -28,6 +29,7 @@ WORKDIR /app
 
 # Copy built artifacts and package files
 COPY --from=builder /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/package.json ./
+COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/packages/shared ./packages/shared
 COPY --from=builder /app/apps/gateway ./apps/gateway
 
