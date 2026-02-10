@@ -27,6 +27,10 @@ type Mutations = {
 	archiveSessionMutation: {
 		mutateAsync: (params: { sessionId: string }) => Promise<unknown>;
 	};
+	bulkArchiveSessionsMutation: {
+		mutateAsync: (params: { sessionIds: string[] }) => Promise<unknown>;
+		isPending: boolean;
+	};
 	cancelSessionMutation: {
 		mutate: (params: { sessionId: string }) => void;
 		mutateAsync: (params: { sessionId: string }) => Promise<unknown>;
@@ -209,6 +213,21 @@ export function useSessionHandlers({
 		[mutations.archiveSessionMutation, chatActions.setActiveSessionId],
 	);
 
+	const handleBulkArchiveSessions = useCallback(
+		async (sessionIds: string[]) => {
+			try {
+				await mutations.bulkArchiveSessionsMutation.mutateAsync({ sessionIds });
+				const { activeSessionId } = useChatStore.getState();
+				if (activeSessionId && sessionIds.includes(activeSessionId)) {
+					chatActions.setActiveSessionId(undefined);
+				}
+			} catch {
+				return;
+			}
+		},
+		[mutations.bulkArchiveSessionsMutation, chatActions.setActiveSessionId],
+	);
+
 	const handlePermissionDecision = useCallback(
 		(payload: {
 			requestId: string;
@@ -361,10 +380,12 @@ export function useSessionHandlers({
 
 	return {
 		isForceReloading,
+		isBulkArchiving: mutations.bulkArchiveSessionsMutation.isPending,
 		handleOpenCreateDialog,
 		handleCreateSession,
 		handleRenameSubmit,
 		handleArchiveSession,
+		handleBulkArchiveSessions,
 		handlePermissionDecision,
 		handleModeChange,
 		handleModelChange,

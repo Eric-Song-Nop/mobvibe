@@ -76,7 +76,11 @@
 		"backendPlaceholder": "Select backend",
 		"cwdLabel": "Working directory",
 		"cwdPlaceholder": "Enter or paste a Home path",
-		"browse": "Browse"
+		"browse": "Browse",
+		"archiveAll": "Archive All",
+		"archiveAllTitle": "Archive all sessions?",
+		"archiveAllDescription": "This will archive {{count}} session(s), ending their backend processes and hiding them from the list.",
+		"archiveAllConfirm": "Archive all"
 	},
 	"errors": {
 		"selectMachine": "Please select a machine",
@@ -107,7 +111,8 @@
 		"rootLoadFailed": "Failed to load root directory",
 		"previewLoadFailed": "Failed to load preview",
 		"pathLoadFailed": "Failed to load path",
-		"reloadSessionFailed": "Failed to reload session"
+		"reloadSessionFailed": "Failed to reload session",
+		"bulkArchiveSessionsFailed": "Failed to archive sessions"
 	},
 	"workingDirectory": {
 		"dialogTitle": "Select working directory",

@@ -37,6 +37,7 @@ import { logger } from "../lib/logger.js";
 import type { CliRecord, CliRegistry } from "./cli-registry.js";
 import {
 	archiveAcpSession,
+	bulkArchiveAcpSessions,
 	closeAcpSession,
 	createAcpSessionDirect,
 	updateAcpSessionState,
@@ -235,6 +236,45 @@ export class SessionRouter {
 		);
 
 		return { ok: true };
+	}
+
+	/**
+	 * Archive multiple sessions at once: best-effort close each CLI process, then bulk-update DB.
+	 * @param sessionIds - Session IDs to archive
+	 * @param userId - User ID for authorization
+	 */
+	async bulkArchiveSessions(
+		sessionIds: string[],
+		userId: string,
+	): Promise<{ archivedCount: number }> {
+		logger.info(
+			{ sessionIds, userId, count: sessionIds.length },
+			"session_bulk_archive_start",
+		);
+
+		// Best-effort close each backend agent process
+		await Promise.allSettled(
+			sessionIds.map(async (sessionId) => {
+				try {
+					const cli = this.resolveCliForSession(sessionId, userId);
+					await this.sendRpc<CloseSessionParams, { ok: boolean }>(
+						cli.socket,
+						"rpc:session:close",
+						{ sessionId },
+					);
+				} catch (err) {
+					logger.debug(
+						{ err, sessionId },
+						"session_bulk_archive_cli_unreachable",
+					);
+				}
+			}),
+		);
+
+		const archivedCount = await bulkArchiveAcpSessions(sessionIds, userId);
+		logger.info({ userId, archivedCount }, "session_bulk_archive_complete");
+
+		return { archivedCount };
 	}
 
 	/**

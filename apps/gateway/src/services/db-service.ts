@@ -222,6 +222,40 @@ export async function archiveAcpSession(
 }
 
 /**
+ * Archive multiple sessions in a single query.
+ * Returns the number of rows updated.
+ */
+export async function bulkArchiveAcpSessions(
+	sessionIds: string[],
+	userId: string,
+): Promise<number> {
+	if (sessionIds.length === 0) {
+		return 0;
+	}
+	try {
+		const result = await db
+			.update(acpSessions)
+			.set({
+				state: "archived",
+				closedAt: new Date(),
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					inArray(acpSessions.sessionId, sessionIds),
+					eq(acpSessions.userId, userId),
+				),
+			)
+			.returning({ id: acpSessions.id });
+
+		return result.length;
+	} catch (error) {
+		logger.error({ err: error }, "db_bulk_archive_sessions_error");
+		return 0;
+	}
+}
+
+/**
  * Given a list of session IDs, return the subset that are archived.
  */
 export async function getArchivedSessionIds(

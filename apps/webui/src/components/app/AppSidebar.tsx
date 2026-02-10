@@ -28,6 +28,8 @@ export type AppSidebarProps = {
 	onSelectSession: (sessionId: string) => void;
 	onEditSubmit: () => void;
 	onArchiveSession: (sessionId: string) => void;
+	onArchiveAllSessions: (sessionIds: string[]) => void;
+	isBulkArchiving?: boolean;
 	isCreating: boolean;
 	/** Whether a session is being activated (restored/loaded) */
 	isActivating?: boolean;
@@ -40,6 +42,8 @@ export function AppSidebar({
 	onSelectSession,
 	onEditSubmit,
 	onArchiveSession,
+	onArchiveAllSessions,
+	isBulkArchiving,
 	isCreating,
 	isActivating: _isActivating,
 }: AppSidebarProps) {
@@ -62,6 +66,8 @@ export function AppSidebar({
 					onSelectSession={onSelectSession}
 					onEditSubmit={onEditSubmit}
 					onArchiveSession={onArchiveSession}
+					onArchiveAllSessions={onArchiveAllSessions}
+					isBulkArchiving={isBulkArchiving}
 					isCreating={isCreating}
 				/>
 			</aside>
@@ -86,6 +92,8 @@ export function AppSidebar({
 								}}
 								onEditSubmit={onEditSubmit}
 								onArchiveSession={onArchiveSession}
+								onArchiveAllSessions={onArchiveAllSessions}
+								isBulkArchiving={isBulkArchiving}
 								isCreating={isCreating}
 							/>
 						</div>

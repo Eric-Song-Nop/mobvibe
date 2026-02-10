@@ -76,7 +76,11 @@
 		"backendPlaceholder": "选择后端",
 		"cwdLabel": "工作目录",
 		"cwdPlaceholder": "输入或粘贴 Home 内路径",
-		"browse": "浏览"
+		"browse": "浏览",
+		"archiveAll": "全部归档",
+		"archiveAllTitle": "归档所有对话？",
+		"archiveAllDescription": "将归档 {{count}} 个对话，结束后端进程并从列表中隐藏。",
+		"archiveAllConfirm": "确认全部归档"
 	},
 	"errors": {
 		"selectMachine": "请先选择机器",
@@ -107,7 +111,8 @@
 		"rootLoadFailed": "根目录加载失败",
 		"previewLoadFailed": "预览加载失败",
 		"pathLoadFailed": "路径加载失败",
-		"reloadSessionFailed": "重载会话失败"
+		"reloadSessionFailed": "重载会话失败",
+		"bulkArchiveSessionsFailed": "批量归档对话失败"
 	},
 	"workingDirectory": {
 		"dialogTitle": "选择工作目录",

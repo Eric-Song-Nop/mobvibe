@@ -110,7 +110,9 @@ const renderSidebar = (
 				onCreateSession={options?.onCreateSession ?? (() => {})}
 				onSelectSession={options?.onSelectSession ?? (() => {})}
 				onEditSubmit={options?.onEditSubmit ?? (() => {})}
-				onCloseSession={options?.onCloseSession ?? (() => {})}
+				onArchiveSession={options?.onArchiveSession ?? (() => {})}
+				onArchiveAllSessions={options?.onArchiveAllSessions ?? (() => {})}
+				isBulkArchiving={options?.isBulkArchiving ?? false}
 				isCreating={options?.isCreating ?? false}
 			/>
 		</ThemeProvider>,
@@ -261,5 +263,42 @@ describe("SessionSidebar", () => {
 		expect(screen.queryByText("Toggle Session")).not.toBeInTheDocument();
 		await user.click(screen.getByText("Backend Toggle"));
 		expect(screen.getByText("Toggle Session")).toBeInTheDocument();
+	});
+
+	describe("Archive All", () => {
+		it("is hidden when sessions list is empty", () => {
+			renderSidebar([]);
+			expect(
+				screen.queryByText(i18n.t("session.archiveAll")),
+			).not.toBeInTheDocument();
+		});
+
+		it("is visible when sessions exist", () => {
+			renderSidebar([buildSession()]);
+			expect(
+				screen.getByText(i18n.t("session.archiveAll")),
+			).toBeInTheDocument();
+		});
+
+		it("calls onArchiveAllSessions with all session IDs on confirm", async () => {
+			const onArchiveAllSessions = vi.fn();
+			const user = userEvent.setup();
+			renderSidebar(
+				[
+					buildSession({ sessionId: "s1", title: "Session 1" }),
+					buildSession({ sessionId: "s2", title: "Session 2" }),
+				],
+				{ onArchiveAllSessions },
+			);
+
+			await user.click(screen.getByText(i18n.t("session.archiveAllConfirm")));
+			expect(onArchiveAllSessions).toHaveBeenCalledWith(["s1", "s2"]);
+		});
+
+		it("is disabled when isBulkArchiving is true", () => {
+			renderSidebar([buildSession()], { isBulkArchiving: true });
+			const button = screen.getByText(i18n.t("session.archiveAll"));
+			expect(button.closest("button")).toBeDisabled();
+		});
 	});
 });

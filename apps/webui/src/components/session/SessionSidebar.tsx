@@ -76,6 +76,8 @@ type SessionSidebarProps = {
 	onSelectSession: (sessionId: string) => void;
 	onEditSubmit: () => void;
 	onArchiveSession: (sessionId: string) => void;
+	onArchiveAllSessions: (sessionIds: string[]) => void;
+	isBulkArchiving?: boolean;
 	isCreating: boolean;
 };
 
@@ -86,6 +88,8 @@ export const SessionSidebar = ({
 	onSelectSession,
 	onEditSubmit,
 	onArchiveSession,
+	onArchiveAllSessions,
+	isBulkArchiving,
 	isCreating,
 }: SessionSidebarProps) => {
 	const { t } = useTranslation();
@@ -180,6 +184,37 @@ export const SessionSidebar = ({
 				</div>
 
 				<div className="flex items-center gap-2">
+					{sessions.length > 0 ? (
+						<AlertDialog>
+							<AlertDialogTrigger asChild>
+								<Button size="sm" variant="outline" disabled={isBulkArchiving}>
+									{t("session.archiveAll")}
+								</Button>
+							</AlertDialogTrigger>
+							<AlertDialogContent size="sm">
+								<AlertDialogHeader>
+									<AlertDialogTitle>
+										{t("session.archiveAllTitle")}
+									</AlertDialogTitle>
+									<AlertDialogDescription>
+										{t("session.archiveAllDescription", {
+											count: sessions.length,
+										})}
+									</AlertDialogDescription>
+								</AlertDialogHeader>
+								<AlertDialogFooter>
+									<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+									<AlertDialogAction
+										onClick={() =>
+											onArchiveAllSessions(sessions.map((s) => s.sessionId))
+										}
+									>
+										{t("session.archiveAllConfirm")}
+									</AlertDialogAction>
+								</AlertDialogFooter>
+							</AlertDialogContent>
+						</AlertDialog>
+					) : null}
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
 							<Button

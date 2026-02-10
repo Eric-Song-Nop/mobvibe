@@ -55,7 +55,11 @@ export function setupSessionRoutes(
 	// Require authentication on all session routes
 	router.use(requireAuth);
 
-	// List sessions - returns only user's sessions
+	/**
+	 * Returns sessions currently held in the in-memory `cliRegistry`.
+	 * Includes active sessions from connected CLIs and previously discovered
+	 * sessions. Does not query the database.
+	 */
 	router.get("/sessions", (request: AuthenticatedRequest, response) => {
 		const userId = getUserId(request);
 		if (!userId) {
@@ -165,6 +169,52 @@ export function setupSessionRoutes(
 				} else {
 					respondError(response, createInternalError("session"));
 				}
+			}
+		},
+	);
+
+	// Bulk archive sessions - with authorization check
+	router.post(
+		"/session/archive-all",
+		async (request: AuthenticatedRequest, response) => {
+			const { sessionIds } = request.body ?? {};
+			if (
+				!Array.isArray(sessionIds) ||
+				sessionIds.length === 0 ||
+				!sessionIds.every((id: unknown) => typeof id === "string")
+			) {
+				respondError(
+					response,
+					buildRequestValidationError(
+						"sessionIds must be a non-empty array of strings",
+					),
+					400,
+				);
+				return;
+			}
+
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			try {
+				logger.info(
+					{ userId, count: sessionIds.length },
+					"session_bulk_archive_request",
+				);
+				const result = await sessionRouter.bulkArchiveSessions(
+					sessionIds,
+					userId,
+				);
+				logger.info(
+					{ userId, archivedCount: result.archivedCount },
+					"session_bulk_archive_success",
+				);
+				response.json(result);
+			} catch (error) {
+				logger.error({ err: error, userId }, "session_bulk_archive_error");
+				respondError(response, createInternalError("session"));
 			}
 		},
 	);
@@ -449,7 +499,11 @@ export function setupSessionRoutes(
 		},
 	);
 
-	// Discover sessions from ACP agent
+	/**
+	 * Sends an RPC to the CLI daemon to scan historical session files on disk.
+	 * Filters out archived sessions via a database query before returning
+	 * results. Supports pagination via the `cursor` query parameter.
+	 */
 	router.get(
 		"/sessions/discover",
 		async (request: AuthenticatedRequest, response) => {

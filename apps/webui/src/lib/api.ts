@@ -315,6 +315,14 @@ export const archiveSession = async (payload: {
 		body: JSON.stringify(payload),
 	});
 
+export const bulkArchiveSessions = async (payload: {
+	sessionIds: string[];
+}): Promise<{ archivedCount: number }> =>
+	requestJson<{ archivedCount: number }>("/acp/session/archive-all", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+
 export const cancelSession = async (payload: {
 	sessionId: string;
 }): Promise<CancelSessionResponse> =>

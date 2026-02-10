@@ -205,10 +205,12 @@ function MainApp() {
 
 	const {
 		isForceReloading,
+		isBulkArchiving,
 		handleOpenCreateDialog,
 		handleCreateSession,
 		handleRenameSubmit,
 		handleArchiveSession,
+		handleBulkArchiveSessions,
 		handlePermissionDecision,
 		handleModeChange,
 		handleModelChange,
@@ -413,6 +415,10 @@ function MainApp() {
 					onArchiveSession={(sessionId) => {
 						void handleArchiveSession(sessionId);
 					}}
+					onArchiveAllSessions={(sessionIds) => {
+						void handleBulkArchiveSessions(sessionIds);
+					}}
+					isBulkArchiving={isBulkArchiving}
 					isCreating={mutations.createSessionMutation.isPending}
 					isActivating={isActivating}
 				/>

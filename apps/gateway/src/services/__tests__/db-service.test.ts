@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createAcpSessionDirect } from "../db-service.js";
+import {
+	bulkArchiveAcpSessions,
+	createAcpSessionDirect,
+} from "../db-service.js";
 
 type MockFn = ReturnType<typeof vi.fn>;
 
@@ -71,6 +74,20 @@ const makeUpdateChain = (): UpdateChain => {
 	return chain;
 };
 
+const makeUpdateChainWithReturning = (
+	returningResult: unknown[],
+): UpdateChain & { returning: MockFn } => {
+	const chain = {
+		set: vi.fn(),
+		where: vi.fn(),
+		returning: vi.fn(),
+	};
+	chain.set.mockReturnValue(chain);
+	chain.where.mockReturnValue(chain);
+	chain.returning.mockResolvedValue(returningResult);
+	return chain;
+};
+
 describe("createAcpSessionDirect", () => {
 	beforeEach(() => {
 		dbMock.insert.mockReset();
@@ -138,5 +155,60 @@ describe("createAcpSessionDirect", () => {
 
 		expect(result).toBeNull();
 		expect(updateChain.set).not.toHaveBeenCalled();
+	});
+});
+
+describe("bulkArchiveAcpSessions", () => {
+	beforeEach(() => {
+		dbMock.insert.mockReset();
+		dbMock.select.mockReset();
+		dbMock.update.mockReset();
+		loggerMock.error.mockReset();
+		loggerMock.warn.mockReset();
+		loggerMock.info.mockReset();
+		loggerMock.debug.mockReset();
+	});
+
+	it("returns 0 for empty sessionIds array without calling DB", async () => {
+		const result = await bulkArchiveAcpSessions([], "user-1");
+
+		expect(result).toBe(0);
+		expect(dbMock.update).not.toHaveBeenCalled();
+	});
+
+	it("archives sessions and returns count from returning result", async () => {
+		const chain = makeUpdateChainWithReturning([
+			{ id: "row-1" },
+			{ id: "row-2" },
+		]);
+		dbMock.update.mockReturnValue(chain);
+
+		const result = await bulkArchiveAcpSessions(
+			["session-1", "session-2"],
+			"user-1",
+		);
+
+		expect(result).toBe(2);
+		expect(chain.set).toHaveBeenCalledWith(
+			expect.objectContaining({
+				state: "archived",
+				closedAt: expect.any(Date),
+				updatedAt: expect.any(Date),
+			}),
+		);
+	});
+
+	it("returns 0 and logs error when DB throws", async () => {
+		const chain = makeUpdateChainWithReturning([]);
+		chain.returning.mockRejectedValue(new Error("connection lost"));
+		dbMock.update.mockReturnValue(chain);
+
+		const result = await bulkArchiveAcpSessions(["session-1"], "user-1");
+
+		expect(result).toBe(0);
+		expect(loggerMock.error).toHaveBeenCalledWith(
+			expect.objectContaining({ err: expect.any(Error) }),
+			"db_bulk_archive_sessions_error",
+		);
 	});
 });

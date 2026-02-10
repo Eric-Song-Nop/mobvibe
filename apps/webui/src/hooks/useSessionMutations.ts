@@ -16,6 +16,7 @@ import type {
 } from "@/lib/acp";
 import {
 	archiveSession,
+	bulkArchiveSessions,
 	cancelSession,
 	createMessageId,
 	createSession,
@@ -238,6 +239,27 @@ export function useSessionMutations(store: ChatStoreActions) {
 		},
 	});
 
+	const bulkArchiveSessionsMutation = useMutation({
+		mutationFn: bulkArchiveSessions,
+		onSuccess: (_, variables) => {
+			for (const id of variables.sessionIds) {
+				store.removeSession(id);
+			}
+			store.setAppError(undefined);
+		},
+		onError: (mutationError: unknown, variables) => {
+			for (const id of variables.sessionIds) {
+				store.removeSession(id);
+			}
+			store.setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError(t("errors.bulkArchiveSessionsFailed"), "session"),
+				),
+			);
+		},
+	});
+
 	const cancelSessionMutation = useMutation({
 		mutationFn: cancelSession,
 		onMutate: (variables) => {
@@ -444,6 +466,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 		createSessionMutation,
 		renameSessionMutation,
 		archiveSessionMutation,
+		bulkArchiveSessionsMutation,
 		cancelSessionMutation,
 		setSessionModeMutation,
 		setSessionModelMutation,
