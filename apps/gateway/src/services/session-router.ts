@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type {
+	ArchiveSessionParams,
+	BulkArchiveSessionsParams,
 	CancelSessionParams,
 	CloseSessionParams,
 	CreateSessionParams,
@@ -36,8 +38,6 @@ import type { Socket } from "socket.io";
 import { logger } from "../lib/logger.js";
 import type { CliRecord, CliRegistry } from "./cli-registry.js";
 import {
-	archiveAcpSession,
-	bulkArchiveAcpSessions,
 	closeAcpSession,
 	createAcpSessionDirect,
 	updateAcpSessionState,
@@ -201,7 +201,8 @@ export class SessionRouter {
 	}
 
 	/**
-	 * Archive a session: terminate the backend agent (if reachable), then mark as archived in DB.
+	 * Archive a session: send archive RPC to CLI which closes session, deletes WAL
+	 * messages, and marks as archived in local SQLite.
 	 * @param params - Session archive parameters
 	 * @param userId - User ID for authorization
 	 */
@@ -214,32 +215,25 @@ export class SessionRouter {
 			"session_archive_rpc_start",
 		);
 
-		// Try to close the backend agent process; if session is detached/dead, skip
-		try {
-			const cli = this.resolveCliForSession(params.sessionId, userId);
-			await this.sendRpc<CloseSessionParams, { ok: boolean }>(
-				cli.socket,
-				"rpc:session:close",
-				params,
-			);
-		} catch (err) {
-			logger.debug(
-				{ err, sessionId: params.sessionId },
-				"session_archive_cli_unreachable",
-			);
-		}
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+		const result = await this.sendRpc<ArchiveSessionParams, { ok: boolean }>(
+			cli.socket,
+			"rpc:session:archive",
+			{
+				sessionId: params.sessionId,
+			},
+		);
 
-		await archiveAcpSession(params.sessionId, userId);
 		logger.info(
 			{ sessionId: params.sessionId, userId },
 			"session_archive_rpc_complete",
 		);
 
-		return { ok: true };
+		return result;
 	}
 
 	/**
-	 * Archive multiple sessions at once: best-effort close each CLI process, then bulk-update DB.
+	 * Archive multiple sessions at once: group by machine and send bulk archive RPC.
 	 * @param sessionIds - Session IDs to archive
 	 * @param userId - User ID for authorization
 	 */
@@ -252,29 +246,56 @@ export class SessionRouter {
 			"session_bulk_archive_start",
 		);
 
-		// Best-effort close each backend agent process
-		await Promise.allSettled(
-			sessionIds.map(async (sessionId) => {
-				try {
-					const cli = this.resolveCliForSession(sessionId, userId);
-					await this.sendRpc<CloseSessionParams, { ok: boolean }>(
-						cli.socket,
-						"rpc:session:close",
-						{ sessionId },
-					);
-				} catch (err) {
-					logger.debug(
-						{ err, sessionId },
-						"session_bulk_archive_cli_unreachable",
-					);
+		// Group session IDs by their owning CLI machine
+		const byMachine = new Map<string, { cli: CliRecord; ids: string[] }>();
+		for (const sessionId of sessionIds) {
+			try {
+				const cli = this.resolveCliForSession(sessionId, userId);
+				const key = cli.machineId;
+				const entry = byMachine.get(key);
+				if (entry) {
+					entry.ids.push(sessionId);
+				} else {
+					byMachine.set(key, { cli, ids: [sessionId] });
 				}
+			} catch {
+				// Session not found in registry — try first CLI for user
+				const cli = this.cliRegistry.getFirstCliForUser(userId);
+				if (cli) {
+					const key = cli.machineId;
+					const entry = byMachine.get(key);
+					if (entry) {
+						entry.ids.push(sessionId);
+					} else {
+						byMachine.set(key, { cli, ids: [sessionId] });
+					}
+				}
+			}
+		}
+
+		let totalArchived = 0;
+		const results = await Promise.allSettled(
+			Array.from(byMachine.values()).map(async ({ cli, ids }) => {
+				const result = await this.sendRpc<
+					BulkArchiveSessionsParams,
+					{ archivedCount: number }
+				>(cli.socket, "rpc:session:archive-all", { sessionIds: ids });
+				return result.archivedCount;
 			}),
 		);
 
-		const archivedCount = await bulkArchiveAcpSessions(sessionIds, userId);
-		logger.info({ userId, archivedCount }, "session_bulk_archive_complete");
+		for (const result of results) {
+			if (result.status === "fulfilled") {
+				totalArchived += result.value;
+			}
+		}
 
-		return { archivedCount };
+		logger.info(
+			{ userId, archivedCount: totalArchived },
+			"session_bulk_archive_complete",
+		);
+
+		return { archivedCount: totalArchived };
 	}
 
 	/**

@@ -307,6 +307,142 @@ describe("WalStore", () => {
 		});
 	});
 
+	describe("archiveSession", () => {
+		it("should delete session events and session record, mark as archived", () => {
+			walStore.ensureSession({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				backendId: "backend-1",
+			});
+
+			walStore.appendEvent({
+				sessionId: "session-1",
+				revision: 1,
+				kind: "user_message",
+				payload: { text: "Hello" },
+			});
+
+			walStore.archiveSession("session-1");
+
+			// Session record should be gone
+			expect(walStore.getSession("session-1")).toBeNull();
+
+			// Events should be gone
+			const events = walStore.queryEvents({
+				sessionId: "session-1",
+				revision: 1,
+			});
+			expect(events.length).toBe(0);
+
+			// Should be marked as archived
+			expect(walStore.isArchived("session-1")).toBe(true);
+		});
+
+		it("should be idempotent for already-archived sessions", () => {
+			walStore.archiveSession("non-existent");
+			expect(walStore.isArchived("non-existent")).toBe(true);
+
+			// Archiving again should not throw
+			walStore.archiveSession("non-existent");
+			expect(walStore.isArchived("non-existent")).toBe(true);
+		});
+	});
+
+	describe("bulkArchiveSessions", () => {
+		it("should archive multiple sessions and return count", () => {
+			walStore.ensureSession({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				backendId: "backend-1",
+			});
+			walStore.ensureSession({
+				sessionId: "session-2",
+				machineId: "machine-1",
+				backendId: "backend-1",
+			});
+
+			const count = walStore.bulkArchiveSessions(["session-1", "session-2"]);
+
+			expect(count).toBe(2);
+			expect(walStore.isArchived("session-1")).toBe(true);
+			expect(walStore.isArchived("session-2")).toBe(true);
+			expect(walStore.getSession("session-1")).toBeNull();
+			expect(walStore.getSession("session-2")).toBeNull();
+		});
+	});
+
+	describe("getArchivedSessionIds", () => {
+		it("should return all archived session IDs", () => {
+			walStore.archiveSession("session-a");
+			walStore.archiveSession("session-b");
+
+			const ids = walStore.getArchivedSessionIds();
+			expect(ids).toContain("session-a");
+			expect(ids).toContain("session-b");
+			expect(ids.length).toBe(2);
+		});
+
+		it("should return empty array when no sessions archived", () => {
+			const ids = walStore.getArchivedSessionIds();
+			expect(ids.length).toBe(0);
+		});
+	});
+
+	describe("discovery exclusion of archived sessions", () => {
+		it("should exclude archived sessions from getDiscoveredSessions", () => {
+			// Save two discovered sessions
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: "session-1",
+					backendId: "backend-1",
+					cwd: "/home/user/project1",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+				{
+					sessionId: "session-2",
+					backendId: "backend-1",
+					cwd: "/home/user/project2",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+
+			// Archive session-1
+			walStore.archiveSession("session-1");
+
+			// Only session-2 should be returned
+			const discovered = walStore.getDiscoveredSessions();
+			expect(discovered.length).toBe(1);
+			expect(discovered[0].sessionId).toBe("session-2");
+		});
+
+		it("should exclude archived sessions from getDiscoveredSessions with backendId filter", () => {
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: "session-1",
+					backendId: "backend-1",
+					cwd: "/home/user/project1",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+				{
+					sessionId: "session-2",
+					backendId: "backend-1",
+					cwd: "/home/user/project2",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+
+			walStore.archiveSession("session-1");
+
+			const discovered = walStore.getDiscoveredSessions("backend-1");
+			expect(discovered.length).toBe(1);
+			expect(discovered[0].sessionId).toBe("session-2");
+		});
+	});
+
 	describe("persistence", () => {
 		it("should persist and reload data", () => {
 			walStore.ensureSession({

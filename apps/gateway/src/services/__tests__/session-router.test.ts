@@ -12,8 +12,6 @@ import { SessionRouter } from "../session-router.js";
 
 // Mock the db-service module
 vi.mock("../db-service.js", () => ({
-	archiveAcpSession: vi.fn().mockResolvedValue(true),
-	bulkArchiveAcpSessions: vi.fn().mockResolvedValue(2),
 	createAcpSessionDirect: vi.fn().mockResolvedValue(undefined),
 	closeAcpSession: vi.fn().mockResolvedValue(undefined),
 	updateAcpSessionState: vi.fn().mockResolvedValue(undefined),
@@ -331,7 +329,7 @@ describe("SessionRouter", () => {
 	});
 
 	describe("archiveSession", () => {
-		it("sends close RPC and archives in DB when session is active", async () => {
+		it("sends archive RPC to CLI", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
 			const authInfo = { userId: "user-1", apiKey: "key-123" };
@@ -343,7 +341,7 @@ describe("SessionRouter", () => {
 			cliRegistry.updateSessions(socket.id, [mockSession]);
 
 			socket.emit.mockImplementation((event, request) => {
-				if (event === "rpc:session:close") {
+				if (event === "rpc:session:archive") {
 					setTimeout(() => {
 						sessionRouter.handleRpcResponse({
 							requestId: request.requestId,
@@ -353,8 +351,6 @@ describe("SessionRouter", () => {
 				}
 			});
 
-			const { archiveAcpSession } = await import("../db-service.js");
-
 			const result = await sessionRouter.archiveSession(
 				{ sessionId: "session-1" },
 				"user-1",
@@ -362,32 +358,25 @@ describe("SessionRouter", () => {
 
 			expect(result).toEqual({ ok: true });
 			expect(socket.emit).toHaveBeenCalledWith(
-				"rpc:session:close",
+				"rpc:session:archive",
 				expect.objectContaining({
 					params: { sessionId: "session-1" },
 				}),
 			);
-			expect(archiveAcpSession).toHaveBeenCalledWith("session-1", "user-1");
 		});
 
-		it("archives in DB even when session is not found in registry", async () => {
-			const { archiveAcpSession } = await import("../db-service.js");
-
-			const result = await sessionRouter.archiveSession(
-				{ sessionId: "detached-session" },
-				"user-1",
-			);
-
-			expect(result).toEqual({ ok: true });
-			expect(archiveAcpSession).toHaveBeenCalledWith(
-				"detached-session",
-				"user-1",
-			);
+		it("throws when session is not found in registry", async () => {
+			await expect(
+				sessionRouter.archiveSession(
+					{ sessionId: "detached-session" },
+					"user-1",
+				),
+			).rejects.toThrow("Session not found");
 		});
 	});
 
 	describe("bulkArchiveSessions", () => {
-		it("sends close RPC for each session and bulk-archives in DB", async () => {
+		it("sends archive-all RPC grouped by machine", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
 			const authInfo = { userId: "user-1", apiKey: "key-123" };
@@ -400,17 +389,15 @@ describe("SessionRouter", () => {
 			cliRegistry.updateSessions(socket.id, sessions);
 
 			socket.emit.mockImplementation((event, request) => {
-				if (event === "rpc:session:close") {
+				if (event === "rpc:session:archive-all") {
 					setTimeout(() => {
 						sessionRouter.handleRpcResponse({
 							requestId: request.requestId,
-							result: { ok: true },
+							result: { archivedCount: request.params.sessionIds.length },
 						});
 					}, 0);
 				}
 			});
-
-			const { bulkArchiveAcpSessions } = await import("../db-service.js");
 
 			const result = await sessionRouter.bulkArchiveSessions(
 				["session-1", "session-2"],
@@ -419,69 +406,38 @@ describe("SessionRouter", () => {
 
 			expect(result).toEqual({ archivedCount: 2 });
 			expect(socket.emit).toHaveBeenCalledWith(
-				"rpc:session:close",
+				"rpc:session:archive-all",
 				expect.objectContaining({
-					params: { sessionId: "session-1" },
+					params: {
+						sessionIds: expect.arrayContaining(["session-1", "session-2"]),
+					},
 				}),
-			);
-			expect(socket.emit).toHaveBeenCalledWith(
-				"rpc:session:close",
-				expect.objectContaining({
-					params: { sessionId: "session-2" },
-				}),
-			);
-			expect(bulkArchiveAcpSessions).toHaveBeenCalledWith(
-				["session-1", "session-2"],
-				"user-1",
 			);
 		});
 
-		it("still bulk-archives when some sessions are not in registry", async () => {
+		it("falls back to first CLI when session not in registry", async () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
 			const authInfo = { userId: "user-1", apiKey: "key-123" };
 			cliRegistry.register(socket, info, authInfo);
 
-			// Only register session-1; session-2 is detached
-			cliRegistry.updateSessions(socket.id, [
-				createMockSessionSummary({ sessionId: "session-1" }),
-			]);
-
 			socket.emit.mockImplementation((event, request) => {
-				if (event === "rpc:session:close") {
+				if (event === "rpc:session:archive-all") {
 					setTimeout(() => {
 						sessionRouter.handleRpcResponse({
 							requestId: request.requestId,
-							result: { ok: true },
+							result: { archivedCount: request.params.sessionIds.length },
 						});
 					}, 0);
 				}
 			});
 
-			const { bulkArchiveAcpSessions } = await import("../db-service.js");
-
 			const result = await sessionRouter.bulkArchiveSessions(
-				["session-1", "session-2"],
+				["unknown-1", "unknown-2"],
 				"user-1",
 			);
 
 			expect(result).toEqual({ archivedCount: 2 });
-			expect(bulkArchiveAcpSessions).toHaveBeenCalledWith(
-				["session-1", "session-2"],
-				"user-1",
-			);
-		});
-
-		it("returns archivedCount from DB result", async () => {
-			const { bulkArchiveAcpSessions } = await import("../db-service.js");
-			vi.mocked(bulkArchiveAcpSessions).mockResolvedValueOnce(5);
-
-			const result = await sessionRouter.bulkArchiveSessions(
-				["s1", "s2", "s3", "s4", "s5"],
-				"user-1",
-			);
-
-			expect(result).toEqual({ archivedCount: 5 });
 		});
 	});
 

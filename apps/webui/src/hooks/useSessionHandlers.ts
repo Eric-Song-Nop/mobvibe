@@ -67,7 +67,6 @@ type Mutations = {
 
 type ChatActions = {
 	setAppError: (error: ChatSession["error"]) => void;
-	setActiveSessionId: (id: string | undefined) => void;
 	renameSession: (sessionId: string, title: string) => void;
 	setError: (sessionId: string, error: ChatSession["error"]) => void;
 	setSending: (sessionId: string, sending: boolean) => void;
@@ -199,33 +198,22 @@ export function useSessionHandlers({
 		async (sessionId: string) => {
 			try {
 				await mutations.archiveSessionMutation.mutateAsync({ sessionId });
-				const { activeSessionId, sessions } = useChatStore.getState();
-				if (activeSessionId === sessionId) {
-					const nextSession = Object.values(sessions).find(
-						(session) => session.sessionId !== sessionId,
-					);
-					chatActions.setActiveSessionId(nextSession?.sessionId);
-				}
 			} catch {
 				return;
 			}
 		},
-		[mutations.archiveSessionMutation, chatActions.setActiveSessionId],
+		[mutations.archiveSessionMutation],
 	);
 
 	const handleBulkArchiveSessions = useCallback(
 		async (sessionIds: string[]) => {
 			try {
 				await mutations.bulkArchiveSessionsMutation.mutateAsync({ sessionIds });
-				const { activeSessionId } = useChatStore.getState();
-				if (activeSessionId && sessionIds.includes(activeSessionId)) {
-					chatActions.setActiveSessionId(undefined);
-				}
 			} catch {
 				return;
 			}
 		},
-		[mutations.bulkArchiveSessionsMutation, chatActions.setActiveSessionId],
+		[mutations.bulkArchiveSessionsMutation],
 	);
 
 	const handlePermissionDecision = useCallback(

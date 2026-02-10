@@ -318,6 +318,12 @@ export interface GatewayToCliEvents {
 	"rpc:session:load": (request: RpcRequest<LoadSessionRpcParams>) => void;
 	"rpc:session:reload": (request: RpcRequest<ReloadSessionRpcParams>) => void;
 
+	// Archive RPC requests
+	"rpc:session:archive": (request: RpcRequest<ArchiveSessionParams>) => void;
+	"rpc:session:archive-all": (
+		request: RpcRequest<BulkArchiveSessionsParams>,
+	) => void;
+
 	// Git RPC requests
 	"rpc:git:status": (request: RpcRequest<GitStatusParams>) => void;
 	"rpc:git:fileDiff": (request: RpcRequest<GitFileDiffParams>) => void;
@@ -343,6 +349,10 @@ export interface GatewayToWebuiEvents {
 	"sessions:list": (sessions: SessionSummary[]) => void;
 	"sessions:changed": (payload: SessionsChangedPayload) => void;
 }
+
+// Archive session RPC params
+export type ArchiveSessionParams = { sessionId: string };
+export type BulkArchiveSessionsParams = { sessionIds: string[] };
 
 // Git file status codes (from git status --porcelain)
 export type GitFileStatus = "M" | "A" | "D" | "?" | "R" | "C" | "U" | "!";

@@ -873,6 +873,35 @@ export class SessionManager {
 	}
 
 	/**
+	 * Archive a session: close if active, delete WAL messages, mark as archived.
+	 */
+	async archiveSession(sessionId: string): Promise<void> {
+		if (this.sessions.has(sessionId)) {
+			await this.closeSession(sessionId);
+		}
+		this.walStore.archiveSession(sessionId);
+		this.discoveredSessions.delete(sessionId);
+	}
+
+	/**
+	 * Archive multiple sessions at once.
+	 */
+	async bulkArchiveSessions(
+		sessionIds: string[],
+	): Promise<{ archivedCount: number }> {
+		await Promise.allSettled(
+			sessionIds
+				.filter((id) => this.sessions.has(id))
+				.map((id) => this.closeSession(id)),
+		);
+		const archivedCount = this.walStore.bulkArchiveSessions(sessionIds);
+		for (const id of sessionIds) {
+			this.discoveredSessions.delete(id);
+		}
+		return { archivedCount };
+	}
+
+	/**
 	 * Shutdown the session manager and close resources.
 	 */
 	async shutdown(): Promise<void> {
@@ -930,6 +959,10 @@ export class SessionManager {
 					cursor: options?.cursor,
 				});
 				nextCursor = response.nextCursor;
+
+				// Get archived IDs to filter them out
+				const archivedIds = new Set(this.walStore.getArchivedSessionIds());
+
 				const validity = await Promise.all(
 					response.sessions.map(async (session) => ({
 						session,
@@ -957,6 +990,12 @@ export class SessionManager {
 						this.walStore.markDiscoveredSessionStale(session.sessionId);
 						continue;
 					}
+
+					// Skip archived sessions
+					if (archivedIds.has(session.sessionId)) {
+						continue;
+					}
+
 					this.discoveredSessions.set(session.sessionId, {
 						sessionId: session.sessionId,
 						cwd: session.cwd,

@@ -4,7 +4,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { acpSessions, machines } from "../db/schema.js";
 import { logger } from "../lib/logger.js";
@@ -189,97 +189,6 @@ export async function closeAcpSession(sessionId: string): Promise<boolean> {
 	} catch (error) {
 		logger.error({ err: error }, "db_close_session_error");
 		return false;
-	}
-}
-
-/**
- * Archive a session in the database.
- */
-export async function archiveAcpSession(
-	sessionId: string,
-	userId: string,
-): Promise<boolean> {
-	try {
-		await db
-			.update(acpSessions)
-			.set({
-				state: "archived",
-				closedAt: new Date(),
-				updatedAt: new Date(),
-			})
-			.where(
-				and(
-					eq(acpSessions.sessionId, sessionId),
-					eq(acpSessions.userId, userId),
-				),
-			);
-
-		return true;
-	} catch (error) {
-		logger.error({ err: error }, "db_archive_session_error");
-		return false;
-	}
-}
-
-/**
- * Archive multiple sessions in a single query.
- * Returns the number of rows updated.
- */
-export async function bulkArchiveAcpSessions(
-	sessionIds: string[],
-	userId: string,
-): Promise<number> {
-	if (sessionIds.length === 0) {
-		return 0;
-	}
-	try {
-		const result = await db
-			.update(acpSessions)
-			.set({
-				state: "archived",
-				closedAt: new Date(),
-				updatedAt: new Date(),
-			})
-			.where(
-				and(
-					inArray(acpSessions.sessionId, sessionIds),
-					eq(acpSessions.userId, userId),
-				),
-			)
-			.returning({ id: acpSessions.id });
-
-		return result.length;
-	} catch (error) {
-		logger.error({ err: error }, "db_bulk_archive_sessions_error");
-		return 0;
-	}
-}
-
-/**
- * Given a list of session IDs, return the subset that are archived.
- */
-export async function getArchivedSessionIds(
-	sessionIds: string[],
-	userId: string,
-): Promise<string[]> {
-	if (sessionIds.length === 0) {
-		return [];
-	}
-	try {
-		const result = await db
-			.select({ sessionId: acpSessions.sessionId })
-			.from(acpSessions)
-			.where(
-				and(
-					inArray(acpSessions.sessionId, sessionIds),
-					eq(acpSessions.userId, userId),
-					eq(acpSessions.state, "archived"),
-				),
-			);
-		return result.map((r) => r.sessionId);
-	} catch (error) {
-		logger.error({ err: error }, "db_get_archived_session_ids_error");
-		return [];
 	}
 }
 

@@ -85,6 +85,13 @@ export class WalStore {
 	private stmtMarkDiscoveredSessionStale: ReturnType<Database["query"]>;
 	private stmtDeleteStaleDiscoveredSessions: ReturnType<Database["query"]>;
 
+	// Archive statements
+	private stmtDeleteSessionEvents: ReturnType<Database["query"]>;
+	private stmtDeleteSession: ReturnType<Database["query"]>;
+	private stmtInsertArchivedSession: ReturnType<Database["query"]>;
+	private stmtIsArchived: ReturnType<Database["query"]>;
+	private stmtGetArchivedSessionIds: ReturnType<Database["query"]>;
+
 	constructor(dbPath: string) {
 		// Ensure directory exists
 		const dir = path.dirname(dbPath);
@@ -181,19 +188,21 @@ export class WalStore {
     `);
 
 		this.stmtGetDiscoveredSessions = this.db.query(`
-      SELECT session_id, backend_id, cwd, title, agent_updated_at,
-             discovered_at, last_verified_at, is_stale
-      FROM discovered_sessions
-      WHERE is_stale = 0
-      ORDER BY discovered_at DESC
+      SELECT d.session_id, d.backend_id, d.cwd, d.title, d.agent_updated_at,
+             d.discovered_at, d.last_verified_at, d.is_stale
+      FROM discovered_sessions d
+      LEFT JOIN archived_session_ids a ON d.session_id = a.session_id
+      WHERE d.is_stale = 0 AND a.session_id IS NULL
+      ORDER BY d.discovered_at DESC
     `);
 
 		this.stmtGetDiscoveredSessionsByBackend = this.db.query(`
-      SELECT session_id, backend_id, cwd, title, agent_updated_at,
-             discovered_at, last_verified_at, is_stale
-      FROM discovered_sessions
-      WHERE backend_id = $backendId AND is_stale = 0
-      ORDER BY discovered_at DESC
+      SELECT d.session_id, d.backend_id, d.cwd, d.title, d.agent_updated_at,
+             d.discovered_at, d.last_verified_at, d.is_stale
+      FROM discovered_sessions d
+      LEFT JOIN archived_session_ids a ON d.session_id = a.session_id
+      WHERE d.backend_id = $backendId AND d.is_stale = 0 AND a.session_id IS NULL
+      ORDER BY d.discovered_at DESC
     `);
 
 		this.stmtMarkDiscoveredSessionStale = this.db.query(`
@@ -205,6 +214,28 @@ export class WalStore {
 		this.stmtDeleteStaleDiscoveredSessions = this.db.query(`
       DELETE FROM discovered_sessions
       WHERE is_stale = 1 AND discovered_at < $olderThan
+    `);
+
+		// Archive statements
+		this.stmtDeleteSessionEvents = this.db.query(`
+      DELETE FROM session_events WHERE session_id = $sessionId
+    `);
+
+		this.stmtDeleteSession = this.db.query(`
+      DELETE FROM sessions WHERE session_id = $sessionId
+    `);
+
+		this.stmtInsertArchivedSession = this.db.query(`
+      INSERT OR IGNORE INTO archived_session_ids (session_id, archived_at)
+      VALUES ($sessionId, $archivedAt)
+    `);
+
+		this.stmtIsArchived = this.db.query(`
+      SELECT 1 FROM archived_session_ids WHERE session_id = $sessionId
+    `);
+
+		this.stmtGetArchivedSessionIds = this.db.query(`
+      SELECT session_id FROM archived_session_ids
     `);
 	}
 
@@ -496,6 +527,50 @@ export class WalStore {
 			$olderThan: olderThan.toISOString(),
 		});
 		return result.changes;
+	}
+
+	// ========== Archive Methods ==========
+
+	/**
+	 * Archive a session: delete WAL events, delete session record, mark as archived.
+	 */
+	archiveSession(sessionId: string): void {
+		this.stmtDeleteSessionEvents.run({ $sessionId: sessionId });
+		this.stmtDeleteSession.run({ $sessionId: sessionId });
+		this.stmtInsertArchivedSession.run({
+			$sessionId: sessionId,
+			$archivedAt: new Date().toISOString(),
+		});
+	}
+
+	/**
+	 * Archive multiple sessions. Returns the number archived.
+	 */
+	bulkArchiveSessions(sessionIds: string[]): number {
+		let count = 0;
+		for (const sessionId of sessionIds) {
+			this.archiveSession(sessionId);
+			count++;
+		}
+		return count;
+	}
+
+	/**
+	 * Check if a session ID is archived.
+	 */
+	isArchived(sessionId: string): boolean {
+		const row = this.stmtIsArchived.get({ $sessionId: sessionId });
+		return row !== null;
+	}
+
+	/**
+	 * Get all archived session IDs.
+	 */
+	getArchivedSessionIds(): string[] {
+		const rows = this.stmtGetArchivedSessionIds.all() as {
+			session_id: string;
+		}[];
+		return rows.map((r) => r.session_id);
 	}
 
 	/**

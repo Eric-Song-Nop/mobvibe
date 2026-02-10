@@ -93,6 +93,16 @@ const MIGRATIONS = [
       );
     `,
 	},
+	{
+		version: 4,
+		up: `
+      -- Archived sessions table (local archive state)
+      CREATE TABLE IF NOT EXISTS archived_session_ids (
+        session_id TEXT PRIMARY KEY,
+        archived_at TEXT NOT NULL
+      );
+    `,
+	},
 ];
 
 export function runMigrations(db: Database): void {

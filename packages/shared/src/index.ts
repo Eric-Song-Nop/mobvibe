@@ -82,6 +82,8 @@ export type {
 
 // Socket event types
 export type {
+	ArchiveSessionParams,
+	BulkArchiveSessionsParams,
 	CancelSessionParams,
 	CliErrorPayload,
 	CliRegistrationInfo,

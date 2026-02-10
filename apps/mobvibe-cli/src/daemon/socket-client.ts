@@ -862,6 +862,54 @@ export class SocketClient extends EventEmitter {
 			}
 		});
 
+		// Archive session
+		this.socket.on("rpc:session:archive", async (request) => {
+			try {
+				const { sessionId } = request.params;
+				logger.info(
+					{ requestId: request.requestId, sessionId },
+					"rpc_session_archive",
+				);
+				await sessionManager.archiveSession(sessionId);
+				this.sendRpcResponse(request.requestId, { ok: true });
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_session_archive_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		// Bulk archive sessions
+		this.socket.on("rpc:session:archive-all", async (request) => {
+			try {
+				const { sessionIds } = request.params;
+				logger.info(
+					{
+						requestId: request.requestId,
+						count: sessionIds.length,
+					},
+					"rpc_session_archive_all",
+				);
+				const result = await sessionManager.bulkArchiveSessions(sessionIds);
+				this.sendRpcResponse(request.requestId, result);
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+					},
+					"rpc_session_archive_all_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
 		// Session events RPC handler (for backfill)
 		this.socket.on("rpc:session:events", (request) => {
 			try {

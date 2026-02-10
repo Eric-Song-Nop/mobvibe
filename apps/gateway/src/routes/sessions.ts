@@ -13,7 +13,6 @@ import {
 	requireAuth,
 } from "../middleware/auth.js";
 import type { CliRegistry } from "../services/cli-registry.js";
-import { getArchivedSessionIds } from "../services/db-service.js";
 import type { SessionRouter } from "../services/session-router.js";
 
 const getErrorMessage = (error: unknown) => {
@@ -499,11 +498,7 @@ export function setupSessionRoutes(
 		},
 	);
 
-	/**
-	 * Sends an RPC to the CLI daemon to scan historical session files on disk.
-	 * Filters out archived sessions via a database query before returning
-	 * results. Supports pagination via the `cursor` query parameter.
-	 */
+	// Discover historical sessions from ACP agent
 	router.get(
 		"/sessions/discover",
 		async (request: AuthenticatedRequest, response) => {
@@ -539,16 +534,6 @@ export function setupSessionRoutes(
 					typeof cursor === "string" ? cursor : undefined,
 					requestedBackendId,
 				);
-
-				// Filter out archived sessions
-				const allSessionIds = result.sessions.map((s) => s.sessionId);
-				const archivedIds = await getArchivedSessionIds(allSessionIds, userId);
-				if (archivedIds.length > 0) {
-					const archivedSet = new Set(archivedIds);
-					result.sessions = result.sessions.filter(
-						(s) => !archivedSet.has(s.sessionId),
-					);
-				}
 
 				if (typeof machineId === "string" && userId) {
 					const cli = cliRegistry.getCliByMachineIdForUser(machineId, userId);
