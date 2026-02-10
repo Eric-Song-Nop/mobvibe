@@ -1,6 +1,6 @@
 # @mobvibe/shared
 
-Shared TypeScript types for the remote-claude monorepo.
+Shared TypeScript types and crypto module for the mobvibe monorepo.
 
 ## Installation
 
@@ -42,6 +42,21 @@ import {
   FsRoot,
   FsEntry,
   SessionFsFilePreview,
+
+  // Crypto (E2EE)
+  initCrypto,
+  getSodium,
+  generateMasterSecret,
+  deriveAuthKeyPair,
+  deriveContentKeyPair,
+  generateDEK,
+  wrapDEK,
+  unwrapDEK,
+  encryptPayload,
+  decryptPayload,
+  isEncryptedPayload,
+  createSignedToken,
+  verifySignedToken,
 } from "@mobvibe/shared";
 ```
 
@@ -86,6 +101,22 @@ Type-safe event definitions for Socket.io communication:
 - `FsEntry` - Directory entry (file or folder)
 - `SessionFsFilePreview` - File preview data
 - `SessionFsResourceEntry` - Resource listing entry
+
+### Crypto Module (`crypto/`)
+
+End-to-end encryption primitives built on libsodium:
+
+| File | Exports |
+|------|---------|
+| `init.ts` | `initCrypto()`, `getSodium()` — initialize libsodium |
+| `keys.ts` | `generateMasterSecret`, `deriveAuthKeyPair`, `deriveContentKeyPair`, `generateDEK`, `wrapDEK`, `unwrapDEK` |
+| `envelope.ts` | `encryptPayload`, `decryptPayload`, `isEncryptedPayload` |
+| `auth.ts` | `createSignedToken`, `verifySignedToken` |
+| `types.ts` | `EncryptedPayload`, `CryptoKeyPair`, `SignedAuthToken`, `SodiumLib` |
+
+**Key hierarchy:**
+- Master secret (32 bytes) → `deriveAuthKeyPair` (Ed25519, for CLI auth) + `deriveContentKeyPair` (Curve25519, for DEK wrapping)
+- Per-session DEK → `encryptPayload`/`decryptPayload` (XSalsa20-Poly1305)
 
 ## Building
 

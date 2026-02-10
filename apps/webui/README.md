@@ -6,6 +6,7 @@ React-based web interface for remote-claude with real-time Socket.io updates.
 
 The webui provides a mobile-first chat interface for interacting with ACP sessions:
 - Real-time updates via Socket.io
+- End-to-end encryption (E2EE) — pair with CLI master secret to decrypt session content locally
 - Multi-session management
 - Permission request handling
 - File explorer with code preview
@@ -37,6 +38,17 @@ pnpm preview  # Preview production build
 By default, the gateway URL is auto-detected as `{protocol}://{hostname}:3005`.
 
 ## Architecture
+
+### E2EE
+
+- `lib/e2ee.ts` - `E2EEManager` singleton: pairing, DEK unwrapping, event decryption
+- `components/settings/E2EESettings.tsx` - Pair/unpair UI in Settings
+- `hooks/useSocket.ts` - Decrypts incoming events and backfill events
+- `main.tsx` - Initializes crypto and loads stored secret on startup
+
+**Pairing flow:** User pastes the CLI master secret (from `mobvibe e2ee show`) into Settings > E2EE > Pair. The secret derives a Curve25519 content keypair used to unwrap per-session DEKs. Session event payloads are then decrypted locally with `crypto_secretbox`.
+
+**Storage:** localStorage (browser) or Tauri plugin-store (desktop/mobile).
 
 ### State Management
 

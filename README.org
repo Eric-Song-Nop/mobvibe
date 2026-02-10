@@ -5,6 +5,7 @@ Mobvibe is a distributed ACP (Agent Client Protocol) WebUI for local agent workf
 ** Key Features
 
 - Multi-session chat with real-time streaming updates
+- End-to-end encryption (E2EE) — session content encrypted on CLI, decrypted on WebUI; gateway cannot read content
 - Permission request handling with inline decision cards
 - Slash command picker (=/=) and file resource picker (=@=)
 - Session-scoped file explorer with code preview and Tree-sitter outline
@@ -65,15 +66,17 @@ pnpm build
 
 *** Commands
 
-| Command                          | Description                |
-|----------------------------------+----------------------------|
-| =mobvibe start [--gateway <url>]= | Start daemon               |
-| =mobvibe stop=                    | Stop daemon                |
-| =mobvibe status=                  | Show daemon status         |
-| =mobvibe logs [-f] [-n <lines>]=  | View daemon logs           |
-| =mobvibe login=                   | Authenticate with gateway  |
-| =mobvibe logout=                  | Remove credentials         |
-| =mobvibe auth-status=             | Show authentication status |
+| Command                          | Description                                  |
+|----------------------------------+----------------------------------------------|
+| =mobvibe login=                   | Authenticate and generate E2EE master secret |
+| =mobvibe logout=                  | Remove stored credentials                    |
+| =mobvibe auth-status=             | Show authentication status                   |
+| =mobvibe start [--gateway <url>]= | Start daemon                                 |
+| =mobvibe stop=                    | Stop daemon                                  |
+| =mobvibe status=                  | Show daemon status                           |
+| =mobvibe logs [-f] [-n <lines>]=  | View daemon logs                             |
+| =mobvibe e2ee show=               | Display master secret for WebUI pairing      |
+| =mobvibe e2ee status=             | Show E2EE key status                         |
 
 *** Configuration
 
@@ -183,6 +186,30 @@ The following agents can be used with an ACP Client:
 - [[https://github.com/QwenLM/qwen-code][Qwen Code]]
 - [[https://github.com/stakpak/agent?tab=readme-ov-file#agent-client-protocol-acp][Stakpak]]
 - [[https://github.com/vinhnx/vtcode/blob/main/README.md#zed-ide-integration-agent-client-protocol][VT Code]]
+
+** E2EE Setup
+
+*** 1. Login (CLI)
+
+#+begin_src bash
+mobvibe login
+#+end_src
+
+Enter email and password. This authenticates with the gateway, generates a master secret, and registers the device. The master secret is displayed at the end — copy it for step 2.
+
+*** 2. Pair WebUI
+
+Open WebUI → Settings → End-to-End Encryption → paste the master secret → click "Pair".
+
+To view the secret again later: =mobvibe e2ee show=
+
+*** 3. Start daemon
+
+#+begin_src bash
+mobvibe start
+#+end_src
+
+All session content is now encrypted end-to-end. The gateway routes events but cannot read their content.
 
 ** WebUI Usage
 

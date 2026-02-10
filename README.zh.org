@@ -5,6 +5,7 @@ Mobvibe 是一个分布式 ACP（Agent Client Protocol）WebUI，用于本地 Ag
 ** 主要功能
 
 - 多会话聊天，支持实时流式更新
+- 端到端加密（E2EE）— 会话内容在 CLI 端加密、WebUI 端解密，Gateway 无法读取内容
 - 权限请求处理，内嵌决策卡片
 - Slash 命令选择器（=/=）和文件资源选择器（=@=）
 - 会话级文件浏览器，支持代码预览和 Tree-sitter 大纲
@@ -65,15 +66,17 @@ pnpm build
 
 *** 命令列表
 
-| 命令                              | 说明               |
-|-----------------------------------+--------------------|
-| =mobvibe start [--gateway <url>]=  | 启动守护进程       |
-| =mobvibe stop=                     | 停止守护进程       |
-| =mobvibe status=                   | 查看守护进程状态   |
-| =mobvibe logs [-f] [-n <lines>]=   | 查看守护进程日志   |
-| =mobvibe login=                   | 向 gateway 认证    |
-| =mobvibe logout=                   | 清除认证凭据       |
-| =mobvibe auth-status=              | 查看认证状态       |
+| 命令                              | 说明                                 |
+|-----------------------------------+--------------------------------------|
+| =mobvibe login=                    | 认证并生成 E2EE 主密钥              |
+| =mobvibe logout=                   | 清除认证凭据                         |
+| =mobvibe auth-status=              | 查看认证状态                         |
+| =mobvibe start [--gateway <url>]=  | 启动守护进程                         |
+| =mobvibe stop=                     | 停止守护进程                         |
+| =mobvibe status=                   | 查看守护进程状态                     |
+| =mobvibe logs [-f] [-n <lines>]=   | 查看守护进程日志                     |
+| =mobvibe e2ee show=                | 显示主密钥（用于 WebUI 配对）       |
+| =mobvibe e2ee status=              | 查看 E2EE 密钥状态                  |
 
 *** 配置
 
@@ -183,6 +186,30 @@ Mobvibe 从 =${MOBVIBE_HOME:-~/.mobvibe}/.config.json= 加载 agent 定义。
 - [[https://github.com/QwenLM/qwen-code][Qwen Code]]
 - [[https://github.com/stakpak/agent?tab=readme-ov-file#agent-client-protocol-acp][Stakpak]]
 - [[https://github.com/vinhnx/vtcode/blob/main/README.md#zed-ide-integration-agent-client-protocol][VT Code]]
+
+** E2EE 配置
+
+*** 1. 登录（CLI）
+
+#+begin_src bash
+mobvibe login
+#+end_src
+
+输入邮箱和密码。完成后会生成主密钥并注册设备。主密钥会显示在终端 — 复制它用于第 2 步。
+
+*** 2. 配对 WebUI
+
+打开 WebUI → 设置 → 端到端加密 → 粘贴主密钥 → 点击「配对」。
+
+之后可用 =mobvibe e2ee show= 再次查看主密钥。
+
+*** 3. 启动守护进程
+
+#+begin_src bash
+mobvibe start
+#+end_src
+
+所有会话内容现已端到端加密。Gateway 只负责路由，无法读取内容。
 
 ** WebUI 使用
 

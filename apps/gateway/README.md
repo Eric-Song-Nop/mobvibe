@@ -8,6 +8,8 @@ The gateway acts as a central hub:
 - Receives REST API requests from the webui
 - Routes them to the appropriate CLI instance via Socket.io RPC
 - Relays real-time events (session updates, permissions, terminal output) back to webui
+- Authenticates CLI devices via Ed25519 signed tokens (E2EE)
+- Stores wrapped session DEKs but cannot read encrypted content
 
 ```
 ┌─────────────┐     Socket.io      ┌──────────────┐     Socket.io     ┌───────────────┐
@@ -52,6 +54,8 @@ Environment variables:
 |----------|---------|-------------|
 | `GATEWAY_PORT` | `3005` | Server port |
 | `GATEWAY_CORS_ORIGINS` | (empty) | Additional CORS origins (comma-separated) |
+| `DATABASE_URL` | (required) | PostgreSQL connection string |
+| `BETTER_AUTH_SECRET` | (required) | Secret for Better Auth sessions |
 
 Private IPs (10.x.x.x, 192.168.x.x, 172.16-31.x.x) and localhost are always allowed.
 
@@ -85,6 +89,12 @@ Private IPs (10.x.x.x, 192.168.x.x, 172.16-31.x.x) and localhost are always allo
 | `GET` | `/fs/session/:sessionId/file` | Get file content |
 | `GET` | `/fs/session/:sessionId/resources` | List all resources |
 
+### Device Registration (E2EE)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/auth/device/register` | Register device public key (requires session cookie) |
+
 ### Health
 
 | Method | Endpoint | Description |
@@ -95,6 +105,8 @@ Private IPs (10.x.x.x, 192.168.x.x, 172.16-31.x.x) and localhost are always allo
 ## Socket.io Namespaces
 
 ### `/cli` - CLI Connections
+
+CLI connections are authenticated via Ed25519 signed tokens. The gateway verifies the signature, checks timestamp freshness (< 5 min), and looks up the device public key in the `device_keys` table to resolve the user.
 
 Events from CLI:
 - `cli:register` - Register CLI instance with machineId
@@ -140,6 +152,7 @@ Events to webui:
 - **CliRegistry** (`services/cli-registry.ts`)
   - Tracks connected CLI instances by machineId
   - Maps sessions to CLI instances
+  - Associates CLI connections with userId/deviceId (from E2EE auth)
   - Handles CLI disconnection cleanup
 
 - **SessionRouter** (`services/session-router.ts`)
