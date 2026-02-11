@@ -1,0 +1,191 @@
+{
+	"common": {
+		"appName": "Mobvibe",
+		"languages": {
+			"zh": "中文",
+			"en": "English"
+		}
+	},
+	"header": {
+		"toggleMenu": "切换菜单",
+		"github": "GitHub",
+		"getStarted": "开始使用"
+	},
+	"sidebar": {
+		"closeSidebar": "关闭侧边栏"
+	},
+	"theme": {
+		"light": "浅色",
+		"dark": "深色",
+		"system": "跟随系统"
+	},
+	"messageList": {
+		"emptyState": "选择一个功能来查看演示。"
+	},
+	"footer": {
+		"placeholder": "开始你自己的会话...",
+		"demoMode": "演示模式",
+		"go": "发送"
+	},
+	"getStarted": {
+		"title": "开始使用 Mobvibe",
+		"description": "两步即可开始远程管理你的 AI 编程代理。",
+		"step1Title": "1. 安装并登录",
+		"step1Description": "安装 CLI 并将你的机器连接到网关。",
+		"copyCommand": "复制命令",
+		"step2Title": "2. 打开 Mobvibe",
+		"webApp": "Web 应用",
+		"androidApk": "Android APK",
+		"close": "关闭",
+		"viewOnGitHub": "在 GitHub 上查看"
+	},
+	"features": {
+		"multi-machine": {
+			"title": "多机器管理",
+			"messages": [
+				{
+					"role": "user",
+					"content": "Mobvibe 如何管理多台机器？"
+				},
+				{
+					"role": "assistant",
+					"content": "Mobvibe 通过中央网关连接运行在你任意机器上的 **AI 编程代理**。每台机器运行一个轻量级的 CLI 守护进程，向网关注册，使所有开发环境都可以通过单一界面访问。\n\n你可以即时切换机器、远程执行命令，并在所有设备间管理会话——无论是本地工作站、云端虚拟机还是无界面服务器。"
+				},
+				{
+					"role": "user",
+					"content": "我可以同时查看所有机器吗？"
+				},
+				{
+					"role": "assistant",
+					"content": "当然可以！侧边栏按 **后端**（机器）对会话进行分组。每个后端显示其连接状态和活跃会话。你可以展开或折叠分组，快速跳转到任意机器上的任意会话。"
+				}
+			]
+		},
+		"streaming": {
+			"title": "实时流式传输",
+			"messages": [
+				{
+					"role": "user",
+					"content": "实时流式传输是如何工作的？"
+				},
+				{
+					"role": "assistant",
+					"content": "Mobvibe 通过 WebSocket **逐 token** 实时流式传输 AI 响应。当代理思考和编写代码时，你可以即时看到每个字符的出现——无需等待完整响应。\n\n这包括：\n- 流式传输时的 **Markdown 渲染**\n- 实时构建的 **语法高亮代码块**\n- 内联展开的 **工具调用结果**\n- 代理推理时的 **思考指示器**"
+				},
+				{
+					"role": "user",
+					"content": "终端输出呢？"
+				},
+				{
+					"role": "assistant",
+					"content": "代理运行的命令的终端输出也会实时流式传输。你可以在命令执行时看到 `stdout` 和 `stderr` 的输出，ANSI 颜色自然渲染。就像在观看终端会话的实时展开。"
+				}
+			]
+		},
+		"sessions": {
+			"title": "会话管理",
+			"messages": [
+				{
+					"role": "user",
+					"content": "Mobvibe 中的会话是如何工作的？"
+				},
+				{
+					"role": "assistant",
+					"content": "与 AI 代理的每次对话都是一个 **会话**。会话在重新连接时保持不变——如果浏览器断开连接，你可以从上次中断的地方继续。\n\n你可以：\n- 在任何已连接的机器上创建新会话\n- **重命名** 会话以便于查找\n- **归档** 已完成的会话\n- 即时切换活跃会话"
+				},
+				{
+					"role": "user",
+					"content": "我可以稍后恢复会话吗？"
+				},
+				{
+					"role": "assistant",
+					"content": "当然可以。会话保留完整的消息历史。重新连接时，所有之前的消息——包括代码块、工具输出和文件更改——都会恢复。代理也保留其上下文，因此你可以无缝地继续对话。"
+				}
+			]
+		},
+		"file-explorer": {
+			"title": "文件浏览器",
+			"messages": [
+				{
+					"role": "user",
+					"content": "介绍一下文件浏览器。"
+				},
+				{
+					"role": "assistant",
+					"content": "内置的 **文件浏览器** 让你可以直接在 Web 界面中浏览任何已连接机器的远程文件系统。你可以：\n\n- 使用熟悉的树形视图浏览目录\n- **预览文件** 并带有语法高亮\n- 使用 `@文件名` 提及在消息中引用文件\n- 查看代理在会话期间修改了哪些文件"
+				},
+				{
+					"role": "user",
+					"content": "@文件提及是怎么工作的？"
+				},
+				{
+					"role": "assistant",
+					"content": "在消息输入框中输入 `@` 即可触发文件选择器。输入时会从会话工作目录中过滤匹配的文件。选择文件后，它会作为上下文附加——代理会在你的消息中看到文件内容。\n\n这非常适合说「重构 `@utils.ts` 使用 async/await」之类的请求。"
+				}
+			]
+		},
+		"e2ee": {
+			"title": "端到端加密",
+			"messages": [
+				{
+					"role": "user",
+					"content": "端到端加密是如何工作的？"
+				},
+				{
+					"role": "assistant",
+					"content": "Mobvibe 使用 `libsodium` 支持 **端到端加密 (E2EE)**。启用后，消息在 CLI 守护进程上加密后传输，仅在浏览器中解密。\n\n网关 **永远看不到明文**——它只转发加密的数据包。这意味着即使网关被入侵，你的代码和对话仍然是私密的。"
+				},
+				{
+					"role": "user",
+					"content": "密钥交换是如何处理的？"
+				},
+				{
+					"role": "assistant",
+					"content": "密钥交换使用 **X25519**（基于 Curve25519 的 Diffie-Hellman）。CLI 守护进程和 Web 客户端各自生成临时密钥对。握手后，派生共享密钥并用于 **XChaCha20-Poly1305** 认证加密。\n\n密钥永远不会存储在网关上。每个会话都建立新的密钥对，提供前向保密性。"
+				}
+			]
+		},
+		"cross-platform": {
+			"title": "桌面端与移动端",
+			"messages": [
+				{
+					"role": "user",
+					"content": "Mobvibe 支持哪些平台？"
+				},
+				{
+					"role": "assistant",
+					"content": "Mobvibe 真正做到了跨平台：\n\n- **Web** ——适用于任何现代浏览器\n- **桌面端** ——通过 Tauri 提供 macOS、Windows 和 Linux 原生应用\n- **移动端** ——iOS 和 Android 应用（同样基于 Tauri）\n\n所有平台共享相同的 React 代码库并连接到同一个网关，因此你的会话在所有设备间同步。"
+				},
+				{
+					"role": "user",
+					"content": "不同平台之间有区别吗？"
+				},
+				{
+					"role": "assistant",
+					"content": "核心体验完全一致。桌面端和移动端应用有一些额外功能：\n\n- 代理完成任务时的 **原生通知**\n- **深度链接** 可直接打开会话\n- **持久存储** 可离线访问会话历史\n- **系统主题** 集成，跟随操作系统外观\n\nWeb 版本同样出色——它是最简单的入门方式。"
+				}
+			]
+		},
+		"acp": {
+			"title": "使用你想要的任何代理，Claude Code 或 Codex。",
+			"messages": [
+				{
+					"role": "user",
+					"content": "什么是 ACP？"
+				},
+				{
+					"role": "assistant",
+					"content": "**ACP（代理通信协议）** 是 Mobvibe 用于网关、CLI 守护进程和前端之间通信的开放协议。它的设计目标是：\n\n- **传输无关** ——支持 WebSocket、HTTP 或 stdio\n- **可扩展** ——可以添加新的消息类型而不破坏现有客户端\n- **流式优先** ——所有响应支持增量传输\n- **安全** ——协议内置可选的端到端加密层"
+				},
+				{
+					"role": "user",
+					"content": "我可以构建自己的客户端吗？"
+				},
+				{
+					"role": "assistant",
+					"content": "可以！ACP 有完整的文档，专为第三方集成而设计。你可以：\n\n- 构建连接到任何 Mobvibe 网关的自定义前端\n- 创建以编程方式与代理交互的 CLI 工具\n- 将代理能力集成到你现有的工具和工作流中\n\n`@mobvibe/shared` 包提供了所有协议消息的 TypeScript 类型。"
+				}
+			]
+		}
+	}
+}

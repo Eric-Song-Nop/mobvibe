@@ -1,0 +1,190 @@
+{
+	"common": {
+		"appName": "Mobvibe",
+		"languages": {
+			"zh": "Chinese",
+			"en": "English"
+		}
+	},
+	"header": {
+		"toggleMenu": "Toggle menu",
+		"github": "GitHub",
+		"getStarted": "Get Started"
+	},
+	"sidebar": {
+		"closeSidebar": "Close sidebar"
+	},
+	"theme": {
+		"light": "Light",
+		"dark": "Dark",
+		"system": "System"
+	},
+	"messageList": {
+		"emptyState": "Select a feature to see it in action."
+	},
+	"footer": {
+		"placeholder": "Start your own session...",
+		"go": "Go"
+	},
+	"getStarted": {
+		"title": "Get Started with Mobvibe",
+		"description": "Two steps to start managing your AI coding agents remotely.",
+		"step1Title": "1. Install & Login",
+		"step1Description": "This installs the CLI and connects your machine to the gateway.",
+		"copyCommand": "Copy command",
+		"step2Title": "2. Open Mobvibe",
+		"webApp": "Web App",
+		"androidApk": "Android APK",
+		"close": "Close",
+		"viewOnGitHub": "View on GitHub"
+	},
+	"features": {
+		"multi-machine": {
+			"title": "Multi-Machine Management",
+			"messages": [
+				{
+					"role": "user",
+					"content": "How does Mobvibe handle multiple machines?"
+				},
+				{
+					"role": "assistant",
+					"content": "Mobvibe connects to **AI coding agents** running on any of your machines through a central gateway. Each machine runs a lightweight CLI daemon that registers with the gateway, making all your development environments accessible from a single interface.\n\nYou can switch between machines instantly, run commands remotely, and manage sessions across your entire fleet — whether it's a local workstation, a cloud VM, or a headless server."
+				},
+				{
+					"role": "user",
+					"content": "Can I see all my machines at once?"
+				},
+				{
+					"role": "assistant",
+					"content": "Yes! The sidebar groups sessions by **backend** (machine). Each backend shows its connection status and active sessions. You can expand or collapse groups, and quickly jump between any session on any machine."
+				}
+			]
+		},
+		"streaming": {
+			"title": "Real-Time Streaming",
+			"messages": [
+				{
+					"role": "user",
+					"content": "How does real-time streaming work?"
+				},
+				{
+					"role": "assistant",
+					"content": "Mobvibe streams AI responses **token by token** in real time via WebSocket. As the agent thinks and writes code, you see every character appear instantly — no waiting for the full response.\n\nThis includes:\n- **Markdown rendering** as it streams\n- **Syntax-highlighted code blocks** that build up live\n- **Tool call results** that expand inline\n- **Thinking indicators** while the agent reasons"
+				},
+				{
+					"role": "user",
+					"content": "What about terminal output?"
+				},
+				{
+					"role": "assistant",
+					"content": "Terminal output from commands the agent runs is also streamed in real time. You'll see `stdout` and `stderr` appear as the command executes, with ANSI colors rendered naturally. It feels like watching a terminal session unfold."
+				}
+			]
+		},
+		"sessions": {
+			"title": "Session Management",
+			"messages": [
+				{
+					"role": "user",
+					"content": "How do sessions work in Mobvibe?"
+				},
+				{
+					"role": "assistant",
+					"content": "Each conversation with an AI agent is a **session**. Sessions persist across reconnections — if your browser disconnects, you pick up right where you left off.\n\nYou can:\n- Create new sessions on any connected machine\n- **Rename** sessions for easy reference\n- **Archive** sessions you're done with\n- Switch between active sessions instantly"
+				},
+				{
+					"role": "user",
+					"content": "Can I resume a session later?"
+				},
+				{
+					"role": "assistant",
+					"content": "Absolutely. Sessions maintain their full message history. When you reconnect, all previous messages — including code blocks, tool outputs, and file changes — are restored. The agent retains its context too, so you can continue the conversation seamlessly."
+				}
+			]
+		},
+		"file-explorer": {
+			"title": "File Explorer",
+			"messages": [
+				{
+					"role": "user",
+					"content": "Tell me about the file explorer."
+				},
+				{
+					"role": "assistant",
+					"content": "The built-in **file explorer** lets you browse the remote file system of any connected machine directly from the web UI. You can:\n\n- Navigate directories with a familiar tree view\n- **Preview files** with syntax highlighting\n- Reference files in your messages using `@filename` mentions\n- See which files the agent has modified during a session"
+				},
+				{
+					"role": "user",
+					"content": "How do @file mentions work?"
+				},
+				{
+					"role": "assistant",
+					"content": "Type `@` in the message input to trigger the file picker. As you type, it filters matching files from the session's working directory. Select a file, and it gets attached as context — the agent sees the file's contents along with your message.\n\nThis is perfect for saying things like \"refactor `@utils.ts` to use async/await\"."
+				}
+			]
+		},
+		"e2ee": {
+			"title": "End-to-End Encryption",
+			"messages": [
+				{
+					"role": "user",
+					"content": "How does end-to-end encryption work?"
+				},
+				{
+					"role": "assistant",
+					"content": "Mobvibe supports **end-to-end encryption (E2EE)** using `libsodium`. When enabled, messages are encrypted on the CLI daemon before transmission and decrypted only in your browser.\n\nThe gateway **never sees plaintext** — it only relays encrypted payloads. This means even if the gateway is compromised, your code and conversations remain private."
+				},
+				{
+					"role": "user",
+					"content": "How is the key exchange handled?"
+				},
+				{
+					"role": "assistant",
+					"content": "Key exchange uses **X25519** (Diffie-Hellman over Curve25519). The CLI daemon and web client each generate ephemeral keypairs. After the handshake, a shared secret is derived and used for **XChaCha20-Poly1305** authenticated encryption.\n\nNo keys are ever stored on the gateway. Each session establishes a fresh keypair, providing forward secrecy."
+				}
+			]
+		},
+		"cross-platform": {
+			"title": "Desktop & Mobile",
+			"messages": [
+				{
+					"role": "user",
+					"content": "What platforms does Mobvibe support?"
+				},
+				{
+					"role": "assistant",
+					"content": "Mobvibe is truly cross-platform:\n\n- **Web** — works in any modern browser\n- **Desktop** — native apps via Tauri for macOS, Windows, and Linux\n- **Mobile** — iOS and Android apps (also via Tauri)\n\nAll platforms share the same React codebase and connect to the same gateway, so your sessions sync everywhere."
+				},
+				{
+					"role": "user",
+					"content": "Are there differences between platforms?"
+				},
+				{
+					"role": "assistant",
+					"content": "The core experience is identical. Desktop and mobile apps get a few extras:\n\n- **Native notifications** when the agent completes a task\n- **Deep linking** to open sessions directly\n- **Persistent storage** for offline access to session history\n- **System theme** integration that follows your OS appearance\n\nThe web version works great too — it's the easiest way to get started."
+				}
+			]
+		},
+		"acp": {
+			"title": "Use whatever agent you want claude code or codex.",
+			"messages": [
+				{
+					"role": "user",
+					"content": "What is ACP?"
+				},
+				{
+					"role": "assistant",
+					"content": "**ACP (Agent Communication Protocol)** is the open protocol Mobvibe uses for communication between the gateway, CLI daemons, and frontends. It's designed to be:\n\n- **Transport-agnostic** — works over WebSocket, HTTP, or stdio\n- **Extensible** — new message types can be added without breaking existing clients\n- **Streaming-first** — all responses support incremental delivery\n- **Secure** — optional E2EE layer built into the protocol"
+				},
+				{
+					"role": "user",
+					"content": "Can I build my own client?"
+				},
+				{
+					"role": "assistant",
+					"content": "Yes! ACP is fully documented and designed for third-party integration. You can:\n\n- Build custom frontends that connect to any Mobvibe gateway\n- Create CLI tools that interact with agents programmatically\n- Integrate agent capabilities into your existing tools and workflows\n\nThe `@mobvibe/shared` package provides TypeScript types for all protocol messages."
+				}
+			]
+		}
+	}
+}

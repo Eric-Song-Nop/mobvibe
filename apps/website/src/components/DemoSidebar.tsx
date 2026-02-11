@@ -1,10 +1,12 @@
 import {
 	ComputerIcon,
+	LanguageSkillIcon,
 	Moon02Icon,
 	PaintBoardIcon,
 	Sun03Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useTranslation } from "react-i18next";
 import { useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import type { DemoFeature } from "@/data/features";
+import { supportedLanguages } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 interface DemoSidebarProps {
@@ -33,6 +36,7 @@ export function DemoSidebar({
 	onClose,
 }: DemoSidebarProps) {
 	const { theme, setTheme } = useTheme();
+	const { t, i18n } = useTranslation();
 
 	return (
 		<>
@@ -42,7 +46,7 @@ export function DemoSidebar({
 					type="button"
 					className="fixed inset-0 z-40 bg-black/20 md:hidden"
 					onClick={onClose}
-					aria-label="Close sidebar"
+					aria-label={t("sidebar.closeSidebar")}
 				/>
 			)}
 
@@ -55,7 +59,7 @@ export function DemoSidebar({
 			>
 				{/* Brand */}
 				<div className="flex h-12 items-center gap-2 px-4">
-					<span className="text-sm font-medium">Mobvibe</span>
+					<span className="text-sm font-medium">{t("common.appName")}</span>
 				</div>
 
 				<Separator />
@@ -89,8 +93,8 @@ export function DemoSidebar({
 
 				<Separator />
 
-				{/* Theme toggle */}
-				<div className="p-2">
+				{/* Theme toggle & Language switcher */}
+				<div className="flex flex-col gap-1 p-2">
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
 							<Button
@@ -106,10 +110,10 @@ export function DemoSidebar({
 								/>
 								<span className="text-xs">
 									{theme === "light"
-										? "Light"
+										? t("theme.light")
 										: theme === "dark"
-											? "Dark"
-											: "System"}
+											? t("theme.dark")
+											: t("theme.system")}
 								</span>
 							</Button>
 						</DropdownMenuTrigger>
@@ -120,7 +124,7 @@ export function DemoSidebar({
 									strokeWidth={2}
 									aria-hidden="true"
 								/>
-								Light
+								{t("theme.light")}
 							</DropdownMenuItem>
 							<DropdownMenuItem onClick={() => setTheme("dark")}>
 								<HugeiconsIcon
@@ -128,7 +132,7 @@ export function DemoSidebar({
 									strokeWidth={2}
 									aria-hidden="true"
 								/>
-								Dark
+								{t("theme.dark")}
 							</DropdownMenuItem>
 							<DropdownMenuItem onClick={() => setTheme("system")}>
 								<HugeiconsIcon
@@ -136,8 +140,38 @@ export function DemoSidebar({
 									strokeWidth={2}
 									aria-hidden="true"
 								/>
-								System
+								{t("theme.system")}
 							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
+
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild>
+							<Button
+								variant="ghost"
+								size="sm"
+								className="w-full justify-start gap-2"
+							>
+								<HugeiconsIcon
+									icon={LanguageSkillIcon}
+									strokeWidth={2}
+									className="size-3.5"
+									aria-hidden="true"
+								/>
+								<span className="text-xs">
+									{t(`common.languages.${i18n.resolvedLanguage ?? "en"}`)}
+								</span>
+							</Button>
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="start" side="top">
+							{supportedLanguages.map((lang) => (
+								<DropdownMenuItem
+									key={lang}
+									onClick={() => i18n.changeLanguage(lang)}
+								>
+									{t(`common.languages.${lang}`)}
+								</DropdownMenuItem>
+							))}
 						</DropdownMenuContent>
 					</DropdownMenu>
 				</div>

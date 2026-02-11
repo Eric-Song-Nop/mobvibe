@@ -1,4 +1,5 @@
 import { useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import {
 	AlertDialog,
 	AlertDialogCancel,
@@ -25,6 +26,7 @@ export function GetStartedDialog({
 	open,
 	onOpenChange,
 }: GetStartedDialogProps) {
+	const { t } = useTranslation();
 	const codeRef = useRef<HTMLElement>(null);
 
 	const handleCopy = useCallback(() => {
@@ -36,22 +38,24 @@ export function GetStartedDialog({
 			<AlertDialogTrigger asChild>{children}</AlertDialogTrigger>
 			<AlertDialogContent className="sm:max-w-md">
 				<AlertDialogHeader>
-					<AlertDialogTitle>Get Started with Mobvibe</AlertDialogTitle>
+					<AlertDialogTitle>{t("getStarted.title")}</AlertDialogTitle>
 					<AlertDialogDescription>
-						Two steps to start managing your AI coding agents remotely.
+						{t("getStarted.description")}
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 
 				<div className="flex flex-col gap-4">
 					{/* Step 1 */}
 					<div className="flex flex-col gap-2">
-						<span className="text-sm font-medium">1. Install &amp; Login</span>
+						<span className="text-sm font-medium">
+							{t("getStarted.step1Title")}
+						</span>
 						<div className="bg-muted flex items-center gap-2 rounded-md px-3 py-2">
 							<code ref={codeRef} className="flex-1 text-xs">
 								{CLI_COMMAND}
 							</code>
 							<Button variant="ghost" size="icon-sm" onClick={handleCopy}>
-								<span className="sr-only">Copy command</span>
+								<span className="sr-only">{t("getStarted.copyCommand")}</span>
 								<svg
 									className="size-3.5"
 									xmlns="http://www.w3.org/2000/svg"
@@ -70,7 +74,7 @@ export function GetStartedDialog({
 							</Button>
 						</div>
 						<p className="text-muted-foreground text-xs">
-							This installs the CLI and connects your machine to the gateway.
+							{t("getStarted.step1Description")}
 						</p>
 					</div>
 
@@ -78,7 +82,9 @@ export function GetStartedDialog({
 
 					{/* Step 2 */}
 					<div className="flex flex-col gap-2">
-						<span className="text-sm font-medium">2. Open Mobvibe</span>
+						<span className="text-sm font-medium">
+							{t("getStarted.step2Title")}
+						</span>
 						<div className="flex flex-wrap gap-2">
 							<a
 								href="https://mobvibe.netlify.app"
@@ -86,7 +92,7 @@ export function GetStartedDialog({
 								rel="noopener noreferrer"
 							>
 								<Button variant="outline" size="sm">
-									Web App
+									{t("getStarted.webApp")}
 								</Button>
 							</a>
 							<a
@@ -95,7 +101,7 @@ export function GetStartedDialog({
 								rel="noopener noreferrer"
 							>
 								<Button variant="outline" size="sm">
-									Android APK
+									{t("getStarted.androidApk")}
 								</Button>
 							</a>
 						</div>
@@ -103,14 +109,14 @@ export function GetStartedDialog({
 				</div>
 
 				<AlertDialogFooter>
-					<AlertDialogCancel>Close</AlertDialogCancel>
+					<AlertDialogCancel>{t("getStarted.close")}</AlertDialogCancel>
 					<Button variant="outline" asChild>
 						<a
 							href="https://github.com/Eric-Song-Nop/mobvibe"
 							target="_blank"
 							rel="noopener noreferrer"
 						>
-							View on GitHub
+							{t("getStarted.viewOnGitHub")}
 						</a>
 					</Button>
 				</AlertDialogFooter>

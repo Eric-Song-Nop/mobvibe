@@ -3,17 +3,18 @@ import { DemoFooter } from "@/components/DemoFooter";
 import { DemoHeader } from "@/components/DemoHeader";
 import { DemoMessageList } from "@/components/DemoMessageList";
 import { DemoSidebar } from "@/components/DemoSidebar";
-import { features } from "@/data/features";
+import { useFeatures } from "@/data/features";
 import { useStreamingDemo } from "@/hooks/use-streaming-demo";
 
 export default function App() {
+	const features = useFeatures();
 	const [sidebarOpen, setSidebarOpen] = useState(false);
 	const { activeFeatureId, setActiveFeatureId, displayMessages } =
 		useStreamingDemo(features);
 
 	const activeFeatureTitle = useMemo(
 		() => features.find((f) => f.id === activeFeatureId)?.title ?? "",
-		[activeFeatureId],
+		[activeFeatureId, features],
 	);
 
 	const handleMenuToggle = useCallback(() => {

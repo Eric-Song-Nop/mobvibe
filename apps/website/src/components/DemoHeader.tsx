@@ -1,5 +1,6 @@
 import { GithubIcon, Menu01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useTranslation } from "react-i18next";
 import { GetStartedDialog } from "@/components/GetStartedDialog";
 import { Button } from "@/components/ui/button";
 
@@ -12,6 +13,8 @@ export function DemoHeader({
 	activeFeatureTitle,
 	onMenuToggle,
 }: DemoHeaderProps) {
+	const { t } = useTranslation();
+
 	return (
 		<header className="bg-background/80 border-b px-4 py-3 backdrop-blur shrink-0">
 			<div className="mx-auto flex w-full max-w-5xl items-center gap-2">
@@ -27,10 +30,10 @@ export function DemoHeader({
 						className="size-4"
 						aria-hidden="true"
 					/>
-					<span className="sr-only">Toggle menu</span>
+					<span className="sr-only">{t("header.toggleMenu")}</span>
 				</Button>
 
-				<span className="text-sm font-medium">Mobvibe</span>
+				<span className="text-sm font-medium">{t("common.appName")}</span>
 				{activeFeatureTitle && (
 					<>
 						<span className="text-muted-foreground text-sm">/</span>
@@ -54,12 +57,12 @@ export function DemoHeader({
 							className="size-4"
 							aria-hidden="true"
 						/>
-						<span className="sr-only">GitHub</span>
+						<span className="sr-only">{t("header.github")}</span>
 					</Button>
 				</a>
 
 				<GetStartedDialog>
-					<Button size="sm">Get Started</Button>
+					<Button size="sm">{t("header.getStarted")}</Button>
 				</GetStartedDialog>
 			</div>
 		</header>

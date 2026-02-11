@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { DemoMessageItem } from "@/components/DemoMessageItem";
 import type { DisplayMessage } from "@/hooks/use-streaming-demo";
 
@@ -7,6 +8,7 @@ interface DemoMessageListProps {
 }
 
 export function DemoMessageList({ messages }: DemoMessageListProps) {
+	const { t } = useTranslation();
 	const bottomRef = useRef<HTMLDivElement>(null);
 
 	const lastMessage = messages[messages.length - 1];
@@ -20,7 +22,7 @@ export function DemoMessageList({ messages }: DemoMessageListProps) {
 			<main className="flex min-h-0 flex-1 flex-col overflow-hidden">
 				<div className="mx-auto flex w-full max-w-5xl flex-1 items-center justify-center px-4">
 					<p className="text-muted-foreground text-xs">
-						Select a feature to see it in action.
+						{t("messageList.emptyState")}
 					</p>
 				</div>
 			</main>
