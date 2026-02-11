@@ -3,14 +3,37 @@
  * but libsodium is a separate npm package. This script copies the real
  * libsodium ESM file into the expected location.
  *
- * Uses require.resolve to find actual paths, so it works regardless of
- * the package manager's node_modules layout (pnpm, npm, yarn).
+ * Tries multiple resolution strategies so it works regardless of the
+ * package manager's node_modules layout (pnpm strict, npm flat, etc.).
  */
 const fs = require("fs");
 const path = require("path");
 
+// Directories to try resolving libsodium-wrappers from.
+// In pnpm strict mode, it's only resolvable from packages that depend on it.
+const searchPaths = [
+	path.join(__dirname, "..", "packages", "shared"),
+	path.join(__dirname, "..", "packages", "core"),
+	path.join(__dirname, ".."),
+	__dirname,
+];
+
 try {
-	const wrappersEntry = require.resolve("libsodium-wrappers");
+	// Find libsodium-wrappers package directory
+	let wrappersEntry = null;
+	for (const searchPath of searchPaths) {
+		try {
+			wrappersEntry = require.resolve("libsodium-wrappers", {
+				paths: [searchPath],
+			});
+			break;
+		} catch {}
+	}
+	if (!wrappersEntry) {
+		console.warn("[fix-libsodium-esm] could not resolve libsodium-wrappers");
+		return;
+	}
+
 	const wrappersPkg = path.dirname(
 		findUp("package.json", path.dirname(wrappersEntry)),
 	);
@@ -18,29 +41,57 @@ try {
 	const target = path.join(esmDir, "libsodium.mjs");
 
 	if (fs.existsSync(target)) {
-		// Already exists (real file, symlink, or previous copy)
 		const stat = fs.lstatSync(target);
-		if (stat.isFile() && stat.size > 0) return;
-		// Remove broken symlink
+		if (stat.isFile() && stat.size > 0) {
+			console.log("[fix-libsodium-esm] already exists:", target);
+			return;
+		}
+		// Remove broken symlink or empty file
 		fs.unlinkSync(target);
 	}
-	if (!fs.existsSync(esmDir)) return;
-
-	// Resolve libsodium from within libsodium-wrappers (it's a direct dep)
-	const sodiumEntry = require.resolve("libsodium", { paths: [wrappersPkg] });
-	const sodiumPkg = path.dirname(
-		findUp("package.json", path.dirname(sodiumEntry)),
-	);
-	const source = path.join(sodiumPkg, "dist", "modules-esm", "libsodium.mjs");
-
-	if (!fs.existsSync(source)) {
-		console.warn("[fix-libsodium-esm] source not found:", source);
+	if (!fs.existsSync(esmDir)) {
+		console.warn("[fix-libsodium-esm] ESM dir not found:", esmDir);
 		return;
 	}
 
-	// Copy instead of symlink — more reliable across pnpm store layouts
-	fs.copyFileSync(source, target);
-	console.log("[fix-libsodium-esm] copied", source, "→", target);
+	// Strategy 1: libsodium is a sibling in pnpm's virtual store
+	// e.g. .pnpm/libsodium-wrappers@0.7.16/node_modules/libsodium/
+	const siblingSource = path.join(
+		path.dirname(wrappersPkg),
+		"libsodium",
+		"dist",
+		"modules-esm",
+		"libsodium.mjs",
+	);
+
+	// Strategy 2: resolve libsodium from within libsodium-wrappers context
+	let resolvedSource = null;
+	try {
+		const sodiumEntry = require.resolve("libsodium", {
+			paths: [wrappersPkg],
+		});
+		const sodiumPkg = path.dirname(
+			findUp("package.json", path.dirname(sodiumEntry)),
+		);
+		resolvedSource = path.join(
+			sodiumPkg,
+			"dist",
+			"modules-esm",
+			"libsodium.mjs",
+		);
+	} catch {}
+
+	// Try each source in order
+	const sources = [siblingSource, resolvedSource].filter(Boolean);
+	for (const source of sources) {
+		if (fs.existsSync(source)) {
+			fs.copyFileSync(source, target);
+			console.log("[fix-libsodium-esm] copied", source, "→", target);
+			return;
+		}
+	}
+
+	console.warn("[fix-libsodium-esm] no source found, tried:", sources);
 } catch (e) {
 	console.warn("[fix-libsodium-esm]", e.message);
 }

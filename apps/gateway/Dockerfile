@@ -13,8 +13,10 @@ COPY scripts/ ./scripts/
 COPY packages/shared ./packages/shared
 COPY apps/gateway ./apps/gateway
 
-# Install dependencies
+# Install dependencies (postinstall runs fix-libsodium-esm.cjs)
 RUN pnpm install --frozen-lockfile
+# Ensure libsodium ESM fix applied (postinstall may silently fail in pnpm strict mode)
+RUN node scripts/fix-libsodium-esm.cjs
 
 # Build all packages in order
 RUN pnpm --filter @mobvibe/shared build
@@ -35,6 +37,8 @@ COPY --from=builder /app/apps/gateway ./apps/gateway
 
 # Install all dependencies (need drizzle-kit for migrations)
 RUN pnpm install --frozen-lockfile
+# Ensure libsodium ESM fix applied
+RUN node scripts/fix-libsodium-esm.cjs
 
 WORKDIR /app/apps/gateway
 
