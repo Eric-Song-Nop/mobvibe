@@ -1,7 +1,7 @@
 /**
  * libsodium-wrappers ESM entry imports "./libsodium.mjs" relatively,
- * but libsodium is a separate npm package. This script creates a symlink
- * from the expected path to the actual libsodium ESM file.
+ * but libsodium is a separate npm package. This script copies the real
+ * libsodium ESM file into the expected location.
  *
  * Uses require.resolve to find actual paths, so it works regardless of
  * the package manager's node_modules layout (pnpm, npm, yarn).
@@ -15,12 +15,19 @@ try {
 		findUp("package.json", path.dirname(wrappersEntry)),
 	);
 	const esmDir = path.join(wrappersPkg, "dist", "modules-esm");
-	const link = path.join(esmDir, "libsodium.mjs");
+	const target = path.join(esmDir, "libsodium.mjs");
 
-	if (fs.existsSync(link)) return;
+	if (fs.existsSync(target)) {
+		// Already exists (real file, symlink, or previous copy)
+		const stat = fs.lstatSync(target);
+		if (stat.isFile() && stat.size > 0) return;
+		// Remove broken symlink
+		fs.unlinkSync(target);
+	}
 	if (!fs.existsSync(esmDir)) return;
 
-	const sodiumEntry = require.resolve("libsodium");
+	// Resolve libsodium from within libsodium-wrappers (it's a direct dep)
+	const sodiumEntry = require.resolve("libsodium", { paths: [wrappersPkg] });
 	const sodiumPkg = path.dirname(
 		findUp("package.json", path.dirname(sodiumEntry)),
 	);
@@ -31,7 +38,9 @@ try {
 		return;
 	}
 
-	fs.symlinkSync(source, link);
+	// Copy instead of symlink — more reliable across pnpm store layouts
+	fs.copyFileSync(source, target);
+	console.log("[fix-libsodium-esm] copied", source, "→", target);
 } catch (e) {
 	console.warn("[fix-libsodium-esm]", e.message);
 }
