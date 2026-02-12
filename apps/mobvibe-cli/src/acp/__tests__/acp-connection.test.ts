@@ -29,7 +29,8 @@ mock.module("node:stream", () => ({
 }));
 
 import type { AcpBackendConfig } from "../../config.js";
-import { AcpConnection } from "../acp-connection.js";
+
+const { AcpConnection } = await import("../acp-connection.js");
 
 const createMockBackendConfig = (): AcpBackendConfig => ({
 	id: "test-backend",
@@ -39,7 +40,7 @@ const createMockBackendConfig = (): AcpBackendConfig => ({
 });
 
 describe("AcpConnection", () => {
-	let connection: AcpConnection;
+	let connection: InstanceType<typeof AcpConnection>;
 	let mockBackend: AcpBackendConfig;
 
 	beforeEach(() => {
@@ -59,7 +60,6 @@ describe("AcpConnection", () => {
 		});
 
 		it("returns correct capabilities when sessionCapabilities.list is defined", () => {
-			// Access private property for testing
 			// @ts-expect-error - accessing private property for testing
 			connection.agentCapabilities = {
 				sessionCapabilities: {
