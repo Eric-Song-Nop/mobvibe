@@ -182,6 +182,9 @@ importers:
       '@biomejs/biome':
         specifier: 2.3.11
         version: 2.3.11
+      '@types/node':
+        specifier: ^24.10.1
+        version: 24.10.7
       '@types/react':
         specifier: ~19.0.10
         version: 19.0.14
