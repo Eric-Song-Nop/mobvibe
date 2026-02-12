@@ -42,7 +42,9 @@
 		"build": "tsc -p tsconfig.json",
 		"dev": "tsc -p tsconfig.json --watch",
 		"lint": "biome check --write .",
-		"format": "biome format --write ."
+		"lint:check": "biome check .",
+		"format": "biome format --write .",
+		"format:check": "biome format ."
 	},
 	"dependencies": {
 		"@mobvibe/shared": "workspace:*",

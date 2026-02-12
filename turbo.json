@@ -23,6 +23,8 @@
 		},
 		"test:run": {
 			"dependsOn": ["^test:run"]
-		}
+		},
+		"format:check": {},
+		"lint:check": {}
 	}
 }

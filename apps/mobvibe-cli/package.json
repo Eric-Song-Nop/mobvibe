@@ -41,7 +41,9 @@
 		"build:bin": "bun run build-bin.ts",
 		"start": "bun dist/index.js",
 		"lint": "biome check --write .",
+		"lint:check": "biome check .",
 		"format": "biome format --write .",
+		"format:check": "biome format .",
 		"test": "bun test",
 		"test:run": "bun test",
 		"prepublishOnly": "pnpm build"

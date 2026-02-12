@@ -9,7 +9,9 @@
 		"build": "tsc -b && vite build",
 		"preview": "vite preview",
 		"format": "biome format --write .",
-		"lint": "biome check --write ."
+		"format:check": "biome format .",
+		"lint": "biome check --write .",
+		"lint:check": "biome check ."
 	},
 	"dependencies": {
 		"@fontsource-variable/jetbrains-mono": "^5.2.8",

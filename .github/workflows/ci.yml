@@ -33,10 +33,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: biomejs/setup-biome@v2
-        with:
-          version: latest
-      - run: biome ci .
+      - run: pnpm format:check && pnpm lint:check
 
   test:
     name: Test
