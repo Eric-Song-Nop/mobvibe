@@ -245,6 +245,14 @@
 		"passwordMismatch": "New passwords do not match",
 		"passwordTooShort": "Password must be at least 8 characters"
 	},
+	"e2ee": {
+		"scanQrCode": "Scan QR Code",
+		"scanning": "Scanning...",
+		"scanHint": "Scan the QR code from `mobvibe e2ee show`, or paste the secret below.",
+		"scanError": "Failed to scan QR code. Please try again or paste the secret manually.",
+		"pairSuccess": "E2EE pairing successful.",
+		"invalidQrCode": "Invalid QR code. Please scan the code from `mobvibe e2ee show`."
+	},
 	"machines": {
 		"title": "Machines",
 		"refresh": "Refresh",

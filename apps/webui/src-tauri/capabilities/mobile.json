@@ -1,0 +1,11 @@
+{
+	"$schema": "https://schemas.tauri.app/config/2/capabilities",
+	"identifier": "mobile",
+	"platforms": ["android", "iOS"],
+	"permissions": [
+		"barcode-scanner:allow-scan",
+		"barcode-scanner:allow-cancel",
+		"barcode-scanner:allow-check-permissions",
+		"barcode-scanner:allow-request-permissions"
+	]
+}

@@ -110,10 +110,26 @@ e2eeCmd
 			console.error("Not logged in. Run 'mobvibe login' first.");
 			process.exit(1);
 		}
+
+		// Convert standard base64 to base64url for URL safety
+		const base64url = credentials.masterSecret
+			.replace(/\+/g, "-")
+			.replace(/\//g, "_")
+			.replace(/=+$/, "");
+		const pairingUrl = `mobvibe://pair?secret=${base64url}`;
+
+		// Display QR code for mobile scanning
+		const QRCode = await import("qrcode");
+		const qrText = await QRCode.toString(pairingUrl, {
+			type: "terminal",
+			small: true,
+		});
+		console.log(qrText);
+
 		console.log("Master secret (for pairing WebUI/Tauri devices):");
 		console.log(`  ${credentials.masterSecret}`);
 		console.log(
-			"\nPaste this into WebUI Settings > End-to-End Encryption > Pair.",
+			"\nScan the QR code with your phone, or paste the secret into WebUI Settings > E2EE > Pair.",
 		);
 	});
 

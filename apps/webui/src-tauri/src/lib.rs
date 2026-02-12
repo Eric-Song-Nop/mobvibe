@@ -12,6 +12,11 @@ pub fn run() {
                 let _ = app.handle().plugin(tauri_plugin_opener::init());
             }
 
+            #[cfg(mobile)]
+            {
+                let _ = app.handle().plugin(tauri_plugin_barcode_scanner::init());
+            }
+
             #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
