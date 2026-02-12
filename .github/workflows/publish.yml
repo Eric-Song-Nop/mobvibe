@@ -64,6 +64,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm build
       - name: Build CLI single binary
         run: pnpm -C apps/mobvibe-cli build:bin
         env:
