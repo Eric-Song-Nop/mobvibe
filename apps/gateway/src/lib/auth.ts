@@ -1,7 +1,7 @@
 import { tauri } from "@daveyplate/better-auth-tauri/plugin";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { openAPI } from "better-auth/plugins";
+import { bearer, openAPI } from "better-auth/plugins";
 import { getGatewayConfig } from "../config.js";
 import { db } from "../db/index.js";
 import * as schema from "../db/schema.js";
@@ -23,10 +23,7 @@ const tauriOrigins = [
 
 const trustedOrigins = [
 	config.siteUrl,
-	config.webUrl,
 	...config.corsOrigins,
-	"http://localhost:5173",
-	"http://127.0.0.1:5173",
 	...tauriOrigins,
 ].filter(Boolean) as string[];
 
@@ -101,6 +98,7 @@ export const auth = betterAuth({
 			scheme: "mobvibe",
 			callbackURL: "/",
 		}),
+		bearer(),
 		openAPI(),
 	],
 });

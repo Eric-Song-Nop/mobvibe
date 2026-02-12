@@ -69,6 +69,13 @@ By default, the gateway URL is auto-detected as `{protocol}://{hostname}:3005`.
 
 - `lib/notification-store.ts` - Toast notifications
 
+### Authentication
+
+In Tauri (desktop/mobile), the webui uses Bearer token authentication. Login responses include a `set-auth-token` header, which is persisted to Tauri Store (`auth.json`). All REST and Socket.io requests include `Authorization: Bearer <token>`. In browser, standard cookie-based authentication is used (`credentials: "include"`).
+
+- `lib/auth.ts` - Auth client setup, `isInTauri()` detection, sign-in/out actions
+- `lib/auth-token.ts` - Bearer token cache and Tauri Store persistence (`getAuthToken`, `setAuthToken`, `clearAuthToken`, `loadAuthToken`)
+
 ### Socket.io Integration
 
 **`lib/socket.ts`**

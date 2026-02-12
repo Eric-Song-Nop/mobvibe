@@ -8,6 +8,7 @@ const mockSendVerificationEmail = vi.fn();
 const mockSignInEmail = vi.fn();
 const mockSignUpEmail = vi.fn();
 const mockSignOut = vi.fn();
+const mockClearAuthToken = vi.fn();
 
 vi.mock("better-auth/react", () => ({
 	createAuthClient: vi.fn(() => ({
@@ -21,6 +22,12 @@ vi.mock("better-auth/react", () => ({
 		signOut: mockSignOut,
 		useSession: vi.fn(() => ({ data: null, isPending: false, error: null })),
 	})),
+}));
+
+vi.mock("../auth-token", () => ({
+	getAuthToken: vi.fn(() => null),
+	setAuthToken: vi.fn(),
+	clearAuthToken: mockClearAuthToken.mockResolvedValue(undefined),
 }));
 
 describe("auth", () => {
@@ -119,6 +126,33 @@ describe("auth", () => {
 			await signOut();
 
 			expect(mockSignOut).toHaveBeenCalled();
+		});
+
+		it("calls clearAuthToken after signOut", async () => {
+			mockSignOut.mockResolvedValue({ data: {}, error: null });
+
+			const { signOut } = await import("../auth");
+
+			await signOut();
+
+			expect(mockClearAuthToken).toHaveBeenCalled();
+		});
+
+		it("calls clearAuthToken after signOut completes (not before)", async () => {
+			const callOrder: string[] = [];
+			mockSignOut.mockImplementation(async () => {
+				callOrder.push("signOut");
+				return { data: {}, error: null };
+			});
+			mockClearAuthToken.mockImplementation(async () => {
+				callOrder.push("clearAuthToken");
+			});
+
+			const { signOut } = await import("../auth");
+
+			await signOut();
+
+			expect(callOrder).toEqual(["signOut", "clearAuthToken"]);
 		});
 	});
 

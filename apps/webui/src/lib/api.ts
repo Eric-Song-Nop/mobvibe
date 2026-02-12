@@ -53,6 +53,8 @@ import type {
 	SessionsResponse,
 } from "@mobvibe/core";
 import { isErrorDetail } from "@mobvibe/core";
+import { isInTauri } from "./auth";
+import { getAuthToken } from "./auth-token";
 import { getDefaultGatewayUrl } from "./gateway-config";
 
 export type FsEntriesResponse = {
@@ -110,9 +112,16 @@ const requestJson = async <ResponseType>(
 	const headers: Record<string, string> = {
 		"Content-Type": "application/json",
 	};
+	const tauriEnv = isInTauri();
+	if (tauriEnv) {
+		const token = getAuthToken();
+		if (token) {
+			headers.Authorization = `Bearer ${token}`;
+		}
+	}
 	const response = await fetch(`${API_BASE_URL}${path}`, {
 		...options,
-		credentials: "include",
+		credentials: tauriEnv ? "omit" : "include",
 		headers: {
 			...headers,
 			...options?.headers,

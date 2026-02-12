@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { gatewaySocket } from "../socket";
 
 const socketMock = {
@@ -61,5 +61,61 @@ describe("gatewaySocket", () => {
 			"disconnect",
 			expect.any(Function),
 		);
+	});
+});
+
+describe("gatewaySocket connect() auth branches", () => {
+	let mockIo: ReturnType<typeof vi.fn>;
+
+	beforeEach(() => {
+		vi.resetModules();
+		mockIo = vi.fn(() => ({
+			on: vi.fn(),
+			off: vi.fn(),
+			emit: vi.fn(),
+			disconnect: vi.fn(),
+			connected: false,
+		}));
+		vi.doMock("socket.io-client", () => ({ io: mockIo }));
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it("uses withCredentials in browser environment", async () => {
+		vi.doMock("../auth", () => ({ isInTauri: () => false }));
+		vi.doMock("../auth-token", () => ({ getAuthToken: () => null }));
+
+		const { gatewaySocket: gs } = await import("../socket");
+		gs.connect();
+
+		expect(mockIo).toHaveBeenCalledWith(
+			expect.any(String),
+			expect.objectContaining({
+				withCredentials: true,
+			}),
+		);
+		const callOpts = mockIo.mock.calls[0][1];
+		expect(callOpts.auth).toBeUndefined();
+	});
+
+	it("uses auth token in Tauri environment", async () => {
+		vi.doMock("../auth", () => ({ isInTauri: () => true }));
+		vi.doMock("../auth-token", () => ({
+			getAuthToken: () => "tauri-test-token",
+		}));
+
+		const { gatewaySocket: gs } = await import("../socket");
+		gs.connect();
+
+		expect(mockIo).toHaveBeenCalledWith(
+			expect.any(String),
+			expect.objectContaining({
+				auth: { token: "tauri-test-token" },
+			}),
+		);
+		const callOpts = mockIo.mock.calls[0][1];
+		expect(callOpts.withCredentials).toBeUndefined();
 	});
 });

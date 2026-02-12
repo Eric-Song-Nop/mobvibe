@@ -9,6 +9,8 @@ import type {
 	SessionsChangedPayload,
 	WebuiToGatewayEvents,
 } from "./acp";
+import { isInTauri } from "./auth";
+import { getAuthToken } from "./auth-token";
 import { getDefaultGatewayUrl } from "./gateway-config";
 
 type TypedSocket = Socket<GatewayToWebuiEvents, WebuiToGatewayEvents>;
@@ -28,15 +30,17 @@ class GatewaySocket {
 		}
 
 		this.isConnecting = true;
+		const tauriEnv = isInTauri();
 		this.socket = io(`${GATEWAY_URL}/webui`, {
 			path: "/socket.io",
 			reconnection: true,
 			reconnectionAttempts: Number.POSITIVE_INFINITY,
 			reconnectionDelay: 1000,
 			reconnectionDelayMax: 10000,
-			transports: ["websocket"],
 			autoConnect: true,
-			withCredentials: true,
+			...(tauriEnv
+				? { auth: { token: getAuthToken() } }
+				: { withCredentials: true }),
 		});
 
 		this.socket.on("connect", () => {

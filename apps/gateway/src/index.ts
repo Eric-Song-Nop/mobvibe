@@ -26,13 +26,11 @@ const tauriOrigins = [
 	"https://tauri.localhost",
 	"mobvibe://",
 ];
-const restCorsOrigins = [
-	config.webUrl,
-	...config.corsOrigins,
-	...tauriOrigins,
-	"http://localhost:5173",
-	"http://127.0.0.1:5173",
-].filter(Boolean) as string[];
+const allowedOrigins = [...config.corsOrigins, ...tauriOrigins];
+
+const isAllowedOrigin = (origin: string): boolean => {
+	return allowedOrigins.includes(origin);
+};
 
 const app: Express = express();
 const httpServer = createServer(app);
@@ -46,25 +44,9 @@ const io = new Server(httpServer, {
 				callback(null, true);
 				return;
 			}
-			try {
-				const { hostname } = new URL(origin);
-				if (hostname === "localhost" || hostname === "127.0.0.1") {
-					callback(null, true);
-					return;
-				}
-				// Check allowed origins (including Tauri origins)
-				if (
-					config.corsOrigins.includes(origin) ||
-					tauriOrigins.includes(origin)
-				) {
-					callback(null, true);
-					return;
-				}
-				callback(null, false);
-			} catch {
-				callback(null, false);
-			}
+			callback(null, isAllowedOrigin(origin));
 		},
+		allowedHeaders: ["Content-Type", "Authorization"],
 		methods: ["GET", "POST"],
 		credentials: true,
 	},
@@ -162,12 +144,9 @@ app.use(
 				callback(null, true);
 				return;
 			}
-			if (restCorsOrigins.includes(origin)) {
-				callback(null, true);
-				return;
-			}
-			callback(null, false);
+			callback(null, isAllowedOrigin(origin));
 		},
+		allowedHeaders: ["Content-Type", "Authorization"],
 		methods: ["GET", "POST", "PUT", "DELETE"],
 		credentials: true,
 	}),

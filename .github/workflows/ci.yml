@@ -123,7 +123,7 @@ jobs:
       - name: Prepare Android artifacts
         id: artifacts
         run: |
-          VERSION="${{ inputs.version || 'v0.0.0' }}"
+          VERSION="${{ inputs.version || 'v0.0.1' }}"
           VERSION="${VERSION#v}"  # Strip v prefix
           mkdir -p dist
           # Copy and rename APK (exclude unsigned)

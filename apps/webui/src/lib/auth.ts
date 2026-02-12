@@ -1,4 +1,5 @@
 import { createAuthClient } from "better-auth/react";
+import { clearAuthToken, getAuthToken, setAuthToken } from "./auth-token";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL as string | undefined;
 
@@ -7,36 +8,7 @@ const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL as string | undefined;
  */
 export const isInTauri = (): boolean => "__TAURI_INTERNALS__" in window;
 
-/**
- * Dynamic fetch implementation that uses Tauri HTTP plugin
- * to properly handle cookies (standard fetch doesn't work with cookies in Tauri)
- */
-const createFetchImpl = async () => {
-	if (!isInTauri()) {
-		return fetch;
-	}
-
-	try {
-		const { fetch: tauriFetch } = await import("@tauri-apps/plugin-http");
-		// Use Tauri fetch on all platforms when running inside Tauri
-		// This bypasses browser cookie restrictions for cross-origin requests
-		return tauriFetch as typeof fetch;
-	} catch {
-		// Fall back to standard fetch if plugins not available
-	}
-
-	return fetch;
-};
-
-// Cached fetch implementation
-let cachedFetchImpl: typeof fetch | null = null;
-
-const getFetchImpl = async (): Promise<typeof fetch> => {
-	if (!cachedFetchImpl) {
-		cachedFetchImpl = await createFetchImpl();
-	}
-	return cachedFetchImpl;
-};
+const inTauri = typeof window !== "undefined" && isInTauri();
 
 // Create auth client with Gateway endpoint
 // Note: When Gateway URL is not configured, auth is disabled
@@ -44,11 +16,22 @@ const authClient = GATEWAY_URL
 	? createAuthClient({
 			baseURL: GATEWAY_URL,
 			fetchOptions: {
-				credentials: "include",
-				customFetchImpl: async (...params: Parameters<typeof fetch>) => {
-					const fetchImpl = await getFetchImpl();
-					return fetchImpl(...params);
-				},
+				credentials: inTauri ? "omit" : "include",
+				...(inTauri && {
+					auth: {
+						type: "Bearer" as const,
+						token: () => getAuthToken() ?? undefined,
+					},
+					customFetchImpl: async (
+						input: RequestInfo | URL,
+						init?: RequestInit,
+					) => {
+						const res = await fetch(input, init);
+						const token = res.headers.get("set-auth-token");
+						if (token) setAuthToken(token);
+						return res;
+					},
+				}),
 			},
 			plugins: [],
 		})
@@ -110,7 +93,9 @@ export const signOut = async () => {
 	if (!authClient) {
 		throw new Error("Auth not configured");
 	}
-	return authClient.signOut();
+	const result = await authClient.signOut();
+	await clearAuthToken();
+	return result;
 };
 
 export const changePassword = async (data: {

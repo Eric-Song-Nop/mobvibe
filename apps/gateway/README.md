@@ -131,6 +131,8 @@ Events to CLI (RPC):
 
 ### `/webui` - Web UI Connections
 
+WebUI connections authenticate via **Bearer token** (preferred, for Tauri/mobile) or **session cookie** (browser fallback). When connecting from Tauri, pass `auth: { token }` in the Socket.io handshake. The gateway checks Bearer first, then falls back to cookie.
+
 Events from webui:
 - `subscribe:session` - Subscribe to session updates
 - `unsubscribe:session` - Unsubscribe from session

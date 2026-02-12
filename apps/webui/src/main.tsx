@@ -6,6 +6,7 @@ import { BrowserRouter } from "react-router-dom";
 import { AuthProvider } from "@/components/auth/AuthProvider";
 import { setApiBaseUrl } from "@/lib/api";
 import { isInTauri } from "@/lib/auth";
+import { loadAuthToken } from "@/lib/auth-token";
 import { e2ee } from "@/lib/e2ee";
 import { getGatewayUrl } from "@/lib/gateway-config";
 import { gatewaySocket } from "@/lib/socket";
@@ -59,11 +60,13 @@ if (isInTauri()) {
 	import("./lib/tauri-storage-adapter")
 		.then(({ initTauriStorage }) => initTauriStorage())
 		.then(initTauriGateway)
+		.then(loadAuthToken)
 		.then(initE2EE)
 		.then(renderApp)
 		.catch((error) => {
 			console.warn("Failed to initialize Tauri storage, using default:", error);
 			initTauriGateway()
+				.then(loadAuthToken)
 				.then(initE2EE)
 				.finally(renderApp)
 				.catch(() => {
