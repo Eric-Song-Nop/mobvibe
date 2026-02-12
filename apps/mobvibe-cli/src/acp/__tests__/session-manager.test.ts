@@ -7,67 +7,6 @@ mock.module("node:fs/promises", () => ({
 	},
 }));
 
-// Mock the AcpConnection class
-mock.module("../acp-connection.js", () => ({
-	AcpConnection: mock(() => ({
-		connect: mock(() => Promise.resolve(undefined)),
-		disconnect: mock(() => Promise.resolve(undefined)),
-		createSession: mock(() =>
-			Promise.resolve({
-				sessionId: "new-session-1",
-				modes: null,
-				models: null,
-			}),
-		),
-		getStatus: mock(() => ({
-			backendId: "backend-1",
-			backendLabel: "Claude Code",
-			state: "ready",
-			command: "claude-code",
-			args: [],
-			pid: 12345,
-		})),
-		getAgentInfo: mock(() => ({
-			name: "claude-code",
-			title: "Claude Code",
-		})),
-		getSessionCapabilities: mock(() => ({
-			list: true,
-			load: true,
-		})),
-		supportsSessionList: mock(() => true),
-		supportsSessionLoad: mock(() => true),
-		listSessions: mock(() =>
-			Promise.resolve({
-				sessions: [
-					{
-						sessionId: "discovered-1",
-						cwd: "/home/user/project1",
-						title: "Project 1",
-						updatedAt: new Date().toISOString(),
-					},
-					{
-						sessionId: "discovered-2",
-						cwd: "/home/user/project2",
-						title: "Project 2",
-					},
-				],
-				nextCursor: undefined,
-			}),
-		),
-		loadSession: mock(() =>
-			Promise.resolve({
-				modes: null,
-				models: null,
-			}),
-		),
-		setPermissionHandler: mock(() => {}),
-		onSessionUpdate: mock(() => () => {}),
-		onTerminalOutput: mock(() => () => {}),
-		onStatusChange: mock(() => () => {}),
-	})),
-}));
-
 // Mock the logger
 mock.module("../../lib/logger.js", () => ({
 	logger: {
@@ -78,7 +17,66 @@ mock.module("../../lib/logger.js", () => ({
 	},
 }));
 
-import { SessionManager } from "../session-manager.js";
+// Dynamic import so that mock.module calls above are registered first
+const { SessionManager } = await import("../session-manager.js");
+
+const createMockConnection = () => ({
+	connect: mock(() => Promise.resolve(undefined)),
+	disconnect: mock(() => Promise.resolve(undefined)),
+	createSession: mock(() =>
+		Promise.resolve({
+			sessionId: "new-session-1",
+			modes: null,
+			models: null,
+		}),
+	),
+	getStatus: mock(() => ({
+		backendId: "backend-1",
+		backendLabel: "Claude Code",
+		state: "ready",
+		command: "claude-code",
+		args: [],
+		pid: 12345,
+	})),
+	getAgentInfo: mock(() => ({
+		name: "claude-code",
+		title: "Claude Code",
+	})),
+	getSessionCapabilities: mock(() => ({
+		list: true,
+		load: true,
+	})),
+	supportsSessionList: mock(() => true),
+	supportsSessionLoad: mock(() => true),
+	listSessions: mock(() =>
+		Promise.resolve({
+			sessions: [
+				{
+					sessionId: "discovered-1",
+					cwd: "/home/user/project1",
+					title: "Project 1",
+					updatedAt: new Date().toISOString(),
+				},
+				{
+					sessionId: "discovered-2",
+					cwd: "/home/user/project2",
+					title: "Project 2",
+				},
+			],
+			nextCursor: undefined,
+		}),
+	),
+	loadSession: mock(() =>
+		Promise.resolve({
+			modes: null,
+			models: null,
+		}),
+	),
+	setPermissionHandler: mock(() => {}),
+	onSessionUpdate: mock(() => () => {}),
+	onTerminalOutput: mock(() => () => {}),
+	onStatusChange: mock(() => () => {}),
+});
 
 const createMockConfig = (): CliConfig => ({
 	gatewayUrl: "http://localhost:3005",
@@ -110,12 +108,15 @@ const createMockConfig = (): CliConfig => ({
 });
 
 describe("SessionManager", () => {
-	let sessionManager: SessionManager;
+	let sessionManager: InstanceType<typeof SessionManager>;
 	let mockConfig: CliConfig;
+	let mockConnection: ReturnType<typeof createMockConnection>;
 
 	beforeEach(() => {
 		mockConfig = createMockConfig();
 		sessionManager = new SessionManager(mockConfig);
+		mockConnection = createMockConnection();
+		sessionManager.createConnection = () => mockConnection as any;
 	});
 
 	describe("discoverSessions", () => {

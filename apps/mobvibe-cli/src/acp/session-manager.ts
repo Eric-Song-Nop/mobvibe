@@ -157,6 +157,16 @@ export class SessionManager {
 		this.cryptoService = cryptoService;
 	}
 
+	createConnection(backend: AcpBackendConfig): AcpConnection {
+		return new AcpConnection({
+			backend,
+			client: {
+				name: this.config.clientName,
+				version: this.config.clientVersion,
+			},
+		});
+	}
+
 	listSessions(): SessionSummary[] {
 		return Array.from(this.sessions.values()).map((record) =>
 			this.buildSummary(record),
@@ -557,13 +567,7 @@ export class SessionManager {
 		backendId: string;
 	}): Promise<SessionSummary> {
 		const backend = this.resolveBackend(options.backendId);
-		const connection = new AcpConnection({
-			backend,
-			client: {
-				name: this.config.clientName,
-				version: this.config.clientVersion,
-			},
-		});
+		const connection = this.createConnection(backend);
 		try {
 			await connection.connect();
 			const session = await connection.createSession({ cwd: options?.cwd });
@@ -989,13 +993,7 @@ export class SessionManager {
 		cursor?: string;
 	}): Promise<DiscoverSessionsRpcResult> {
 		const backend = this.resolveBackend(options.backendId);
-		const connection = new AcpConnection({
-			backend,
-			client: {
-				name: this.config.clientName,
-				version: this.config.clientVersion,
-			},
-		});
+		const connection = this.createConnection(backend);
 
 		try {
 			await connection.connect();
@@ -1116,13 +1114,7 @@ export class SessionManager {
 		}
 
 		const backend = this.resolveBackend(backendId);
-		const connection = new AcpConnection({
-			backend,
-			client: {
-				name: this.config.clientName,
-				version: this.config.clientVersion,
-			},
-		});
+		const connection = this.createConnection(backend);
 
 		try {
 			await connection.connect();

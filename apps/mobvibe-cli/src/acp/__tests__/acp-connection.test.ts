@@ -29,8 +29,7 @@ mock.module("node:stream", () => ({
 }));
 
 import type { AcpBackendConfig } from "../../config.js";
-
-const { AcpConnection } = await import("../acp-connection.js");
+import { AcpConnection } from "../acp-connection.js";
 
 const createMockBackendConfig = (): AcpBackendConfig => ({
 	id: "test-backend",
@@ -40,7 +39,7 @@ const createMockBackendConfig = (): AcpBackendConfig => ({
 });
 
 describe("AcpConnection", () => {
-	let connection: InstanceType<typeof AcpConnection>;
+	let connection: AcpConnection;
 	let mockBackend: AcpBackendConfig;
 
 	beforeEach(() => {
