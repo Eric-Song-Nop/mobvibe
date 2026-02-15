@@ -1,6 +1,6 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { e2ee } from "@/lib/e2ee";
-import { useState } from "react";
 
 export function E2EESettings() {
 	const [isPaired, setIsPaired] = useState(e2ee.isEnabled());
