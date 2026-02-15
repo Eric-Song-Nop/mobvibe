@@ -21,8 +21,13 @@ const mockChatStore = vi.hoisted(() => ({
 		sessions: {},
 		activeSessionId: undefined,
 		appError: undefined,
+		lastCreatedCwd: undefined,
 		setActiveSessionId: vi.fn(),
 		setAppError: vi.fn(),
+		setLastCreatedCwd: vi.fn(),
+		setSessionLoading: vi.fn(),
+		markSessionAttached: vi.fn(),
+		markSessionDetached: vi.fn(),
 		createLocalSession: vi.fn(),
 		syncSessions: vi.fn(),
 		removeSession: vi.fn(),
@@ -47,16 +52,23 @@ const mockChatStore = vi.hoisted(() => ({
 		appendTerminalOutput: vi.fn(),
 		finalizeAssistantMessage: vi.fn(),
 		handleSessionsChanged: vi.fn(),
+		clearSessionMessages: vi.fn(),
+		restoreSessionMessages: vi.fn(),
+		updateSessionCursor: vi.fn(),
+		resetSessionForRevision: vi.fn(),
 	},
 }));
 
-vi.mock("@mobvibe/core", async (importOriginal) => {
-	const original = await importOriginal<typeof import("@mobvibe/core")>();
-	return {
-		...original,
-		useChatStore: () => mockChatStore.value,
-	};
-});
+vi.mock("@mobvibe/core", () => ({
+	useChatStore: (
+		selectorOrUndefined?: (s: typeof mockChatStore.value) => unknown,
+	) => {
+		if (typeof selectorOrUndefined === "function") {
+			return selectorOrUndefined(mockChatStore.value);
+		}
+		return mockChatStore.value;
+	},
+}));
 
 vi.mock("@/hooks/useSessionQueries", () => ({
 	useSessionQueries: () => ({
@@ -121,13 +133,30 @@ vi.mock("@/hooks/useMachineDiscovery", () => ({
 	useMachineDiscovery: () => undefined,
 }));
 
+vi.mock("@/hooks/useSocket", () => ({
+	useSocket: () => ({
+		syncSessionHistory: vi.fn(),
+		isBackfilling: () => false,
+	}),
+}));
+
+vi.mock("@/hooks/useSessionActivation", () => ({
+	useSessionActivation: () => ({
+		activateSession: vi.fn(),
+		isActivating: false,
+		activationState: "idle",
+	}),
+}));
+
 vi.mock("@/hooks/useSessionHandlers", () => ({
 	useSessionHandlers: () => ({
 		isForceReloading: false,
+		isBulkArchiving: false,
 		handleOpenCreateDialog: vi.fn(),
 		handleCreateSession: vi.fn(),
 		handleRenameSubmit: vi.fn(),
 		handleArchiveSession: vi.fn(),
+		handleBulkArchiveSessions: vi.fn(),
 		handlePermissionDecision: vi.fn(),
 		handleModeChange: vi.fn(),
 		handleModelChange: vi.fn(),
@@ -136,6 +165,26 @@ vi.mock("@/hooks/useSessionHandlers", () => ({
 		handleSyncHistory: vi.fn(),
 		handleSend: vi.fn(),
 	}),
+}));
+
+vi.mock("@/lib/e2ee", () => ({
+	e2ee: {
+		isEnabled: () => false,
+		getDeviceId: () => null,
+		loadFromStorage: vi.fn().mockResolvedValue(false),
+		autoInitialize: vi.fn().mockResolvedValue(false),
+		unwrapSessionDeks: vi.fn(),
+		decryptEvent: (event: unknown) => event,
+	},
+}));
+
+vi.mock("@/lib/socket", () => ({
+	gatewaySocket: {
+		connect: vi.fn(),
+		disconnect: vi.fn(),
+		getGatewayUrl: () => null,
+		getSocket: () => null,
+	},
 }));
 
 vi.mock("@/components/app/AppHeader", () => ({
@@ -220,32 +269,38 @@ beforeEach(() => {
 	document.documentElement.classList.remove("dark");
 });
 
+// Import App once at module level (after mocks are set up) to avoid
+// repeated dynamic import overhead that causes timeouts under load.
+const { default: App } = await import("../App");
+
 describe("App theme preference", () => {
 	it("uses stored preference and updates root class", async () => {
 		localStorage.setItem(THEME_STORAGE_KEY, "dark");
 		setMatchMedia(false);
 
-		const { default: App } = await import("../App");
 		render(
 			<MemoryRouter>
 				<App />
 			</MemoryRouter>,
 		);
 
-		expect(document.documentElement.classList.contains("dark")).toBe(true);
+		await waitFor(() => {
+			expect(document.documentElement.classList.contains("dark")).toBe(true);
+		});
 	});
 
 	it("responds to system theme changes when in system mode", async () => {
 		const mediaQueryList = setMatchMedia(false);
 
-		const { default: App } = await import("../App");
 		render(
 			<MemoryRouter>
 				<App />
 			</MemoryRouter>,
 		);
 
-		expect(document.documentElement.classList.contains("dark")).toBe(false);
+		await waitFor(() => {
+			expect(document.documentElement.classList.contains("dark")).toBe(false);
+		});
 
 		mediaQueryList.dispatch(true);
 		expect(document.documentElement.classList.contains("dark")).toBe(true);
