@@ -44,6 +44,8 @@ export function E2EESettings() {
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [isMobile, setIsMobile] = useState(false);
 	const [isScanning, setIsScanning] = useState(false);
+	const [showLegacyPairing, setShowLegacyPairing] = useState(false);
+	const deviceId = e2ee.getDeviceId();
 
 	useEffect(() => {
 		isMobilePlatform().then(setIsMobile);
@@ -104,10 +106,17 @@ export function E2EESettings() {
 			<div className="space-y-3">
 				<div className="flex items-center gap-2">
 					<div className="h-2 w-2 rounded-full bg-green-500" />
-					<span className="text-sm font-medium">E2EE Paired</span>
+					<span className="text-sm font-medium">E2EE Active</span>
 				</div>
 				<p className="text-muted-foreground text-sm">
 					End-to-end encryption is active. Session content is decrypted locally.
+					{deviceId && (
+						<>
+							<br />
+							Device ID:{" "}
+							<code className="text-xs">{deviceId.slice(0, 8)}...</code>
+						</>
+					)}
 				</p>
 				<Button variant="destructive" onClick={handleUnpair}>
 					Unpair
@@ -120,33 +129,54 @@ export function E2EESettings() {
 		<div className="space-y-3">
 			<div className="flex items-center gap-2">
 				<div className="h-2 w-2 rounded-full bg-yellow-500" />
-				<span className="text-sm font-medium">E2EE Not Paired</span>
+				<span className="text-sm font-medium">E2EE Not Active</span>
 			</div>
 			<p className="text-muted-foreground text-sm">
-				{isMobile
-					? t("e2ee.scanHint")
-					: `Paste the master secret from your CLI to enable end-to-end encryption. Run \`mobvibe e2ee show\` to get your secret.`}
+				E2EE keys are auto-generated for this device. If auto-setup failed, you
+				can manually pair with a CLI master secret below.
 			</p>
-			{isMobile && (
-				<Button onClick={handleScanQr} disabled={isScanning} className="w-full">
-					{isScanning ? t("e2ee.scanning") : t("e2ee.scanQrCode")}
+			{!showLegacyPairing && (
+				<Button
+					variant="outline"
+					onClick={() => setShowLegacyPairing(true)}
+					className="w-full"
+				>
+					Manual Pairing (Legacy)
 				</Button>
 			)}
-			<div className="flex gap-2">
-				<Input
-					type="password"
-					value={secret}
-					onChange={(e) => setSecret(e.target.value)}
-					onKeyDown={(e) => {
-						if (e.key === "Enter") void handlePair();
-					}}
-					placeholder="Paste master secret (base64)"
-					className="flex-1"
-				/>
-				<Button onClick={handlePair} disabled={isSubmitting}>
-					{isSubmitting ? "Pairing..." : "Pair"}
-				</Button>
-			</div>
+			{showLegacyPairing && (
+				<>
+					<p className="text-muted-foreground text-sm">
+						{isMobile
+							? t("e2ee.scanHint")
+							: `Paste the master secret from your CLI. Run \`mobvibe e2ee show\` to get your secret.`}
+					</p>
+					{isMobile && (
+						<Button
+							onClick={handleScanQr}
+							disabled={isScanning}
+							className="w-full"
+						>
+							{isScanning ? t("e2ee.scanning") : t("e2ee.scanQrCode")}
+						</Button>
+					)}
+					<div className="flex gap-2">
+						<Input
+							type="password"
+							value={secret}
+							onChange={(e) => setSecret(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter") void handlePair();
+							}}
+							placeholder="Paste master secret (base64)"
+							className="flex-1"
+						/>
+						<Button onClick={handlePair} disabled={isSubmitting}>
+							{isSubmitting ? "Pairing..." : "Pair"}
+						</Button>
+					</div>
+				</>
+			)}
 			{error && <p className="text-destructive text-sm">{error}</p>}
 		</div>
 	);

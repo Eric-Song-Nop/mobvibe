@@ -5,12 +5,19 @@ import type { SessionEvent } from "@/lib/acp";
 const mockInitCrypto = vi.fn().mockResolvedValue(undefined);
 const mockGetSodium = vi.fn(() => ({
 	from_base64: (s: string) => new Uint8Array(Buffer.from(s, "base64")),
+	to_base64: (buf: Uint8Array) => Buffer.from(buf).toString("base64"),
 	base64_variants: { ORIGINAL: 0 },
+	randombytes_buf: (len: number) => new Uint8Array(len).fill(42),
 }));
 const mockDeriveContentKeyPair = vi.fn(() => ({
 	publicKey: new Uint8Array([1, 2, 3]),
 	secretKey: new Uint8Array([4, 5, 6]),
 }));
+const mockDeriveAuthKeyPair = vi.fn(() => ({
+	publicKey: new Uint8Array([7, 8, 9]),
+	secretKey: new Uint8Array([10, 11, 12]),
+}));
+const mockGenerateMasterSecret = vi.fn(() => new Uint8Array(32).fill(42));
 const mockUnwrapDEK = vi.fn(() => new Uint8Array([10, 20, 30]));
 const mockDecryptPayload = vi.fn((encrypted: { t: string; c: string }) =>
 	JSON.parse(atob(encrypted.c)),
@@ -27,6 +34,8 @@ vi.mock("@mobvibe/core", () => ({
 	initCrypto: mockInitCrypto,
 	getSodium: mockGetSodium,
 	deriveContentKeyPair: mockDeriveContentKeyPair,
+	deriveAuthKeyPair: mockDeriveAuthKeyPair,
+	generateMasterSecret: mockGenerateMasterSecret,
 	unwrapDEK: mockUnwrapDEK,
 	decryptPayload: mockDecryptPayload,
 	isEncryptedPayload: mockIsEncryptedPayload,
@@ -79,6 +88,7 @@ describe("E2EEManager", () => {
 		await e2ee.clearSecret();
 		expect(e2ee.isEnabled()).toBe(false);
 		expect(localStorage.getItem("mobvibe_e2ee_master_secret")).toBeNull();
+		expect(localStorage.getItem("mobvibe_e2ee_device_id")).toBeNull();
 	});
 
 	it("unwrapSessionDek returns false when not enabled", () => {
@@ -94,6 +104,43 @@ describe("E2EEManager", () => {
 			expect.any(Uint8Array),
 			expect.any(Uint8Array),
 		);
+	});
+
+	it("unwrapFromSession handles legacy wrappedDek", async () => {
+		await e2ee.setPairedSecret(btoa("test-secret"));
+		const result = e2ee.unwrapFromSession("session-1", "wrapped-dek-base64");
+		expect(result).toBe(true);
+	});
+
+	it("unwrapFromSession handles multi-device wrappedDeks", async () => {
+		await e2ee.setPairedSecret(btoa("test-secret"));
+		const result = e2ee.unwrapFromSession("session-2", undefined, {
+			"device-a": "wrapped-for-a",
+			"device-b": "wrapped-for-b",
+		});
+		expect(result).toBe(true);
+		// Should try all entries
+		expect(mockUnwrapDEK).toHaveBeenCalled();
+	});
+
+	it("unwrapFromSession prefers wrappedDeks over wrappedDek", async () => {
+		await e2ee.setPairedSecret(btoa("test-secret"));
+		const result = e2ee.unwrapFromSession("session-3", "legacy-wrapped", {
+			"device-a": "multi-wrapped",
+		});
+		expect(result).toBe(true);
+		// Should try multi-device first
+		expect(mockUnwrapDEK).toHaveBeenCalledWith(
+			"multi-wrapped",
+			expect.any(Uint8Array),
+			expect.any(Uint8Array),
+		);
+	});
+
+	it("unwrapFromSession returns false when nothing provided", async () => {
+		await e2ee.setPairedSecret(btoa("test-secret"));
+		const result = e2ee.unwrapFromSession("session-4");
+		expect(result).toBe(false);
 	});
 
 	it("decryptEvent passes through non-encrypted payloads unchanged", () => {
@@ -152,5 +199,19 @@ describe("E2EEManager", () => {
 		const result = await e2ee.loadFromStorage();
 		expect(result).toBe(false);
 		expect(e2ee.isEnabled()).toBe(false);
+	});
+
+	it("getDeviceId returns null initially", () => {
+		expect(e2ee.getDeviceId()).toBeNull();
+	});
+
+	it("loadFromStorage restores device ID from localStorage", async () => {
+		const secret = btoa("stored-secret");
+		localStorage.setItem("mobvibe_e2ee_master_secret", secret);
+		localStorage.setItem("mobvibe_e2ee_device_id", "test-device-id");
+
+		const result = await e2ee.loadFromStorage();
+		expect(result).toBe(true);
+		expect(e2ee.getDeviceId()).toBe("test-device-id");
 	});
 });

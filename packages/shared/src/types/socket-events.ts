@@ -285,9 +285,23 @@ export interface CliToGatewayEvents {
 	"rpc:response": (response: RpcResponse<unknown>) => void;
 }
 
+/** Device content key for multi-device E2EE DEK wrapping */
+export type DeviceContentKeyInfo = {
+	deviceId: string;
+	contentPublicKey: string;
+};
+
 // Gateway -> CLI events
 export interface GatewayToCliEvents {
-	"cli:registered": (info: { machineId: string; userId?: string }) => void;
+	"cli:registered": (info: {
+		machineId: string;
+		userId?: string;
+		/** All device content keys for this user (multi-device E2EE) */
+		deviceContentKeys?: DeviceContentKeyInfo[];
+	}) => void;
+	"cli:device-content-keys": (payload: {
+		keys: DeviceContentKeyInfo[];
+	}) => void;
 	"cli:error": (payload: CliErrorPayload) => void;
 	"events:ack": (payload: EventsAckPayload) => void;
 

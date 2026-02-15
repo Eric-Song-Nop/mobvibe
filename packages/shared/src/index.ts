@@ -114,6 +114,7 @@ export type {
 	CliToGatewayEvents,
 	CloseSessionParams,
 	CreateSessionParams,
+	DeviceContentKeyInfo,
 	DiscoverSessionsRpcParams,
 	DiscoverSessionsRpcResult,
 	EventsAckPayload,

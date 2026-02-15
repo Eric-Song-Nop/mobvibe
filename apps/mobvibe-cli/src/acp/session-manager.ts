@@ -1504,8 +1504,8 @@ export class SessionManager {
 			availableModels: record.availableModels,
 			availableCommands: record.availableCommands,
 			revision: record.revision,
-			wrappedDek:
-				this.cryptoService?.getWrappedDek(record.sessionId) ?? undefined,
+			wrappedDeks:
+				this.cryptoService?.getWrappedDeks(record.sessionId) ?? undefined,
 		};
 	}
 }

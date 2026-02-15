@@ -1,7 +1,9 @@
 import {
 	type CryptoKeyPair,
 	decryptPayload,
+	deriveAuthKeyPair,
 	deriveContentKeyPair,
+	generateMasterSecret,
 	getSodium,
 	initCrypto,
 	isEncryptedPayload,
@@ -11,17 +13,24 @@ import type { SessionEvent } from "@/lib/acp";
 import { isInTauri } from "@/lib/auth";
 
 const STORAGE_KEY = "mobvibe_e2ee_master_secret";
+const DEVICE_ID_KEY = "mobvibe_e2ee_device_id";
 
 class E2EEManager {
 	private contentKeyPair: CryptoKeyPair | null = null;
 	private sessionDeks: Map<string, Uint8Array> = new Map();
+	private deviceId: string | null = null;
+	private registering = false;
 
 	isEnabled(): boolean {
 		return this.contentKeyPair !== null;
 	}
 
+	getDeviceId(): string | null {
+		return this.deviceId;
+	}
+
 	/**
-	 * Load persisted master secret from storage (localStorage or Tauri store).
+	 * Load persisted master secret and device ID from storage.
 	 * Should be called during app initialization.
 	 */
 	async loadFromStorage(): Promise<boolean> {
@@ -30,6 +39,7 @@ class E2EEManager {
 
 		try {
 			await this.applySecret(stored);
+			this.deviceId = await this.getStoredDeviceId();
 			return true;
 		} catch {
 			return false;
@@ -37,11 +47,101 @@ class E2EEManager {
 	}
 
 	/**
-	 * Set and persist a master secret from user input (pairing flow).
+	 * Set and persist a master secret from user input (legacy pairing flow).
 	 */
 	async setPairedSecret(base64Secret: string): Promise<void> {
 		await this.applySecret(base64Secret);
 		await this.storeSecret(base64Secret);
+	}
+
+	/**
+	 * Auto-initialize E2EE for this device.
+	 * Generates a new master secret, derives keys, and registers with the gateway.
+	 * Only call this when the user is authenticated and E2EE is not yet enabled.
+	 */
+	async autoInitialize(gatewayUrl: string): Promise<boolean> {
+		if (this.isEnabled() || this.registering) return false;
+		this.registering = true;
+
+		try {
+			await initCrypto();
+			const sodium = getSodium();
+			const masterSecret = generateMasterSecret();
+			const base64Secret = sodium.to_base64(
+				masterSecret,
+				sodium.base64_variants.ORIGINAL,
+			);
+
+			await this.applySecret(base64Secret);
+
+			// Register device with gateway
+			const registered = await this.registerDevice(gatewayUrl, masterSecret);
+			if (!registered) {
+				// Rollback
+				this.contentKeyPair = null;
+				this.sessionDeks.clear();
+				return false;
+			}
+
+			await this.storeSecret(base64Secret);
+			return true;
+		} catch {
+			this.contentKeyPair = null;
+			this.sessionDeks.clear();
+			return false;
+		} finally {
+			this.registering = false;
+		}
+	}
+
+	/**
+	 * Register this device's keys with the gateway.
+	 * Uses the auth key pair for device identity and content key pair for DEK wrapping.
+	 */
+	private async registerDevice(
+		gatewayUrl: string,
+		masterSecret: Uint8Array,
+	): Promise<boolean> {
+		const sodium = getSodium();
+		const authKeyPair = deriveAuthKeyPair(masterSecret);
+		const contentKeyPair = deriveContentKeyPair(masterSecret);
+
+		const publicKeyBase64 = sodium.to_base64(
+			authKeyPair.publicKey,
+			sodium.base64_variants.ORIGINAL,
+		);
+		const contentPublicKeyBase64 = sodium.to_base64(
+			contentKeyPair.publicKey,
+			sodium.base64_variants.ORIGINAL,
+		);
+
+		try {
+			const response = await fetch(`${gatewayUrl}/auth/device/register`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				credentials: "include",
+				body: JSON.stringify({
+					publicKey: publicKeyBase64,
+					contentPublicKey: contentPublicKeyBase64,
+					deviceName: this.getDeviceName(),
+				}),
+			});
+
+			if (!response.ok) return false;
+
+			const data = (await response.json()) as {
+				success: boolean;
+				deviceId: string;
+			};
+			if (data.success && data.deviceId) {
+				this.deviceId = data.deviceId;
+				await this.storeDeviceId(data.deviceId);
+				return true;
+			}
+			return false;
+		} catch {
+			return false;
+		}
 	}
 
 	/**
@@ -50,12 +150,14 @@ class E2EEManager {
 	async clearSecret(): Promise<void> {
 		this.contentKeyPair = null;
 		this.sessionDeks.clear();
+		this.deviceId = null;
 		await this.removeStoredSecret();
+		await this.removeStoredDeviceId();
 	}
 
 	/**
-	 * Unwrap a session DEK from its wrapped (base64) form.
-	 * Returns true if successful, false if E2EE is not enabled or unwrapping fails.
+	 * Unwrap a session DEK from legacy single wrappedDek (base64 string).
+	 * Returns true if successful.
 	 */
 	unwrapSessionDek(sessionId: string, wrappedDek: string): boolean {
 		if (!this.contentKeyPair) return false;
@@ -71,6 +173,64 @@ class E2EEManager {
 		} catch {
 			return false;
 		}
+	}
+
+	/**
+	 * Unwrap a session DEK from multi-device wrappedDeks map.
+	 * Tries own device ID first, then falls back to trying all entries.
+	 * Returns true if successful.
+	 */
+	unwrapSessionDeks(
+		sessionId: string,
+		wrappedDeks: Record<string, string>,
+	): boolean {
+		if (!this.contentKeyPair) return false;
+
+		// Try own device ID first
+		if (this.deviceId && wrappedDeks[this.deviceId]) {
+			if (this.unwrapSessionDek(sessionId, wrappedDeks[this.deviceId])) {
+				return true;
+			}
+		}
+
+		// Try "self" fallback key (from CLIs without device content keys)
+		if (wrappedDeks.self) {
+			if (this.unwrapSessionDek(sessionId, wrappedDeks.self)) {
+				return true;
+			}
+		}
+
+		// Try all entries as a last resort (for backward compat)
+		for (const wrapped of Object.values(wrappedDeks)) {
+			if (this.unwrapSessionDek(sessionId, wrapped)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Unwrap DEK from session data, handling both legacy and multi-device formats.
+	 */
+	unwrapFromSession(
+		sessionId: string,
+		wrappedDek?: string,
+		wrappedDeks?: Record<string, string>,
+	): boolean {
+		if (!this.contentKeyPair) return false;
+
+		// Prefer multi-device format
+		if (wrappedDeks && Object.keys(wrappedDeks).length > 0) {
+			return this.unwrapSessionDeks(sessionId, wrappedDeks);
+		}
+
+		// Fall back to legacy single wrappedDek
+		if (wrappedDek) {
+			return this.unwrapSessionDek(sessionId, wrappedDek);
+		}
+
+		return false;
 	}
 
 	/**
@@ -90,6 +250,13 @@ class E2EEManager {
 			console.warn("[E2EE] Failed to decrypt event", event.sessionId, error);
 			return event;
 		}
+	}
+
+	private getDeviceName(): string {
+		if (typeof navigator !== "undefined") {
+			return `WebUI (${navigator.userAgent.split(" ").pop() ?? "Browser"})`;
+		}
+		return "WebUI";
 	}
 
 	private async applySecret(base64Secret: string): Promise<void> {
@@ -145,6 +312,49 @@ class E2EEManager {
 			}
 		}
 		localStorage.removeItem(STORAGE_KEY);
+	}
+
+	private async getStoredDeviceId(): Promise<string | null> {
+		if (isInTauri()) {
+			try {
+				const { load } = await import("@tauri-apps/plugin-store");
+				const store = await load("app-state.json");
+				const value = await store.get<string>(DEVICE_ID_KEY);
+				return value ?? null;
+			} catch {
+				return null;
+			}
+		}
+		return localStorage.getItem(DEVICE_ID_KEY);
+	}
+
+	private async storeDeviceId(deviceId: string): Promise<void> {
+		if (isInTauri()) {
+			try {
+				const { load } = await import("@tauri-apps/plugin-store");
+				const store = await load("app-state.json");
+				await store.set(DEVICE_ID_KEY, deviceId);
+				await store.save();
+			} catch {
+				localStorage.setItem(DEVICE_ID_KEY, deviceId);
+			}
+			return;
+		}
+		localStorage.setItem(DEVICE_ID_KEY, deviceId);
+	}
+
+	private async removeStoredDeviceId(): Promise<void> {
+		if (isInTauri()) {
+			try {
+				const { load } = await import("@tauri-apps/plugin-store");
+				const store = await load("app-state.json");
+				await store.delete(DEVICE_ID_KEY);
+				await store.save();
+			} catch {
+				// Ignore
+			}
+		}
+		localStorage.removeItem(DEVICE_ID_KEY);
 	}
 }
 
