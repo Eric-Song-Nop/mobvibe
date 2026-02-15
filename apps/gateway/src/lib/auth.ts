@@ -90,7 +90,7 @@ export const auth = betterAuth({
 		useSecureCookies: !isDevelopment,
 		defaultCookieAttributes: {
 			secure: !isDevelopment,
-			sameSite: isDevelopment ? "lax" : "none",
+			sameSite: "lax",
 		},
 	},
 	plugins: [

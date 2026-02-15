@@ -116,7 +116,7 @@ jobs:
       - name: Build Android (Tauri)
         run: pnpm -C apps/webui exec tauri android build --target aarch64
         env:
-          VITE_GATEWAY_URL: https://mobvibe.zeabur.app
+          VITE_GATEWAY_URL: https://api.mobvibe.net
       - name: Prepare Android artifacts
         id: artifacts
         run: |

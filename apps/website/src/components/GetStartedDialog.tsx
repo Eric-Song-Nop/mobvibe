@@ -87,7 +87,7 @@ export function GetStartedDialog({
 						</span>
 						<div className="flex flex-wrap gap-2">
 							<a
-								href="https://mobvibe.netlify.app"
+								href="https://app.mobvibe.net"
 								target="_blank"
 								rel="noopener noreferrer"
 							>

@@ -94,7 +94,7 @@ export async function getMasterSecret(): Promise<string | undefined> {
 }
 
 /** Default production gateway URL */
-const DEFAULT_GATEWAY_URL = "https://mobvibe.zeabur.app";
+const DEFAULT_GATEWAY_URL = "https://api.mobvibe.net";
 
 /**
  * Get the gateway URL with the following priority:
