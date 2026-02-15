@@ -74,15 +74,10 @@ describe("E2EEManager", () => {
 		expect(e2ee.isEnabled()).toBe(false);
 	});
 
-	it("setPairedSecret makes isEnabled() return true", async () => {
-		await e2ee.setPairedSecret(btoa("test-secret"));
-		expect(e2ee.isEnabled()).toBe(true);
-		expect(mockInitCrypto).toHaveBeenCalled();
-		expect(mockDeriveContentKeyPair).toHaveBeenCalled();
-	});
-
 	it("clearSecret makes isEnabled() return false and clears localStorage", async () => {
-		await e2ee.setPairedSecret(btoa("test-secret"));
+		// Use loadFromStorage to set up state
+		localStorage.setItem("mobvibe_e2ee_master_secret", btoa("test-secret"));
+		await e2ee.loadFromStorage();
 		expect(e2ee.isEnabled()).toBe(true);
 
 		await e2ee.clearSecret();
@@ -91,56 +86,21 @@ describe("E2EEManager", () => {
 		expect(localStorage.getItem("mobvibe_e2ee_device_id")).toBeNull();
 	});
 
-	it("unwrapSessionDek returns false when not enabled", () => {
-		expect(e2ee.unwrapSessionDek("session-1", "wrapped-dek")).toBe(false);
-	});
-
-	it("unwrapSessionDek returns true after pairing", async () => {
-		await e2ee.setPairedSecret(btoa("test-secret"));
-		const result = e2ee.unwrapSessionDek("session-1", "wrapped-dek-base64");
-		expect(result).toBe(true);
-		expect(mockUnwrapDEK).toHaveBeenCalledWith(
-			"wrapped-dek-base64",
-			expect.any(Uint8Array),
-			expect.any(Uint8Array),
+	it("unwrapSessionDeks returns false when not enabled", () => {
+		expect(e2ee.unwrapSessionDeks("session-1", { "device-a": "wrapped" })).toBe(
+			false,
 		);
 	});
 
-	it("unwrapFromSession handles legacy wrappedDek", async () => {
-		await e2ee.setPairedSecret(btoa("test-secret"));
-		const result = e2ee.unwrapFromSession("session-1", "wrapped-dek-base64");
-		expect(result).toBe(true);
-	});
-
-	it("unwrapFromSession handles multi-device wrappedDeks", async () => {
-		await e2ee.setPairedSecret(btoa("test-secret"));
-		const result = e2ee.unwrapFromSession("session-2", undefined, {
+	it("unwrapSessionDeks returns true after initialization", async () => {
+		localStorage.setItem("mobvibe_e2ee_master_secret", btoa("test-secret"));
+		await e2ee.loadFromStorage();
+		const result = e2ee.unwrapSessionDeks("session-1", {
 			"device-a": "wrapped-for-a",
 			"device-b": "wrapped-for-b",
 		});
 		expect(result).toBe(true);
-		// Should try all entries
 		expect(mockUnwrapDEK).toHaveBeenCalled();
-	});
-
-	it("unwrapFromSession prefers wrappedDeks over wrappedDek", async () => {
-		await e2ee.setPairedSecret(btoa("test-secret"));
-		const result = e2ee.unwrapFromSession("session-3", "legacy-wrapped", {
-			"device-a": "multi-wrapped",
-		});
-		expect(result).toBe(true);
-		// Should try multi-device first
-		expect(mockUnwrapDEK).toHaveBeenCalledWith(
-			"multi-wrapped",
-			expect.any(Uint8Array),
-			expect.any(Uint8Array),
-		);
-	});
-
-	it("unwrapFromSession returns false when nothing provided", async () => {
-		await e2ee.setPairedSecret(btoa("test-secret"));
-		const result = e2ee.unwrapFromSession("session-4");
-		expect(result).toBe(false);
 	});
 
 	it("decryptEvent passes through non-encrypted payloads unchanged", () => {
@@ -150,8 +110,9 @@ describe("E2EEManager", () => {
 	});
 
 	it("decryptEvent decrypts encrypted payloads", async () => {
-		await e2ee.setPairedSecret(btoa("test-secret"));
-		e2ee.unwrapSessionDek("session-1", "wrapped-dek");
+		localStorage.setItem("mobvibe_e2ee_master_secret", btoa("test-secret"));
+		await e2ee.loadFromStorage();
+		e2ee.unwrapSessionDeks("session-1", { self: "wrapped-dek" });
 
 		const original = { text: "decrypted" };
 		const encrypted = { t: "encrypted", c: btoa(JSON.stringify(original)) };
@@ -163,8 +124,9 @@ describe("E2EEManager", () => {
 	});
 
 	it("decryptEvent logs warning on failure", async () => {
-		await e2ee.setPairedSecret(btoa("test-secret"));
-		e2ee.unwrapSessionDek("session-1", "wrapped-dek");
+		localStorage.setItem("mobvibe_e2ee_master_secret", btoa("test-secret"));
+		await e2ee.loadFromStorage();
+		e2ee.unwrapSessionDeks("session-1", { self: "wrapped-dek" });
 
 		mockDecryptPayload.mockImplementationOnce(() => {
 			throw new Error("decrypt failed");

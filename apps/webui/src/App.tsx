@@ -1,6 +1,6 @@
 import { useBetterAuthTauri } from "@daveyplate/better-auth-tauri/react";
 import { useChatStore } from "@mobvibe/core";
-import { lazy, Suspense, useEffect, useMemo, useRef } from "react";
+import { lazy, Suspense, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
@@ -12,7 +12,7 @@ import { CreateSessionDialog } from "@/components/app/CreateSessionDialog";
 import { FileExplorerDialog } from "@/components/app/FileExplorerDialog";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { MachinesSidebar } from "@/components/machines/MachinesSidebar";
-import { parsePairingUrl } from "@/components/settings/E2EESettings";
+
 import { ThemeProvider } from "@/components/theme-provider";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/toaster";
@@ -237,14 +237,12 @@ function MainApp() {
 
 	useEffect(() => {
 		if (sessionsQuery.data?.sessions) {
-			// Unwrap DEKs from initial session list (supports both legacy and multi-device)
+			// Unwrap DEKs from initial session list
 			if (e2ee.isEnabled()) {
 				for (const session of sessionsQuery.data.sessions) {
-					e2ee.unwrapFromSession(
-						session.sessionId,
-						session.wrappedDek,
-						session.wrappedDeks,
-					);
+					if (session.wrappedDeks) {
+						e2ee.unwrapSessionDeks(session.sessionId, session.wrappedDeks);
+					}
 				}
 			}
 			chatActions.syncSessions(sessionsQuery.data.sessions);
@@ -261,7 +259,7 @@ function MainApp() {
 		const gatewayUrl = gatewaySocket.getGatewayUrl();
 		if (!gatewayUrl) return;
 		e2ee.autoInitialize(gatewayUrl).catch(() => {
-			// Auto-initialization is best-effort; user can manually pair in settings
+			// Auto-initialization is best-effort
 		});
 	}, []);
 
@@ -502,47 +500,6 @@ function TauriAuthHandler({
 	return null;
 }
 
-/**
- * Component to handle `mobvibe://pair?secret=...` deep links.
- * Automatically pairs E2EE when the app is opened via a pairing URL.
- */
-function TauriPairHandler() {
-	const unlistenRef = useRef<(() => void) | null>(null);
-
-	useEffect(() => {
-		let cancelled = false;
-
-		(async () => {
-			try {
-				const { onOpenUrl } = await import("@tauri-apps/plugin-deep-link");
-				const unlisten = await onOpenUrl((urls) => {
-					for (const url of urls) {
-						const secret = parsePairingUrl(url);
-						if (secret) {
-							void e2ee.setPairedSecret(secret);
-							break;
-						}
-					}
-				});
-				if (cancelled) {
-					unlisten();
-				} else {
-					unlistenRef.current = unlisten;
-				}
-			} catch {
-				// Deep-link plugin not available (e.g. browser build)
-			}
-		})();
-
-		return () => {
-			cancelled = true;
-			unlistenRef.current?.();
-		};
-	}, []);
-
-	return null;
-}
-
 function RoutePending() {
 	return (
 		<div className="text-muted-foreground flex min-h-screen items-center justify-center bg-muted/40">
@@ -558,7 +515,6 @@ export function App() {
 	// Handle Tauri deep link auth callbacks
 	const authClient = getAuthClient();
 	const shouldSetupTauriAuth = isInTauri() && authClient !== null;
-	const shouldSetupTauriPair = isInTauri();
 
 	// Show loading state while checking auth
 	if (isLoading) {
@@ -574,7 +530,6 @@ export function App() {
 	return (
 		<>
 			{shouldSetupTauriAuth && <TauriAuthHandler authClient={authClient!} />}
-			{shouldSetupTauriPair && <TauriPairHandler />}
 			<Routes>
 				{/* Settings page */}
 				<Route

@@ -157,7 +157,6 @@ export class SessionRouter {
 				title: result.title ?? `Session ${result.sessionId.slice(0, 8)}`,
 				backendId: result.backendId,
 				cwd: result.cwd,
-				wrappedDek: result.wrappedDek,
 				wrappedDeks: result.wrappedDeks,
 			});
 		}

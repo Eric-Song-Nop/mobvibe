@@ -47,14 +47,6 @@ class E2EEManager {
 	}
 
 	/**
-	 * Set and persist a master secret from user input (legacy pairing flow).
-	 */
-	async setPairedSecret(base64Secret: string): Promise<void> {
-		await this.applySecret(base64Secret);
-		await this.storeSecret(base64Secret);
-	}
-
-	/**
 	 * Auto-initialize E2EE for this device.
 	 * Generates a new master secret, derives keys, and registers with the gateway.
 	 * Only call this when the user is authenticated and E2EE is not yet enabled.
@@ -156,28 +148,8 @@ class E2EEManager {
 	}
 
 	/**
-	 * Unwrap a session DEK from legacy single wrappedDek (base64 string).
-	 * Returns true if successful.
-	 */
-	unwrapSessionDek(sessionId: string, wrappedDek: string): boolean {
-		if (!this.contentKeyPair) return false;
-
-		try {
-			const dek = unwrapDEK(
-				wrappedDek,
-				this.contentKeyPair.publicKey,
-				this.contentKeyPair.secretKey,
-			);
-			this.sessionDeks.set(sessionId, dek);
-			return true;
-		} catch {
-			return false;
-		}
-	}
-
-	/**
-	 * Unwrap a session DEK from multi-device wrappedDeks map.
-	 * Tries own device ID first, then falls back to trying all entries.
+	 * Unwrap a session DEK from the per-device wrappedDeks map.
+	 * Tries own device ID first, then "self" key, then all entries as last resort.
 	 * Returns true if successful.
 	 */
 	unwrapSessionDeks(
@@ -188,46 +160,23 @@ class E2EEManager {
 
 		// Try own device ID first
 		if (this.deviceId && wrappedDeks[this.deviceId]) {
-			if (this.unwrapSessionDek(sessionId, wrappedDeks[this.deviceId])) {
+			if (this.tryUnwrap(sessionId, wrappedDeks[this.deviceId])) {
 				return true;
 			}
 		}
 
 		// Try "self" fallback key (from CLIs without device content keys)
 		if (wrappedDeks.self) {
-			if (this.unwrapSessionDek(sessionId, wrappedDeks.self)) {
+			if (this.tryUnwrap(sessionId, wrappedDeks.self)) {
 				return true;
 			}
 		}
 
-		// Try all entries as a last resort (for backward compat)
+		// Try all entries as a last resort
 		for (const wrapped of Object.values(wrappedDeks)) {
-			if (this.unwrapSessionDek(sessionId, wrapped)) {
+			if (this.tryUnwrap(sessionId, wrapped)) {
 				return true;
 			}
-		}
-
-		return false;
-	}
-
-	/**
-	 * Unwrap DEK from session data, handling both legacy and multi-device formats.
-	 */
-	unwrapFromSession(
-		sessionId: string,
-		wrappedDek?: string,
-		wrappedDeks?: Record<string, string>,
-	): boolean {
-		if (!this.contentKeyPair) return false;
-
-		// Prefer multi-device format
-		if (wrappedDeks && Object.keys(wrappedDeks).length > 0) {
-			return this.unwrapSessionDeks(sessionId, wrappedDeks);
-		}
-
-		// Fall back to legacy single wrappedDek
-		if (wrappedDek) {
-			return this.unwrapSessionDek(sessionId, wrappedDek);
 		}
 
 		return false;
@@ -249,6 +198,22 @@ class E2EEManager {
 		} catch (error) {
 			console.warn("[E2EE] Failed to decrypt event", event.sessionId, error);
 			return event;
+		}
+	}
+
+	private tryUnwrap(sessionId: string, wrappedDek: string): boolean {
+		if (!this.contentKeyPair) return false;
+
+		try {
+			const dek = unwrapDEK(
+				wrappedDek,
+				this.contentKeyPair.publicKey,
+				this.contentKeyPair.secretKey,
+			);
+			this.sessionDeks.set(sessionId, dek);
+			return true;
+		} catch {
+			return false;
 		}
 	}
 
