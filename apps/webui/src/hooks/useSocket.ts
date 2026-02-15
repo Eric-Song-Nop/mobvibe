@@ -428,14 +428,12 @@ export function useSocket({
 	};
 
 	handleSessionsChangedRef.current = (payload: SessionsChangedPayload) => {
-		// Unwrap DEKs from new/updated sessions (supports both legacy and multi-device)
+		// Unwrap DEKs from new/updated sessions
 		if (e2ee.isEnabled()) {
 			for (const session of [...payload.added, ...payload.updated]) {
-				e2ee.unwrapFromSession(
-					session.sessionId,
-					session.wrappedDek,
-					session.wrappedDeks,
-				);
+				if (session.wrappedDeks) {
+					e2ee.unwrapSessionDeks(session.sessionId, session.wrappedDeks);
+				}
 			}
 		}
 		handleSessionsChanged(payload);

@@ -480,7 +480,6 @@ export async function createAcpSessionDirect(params: {
 	title: string;
 	backendId: string;
 	cwd?: string;
-	wrappedDek?: string;
 	wrappedDeks?: Record<string, string>;
 }): Promise<{ _id: string } | null> {
 	const isUniqueViolation = (error: unknown) =>
@@ -492,10 +491,9 @@ export async function createAcpSessionDirect(params: {
 	try {
 		const id = randomUUID();
 
-		// Store wrappedDeks as JSON if provided, fall back to legacy wrappedDek
 		const wrappedDekValue = params.wrappedDeks
 			? JSON.stringify(params.wrappedDeks)
-			: (params.wrappedDek ?? null);
+			: null;
 
 		await db.insert(acpSessions).values({
 			id,
