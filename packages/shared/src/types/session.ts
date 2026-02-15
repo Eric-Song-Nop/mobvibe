@@ -48,8 +48,10 @@ export type SessionSummary = {
 	machineId?: string;
 	/** Current WAL revision for this session */
 	revision?: number;
-	/** Base64-encoded sealed DEK for E2EE (crypto_box_seal) */
+	/** @deprecated Use wrappedDeks for multi-device E2EE. Single base64-encoded sealed DEK. */
 	wrappedDek?: string;
+	/** Per-device wrapped DEKs: Record<deviceKeyId, base64WrappedDek> */
+	wrappedDeks?: Record<string, string>;
 };
 
 /** Sessions changed event payload for incremental sync */

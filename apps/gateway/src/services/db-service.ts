@@ -39,6 +39,36 @@ export async function findDeviceByPublicKey(
 	}
 }
 
+/**
+ * Get all device content public keys for a user (for multi-device DEK wrapping).
+ */
+export async function getDeviceContentKeysForUser(
+	userId: string,
+): Promise<Array<{ deviceId: string; contentPublicKey: string }>> {
+	try {
+		const results = await db
+			.select({
+				id: deviceKeys.id,
+				contentPublicKey: deviceKeys.contentPublicKey,
+			})
+			.from(deviceKeys)
+			.where(eq(deviceKeys.userId, userId));
+
+		return results
+			.filter(
+				(r): r is { id: string; contentPublicKey: string } =>
+					r.contentPublicKey !== null,
+			)
+			.map((r) => ({
+				deviceId: r.id,
+				contentPublicKey: r.contentPublicKey,
+			}));
+	} catch (error) {
+		logger.error({ err: error }, "db_get_device_content_keys_error");
+		return [];
+	}
+}
+
 export type MachineTokenValidation = {
 	machineId: string;
 	userId: string;
@@ -451,6 +481,7 @@ export async function createAcpSessionDirect(params: {
 	backendId: string;
 	cwd?: string;
 	wrappedDek?: string;
+	wrappedDeks?: Record<string, string>;
 }): Promise<{ _id: string } | null> {
 	const isUniqueViolation = (error: unknown) =>
 		typeof error === "object" &&
@@ -461,6 +492,11 @@ export async function createAcpSessionDirect(params: {
 	try {
 		const id = randomUUID();
 
+		// Store wrappedDeks as JSON if provided, fall back to legacy wrappedDek
+		const wrappedDekValue = params.wrappedDeks
+			? JSON.stringify(params.wrappedDeks)
+			: (params.wrappedDek ?? null);
+
 		await db.insert(acpSessions).values({
 			id,
 			sessionId: params.sessionId,
@@ -469,7 +505,7 @@ export async function createAcpSessionDirect(params: {
 			title: params.title,
 			backendId: params.backendId,
 			cwd: params.cwd ?? null,
-			wrappedDek: params.wrappedDek ?? null,
+			wrappedDek: wrappedDekValue,
 			state: "active",
 		});
 

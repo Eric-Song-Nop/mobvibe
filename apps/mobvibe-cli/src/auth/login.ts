@@ -9,6 +9,7 @@ import * as readline from "node:readline/promises";
 import { Writable } from "node:stream";
 import {
 	deriveAuthKeyPair,
+	deriveContentKeyPair,
 	generateMasterSecret,
 	getSodium,
 	initCrypto,
@@ -154,15 +155,20 @@ export async function login(): Promise<LoginResult> {
 			};
 		}
 
-		// Step 2: Generate master secret and derive public key
+		// Step 2: Generate master secret and derive key pairs
 		const masterSecret = generateMasterSecret();
 		const authKeyPair = deriveAuthKeyPair(masterSecret);
+		const contentKeyPair = deriveContentKeyPair(masterSecret);
 		const publicKeyBase64 = sodium.to_base64(
 			authKeyPair.publicKey,
 			sodium.base64_variants.ORIGINAL,
 		);
+		const contentPublicKeyBase64 = sodium.to_base64(
+			contentKeyPair.publicKey,
+			sodium.base64_variants.ORIGINAL,
+		);
 
-		// Step 3: Register device public key
+		// Step 3: Register device public key (auth + content for multi-device E2EE)
 		console.log("Registering device...");
 		const registerResponse = await fetch(`${gatewayUrl}/auth/device/register`, {
 			method: "POST",
@@ -172,6 +178,7 @@ export async function login(): Promise<LoginResult> {
 			},
 			body: JSON.stringify({
 				publicKey: publicKeyBase64,
+				contentPublicKey: contentPublicKeyBase64,
 				deviceName: os.hostname(),
 			}),
 		});

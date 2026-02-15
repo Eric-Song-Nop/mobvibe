@@ -141,6 +141,8 @@ export const deviceKeys = pgTable(
 			.notNull()
 			.references(() => user.id, { onDelete: "cascade" }),
 		publicKey: text("public_key").notNull().unique(),
+		/** Base64 Curve25519 public key used for DEK wrapping (E2EE) */
+		contentPublicKey: text("content_public_key"),
 		deviceName: text("device_name"),
 		createdAt: timestamp("created_at").notNull().defaultNow(),
 		lastSeenAt: timestamp("last_seen_at"),

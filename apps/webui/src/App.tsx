@@ -30,6 +30,7 @@ import { e2ee } from "@/lib/e2ee";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { useMachinesStore } from "@/lib/machines-store";
 import { ensureNotificationPermission } from "@/lib/notifications";
+import { gatewaySocket } from "@/lib/socket";
 import { useUiStore } from "@/lib/ui-store";
 
 const SettingsPage = lazy(async () => {
@@ -236,12 +237,14 @@ function MainApp() {
 
 	useEffect(() => {
 		if (sessionsQuery.data?.sessions) {
-			// Unwrap DEKs from initial session list
+			// Unwrap DEKs from initial session list (supports both legacy and multi-device)
 			if (e2ee.isEnabled()) {
 				for (const session of sessionsQuery.data.sessions) {
-					if (session.wrappedDek) {
-						e2ee.unwrapSessionDek(session.sessionId, session.wrappedDek);
-					}
+					e2ee.unwrapFromSession(
+						session.sessionId,
+						session.wrappedDek,
+						session.wrappedDeks,
+					);
 				}
 			}
 			chatActions.syncSessions(sessionsQuery.data.sessions);
@@ -250,6 +253,16 @@ function MainApp() {
 
 	useEffect(() => {
 		ensureNotificationPermission();
+	}, []);
+
+	// Auto-initialize E2EE for this device if not already enabled
+	useEffect(() => {
+		if (e2ee.isEnabled()) return;
+		const gatewayUrl = gatewaySocket.getGatewayUrl();
+		if (!gatewayUrl) return;
+		e2ee.autoInitialize(gatewayUrl).catch(() => {
+			// Auto-initialization is best-effort; user can manually pair in settings
+		});
 	}, []);
 
 	useEffect(() => {

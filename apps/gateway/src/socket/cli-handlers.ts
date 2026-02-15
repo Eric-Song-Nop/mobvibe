@@ -18,6 +18,7 @@ import type { CliRegistry } from "../services/cli-registry.js";
 import {
 	closeSessionsForMachineById,
 	findDeviceByPublicKey,
+	getDeviceContentKeysForUser,
 	updateMachineStatusById,
 	upsertMachine,
 } from "../services/db-service.js";
@@ -147,9 +148,13 @@ export function setupCliHandlers(
 				},
 			);
 
+			// Fetch device content keys for multi-device E2EE
+			const deviceContentKeys = await getDeviceContentKeysForUser(userId);
+
 			socket.emit("cli:registered", {
 				machineId: record.machineId,
 				userId,
+				deviceContentKeys,
 			});
 			logger.info(
 				{
@@ -157,6 +162,7 @@ export function setupCliHandlers(
 					rawMachineId,
 					hostname: info.hostname,
 					userId,
+					deviceContentKeyCount: deviceContentKeys.length,
 				},
 				"cli_registered",
 			);

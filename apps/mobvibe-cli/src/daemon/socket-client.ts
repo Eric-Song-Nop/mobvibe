@@ -217,6 +217,16 @@ export class SocketClient extends EventEmitter {
 		this.socket.on("cli:registered", async (info) => {
 			logger.info({ machineId: info.machineId }, "gateway_registered");
 
+			// Update device content keys for multi-device E2EE
+			if (info.deviceContentKeys && info.deviceContentKeys.length > 0) {
+				this.options.cryptoService.setDeviceContentKeys(info.deviceContentKeys);
+				this.options.cryptoService.rewrapAllSessions();
+				logger.info(
+					{ count: info.deviceContentKeys.length },
+					"device_content_keys_loaded",
+				);
+			}
+
 			// Auto-discover historical sessions from all backends
 			for (const backend of this.options.config.acpBackends) {
 				try {
@@ -255,6 +265,18 @@ export class SocketClient extends EventEmitter {
 						"session_discovery_failed",
 					);
 				}
+			}
+		});
+
+		// Handle device content keys update (multi-device E2EE)
+		this.socket.on("cli:device-content-keys", (payload) => {
+			if (payload.keys && payload.keys.length > 0) {
+				this.options.cryptoService.setDeviceContentKeys(payload.keys);
+				this.options.cryptoService.rewrapAllSessions();
+				logger.info(
+					{ count: payload.keys.length },
+					"device_content_keys_updated",
+				);
 			}
 		});
 

@@ -1,0 +1,1 @@
+ALTER TABLE "device_keys" ADD COLUMN "content_public_key" text;
