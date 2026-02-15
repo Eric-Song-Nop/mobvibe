@@ -251,7 +251,8 @@
 		"scanHint": "扫描 `mobvibe e2ee show` 生成的二维码，或在下方粘贴密钥。",
 		"scanError": "扫描二维码失败，请重试或手动粘贴密钥。",
 		"pairSuccess": "E2EE 配对成功。",
-		"invalidQrCode": "无效的二维码，请扫描 `mobvibe e2ee show` 生成的二维码。"
+		"invalidQrCode": "无效的二维码，请扫描 `mobvibe e2ee show` 生成的二维码。",
+		"cameraPermissionDenied": "扫描二维码需要相机权限，请在设备设置中授予相机访问权限。"
 	},
 	"machines": {
 		"title": "设备",

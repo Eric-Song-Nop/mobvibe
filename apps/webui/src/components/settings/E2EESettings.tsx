@@ -74,9 +74,17 @@ export function E2EESettings() {
 		setError(null);
 
 		try {
-			const { scan, Format } = await import(
-				"@tauri-apps/plugin-barcode-scanner"
-			);
+			const { scan, Format, checkPermissions, requestPermissions } =
+				await import("@tauri-apps/plugin-barcode-scanner");
+
+			let permState = await checkPermissions();
+			if (permState === "prompt") {
+				permState = await requestPermissions();
+			}
+			if (permState !== "granted") {
+				setError(t("e2ee.cameraPermissionDenied"));
+			}
+
 			const result = await scan({ windowed: false, formats: [Format.QRCode] });
 
 			const base64Secret = parsePairingUrl(result.content);

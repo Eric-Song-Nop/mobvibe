@@ -5,12 +5,15 @@ await $`rm -rf dist`;
 
 // Build with Bun bundler
 // Bundle local code + @mobvibe/shared, keep node_modules external
+const pkg = await Bun.file("./package.json").json();
+const external = Object.keys(pkg.dependencies ?? {});
+
 const result = await Bun.build({
 	entrypoints: ["./src/index.ts"],
 	outdir: "./dist",
 	target: "bun",
 	sourcemap: "external",
-	packages: "external",
+	external,
 });
 
 if (!result.success) {
