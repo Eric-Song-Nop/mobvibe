@@ -2,6 +2,12 @@ import { Database } from "bun:sqlite";
 import { Command } from "commander";
 import { loadCredentials } from "./auth/credentials.js";
 import { login, loginStatus, logout } from "./auth/login.js";
+import {
+	listDevices,
+	registerDevice,
+	removeDevice,
+	renameDevice,
+} from "./commands/device.js";
 import { getCliConfig } from "./config.js";
 import { DaemonManager } from "./daemon/daemon.js";
 import { logger } from "./lib/logger.js";
@@ -133,6 +139,36 @@ e2eeCmd
 		console.log(`Auth public key:    ${authPub.slice(0, 16)}...`);
 		console.log(`Content public key: ${contentPub.slice(0, 16)}...`);
 		console.log(`Saved: ${new Date(credentials.createdAt).toLocaleString()}`);
+	});
+
+const deviceCmd = program.command("device").description("Device management");
+
+deviceCmd
+	.command("list")
+	.description("List all registered devices")
+	.action(async () => {
+		await listDevices();
+	});
+
+deviceCmd
+	.command("remove <deviceId>")
+	.description("Remove a registered device")
+	.action(async (deviceId: string) => {
+		await removeDevice(deviceId);
+	});
+
+deviceCmd
+	.command("rename <deviceId> <name>")
+	.description("Rename a registered device")
+	.action(async (deviceId: string, name: string) => {
+		await renameDevice(deviceId, name);
+	});
+
+deviceCmd
+	.command("register")
+	.description("Re-register current device with gateway")
+	.action(async () => {
+		await registerDevice();
 	});
 
 program

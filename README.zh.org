@@ -75,7 +75,6 @@ pnpm build
 | =mobvibe stop=                     | 停止守护进程                         |
 | =mobvibe status=                   | 查看守护进程状态                     |
 | =mobvibe logs [-f] [-n <lines>]=   | 查看守护进程日志                     |
-| =mobvibe e2ee show=                | 显示主密钥（用于 WebUI 配对）       |
 | =mobvibe e2ee status=              | 查看 E2EE 密钥状态                  |
 
 *** 配置
@@ -196,12 +195,6 @@ mobvibe login
 #+end_src
 
 输入邮箱和密码。完成后会生成主密钥并注册设备。主密钥会显示在终端 — 复制它用于第 2 步。
-
-*** 2. 配对 WebUI
-
-打开 WebUI → 设置 → 端到端加密 → 粘贴主密钥 → 点击「配对」。
-
-之后可用 =mobvibe e2ee show= 再次查看主密钥。
 
 *** 3. 启动守护进程
 

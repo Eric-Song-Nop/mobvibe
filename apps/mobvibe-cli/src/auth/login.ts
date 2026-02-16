@@ -208,17 +208,6 @@ export async function login(): Promise<LoginResult> {
 		logger.info("login_credentials_saved");
 
 		console.log("\nLogin successful!");
-		console.log(
-			"\nWARNING: The master secret below will appear in your terminal history.",
-		);
-		console.log(
-			"  Clear your terminal after copying it, or use 'mobvibe e2ee show' later.",
-		);
-		console.log("\nYour master secret (for pairing WebUI/Tauri devices):");
-		console.log(`  ${masterSecretBase64}`);
-		console.log(
-			"\nKeep this secret safe. You can view it again with 'mobvibe e2ee show'.",
-		);
 		console.log("Run 'mobvibe start' to connect to the gateway.");
 
 		return { success: true };

@@ -75,7 +75,6 @@ pnpm build
 | =mobvibe stop=                    | Stop daemon                                  |
 | =mobvibe status=                  | Show daemon status                           |
 | =mobvibe logs [-f] [-n <lines>]=  | View daemon logs                             |
-| =mobvibe e2ee show=               | Display master secret for WebUI pairing      |
 | =mobvibe e2ee status=             | Show E2EE key status                         |
 
 *** Configuration
@@ -197,13 +196,7 @@ mobvibe login
 
 Enter email and password. This authenticates with the gateway, generates a master secret, and registers the device. The master secret is displayed at the end — copy it for step 2.
 
-*** 2. Pair WebUI
-
-Open WebUI → Settings → End-to-End Encryption → paste the master secret → click "Pair".
-
-To view the secret again later: =mobvibe e2ee show=
-
-*** 3. Start daemon
+*** 2. Start daemon
 
 #+begin_src bash
 mobvibe start

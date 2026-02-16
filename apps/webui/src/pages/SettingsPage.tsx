@@ -224,7 +224,8 @@ export function SettingsPage() {
 						<CardHeader>
 							<CardTitle>End-to-End Encryption</CardTitle>
 							<CardDescription>
-								Pair this device with your CLI to decrypt session content.
+								Session content is encrypted end-to-end. Keys are auto-generated
+								on login.
 							</CardDescription>
 						</CardHeader>
 						<CardContent>

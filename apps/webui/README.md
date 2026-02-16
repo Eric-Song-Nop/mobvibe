@@ -5,6 +5,7 @@ React-based web interface for remote-claude with real-time Socket.io updates.
 ## Overview
 
 The webui provides a mobile-first chat interface for interacting with ACP sessions:
+
 - Real-time updates via Socket.io
 - End-to-end encryption (E2EE) — pair with CLI master secret to decrypt session content locally
 - Multi-session management
@@ -46,8 +47,6 @@ By default, the gateway URL is auto-detected as `{protocol}://{hostname}:3005`.
 - `hooks/useSocket.ts` - Decrypts incoming events and backfill events
 - `main.tsx` - Initializes crypto and loads stored secret on startup
 
-**Pairing flow:** User pastes the CLI master secret (from `mobvibe e2ee show`) into Settings > E2EE > Pair. The secret derives a Curve25519 content keypair used to unwrap per-session DEKs. Session event payloads are then decrypted locally with `crypto_secretbox`.
-
 **Storage:** localStorage (browser) or Tauri plugin-store (desktop/mobile).
 
 ### State Management
@@ -79,12 +78,14 @@ In Tauri (desktop/mobile), the webui uses Bearer token authentication. Login res
 ### Socket.io Integration
 
 **`lib/socket.ts`**
+
 - GatewaySocket singleton class
 - Connects to `/webui` namespace
 - Auto-reconnection handling
 - Session subscription management
 
 **`hooks/useSocket.ts`**
+
 - React hook for Socket.io event handling
 - Subscribes to ready sessions
 - Routes events to store actions:
@@ -97,6 +98,7 @@ In Tauri (desktop/mobile), the webui uses Bearer token authentication. Login res
 ### API Layer
 
 **`lib/api.ts`**
+
 - TanStack Query wrapper for REST endpoints
 - Type-safe API functions:
   - `fetchSessions()` - List all sessions
@@ -109,6 +111,7 @@ In Tauri (desktop/mobile), the webui uses Bearer token authentication. Login res
 ### Key Components
 
 **App Layout (`components/app/`):**
+
 - `AppHeader` - Status bar, file explorer toggle
 - `AppSidebar` - Session list, create button
 - `ChatMessageList` - Message display
@@ -117,6 +120,7 @@ In Tauri (desktop/mobile), the webui uses Bearer token authentication. Login res
 - `CreateSessionDialog` - New session form
 
 **Chat Components (`components/chat/`):**
+
 - Message rendering (text, tool calls, permissions)
 - Code blocks with syntax highlighting
 - Slash command picker (`/`)
@@ -124,30 +128,35 @@ In Tauri (desktop/mobile), the webui uses Bearer token authentication. Login res
 - Markdown streaming via Streamdown
 
 **UI Components (`components/ui/`):**
+
 - Shadcn UI components (Radix + Tailwind)
 - Button, Dialog, ScrollArea, etc.
 
 ### Features
 
 **Session Management:**
+
 - Create sessions with backend and working directory selection
 - Switch between active sessions
 - Rename and close sessions
 - Mode and model switching
 
 **Real-time Updates:**
+
 - Streaming message content
 - Tool call progress tracking
 - Terminal output display
 - Permission request cards
 
 **File Explorer:**
+
 - Finder-style column navigation
 - Code preview with syntax highlighting
 - Tree-sitter outline for supported languages
 - Image preview for common formats
 
 **Mobile Support:**
+
 - Touch-friendly interface
 - Safe-area handling
 - Responsive layout
@@ -181,6 +190,7 @@ pnpm test --coverage       # With coverage
 ```
 
 Uses:
+
 - Vitest as test runner
 - @testing-library/react for component testing
 - jsdom for browser environment
@@ -188,6 +198,7 @@ Uses:
 ## Tree-sitter Support
 
 Code outline generation supports these languages:
+
 - JavaScript, TypeScript, TSX
 - Bash, C, C++, C#
 - Go, Java, PHP, Python, Ruby, Rust
@@ -197,6 +208,7 @@ WASM files are copied to `public/` via postinstall script.
 ## Internationalization
 
 Supported languages:
+
 - English (`en`)
 - Chinese (`zh`)
 

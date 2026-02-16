@@ -452,3 +452,34 @@ export const fetchSessionGitDiff = async (payload: {
 
 // Note: SSE streaming (createSessionEventSource) has been replaced with Socket.io
 // See @/lib/socket.ts for the Socket.io implementation
+
+export type DeviceInfo = {
+	id: string;
+	deviceName: string | null;
+	hasContentKey: boolean;
+	createdAt: string;
+	lastSeenAt: string | null;
+};
+
+export type DeviceListResponse = {
+	devices: DeviceInfo[];
+};
+
+export const fetchDevices = async (): Promise<DeviceListResponse> =>
+	requestJson<DeviceListResponse>("/auth/device/list");
+
+export const deleteDevice = async (
+	deviceId: string,
+): Promise<{ success: boolean }> =>
+	requestJson<{ success: boolean }>(`/auth/device/${deviceId}`, {
+		method: "DELETE",
+	});
+
+export const renameDeviceApi = async (
+	deviceId: string,
+	deviceName: string,
+): Promise<{ success: boolean }> =>
+	requestJson<{ success: boolean }>(`/auth/device/${deviceId}`, {
+		method: "PATCH",
+		body: JSON.stringify({ deviceName }),
+	});

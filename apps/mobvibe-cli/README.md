@@ -33,7 +33,6 @@ After login, copy the displayed master secret and paste it into WebUI Settings >
 | `mobvibe stop` | Stop daemon |
 | `mobvibe status` | Show daemon status |
 | `mobvibe logs [-f] [-n <lines>]` | View daemon logs |
-| `mobvibe e2ee show` | Display master secret for WebUI pairing |
 | `mobvibe e2ee status` | Show E2EE key status (public key fingerprints) |
 | `mobvibe compact [--session <id>]` | Compact WAL database |
 
@@ -42,6 +41,7 @@ After login, copy the displayed master secret and paste it into WebUI Settings >
 All session content is encrypted on the CLI before sending to the gateway. The gateway routes events but cannot read their content.
 
 **Login flow:**
+
 1. `mobvibe login` prompts for email and password (password masked)
 2. Authenticates via Better Auth session cookie
 3. Generates a 32-byte master secret and derives an Ed25519 keypair
@@ -50,6 +50,7 @@ All session content is encrypted on the CLI before sending to the gateway. The g
 6. Displays the master secret (base64) for WebUI pairing
 
 **Runtime encryption:**
+
 - Each session gets a random DEK (data encryption key)
 - Events are encrypted with `crypto_secretbox` (XSalsa20-Poly1305)
 - DEKs are wrapped with `crypto_box_seal` so only paired devices can unwrap them

@@ -3,25 +3,20 @@
  * Validates session tokens using Better Auth.
  */
 
+import { verifySignedToken } from "@mobvibe/shared";
 import { fromNodeHeaders } from "better-auth/node";
 import type { NextFunction, Request, Response } from "express";
 import { auth } from "../lib/auth.js";
 import { logger } from "../lib/logger.js";
+import { findDeviceByPublicKey } from "../services/db-service.js";
 
-/**
- * Extended request type with user information.
- */
 export interface AuthenticatedRequest extends Request {
 	userId?: string;
 	userEmail?: string;
 	requestId?: string;
+	deviceId?: string;
 }
 
-/**
- * Middleware that requires authentication.
- * Validates session using Better Auth.
- * Returns 401 if no session or invalid session.
- */
 export async function requireAuth(
 	req: AuthenticatedRequest,
 	res: Response,
@@ -52,11 +47,6 @@ export async function requireAuth(
 	}
 }
 
-/**
- * Middleware that optionally authenticates.
- * If a session exists, validates it and attaches user info.
- * If no session, continues without user context.
- */
 export async function optionalAuth(
 	req: AuthenticatedRequest,
 	res: Response,
@@ -74,21 +64,54 @@ export async function optionalAuth(
 		next();
 	} catch (error) {
 		logger.error({ err: error }, "auth_optional_session_validation_error");
-		// Continue without auth on error
 		next();
 	}
 }
 
-/**
- * Helper to get user ID from request.
- */
+export async function requireDeviceOrSessionAuth(
+	req: AuthenticatedRequest,
+	res: Response,
+	next: NextFunction,
+): Promise<void> {
+	const authHeader = req.headers.authorization;
+	if (authHeader?.startsWith("Bearer ")) {
+		try {
+			const tokenStr = authHeader.slice(7);
+			const token = JSON.parse(tokenStr);
+			const verified = verifySignedToken(token);
+			if (!verified) {
+				res.status(401).json({
+					error: "Invalid device token",
+					code: "INVALID_DEVICE_TOKEN",
+				});
+				return;
+			}
+
+			const device = await findDeviceByPublicKey(verified.publicKey);
+			if (!device) {
+				res.status(401).json({
+					error: "Device not registered",
+					code: "DEVICE_NOT_REGISTERED",
+				});
+				return;
+			}
+
+			req.userId = device.userId;
+			req.deviceId = device.id;
+			next();
+			return;
+		} catch (error) {
+			logger.error({ err: error }, "device_auth_error");
+		}
+	}
+
+	await requireAuth(req, res, next);
+}
+
 export function getUserId(req: AuthenticatedRequest): string | undefined {
 	return req.userId;
 }
 
-/**
- * Check if request is authenticated.
- */
 export function isAuthenticated(req: AuthenticatedRequest): boolean {
 	return req.userId !== undefined;
 }

@@ -2,9 +2,16 @@
 
 ## 概述
 
-Mobvibe 实现了端到端加密（E2EE），确保所有 session 事件内容在 CLI 端加密、在 WebUI/Tauri 端解密，Gateway 仅能看到路由元数据但无法读取内容。
+Mobvibe 实现了**多设备端到端加密（E2EE）**，确保所有 session 事件内容在 CLI 端加密、在任意 WebUI/Tauri 设备端解密，Gateway 仅能看到路由元数据但无法读取内容。
 
 同时，CLI 认证也从 API Key 切换为基于 Ed25519 签名令牌的设备认证，消除了 Gateway 持有可重放凭证的风险。
+
+### 核心特性
+
+- **多设备支持**：每个用户可注册多个设备（CLI、WebUI、Tauri 桌面/移动端）
+- **独立密钥**：每个设备拥有独立的 Auth KeyPair（Ed25519）和 Content KeyPair（Curve25519）
+- **跨设备解密**：CLI 为用户所有设备包装 DEK，任意设备均可解密 session 内容
+- **自动初始化**：WebUI/Tauri 首次登录时自动生成密钥并注册，无需手动配对
 
 ### 威胁模型
 
@@ -21,24 +28,36 @@ Mobvibe 实现了端到端加密（E2EE），确保所有 session 事件内容�
 
 ## 密钥体系
 
-所有密钥从一个 32 字节的 Master Secret 派生：
+每个设备从自己的 32 字节 Master Secret 派生两对密钥：
 
 ```
-Master Secret (32 bytes, 用户唯一根凭证)
+Device Master Secret (32 bytes, 每设备独立)
 │
 ├── KDF(subkey=1, ctx="mobvauth") → seed
 │     └── crypto_sign_seed_keypair(seed) → Auth KeyPair (Ed25519)
-│           ├── publicKey: CLI 身份，注册到 Gateway device_keys 表
-│           └── secretKey: 签署认证令牌
+│           ├── publicKey: 设备身份，注册到 Gateway device_keys.public_key
+│           └── secretKey: 签署 Socket 认证令牌
 │
-├── KDF(subkey=2, ctx="mobvcont") → seed
-│     └── crypto_box_seed_keypair(seed) → Content KeyPair (Curve25519)
-│           ├── publicKey: 包装 session DEK
-│           └── secretKey: 解包 session DEK
-│
-└── Per-Session DEK (每个 session 随机 32 bytes)
-      ├── 包装: crypto_box_seal(dek, contentPubKey) → 存储在 Gateway
-      └── 使用: crypto_secretbox_easy(payload, randomNonce, dek) → 每个事件
+└── KDF(subkey=2, ctx="mobvcont") → seed
+      └── crypto_box_seed_keypair(seed) → Content KeyPair (Curve25519)
+            ├── publicKey: 注册到 device_keys.content_public_key，用于 DEK 包装
+            └── secretKey: 解包为该设备包装的 session DEK
+
+Per-Session DEK (每个 session 随机 32 bytes)
+├── 包装: crypto_box_seal(dek, eachDeviceContentPubKey)
+│         → Record<deviceId, base64WrappedDek> 存储在 acp_sessions.wrapped_dek
+└── 使用: crypto_secretbox_easy(payload, randomNonce, dek) → 每个事件
+```
+
+**多设备 DEK 包装示例：**
+
+```typescript
+// CLI 为所有已知设备包装 DEK
+const wrappedDeks: Record<string, string> = {};
+for (const device of deviceContentKeys) {
+  wrappedDeks[device.deviceId] = wrapDEK(dek, device.contentPublicKey);
+}
+// 存储为 JSON: { "device-uuid-1": "base64...", "device-uuid-2": "base64..." }
 ```
 
 **使用的 libsodium 原语：**
@@ -66,19 +85,32 @@ Master Secret (32 bytes, 用户唯一根凭证)
 
 元数据（sessionId、machineId、revision、seq、kind、createdAt）保持明文，供 Gateway 路由和确认使用。
 
-## 认证流程
+## 设备注册与认证流程
 
 ### CLI 登录（`mobvibe login`）
 
 ```
 1. 用户运行 `mobvibe login`
-2. CLI 生成 master secret (32 bytes), 派生 Ed25519 公钥
+2. CLI 生成 master secret (32 bytes), 派生 Auth KeyPair + Content KeyPair
 3. 用户输入 email + password
 4. CLI 调用 POST /api/auth/sign-in/email → 获取 session cookie
-5. CLI 调用 POST /auth/device/register { publicKey, deviceName }
+5. CLI 调用 POST /auth/device/register { publicKey, contentPublicKey, deviceName }
 6. CLI 保存 master secret 到 ~/.mobvibe/credentials.json (mode 0600)
 7. session cookie 丢弃 — 后续认证使用签名令牌
-8. 显示 master secret (base64) 供 WebUI 配对
+```
+
+### WebUI/Tauri 自动初始化
+
+```
+1. 用户登录（Better Auth session cookie）
+2. WebUI 检测 E2EE 未启用
+3. 自动调用 e2ee.autoInitialize():
+   a. 生成 master secret
+   b. 派生 Auth KeyPair + Content KeyPair
+   c. 调用 POST /auth/device/register { publicKey, contentPublicKey, deviceName }
+   d. 存储 master secret 到 localStorage / Tauri plugin-store
+   e. 存储 deviceId 用于 DEK 解包
+4. 后续启动时自动从存储加载
 ```
 
 ### CLI Socket 认证
@@ -106,15 +138,6 @@ Gateway 中间件验证流程：
 5. 认证通过，设置 socket.data = { userId, deviceId }
 ```
 
-### WebUI 配对
-
-```
-1. 用户运行 `mobvibe e2ee show` → 获取 master secret (base64)
-2. WebUI: Settings > End-to-End Encryption > Pair
-3. 粘贴 master secret → 派生 content keypair → 可解密所有 session
-4. 存储: localStorage (浏览器) / Tauri plugin-store (桌面/移动)
-```
-
 ## 代码结构
 
 ### 共享加密模块 (`packages/shared/src/crypto/`)
@@ -133,32 +156,32 @@ Gateway 中间件验证流程：
 
 | 文件 | 变更 |
 |------|------|
-| `db/schema.ts` | 新增 `device_keys` 表, `acpSessions` 加 `wrappedDek` 列 |
-| `routes/device.ts` | `POST /auth/device/register` 设备注册端点 |
+| `db/schema.ts` | `device_keys` 表新增 `content_public_key` 列, `acpSessions.wrappedDek` 存储 JSON map |
+| `routes/device.ts` | `POST /auth/device/register` 接受 `contentPublicKey`, `GET /auth/device/content-keys` 返回用户所有设备密钥 |
 | `socket/cli-handlers.ts` | 签名令牌认证中间件（替代 API key） |
 | `services/cli-registry.ts` | `CliRecord`: `apiKey` → `deviceId` |
-| `services/db-service.ts` | `findDeviceByPublicKey`, `createAcpSessionDirect` 支持 `wrappedDek` |
+| `services/db-service.ts` | `createAcpSessionDirect` 支持 `wrappedDeks: Record<string, string>` |
 
 ### CLI (`apps/mobvibe-cli/`)
 
 | 文件 | 功能 |
 |------|------|
-| `e2ee/crypto-service.ts` | `CliCryptoService`: DEK 管理、事件加密 |
+| `e2ee/crypto-service.ts` | `CliCryptoService`: 多设备 DEK 管理、事件加密、`wrapDekForAllDevices()` |
 | `auth/credentials.ts` | 凭证存储: `masterSecret` (替代 `apiKey`) |
-| `auth/login.ts` | 新登录流程: email/password + 公钥注册 |
-| `daemon/socket-client.ts` | 签名令牌认证 + 3 个加密边界点 |
-| `daemon/daemon.ts` | 启动时初始化 crypto, 创建 `CliCryptoService` |
-| `acp/session-manager.ts` | session 创建/加载时生成 DEK |
-| `index.ts` | `mobvibe e2ee show` 和 `mobvibe e2ee status` 命令 |
+| `auth/login.ts` | 登录流程: 注册 `publicKey` + `contentPublicKey` |
+| `daemon/socket-client.ts` | 签名令牌认证 + 启动时获取设备内容密钥列表 |
+| `daemon/daemon.ts` | 启动时初始化 crypto, 创建 `CliCryptoService`, 调用 `GET /auth/device/content-keys` |
+| `acp/session-manager.ts` | session 创建/加载时生成 DEK 并为所有设备包装 |
+| `index.ts` | 和 `mobvibe e2ee status` 命令 |
 
 ### WebUI (`apps/webui/`)
 
 | 文件 | 功能 |
 |------|------|
-| `lib/e2ee.ts` | `E2EEManager`: 配对、DEK 解包、事件解密 |
+| `lib/e2ee.ts` | `E2EEManager`: 自动初始化、设备注册、DEK 解包（支持 deviceId 和 "self" 回退）、事件解密 |
 | `hooks/useSocket.ts` | 实时事件 + 回填事件解密, session 变更时解包 DEK |
-| `main.tsx` | 启动时 `initCrypto()` + `e2ee.loadFromStorage()` |
-| `components/settings/E2EESettings.tsx` | 配对/取消配对 UI |
+| `main.tsx` | 启动时 `initCrypto()` + `e2ee.loadFromStorage()` + 自动初始化检测 |
+| `components/settings/E2EESettings.tsx` | 配对/取消配对 UI（含自动初始化提示） |
 | `pages/SettingsPage.tsx` | 集成 E2EE 设置卡片 |
 
 ## 加密边界
@@ -166,10 +189,10 @@ Gateway 中间件验证流程：
 CLI 在 **Socket 边界** 进行加密（WAL 本地存储明文）：
 
 ```
-┌──────────────┐    加密    ┌─────────┐    密文    ┌───────────┐    解密    ┌──────────┐
-│  CLI (明文)  │ ─────────> │  Socket │ ────────> │  Gateway  │ ────────> │  WebUI   │
-│  WAL 存储    │            │  边界   │           │  (看不到   │           │  (明文)  │
-└──────────────┘            └─────────┘           │   内容)    │           └──────────┘
+┌──────────────┐    加密    ┌─────────┐    密文    ┌───────────┐    解密    ┌──────────────┐
+│  CLI (明文)  │ ─────────> │  Socket │ ────────> │  Gateway  │ ────────> │  WebUI/Tauri │
+│  WAL 存储    │            │  边界   │           │  (看不到   │           │  (明文)      │
+└──────────────┘            └─────────┘           │   内容)    │           └──────────────┘
                                                   └───────────┘
 ```
 
@@ -189,27 +212,52 @@ CLI 在 **Socket 边界** 进行加密（WAL 本地存储明文）：
 - 初始 session 列表加载（`App.tsx` 中 `syncSessions`）
 - `sessions:changed` 事件（`useSocket.ts` 中 `handleSessionsChangedRef`）
 
-## DEK 生命周期
+## DEK 生命周期（多设备）
 
 ```
+CLI 启动
+  │
+  └── 调用 GET /auth/device/content-keys → 获取用户所有设备的 contentPublicKey
+        │
+        └── cryptoService.setDeviceContentKeys(keys)
+
 Session 创建/加载 (CLI)
   │
   ├── generateDEK() → 随机 32 bytes
-  ├── wrapDEK(dek, contentPubKey) → base64 密文
-  ├── 存储到 WAL session 记录 (wrappedDek)
-  ├── 通过 sessions:changed 推送到 Gateway + WebUI
+  ├── wrapDekForAllDevices(dek):
+  │     for (device of deviceContentKeys):
+  │       wrappedDeks[device.deviceId] = wrapDEK(dek, device.contentPublicKey)
+  │     // 回退：若无其他设备，wrappedDeks["self"] = wrapDEK(dek, ownPubKey)
+  ├── 存储到 WAL session 记录 (wrappedDeks)
+  ├── 通过 sessions:changed 推送到 Gateway → acp_sessions.wrapped_dek (JSON)
   │
   └── 每个事件: encryptPayload(payload, dek) → { t: "encrypted", c: "..." }
+
+WebUI/Tauri 接收 session
+  │
+  └── unwrapSessionDeks(sessionId, wrappedDeks):
+        1. 尝试 wrappedDeks[ownDeviceId]
+        2. 回退尝试 wrappedDeks["self"] (CLI 单设备模式)
+        3. 最后尝试所有条目
+        → 解包成功则缓存 sessionDeks[sessionId]
 ```
 
-新 revision = 新 DEK（session reload 时重新生成）。
+新 revision = 新 DEK（session reload 时重新生成并重新包装）。
+
+**新增设备后的处理：**
+
+当用户在新设备登录后，CLI 需要重新包装所有 session 的 DEK：
+
+```typescript
+// CLI 下次启动时自动执行
+const keys = await fetchDeviceContentKeys();
+cryptoService.setDeviceContentKeys(keys);
+cryptoService.rewrapAllSessions(); // 重新包装所有缓存的 DEK
+```
 
 ## CLI 命令
 
 ```bash
-# 显示 master secret 用于配对
-mobvibe e2ee show
-
 # 显示密钥状态（公钥指纹）
 mobvibe e2ee status
 ```
@@ -220,20 +268,75 @@ mobvibe e2ee status
 
 ```sql
 CREATE TABLE device_keys (
-  id          TEXT PRIMARY KEY,
-  user_id     TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
-  public_key  TEXT NOT NULL UNIQUE,  -- base64 Ed25519 公钥
-  device_name TEXT,
-  created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
-  last_seen_at TIMESTAMP
+  id                  TEXT PRIMARY KEY,
+  user_id             TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+  public_key          TEXT NOT NULL UNIQUE,           -- base64 Ed25519 公钥（认证）
+  content_public_key  TEXT,                           -- base64 Curve25519 公钥（DEK 包装）
+  device_name         TEXT,
+  created_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+  last_seen_at        TIMESTAMP
 );
 CREATE INDEX device_keys_user_id_idx ON device_keys(user_id);
 CREATE INDEX device_keys_public_key_idx ON device_keys(public_key);
 ```
 
-### acpSessions 变更
+每个用户可以有多个设备，每个设备有独立的密钥对。
 
-新增 `wrapped_dek TEXT` 列，存储 base64 编码的密封 DEK。
+### acp_sessions 变更
+
+`wrapped_dek` 列存储 JSON 格式的多设备包装 DEK map：
+
+```json
+{
+  "device-uuid-1": "base64_crypto_box_seal_dek_for_device1",
+  "device-uuid-2": "base64_crypto_box_seal_dek_for_device2",
+  "self": "base64_crypto_box_seal_dek_for_cli_own_key"
+}
+```
+
+WebUI/Tauri 根据自己的 `deviceId` 查找对应的包装 DEK 进行解包。
+
+## Gateway API 端点
+
+### `POST /auth/device/register`
+
+注册新设备或更新现有设备。
+
+**请求体：**
+
+```json
+{
+  "publicKey": "base64-ed25519-public-key",
+  "contentPublicKey": "base64-curve25519-public-key",
+  "deviceName": "My Laptop"
+}
+```
+
+**响应：**
+
+```json
+{ "success": true, "deviceId": "uuid" }
+```
+
+- 需要有效的 Better Auth session cookie
+- 同一用户重复注册相同 `publicKey` 会返回已有 `deviceId` 并更新 `contentPublicKey`
+
+### `GET /auth/device/content-keys`
+
+获取当前用户所有设备的内容公钥，用于多设备 DEK 包装。
+
+**响应：**
+
+```json
+{
+  "keys": [
+    { "deviceId": "uuid-1", "contentPublicKey": "base64...", "deviceName": "CLI" },
+    { "deviceId": "uuid-2", "contentPublicKey": "base64...", "deviceName": "WebUI" }
+  ]
+}
+```
+
+- 只返回已设置 `contentPublicKey` 的设备
 
 ## libsodium ESM 兼容性
 
@@ -246,10 +349,9 @@ CREATE INDEX device_keys_public_key_idx ON device_keys(public_key);
 ## 未来扩展（不在当前实现中）
 
 - RPC payload 加密（`rpc:message:send` prompt、`rpc:fs:file` content）
-- 带内配对（通过 Gateway 的临时密钥交换）
 - 前向保密（临时 session 密钥）
-- Master secret 备份/恢复
+- Master secret 备份/恢复（云端加密备份）
 - Session 标题加密
-- 密钥轮换
-- Tauri 钥匙串集成
-- 设备吊销 UI
+- 密钥轮换（定期更换 master secret）
+- 设备吊销 UI（移除已注册设备，触发 DEK 重新包装）
+- 跨用户 session 共享（需要额外的密钥交换协议）

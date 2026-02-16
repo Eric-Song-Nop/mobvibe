@@ -148,6 +148,43 @@ class E2EEManager {
 	}
 
 	/**
+	 * Re-register the current device with the gateway.
+	 * Uses the existing master secret if available.
+	 * Returns true on success, false on failure.
+	 */
+	async reRegister(gatewayUrl: string): Promise<boolean> {
+		const stored = await this.getStoredSecret();
+		if (!stored) {
+			return this.autoInitialize(gatewayUrl);
+		}
+
+		if (this.registering) return false;
+		this.registering = true;
+
+		try {
+			await initCrypto();
+			const sodium = getSodium();
+			const masterSecret = sodium.from_base64(
+				stored,
+				sodium.base64_variants.ORIGINAL,
+			);
+
+			await this.applySecret(stored);
+
+			const registered = await this.registerDevice(gatewayUrl, masterSecret);
+			if (!registered) {
+				return false;
+			}
+
+			return true;
+		} catch {
+			return false;
+		} finally {
+			this.registering = false;
+		}
+	}
+
+	/**
 	 * Unwrap a session DEK from the per-device wrappedDeks map.
 	 * Tries own device ID first, then "self" key, then all entries as last resort.
 	 * Returns true if successful.

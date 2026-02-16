@@ -69,6 +69,70 @@ export async function getDeviceContentKeysForUser(
 	}
 }
 
+export type DeviceInfo = {
+	id: string;
+	deviceName: string | null;
+	contentPublicKey: string | null;
+	createdAt: Date;
+	lastSeenAt: Date | null;
+};
+
+export async function getDevicesForUser(userId: string): Promise<DeviceInfo[]> {
+	try {
+		const results = await db
+			.select({
+				id: deviceKeys.id,
+				deviceName: deviceKeys.deviceName,
+				contentPublicKey: deviceKeys.contentPublicKey,
+				createdAt: deviceKeys.createdAt,
+				lastSeenAt: deviceKeys.lastSeenAt,
+			})
+			.from(deviceKeys)
+			.where(eq(deviceKeys.userId, userId));
+
+		return results;
+	} catch (error) {
+		logger.error({ err: error }, "db_get_devices_for_user_error");
+		return [];
+	}
+}
+
+export async function deleteDeviceById(
+	deviceId: string,
+	userId: string,
+): Promise<boolean> {
+	try {
+		const result = await db
+			.delete(deviceKeys)
+			.where(and(eq(deviceKeys.id, deviceId), eq(deviceKeys.userId, userId)))
+			.returning({ id: deviceKeys.id });
+
+		return result.length > 0;
+	} catch (error) {
+		logger.error({ err: error }, "db_delete_device_error");
+		return false;
+	}
+}
+
+export async function updateDeviceName(
+	deviceId: string,
+	userId: string,
+	deviceName: string,
+): Promise<boolean> {
+	try {
+		const result = await db
+			.update(deviceKeys)
+			.set({ deviceName })
+			.where(and(eq(deviceKeys.id, deviceId), eq(deviceKeys.userId, userId)))
+			.returning({ id: deviceKeys.id });
+
+		return result.length > 0;
+	} catch (error) {
+		logger.error({ err: error }, "db_update_device_name_error");
+		return false;
+	}
+}
+
 export type MachineTokenValidation = {
 	machineId: string;
 	userId: string;

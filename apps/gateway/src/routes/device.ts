@@ -7,11 +7,16 @@ import { logger } from "../lib/logger.js";
 import {
 	type AuthenticatedRequest,
 	getUserId,
-	requireAuth,
+	requireDeviceOrSessionAuth,
 } from "../middleware/auth.js";
+import {
+	deleteDeviceById,
+	getDevicesForUser,
+	updateDeviceName,
+} from "../services/db-service.js";
 
 export function setupDeviceRoutes(router: Router) {
-	router.use(requireAuth);
+	router.use(requireDeviceOrSessionAuth);
 
 	/**
 	 * POST /auth/device/register
@@ -179,6 +184,130 @@ export function setupDeviceRoutes(router: Router) {
 				response
 					.status(500)
 					.json({ error: "Failed to fetch device content keys" });
+			}
+		},
+	);
+
+	/**
+	 * GET /auth/device/list
+	 * List all registered devices for the authenticated user.
+	 *
+	 * Returns: { devices: Array<{ id, deviceName, hasContentKey, createdAt, lastSeenAt }> }
+	 */
+	router.get(
+		"/auth/device/list",
+		async (request: AuthenticatedRequest, response) => {
+			const userId = getUserId(request);
+			if (!userId) {
+				response.status(401).json({ error: "AUTH_REQUIRED" });
+				return;
+			}
+
+			try {
+				const devices = await getDevicesForUser(userId);
+				response.json({
+					devices: devices.map((d) => ({
+						id: d.id,
+						deviceName: d.deviceName,
+						hasContentKey: d.contentPublicKey !== null,
+						createdAt: d.createdAt.toISOString(),
+						lastSeenAt: d.lastSeenAt?.toISOString() ?? null,
+					})),
+				});
+			} catch (error) {
+				logger.error({ err: error }, "device_list_error");
+				response.status(500).json({ error: "Failed to list devices" });
+			}
+		},
+	);
+
+	/**
+	 * DELETE /auth/device/:deviceId
+	 * Delete a device by ID.
+	 * User can only delete their own devices.
+	 *
+	 * Returns: { success: true } or { error: string }
+	 */
+	router.delete(
+		"/auth/device/:deviceId",
+		async (request: AuthenticatedRequest, response) => {
+			const userId = getUserId(request);
+			if (!userId) {
+				response.status(401).json({ error: "AUTH_REQUIRED" });
+				return;
+			}
+
+			const { deviceId } = request.params;
+			if (!deviceId) {
+				response.status(400).json({ error: "Device ID is required" });
+				return;
+			}
+
+			try {
+				const deleted = await deleteDeviceById(deviceId, userId);
+				if (!deleted) {
+					response.status(404).json({ error: "Device not found" });
+					return;
+				}
+
+				logger.info({ userId, deviceId }, "device_deleted");
+				response.json({ success: true });
+			} catch (error) {
+				logger.error({ err: error }, "device_delete_error");
+				response.status(500).json({ error: "Failed to delete device" });
+			}
+		},
+	);
+
+	/**
+	 * PATCH /auth/device/:deviceId
+	 * Update a device's name.
+	 * User can only update their own devices.
+	 *
+	 * Body: { deviceName: string }
+	 * Returns: { success: true } or { error: string }
+	 */
+	router.patch(
+		"/auth/device/:deviceId",
+		async (request: AuthenticatedRequest, response) => {
+			const userId = getUserId(request);
+			if (!userId) {
+				response.status(401).json({ error: "AUTH_REQUIRED" });
+				return;
+			}
+
+			const { deviceId } = request.params;
+			const { deviceName } = request.body as { deviceName?: string };
+
+			if (!deviceId) {
+				response.status(400).json({ error: "Device ID is required" });
+				return;
+			}
+
+			if (!deviceName || typeof deviceName !== "string") {
+				response.status(400).json({ error: "deviceName is required" });
+				return;
+			}
+
+			if (deviceName.length > 100) {
+				response
+					.status(400)
+					.json({ error: "deviceName must be 100 characters or less" });
+				return;
+			}
+
+			try {
+				const updated = await updateDeviceName(deviceId, userId, deviceName);
+				if (!updated) {
+					response.status(404).json({ error: "Device not found" });
+					return;
+				}
+
+				logger.info({ userId, deviceId, deviceName }, "device_renamed");
+				response.json({ success: true });
+			} catch (error) {
+				logger.error({ err: error }, "device_rename_error");
+				response.status(500).json({ error: "Failed to rename device" });
 			}
 		},
 	);
