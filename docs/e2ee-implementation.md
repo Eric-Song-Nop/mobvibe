@@ -19,6 +19,21 @@ Mobvibe 实现了端到端加密（E2EE），确保所有 session 事件内容�
 - 元数据泄露（session ID、时间戳、事件数量）
 - 首次配对时的 MITM（TOFU 限制）
 
+## 实现状态
+
+| 组件 | 状态 | 说明 |
+|------|------|------|
+| 共享加密模块 | ✅ 完成 | `packages/shared/src/crypto/` |
+| CLI 密钥管理 | ✅ 完成 | `apps/mobvibe-cli/src/e2ee/` |
+| CLI 认证流程 | ✅ 完成 | 签名令牌替代 API Key |
+| Gateway 设备认证 | ✅ 完成 | `apps/gateway/src/routes/device.ts` |
+| Gateway Socket 认证 | ✅ 完成 | `apps/gateway/src/socket/cli-handlers.ts` |
+| WebUI 配对/解密 | ✅ 完成 | `apps/webui/src/lib/e2ee.ts` |
+| 多设备支持 | ✅ 完成 | WebUI 可配对多个 CLI |
+| QR 码配对 | ✅ 完成 | `mobvibe e2ee show` 生成 QR |
+| Tauri 存储 | ✅ 完成 | 使用 @tauri-apps/plugin-store |
+| 测试覆盖 | ✅ 完成 | CLI + Gateway + WebUI 加密测试 |
+
 ## 密钥体系
 
 所有密钥从一个 32 字节的 Master Secret 派生：
@@ -86,8 +101,8 @@ Master Secret (32 bytes, 用户唯一根凭证)
 每次连接/重连，CLI 生成一个新的签名令牌：
 
 ```typescript
-// CLI 端
-auth: () => createSignedToken(cryptoService.authKeyPair)
+// CLI 端 (socket-client.ts)
+auth: (cb) => cb(createSignedToken(cryptoService.authKeyPair))
 
 // 令牌结构
 {
@@ -96,23 +111,26 @@ auth: () => createSignedToken(cryptoService.authKeyPair)
 }
 ```
 
-Gateway 中间件验证流程：
+Gateway 中间件验证流程 (`cli-handlers.ts`):
 
 ```
 1. 从 socket.handshake.auth 提取 SignedAuthToken
 2. 验证签名有效性 (Ed25519)
 3. 检查时间戳新鲜度 (< 5 分钟)
 4. 查 device_keys 表获取 userId
-5. 认证通过，设置 socket.data = { userId, deviceId }
+5. 更新 device_keys.lastSeenAt
+6. 认证通过，设置 socket.data = { userId, deviceId }
 ```
 
 ### WebUI 配对
 
 ```
-1. 用户运行 `mobvibe e2ee show` → 获取 master secret (base64)
+1. 用户运行 `mobvibe e2ee show` → 获取 master secret (base64) + QR 码
 2. WebUI: Settings > End-to-End Encryption > Pair
-3. 粘贴 master secret → 派生 content keypair → 可解密所有 session
-4. 存储: localStorage (浏览器) / Tauri plugin-store (桌面/移动)
+3. 桌面/浏览器: 粘贴 master secret
+   移动端: 扫描 QR 码 (mobvibe://pair?secret=<base64url>)
+4. 派生 content keypair → 可解密所有 session
+5. 存储: localStorage (浏览器) / Tauri plugin-store (桌面/移动)
 ```
 
 ## 代码结构
@@ -127,7 +145,7 @@ Gateway 中间件验证流程：
 | `envelope.ts` | `encryptPayload`, `decryptPayload`, `isEncryptedPayload` |
 | `auth.ts` | `createSignedToken`, `verifySignedToken` |
 
-所有函数通过 `packages/shared/src/index.ts` 和 `@mobvibe/core` 重新导出。
+所有函数通过 `packages/shared/src/index.ts` 和 `@mobvibe/core`（通过 `api/types.ts` 的 `export * from "@mobvibe/shared"`）重新导出。
 
 ### Gateway
 
@@ -155,11 +173,10 @@ Gateway 中间件验证流程：
 
 | 文件 | 功能 |
 |------|------|
-| `lib/e2ee.ts` | `E2EEManager`: 配对、DEK 解包、事件解密 |
+| `lib/e2ee.ts` | `E2EEManager`: 多设备配对、DEK 解包、事件解密 |
 | `hooks/useSocket.ts` | 实时事件 + 回填事件解密, session 变更时解包 DEK |
 | `main.tsx` | 启动时 `initCrypto()` + `e2ee.loadFromStorage()` |
-| `components/settings/E2EESettings.tsx` | 配对/取消配对 UI |
-| `pages/SettingsPage.tsx` | 集成 E2EE 设置卡片 |
+| `components/settings/E2EESettings.tsx` | 多设备配对 UI，设备列表，支持 QR 码扫描 |
 
 ## 加密边界
 
@@ -175,31 +192,31 @@ CLI 在 **Socket 边界** 进行加密（WAL 本地存储明文）：
 
 **三个加密点（`socket-client.ts`）：**
 
-1. **实时事件** — `onSessionEvent` 回调中，emit 前加密
-2. **重连重放** — `replayUnackedEvents` 中，emit 前加密
-3. **回填 RPC** — `rpc:session:events` 响应中，逐事件加密
+1. **实时事件** — `onSessionEvent` 回调中，emit 前加密 (L1015)
+2. **重连重放** — `replayUnackedEvents` 中，emit 前加密 (L1190)
+3. **回填 RPC** — `rpc:session:events` 响应中，逐事件加密 (L937)
 
 **两个解密点（`useSocket.ts`）：**
 
-1. **实时事件** — `handleSessionEventRef` 中 `e2ee.decryptEvent(event)`
-2. **回填事件** — `onEvents` 回调中 `e2ee.decryptEvent(rawEvent)`
+1. **实时事件** — `handleSessionEventRef` 中 `e2ee.decryptEvent(event)` (L444)
+2. **回填事件** — 通过 `applySessionEventRef` 处理（事件已在 backfill 时解密）
 
 **DEK 解包点：**
 
-- 初始 session 列表加载（`App.tsx` 中 `syncSessions`）
-- `sessions:changed` 事件（`useSocket.ts` 中 `handleSessionsChangedRef`）
+- `sessions:changed` 事件（`useSocket.ts` 中 `handleSessionsChangedRef`，L432-438）
 
 ## DEK 生命周期
 
 ```
 Session 创建/加载 (CLI)
   │
-  ├── generateDEK() → 随机 32 bytes
+  ├── cryptoService.initSessionDek(sessionId) → 随机 32 bytes
   ├── wrapDEK(dek, contentPubKey) → base64 密文
-  ├── 存储到 WAL session 记录 (wrappedDek)
-  ├── 通过 sessions:changed 推送到 Gateway + WebUI
+  ├── 存储在内存 Map (sessionDeks, wrappedDekCache)
+  ├── 通过 buildSummary() 添加到 SessionSummary.wrappedDek
+  ├── sessions:changed → 推送到 Gateway → WebUI
   │
-  └── 每个事件: encryptPayload(payload, dek) → { t: "encrypted", c: "..." }
+  └── 每个事件: cryptoService.encryptEvent(event) → { t: "encrypted", c: "..." }
 ```
 
 新 revision = 新 DEK（session reload 时重新生成）。
@@ -207,12 +224,26 @@ Session 创建/加载 (CLI)
 ## CLI 命令
 
 ```bash
-# 显示 master secret 用于配对
+# 登录并生成密钥
+mobvibe login
+
+# 显示 master secret 和 QR 码用于配对
 mobvibe e2ee show
 
 # 显示密钥状态（公钥指纹）
 mobvibe e2ee status
+
+# 显示认证状态
+mobvibe auth-status
 ```
+
+## 环境变量
+
+| 变量 | 说明 | 用途 |
+|------|------|------|
+| `MOBVIBE_MASTER_SECRET` | 覆盖 credentials.json 中的 master secret | CI/CD 或临时覆盖 |
+| `MOBVIBE_GATEWAY_URL` | Gateway URL | 默认 `https://api.mobvibe.net` |
+| `MOBVIBE_HOME` | 自定义 ~/.mobvibe 目录 | 测试或特殊配置 |
 
 ## 数据库变更
 
@@ -243,9 +274,227 @@ CREATE INDEX device_keys_public_key_idx ON device_keys(public_key);
 - **Vite 生产构建**: 自定义 Rollup 插件 `resolve-libsodium` 将相对路径映射到 `node_modules/libsodium/`
 - **Vitest (Gateway)**: 在测试中 mock `@mobvibe/shared` 的 `initCrypto`/`verifySignedToken`
 
-## 未来扩展（不在当前实现中）
+## 测试覆盖
 
-- RPC payload 加密（`rpc:message:send` prompt、`rpc:fs:file` content）
+| 测试文件 | 覆盖内容 |
+|----------|----------|
+| `apps/mobvibe-cli/src/e2ee/__tests__/crypto-service.test.ts` | DEK 管理、加密/解密、密钥派生 |
+| `apps/gateway/src/services/__tests__/crypto.test.ts` | 密钥派生、加密/解密、签名验证、DEK 包装 |
+| `apps/gateway/src/socket/__tests__/cli-handlers.test.ts` | Socket 认证中间件 |
+| `apps/webui/src/__tests__/e2ee.test.ts` | 多设备配对、DEK 解包、存储迁移 |
+
+## 当前限制
+
+### 单向加密
+
+当前实现仅支持 **CLI → WebUI** 方向的加密：
+
+| 方向 | 数据 | 加密状态 |
+|------|------|----------|
+| CLI → WebUI | agent_message_chunk, tool_call, terminal_output 等 | ✅ 加密 |
+| WebUI → CLI | `rpc:message:send` 的 prompt | ❌ 明文 |
+| WebUI → CLI | 其他 RPC（create session, permission decision 等） | ❌ 明文 |
+
+**影响：** Gateway 可以看到用户发送的所有消息内容，但看不到 AI 的回复。
+
+---
+
+## 扩展计划
+
+### Plan A: 多设备支持 ✅ 已完成
+
+**目标：** 允许 WebUI 解密来自多个 CLI 的 session，每个 CLI 有独立的 master secret。
+
+**设计：**
+
+由于 `crypto_box_seal_open` 使用错误密钥时会失败，WebUI 可以遍历所有存储的 master secret 直到解密成功。
+
+```
+WebUI 存储多个 master secrets:
+  ├── masterSecret-A → contentKeyPair-A
+  ├── masterSecret-B → contentKeyPair-B
+  └── masterSecret-C → contentKeyPair-C
+
+收到 wrappedDek 后:
+  尝试 contentKeyPair-A → 失败
+  尝试 contentKeyPair-B → 成功 ✅
+  缓存: session-X → masterSecret-B
+```
+
+**已完成的改动：**
+
+| # | 任务 | 文件 | 状态 |
+|---|------|------|------|
+| A1 | 重构 `E2EEManager` 支持多个 secrets | `e2ee.ts` | ✅ |
+| A2 | 实现 `addPairedSecret(base64Secret)` | `e2ee.ts` | ✅ |
+| A3 | 实现 `removePairedSecret(base64Secret)` | `e2ee.ts` | ✅ |
+| A4 | 实现 `getPairedSecrets()` 返回设备列表 | `e2ee.ts` | ✅ |
+| A5 | 更新 `unwrapSessionDek`：遍历尝试 + 缓存成功的映射 | `e2ee.ts` | ✅ |
+| A6 | 更新存储格式为数组 + 迁移旧格式 | `e2ee.ts` | ✅ |
+| A7 | 更新 `E2EESettings` UI：显示设备列表、添加/删除 | `E2EESettings.tsx` | ✅ |
+| A8 | 添加 i18n 字符串 | `apps/webui/src/i18n/` | ✅ |
+| A9 | 添加测试 | `apps/webui/src/__tests__/e2ee.test.ts` | ✅ |
+
+**存储格式：**
+
+```typescript
+interface StoredSecret {
+  secret: string;       // base64 master secret
+  fingerprint: string;  // auth pubkey 前 8 字符，用于显示
+  addedAt: number;      // 添加时间戳
+}
+localStorage.setItem("mobvibe_e2ee_secrets", JSON.stringify(secrets));
+```
+
+**核心代码结构：**
+
+```typescript
+class E2EEManager {
+  private contentKeyPairs: Map<string, CryptoKeyPair> = new Map(); // base64 secret → keypair
+  private sessionToSecret: Map<string, string> = new Map();        // sessionId → base64 secret
+  private sessionDeks: Map<string, Uint8Array> = new Map();
+
+  async addPairedSecret(base64Secret: string): Promise<void>;
+  async removePairedSecret(base64Secret: string): Promise<void>;
+  getPairedSecrets(): { fingerprint: string; addedAt: number }[];
+
+  unwrapSessionDek(sessionId: string, wrappedDek: string): boolean {
+    // 1. 检查缓存
+    const cached = this.sessionToSecret.get(sessionId);
+    if (cached) {
+      const keypair = this.contentKeyPairs.get(cached);
+      if (keypair && this.tryUnwrap(sessionId, wrappedDek, keypair)) return true;
+    }
+
+    // 2. 遍历所有 keypair
+    for (const [secret, keypair] of this.contentKeyPairs) {
+      if (this.tryUnwrap(sessionId, wrappedDek, keypair)) {
+        this.sessionToSecret.set(sessionId, secret);
+        return true;
+      }
+    }
+    return false;
+  }
+}
+```
+
+---
+
+### Plan B: 双向加密（依赖 Plan A）
+
+**目标：** 加密 WebUI → CLI 方向的用户输入，使 Gateway 在双向都只能看到密文。
+
+**核心洞察：** DEK 是对称密钥（`crypto_secretbox`），一旦 WebUI 解包了 wrappedDek，双方就共享同一个 DEK，双向加密自然成立。
+
+```
+                    wrappedDek (用 CLI-A 的 content pubkey 加密)
+CLI-A ──────────────────────────────────────────────────────────────────► WebUI
+  │                                                                       │
+  │                        WebUI 尝试解包                                  │
+  │                        (遍历 stored secrets)                           │
+  │                              │                                         │
+  └──────────────────────────────┘                                         │
+                                   │                                       │
+                             DEK-1 (对称密钥)                               │
+                             双方都持有                                     │
+         ┌─────────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  CLI-A ◄─────────────────────────────────────────────────► WebUI        │
+│                                                                         │
+│  CLI → WebUI: encrypt(payload, DEK-1) ─────────► decrypt(..., DEK-1)   │
+│  CLI ◄─── decrypt(..., DEK-1) ◄──────────────── encrypt(payload, DEK-1) │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**需要加密的 RPC：**
+
+| RPC | 方向 | 加密字段 |
+|-----|------|----------|
+| `rpc:message:send` | WebUI → CLI | `prompt[]` |
+| `rpc:session:create` | WebUI → CLI | `prompt[]`（如果有初始消息） |
+
+**加密格式（与 CLI→WebUI 相同）：**
+
+```typescript
+// 加密前
+{ prompt: [{ type: "text", text: "hello" }] }
+
+// 加密后
+{ prompt: { t: "encrypted", c: "<base64(nonce || ciphertext)>" } }
+```
+
+**改动清单：**
+
+| # | 任务 | 文件 |
+|---|------|------|
+| B1 | `E2EEManager` 添加 `encryptPayloadForSession(sessionId, payload)` | `e2ee.ts` |
+| B2 | `CliCryptoService` 添加 `getDek(sessionId)` | `crypto-service.ts` |
+| B3 | `CliCryptoService` 添加 `decryptPayload(encrypted, sessionId)` | `crypto-service.ts` |
+| B4 | WebUI 发送 `rpc:message:send` 前加密 prompt | `useSocket.ts` |
+| B5 | CLI 接收 `rpc:message:send` 后解密 prompt | `socket-client.ts` |
+| B6 | WebUI 发送 `rpc:session:create` 前加密 prompt（如有） | `useSocket.ts` |
+| B7 | CLI 接收 `rpc:session:create` 后解密 prompt | `socket-client.ts` |
+| B8 | CLI 添加通用解密辅助方法 `decryptRpcPayload` | `socket-client.ts` |
+| B9 | 添加双向加密测试 | 两个测试文件 |
+
+**核心代码结构：**
+
+```typescript
+// e2ee.ts (WebUI)
+class E2EEManager {
+  encryptPayloadForSession(sessionId: string, payload: unknown): unknown {
+    const dek = this.sessionDeks.get(sessionId);
+    if (!dek) return payload; // 无 DEK 则透传
+    return encryptPayload(payload, dek);
+  }
+}
+
+// crypto-service.ts (CLI)
+class CliCryptoService {
+  getDek(sessionId: string): Uint8Array | null {
+    return this.sessionDeks.get(sessionId) ?? null;
+  }
+
+  decryptPayload(encrypted: EncryptedPayload, sessionId: string): unknown {
+    const dek = this.sessionDeks.get(sessionId);
+    if (!dek) throw new Error("No DEK for session");
+    return decryptPayload(encrypted, dek);
+  }
+}
+
+// socket-client.ts (CLI)
+private decryptRpcPayload<T>(sessionId: string, data: unknown): T {
+  if (!isEncryptedPayload(data)) return data as T;
+  const dek = this.options.cryptoService.getDek(sessionId);
+  if (!dek) return data as T;
+  return decryptPayload(data, dek) as T;
+}
+
+// rpc:message:send handler
+const prompt = this.decryptRpcPayload(sessionId, request.params.prompt);
+```
+
+**边界情况处理：**
+
+| 情况 | 处理 |
+|------|------|
+| WebUI 未配对 | 透传（不加密） |
+| Session DEK 未解包 | 透传（等待 sessions:changed 后重试） |
+| CLI 解密失败 | 返回错误，WebUI 显示"解密失败" |
+
+---
+
+### 实施顺序
+
+1. ~~**Plan A** — 多设备支持~~ ✅ 已完成
+2. **Plan B** — 双向加密（依赖 Plan A，待实施）
+
+---
+
+## 未来扩展（不在当前计划中）
+
 - 带内配对（通过 Gateway 的临时密钥交换）
 - 前向保密（临时 session 密钥）
 - Master secret 备份/恢复

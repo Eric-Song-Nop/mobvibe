@@ -252,7 +252,20 @@
 		"scanError": "Failed to scan QR code. Please try again or paste the secret manually.",
 		"pairSuccess": "E2EE pairing successful.",
 		"invalidQrCode": "Invalid QR code. Please scan the code from `mobvibe e2ee show`.",
-		"cameraPermissionDenied": "Camera permission is required to scan QR codes. Please grant camera access in your device settings."
+		"cameraPermissionDenied": "Camera permission is required to scan QR codes. Please grant camera access in your device settings.",
+		"paired": "E2EE Paired ({{count}} device(s))",
+		"notPaired": "E2EE Not Paired",
+		"pairedDevices": "Paired devices:",
+		"remove": "Remove",
+		"removeAll": "Remove All",
+		"removeTitle": "Remove device?",
+		"removeDescription": "You will no longer be able to decrypt sessions from this device.",
+		"pasteHint": "Paste the master secret from your CLI to pair another device. Run `mobvibe e2ee show` to get the secret.",
+		"enterSecret": "Please enter a master secret.",
+		"invalidSecret": "Invalid master secret. Please check and try again.",
+		"secretPlaceholder": "Paste master secret (base64)",
+		"pairing": "Pairing...",
+		"addDevice": "Add Device"
 	},
 	"machines": {
 		"title": "Machines",

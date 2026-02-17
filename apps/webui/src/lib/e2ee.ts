@@ -1,6 +1,7 @@
 import {
 	type CryptoKeyPair,
 	decryptPayload,
+	deriveAuthKeyPair,
 	deriveContentKeyPair,
 	getSodium,
 	initCrypto,
@@ -10,73 +11,114 @@ import {
 import type { SessionEvent } from "@/lib/acp";
 import { isInTauri } from "@/lib/auth";
 
-const STORAGE_KEY = "mobvibe_e2ee_master_secret";
+const STORAGE_KEY = "mobvibe_e2ee_secrets";
+const LEGACY_STORAGE_KEY = "mobvibe_e2ee_master_secret";
+
+interface StoredSecret {
+	secret: string;
+	fingerprint: string;
+	addedAt: number;
+}
 
 class E2EEManager {
-	private contentKeyPair: CryptoKeyPair | null = null;
+	private contentKeyPairs: Map<string, CryptoKeyPair> = new Map();
+	private sessionToSecret: Map<string, string> = new Map();
 	private sessionDeks: Map<string, Uint8Array> = new Map();
 
 	isEnabled(): boolean {
-		return this.contentKeyPair !== null;
+		return this.contentKeyPairs.size > 0;
 	}
 
-	/**
-	 * Load persisted master secret from storage (localStorage or Tauri store).
-	 * Should be called during app initialization.
-	 */
+	getPairedSecrets(): StoredSecret[] {
+		const secrets: StoredSecret[] = [];
+		for (const secret of this.contentKeyPairs.keys()) {
+			secrets.push({
+				secret,
+				fingerprint: this.computeFingerprint(secret),
+				addedAt: Date.now(),
+			});
+		}
+		return secrets;
+	}
+
+	async addPairedSecret(base64Secret: string): Promise<void> {
+		if (this.contentKeyPairs.has(base64Secret)) {
+			return;
+		}
+		await initCrypto();
+		const sodium = getSodium();
+		const masterSecret = sodium.from_base64(
+			base64Secret,
+			sodium.base64_variants.ORIGINAL,
+		);
+		const contentKeyPair = deriveContentKeyPair(masterSecret);
+		this.contentKeyPairs.set(base64Secret, contentKeyPair);
+		await this.persistSecrets();
+	}
+
+	async removePairedSecret(base64Secret: string): Promise<void> {
+		this.contentKeyPairs.delete(base64Secret);
+		for (const [sessionId, secret] of this.sessionToSecret) {
+			if (secret === base64Secret) {
+				this.sessionToSecret.delete(sessionId);
+				this.sessionDeks.delete(sessionId);
+			}
+		}
+		await this.persistSecrets();
+	}
+
 	async loadFromStorage(): Promise<boolean> {
-		const stored = await this.getStoredSecret();
-		if (!stored) return false;
+		const stored = await this.getStoredSecrets();
+		if (!stored || stored.length === 0) {
+			const legacy = await this.getLegacyStoredSecret();
+			if (legacy) {
+				await this.addPairedSecret(legacy);
+				await this.removeLegacyStoredSecret();
+				return true;
+			}
+			return false;
+		}
 
 		try {
-			await this.applySecret(stored);
+			await initCrypto();
+			for (const item of stored) {
+				await this.addPairedSecret(item.secret);
+			}
 			return true;
 		} catch {
 			return false;
 		}
 	}
 
-	/**
-	 * Set and persist a master secret from user input (pairing flow).
-	 */
 	async setPairedSecret(base64Secret: string): Promise<void> {
-		await this.applySecret(base64Secret);
-		await this.storeSecret(base64Secret);
+		await this.addPairedSecret(base64Secret);
 	}
 
-	/**
-	 * Clear the master secret and all derived state.
-	 */
 	async clearSecret(): Promise<void> {
-		this.contentKeyPair = null;
+		this.contentKeyPairs.clear();
+		this.sessionToSecret.clear();
 		this.sessionDeks.clear();
-		await this.removeStoredSecret();
+		await this.removeStoredSecrets();
 	}
 
-	/**
-	 * Unwrap a session DEK from its wrapped (base64) form.
-	 * Returns true if successful, false if E2EE is not enabled or unwrapping fails.
-	 */
 	unwrapSessionDek(sessionId: string, wrappedDek: string): boolean {
-		if (!this.contentKeyPair) return false;
-
-		try {
-			const dek = unwrapDEK(
-				wrappedDek,
-				this.contentKeyPair.publicKey,
-				this.contentKeyPair.secretKey,
-			);
-			this.sessionDeks.set(sessionId, dek);
-			return true;
-		} catch {
-			return false;
+		const cachedSecret = this.sessionToSecret.get(sessionId);
+		if (cachedSecret) {
+			const keypair = this.contentKeyPairs.get(cachedSecret);
+			if (keypair && this.tryUnwrap(sessionId, wrappedDek, keypair)) {
+				return true;
+			}
 		}
+
+		for (const [secret, keypair] of this.contentKeyPairs) {
+			if (this.tryUnwrap(sessionId, wrappedDek, keypair)) {
+				this.sessionToSecret.set(sessionId, secret);
+				return true;
+			}
+		}
+		return false;
 	}
 
-	/**
-	 * Decrypt an event's payload if it is encrypted.
-	 * Returns the event unchanged if payload is not encrypted or E2EE is not enabled.
-	 */
 	decryptEvent(event: SessionEvent): SessionEvent {
 		if (!isEncryptedPayload(event.payload)) return event;
 
@@ -92,48 +134,96 @@ class E2EEManager {
 		}
 	}
 
-	private async applySecret(base64Secret: string): Promise<void> {
-		await initCrypto();
+	private tryUnwrap(
+		sessionId: string,
+		wrappedDek: string,
+		keypair: CryptoKeyPair,
+	): boolean {
+		try {
+			const dek = unwrapDEK(wrappedDek, keypair.publicKey, keypair.secretKey);
+			this.sessionDeks.set(sessionId, dek);
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	private computeFingerprint(base64Secret: string): string {
 		const sodium = getSodium();
 		const masterSecret = sodium.from_base64(
 			base64Secret,
 			sodium.base64_variants.ORIGINAL,
 		);
-		this.contentKeyPair = deriveContentKeyPair(masterSecret);
-		this.sessionDeks.clear();
+		const authKp = deriveAuthKeyPair(masterSecret);
+		const authPub = sodium.to_base64(
+			authKp.publicKey,
+			sodium.base64_variants.ORIGINAL,
+		);
+		return authPub.slice(0, 8);
 	}
 
-	private async getStoredSecret(): Promise<string | null> {
+	private async persistSecrets(): Promise<void> {
+		const secrets: StoredSecret[] = [];
+		for (const secret of this.contentKeyPairs.keys()) {
+			secrets.push({
+				secret,
+				fingerprint: this.computeFingerprint(secret),
+				addedAt: Date.now(),
+			});
+		}
+		await this.storeSecrets(secrets);
+	}
+
+	private async getStoredSecrets(): Promise<StoredSecret[] | null> {
 		if (isInTauri()) {
 			try {
 				const { load } = await import("@tauri-apps/plugin-store");
 				const store = await load("app-state.json");
-				const value = await store.get<string>(STORAGE_KEY);
+				const value = await store.get<StoredSecret[]>(STORAGE_KEY);
 				return value ?? null;
 			} catch {
 				return null;
 			}
 		}
-		return localStorage.getItem(STORAGE_KEY);
+		const raw = localStorage.getItem(STORAGE_KEY);
+		if (!raw) return null;
+		try {
+			return JSON.parse(raw) as StoredSecret[];
+		} catch {
+			return null;
+		}
 	}
 
-	private async storeSecret(base64Secret: string): Promise<void> {
+	private async getLegacyStoredSecret(): Promise<string | null> {
 		if (isInTauri()) {
 			try {
 				const { load } = await import("@tauri-apps/plugin-store");
 				const store = await load("app-state.json");
-				await store.set(STORAGE_KEY, base64Secret);
-				await store.save();
+				const value = await store.get<string>(LEGACY_STORAGE_KEY);
+				return value ?? null;
 			} catch {
-				// Fall through to localStorage
-				localStorage.setItem(STORAGE_KEY, base64Secret);
+				return null;
 			}
-			return;
 		}
-		localStorage.setItem(STORAGE_KEY, base64Secret);
+		return localStorage.getItem(LEGACY_STORAGE_KEY);
 	}
 
-	private async removeStoredSecret(): Promise<void> {
+	private async storeSecrets(secrets: StoredSecret[]): Promise<void> {
+		if (isInTauri()) {
+			try {
+				const { load } = await import("@tauri-apps/plugin-store");
+				const store = await load("app-state.json");
+				await store.set(STORAGE_KEY, secrets);
+				await store.save();
+				return;
+			} catch {
+				// Fall through to localStorage
+			}
+		}
+		localStorage.setItem(STORAGE_KEY, JSON.stringify(secrets));
+	}
+
+	private async removeStoredSecrets(): Promise<void> {
 		if (isInTauri()) {
 			try {
 				const { load } = await import("@tauri-apps/plugin-store");
@@ -145,6 +235,20 @@ class E2EEManager {
 			}
 		}
 		localStorage.removeItem(STORAGE_KEY);
+	}
+
+	private async removeLegacyStoredSecret(): Promise<void> {
+		if (isInTauri()) {
+			try {
+				const { load } = await import("@tauri-apps/plugin-store");
+				const store = await load("app-state.json");
+				await store.delete(LEGACY_STORAGE_KEY);
+				await store.save();
+			} catch {
+				// Ignore
+			}
+		}
+		localStorage.removeItem(LEGACY_STORAGE_KEY);
 	}
 }
 
