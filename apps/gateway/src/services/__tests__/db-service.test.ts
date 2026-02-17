@@ -108,7 +108,6 @@ describe("createAcpSessionDirect", () => {
 			expect.objectContaining({
 				title: "Session Title",
 				backendId: "backend-1",
-				state: "active",
 				closedAt: null,
 				cwd: "/tmp/project",
 				updatedAt: expect.any(Date),

@@ -16,9 +16,7 @@ import type { Server, Socket } from "socket.io";
 import { logger } from "../lib/logger.js";
 import type { CliRegistry } from "../services/cli-registry.js";
 import {
-	closeSessionsForMachineById,
 	findDeviceByPublicKey,
-	updateMachineStatusById,
 	upsertMachine,
 } from "../services/db-service.js";
 import type { SessionRouter } from "../services/session-router.js";
@@ -116,10 +114,9 @@ export function setupCliHandlers(
 			const machineResult = await upsertMachine({
 				rawMachineId,
 				userId,
-				name: info.hostname, // Use hostname as default name
+				name: info.hostname,
 				hostname: info.hostname,
 				platform: undefined,
-				isOnline: true,
 			});
 
 			if (!machineResult) {
@@ -388,11 +385,10 @@ export function setupCliHandlers(
 					);
 				}
 
-				// Update machine status and close sessions in database
-				if (record.machineId) {
-					await updateMachineStatusById(record.machineId, false);
-					await closeSessionsForMachineById(record.machineId);
-				}
+				// Note: We no longer update machine status or close sessions in DB
+				// Real-time status is managed by CliRegistry (in-memory)
+				// Sessions continue running in CLI process; they should be
+				// explicitly closed by CLI when they actually end
 			}
 		});
 	});

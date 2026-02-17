@@ -88,35 +88,6 @@ export async function validateMachineToken(
 }
 
 /**
- * Update machine online status.
- */
-export async function updateMachineStatus(
-	machineToken: string,
-	isOnline: boolean,
-): Promise<{ machineId: string; userId: string } | null> {
-	try {
-		const result = await db
-			.update(machines)
-			.set({
-				isOnline,
-				lastSeenAt: new Date(),
-				updatedAt: new Date(),
-			})
-			.where(eq(machines.machineToken, machineToken))
-			.returning({ id: machines.id, userId: machines.userId });
-
-		if (result.length === 0) {
-			return null;
-		}
-
-		return { machineId: result[0].id, userId: result[0].userId };
-	} catch (error) {
-		logger.error({ err: error }, "db_update_machine_status_error");
-		return null;
-	}
-}
-
-/**
  * Create a session record in the database.
  */
 export async function createAcpSession(params: {
@@ -127,7 +98,6 @@ export async function createAcpSession(params: {
 	cwd?: string;
 }): Promise<{ _id: string; userId: string; machineId: string } | null> {
 	try {
-		// First, get the machine info from the token
 		const machineResult = await db
 			.select({ id: machines.id, userId: machines.userId })
 			.from(machines)
@@ -153,7 +123,6 @@ export async function createAcpSession(params: {
 			title: params.title,
 			backendId: params.backendId,
 			cwd: params.cwd ?? null,
-			state: "active",
 		});
 
 		return {
@@ -164,61 +133,6 @@ export async function createAcpSession(params: {
 	} catch (error) {
 		logger.error({ err: error }, "db_create_session_error");
 		return null;
-	}
-}
-
-/**
- * Update a session's state in the database.
- */
-export async function updateAcpSessionState(params: {
-	sessionId: string;
-	state: string;
-	title?: string;
-	cwd?: string;
-}): Promise<boolean> {
-	try {
-		const updateData: Record<string, unknown> = {
-			state: params.state,
-			updatedAt: new Date(),
-		};
-
-		if (params.title !== undefined) {
-			updateData.title = params.title;
-		}
-		if (params.cwd !== undefined) {
-			updateData.cwd = params.cwd;
-		}
-
-		await db
-			.update(acpSessions)
-			.set(updateData)
-			.where(eq(acpSessions.sessionId, params.sessionId));
-
-		return true;
-	} catch (error) {
-		logger.error({ err: error }, "db_update_session_state_error");
-		return false;
-	}
-}
-
-/**
- * Close a session in the database.
- */
-export async function closeAcpSession(sessionId: string): Promise<boolean> {
-	try {
-		await db
-			.update(acpSessions)
-			.set({
-				state: "closed",
-				closedAt: new Date(),
-				updatedAt: new Date(),
-			})
-			.where(eq(acpSessions.sessionId, sessionId));
-
-		return true;
-	} catch (error) {
-		logger.error({ err: error }, "db_close_session_error");
-		return false;
 	}
 }
 
@@ -251,75 +165,54 @@ export async function checkSessionOwnership(
 }
 
 /**
- * Close all sessions for a machine (on disconnect).
- * @deprecated Use closeSessionsForMachineById instead
+ * Mark a session as closed by setting closedAt.
  */
-export async function closeSessionsForMachine(
-	machineToken: string,
-): Promise<number> {
+export async function markSessionClosed(sessionId: string): Promise<boolean> {
 	try {
-		// First get the machine ID from the token
-		const machineResult = await db
-			.select({ id: machines.id })
-			.from(machines)
-			.where(eq(machines.machineToken, machineToken))
-			.limit(1);
-
-		if (machineResult.length === 0) {
-			return 0;
-		}
-
-		const machineId = machineResult[0].id;
-
-		// Close all active sessions for this machine
-		const result = await db
+		await db
 			.update(acpSessions)
 			.set({
-				state: "closed",
 				closedAt: new Date(),
 				updatedAt: new Date(),
 			})
-			.where(
-				and(
-					eq(acpSessions.machineId, machineId),
-					eq(acpSessions.state, "active"),
-				),
-			)
-			.returning({ id: acpSessions.id });
+			.where(eq(acpSessions.sessionId, sessionId));
 
-		return result.length;
+		return true;
 	} catch (error) {
-		logger.error({ err: error }, "db_close_sessions_for_machine_error");
-		return 0;
+		logger.error({ err: error }, "db_mark_session_closed_error");
+		return false;
 	}
 }
 
 /**
- * Close all sessions for a machine by machineId (on disconnect).
+ * Update session metadata (title, cwd).
  */
-export async function closeSessionsForMachineById(
-	machineId: string,
-): Promise<number> {
+export async function updateSessionMetadata(params: {
+	sessionId: string;
+	title?: string;
+	cwd?: string;
+}): Promise<boolean> {
 	try {
-		const result = await db
-			.update(acpSessions)
-			.set({
-				state: "closed",
-				closedAt: new Date(),
-				updatedAt: new Date(),
-			})
-			.where(
-				and(
-					eq(acpSessions.machineId, machineId),
-					eq(acpSessions.state, "active"),
-				),
-			)
-			.returning({ id: acpSessions.id });
+		const updateData: Record<string, unknown> = {
+			updatedAt: new Date(),
+		};
 
-		return result.length;
+		if (params.title !== undefined) {
+			updateData.title = params.title;
+		}
+		if (params.cwd !== undefined) {
+			updateData.cwd = params.cwd;
+		}
+
+		await db
+			.update(acpSessions)
+			.set(updateData)
+			.where(eq(acpSessions.sessionId, params.sessionId));
+
+		return true;
 	} catch (error) {
-		logger.error({ err: error }, "db_close_sessions_for_machine_by_id_error");
-		return 0;
+		logger.error({ err: error }, "db_update_session_metadata_error");
+		return false;
 	}
 }
 
@@ -338,10 +231,8 @@ export async function upsertMachine(params: {
 	name: string;
 	hostname: string;
 	platform?: string;
-	isOnline?: boolean;
 }): Promise<{ machineId: string; userId: string } | null> {
 	try {
-		// Prefer legacy machineId (raw) if it already belongs to this user
 		const legacyMatch = await db
 			.select({ id: machines.id, userId: machines.userId })
 			.from(machines)
@@ -368,7 +259,6 @@ export async function upsertMachine(params: {
 						.limit(1);
 
 		if (existing.length > 0) {
-			// Machine exists - verify it belongs to the same user
 			if (existing[0].userId !== params.userId) {
 				logger.warn(
 					{ machineId: resolvedMachineId, userId: params.userId },
@@ -378,14 +268,12 @@ export async function upsertMachine(params: {
 				return null;
 			}
 
-			// Update existing machine
 			await db
 				.update(machines)
 				.set({
 					name: params.name,
 					hostname: params.hostname,
 					platform: params.platform ?? null,
-					isOnline: params.isOnline ?? true,
 					lastSeenAt: new Date(),
 					updatedAt: new Date(),
 				})
@@ -394,8 +282,6 @@ export async function upsertMachine(params: {
 			return { machineId: resolvedMachineId, userId: params.userId };
 		}
 
-		// Create new machine
-		// Generate a placeholder machineToken for backwards compatibility
 		const placeholderToken = `api_${resolvedMachineId.replace(/-/g, "")}`;
 
 		await db.insert(machines).values({
@@ -405,7 +291,6 @@ export async function upsertMachine(params: {
 			hostname: params.hostname,
 			platform: params.platform ?? null,
 			machineToken: placeholderToken,
-			isOnline: params.isOnline ?? true,
 			lastSeenAt: new Date(),
 		});
 
@@ -413,30 +298,6 @@ export async function upsertMachine(params: {
 	} catch (error) {
 		logger.error({ err: error }, "db_upsert_machine_error");
 		return null;
-	}
-}
-
-/**
- * Update machine online status by machineId.
- */
-export async function updateMachineStatusById(
-	machineId: string,
-	isOnline: boolean,
-): Promise<boolean> {
-	try {
-		await db
-			.update(machines)
-			.set({
-				isOnline,
-				lastSeenAt: new Date(),
-				updatedAt: new Date(),
-			})
-			.where(eq(machines.id, machineId));
-
-		return true;
-	} catch (error) {
-		logger.error({ err: error }, "db_update_machine_status_by_id_error");
-		return false;
 	}
 }
 
@@ -470,7 +331,6 @@ export async function createAcpSessionDirect(params: {
 			backendId: params.backendId,
 			cwd: params.cwd ?? null,
 			wrappedDek: params.wrappedDek ?? null,
-			state: "active",
 		});
 
 		return { _id: id };
@@ -520,7 +380,6 @@ export async function createAcpSessionDirect(params: {
 			const updateData: Record<string, unknown> = {
 				title: params.title,
 				backendId: params.backendId,
-				state: "active",
 				updatedAt: new Date(),
 				closedAt: null,
 			};

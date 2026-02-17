@@ -38,9 +38,9 @@ import type { Socket } from "socket.io";
 import { logger } from "../lib/logger.js";
 import type { CliRecord, CliRegistry } from "./cli-registry.js";
 import {
-	closeAcpSession,
 	createAcpSessionDirect,
-	updateAcpSessionState,
+	markSessionClosed,
+	updateSessionMetadata,
 } from "./db-service.js";
 
 type PendingRpc<T> = {
@@ -191,7 +191,7 @@ export class SessionRouter {
 		);
 
 		// Sync to database
-		await closeAcpSession(params.sessionId);
+		await markSessionClosed(params.sessionId);
 		logger.info(
 			{ sessionId: params.sessionId, userId },
 			"session_close_rpc_complete",
@@ -805,15 +805,15 @@ export class SessionRouter {
 	}
 
 	/**
-	 * Update session state in database (called from session update events).
+	 * Update session metadata in database.
 	 */
 	async syncSessionState(
 		sessionId: string,
-		state: string,
+		_state: string,
 		title?: string,
 		cwd?: string,
 	): Promise<void> {
-		await updateAcpSessionState({ sessionId, state, title, cwd });
+		await updateSessionMetadata({ sessionId, title, cwd });
 	}
 
 	/**

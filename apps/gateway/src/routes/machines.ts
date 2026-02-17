@@ -68,19 +68,27 @@ export function setupMachineRoutes(
 					name: machines.name,
 					hostname: machines.hostname,
 					platform: machines.platform,
-					isOnline: machines.isOnline,
 					lastSeenAt: machines.lastSeenAt,
 					createdAt: machines.createdAt,
 				})
 				.from(machines)
 				.where(eq(machines.userId, userId));
 
+			// Merge DB metadata with real-time status from CliRegistry
+			const machinesWithStatus = userMachines.map((m) => {
+				const cliRecord = cliRegistry.getCliByMachineIdForUser(m.id, userId);
+				return {
+					...m,
+					isOnline: cliRecord !== undefined,
+				};
+			});
+
 			logger.info(
-				{ userId, machineCount: userMachines.length },
+				{ userId, machineCount: machinesWithStatus.length },
 				"machines_list_success",
 			);
 
-			res.json({ machines: userMachines });
+			res.json({ machines: machinesWithStatus });
 		} catch (error) {
 			logger.error({ err: error }, "machines_list_error");
 			res.status(500).json({

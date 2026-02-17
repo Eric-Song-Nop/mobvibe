@@ -2,10 +2,6 @@ import type { CliRegistrationInfo, SessionSummary } from "@mobvibe/shared";
 import type { Server } from "socket.io";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CliRegistry } from "../../services/cli-registry.js";
-import {
-	closeSessionsForMachineById,
-	updateMachineStatusById,
-} from "../../services/db-service.js";
 import { setupCliHandlers } from "../cli-handlers.js";
 
 vi.mock("@mobvibe/shared", () => ({
@@ -15,8 +11,6 @@ vi.mock("@mobvibe/shared", () => ({
 
 vi.mock("../../services/db-service.js", () => ({
 	upsertMachine: vi.fn(),
-	updateMachineStatusById: vi.fn(),
-	closeSessionsForMachineById: vi.fn(),
 	findDeviceByPublicKey: vi.fn(),
 }));
 
@@ -181,7 +175,5 @@ describe("setupCliHandlers", () => {
 			}),
 			"user-1",
 		);
-		expect(updateMachineStatusById).toHaveBeenCalledWith("machine-1", false);
-		expect(closeSessionsForMachineById).toHaveBeenCalledWith("machine-1");
 	});
 });

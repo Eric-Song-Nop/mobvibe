@@ -13,8 +13,8 @@ import { SessionRouter } from "../session-router.js";
 // Mock the db-service module
 vi.mock("../db-service.js", () => ({
 	createAcpSessionDirect: vi.fn().mockResolvedValue(undefined),
-	closeAcpSession: vi.fn().mockResolvedValue(undefined),
-	updateAcpSessionState: vi.fn().mockResolvedValue(undefined),
+	markSessionClosed: vi.fn().mockResolvedValue(undefined),
+	updateSessionMetadata: vi.fn().mockResolvedValue(undefined),
 }));
 
 const createMockSocket = (
