@@ -408,7 +408,10 @@ export class SocketClient extends EventEmitter {
 		this.socket.on("rpc:message:send", async (request) => {
 			const requestStart = process.hrtime.bigint();
 			try {
-				const { sessionId, prompt } = request.params;
+				const { sessionId, prompt: rawPrompt } = request.params;
+				const prompt = this.options.cryptoService.decryptRpcPayload<
+					import("@agentclientprotocol/sdk").ContentBlock[]
+				>(sessionId, rawPrompt);
 				logger.info(
 					{
 						requestId: request.requestId,
@@ -430,11 +433,7 @@ export class SocketClient extends EventEmitter {
 					throw new Error("Session not found");
 				}
 				sessionManager.touchSession(sessionId);
-				// Cast through unknown since SDK and shared ContentBlock types are structurally compatible
-				const result = await record.connection.prompt(
-					sessionId,
-					prompt as unknown as import("@agentclientprotocol/sdk").ContentBlock[],
-				);
+				const result = await record.connection.prompt(sessionId, prompt);
 				sessionManager.touchSession(sessionId);
 				sessionManager.recordTurnEnd(
 					sessionId,
@@ -470,7 +469,9 @@ export class SocketClient extends EventEmitter {
 						err: error,
 						requestId: request.requestId,
 						sessionId: request.params.sessionId,
-						promptBlocks: request.params.prompt.length,
+						promptBlocks: Array.isArray(request.params.prompt)
+							? request.params.prompt.length
+							: 1,
 						durationMs,
 					},
 					"rpc_message_send_error",

@@ -55,6 +55,7 @@ import type {
 import { isErrorDetail } from "@mobvibe/core";
 import { isInTauri } from "./auth";
 import { getAuthToken } from "./auth-token";
+import { e2ee } from "./e2ee";
 import { getDefaultGatewayUrl } from "./gateway-config";
 
 export type FsEntriesResponse = {
@@ -369,15 +370,20 @@ export const setSessionModel = async (payload: {
 export const sendMessage = async (payload: {
 	sessionId: string;
 	prompt: ContentBlock[];
-}): Promise<SendMessageResponse> =>
-	requestJsonWithTimeout<SendMessageResponse>(
+}): Promise<SendMessageResponse> => {
+	const encryptedPrompt = e2ee.encryptPayloadForSession(
+		payload.sessionId,
+		payload.prompt,
+	);
+	return requestJsonWithTimeout<SendMessageResponse>(
 		"/acp/message",
 		SEND_MESSAGE_TIMEOUT_MS,
 		{
 			method: "POST",
-			body: JSON.stringify(payload),
+			body: JSON.stringify({ ...payload, prompt: encryptedPrompt }),
 		},
 	);
+};
 
 export const sendPermissionDecision = async (
 	payload: PermissionDecisionPayload,

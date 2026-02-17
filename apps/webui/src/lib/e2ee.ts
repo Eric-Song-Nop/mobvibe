@@ -3,6 +3,7 @@ import {
 	decryptPayload,
 	deriveAuthKeyPair,
 	deriveContentKeyPair,
+	encryptPayload,
 	getSodium,
 	initCrypto,
 	isEncryptedPayload,
@@ -132,6 +133,12 @@ class E2EEManager {
 			console.warn("[E2EE] Failed to decrypt event", event.sessionId, error);
 			return event;
 		}
+	}
+
+	encryptPayloadForSession(sessionId: string, payload: unknown): unknown {
+		const dek = this.sessionDeks.get(sessionId);
+		if (!dek) return payload;
+		return encryptPayload(payload, dek);
 	}
 
 	private tryUnwrap(

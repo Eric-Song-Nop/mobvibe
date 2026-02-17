@@ -19,6 +19,10 @@ const mockUnwrapDEK = vi.fn(() => new Uint8Array([10, 20, 30]));
 const mockDecryptPayload = vi.fn((encrypted: { t: string; c: string }) =>
 	JSON.parse(atob(encrypted.c)),
 );
+const mockEncryptPayload = vi.fn((payload: unknown, _dek: Uint8Array) => ({
+	t: "encrypted",
+	c: btoa(JSON.stringify(payload)),
+}));
 const mockIsEncryptedPayload = vi.fn(
 	(p: unknown) =>
 		typeof p === "object" &&
@@ -34,6 +38,7 @@ vi.mock("@mobvibe/core", () => ({
 	deriveAuthKeyPair: mockDeriveAuthKeyPair,
 	unwrapDEK: mockUnwrapDEK,
 	decryptPayload: mockDecryptPayload,
+	encryptPayload: mockEncryptPayload,
 	isEncryptedPayload: mockIsEncryptedPayload,
 }));
 
@@ -278,6 +283,48 @@ describe("E2EEManager", () => {
 			expect(stored).not.toBeNull();
 			const parsed = JSON.parse(stored as string);
 			expect(parsed).toHaveLength(2);
+		});
+	});
+
+	describe("bidirectional encryption", () => {
+		it("encryptPayloadForSession returns plaintext when no DEK", () => {
+			const payload = [{ type: "text", text: "hello" }];
+			const result = e2ee.encryptPayloadForSession("session-no-dek", payload);
+			expect(result).toBe(payload);
+			expect(mockEncryptPayload).not.toHaveBeenCalled();
+		});
+
+		it("encryptPayloadForSession encrypts when DEK exists", async () => {
+			await e2ee.addPairedSecret(btoa("test-secret"));
+			e2ee.unwrapSessionDek("session-1", "wrapped-dek");
+
+			const payload = [{ type: "text", text: "hello" }];
+			const result = e2ee.encryptPayloadForSession("session-1", payload);
+
+			expect(mockEncryptPayload).toHaveBeenCalledWith(
+				payload,
+				expect.any(Uint8Array),
+			);
+			expect(result).toEqual({
+				t: "encrypted",
+				c: expect.any(String),
+			});
+		});
+
+		it("round-trip: encrypt then decrypt same DEK", async () => {
+			await e2ee.addPairedSecret(btoa("test-secret"));
+			e2ee.unwrapSessionDek("session-rt", "wrapped-dek");
+
+			const original = [{ type: "text", text: "round trip" }];
+			const encrypted = e2ee.encryptPayloadForSession("session-rt", original);
+
+			mockDecryptPayload.mockReturnValueOnce(original);
+			mockIsEncryptedPayload.mockReturnValueOnce(true);
+
+			const event = makeEvent("session-rt", encrypted);
+			const decrypted = e2ee.decryptEvent(event);
+
+			expect(decrypted.payload).toEqual(original);
 		});
 	});
 });

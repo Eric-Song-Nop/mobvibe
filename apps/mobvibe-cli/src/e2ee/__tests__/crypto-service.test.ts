@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import {
 	decryptPayload,
 	deriveContentKeyPair,
+	encryptPayload,
 	generateMasterSecret,
 	getSodium,
 	initCrypto,
@@ -124,5 +125,87 @@ describe("CliCryptoService", () => {
 		const sodium = getSodium();
 		const decoded = sodium.from_base64(pubKey, sodium.base64_variants.ORIGINAL);
 		expect(decoded).toBeInstanceOf(Uint8Array);
+	});
+
+	test("getDek returns DEK for initialized session", () => {
+		const { dek } = service.initSessionDek("session-getdek");
+		const retrieved = service.getDek("session-getdek");
+		expect(retrieved).toEqual(dek);
+	});
+
+	test("getDek returns null for unknown session", () => {
+		expect(service.getDek("unknown-session")).toBeNull();
+	});
+
+	describe("bidirectional encryption", () => {
+		test("decryptPayloadForSession decrypts encrypted data", () => {
+			const { dek } = service.initSessionDek("session-decrypt");
+			const original = [{ type: "text", text: "hello" }];
+			const encrypted = encryptPayload(original, dek);
+
+			const decrypted = service.decryptPayloadForSession(
+				encrypted,
+				"session-decrypt",
+			);
+			expect(decrypted).toEqual(original);
+		});
+
+		test("decryptPayloadForSession throws when no DEK", () => {
+			const encrypted = encryptPayload(
+				[{ type: "text", text: "hello" }],
+				new Uint8Array(32),
+			);
+			expect(() =>
+				service.decryptPayloadForSession(encrypted, "unknown-session"),
+			).toThrow("No DEK for session");
+		});
+
+		test("decryptRpcPayload returns original when not encrypted", () => {
+			service.initSessionDek("session-rpc");
+			const original = [{ type: "text", text: "plain" }];
+			const result = service.decryptRpcPayload("session-rpc", original);
+			expect(result).toBe(original);
+		});
+
+		test("decryptRpcPayload returns original when no DEK", () => {
+			const encrypted = { t: "encrypted" as const, c: "some-data" };
+			const result = service.decryptRpcPayload("unknown-session", encrypted);
+			expect(result).toBe(encrypted);
+		});
+
+		test("decryptRpcPayload decrypts encrypted payload", () => {
+			const { dek } = service.initSessionDek("session-rpc-decrypt");
+			const original = [{ type: "text", text: "secret message" }];
+			const encrypted = encryptPayload(original, dek);
+
+			const result = service.decryptRpcPayload<typeof original>(
+				"session-rpc-decrypt",
+				encrypted,
+			);
+			expect(result).toEqual(original);
+		});
+
+		test("round-trip: encrypt from WebUI, decrypt on CLI", () => {
+			const { dek, wrappedDek } = service.initSessionDek("session-bidi");
+
+			// Simulate WebUI: unwrap DEK then encrypt prompt
+			const contentKp = deriveContentKeyPair(masterSecret);
+			const webuiDek = unwrapDEK(
+				wrappedDek,
+				contentKp.publicKey,
+				contentKp.secretKey,
+			);
+			expect(webuiDek).toEqual(dek);
+
+			const originalPrompt = [{ type: "text", text: "user message" } as const];
+			const encrypted = encryptPayload(originalPrompt, webuiDek);
+
+			// CLI decrypts the prompt
+			const decrypted = service.decryptRpcPayload<typeof originalPrompt>(
+				"session-bidi",
+				encrypted,
+			);
+			expect(decrypted).toEqual(originalPrompt);
+		});
 	});
 });

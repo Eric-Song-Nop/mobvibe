@@ -1,10 +1,16 @@
-import type { CryptoKeyPair, SessionEvent } from "@mobvibe/shared";
+import type {
+	CryptoKeyPair,
+	EncryptedPayload,
+	SessionEvent,
+} from "@mobvibe/shared";
 import {
+	decryptPayload,
 	deriveAuthKeyPair,
 	deriveContentKeyPair,
 	encryptPayload,
 	generateDEK,
 	getSodium,
+	isEncryptedPayload,
 	wrapDEK,
 } from "@mobvibe/shared";
 
@@ -77,5 +83,36 @@ export class CliCryptoService {
 			this.authKeyPair.publicKey,
 			sodium.base64_variants.ORIGINAL,
 		);
+	}
+
+	/**
+	 * Get the DEK for a session, or null if not initialized.
+	 */
+	getDek(sessionId: string): Uint8Array | null {
+		return this.sessionDeks.get(sessionId) ?? null;
+	}
+
+	/**
+	 * Decrypt an encrypted payload for a session.
+	 * Returns the decrypted data or throws if no DEK available.
+	 */
+	decryptPayloadForSession(
+		encrypted: EncryptedPayload,
+		sessionId: string,
+	): unknown {
+		const dek = this.sessionDeks.get(sessionId);
+		if (!dek) throw new Error("No DEK for session");
+		return decryptPayload(encrypted, dek);
+	}
+
+	/**
+	 * Decrypt RPC payload if encrypted. Returns original data if not encrypted
+	 * or no DEK available.
+	 */
+	decryptRpcPayload<T>(sessionId: string, data: unknown): T {
+		if (!isEncryptedPayload(data)) return data as T;
+		const dek = this.sessionDeks.get(sessionId);
+		if (!dek) return data as T;
+		return decryptPayload(data, dek) as T;
 	}
 }
