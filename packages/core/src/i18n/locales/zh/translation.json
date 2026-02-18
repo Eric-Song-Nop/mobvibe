@@ -73,11 +73,21 @@
 		"forceReloadDescription": "重载会清空本地消息并从代理重新加载历史。",
 		"forceReloadConfirm": "确认重载",
 		"loadingHistory": "正在加载历史...",
-		"reloadingHistory": "正在重载历史..."
+		"reloadingHistory": "正在重载历史...",
+		"switchingMode": "正在切换模式...",
+		"switchingModel": "正在切换模型...",
+		"status": {
+			"active": "活跃",
+			"loading": "加载中",
+			"history": "历史",
+			"error": "错误",
+			"detached": "已断开"
+		}
 	},
 	"errors": {
 		"selectBackend": "请选择后端",
 		"selectDirectory": "请选择工作目录",
+		"selectMachine": "请选择设备",
 		"backendsFetchFailed": "后端列表获取失败",
 		"sessionsFetchFailed": "会话列表获取失败",
 		"sessionNotReady": "会话未就绪，请重新创建对话",
@@ -104,7 +114,11 @@
 		"previewLoadFailed": "预览加载失败",
 		"pathLoadFailed": "路径加载失败",
 		"loadSessionFailed": "加载会话失败",
-		"reloadSessionFailed": "重载会话失败"
+		"reloadSessionFailed": "重载会话失败",
+		"cliOffline": "CLI 离线，请启动 mobvibe-cli",
+		"capabilityFetchFailed": "无法获取 Agent 能力",
+		"sessionLoadNotSupported": "当前 Agent 不支持加载历史会话",
+		"missingBackendId": "会话缺少后端信息"
 	},
 	"workingDirectory": {
 		"dialogTitle": "选择工作目录",
@@ -255,5 +269,8 @@
 		"disconnected": "已断开",
 		"connecting": "连接中...",
 		"reconnecting": "重新连接中..."
+	},
+	"cli": {
+		"discoveringCapabilities": "正在获取 Agent 能力..."
 	}
 }

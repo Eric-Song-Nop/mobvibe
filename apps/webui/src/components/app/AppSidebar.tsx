@@ -18,6 +18,7 @@ import {
 import { useMachinesQuery } from "@/hooks/useMachinesQuery";
 import { useDiscoverSessionsMutation } from "@/hooks/useSessionQueries";
 import { type Machine, useMachinesStore } from "@/lib/machines-store";
+import type { SessionMutationsSnapshot } from "@/lib/session-utils";
 import { useUiStore } from "@/lib/ui-store";
 import { cn } from "@/lib/utils";
 
@@ -31,8 +32,7 @@ export type AppSidebarProps = {
 	onArchiveAllSessions: (sessionIds: string[]) => void;
 	isBulkArchiving?: boolean;
 	isCreating: boolean;
-	/** Whether a session is being activated (restored/loaded) */
-	isActivating?: boolean;
+	mutations: SessionMutationsSnapshot;
 };
 
 export function AppSidebar({
@@ -45,7 +45,7 @@ export function AppSidebar({
 	onArchiveAllSessions,
 	isBulkArchiving,
 	isCreating,
-	isActivating: _isActivating,
+	mutations,
 }: AppSidebarProps) {
 	const {
 		mobileMenuOpen,
@@ -69,6 +69,7 @@ export function AppSidebar({
 					onArchiveAllSessions={onArchiveAllSessions}
 					isBulkArchiving={isBulkArchiving}
 					isCreating={isCreating}
+					mutations={mutations}
 				/>
 			</aside>
 			<ResizeHandle
@@ -95,6 +96,7 @@ export function AppSidebar({
 								onArchiveAllSessions={onArchiveAllSessions}
 								isBulkArchiving={isBulkArchiving}
 								isCreating={isCreating}
+								mutations={mutations}
 							/>
 						</div>
 					</div>

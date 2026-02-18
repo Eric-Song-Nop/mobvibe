@@ -1,45 +1,79 @@
 import type { ChatMessage, ChatSession } from "@mobvibe/core";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { createFallbackError } from "@/lib/error-utils";
 import { useMachinesStore } from "@/lib/machines-store";
 import { gatewaySocket } from "@/lib/socket";
 import type { ChatStoreActions } from "./useSessionMutations";
 import { useSessionMutations } from "./useSessionMutations";
+import { useDiscoverSessionsMutation } from "./useSessionQueries";
 
-export type ActivationState = "idle" | "loading";
+export type ActivationPhase = "idle" | "discovering" | "loading" | "reloading";
 
-/**
- * Hook for session activation via session/load (or reload when forced).
- * - Attached session: set active immediately (unless forced)
- * - Otherwise: call load/reload, clear local messages, restore on failure
- * - Active session ID is set only after load succeeds
- */
+export type ActivationState = {
+	phase: ActivationPhase;
+	sessionId?: string;
+	machineId?: string;
+};
+
 export function useSessionActivation(store: ChatStoreActions) {
-	const [activationState, setActivationState] =
-		useState<ActivationState>("idle");
+	const { t } = useTranslation();
 	const { loadSessionMutation, reloadSessionMutation } =
 		useSessionMutations(store);
+	const discoverSessionsMutation = useDiscoverSessionsMutation();
 	const machines = useMachinesStore((state) => state.machines);
+	const setMachineCapabilities = useMachinesStore(
+		(state) => state.setMachineCapabilities,
+	);
 
 	const activateSession = useCallback(
 		async (session: ChatSession, options?: { force?: boolean }) => {
 			const force = options?.force === true;
-			if (session.isLoading) {
-				return;
-			}
+
 			if (session.isAttached && !force) {
 				store.setActiveSessionId(session.sessionId);
+				return;
+			}
+
+			if (session.isLoading) {
 				return;
 			}
 
 			if (!session.cwd || !session.machineId) {
 				return;
 			}
-			const capabilities = machines[session.machineId]?.capabilities;
-			if (!capabilities?.load) {
+
+			const machine = machines[session.machineId];
+			if (!machine?.connected) {
 				store.setError(
 					session.sessionId,
-					createFallbackError("Agent does not support session/load", "session"),
+					createFallbackError(t("errors.cliOffline"), "service"),
+				);
+				return;
+			}
+
+			let capabilities = machine.capabilities;
+			if (!capabilities) {
+				try {
+					const result = await discoverSessionsMutation.mutateAsync({
+						machineId: session.machineId,
+						cwd: session.cwd,
+					});
+					capabilities = result.capabilities;
+					setMachineCapabilities(session.machineId, capabilities);
+				} catch {
+					store.setError(
+						session.sessionId,
+						createFallbackError(t("errors.capabilityFetchFailed"), "session"),
+					);
+					return;
+				}
+			}
+
+			if (!capabilities.load) {
+				store.setError(
+					session.sessionId,
+					createFallbackError(t("errors.sessionLoadNotSupported"), "session"),
 				);
 				return;
 			}
@@ -47,10 +81,7 @@ export function useSessionActivation(store: ChatStoreActions) {
 			if (!session.backendId) {
 				store.setError(
 					session.sessionId,
-					createFallbackError(
-						"Session is missing backend information and cannot be loaded",
-						"session",
-					),
+					createFallbackError(t("errors.missingBackendId"), "session"),
 				);
 				return;
 			}
@@ -62,7 +93,6 @@ export function useSessionActivation(store: ChatStoreActions) {
 				machineId: session.machineId,
 			};
 
-			setActivationState("loading");
 			store.setSessionLoading(session.sessionId, true);
 			const backupMessages: ChatMessage[] = [...session.messages];
 			const backupLastAppliedSeq = session.lastAppliedSeq;
@@ -80,15 +110,54 @@ export function useSessionActivation(store: ChatStoreActions) {
 				gatewaySocket.unsubscribeFromSession(session.sessionId);
 			} finally {
 				store.setSessionLoading(session.sessionId, false);
-				setActivationState("idle");
 			}
 		},
-		[loadSessionMutation, reloadSessionMutation, machines, store],
+		[
+			loadSessionMutation,
+			reloadSessionMutation,
+			discoverSessionsMutation,
+			machines,
+			setMachineCapabilities,
+			store,
+			t,
+		],
 	);
+
+	const activationState = useMemo<ActivationState>(() => {
+		if (loadSessionMutation.isPending && loadSessionMutation.variables) {
+			return {
+				phase: "loading",
+				sessionId: loadSessionMutation.variables.sessionId,
+			};
+		}
+		if (reloadSessionMutation.isPending && reloadSessionMutation.variables) {
+			return {
+				phase: "reloading",
+				sessionId: reloadSessionMutation.variables.sessionId,
+			};
+		}
+		if (
+			discoverSessionsMutation.isPending &&
+			discoverSessionsMutation.variables
+		) {
+			return {
+				phase: "discovering",
+				machineId: discoverSessionsMutation.variables.machineId,
+			};
+		}
+		return { phase: "idle" };
+	}, [
+		loadSessionMutation.isPending,
+		loadSessionMutation.variables,
+		reloadSessionMutation.isPending,
+		reloadSessionMutation.variables,
+		discoverSessionsMutation.isPending,
+		discoverSessionsMutation.variables,
+	]);
 
 	return {
 		activateSession,
-		isActivating: activationState !== "idle",
 		activationState,
+		isActivating: activationState.phase !== "idle",
 	};
 }

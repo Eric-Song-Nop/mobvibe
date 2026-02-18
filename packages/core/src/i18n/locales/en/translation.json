@@ -73,11 +73,21 @@
 		"forceReloadDescription": "Reloading clears local messages and replays history from the agent.",
 		"forceReloadConfirm": "Reload",
 		"loadingHistory": "Loading session history...",
-		"reloadingHistory": "Reloading session history..."
+		"reloadingHistory": "Reloading session history...",
+		"switchingMode": "Switching mode...",
+		"switchingModel": "Switching model...",
+		"status": {
+			"active": "Active",
+			"loading": "Loading",
+			"history": "History",
+			"error": "Error",
+			"detached": "Detached"
+		}
 	},
 	"errors": {
 		"selectBackend": "Please select a backend",
 		"selectDirectory": "Please select a working directory",
+		"selectMachine": "Please select a machine",
 		"backendsFetchFailed": "Failed to load backends",
 		"sessionsFetchFailed": "Failed to load sessions",
 		"sessionNotReady": "Session not ready. Please create a new conversation.",
@@ -104,7 +114,11 @@
 		"previewLoadFailed": "Failed to load preview",
 		"pathLoadFailed": "Failed to load path",
 		"loadSessionFailed": "Failed to load session",
-		"reloadSessionFailed": "Failed to reload session"
+		"reloadSessionFailed": "Failed to reload session",
+		"cliOffline": "CLI is offline. Please start mobvibe-cli",
+		"capabilityFetchFailed": "Failed to fetch agent capabilities",
+		"sessionLoadNotSupported": "This agent does not support loading history sessions",
+		"missingBackendId": "Session is missing backend information"
 	},
 	"workingDirectory": {
 		"dialogTitle": "Select working directory",
@@ -255,5 +269,8 @@
 		"disconnected": "Disconnected",
 		"connecting": "Connecting...",
 		"reconnecting": "Reconnecting..."
+	},
+	"cli": {
+		"discoveringCapabilities": "Fetching agent capabilities..."
 	}
 }

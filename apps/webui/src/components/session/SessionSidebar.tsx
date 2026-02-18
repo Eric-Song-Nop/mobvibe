@@ -1,5 +1,6 @@
 import {
 	ComputerIcon,
+	Loading01Icon,
 	MoonIcon,
 	PaintBoardIcon,
 	SunIcon,
@@ -39,6 +40,11 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import i18n, { supportedLanguages } from "@/i18n";
+import {
+	getSessionDisplayStatus,
+	type SessionDisplayPhase,
+	type SessionMutationsSnapshot,
+} from "@/lib/session-utils";
 import { useUiStore } from "@/lib/ui-store";
 import { cn } from "@/lib/utils";
 
@@ -79,6 +85,7 @@ type SessionSidebarProps = {
 	onArchiveAllSessions: (sessionIds: string[]) => void;
 	isBulkArchiving?: boolean;
 	isCreating: boolean;
+	mutations: SessionMutationsSnapshot;
 };
 
 export const SessionSidebar = ({
@@ -91,6 +98,7 @@ export const SessionSidebar = ({
 	onArchiveAllSessions,
 	isBulkArchiving,
 	isCreating,
+	mutations,
 }: SessionSidebarProps) => {
 	const { t } = useTranslation();
 	const { theme, setTheme } = useTheme();
@@ -287,6 +295,10 @@ export const SessionSidebar = ({
 											isActive={session.sessionId === activeSessionId}
 											isEditing={session.sessionId === editingSessionId}
 											editingTitle={editingTitle}
+											displayStatus={getSessionDisplayStatus(
+												session,
+												mutations,
+											)}
 											onSelect={onSelectSession}
 											onEdit={() =>
 												startEditingSession(session.sessionId, session.title)
@@ -312,6 +324,7 @@ type SessionListItemProps = {
 	isActive: boolean;
 	isEditing: boolean;
 	editingTitle: string;
+	displayStatus: SessionDisplayPhase;
 	onSelect: (sessionId: string) => void;
 	onEdit: () => void;
 	onEditCancel: () => void;
@@ -325,6 +338,7 @@ const SessionListItem = ({
 	isActive,
 	isEditing,
 	editingTitle,
+	displayStatus,
 	onSelect,
 	onEdit,
 	onEditCancel,
@@ -335,6 +349,48 @@ const SessionListItem = ({
 	const { t } = useTranslation();
 	const cwdLabel = getPathBasename(session.cwd) ?? t("common.unknown");
 	const handleSelect = () => onSelect(session.sessionId);
+
+	const StatusBadge = () => {
+		switch (displayStatus) {
+			case "loading":
+				return (
+					<Badge variant="secondary" className="gap-1">
+						<HugeiconsIcon
+							icon={Loading01Icon}
+							strokeWidth={2}
+							className="h-3 w-3 animate-spin"
+						/>
+						{t("session.status.loading")}
+					</Badge>
+				);
+			case "active":
+				return (
+					<Badge className="bg-green-600 hover:bg-green-700">
+						{t("session.status.active")}
+					</Badge>
+				);
+			case "error":
+				return <Badge variant="destructive">{t("session.status.error")}</Badge>;
+			case "detached":
+				return (
+					<Badge variant="outline" className="text-warning border-warning">
+						{t("session.status.detached")}
+					</Badge>
+				);
+			case "history":
+				return (
+					<Badge
+						variant="outline"
+						className="text-muted-foreground border-muted-foreground/30"
+					>
+						{t("session.status.history")}
+					</Badge>
+				);
+			default:
+				return null;
+		}
+	};
+
 	return (
 		<div
 			className={cn(
@@ -362,10 +418,8 @@ const SessionListItem = ({
 					) : (
 						<span className="text-sm font-medium">{session.title}</span>
 					)}
-					<div className="flex items-center gap-2">
-						{session.isLoading ? (
-							<Badge variant="secondary">{t("common.loading")}</Badge>
-						) : null}
+					<div className="flex items-center gap-2 shrink-0">
+						<StatusBadge />
 					</div>
 				</div>
 				<span className="text-muted-foreground text-xs">{cwdLabel}</span>

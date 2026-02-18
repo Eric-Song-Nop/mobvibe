@@ -142,10 +142,12 @@ function MainApp() {
 		...chatActions,
 	});
 
-	const { activateSession, isActivating } = useSessionActivation({
+	const { activateSession, activationState } = useSessionActivation({
 		sessions,
 		...chatActions,
 	});
+
+	const isActivating = activationState.phase !== "idle";
 
 	const { syncSessionHistory, isBackfilling } = useSocket({
 		sessions,
@@ -365,11 +367,69 @@ function MainApp() {
 		t,
 	]);
 
-	const loadingMessage = activeSession?.isLoading
-		? isForceReloading
-			? t("session.reloadingHistory")
-			: t("session.loadingHistory")
-		: undefined;
+	const loadingMessage = useMemo(() => {
+		if (
+			mutations.loadSessionMutation.isPending &&
+			mutations.loadSessionMutation.variables?.sessionId === activeSessionId
+		) {
+			return t("session.loadingHistory");
+		}
+		if (
+			mutations.reloadSessionMutation.isPending &&
+			mutations.reloadSessionMutation.variables?.sessionId === activeSessionId
+		) {
+			return t("session.reloadingHistory");
+		}
+		if (
+			discoverSessionsMutation.isPending &&
+			discoverSessionsMutation.variables?.machineId === selectedMachineId
+		) {
+			return t("cli.discoveringCapabilities");
+		}
+		if (
+			mutations.setSessionModeMutation.isPending &&
+			mutations.setSessionModeMutation.variables?.sessionId === activeSessionId
+		) {
+			return t("session.switchingMode");
+		}
+		if (
+			mutations.setSessionModelMutation.isPending &&
+			mutations.setSessionModelMutation.variables?.sessionId === activeSessionId
+		) {
+			return t("session.switchingModel");
+		}
+		return undefined;
+	}, [
+		activeSessionId,
+		discoverSessionsMutation.isPending,
+		discoverSessionsMutation.variables,
+		mutations.loadSessionMutation.isPending,
+		mutations.loadSessionMutation.variables,
+		mutations.reloadSessionMutation.isPending,
+		mutations.reloadSessionMutation.variables,
+		mutations.setSessionModeMutation.isPending,
+		mutations.setSessionModeMutation.variables,
+		mutations.setSessionModelMutation.isPending,
+		mutations.setSessionModelMutation.variables,
+		selectedMachineId,
+		t,
+	]);
+
+	const mutationsSnapshot = useMemo(
+		(): import("@/lib/session-utils").SessionMutationsSnapshot => ({
+			loadSessionPending: mutations.loadSessionMutation.isPending,
+			loadSessionVariables: mutations.loadSessionMutation.variables,
+			reloadSessionPending: mutations.reloadSessionMutation.isPending,
+			reloadSessionVariables: mutations.reloadSessionMutation.variables,
+		}),
+		[
+			mutations.loadSessionMutation.isPending,
+			mutations.loadSessionMutation.variables,
+			mutations.reloadSessionMutation.isPending,
+			mutations.reloadSessionMutation.variables,
+		],
+	);
+
 	const streamError = activeSession?.streamError;
 	const backendLabel = activeSession?.backendLabel ?? activeSession?.backendId;
 	const isModeSwitching =
@@ -425,7 +485,7 @@ function MainApp() {
 					}}
 					isBulkArchiving={isBulkArchiving}
 					isCreating={mutations.createSessionMutation.isPending}
-					isActivating={isActivating}
+					mutations={mutationsSnapshot}
 				/>
 
 				<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
