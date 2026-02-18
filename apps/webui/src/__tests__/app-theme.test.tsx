@@ -75,6 +75,12 @@ vi.mock("@/hooks/useSessionQueries", () => ({
 			isPending: false,
 		},
 	}),
+	useDiscoverSessionsMutation: () => ({
+		mutate: vi.fn(),
+		mutateAsync: vi.fn(),
+		isPending: false,
+		variables: null,
+	}),
 }));
 
 vi.mock("@/hooks/useSessionMutations", () => ({
@@ -88,6 +94,8 @@ vi.mock("@/hooks/useSessionMutations", () => ({
 		sendMessageMutation: { mutate: vi.fn() },
 		createMessageIdMutation: { mutateAsync: vi.fn() },
 		permissionDecisionMutation: { mutate: vi.fn() },
+		loadSessionMutation: { isPending: false, mutateAsync: vi.fn() },
+		reloadSessionMutation: { isPending: false, mutateAsync: vi.fn() },
 	}),
 }));
 
@@ -119,6 +127,14 @@ vi.mock("@/hooks/useSessionList", () => ({
 
 vi.mock("@/hooks/useMachineDiscovery", () => ({
 	useMachineDiscovery: () => undefined,
+}));
+
+vi.mock("@/hooks/useSessionActivation", () => ({
+	useSessionActivation: () => ({
+		activateSession: vi.fn(),
+		activationState: { phase: "idle" },
+		isActivating: false,
+	}),
 }));
 
 vi.mock("@/hooks/useSessionHandlers", () => ({

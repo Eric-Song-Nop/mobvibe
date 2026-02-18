@@ -5,7 +5,15 @@ import { SessionSidebar } from "../src/components/session/SessionSidebar";
 import { ThemeProvider } from "../src/components/theme-provider";
 import i18n from "../src/i18n";
 import type { ChatSession } from "../src/lib/chat-store";
+import type { SessionMutationsSnapshot } from "../src/lib/session-utils";
 import { useUiStore } from "../src/lib/ui-store";
+
+const defaultMutations: SessionMutationsSnapshot = {
+	loadSessionPending: false,
+	loadSessionVariables: undefined,
+	reloadSessionPending: false,
+	reloadSessionVariables: undefined,
+};
 
 vi.mock("../src/components/ui/alert-dialog", () => ({
 	AlertDialog: ({ children }: { children: React.ReactNode }) => (
@@ -114,6 +122,7 @@ const renderSidebar = (
 				onArchiveAllSessions={options?.onArchiveAllSessions ?? (() => {})}
 				isBulkArchiving={options?.isBulkArchiving ?? false}
 				isCreating={options?.isCreating ?? false}
+				mutations={options?.mutations ?? defaultMutations}
 			/>
 		</ThemeProvider>,
 	);
@@ -231,7 +240,9 @@ describe("SessionSidebar", () => {
 			}),
 		]);
 
-		expect(screen.getByText(i18n.t("common.loading"))).toBeInTheDocument();
+		expect(
+			screen.getByText(i18n.t("session.status.loading")),
+		).toBeInTheDocument();
 	});
 
 	it("shows detached reason when present", () => {
