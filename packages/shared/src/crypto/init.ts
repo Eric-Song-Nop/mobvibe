@@ -1,11 +1,13 @@
+import sodiumModule from "libsodium-wrappers";
 import type { SodiumLib } from "./types.js";
 
 let _sodium: SodiumLib | null = null;
 
 export async function initCrypto(): Promise<void> {
 	if (_sodium) return;
-	const mod = await import("libsodium-wrappers");
-	const sodium = ("default" in mod ? mod.default : mod) as SodiumLib;
+	const sodium = (
+		"default" in sodiumModule ? sodiumModule.default : sodiumModule
+	) as SodiumLib;
 	await sodium.ready;
 	_sodium = sodium;
 }
