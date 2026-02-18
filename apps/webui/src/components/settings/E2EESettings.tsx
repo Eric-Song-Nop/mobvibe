@@ -101,9 +101,14 @@ export function E2EESettings() {
 			}
 			if (permState !== "granted") {
 				setError(t("e2ee.cameraPermissionDenied"));
+				return;
 			}
 
-			const result = await scan({ windowed: false, formats: [Format.QRCode] });
+			const result = await scan({ formats: [Format.QRCode] });
+			if (!result?.content) {
+				setError(t("e2ee.scanError"));
+				return;
+			}
 
 			const base64Secret = parsePairingUrl(result.content);
 			if (!base64Secret) {
@@ -113,8 +118,10 @@ export function E2EESettings() {
 
 			await e2ee.addPairedSecret(base64Secret);
 			refreshDevices();
-		} catch {
-			setError(t("e2ee.scanError"));
+		} catch (err) {
+			console.error("QR scan error:", err);
+			const errMsg = err instanceof Error ? err.message : String(err);
+			setError(`${t("e2ee.scanError")}: ${errMsg}`);
 		} finally {
 			setIsScanning(false);
 		}
