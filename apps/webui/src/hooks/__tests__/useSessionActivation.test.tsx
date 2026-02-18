@@ -5,7 +5,10 @@ import { useSessionActivation } from "../useSessionActivation";
 import type { ChatStoreActions } from "../useSessionMutations";
 
 let machinesState: {
-	machines: Record<string, { capabilities?: { list: boolean; load: boolean } }>;
+	machines: Record<
+		string,
+		{ connected?: boolean; capabilities?: { list: boolean; load: boolean } }
+	>;
 };
 
 vi.mock("@/lib/machines-store", () => ({
@@ -34,6 +37,16 @@ vi.mock("../useSessionMutations", () => ({
 		loadSessionMutation,
 		reloadSessionMutation,
 	}),
+}));
+
+const discoverSessionsMutation = {
+	mutateAsync: vi.fn(),
+	isPending: false,
+	variables: null,
+};
+
+vi.mock("../useSessionQueries", () => ({
+	useDiscoverSessionsMutation: () => discoverSessionsMutation,
 }));
 
 const buildSession = (overrides: Partial<ChatSession> = {}): ChatSession => ({
@@ -92,6 +105,9 @@ describe("useSessionActivation", () => {
 		machinesState = { machines: {} };
 		loadSessionMutation.mutateAsync.mockReset();
 		reloadSessionMutation.mutateAsync.mockReset();
+		discoverSessionsMutation.mutateAsync.mockReset();
+		discoverSessionsMutation.isPending = false;
+		discoverSessionsMutation.variables = null;
 		mockGatewaySocket.subscribeToSession.mockReset();
 		mockGatewaySocket.unsubscribeFromSession.mockReset();
 	});
@@ -121,7 +137,12 @@ describe("useSessionActivation", () => {
 		});
 
 		machinesState = {
-			machines: { "machine-1": { capabilities: { list: true, load: true } } },
+			machines: {
+				"machine-1": {
+					connected: true,
+					capabilities: { list: true, load: true },
+				},
+			},
 		};
 
 		const { result } = renderHook(() => useSessionActivation(store));
@@ -142,7 +163,12 @@ describe("useSessionActivation", () => {
 		});
 
 		machinesState = {
-			machines: { "machine-1": { capabilities: { list: true, load: false } } },
+			machines: {
+				"machine-1": {
+					connected: true,
+					capabilities: { list: true, load: false },
+				},
+			},
 		};
 
 		const { result } = renderHook(() => useSessionActivation(store));
@@ -154,7 +180,7 @@ describe("useSessionActivation", () => {
 		expect(store.setError).toHaveBeenCalledWith(
 			"session-1",
 			expect.objectContaining({
-				message: "Agent does not support session/load",
+				message: "errors.sessionLoadNotSupported",
 			}),
 		);
 		expect(loadSessionMutation.mutateAsync).not.toHaveBeenCalled();
@@ -169,7 +195,12 @@ describe("useSessionActivation", () => {
 		});
 
 		machinesState = {
-			machines: { "machine-1": { capabilities: { list: true, load: true } } },
+			machines: {
+				"machine-1": {
+					connected: true,
+					capabilities: { list: true, load: true },
+				},
+			},
 		};
 		loadSessionMutation.mutateAsync.mockResolvedValue({
 			sessionId: "session-1",
@@ -203,7 +234,12 @@ describe("useSessionActivation", () => {
 		});
 
 		machinesState = {
-			machines: { "machine-1": { capabilities: { list: true, load: true } } },
+			machines: {
+				"machine-1": {
+					connected: true,
+					capabilities: { list: true, load: true },
+				},
+			},
 		};
 		reloadSessionMutation.mutateAsync.mockResolvedValue({
 			sessionId: "session-1",
@@ -244,7 +280,12 @@ describe("useSessionActivation", () => {
 		});
 
 		machinesState = {
-			machines: { "machine-1": { capabilities: { list: true, load: true } } },
+			machines: {
+				"machine-1": {
+					connected: true,
+					capabilities: { list: true, load: true },
+				},
+			},
 		};
 		loadSessionMutation.mutateAsync.mockRejectedValue(new Error("fail"));
 
