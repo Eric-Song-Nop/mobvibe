@@ -80,7 +80,14 @@
 		"archiveAll": "Archive All",
 		"archiveAllTitle": "Archive all sessions?",
 		"archiveAllDescription": "This will archive {{count}} session(s), ending their backend processes and hiding them from the list.",
-		"archiveAllConfirm": "Archive all"
+		"archiveAllConfirm": "Archive all",
+		"status": {
+			"active": "Active",
+			"loading": "Loading",
+			"history": "History",
+			"error": "Error",
+			"detached": "Detached"
+		}
 	},
 	"errors": {
 		"selectMachine": "Please select a machine",
@@ -281,5 +288,8 @@
 		"remove": "Remove",
 		"removeTitle": "Remove machine?",
 		"removeDescription": "This will disconnect the machine and all its sessions."
+	},
+	"cli": {
+		"discoveringCapabilities": "Discovering agent capabilities..."
 	}
 }

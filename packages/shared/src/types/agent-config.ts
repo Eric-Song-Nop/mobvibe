@@ -20,6 +20,4 @@ export type UserAgentConfig = {
 export type MobvibeUserConfig = {
 	/** List of agent configurations */
 	agents?: UserAgentConfig[];
-	/** Default agent to use when none specified */
-	defaultAgentId?: string;
 };

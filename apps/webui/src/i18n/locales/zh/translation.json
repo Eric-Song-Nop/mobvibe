@@ -80,7 +80,14 @@
 		"archiveAll": "全部归档",
 		"archiveAllTitle": "归档所有对话？",
 		"archiveAllDescription": "将归档 {{count}} 个对话，结束后端进程并从列表中隐藏。",
-		"archiveAllConfirm": "确认全部归档"
+		"archiveAllConfirm": "确认全部归档",
+		"status": {
+			"active": "活跃",
+			"loading": "加载中",
+			"history": "历史",
+			"error": "错误",
+			"detached": "已断开"
+		}
 	},
 	"errors": {
 		"selectMachine": "请先选择机器",
@@ -281,5 +288,8 @@
 		"remove": "移除",
 		"removeTitle": "移除设备？",
 		"removeDescription": "这将断开设备连接并关闭所有会话。"
+	},
+	"cli": {
+		"discoveringCapabilities": "正在获取 Agent 能力..."
 	}
 }

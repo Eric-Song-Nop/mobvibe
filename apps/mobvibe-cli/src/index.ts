@@ -247,9 +247,3 @@ program
 export async function run() {
 	await program.parseAsync(process.argv);
 }
-
-run().catch((error) => {
-	logger.error({ err: error }, "cli_run_error");
-	console.error("Error:", error.message);
-	process.exit(1);
-});

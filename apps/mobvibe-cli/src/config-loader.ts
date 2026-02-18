@@ -142,15 +142,6 @@ const validateUserConfig = (
 		}
 	}
 
-	// Validate defaultAgentId
-	if (record.defaultAgentId !== undefined) {
-		if (typeof record.defaultAgentId !== "string") {
-			errors.push("defaultAgentId: must be a string");
-		} else if (record.defaultAgentId.trim().length > 0) {
-			config.defaultAgentId = record.defaultAgentId.trim();
-		}
-	}
-
 	if (errors.length > 0) {
 		return { config: null, errors };
 	}
