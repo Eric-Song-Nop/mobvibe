@@ -49,7 +49,7 @@
 		"prepublishOnly": "pnpm build"
 	},
 	"dependencies": {
-		"@agentclientprotocol/sdk": "^0.12.0",
+		"@agentclientprotocol/sdk": "^0.14.1",
 		"commander": "^13.1.0",
 		"ignore": "^7.0.4",
 		"open": "^10.1.0",

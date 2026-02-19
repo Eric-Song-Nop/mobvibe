@@ -33,7 +33,8 @@ export type SessionEventKind =
 	| "permission_result"
 	| "terminal_output"
 	| "session_info_update"
-	| "session_error";
+	| "session_error"
+	| "usage_update";
 
 /** A persisted session event with sequence tracking */
 export type SessionEvent = {
@@ -375,4 +376,30 @@ export type GitFileDiffResponse = {
 	addedLines: number[];
 	modifiedLines: number[];
 	deletedLines: number[];
+};
+
+// HTTP API response types (used by gateway routes + webui client)
+export type AcpBackendsResponse = {
+	backends: AcpBackendSummary[];
+};
+
+export type SessionsResponse = {
+	sessions: SessionSummary[];
+};
+
+export type CreateSessionResponse = SessionSummary;
+
+export type CancelSessionResponse = {
+	ok: boolean;
+};
+
+export type MessageIdResponse = {
+	messageId: string;
+};
+
+export type SessionFsFilePreviewResponse = {
+	path: string;
+	previewType: import("./session.js").SessionFsFilePreviewType;
+	content: string;
+	mimeType?: string;
 };

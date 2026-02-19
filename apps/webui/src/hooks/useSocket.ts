@@ -248,6 +248,20 @@ export function useSocket({
 				}
 				break;
 			}
+			case "usage_update": {
+				const notification = event.payload as SessionNotification;
+				const update = notification.update;
+				if (update.sessionUpdate === "usage_update") {
+					updateSessionMeta(event.sessionId, {
+						usage: {
+							used: update.used,
+							size: update.size,
+							cost: update.cost ?? undefined,
+						},
+					});
+				}
+				break;
+			}
 			case "turn_end": {
 				finalizeAssistantMessage?.(event.sessionId);
 				setSending?.(event.sessionId, false);

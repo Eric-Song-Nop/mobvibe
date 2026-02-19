@@ -27,6 +27,8 @@ export type {
 	AudioContent,
 	AvailableCommand,
 	ContentBlock,
+	// Cost & usage types (new in SDK 0.14.x)
+	Cost,
 	EmbeddedResource,
 	ImageContent,
 	// Project-specific types
@@ -43,6 +45,8 @@ export type {
 	ResourceLink,
 	ResourceLinkContent,
 	SdkToolCallUpdate,
+	// Session config option category (new in SDK 0.14.x)
+	SessionConfigOptionCategory,
 	SessionContent,
 	SessionNotification,
 	SessionUpdate,
@@ -59,6 +63,9 @@ export type {
 	ToolCallStatus,
 	ToolCallUpdate,
 	ToolKind,
+	// Usage types (new in SDK 0.14.x)
+	Usage,
+	UsageUpdate,
 } from "./types/acp.js";
 // Agent configuration types
 export type {
@@ -105,15 +112,19 @@ export type {
 
 // Socket event types
 export type {
+	// HTTP API response types
+	AcpBackendsResponse,
 	ArchiveSessionParams,
 	BulkArchiveSessionsParams,
 	CancelSessionParams,
+	CancelSessionResponse,
 	CliErrorPayload,
 	CliRegistrationInfo,
 	CliStatusPayload,
 	CliToGatewayEvents,
 	CloseSessionParams,
 	CreateSessionParams,
+	CreateSessionResponse,
 	DiscoverSessionsRpcParams,
 	DiscoverSessionsRpcResult,
 	EventsAckPayload,
@@ -134,6 +145,7 @@ export type {
 	HostFsRootsParams,
 	HostFsRootsResponse,
 	LoadSessionRpcParams,
+	MessageIdResponse,
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
 	ReloadSessionRpcParams,
@@ -147,7 +159,9 @@ export type {
 	SessionEventKind,
 	SessionEventsParams,
 	SessionEventsResponse,
+	SessionFsFilePreviewResponse,
 	SessionsDiscoveredPayload,
+	SessionsResponse,
 	SetSessionModelParams,
 	SetSessionModeParams,
 	StreamErrorPayload,

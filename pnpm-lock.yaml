@@ -88,8 +88,8 @@ importers:
   apps/mobvibe-cli:
     dependencies:
       '@agentclientprotocol/sdk':
-        specifier: ^0.12.0
-        version: 0.12.0(zod@4.3.5)
+        specifier: ^0.14.1
+        version: 0.14.1(zod@4.3.5)
       commander:
         specifier: ^13.1.0
         version: 13.1.0
@@ -394,8 +394,8 @@ importers:
   packages/shared:
     dependencies:
       '@agentclientprotocol/sdk':
-        specifier: ^0.12.0
-        version: 0.12.0(zod@4.3.5)
+        specifier: ^0.14.1
+        version: 0.14.1(zod@4.3.5)
       '@noble/hashes':
         specifier: ^2.0.1
         version: 2.0.1
@@ -418,8 +418,8 @@ packages:
   '@adobe/css-tools@4.4.4':
     resolution: {integrity: sha512-Elp+iwUx5rN5+Y8xLt5/GRoG20WGoDCQ/1Fb+1LiGtvwbDavuSk0jhD/eZdckHAuzcDzccnkv+rEjyWfRx18gg==}
 
-  '@agentclientprotocol/sdk@0.12.0':
-    resolution: {integrity: sha512-V8uH/KK1t7utqyJmTA7y7DzKu6+jKFIXM+ZVouz8E55j8Ej2RV42rEvPKn3/PpBJlliI5crcGk1qQhZ7VwaepA==}
+  '@agentclientprotocol/sdk@0.14.1':
+    resolution: {integrity: sha512-b6r3PS3Nly+Wyw9U+0nOr47bV8tfS476EgyEMhoKvJCZLbgqoDFN7DJwkxL88RR0aiOqOYV1ZnESHqb+RmdH8w==, tarball: https://registry.npmjs.org/@agentclientprotocol/sdk/-/sdk-0.14.1.tgz}
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
@@ -5780,7 +5780,7 @@ snapshots:
 
   '@adobe/css-tools@4.4.4': {}
 
-  '@agentclientprotocol/sdk@0.12.0(zod@4.3.5)':
+  '@agentclientprotocol/sdk@0.14.1(zod@4.3.5)':
     dependencies:
       zod: 4.3.5
 

@@ -142,6 +142,12 @@ export type ChatSession = {
 		| "gateway_disconnect"
 		| "unknown";
 	isLoading?: boolean;
+	/** Usage tracking from ACP agent */
+	usage?: {
+		used: number;
+		size: number;
+		cost?: { amount: number; currency: string };
+	};
 	/** WAL cursor tracking for sync */
 	revision?: number;
 	lastAppliedSeq?: number;
@@ -219,6 +225,7 @@ type ChatState = {
 				| "availableModes"
 				| "availableModels"
 				| "availableCommands"
+				| "usage"
 			>
 		>,
 	) => void;
@@ -974,6 +981,9 @@ export const useChatStore = create<ChatState>()(
 					}
 					if (payload.availableCommands !== undefined) {
 						nextSession.availableCommands = payload.availableCommands;
+					}
+					if (payload.usage !== undefined) {
+						nextSession.usage = payload.usage;
 					}
 					return {
 						sessions: {

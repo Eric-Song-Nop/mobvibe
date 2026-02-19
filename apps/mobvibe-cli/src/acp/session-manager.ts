@@ -1396,15 +1396,25 @@ export class SessionManager {
 			case "session_info_update":
 			case "current_mode_update":
 			case "available_commands_update":
+			case "plan":
+			case "config_option_update":
 				kind = "session_info_update";
 				break;
-			default:
+			case "usage_update":
+				kind = "usage_update";
+				break;
+			default: {
 				// For unknown types, log but don't write to WAL
+				const _unhandled = update as { sessionUpdate?: string };
 				logger.warn(
-					{ sessionId: record.sessionId, updateType: update.sessionUpdate },
+					{
+						sessionId: record.sessionId,
+						updateType: _unhandled.sessionUpdate,
+					},
 					"unknown_session_update_type_skipped",
 				);
 				return;
+			}
 		}
 
 		logger.info(

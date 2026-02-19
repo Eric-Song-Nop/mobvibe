@@ -5,12 +5,16 @@ export type {
 	AvailableCommand,
 	// Content types
 	ContentBlock,
+	// Cost & usage types (new in SDK 0.14.x)
+	Cost,
 	EmbeddedResource,
 	ImageContent,
 	RequestPermissionOutcome,
 	RequestPermissionRequest,
 	RequestPermissionResponse,
 	ResourceLink,
+	// Session config option category (new in SDK 0.14.x)
+	SessionConfigOptionCategory,
 	// Session types
 	SessionNotification,
 	SessionUpdate,
@@ -24,6 +28,9 @@ export type {
 	ToolCallStatus,
 	ToolCallUpdate as SdkToolCallUpdate,
 	ToolKind,
+	// Usage types (new in SDK 0.14.x)
+	Usage,
+	UsageUpdate,
 } from "@agentclientprotocol/sdk";
 
 // Backwards-compatible aliases (deprecate over time)
@@ -58,7 +65,8 @@ export type SessionUpdateType =
 	| "available_commands_update"
 	| "current_mode_update"
 	| "config_option_update"
-	| "session_info_update";
+	| "session_info_update"
+	| "usage_update";
 
 // Keep local type for broader content payload support (project-specific)
 // SDK's Content.content is strictly ContentBlock, but we allow more flexible types

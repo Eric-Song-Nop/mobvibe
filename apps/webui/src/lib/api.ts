@@ -1,67 +1,63 @@
 // Re-export types from @mobvibe/shared
 // Re-export shared socket-events types used by webui
+// Re-export HTTP API response types from shared
 export type {
 	AcpBackendSummary,
+	AcpBackendsResponse,
 	AcpConnectionState,
+	CancelSessionResponse,
+	CreateSessionResponse,
 	DiscoverSessionsResult,
 	ErrorCode,
 	ErrorDetail,
 	ErrorScope,
 	FsEntriesResponse,
 	FsEntry,
+	FsResourcesResponse,
 	FsRoot,
+	FsRootsResponse,
 	GitFileDiffResponse,
 	GitFileStatus,
 	GitStatusResponse,
+	HostFsRootsResponse,
+	MessageIdResponse,
+	SendMessageResult,
+	SessionFsFilePreviewResponse,
 	SessionFsFilePreviewType,
 	SessionFsResourceEntry,
 	SessionModelOption,
 	SessionModeOption,
 	SessionSummary,
+	SessionsResponse,
 	StopReason,
 } from "@mobvibe/shared";
-
 // Re-export isErrorDetail for local use
 export { isErrorDetail } from "@mobvibe/shared";
-// Re-export types from acp-types (formerly core-specific)
-export type {
-	AcpBackendsResponse,
-	CancelSessionResponse,
-	CreateSessionResponse,
-	FsRootsResponse,
-	MessageIdResponse,
-	PermissionDecisionResponse,
-	SendMessageResponse,
-	SessionFsFilePreviewResponse,
-	SessionFsResourcesResponse,
-	SessionFsRoot,
-	SessionFsRootsResponse,
-	SessionsResponse,
-} from "./acp-types";
+
+// Re-export webui-specific types from acp-types
+export type { PermissionDecisionResponse } from "./acp-types";
 
 // Import types for API functions
 import type {
+	AcpBackendsResponse,
+	CancelSessionResponse,
 	ContentBlock,
+	CreateSessionResponse,
 	DiscoverSessionsResult,
 	ErrorDetail,
 	FsEntriesResponse,
+	FsResourcesResponse,
+	FsRootsResponse,
+	HostFsRootsResponse,
+	MessageIdResponse,
 	PermissionDecisionPayload,
+	SendMessageResult,
+	SessionFsFilePreviewResponse,
 	SessionSummary,
+	SessionsResponse,
 } from "@mobvibe/shared";
 import { isErrorDetail } from "@mobvibe/shared";
-import type {
-	AcpBackendsResponse,
-	CancelSessionResponse,
-	CreateSessionResponse,
-	FsRootsResponse,
-	MessageIdResponse,
-	PermissionDecisionResponse,
-	SendMessageResponse,
-	SessionFsFilePreviewResponse,
-	SessionFsResourcesResponse,
-	SessionFsRootsResponse,
-	SessionsResponse,
-} from "./acp-types";
+import type { PermissionDecisionResponse } from "./acp-types";
 import { isInTauri } from "./auth";
 import { getAuthToken } from "./auth-token";
 import { e2ee } from "./e2ee";
@@ -252,8 +248,8 @@ const buildSessionFsResourcesPath = (sessionId: string) =>
 
 export const fetchFsRoots = async (payload?: {
 	machineId?: string;
-}): Promise<FsRootsResponse> =>
-	requestJson<FsRootsResponse>(buildFsRootsPath(payload?.machineId));
+}): Promise<HostFsRootsResponse> =>
+	requestJson<HostFsRootsResponse>(buildFsRootsPath(payload?.machineId));
 
 export const discoverSessions = async (payload: {
 	machineId?: string;
@@ -273,10 +269,8 @@ export const fetchFsEntries = async (payload: {
 
 export const fetchSessionFsRoots = async (payload: {
 	sessionId: string;
-}): Promise<SessionFsRootsResponse> =>
-	requestJson<SessionFsRootsResponse>(
-		buildSessionFsRootsPath(payload.sessionId),
-	);
+}): Promise<FsRootsResponse> =>
+	requestJson<FsRootsResponse>(buildSessionFsRootsPath(payload.sessionId));
 
 export const fetchSessionFsEntries = async (payload: {
 	sessionId: string;
@@ -296,8 +290,8 @@ export const fetchSessionFsFile = async (payload: {
 
 export const fetchSessionFsResources = async (payload: {
 	sessionId: string;
-}): Promise<SessionFsResourcesResponse> =>
-	requestJson<SessionFsResourcesResponse>(
+}): Promise<FsResourcesResponse> =>
+	requestJson<FsResourcesResponse>(
 		buildSessionFsResourcesPath(payload.sessionId),
 	);
 
@@ -374,12 +368,12 @@ export const setSessionModel = async (payload: {
 export const sendMessage = async (payload: {
 	sessionId: string;
 	prompt: ContentBlock[];
-}): Promise<SendMessageResponse> => {
+}): Promise<SendMessageResult> => {
 	const encryptedPrompt = e2ee.encryptPayloadForSession(
 		payload.sessionId,
 		payload.prompt,
 	);
-	return requestJsonWithTimeout<SendMessageResponse>(
+	return requestJsonWithTimeout<SendMessageResult>(
 		"/acp/message",
 		SEND_MESSAGE_TIMEOUT_MS,
 		{

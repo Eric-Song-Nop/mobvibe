@@ -1,12 +1,6 @@
 import type {
 	AvailableCommand,
-	FsRoot,
-	PermissionOutcome,
-	SessionFsFilePreviewType,
-	SessionFsResourceEntry,
 	SessionNotification,
-	SessionSummary,
-	StopReason,
 	ToolCallUpdate,
 } from "@mobvibe/shared";
 
@@ -25,59 +19,12 @@ export type SessionInfoPayload = {
 	updatedAt?: string;
 };
 
-// API Response types
-export type AcpBackendsResponse = {
-	backends: { backendId: string; backendLabel: string }[];
-};
-
-export type FsRootsResponse = {
-	homePath: string;
-	roots: FsRoot[];
-};
-
-export type SessionFsRoot = {
-	name: string;
-	path: string;
-};
-
-export type SessionFsRootsResponse = {
-	root: SessionFsRoot;
-};
-
-export type SessionFsFilePreviewResponse = {
-	path: string;
-	previewType: SessionFsFilePreviewType;
-	content: string;
-	mimeType?: string;
-};
-
-export type SessionFsResourcesResponse = {
-	rootPath: string;
-	entries: SessionFsResourceEntry[];
-};
-
-export type SessionsResponse = {
-	sessions: SessionSummary[];
-};
-
-export type CreateSessionResponse = SessionSummary;
-
-export type SendMessageResponse = {
-	stopReason: StopReason;
-};
-
-export type CancelSessionResponse = {
-	ok: boolean;
-};
-
+// Note: PermissionDecisionResponse kept here because gateway actually returns
+// the decision payload back, which differs from the shared CancelSessionResponse.
 export type PermissionDecisionResponse = {
 	sessionId: string;
 	requestId: string;
-	outcome: PermissionOutcome;
-};
-
-export type MessageIdResponse = {
-	messageId: string;
+	outcome: import("@mobvibe/shared").PermissionOutcome;
 };
 
 // Extraction utility functions (these work with SDK types)

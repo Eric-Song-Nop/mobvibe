@@ -7,7 +7,11 @@ import {
 } from "@/components/app/ColumnFileBrowser";
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
-import { type FsRootsResponse, fetchFsEntries, fetchFsRoots } from "@/lib/api";
+import {
+	fetchFsEntries,
+	fetchFsRoots,
+	type HostFsRootsResponse,
+} from "@/lib/api";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { cn } from "@/lib/utils";
 
@@ -37,7 +41,7 @@ export function WorkingDirectoryPicker({
 	const { t } = useTranslation();
 	const [inputValue, setInputValue] = useState("");
 
-	const rootsQuery = useQuery<FsRootsResponse>({
+	const rootsQuery = useQuery<HostFsRootsResponse>({
 		queryKey: ["fs-roots", machineId],
 		queryFn: () => {
 			if (!machineId) {

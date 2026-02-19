@@ -44,6 +44,8 @@ export type {
 	ToolCallStatus,
 	ToolCallUpdate,
 	ToolKind,
+	Usage,
+	UsageUpdate,
 	WebuiToGatewayEvents,
 } from "@mobvibe/shared";
 

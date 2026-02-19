@@ -94,7 +94,26 @@ export interface ChatStoreActions {
 	setSending: (sessionId: string, sending: boolean) => void;
 	setCanceling: (sessionId: string, canceling: boolean) => void;
 	setStreamError: (sessionId: string, error?: StreamError) => void;
-	updateSessionMeta: (sessionId: string, meta: Partial<SessionSummary>) => void;
+	updateSessionMeta: (
+		sessionId: string,
+		meta: Partial<
+			Pick<
+				ChatSession,
+				| "title"
+				| "updatedAt"
+				| "cwd"
+				| "agentName"
+				| "modelId"
+				| "modelName"
+				| "modeId"
+				| "modeName"
+				| "availableModes"
+				| "availableModels"
+				| "availableCommands"
+				| "usage"
+			>
+		>,
+	) => void;
 	addUserMessage: (
 		sessionId: string,
 		content: string,
