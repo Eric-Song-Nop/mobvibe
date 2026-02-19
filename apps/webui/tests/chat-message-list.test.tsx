@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import type { ChatMessage, ChatSession } from "@mobvibe/core";
+import type { ChatMessage, ChatSession } from "../src/lib/chat-store";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatMessageList } from "../src/components/app/ChatMessageList";

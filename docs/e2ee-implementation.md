@@ -146,7 +146,7 @@ Gateway 中间件验证流程 (`cli-handlers.ts`):
 | `envelope.ts` | `encryptPayload`, `decryptPayload`, `isEncryptedPayload` |
 | `auth.ts` | `createSignedToken`, `verifySignedToken` |
 
-所有函数通过 `packages/shared/src/index.ts` 和 `@mobvibe/core`（通过 `api/types.ts` 的 `export * from "@mobvibe/shared"`）重新导出。
+所有函数通过 `packages/shared/src/index.ts` 重新导出。
 
 ### Gateway
 
