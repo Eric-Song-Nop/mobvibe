@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { AgentSessionCapabilities } from "@/lib/acp";
 import {
 	type AcpBackendSummary,
 	type AcpBackendsResponse,
-	type DiscoverSessionsResult,
 	discoverSessions,
 	fetchAcpBackends,
 	fetchSessions,
@@ -25,7 +25,7 @@ export type DiscoverSessionsVariables = {
 
 export type DiscoverSessionsMutationResult = {
 	machineId: string;
-	capabilities: DiscoverSessionsResult["capabilities"];
+	backendCapabilities: Record<string, AgentSessionCapabilities>;
 };
 
 const queryKeys = {
@@ -56,7 +56,7 @@ export function useDiscoverSessionsMutation() {
 		mutationFn: async (
 			variables: DiscoverSessionsVariables,
 		): Promise<DiscoverSessionsMutationResult> => {
-			let capabilities: DiscoverSessionsResult["capabilities"] | undefined;
+			const backendCapabilities: Record<string, AgentSessionCapabilities> = {};
 			let lastError: unknown;
 			const hasExplicitBackendSelection =
 				normalizeBackendIds([
@@ -97,7 +97,7 @@ export function useDiscoverSessionsMutation() {
 			const results = await Promise.allSettled(
 				backendIds.map(async (backendId) => {
 					let cursor: string | undefined;
-					let caps: DiscoverSessionsResult["capabilities"] | undefined;
+					let caps: AgentSessionCapabilities | undefined;
 					do {
 						const result = await discoverSessions({
 							machineId: variables.machineId,
@@ -105,15 +105,11 @@ export function useDiscoverSessionsMutation() {
 							cursor,
 							backendId,
 						});
-						caps = caps
-							? {
-									list: caps.list || result.capabilities.list,
-									load: caps.load || result.capabilities.load,
-								}
-							: { ...result.capabilities };
+						// Use latest capabilities per page (they shouldn't change between pages)
+						caps = { ...result.capabilities };
 						cursor = result.nextCursor;
 					} while (cursor);
-					return caps;
+					return { backendId, caps: caps! };
 				}),
 			);
 
@@ -127,26 +123,21 @@ export function useDiscoverSessionsMutation() {
 			}
 
 			for (const r of results) {
-				if (r.status === "fulfilled" && r.value) {
-					capabilities = capabilities
-						? {
-								list: capabilities.list || r.value.list,
-								load: capabilities.load || r.value.load,
-							}
-						: { ...r.value };
+				if (r.status === "fulfilled" && r.value.caps) {
+					backendCapabilities[r.value.backendId] = r.value.caps;
 				} else if (r.status === "rejected") {
 					lastError = r.reason;
 				}
 			}
 
-			if (!capabilities) {
+			if (Object.keys(backendCapabilities).length === 0) {
 				if (lastError) {
 					throw lastError;
 				}
 				throw new Error("Missing session capabilities from discovery response");
 			}
 
-			return { machineId: variables.machineId, capabilities };
+			return { machineId: variables.machineId, backendCapabilities };
 		},
 		onSuccess: () => {
 			void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });

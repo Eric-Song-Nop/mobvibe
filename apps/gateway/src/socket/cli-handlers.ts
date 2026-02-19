@@ -200,6 +200,13 @@ export function setupCliHandlers(
 
 			const { sessions, capabilities } = payload;
 
+			// Update per-backend capabilities from discovery result
+			if (capabilities && payload.backendId) {
+				cliRegistry.updateBackendCapabilities(socket.id, {
+					[payload.backendId]: capabilities,
+				});
+			}
+
 			// Transform AcpSessionInfo to SessionSummary with historical markers
 			const historicalSessions: SessionSummary[] = sessions.map((s) => ({
 				sessionId: s.sessionId,
@@ -218,11 +225,18 @@ export function setupCliHandlers(
 				historicalSessions,
 			);
 
-			// Emit sessions:changed to webui only for actually new sessions
-			if (cliRecord.userId && added.length > 0) {
+			// Emit sessions:changed to webui (with capabilities even if no new sessions)
+			if (cliRecord.userId && (added.length > 0 || capabilities)) {
 				emitToWebui(
 					"sessions:changed",
-					{ added, updated: [], removed: [] },
+					{
+						added,
+						updated: [],
+						removed: [],
+						backendCapabilities: payload.backendId
+							? { [payload.backendId]: capabilities }
+							: undefined,
+					},
 					cliRecord.userId,
 				);
 			}

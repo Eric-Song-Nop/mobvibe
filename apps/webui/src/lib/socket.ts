@@ -1,5 +1,6 @@
 import { io, type Socket } from "socket.io-client";
 import type {
+	CliStatusPayload,
 	GatewayToWebuiEvents,
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
@@ -124,6 +125,13 @@ class GatewaySocket {
 		this.socket?.on("permission:result", handler);
 		return () => {
 			this.socket?.off("permission:result", handler);
+		};
+	}
+
+	onCliStatus(handler: (payload: CliStatusPayload) => void) {
+		this.socket?.on("cli:status", handler);
+		return () => {
+			this.socket?.off("cli:status", handler);
 		};
 	}
 

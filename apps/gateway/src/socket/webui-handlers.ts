@@ -138,6 +138,7 @@ export function setupWebuiHandlers(
 				hostname: cli.hostname,
 				sessionCount: cli.sessions.length,
 				userId: cli.userId,
+				backendCapabilities: cli.backendCapabilities,
 			});
 		}
 

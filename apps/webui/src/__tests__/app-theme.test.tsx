@@ -110,10 +110,6 @@ vi.mock("@/hooks/useMachinesQuery", () => ({
 	}),
 }));
 
-vi.mock("@/hooks/useMachinesStream", () => ({
-	useMachinesStream: () => undefined,
-}));
-
 vi.mock("@/hooks/useSessionList", () => ({
 	useSessionList: () => ({
 		workspaceList: [],

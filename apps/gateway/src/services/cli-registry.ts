@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import type {
 	AcpBackendSummary,
+	AgentSessionCapabilities,
 	CliRegistrationInfo,
 	CliStatusPayload,
 	SessionSummary,
@@ -20,6 +21,8 @@ export type CliRecord = {
 	userId?: string;
 	/** Device key ID used to authenticate this CLI */
 	deviceId?: string;
+	/** Per-backend capabilities */
+	backendCapabilities?: Record<string, AgentSessionCapabilities>;
 };
 
 export class CliRegistry extends EventEmitter {
@@ -86,6 +89,7 @@ export class CliRegistry extends EventEmitter {
 			hostname: info.hostname,
 			sessionCount: 0,
 			userId: authInfo?.userId,
+			backendCapabilities: record.backendCapabilities,
 		});
 
 		return record;
@@ -396,6 +400,21 @@ export class CliRegistry extends EventEmitter {
 
 		return {
 			backends: Array.from(backendsMap.values()),
+		};
+	}
+
+	/**
+	 * Merge per-backend capabilities into a CLI record.
+	 */
+	updateBackendCapabilities(
+		socketId: string,
+		capabilities: Record<string, AgentSessionCapabilities>,
+	): void {
+		const record = this.cliBySocketId.get(socketId);
+		if (!record) return;
+		record.backendCapabilities = {
+			...record.backendCapabilities,
+			...capabilities,
 		};
 	}
 

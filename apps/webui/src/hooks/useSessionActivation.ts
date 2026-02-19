@@ -2,11 +2,10 @@ import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { ChatMessage, ChatSession } from "@/lib/chat-store";
 import { createFallbackError } from "@/lib/error-utils";
-import { useMachinesStore } from "@/lib/machines-store";
+import { getBackendCapability, useMachinesStore } from "@/lib/machines-store";
 import { gatewaySocket } from "@/lib/socket";
 import type { ChatStoreActions } from "./useSessionMutations";
 import { useSessionMutations } from "./useSessionMutations";
-import { useDiscoverSessionsMutation } from "./useSessionQueries";
 
 export type ActivationPhase = "idle" | "discovering" | "loading" | "reloading";
 
@@ -20,11 +19,7 @@ export function useSessionActivation(store: ChatStoreActions) {
 	const { t } = useTranslation();
 	const { loadSessionMutation, reloadSessionMutation } =
 		useSessionMutations(store);
-	const discoverSessionsMutation = useDiscoverSessionsMutation();
 	const machines = useMachinesStore((state) => state.machines);
-	const setMachineCapabilities = useMachinesStore(
-		(state) => state.setMachineCapabilities,
-	);
 
 	const activateSession = useCallback(
 		async (session: ChatSession, options?: { force?: boolean }) => {
@@ -52,31 +47,16 @@ export function useSessionActivation(store: ChatStoreActions) {
 				return;
 			}
 
-			let capabilities = machine.capabilities;
-			if (!capabilities) {
-				try {
-					const result = await discoverSessionsMutation.mutateAsync({
-						machineId: session.machineId,
-						cwd: session.cwd,
-					});
-					capabilities = result.capabilities;
-					setMachineCapabilities(session.machineId, capabilities);
-				} catch {
-					store.setError(
-						session.sessionId,
-						createFallbackError(t("errors.capabilityFetchFailed"), "session"),
-					);
-					return;
-				}
-			}
-
-			if (!capabilities.load) {
+			// Per-backend capability check: false → known unsupported, undefined → unknown (proceed optimistically)
+			const loadCap = getBackendCapability(machine, session.backendId, "load");
+			if (loadCap === false) {
 				store.setError(
 					session.sessionId,
 					createFallbackError(t("errors.sessionLoadNotSupported"), "session"),
 				);
 				return;
 			}
+			// loadCap === true or undefined → proceed, server validates
 
 			if (!session.backendId) {
 				store.setError(
@@ -112,15 +92,7 @@ export function useSessionActivation(store: ChatStoreActions) {
 				store.setSessionLoading(session.sessionId, false);
 			}
 		},
-		[
-			loadSessionMutation,
-			reloadSessionMutation,
-			discoverSessionsMutation,
-			machines,
-			setMachineCapabilities,
-			store,
-			t,
-		],
+		[loadSessionMutation, reloadSessionMutation, machines, store, t],
 	);
 
 	const activationState = useMemo<ActivationState>(() => {
@@ -136,23 +108,12 @@ export function useSessionActivation(store: ChatStoreActions) {
 				sessionId: reloadSessionMutation.variables.sessionId,
 			};
 		}
-		if (
-			discoverSessionsMutation.isPending &&
-			discoverSessionsMutation.variables
-		) {
-			return {
-				phase: "discovering",
-				machineId: discoverSessionsMutation.variables.machineId,
-			};
-		}
 		return { phase: "idle" };
 	}, [
 		loadSessionMutation.isPending,
 		loadSessionMutation.variables,
 		reloadSessionMutation.isPending,
 		reloadSessionMutation.variables,
-		discoverSessionsMutation.isPending,
-		discoverSessionsMutation.variables,
 	]);
 
 	return {

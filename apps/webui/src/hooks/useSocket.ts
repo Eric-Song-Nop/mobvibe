@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useSessionBackfill } from "@/hooks/use-session-backfill";
 import type { ChatStoreActions } from "@/hooks/useSessionMutations";
 import {
+	type CliStatusPayload,
 	extractAvailableCommandsUpdate,
 	extractSessionInfoUpdate,
 	extractSessionModeUpdate,
@@ -20,6 +21,7 @@ import {
 import { type ChatSession, useChatStore } from "@/lib/chat-store";
 import { e2ee } from "@/lib/e2ee";
 import { isErrorDetail } from "@/lib/error-utils";
+import { useMachinesStore } from "@/lib/machines-store";
 import {
 	notifyPermissionRequest,
 	notifySessionError,
@@ -438,6 +440,17 @@ export function useSocket({
 			}
 		}
 		handleSessionsChanged(payload);
+
+		// Extract per-backend capabilities if present
+		if (payload.backendCapabilities) {
+			const machineId =
+				payload.added[0]?.machineId ?? payload.updated[0]?.machineId;
+			if (machineId) {
+				useMachinesStore
+					.getState()
+					.updateBackendCapabilities(machineId, payload.backendCapabilities);
+			}
+		}
 	};
 
 	handleSessionEventRef.current = (incomingEvent: SessionEvent) => {
@@ -513,6 +526,9 @@ export function useSocket({
 		gatewaySocket.connect();
 
 		// Stable wrapper functions
+		const onCliStatus = (p: CliStatusPayload) => {
+			useMachinesStore.getState().updateMachine(p);
+		};
 		const onSessionAttached = (p: SessionAttachedPayload) =>
 			handleSessionAttachedRef.current?.(p);
 		const onSessionDetached = (p: SessionDetachedPayload) =>
@@ -527,6 +543,7 @@ export function useSocket({
 			handleSessionEventRef.current?.(e);
 
 		// Register listeners
+		const unsubCliStatus = gatewaySocket.onCliStatus(onCliStatus);
 		const unsubSessionAttached =
 			gatewaySocket.onSessionAttached(onSessionAttached);
 		const unsubSessionDetached =
@@ -552,6 +569,7 @@ export function useSocket({
 		});
 
 		return () => {
+			unsubCliStatus();
 			unsubSessionAttached();
 			unsubSessionDetached();
 			unsubPermReq();

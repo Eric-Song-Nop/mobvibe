@@ -1,20 +1,11 @@
-import type { CliStatusPayload } from "@mobvibe/shared";
 import { fromNodeHeaders } from "better-auth/node";
 import { eq } from "drizzle-orm";
-import type { Request as ExpressRequest, Response, Router } from "express";
+import type { Request as ExpressRequest, Router } from "express";
 import { db } from "../db/index.js";
 import { machines } from "../db/schema.js";
 import { auth } from "../lib/auth.js";
 import { logger } from "../lib/logger.js";
 import type { CliRegistry } from "../services/cli-registry.js";
-
-const sendSseEvent = (response: Response, payload: unknown) => {
-	response.write(`data: ${JSON.stringify(payload)}\n\n`);
-};
-
-const keepAlive = (response: Response) => {
-	response.write(": ping\n\n");
-};
 
 const extractSessionUserId = async (
 	request: ExpressRequest,
@@ -94,101 +85,6 @@ export function setupMachineRoutes(
 			res.status(500).json({
 				error: "Failed to list machines",
 				code: "LIST_ERROR",
-			});
-		}
-	});
-
-	/**
-	 * GET /api/machines/stream
-	 * Stream machine status updates via SSE.
-	 */
-	router.get("/api/machines/stream", async (req, res) => {
-		const requestId =
-			(req as ExpressRequest & { requestId?: string }).requestId ??
-			req.headers["x-request-id"];
-		res.setHeader("x-gateway-instance", "mobvibe");
-		logger.info(
-			{
-				requestId,
-				origin: req.headers.origin,
-				ip: req.ip,
-				userAgent: req.headers["user-agent"],
-			},
-			"machines_stream_open",
-		);
-		try {
-			const { userId, errorResponse } = await extractSessionUserId(req);
-			if (errorResponse) {
-				logger.warn(
-					{
-						requestId,
-						status: errorResponse.status,
-					},
-					"machines_stream_auth_failed",
-				);
-				res.status(errorResponse.status).json(errorResponse.body);
-				return;
-			}
-			if (!userId) {
-				logger.warn({ requestId }, "machines_stream_auth_missing_user");
-				res.status(401).json({
-					error: "Authentication required",
-					code: "AUTH_REQUIRED",
-				});
-				return;
-			}
-			const sessionUserId = userId;
-
-			res.writeHead(200, {
-				"Content-Type": "text/event-stream",
-				"Cache-Control": "no-cache",
-				Connection: "keep-alive",
-			});
-			res.flushHeaders?.();
-
-			const heartbeat = setInterval(() => {
-				keepAlive(res);
-			}, 25000);
-
-			const unsubscribe = cliRegistry.onCliStatus(
-				(payload: CliStatusPayload) => {
-					if (
-						payload.userId &&
-						sessionUserId &&
-						payload.userId !== sessionUserId
-					) {
-						return;
-					}
-					sendSseEvent(res, {
-						machineId: payload.machineId,
-						isOnline: payload.connected,
-						hostname: payload.hostname ?? null,
-						sessionCount: payload.sessionCount ?? null,
-					});
-				},
-			);
-
-			const cleanup = () => {
-				clearInterval(heartbeat);
-				unsubscribe();
-				res.end();
-			};
-
-			req.on("close", cleanup);
-		} catch (error) {
-			logger.error(
-				{
-					err: error,
-					requestId,
-					origin: req.headers.origin,
-					ip: req.ip,
-					userAgent: req.headers["user-agent"],
-				},
-				"machines_stream_error",
-			);
-			res.status(500).json({
-				error: "Failed to stream machine updates",
-				code: "STREAM_ERROR",
 			});
 		}
 	});

@@ -62,6 +62,8 @@ export type SessionsChangedPayload = {
 	updated: SessionSummary[];
 	/** Removed session IDs */
 	removed: string[];
+	/** Per-backend capabilities from discovery */
+	backendCapabilities?: Record<string, AgentSessionCapabilities>;
 };
 
 // StopReason is now re-exported from SDK via acp.ts

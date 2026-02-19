@@ -48,6 +48,7 @@ const mockGatewaySocket = vi.hoisted(() => ({
 	onSessionsChanged: vi.fn(),
 	onSessionAttached: vi.fn(),
 	onSessionDetached: vi.fn(),
+	onCliStatus: vi.fn(),
 	onDisconnect: vi.fn(),
 	onConnect: vi.fn(),
 }));
@@ -60,6 +61,19 @@ vi.mock("@/lib/notifications", () => ({
 	notifyPermissionRequest: vi.fn(),
 	notifySessionError: vi.fn(),
 }));
+
+vi.mock("@/lib/machines-store", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/lib/machines-store")>();
+	return {
+		...actual,
+		useMachinesStore: {
+			getState: () => ({
+				updateMachine: vi.fn(),
+				updateBackendCapabilities: vi.fn(),
+			}),
+		},
+	};
+});
 
 vi.mock("react-i18next", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("react-i18next")>();
@@ -220,6 +234,12 @@ describe("useSocket (webui)", () => {
 				};
 			},
 		);
+		mockGatewaySocket.onCliStatus.mockImplementation((handler: () => void) => {
+			handlers.cliStatus = handler;
+			return () => {
+				handlers.cliStatus = undefined;
+			};
+		});
 		mockGatewaySocket.onConnect.mockImplementation((handler: () => void) => {
 			handlers.connect = handler;
 			return () => {

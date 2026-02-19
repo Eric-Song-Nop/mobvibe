@@ -11,6 +11,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 import {
 	type AcpSessionInfo,
+	type AgentSessionCapabilities,
 	AppError,
 	createErrorDetail,
 	type DiscoverSessionsRpcResult,
@@ -150,6 +151,9 @@ export class SessionManager {
 
 	/** Per-backend idle connections (initialized but no session bound) */
 	private idleConnections = new Map<string, AcpConnection>();
+
+	/** Per-backend capabilities cache */
+	private backendCapabilities = new Map<string, AgentSessionCapabilities>();
 
 	constructor(
 		private readonly config: CliConfig,
@@ -1024,6 +1028,13 @@ export class SessionManager {
 	}
 
 	/**
+	 * Get cached per-backend capabilities.
+	 */
+	getBackendCapabilities(): Record<string, AgentSessionCapabilities> {
+		return Object.fromEntries(this.backendCapabilities);
+	}
+
+	/**
 	 * Get previously discovered sessions from WAL storage.
 	 * Filters out sessions that are already loaded.
 	 * @param backendId Optional backend ID to filter by
@@ -1133,6 +1144,9 @@ export class SessionManager {
 					this.walStore.saveDiscoveredSessions(discoveredRecords);
 				}
 			}
+
+			// Cache per-backend capabilities
+			this.backendCapabilities.set(backend.id, capabilities);
 
 			logger.info(
 				{

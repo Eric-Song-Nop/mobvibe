@@ -37,7 +37,7 @@ export function MachineWorkspaces({
 }: MachineWorkspacesProps) {
 	const { t } = useTranslation();
 	const { sessions, activeSessionId, setActiveSessionId } = useChatStore();
-	const { machines, setSelectedMachineId, setMachineCapabilities } =
+	const { machines, setSelectedMachineId, updateBackendCapabilities } =
 		useMachinesStore();
 	const {
 		selectedWorkspaceByMachine,
@@ -129,7 +129,7 @@ export function MachineWorkspaces({
 			{ machineId, cwd },
 			{
 				onSuccess: (result) => {
-					setMachineCapabilities(machineId, result.capabilities);
+					updateBackendCapabilities(machineId, result.backendCapabilities);
 				},
 			},
 		);

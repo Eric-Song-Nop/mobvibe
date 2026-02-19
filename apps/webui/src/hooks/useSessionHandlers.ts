@@ -7,7 +7,7 @@ import {
 	buildSessionNotReadyError,
 	createFallbackError,
 } from "@/lib/error-utils";
-import type { Machine } from "@/lib/machines-store";
+import { getBackendCapability, type Machine } from "@/lib/machines-store";
 import { useUiStore } from "@/lib/ui-store";
 import { buildSessionTitle } from "@/lib/ui-utils";
 
@@ -293,10 +293,12 @@ export function useSessionHandlers({
 		if (!activeSessionId || !activeSession) {
 			return;
 		}
-		const capabilities = activeSession.machineId
-			? machines[activeSession.machineId]?.capabilities
-			: undefined;
-		if (!activeSession.cwd || !activeSession.machineId || !capabilities?.load) {
+		const loadCap = getBackendCapability(
+			activeSession.machineId ? machines[activeSession.machineId] : undefined,
+			activeSession.backendId,
+			"load",
+		);
+		if (!activeSession.cwd || !activeSession.machineId || loadCap === false) {
 			return;
 		}
 		if (activeSession.isLoading || isActivating || isForceReloading) {

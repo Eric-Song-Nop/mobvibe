@@ -34,7 +34,7 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 		machines,
 		selectedMachineId,
 		setSelectedMachineId,
-		setMachineCapabilities,
+		updateBackendCapabilities,
 	} = useMachinesStore();
 	const {
 		selectedWorkspaceByMachine,
@@ -81,7 +81,7 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 					machineId,
 					cwd,
 				});
-				setMachineCapabilities(machineId, result.capabilities);
+				updateBackendCapabilities(machineId, result.backendCapabilities);
 			}),
 		);
 		await queryClient.invalidateQueries({ queryKey: queryKeys.sessions });

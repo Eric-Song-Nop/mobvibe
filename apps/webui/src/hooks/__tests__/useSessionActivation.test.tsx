@@ -7,14 +7,24 @@ import type { ChatStoreActions } from "../useSessionMutations";
 let machinesState: {
 	machines: Record<
 		string,
-		{ connected?: boolean; capabilities?: { list: boolean; load: boolean } }
+		{
+			connected?: boolean;
+			backendCapabilities?: Record<string, { list: boolean; load: boolean }>;
+		}
 	>;
+	updateBackendCapabilities: () => void;
 };
 
-vi.mock("@/lib/machines-store", () => ({
-	useMachinesStore: (selector: (state: typeof machinesState) => unknown) =>
-		selector(machinesState),
-}));
+vi.mock("@/lib/machines-store", async () => {
+	const actual = await vi.importActual<typeof import("@/lib/machines-store")>(
+		"@/lib/machines-store",
+	);
+	return {
+		...actual,
+		useMachinesStore: (selector: (state: typeof machinesState) => unknown) =>
+			selector(machinesState),
+	};
+});
 
 const mockGatewaySocket = vi.hoisted(() => ({
 	subscribeToSession: vi.fn(),
@@ -37,16 +47,6 @@ vi.mock("../useSessionMutations", () => ({
 		loadSessionMutation,
 		reloadSessionMutation,
 	}),
-}));
-
-const discoverSessionsMutation = {
-	mutateAsync: vi.fn(),
-	isPending: false,
-	variables: null,
-};
-
-vi.mock("../useSessionQueries", () => ({
-	useDiscoverSessionsMutation: () => discoverSessionsMutation,
 }));
 
 const buildSession = (overrides: Partial<ChatSession> = {}): ChatSession => ({
@@ -102,12 +102,12 @@ const createStore = (): ChatStoreActions =>
 
 describe("useSessionActivation", () => {
 	beforeEach(() => {
-		machinesState = { machines: {} };
+		machinesState = {
+			machines: {},
+			updateBackendCapabilities: vi.fn(),
+		};
 		loadSessionMutation.mutateAsync.mockReset();
 		reloadSessionMutation.mutateAsync.mockReset();
-		discoverSessionsMutation.mutateAsync.mockReset();
-		discoverSessionsMutation.isPending = false;
-		discoverSessionsMutation.variables = null;
 		mockGatewaySocket.subscribeToSession.mockReset();
 		mockGatewaySocket.unsubscribeFromSession.mockReset();
 	});
@@ -140,9 +140,12 @@ describe("useSessionActivation", () => {
 			machines: {
 				"machine-1": {
 					connected: true,
-					capabilities: { list: true, load: true },
+					backendCapabilities: {
+						"backend-1": { list: true, load: true },
+					},
 				},
 			},
+			updateBackendCapabilities: vi.fn(),
 		};
 
 		const { result } = renderHook(() => useSessionActivation(store));
@@ -155,20 +158,24 @@ describe("useSessionActivation", () => {
 		expect(store.setActiveSessionId).not.toHaveBeenCalled();
 	});
 
-	it("sets error when load capability is missing", async () => {
+	it("sets error when load capability is known false", async () => {
 		const store = createStore();
 		const session = buildSession({
 			cwd: "/home/user/project",
 			machineId: "machine-1",
+			backendId: "backend-1",
 		});
 
 		machinesState = {
 			machines: {
 				"machine-1": {
 					connected: true,
-					capabilities: { list: true, load: false },
+					backendCapabilities: {
+						"backend-1": { list: true, load: false },
+					},
 				},
 			},
+			updateBackendCapabilities: vi.fn(),
 		};
 
 		const { result } = renderHook(() => useSessionActivation(store));
@@ -186,6 +193,38 @@ describe("useSessionActivation", () => {
 		expect(loadSessionMutation.mutateAsync).not.toHaveBeenCalled();
 	});
 
+	it("proceeds optimistically when capabilities unknown", async () => {
+		const store = createStore();
+		const session = buildSession({
+			cwd: "/home/user/project",
+			machineId: "machine-1",
+			backendId: "backend-1",
+		});
+
+		machinesState = {
+			machines: {
+				"machine-1": {
+					connected: true,
+					// No backendCapabilities — unknown state
+				},
+			},
+			updateBackendCapabilities: vi.fn(),
+		};
+		loadSessionMutation.mutateAsync.mockResolvedValue({
+			sessionId: "session-1",
+		});
+
+		const { result } = renderHook(() => useSessionActivation(store));
+
+		await act(async () => {
+			await result.current.activateSession(session);
+		});
+
+		// Should proceed without error — optimistic loading
+		expect(loadSessionMutation.mutateAsync).toHaveBeenCalled();
+		expect(store.setActiveSessionId).toHaveBeenCalledWith("session-1");
+	});
+
 	it("loads session and sets active session on success", async () => {
 		const store = createStore();
 		const session = buildSession({
@@ -198,9 +237,12 @@ describe("useSessionActivation", () => {
 			machines: {
 				"machine-1": {
 					connected: true,
-					capabilities: { list: true, load: true },
+					backendCapabilities: {
+						"backend-1": { list: true, load: true },
+					},
 				},
 			},
+			updateBackendCapabilities: vi.fn(),
 		};
 		loadSessionMutation.mutateAsync.mockResolvedValue({
 			sessionId: "session-1",
@@ -237,9 +279,12 @@ describe("useSessionActivation", () => {
 			machines: {
 				"machine-1": {
 					connected: true,
-					capabilities: { list: true, load: true },
+					backendCapabilities: {
+						"backend-1": { list: true, load: true },
+					},
 				},
 			},
+			updateBackendCapabilities: vi.fn(),
 		};
 		reloadSessionMutation.mutateAsync.mockResolvedValue({
 			sessionId: "session-1",
@@ -283,9 +328,12 @@ describe("useSessionActivation", () => {
 			machines: {
 				"machine-1": {
 					connected: true,
-					capabilities: { list: true, load: true },
+					backendCapabilities: {
+						"backend-1": { list: true, load: true },
+					},
 				},
 			},
+			updateBackendCapabilities: vi.fn(),
 		};
 		loadSessionMutation.mutateAsync.mockRejectedValue(new Error("fail"));
 

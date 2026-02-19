@@ -118,7 +118,7 @@ function MobileMachineColumn() {
 		machines,
 		selectedMachineId,
 		setSelectedMachineId,
-		setMachineCapabilities,
+		updateBackendCapabilities,
 	} = useMachinesStore();
 	const machinesQuery = useMachinesQuery();
 	const queryClient = useQueryClient();
@@ -154,7 +154,7 @@ function MobileMachineColumn() {
 					machineId,
 					cwd,
 				});
-				setMachineCapabilities(machineId, result.capabilities);
+				updateBackendCapabilities(machineId, result.backendCapabilities);
 			}),
 		);
 		await queryClient.invalidateQueries({ queryKey: ["sessions"] });

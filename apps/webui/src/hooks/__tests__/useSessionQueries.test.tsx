@@ -282,7 +282,9 @@ describe("useSessionQueries", () => {
 			}),
 		).resolves.toEqual({
 			machineId: "machine-1",
-			capabilities: { list: true, load: true },
+			backendCapabilities: {
+				"codex-acp": { list: true, load: true },
+			},
 		});
 		expect(api.discoverSessions).toHaveBeenCalledTimes(2);
 	});

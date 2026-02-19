@@ -109,6 +109,8 @@ export type CliStatusPayload = {
 	sessionCount?: number;
 	/** User ID (only present when auth is enabled) */
 	userId?: string;
+	/** Per-backend capabilities (sent when available) */
+	backendCapabilities?: Record<string, AgentSessionCapabilities>;
 };
 
 // Stream error event

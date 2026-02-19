@@ -8,13 +8,15 @@ export type UseMachineDiscoveryParams = {
 	discoverMachines: (
 		variables: { machineId: string; cwd: string },
 		options: {
-			onSuccess: (result: { capabilities: AgentSessionCapabilities }) => void;
+			onSuccess: (result: {
+				backendCapabilities: Record<string, AgentSessionCapabilities>;
+			}) => void;
 			onSettled: () => void;
 		},
 	) => void;
-	setMachineCapabilities: (
+	updateBackendCapabilities: (
 		machineId: string,
-		caps: AgentSessionCapabilities,
+		caps: Record<string, AgentSessionCapabilities>,
 	) => void;
 };
 
@@ -22,7 +24,7 @@ export function useMachineDiscovery({
 	machines,
 	selectedWorkspaceByMachine,
 	discoverMachines,
-	setMachineCapabilities,
+	updateBackendCapabilities,
 }: UseMachineDiscoveryParams): void {
 	const discoveryInFlightRef = useRef(new Set<string>());
 	const previousConnectionRef = useRef<Record<string, boolean>>({});
@@ -39,7 +41,7 @@ export function useMachineDiscovery({
 			if (!machine.connected) {
 				continue;
 			}
-			if (machine.lastCapabilitiesAt && wasConnected) {
+			if (wasConnected) {
 				continue;
 			}
 			if (discoveryInFlightRef.current.has(machine.machineId)) {
@@ -55,7 +57,10 @@ export function useMachineDiscovery({
 				{ machineId: machine.machineId, cwd: workspaceCwd },
 				{
 					onSuccess: (result) => {
-						setMachineCapabilities(machine.machineId, result.capabilities);
+						updateBackendCapabilities(
+							machine.machineId,
+							result.backendCapabilities,
+						);
 					},
 					onSettled: () => {
 						discoveryInFlightRef.current.delete(machine.machineId);
@@ -63,5 +68,5 @@ export function useMachineDiscovery({
 				},
 			);
 		}
-	}, [machines, selectedWorkspaceByMachine, setMachineCapabilities]);
+	}, [machines, selectedWorkspaceByMachine, updateBackendCapabilities]);
 }

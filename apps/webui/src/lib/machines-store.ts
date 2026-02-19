@@ -7,8 +7,8 @@ export type Machine = {
 	connected: boolean;
 	sessionCount?: number;
 	userId?: string;
-	capabilities?: AgentSessionCapabilities;
-	lastCapabilitiesAt?: string;
+	/** Per-backend capabilities */
+	backendCapabilities?: Record<string, AgentSessionCapabilities>;
 };
 
 type MachinesState = {
@@ -18,9 +18,9 @@ type MachinesState = {
 	updateMachine: (payload: CliStatusPayload) => void;
 	removeMachine: (machineId: string) => void;
 	syncMachines: (machines: Machine[]) => void;
-	setMachineCapabilities: (
+	updateBackendCapabilities: (
 		machineId: string,
-		capabilities: AgentSessionCapabilities,
+		backendCapabilities: Record<string, AgentSessionCapabilities>,
 	) => void;
 };
 
@@ -39,8 +39,9 @@ export const useMachinesStore = create<MachinesState>((set) => ({
 				connected: payload.connected,
 				sessionCount: payload.sessionCount,
 				userId: payload.userId,
-				capabilities: existing?.capabilities,
-				lastCapabilitiesAt: existing?.lastCapabilitiesAt,
+				backendCapabilities: payload.backendCapabilities
+					? { ...existing?.backendCapabilities, ...payload.backendCapabilities }
+					: existing?.backendCapabilities,
 			};
 
 			// Auto-select first connected machine if none selected
@@ -75,7 +76,7 @@ export const useMachinesStore = create<MachinesState>((set) => ({
 			return { machines: rest, selectedMachineId: nextSelected };
 		}),
 
-	setMachineCapabilities: (machineId, capabilities) =>
+	updateBackendCapabilities: (machineId, backendCapabilities) =>
 		set((state) => {
 			const existing = state.machines[machineId];
 			if (!existing) {
@@ -86,8 +87,10 @@ export const useMachinesStore = create<MachinesState>((set) => ({
 					...state.machines,
 					[machineId]: {
 						...existing,
-						capabilities,
-						lastCapabilitiesAt: new Date().toISOString(),
+						backendCapabilities: {
+							...existing.backendCapabilities,
+							...backendCapabilities,
+						},
 					},
 				},
 			};
@@ -100,8 +103,7 @@ export const useMachinesStore = create<MachinesState>((set) => ({
 				const existing = state.machines[machine.machineId];
 				nextMachines[machine.machineId] = {
 					...machine,
-					capabilities: existing?.capabilities,
-					lastCapabilitiesAt: existing?.lastCapabilitiesAt,
+					backendCapabilities: existing?.backendCapabilities,
 				};
 			}
 
@@ -115,3 +117,24 @@ export const useMachinesStore = create<MachinesState>((set) => ({
 			return { machines: nextMachines, selectedMachineId };
 		}),
 }));
+
+/** Check capability for a specific backend. Returns undefined if unknown. */
+export const getBackendCapability = (
+	machine: Machine | undefined,
+	backendId: string | undefined,
+	capability: keyof AgentSessionCapabilities,
+): boolean | undefined => {
+	if (!machine?.backendCapabilities || !backendId) return undefined;
+	return machine.backendCapabilities[backendId]?.[capability];
+};
+
+/** Check if any backend supports a capability */
+export const hasAnyBackendCapability = (
+	machine: Machine | undefined,
+	capability: keyof AgentSessionCapabilities,
+): boolean => {
+	if (!machine?.backendCapabilities) return false;
+	return Object.values(machine.backendCapabilities).some(
+		(caps) => caps[capability] === true,
+	);
+};

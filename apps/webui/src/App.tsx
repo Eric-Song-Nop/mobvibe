@@ -17,7 +17,6 @@ import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/toaster";
 import { useMachineDiscovery } from "@/hooks/useMachineDiscovery";
 import { useMachinesQuery } from "@/hooks/useMachinesQuery";
-import { useMachinesStream } from "@/hooks/useMachinesStream";
 import { useSessionActivation } from "@/hooks/useSessionActivation";
 import { useSessionHandlers } from "@/hooks/useSessionHandlers";
 import { useSessionList } from "@/hooks/useSessionList";
@@ -28,7 +27,7 @@ import { getAuthClient, isInTauri } from "@/lib/auth";
 import { useChatStore } from "@/lib/chat-store";
 import { e2ee } from "@/lib/e2ee";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
-import { useMachinesStore } from "@/lib/machines-store";
+import { getBackendCapability, useMachinesStore } from "@/lib/machines-store";
 import { ensureNotificationPermission } from "@/lib/notifications";
 import { useUiStore } from "@/lib/ui-store";
 
@@ -135,7 +134,6 @@ function MainApp() {
 	} = useSessionQueries();
 	const defaultBackendId = availableBackends[0]?.backendId;
 	useMachinesQuery();
-	useMachinesStream();
 
 	const mutations = useSessionMutations({
 		sessions,
@@ -179,10 +177,8 @@ function MainApp() {
 			selectedMachineId: s.selectedMachineId,
 		})),
 	);
-	const { setMachineCapabilities } = useMachinesStore(
-		useShallow((s) => ({
-			setMachineCapabilities: s.setMachineCapabilities,
-		})),
+	const updateBackendCapabilities = useMachinesStore(
+		(s) => s.updateBackendCapabilities,
 	);
 
 	// --- Extracted hooks ---
@@ -199,7 +195,7 @@ function MainApp() {
 		machines,
 		selectedWorkspaceByMachine,
 		discoverMachines: discoverSessionsMutation.mutate,
-		setMachineCapabilities,
+		updateBackendCapabilities,
 	});
 
 	const {
@@ -325,7 +321,11 @@ function MainApp() {
 		activeSessionId &&
 			activeSession?.machineId &&
 			activeSession?.cwd &&
-			machines[activeSession.machineId]?.capabilities?.load,
+			getBackendCapability(
+				machines[activeSession.machineId],
+				activeSession.backendId,
+				"load",
+			) !== false,
 	);
 	const forceReloadDisabled =
 		!forceReloadAvailable ||
