@@ -45,7 +45,7 @@ import {
 
   // Crypto (E2EE)
   initCrypto,
-  getSodium,
+  ensureCryptoReady,
   generateMasterSecret,
   deriveAuthKeyPair,
   deriveContentKeyPair,
@@ -104,15 +104,15 @@ Type-safe event definitions for Socket.io communication:
 
 ### Crypto Module (`crypto/`)
 
-End-to-end encryption primitives built on libsodium:
+End-to-end encryption primitives built on tweetnacl + @noble/hashes (pure JS):
 
 | File | Exports |
 |------|---------|
-| `init.ts` | `initCrypto()`, `getSodium()` — initialize libsodium |
+| `init.ts` | `initCrypto()`, `ensureCryptoReady()` — initialize crypto module |
 | `keys.ts` | `generateMasterSecret`, `deriveAuthKeyPair`, `deriveContentKeyPair`, `generateDEK`, `wrapDEK`, `unwrapDEK` |
 | `envelope.ts` | `encryptPayload`, `decryptPayload`, `isEncryptedPayload` |
 | `auth.ts` | `createSignedToken`, `verifySignedToken` |
-| `types.ts` | `EncryptedPayload`, `CryptoKeyPair`, `SignedAuthToken`, `SodiumLib` |
+| `types.ts` | `EncryptedPayload`, `CryptoKeyPair`, `SignedAuthToken` |
 
 **Key hierarchy:**
 - Master secret (32 bytes) → `deriveAuthKeyPair` (Ed25519, for CLI auth) + `deriveContentKeyPair` (Curve25519, for DEK wrapping)

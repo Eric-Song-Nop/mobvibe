@@ -132,7 +132,7 @@
 				},
 				{
 					"role": "assistant",
-					"content": "Mobvibe supports **end-to-end encryption (E2EE)** using `libsodium`. When enabled, messages are encrypted on the CLI daemon before transmission and decrypted only in your browser.\n\nThe gateway **never sees plaintext** — it only relays encrypted payloads. This means even if the gateway is compromised, your code and conversations remain private."
+					"content": "Mobvibe supports **end-to-end encryption (E2EE)** using proven cryptographic primitives (XSalsa20-Poly1305, X25519, Ed25519). When enabled, messages are encrypted on the CLI daemon before transmission and decrypted only in your browser.\n\nThe gateway **never sees plaintext** — it only relays encrypted payloads. This means even if the gateway is compromised, your code and conversations remain private."
 				},
 				{
 					"role": "user",
