@@ -4,6 +4,7 @@ import {
 	createErrorDetail,
 	createInternalError,
 	type ErrorDetail,
+	isEncryptedPayload,
 } from "@mobvibe/shared";
 import type { Router } from "express";
 import { logger } from "../lib/logger.js";
@@ -353,7 +354,7 @@ export function setupSessionRoutes(
 	// Send message - with authorization check
 	router.post("/message", async (request: AuthenticatedRequest, response) => {
 		const { sessionId, prompt } = request.body ?? {};
-		if (typeof sessionId !== "string" || !Array.isArray(prompt)) {
+		if (typeof sessionId !== "string" || !isEncryptedPayload(prompt)) {
 			respondError(
 				response,
 				buildRequestValidationError("sessionId and prompt required"),
@@ -374,11 +375,21 @@ export function setupSessionRoutes(
 				}
 			).requestId;
 			logger.info(
-				{ sessionId, userId, promptBlocks: prompt.length, requestId },
+				{
+					sessionId,
+					userId,
+					promptBlocks: "encrypted",
+					requestId,
+				},
 				"message_send_request",
 			);
 			logger.debug(
-				{ sessionId, userId, promptBlocks: prompt.length, requestId },
+				{
+					sessionId,
+					userId,
+					promptBlocks: "encrypted",
+					requestId,
+				},
 				"message_send_request_debug",
 			);
 			logger.debug(
@@ -387,7 +398,7 @@ export function setupSessionRoutes(
 					userId,
 					requestId,
 					route: "/acp/message",
-					promptBlocks: prompt.length,
+					promptBlocks: "encrypted",
 					requestHasAuth: Boolean(request.headers.authorization),
 				},
 				"message_send_http_context",

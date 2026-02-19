@@ -1,3 +1,4 @@
+import type { EncryptedPayload } from "../crypto/types.js";
 import type {
 	ContentBlock,
 	PermissionOption,
@@ -139,7 +140,7 @@ export type CreateSessionParams = {
 // Send message RPC params
 export type SendMessageParams = {
 	sessionId: string;
-	prompt: ContentBlock[];
+	prompt: EncryptedPayload;
 };
 
 // Send message RPC result

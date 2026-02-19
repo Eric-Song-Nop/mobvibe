@@ -1,8 +1,8 @@
 import type {
 	AcpBackendsResponse,
 	CancelSessionResponse,
-	ContentBlock,
 	CreateSessionResponse,
+	EncryptedPayload,
 	ErrorDetail,
 	FsEntriesResponse,
 	FsRootsResponse,
@@ -223,7 +223,7 @@ export const createApiClient = (config: ApiClientConfig) => {
 
 		sendMessage: async (payload: {
 			sessionId: string;
-			prompt: ContentBlock[];
+			prompt: EncryptedPayload;
 		}): Promise<SendMessageResponse> =>
 			requestJson<SendMessageResponse>("/acp/message", {
 				method: "POST",
