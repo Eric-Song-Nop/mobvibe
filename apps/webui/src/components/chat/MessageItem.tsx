@@ -5,11 +5,11 @@ import {
 } from "@mobvibe/core";
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
-import { Streamdown } from "streamdown";
 import {
 	buildUnifiedDiffString,
 	UnifiedDiffView,
 } from "@/components/chat/DiffView";
+import { LazyStreamdown } from "@/components/chat/LazyStreamdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -328,11 +328,13 @@ const renderUserContent = (
 ) => {
 	const contentBlocks = message.contentBlocks ?? [];
 	if (contentBlocks.length === 0) {
-		return <Streamdown>{message.content}</Streamdown>;
+		return <LazyStreamdown>{message.content}</LazyStreamdown>;
 	}
 	const parts = contentBlocks.map((block, index) => {
 		if (block.type === "text") {
-			return <Streamdown key={`text-${index}`}>{block.text}</Streamdown>;
+			return (
+				<LazyStreamdown key={`text-${index}`}>{block.text}</LazyStreamdown>
+			);
 		}
 		if (block.type === "resource_link") {
 			const label = `@${block.name}`;
@@ -861,7 +863,7 @@ const MessageItemInner = ({
 						</span>
 					</summary>
 					<div className="mt-1 ml-3.5 pl-2 border-l border-muted text-xs text-muted-foreground">
-						<Streamdown>{message.content}</Streamdown>
+						<LazyStreamdown>{message.content}</LazyStreamdown>
 					</div>
 				</details>
 			</div>
@@ -896,7 +898,7 @@ const MessageItemInner = ({
 						message.isStreaming ? "opacity-90" : "opacity-100",
 					)}
 				>
-					<Streamdown>{message.content}</Streamdown>
+					<LazyStreamdown>{message.content}</LazyStreamdown>
 				</div>
 			</div>
 		</div>
