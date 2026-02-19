@@ -86,7 +86,8 @@ class E2EEManager {
 				await this.addPairedSecret(item.secret);
 			}
 			return true;
-		} catch {
+		} catch (error) {
+			console.error("[E2EE] Failed to initialize crypto:", error);
 			return false;
 		}
 	}
