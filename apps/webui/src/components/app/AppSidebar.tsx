@@ -1,6 +1,5 @@
 import { AddCircleIcon, Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { ChatSession } from "@mobvibe/core";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -17,6 +16,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useMachinesQuery } from "@/hooks/useMachinesQuery";
 import { useDiscoverSessionsMutation } from "@/hooks/useSessionQueries";
+import type { ChatSession } from "@/lib/chat-store";
 import { type Machine, useMachinesStore } from "@/lib/machines-store";
 import type { SessionMutationsSnapshot } from "@/lib/session-utils";
 import { useUiStore } from "@/lib/ui-store";

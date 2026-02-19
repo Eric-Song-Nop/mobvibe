@@ -1,6 +1,5 @@
 import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { ChatSession } from "@mobvibe/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -8,6 +7,7 @@ import { MessageItem } from "@/components/chat/MessageItem";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { Button } from "@/components/ui/button";
 import type { PermissionResultNotification } from "@/lib/acp";
+import type { ChatSession } from "@/lib/chat-store";
 import { useUiStore } from "@/lib/ui-store";
 
 const SCROLL_THRESHOLD = 64;

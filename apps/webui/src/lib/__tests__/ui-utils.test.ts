@@ -1,6 +1,6 @@
-import type { ChatSession } from "@mobvibe/core";
 import { describe, expect, it } from "vitest";
 import i18n from "@/i18n";
+import type { ChatSession } from "@/lib/chat-store";
 import { buildSessionTitle } from "../ui-utils";
 
 describe("ui-utils", () => {

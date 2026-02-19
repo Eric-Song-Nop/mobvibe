@@ -1,9 +1,3 @@
-import type {
-	ChatMessage,
-	ChatSession,
-	PermissionDecisionState,
-	StatusVariant,
-} from "@mobvibe/core";
 import { useMutation } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type {
@@ -29,6 +23,12 @@ import {
 	setSessionMode,
 	setSessionModel,
 } from "@/lib/api";
+import type {
+	ChatMessage,
+	ChatSession,
+	PermissionDecisionState,
+	StatusVariant,
+} from "@/lib/chat-store";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { notifyResponseCompleted } from "@/lib/notifications";
 

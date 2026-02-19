@@ -4,7 +4,6 @@ import {
 	Refresh03Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { ChatSession } from "@mobvibe/core";
 import { useTranslation } from "react-i18next";
 import { UserMenu } from "@/components/auth/UserMenu";
 import {
@@ -20,6 +19,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import type { ChatSession } from "@/lib/chat-store";
 
 export type AppHeaderProps = {
 	backendLabel?: string;

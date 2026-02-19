@@ -1,6 +1,5 @@
 import { ArrowUp01Icon, StopIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { type ChatSession, useChatStore } from "@mobvibe/core";
 import { useQuery } from "@tanstack/react-query";
 import type { ClipboardEvent, FormEvent, KeyboardEvent } from "react";
 import {
@@ -32,6 +31,7 @@ import {
 	fetchSessionFsResources,
 	type SessionFsResourceEntry,
 } from "@/lib/api";
+import { type ChatSession, useChatStore } from "@/lib/chat-store";
 import {
 	buildCommandSearchItems,
 	filterCommandItems,

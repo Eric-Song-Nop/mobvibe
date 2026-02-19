@@ -1,5 +1,5 @@
+import type { SessionEvent, SessionEventsResponse } from "@mobvibe/shared";
 import { useCallback, useRef } from "react";
-import type { SessionEvent, SessionEventsResponse } from "../api/types";
 
 type BackfillState = {
 	sessionId: string;

@@ -1,6 +1,6 @@
-import type { ChatSession } from "@mobvibe/core";
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ChatSession } from "@/lib/chat-store";
 import { useSessionActivation } from "../useSessionActivation";
 import type { ChatStoreActions } from "../useSessionMutations";
 

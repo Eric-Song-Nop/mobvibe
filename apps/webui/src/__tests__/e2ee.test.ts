@@ -32,7 +32,7 @@ const mockIsEncryptedPayload = vi.fn(
 		(p as Record<string, unknown>).t === "encrypted",
 );
 
-vi.mock("@mobvibe/core", () => ({
+vi.mock("@mobvibe/shared", () => ({
 	initCrypto: mockInitCrypto,
 	base64ToUint8: mockBase64ToUint8,
 	uint8ToBase64: mockUint8ToBase64,

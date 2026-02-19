@@ -1,5 +1,4 @@
 import { useBetterAuthTauri } from "@daveyplate/better-auth-tauri/react";
-import { useChatStore } from "@mobvibe/core";
 import { lazy, Suspense, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
@@ -26,6 +25,7 @@ import { useSessionMutations } from "@/hooks/useSessionMutations";
 import { useSessionQueries } from "@/hooks/useSessionQueries";
 import { useSocket } from "@/hooks/useSocket";
 import { getAuthClient, isInTauri } from "@/lib/auth";
+import { useChatStore } from "@/lib/chat-store";
 import { e2ee } from "@/lib/e2ee";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { useMachinesStore } from "@/lib/machines-store";

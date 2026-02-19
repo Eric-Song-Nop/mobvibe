@@ -1,9 +1,5 @@
-import {
-	type ChatSession,
-	useChatStore,
-	useSessionBackfill,
-} from "@mobvibe/core";
 import { useCallback, useEffect, useRef } from "react";
+import { useSessionBackfill } from "@/hooks/use-session-backfill";
 import type { ChatStoreActions } from "@/hooks/useSessionMutations";
 import {
 	extractAvailableCommandsUpdate,
@@ -21,6 +17,7 @@ import {
 	type SessionsChangedPayload,
 	type TerminalOutputEvent,
 } from "@/lib/acp";
+import { type ChatSession, useChatStore } from "@/lib/chat-store";
 import { e2ee } from "@/lib/e2ee";
 import { isErrorDetail } from "@/lib/error-utils";
 import {

@@ -1,67 +1,71 @@
-// Re-export types from @mobvibe/core
+// Re-export types from @mobvibe/shared
+// Re-export shared socket-events types used by webui
 export type {
 	AcpBackendSummary,
-	AcpBackendsResponse,
 	AcpConnectionState,
-	CancelSessionResponse,
-	CreateSessionResponse,
 	DiscoverSessionsResult,
 	ErrorCode,
 	ErrorDetail,
 	ErrorScope,
+	FsEntriesResponse,
 	FsEntry,
 	FsRoot,
-	FsRootsResponse,
-	MessageIdResponse,
-	PermissionDecisionResponse,
-	SendMessageResponse,
-	SessionFsFilePreviewResponse,
+	GitFileDiffResponse,
+	GitFileStatus,
+	GitStatusResponse,
 	SessionFsFilePreviewType,
 	SessionFsResourceEntry,
-	SessionFsResourcesResponse,
-	SessionFsRoot,
-	SessionFsRootsResponse,
 	SessionModelOption,
 	SessionModeOption,
 	SessionSummary,
-	SessionsResponse,
 	StopReason,
-} from "@mobvibe/core";
+} from "@mobvibe/shared";
 
 // Re-export isErrorDetail for local use
-export { isErrorDetail } from "@mobvibe/core";
+export { isErrorDetail } from "@mobvibe/shared";
+// Re-export types from acp-types (formerly core-specific)
+export type {
+	AcpBackendsResponse,
+	CancelSessionResponse,
+	CreateSessionResponse,
+	FsRootsResponse,
+	MessageIdResponse,
+	PermissionDecisionResponse,
+	SendMessageResponse,
+	SessionFsFilePreviewResponse,
+	SessionFsResourcesResponse,
+	SessionFsRoot,
+	SessionFsRootsResponse,
+	SessionsResponse,
+} from "./acp-types";
 
 // Import types for API functions
-// Local type for FsEntriesResponse (not exported from core)
+import type {
+	ContentBlock,
+	DiscoverSessionsResult,
+	ErrorDetail,
+	FsEntriesResponse,
+	PermissionDecisionPayload,
+	SessionSummary,
+} from "@mobvibe/shared";
+import { isErrorDetail } from "@mobvibe/shared";
 import type {
 	AcpBackendsResponse,
 	CancelSessionResponse,
-	ContentBlock,
 	CreateSessionResponse,
-	DiscoverSessionsResult,
-	ErrorDetail,
-	FsEntry,
 	FsRootsResponse,
 	MessageIdResponse,
-	PermissionDecisionPayload,
 	PermissionDecisionResponse,
 	SendMessageResponse,
 	SessionFsFilePreviewResponse,
 	SessionFsResourcesResponse,
 	SessionFsRootsResponse,
-	SessionSummary,
 	SessionsResponse,
-} from "@mobvibe/core";
-import { isErrorDetail } from "@mobvibe/core";
+} from "./acp-types";
 import { isInTauri } from "./auth";
 import { getAuthToken } from "./auth-token";
 import { e2ee } from "./e2ee";
 import { getDefaultGatewayUrl } from "./gateway-config";
-
-export type FsEntriesResponse = {
-	path: string;
-	entries: FsEntry[];
-};
 
 export type MachinesResponse = {
 	machines: Array<{
@@ -415,25 +419,7 @@ export const reloadSession = async (payload: {
 		body: JSON.stringify(payload),
 	});
 
-// Git file status codes (from git status --porcelain)
-export type GitFileStatus = "M" | "A" | "D" | "?" | "R" | "C" | "U" | "!";
-
-// Git status response
-export type GitStatusResponse = {
-	isGitRepo: boolean;
-	branch?: string;
-	files: Array<{ path: string; status: GitFileStatus }>;
-	dirStatus: Record<string, GitFileStatus>;
-};
-
-// Git file diff response
-export type GitFileDiffResponse = {
-	isGitRepo: boolean;
-	path: string;
-	addedLines: number[];
-	modifiedLines: number[];
-	deletedLines: number[];
-};
+import type { GitFileDiffResponse, GitStatusResponse } from "@mobvibe/shared";
 
 const buildSessionGitStatusPath = (sessionId: string) =>
 	`/fs/session/git/status?sessionId=${encodeURIComponent(sessionId)}`;

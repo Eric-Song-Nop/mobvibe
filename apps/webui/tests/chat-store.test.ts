@@ -1,6 +1,6 @@
-import { useChatStore } from "@mobvibe/core";
 import type { SessionSummary, SessionsChangedPayload } from "@mobvibe/shared";
 import { beforeEach, describe, expect, it } from "vitest";
+import { useChatStore } from "@/lib/chat-store";
 
 const resetStore = () => {
 	useChatStore.setState({

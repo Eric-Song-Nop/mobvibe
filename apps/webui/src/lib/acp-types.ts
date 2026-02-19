@@ -1,7 +1,3 @@
-// Re-export shared types
-export * from "@mobvibe/shared";
-
-// Import types needed for extraction functions and local types
 import type {
 	AvailableCommand,
 	FsRoot,
@@ -29,7 +25,7 @@ export type SessionInfoPayload = {
 	updatedAt?: string;
 };
 
-// API Response types (core-specific)
+// API Response types
 export type AcpBackendsResponse = {
 	backends: { backendId: string; backendLabel: string }[];
 };

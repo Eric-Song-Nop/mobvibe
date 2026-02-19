@@ -1,6 +1,6 @@
-import type { ChatMessage, ChatSession } from "@mobvibe/core";
 import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import type { ChatMessage, ChatSession } from "@/lib/chat-store";
 import { createFallbackError } from "@/lib/error-utils";
 import { useMachinesStore } from "@/lib/machines-store";
 import { gatewaySocket } from "@/lib/socket";

@@ -1,9 +1,9 @@
-import { type ChatSession, useChatStore } from "@mobvibe/core";
 import { useQueries } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useDiscoverSessionsMutation } from "@/hooks/useSessionQueries";
 import { fetchFsEntries } from "@/lib/api";
+import { type ChatSession, useChatStore } from "@/lib/chat-store";
 import { useMachinesStore } from "@/lib/machines-store";
 import { useUiStore } from "@/lib/ui-store";
 import { cn } from "@/lib/utils";

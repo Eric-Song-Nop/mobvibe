@@ -1,8 +1,8 @@
-import type { ChatSession } from "@mobvibe/core";
-import { useChatStore } from "@mobvibe/core";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PermissionResultNotification } from "@/lib/acp";
+import type { ChatSession } from "@/lib/chat-store";
+import { useChatStore } from "@/lib/chat-store";
 import {
 	buildSessionNotReadyError,
 	createFallbackError,

@@ -1,6 +1,6 @@
-import type { ChatSession } from "@mobvibe/core";
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ChatSession } from "@/lib/chat-store";
 import type { ChatStoreActions } from "../useSessionMutations";
 import { useSocket } from "../useSocket";
 
@@ -17,20 +17,23 @@ const mockStoreState = vi.hoisted(
 );
 
 // Mock useChatStore.getState() to return our controlled state
-vi.mock("@mobvibe/core", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@mobvibe/core")>();
+vi.mock("@/lib/chat-store", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/lib/chat-store")>();
 	return {
 		...actual,
 		useChatStore: {
 			getState: () => mockStoreState,
 		},
-		useSessionBackfill: () => ({
-			startBackfill: vi.fn(),
-			cancelBackfill: vi.fn(),
-			isBackfilling: vi.fn(() => false),
-		}),
 	};
 });
+
+vi.mock("@/hooks/use-session-backfill", () => ({
+	useSessionBackfill: () => ({
+		startBackfill: vi.fn(),
+		cancelBackfill: vi.fn(),
+		isBackfilling: vi.fn(() => false),
+	}),
+}));
 
 const mockGatewaySocket = vi.hoisted(() => ({
 	connect: vi.fn(),

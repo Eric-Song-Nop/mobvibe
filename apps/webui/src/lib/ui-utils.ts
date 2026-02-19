@@ -1,5 +1,5 @@
-import type { ChatSession } from "@mobvibe/core";
 import type { TFunction } from "i18next";
+import type { ChatSession } from "@/lib/chat-store";
 
 /**
  * Generates a default title for a new session based on the current session count.

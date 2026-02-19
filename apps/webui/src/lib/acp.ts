@@ -1,4 +1,4 @@
-// Re-export ACP types from @mobvibe/core (which re-exports from @mobvibe/shared)
+// Re-export ACP types from @mobvibe/shared
 export type {
 	AgentSessionCapabilities,
 	AudioContent,
@@ -26,13 +26,9 @@ export type {
 	SessionContent,
 	SessionDetachedPayload,
 	SessionEvent,
-	SessionInfoPayload,
-	SessionModeUpdate,
 	// Session types
 	SessionNotification,
 	SessionsChangedPayload,
-	// Extraction helper types
-	SessionTextChunk,
 	SessionUpdate,
 	SessionUpdateType,
 	StreamErrorPayload,
@@ -49,16 +45,22 @@ export type {
 	ToolCallUpdate,
 	ToolKind,
 	WebuiToGatewayEvents,
-} from "@mobvibe/core";
+} from "@mobvibe/shared";
 
-// Re-export extraction functions
+// Re-export extraction helper types and functions from acp-types
+export type {
+	SessionInfoPayload,
+	SessionModeUpdate,
+	SessionTextChunk,
+} from "./acp-types";
+
 export {
 	extractAvailableCommandsUpdate,
 	extractSessionInfoUpdate,
 	extractSessionModeUpdate,
 	extractTextChunk,
 	extractToolCallUpdate,
-} from "@mobvibe/core";
+} from "./acp-types";
 
 // Re-export API types used in socket events
 export type { ErrorDetail, SessionSummary } from "./api";

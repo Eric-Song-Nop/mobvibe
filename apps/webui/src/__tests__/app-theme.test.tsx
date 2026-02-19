@@ -50,8 +50,8 @@ const mockChatStore = vi.hoisted(() => ({
 	},
 }));
 
-vi.mock("@mobvibe/core", async (importOriginal) => {
-	const original = await importOriginal<typeof import("@mobvibe/core")>();
+vi.mock("@/lib/chat-store", async (importOriginal) => {
+	const original = await importOriginal<typeof import("@/lib/chat-store")>();
 	return {
 		...original,
 		useChatStore: () => mockChatStore.value,

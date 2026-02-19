@@ -6,7 +6,6 @@ import {
 	SunIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { type ChatSession } from "@mobvibe/core";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "@/components/theme-provider";
@@ -40,6 +39,7 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import i18n, { supportedLanguages } from "@/i18n";
+import { type ChatSession } from "@/lib/chat-store";
 import {
 	getSessionDisplayStatus,
 	type SessionDisplayPhase,

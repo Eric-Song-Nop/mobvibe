@@ -1,5 +1,3 @@
-import { create } from "zustand";
-import { persist } from "zustand/middleware";
 import type {
 	AvailableCommand,
 	ContentBlock,
@@ -15,9 +13,11 @@ import type {
 	ToolCallLocation,
 	ToolCallStatus,
 	ToolCallUpdate,
-} from "../api/types";
-import { i18n } from "../i18n";
-import { createDefaultContentBlocks } from "../utils/content-block-utils";
+} from "@mobvibe/shared";
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import i18n from "@/i18n";
+import { createDefaultContentBlocks } from "./content-block-utils";
 import { getStorageAdapter } from "./storage-adapter";
 
 export type ChatRole = "user" | "assistant";

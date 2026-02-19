@@ -9,7 +9,7 @@ import {
 	isEncryptedPayload,
 	uint8ToBase64,
 	unwrapDEK,
-} from "@mobvibe/core";
+} from "@mobvibe/shared";
 import type { SessionEvent } from "@/lib/acp";
 import { isInTauri } from "@/lib/auth";
 

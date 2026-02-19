@@ -1,8 +1,3 @@
-import {
-	type ChatMessage,
-	type ToolCallStatus,
-	useChatStore,
-} from "@mobvibe/core";
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -22,7 +17,9 @@ import type {
 	ResourceLinkContent,
 	ToolCallContent,
 	ToolCallContentPayload,
+	ToolCallStatus,
 } from "@/lib/acp";
+import { type ChatMessage, useChatStore } from "@/lib/chat-store";
 import { cn } from "@/lib/utils";
 
 type PermissionDecisionPayload = {

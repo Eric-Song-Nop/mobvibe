@@ -1,6 +1,6 @@
-import { useSessionBackfill } from "@mobvibe/core";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useSessionBackfill } from "@/hooks/use-session-backfill";
 
 // Mock fetch globally
 const mockFetch = vi.fn();

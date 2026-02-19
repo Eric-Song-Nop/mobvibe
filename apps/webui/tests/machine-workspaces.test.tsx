@@ -1,9 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import { useChatStore } from "@mobvibe/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useChatStore } from "@/lib/chat-store";
 import { MachineWorkspaces } from "../src/components/machines/MachineWorkspaces";
 import { useMachinesStore } from "../src/lib/machines-store";
 import { useUiStore } from "../src/lib/ui-store";

@@ -1,5 +1,5 @@
-import type { ChatSession } from "@mobvibe/core";
 import { useMemo } from "react";
+import type { ChatSession } from "@/lib/chat-store";
 import {
 	collectWorkspaces,
 	type WorkspaceSummary,

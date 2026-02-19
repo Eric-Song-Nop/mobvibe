@@ -1,4 +1,4 @@
-import type { ChatSession } from "@mobvibe/core";
+import type { ChatSession } from "@/lib/chat-store";
 
 export type WorkspaceSummary = {
 	machineId: string;
