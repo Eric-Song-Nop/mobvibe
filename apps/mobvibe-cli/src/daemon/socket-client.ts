@@ -149,11 +149,15 @@ const buildHostFsRoots = async (): Promise<HostFsRootsResponse> => {
 	};
 };
 
+/** Minimum interval between automatic discover calls (ms) */
+const DISCOVER_THROTTLE_MS = 60_000;
+
 export class SocketClient extends EventEmitter {
 	private socket: Socket<GatewayToCliEvents, CliToGatewayEvents>;
 	private connected = false;
 	private reconnectAttempts = 0;
 	private heartbeatInterval?: NodeJS.Timeout;
+	private lastDiscoverAt = 0;
 
 	constructor(private readonly options: SocketClientOptions) {
 		super();
@@ -216,6 +220,14 @@ export class SocketClient extends EventEmitter {
 
 		this.socket.on("cli:registered", async (info) => {
 			logger.info({ machineId: info.machineId }, "gateway_registered");
+
+			// Throttle automatic discover on reconnect
+			const now = Date.now();
+			if (now - this.lastDiscoverAt < DISCOVER_THROTTLE_MS) {
+				logger.info("discover_throttled_skip");
+				return;
+			}
+			this.lastDiscoverAt = now;
 
 			// Auto-discover historical sessions from all backends
 			for (const backend of this.options.config.acpBackends) {

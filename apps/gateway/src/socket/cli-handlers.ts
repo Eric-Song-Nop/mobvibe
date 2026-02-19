@@ -212,15 +212,17 @@ export function setupCliHandlers(
 				machineId: cliRecord.machineId,
 			}));
 
-			// Add to CLI registry (only adds sessions that don't already exist)
-			cliRegistry.addDiscoveredSessions(socket.id, historicalSessions);
+			// Add to CLI registry (returns only actually new sessions)
+			const added = cliRegistry.addDiscoveredSessions(
+				socket.id,
+				historicalSessions,
+			);
 
-			// Emit sessions:changed to webui for the user
-			if (cliRecord.userId && historicalSessions.length > 0) {
-				// Use the same event pattern as updateSessionsIncremental
+			// Emit sessions:changed to webui only for actually new sessions
+			if (cliRecord.userId && added.length > 0) {
 				emitToWebui(
 					"sessions:changed",
-					{ added: historicalSessions, updated: [], removed: [] },
+					{ added, updated: [], removed: [] },
 					cliRecord.userId,
 				);
 			}

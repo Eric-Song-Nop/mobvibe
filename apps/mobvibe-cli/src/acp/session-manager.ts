@@ -148,6 +148,9 @@ export class SessionManager {
 	private readonly walStore: WalStore;
 	private readonly cryptoService?: CliCryptoService;
 
+	/** Per-backend idle connections (initialized but no session bound) */
+	private idleConnections = new Map<string, AcpConnection>();
+
 	constructor(
 		private readonly config: CliConfig,
 		cryptoService?: CliCryptoService,
@@ -167,6 +170,58 @@ export class SessionManager {
 				version: this.config.clientVersion,
 			},
 		});
+	}
+
+	/**
+	 * Acquire an initialized connection for a backend.
+	 * Reuses an idle connection if available and still ready,
+	 * otherwise creates and connects a new one.
+	 */
+	async acquireConnection(backend: AcpBackendConfig): Promise<AcpConnection> {
+		const idle = this.idleConnections.get(backend.id);
+		if (idle) {
+			this.idleConnections.delete(backend.id);
+			const status = idle.getStatus();
+			if (status.state === "ready") {
+				logger.debug({ backendId: backend.id }, "idle_connection_reused");
+				return idle;
+			}
+			// Connection is no longer usable — discard it
+			logger.debug(
+				{ backendId: backend.id, state: status.state },
+				"idle_connection_stale_discarded",
+			);
+			await idle.disconnect().catch(() => {});
+		}
+
+		const connection = this.createConnection(backend);
+		await connection.connect();
+		return connection;
+	}
+
+	/**
+	 * Release a connection back to the idle pool for later reuse.
+	 * Only keeps one idle connection per backend.
+	 */
+	releaseConnection(backendId: string, connection: AcpConnection): void {
+		const status = connection.getStatus();
+		// Only pool connections that are still ready and have no session bound
+		if (status.state === "ready" && !status.sessionId) {
+			const existing = this.idleConnections.get(backendId);
+			if (existing) {
+				// Already have one — disconnect the old one
+				existing.disconnect().catch(() => {});
+			}
+			this.idleConnections.set(backendId, connection);
+			logger.debug({ backendId }, "connection_released_to_idle_pool");
+		} else {
+			// Not reusable — disconnect immediately
+			connection.disconnect().catch(() => {});
+			logger.debug(
+				{ backendId, state: status.state, sessionId: status.sessionId },
+				"connection_discarded_not_reusable",
+			);
+		}
 	}
 
 	listSessions(): SessionSummary[] {
@@ -569,9 +624,8 @@ export class SessionManager {
 		backendId: string;
 	}): Promise<SessionSummary> {
 		const backend = this.resolveBackend(options.backendId);
-		const connection = this.createConnection(backend);
+		const connection = await this.acquireConnection(backend);
 		try {
-			await connection.connect();
 			const session = await connection.createSession({ cwd: options?.cwd });
 			connection.setPermissionHandler((params) =>
 				this.handlePermissionRequest(session.sessionId, params),
@@ -925,6 +979,11 @@ export class SessionManager {
 		await Promise.all(
 			sessionIds.map((sessionId) => this.closeSession(sessionId)),
 		);
+		// Also disconnect idle connections
+		for (const [, conn] of this.idleConnections) {
+			await conn.disconnect().catch(() => {});
+		}
+		this.idleConnections.clear();
 	}
 
 	/**
@@ -994,10 +1053,9 @@ export class SessionManager {
 		cursor?: string;
 	}): Promise<DiscoverSessionsRpcResult> {
 		const backend = this.resolveBackend(options.backendId);
-		const connection = this.createConnection(backend);
+		const connection = await this.acquireConnection(backend);
 
 		try {
-			await connection.connect();
 			const capabilities = connection.getSessionCapabilities();
 			const sessions: AcpSessionInfo[] = [];
 			let nextCursor: string | undefined;
@@ -1087,7 +1145,7 @@ export class SessionManager {
 
 			return { sessions, capabilities, nextCursor };
 		} finally {
-			await connection.disconnect();
+			this.releaseConnection(backend.id, connection);
 		}
 	}
 
@@ -1115,11 +1173,9 @@ export class SessionManager {
 		}
 
 		const backend = this.resolveBackend(backendId);
-		const connection = this.createConnection(backend);
+		const connection = await this.acquireConnection(backend);
 
 		try {
-			await connection.connect();
-
 			if (!connection.supportsSessionLoad()) {
 				throw createCapabilityNotSupportedError(
 					"Agent does not support session loading",

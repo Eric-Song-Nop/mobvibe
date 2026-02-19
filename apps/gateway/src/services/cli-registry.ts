@@ -214,20 +214,26 @@ export class CliRegistry extends EventEmitter {
 	 * Add discovered historical sessions to a CLI record.
 	 * Only adds sessions that don't already exist (to avoid overwriting active sessions).
 	 */
-	addDiscoveredSessions(socketId: string, sessions: SessionSummary[]): void {
+	addDiscoveredSessions(
+		socketId: string,
+		sessions: SessionSummary[],
+	): SessionSummary[] {
 		const record = this.cliBySocketId.get(socketId);
 		if (!record) {
-			return;
+			return [];
 		}
 
+		const added: SessionSummary[] = [];
 		for (const session of sessions) {
 			const exists = record.sessions.some(
 				(s) => s.sessionId === session.sessionId,
 			);
 			if (!exists) {
 				record.sessions.push(session);
+				added.push(session);
 			}
 		}
+		return added;
 	}
 
 	/**
