@@ -149,6 +149,7 @@ export type {
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
 	ReloadSessionRpcParams,
+	RenameSessionParams,
 	RpcRequest,
 	RpcResponse,
 	SendMessageParams,

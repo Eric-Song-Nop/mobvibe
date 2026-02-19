@@ -105,32 +105,6 @@ export const machines = pgTable(
 	],
 );
 
-export const acpSessions = pgTable(
-	"acp_sessions",
-	{
-		id: text("id").primaryKey(),
-		sessionId: text("session_id").notNull().unique(),
-		userId: text("user_id")
-			.notNull()
-			.references(() => user.id, { onDelete: "cascade" }),
-		machineId: text("machine_id")
-			.notNull()
-			.references(() => machines.id, { onDelete: "cascade" }),
-		title: text("title"),
-		backendId: text("backend_id"),
-		cwd: text("cwd"),
-		createdAt: timestamp("created_at").notNull().defaultNow(),
-		updatedAt: timestamp("updated_at").notNull().defaultNow(),
-		closedAt: timestamp("closed_at"),
-		wrappedDek: text("wrapped_dek"),
-	},
-	(table) => [
-		index("acp_sessions_user_id_idx").on(table.userId),
-		index("acp_sessions_machine_id_idx").on(table.machineId),
-		index("acp_sessions_session_id_idx").on(table.sessionId),
-	],
-);
-
 export const deviceKeys = pgTable(
 	"device_keys",
 	{
@@ -191,7 +165,5 @@ export type Verification = typeof verification.$inferSelect;
 export type NewVerification = typeof verification.$inferInsert;
 export type Machine = typeof machines.$inferSelect;
 export type NewMachine = typeof machines.$inferInsert;
-export type AcpSession = typeof acpSessions.$inferSelect;
-export type NewAcpSession = typeof acpSessions.$inferInsert;
 export type DeviceKey = typeof deviceKeys.$inferSelect;
 export type NewDeviceKey = typeof deviceKeys.$inferInsert;

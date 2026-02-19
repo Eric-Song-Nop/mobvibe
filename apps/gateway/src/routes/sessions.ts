@@ -137,6 +137,42 @@ export function setupSessionRoutes(
 		}
 	});
 
+	// Rename session - with authorization check
+	router.patch("/session", async (request: AuthenticatedRequest, response) => {
+		const { sessionId, title } = request.body ?? {};
+		if (typeof sessionId !== "string" || typeof title !== "string") {
+			respondError(
+				response,
+				buildRequestValidationError("sessionId and title required"),
+				400,
+			);
+			return;
+		}
+
+		const userId = getUserId(request);
+		if (!userId) {
+			respondError(response, buildAuthorizationError(), 401);
+			return;
+		}
+		try {
+			logger.info({ sessionId, title, userId }, "session_rename_request");
+			const session = await sessionRouter.renameSession(
+				{ sessionId, title },
+				userId,
+			);
+			logger.info({ sessionId, userId }, "session_rename_success");
+			response.json(session);
+		} catch (error) {
+			const message = getErrorMessage(error);
+			logger.error({ err: error, sessionId }, "session_rename_error");
+			if (message.includes("Session not found")) {
+				respondError(response, buildAuthorizationError(message), 404);
+			} else {
+				respondError(response, createInternalError("session"));
+			}
+		}
+	});
+
 	// Archive session - with authorization check
 	router.post(
 		"/session/archive",

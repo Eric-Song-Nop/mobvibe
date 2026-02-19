@@ -50,6 +50,8 @@ export type SessionSummary = {
 	revision?: number;
 	/** Base64-encoded sealed DEK for E2EE (crypto_box_seal) */
 	wrappedDek?: string;
+	/** Agent-defined metadata from session_info_update RFD */
+	_meta?: Record<string, unknown> | null;
 };
 
 /** Sessions changed event payload for incremental sync */
@@ -97,6 +99,8 @@ export type AcpSessionInfo = {
 	cwd: string;
 	title?: string;
 	updatedAt?: string;
+	/** Agent-defined metadata from session_info_update RFD */
+	_meta?: Record<string, unknown> | null;
 };
 
 /** Agent session capabilities */

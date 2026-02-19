@@ -57,6 +57,8 @@ type SessionRecord = {
 	attachedAt?: Date;
 	/** Current WAL revision for this session */
 	revision: number;
+	/** Agent-defined metadata from session_info_update RFD */
+	_meta?: Record<string, unknown> | null;
 };
 
 type PermissionRequestRecord = {
@@ -759,6 +761,16 @@ export class SessionManager {
 		}
 		record.title = title;
 		record.updatedAt = new Date();
+
+		// Persist to WAL
+		this.walStore.ensureSession({
+			sessionId,
+			machineId: this.config.machineId,
+			backendId: record.backendId,
+			cwd: record.cwd,
+			title,
+		});
+
 		const summary = this.buildSummary(record);
 		this.emitSessionsChanged({
 			added: [],
@@ -1339,6 +1351,27 @@ export class SessionManager {
 			if (typeof update.updatedAt === "string") {
 				record.updatedAt = new Date(update.updatedAt);
 			}
+			// RFD _meta merge semantics
+			if ("_meta" in update) {
+				const meta = (update as { _meta?: Record<string, unknown> | null })
+					._meta;
+				if (meta === null) {
+					// null → clear all metadata
+					record._meta = null;
+				} else if (meta && typeof meta === "object") {
+					// Merge: null values delete keys, others upsert
+					const current = record._meta ?? {};
+					const merged = { ...current };
+					for (const [key, value] of Object.entries(meta)) {
+						if (value === null) {
+							delete merged[key];
+						} else {
+							merged[key] = value;
+						}
+					}
+					record._meta = Object.keys(merged).length > 0 ? merged : null;
+				}
+			}
 		}
 		if (update.sessionUpdate === "available_commands_update") {
 			if (update.availableCommands) {
@@ -1507,6 +1540,7 @@ export class SessionManager {
 			revision: record.revision,
 			wrappedDek:
 				this.cryptoService?.getWrappedDek(record.sessionId) ?? undefined,
+			_meta: record._meta,
 		};
 	}
 }

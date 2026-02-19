@@ -148,6 +148,8 @@ export type ChatSession = {
 		size: number;
 		cost?: { amount: number; currency: string };
 	};
+	/** Agent-defined metadata from session_info_update RFD */
+	_meta?: Record<string, unknown> | null;
 	/** WAL cursor tracking for sync */
 	revision?: number;
 	lastAppliedSeq?: number;
@@ -226,6 +228,7 @@ type ChatState = {
 				| "availableModels"
 				| "availableCommands"
 				| "usage"
+				| "_meta"
 			>
 		>,
 	) => void;
@@ -984,6 +987,9 @@ export const useChatStore = create<ChatState>()(
 					}
 					if (payload.usage !== undefined) {
 						nextSession.usage = payload.usage;
+					}
+					if (payload._meta !== undefined) {
+						nextSession._meta = payload._meta;
 					}
 					return {
 						sessions: {

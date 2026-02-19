@@ -10,13 +10,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CliRegistry } from "../cli-registry.js";
 import { SessionRouter } from "../session-router.js";
 
-// Mock the db-service module
-vi.mock("../db-service.js", () => ({
-	createAcpSessionDirect: vi.fn().mockResolvedValue(undefined),
-	markSessionClosed: vi.fn().mockResolvedValue(undefined),
-	updateSessionMetadata: vi.fn().mockResolvedValue(undefined),
-}));
-
 const createMockSocket = (
 	id = `socket-${Math.random().toString(36).slice(2, 8)}`,
 ) => {

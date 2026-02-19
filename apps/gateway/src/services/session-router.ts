@@ -23,6 +23,7 @@ import type {
 	LoadSessionRpcParams,
 	PermissionDecisionPayload,
 	ReloadSessionRpcParams,
+	RenameSessionParams,
 	RpcRequest,
 	RpcResponse,
 	SendMessageParams,
@@ -37,11 +38,6 @@ import type {
 import type { Socket } from "socket.io";
 import { logger } from "../lib/logger.js";
 import type { CliRecord, CliRegistry } from "./cli-registry.js";
-import {
-	createAcpSessionDirect,
-	markSessionClosed,
-	updateSessionMetadata,
-} from "./db-service.js";
 
 type PendingRpc<T> = {
 	requestId: string;
@@ -148,18 +144,6 @@ export class SessionRouter {
 			rpcParams,
 		);
 
-		// Sync session to database if machine is authenticated
-		if (cli.userId && cli.machineId) {
-			await createAcpSessionDirect({
-				userId: cli.userId,
-				machineId: cli.machineId,
-				sessionId: result.sessionId,
-				title: result.title ?? `Session ${result.sessionId.slice(0, 8)}`,
-				backendId: result.backendId,
-				cwd: result.cwd,
-			});
-		}
-
 		logger.info(
 			{ sessionId: result.sessionId, userId },
 			"session_create_rpc_complete",
@@ -190,8 +174,6 @@ export class SessionRouter {
 			params,
 		);
 
-		// Sync to database
-		await markSessionClosed(params.sessionId);
 		logger.info(
 			{ sessionId: params.sessionId, userId },
 			"session_close_rpc_complete",
@@ -311,6 +293,37 @@ export class SessionRouter {
 		);
 
 		return { archivedCount: totalArchived };
+	}
+
+	/**
+	 * Rename a session (update title).
+	 * Forwards to CLI which persists via WAL store.
+	 * @param params - Rename parameters
+	 * @param userId - User ID for authorization
+	 */
+	async renameSession(
+		params: RenameSessionParams,
+		userId: string,
+	): Promise<SessionSummary> {
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+
+		logger.info(
+			{ sessionId: params.sessionId, title: params.title, userId },
+			"session_rename_rpc_start",
+		);
+
+		const result = await this.sendRpc<RenameSessionParams, SessionSummary>(
+			cli.socket,
+			"rpc:session:rename",
+			params,
+		);
+
+		logger.info(
+			{ sessionId: params.sessionId, userId },
+			"session_rename_rpc_complete",
+		);
+
+		return result;
 	}
 
 	/**
@@ -718,18 +731,6 @@ export class SessionRouter {
 			rpcParams,
 		);
 
-		// Sync session to database if machine is authenticated
-		if (cli.userId && cli.machineId) {
-			await createAcpSessionDirect({
-				userId: cli.userId,
-				machineId: cli.machineId,
-				sessionId: result.sessionId,
-				title: result.title ?? result.sessionId,
-				backendId: result.backendId,
-				cwd: result.cwd,
-			});
-		}
-
 		logger.info(
 			{ sessionId: result.sessionId, userId },
 			"session_load_rpc_complete",
@@ -784,36 +785,12 @@ export class SessionRouter {
 			rpcParams,
 		);
 
-		// Sync session to database if machine is authenticated
-		if (cli.userId && cli.machineId) {
-			await createAcpSessionDirect({
-				userId: cli.userId,
-				machineId: cli.machineId,
-				sessionId: result.sessionId,
-				title: result.title ?? result.sessionId,
-				backendId: result.backendId,
-				cwd: result.cwd,
-			});
-		}
-
 		logger.info(
 			{ sessionId: result.sessionId, userId },
 			"session_reload_rpc_complete",
 		);
 
 		return result;
-	}
-
-	/**
-	 * Update session metadata in database.
-	 */
-	async syncSessionState(
-		sessionId: string,
-		_state: string,
-		title?: string,
-		cwd?: string,
-	): Promise<void> {
-		await updateSessionMetadata({ sessionId, title, cwd });
 	}
 
 	/**

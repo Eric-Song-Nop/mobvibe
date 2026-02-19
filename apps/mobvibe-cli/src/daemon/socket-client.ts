@@ -864,6 +864,29 @@ export class SocketClient extends EventEmitter {
 			}
 		});
 
+		// Session rename
+		this.socket.on("rpc:session:rename", async (request) => {
+			try {
+				const { sessionId, title } = request.params;
+				logger.info(
+					{ requestId: request.requestId, sessionId, title },
+					"rpc_session_rename",
+				);
+				const summary = sessionManager.updateTitle(sessionId, title);
+				this.sendRpcResponse(request.requestId, summary);
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_session_rename_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
 		// Archive session
 		this.socket.on("rpc:session:archive", async (request) => {
 			try {

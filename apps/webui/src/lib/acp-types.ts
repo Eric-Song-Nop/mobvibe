@@ -17,6 +17,7 @@ export type SessionModeUpdate = {
 export type SessionInfoPayload = {
 	title?: string;
 	updatedAt?: string;
+	_meta?: Record<string, unknown> | null;
 };
 
 // Note: PermissionDecisionResponse kept here because gateway actually returns
@@ -66,10 +67,15 @@ export const extractSessionInfoUpdate = (
 	}
 	const title = notification.update.title ?? undefined;
 	const updatedAt = notification.update.updatedAt ?? undefined;
-	if (!title && !updatedAt) {
+	const _meta =
+		"_meta" in notification.update
+			? (notification.update as { _meta?: Record<string, unknown> | null })
+					._meta
+			: undefined;
+	if (!title && !updatedAt && _meta === undefined) {
 		return null;
 	}
-	return { title, updatedAt };
+	return { title, updatedAt, _meta };
 };
 
 export const extractToolCallUpdate = (

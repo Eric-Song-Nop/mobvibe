@@ -1,6 +1,5 @@
 import type { EncryptedPayload } from "../crypto/types.js";
 import type {
-	ContentBlock,
 	PermissionOption,
 	PermissionOutcome,
 	PermissionToolCall,
@@ -321,6 +320,9 @@ export interface GatewayToCliEvents {
 	"rpc:session:load": (request: RpcRequest<LoadSessionRpcParams>) => void;
 	"rpc:session:reload": (request: RpcRequest<ReloadSessionRpcParams>) => void;
 
+	// Rename RPC request
+	"rpc:session:rename": (request: RpcRequest<RenameSessionParams>) => void;
+
 	// Archive RPC requests
 	"rpc:session:archive": (request: RpcRequest<ArchiveSessionParams>) => void;
 	"rpc:session:archive-all": (
@@ -352,6 +354,9 @@ export interface GatewayToWebuiEvents {
 	"sessions:list": (sessions: SessionSummary[]) => void;
 	"sessions:changed": (payload: SessionsChangedPayload) => void;
 }
+
+// Rename session RPC params
+export type RenameSessionParams = { sessionId: string; title: string };
 
 // Archive session RPC params
 export type ArchiveSessionParams = { sessionId: string };
