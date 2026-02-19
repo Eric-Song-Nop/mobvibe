@@ -24,6 +24,7 @@ export {
 } from "./crypto/index.js";
 export type {
 	// SDK types (directly from SDK)
+	AgentCapabilities,
 	AudioContent,
 	AvailableCommand,
 	ContentBlock,
@@ -31,23 +32,24 @@ export type {
 	Cost,
 	EmbeddedResource,
 	ImageContent,
-	// Project-specific types
+	Implementation,
+	// Permission types
 	PermissionOption,
 	PermissionOutcome,
-	PermissionRequestNotification,
 	PermissionResultNotification,
 	PermissionToolCall,
 	RequestPermissionOutcome,
 	RequestPermissionRequest,
 	RequestPermissionResponse,
-	// Backwards-compatible aliases (deprecated)
+	// Backwards-compatible aliases (still in use)
 	ResourceContent,
 	ResourceLink,
 	ResourceLinkContent,
-	SdkToolCallUpdate,
 	// Session config option category (new in SDK 0.14.x)
 	SessionConfigOptionCategory,
-	SessionContent,
+	// Session info & state types
+	SessionModelState,
+	SessionModeState,
 	SessionNotification,
 	SessionUpdate,
 	SessionUpdateType,
@@ -58,7 +60,6 @@ export type {
 	ToolCall,
 	ToolCallContent,
 	ToolCallContentPayload,
-	ToolCallKind,
 	ToolCallLocation,
 	ToolCallStatus,
 	ToolCallUpdate,
@@ -107,7 +108,6 @@ export type {
 	SessionModeOption,
 	SessionSummary,
 	SessionsChangedPayload,
-	// StopReason is now re-exported from SDK via acp.ts
 } from "./types/session.js";
 
 // Socket event types
@@ -167,3 +167,6 @@ export type {
 	StreamErrorPayload,
 	WebuiToGatewayEvents,
 } from "./types/socket-events.js";
+
+// Validation utilities (Zod schemas from SDK)
+export { parseSessionNotification } from "./validation/acp-schemas.js";

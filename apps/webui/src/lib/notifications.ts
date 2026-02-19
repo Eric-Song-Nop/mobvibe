@@ -159,7 +159,7 @@ export const notifyPermissionRequest = (
 ) => {
 	const toolLabel =
 		payload.toolCall?.title ??
-		payload.toolCall?.name ??
+		(payload.toolCall?._meta?.name as string | undefined) ??
 		i18n.t("toolCall.toolCall");
 	pushNotification(
 		{

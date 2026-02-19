@@ -678,23 +678,12 @@ export class SessionManager {
 	private buildPermissionRequestPayload(
 		record: PermissionRequestRecord,
 	): PermissionRequestPayload {
-		const toolCall = record.params.toolCall;
 		return {
 			sessionId: record.sessionId,
 			requestId: record.requestId,
-			options: record.params.options.map((option) => ({
-				optionId: option.optionId,
-				// SDK uses 'name', our shared type uses 'label'
-				label: option.name,
-				description: (option._meta?.description as string) ?? null,
-			})),
-			toolCall: {
-				toolCallId: toolCall.toolCallId,
-				name: (toolCall._meta?.name as string) ?? null,
-				title: toolCall.title,
-				command: (toolCall._meta?.command as string) ?? null,
-				args: (toolCall._meta?.args as string[]) ?? null,
-			},
+			// Pass SDK types directly - no manual mapping needed
+			options: record.params.options,
+			toolCall: record.params.toolCall,
 		};
 	}
 
@@ -1404,16 +1393,18 @@ export class SessionManager {
 				kind = "usage_update";
 				break;
 			default: {
-				// For unknown types, log but don't write to WAL
+				// Forward-compatible: write unknown update types to WAL
+				// so no data is lost when SDK introduces new event types
 				const _unhandled = update as { sessionUpdate?: string };
 				logger.warn(
 					{
 						sessionId: record.sessionId,
 						updateType: _unhandled.sessionUpdate,
 					},
-					"unknown_session_update_type_skipped",
+					"unknown_session_update_type_persisted",
 				);
-				return;
+				kind = "unknown_update";
+				break;
 			}
 		}
 

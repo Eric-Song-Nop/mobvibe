@@ -34,7 +34,8 @@ export type SessionEventKind =
 	| "terminal_output"
 	| "session_info_update"
 	| "session_error"
-	| "usage_update";
+	| "usage_update"
+	| "unknown_update";
 
 /** A persisted session event with sequence tracking */
 export type SessionEvent = {

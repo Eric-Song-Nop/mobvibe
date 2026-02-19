@@ -1,9 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import type { ChatMessage, ChatSession } from "../src/lib/chat-store";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatMessageList } from "../src/components/app/ChatMessageList";
 import i18n from "../src/i18n";
+import type { ChatMessage, ChatSession } from "../src/lib/chat-store";
 import { createDefaultContentBlocks } from "../src/lib/content-block-utils";
 
 vi.mock("../src/components/chat/MessageItem", () => ({

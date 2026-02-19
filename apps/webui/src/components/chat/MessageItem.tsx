@@ -615,13 +615,14 @@ const MessageItemInner = ({
 		);
 	}
 	if (message.kind === "permission") {
+		const meta = message.toolCall?._meta;
 		const toolLabel =
 			message.toolCall?.title ??
-			message.toolCall?.name ??
+			(meta?.name as string | undefined) ??
 			getLabel("toolCall.toolCall");
 		const toolId = message.toolCall?.toolCallId ?? message.requestId;
-		const toolCommand = message.toolCall?.command;
-		const toolArgs = message.toolCall?.args?.join(" ");
+		const toolCommand = meta?.command as string | undefined;
+		const toolArgs = (meta?.args as string[] | undefined)?.join(" ");
 		const isDisabled =
 			message.outcome !== undefined || message.decisionState === "submitting";
 		return (
@@ -661,7 +662,7 @@ const MessageItemInner = ({
 										})
 									}
 								>
-									{option.label ?? option.optionId}
+									{option.name ?? option.optionId}
 								</Button>
 							))}
 							<Button

@@ -2,50 +2,36 @@
 export type {
 	AgentSessionCapabilities,
 	AudioContent,
-	// Content types
 	AvailableCommand,
 	CliStatusPayload,
 	ContentBlock,
-	EmbeddedResource,
 	GatewayToWebuiEvents,
 	ImageContent,
 	PermissionDecisionPayload,
 	// Permission types
 	PermissionOption,
 	PermissionOutcome,
-	PermissionRequestNotification,
 	// Socket event types
 	PermissionRequestPayload,
 	PermissionResultNotification,
 	PermissionToolCall,
+	// Backwards-compatible aliases (still in use)
 	ResourceContent,
-	ResourceLink,
 	ResourceLinkContent,
 	SessionAttachedPayload,
-	// Backwards-compatible aliases
-	SessionContent,
 	SessionDetachedPayload,
 	SessionEvent,
 	// Session types
 	SessionNotification,
 	SessionsChangedPayload,
-	SessionUpdate,
-	SessionUpdateType,
-	StreamErrorPayload,
 	// Terminal
-	TerminalExitStatus,
 	TerminalOutputEvent,
-	TextContent,
 	ToolCallContent,
 	ToolCallContentPayload,
-	ToolCallKind,
 	ToolCallLocation,
 	// Tool types
 	ToolCallStatus,
 	ToolCallUpdate,
-	ToolKind,
-	Usage,
-	UsageUpdate,
 	WebuiToGatewayEvents,
 } from "@mobvibe/shared";
 

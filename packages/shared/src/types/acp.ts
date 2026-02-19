@@ -1,5 +1,7 @@
 // Full SDK re-exports - use SDK types directly
 export type {
+	// Agent & implementation types
+	AgentCapabilities,
 	AudioContent,
 	// Other
 	AvailableCommand,
@@ -9,12 +11,17 @@ export type {
 	Cost,
 	EmbeddedResource,
 	ImageContent,
+	Implementation,
 	RequestPermissionOutcome,
 	RequestPermissionRequest,
 	RequestPermissionResponse,
 	ResourceLink,
 	// Session config option category (new in SDK 0.14.x)
 	SessionConfigOptionCategory,
+	// Session info & state types
+	SessionInfo,
+	SessionModelState,
+	SessionModeState,
 	// Session types
 	SessionNotification,
 	SessionUpdate,
@@ -26,27 +33,14 @@ export type {
 	ToolCallLocation,
 	// Tool types
 	ToolCallStatus,
-	ToolCallUpdate as SdkToolCallUpdate,
 	ToolKind,
 	// Usage types (new in SDK 0.14.x)
 	Usage,
 	UsageUpdate,
 } from "@agentclientprotocol/sdk";
 
-// Backwards-compatible aliases (deprecate over time)
-import type {
-	EmbeddedResource,
-	ResourceLink,
-	ToolCallUpdate as SdkToolCallUpdate,
-	TextContent,
-	ToolKind,
-} from "@agentclientprotocol/sdk";
-
-/** @deprecated Use `TextContent` from SDK instead */
-export type SessionContent = TextContent;
-
-/** @deprecated Use `ToolKind` from SDK instead */
-export type ToolCallKind = ToolKind;
+// Backwards-compatible aliases still in use
+import type { EmbeddedResource, ResourceLink } from "@agentclientprotocol/sdk";
 
 /** @deprecated Use `EmbeddedResource` from SDK instead */
 export type ResourceContent = EmbeddedResource;
@@ -54,19 +48,10 @@ export type ResourceContent = EmbeddedResource;
 /** @deprecated Use `ResourceLink` from SDK instead */
 export type ResourceLinkContent = ResourceLink;
 
-// Keep local types for session update type discriminator values (not exported from SDK)
-export type SessionUpdateType =
-	| "user_message_chunk"
-	| "agent_message_chunk"
-	| "agent_thought_chunk"
-	| "tool_call"
-	| "tool_call_update"
-	| "plan"
-	| "available_commands_update"
-	| "current_mode_update"
-	| "config_option_update"
-	| "session_info_update"
-	| "usage_update";
+// Derive SessionUpdateType from SDK's SessionUpdate discriminated union
+// SDK updates will automatically be reflected here - zero manual sync needed
+import type { SessionUpdate } from "@agentclientprotocol/sdk";
+export type SessionUpdateType = SessionUpdate["sessionUpdate"];
 
 // Keep local type for broader content payload support (project-specific)
 // SDK's Content.content is strictly ContentBlock, but we allow more flexible types
@@ -78,6 +63,7 @@ export type ToolCallContentPayload =
 
 // ToolCallUpdate with sessionUpdate discriminator (project-specific extension)
 // The SDK's ToolCallUpdate doesn't include the sessionUpdate field
+import type { ToolCallUpdate as SdkToolCallUpdate } from "@agentclientprotocol/sdk";
 export type ToolCallUpdate = SdkToolCallUpdate & {
 	sessionUpdate: "tool_call" | "tool_call_update";
 };
@@ -92,34 +78,23 @@ export type TerminalOutputEvent = {
 	exitStatus?: { exitCode?: number | null; signal?: string | null } | null;
 };
 
-// Permission types (project-specific socket event types)
-export type PermissionOption = {
-	optionId: string;
-	label?: string | null;
-	description?: string | null;
-};
+// Permission types - directly from SDK, no project-specific shadow types
+import type {
+	RequestPermissionOutcome,
+	PermissionOption as SdkPermissionOption,
+	ToolCallUpdate as SdkPermissionToolCall,
+} from "@agentclientprotocol/sdk";
 
-export type PermissionOutcome =
-	| { outcome: "selected"; optionId: string }
-	| { outcome: "cancelled" };
+/** Permission option - directly from SDK */
+export type PermissionOption = SdkPermissionOption;
 
-export type PermissionToolCall = {
-	toolCallId?: string;
-	name?: string | null;
-	title?: string | null;
-	command?: string | null;
-	args?: string[] | null;
-	[key: string]: unknown;
-};
+/** Permission outcome - directly from SDK */
+export type PermissionOutcome = RequestPermissionOutcome;
 
-// Permission notification types (project-specific)
-export type PermissionRequestNotification = {
-	sessionId: string;
-	requestId: string;
-	options: PermissionOption[];
-	toolCall?: PermissionToolCall;
-};
+/** Permission tool call - directly from SDK's ToolCallUpdate */
+export type PermissionToolCall = SdkPermissionToolCall;
 
+// Permission result notification (project-specific socket transport wrapper)
 export type PermissionResultNotification = {
 	sessionId: string;
 	requestId: string;

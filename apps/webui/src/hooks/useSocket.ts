@@ -200,22 +200,7 @@ export function useSocket({
 				break;
 			}
 			case "permission_request": {
-				const payload = event.payload as {
-					sessionId: string;
-					requestId: string;
-					options: Array<{
-						optionId: string;
-						label: string;
-						description?: string | null;
-					}>;
-					toolCall?: {
-						toolCallId: string;
-						name?: string | null;
-						title: string;
-						command?: string | null;
-						args?: string[] | null;
-					};
-				};
+				const payload = event.payload as PermissionRequestPayload;
 				addPermissionRequest(event.sessionId, {
 					requestId: payload.requestId,
 					toolCall: payload.toolCall,
@@ -268,6 +253,11 @@ export function useSocket({
 				setCanceling?.(event.sessionId, false);
 				break;
 			}
+			case "unknown_update":
+			default:
+				// Forward-compatible: silently ignore unknown event kinds
+				// so the UI doesn't crash when SDK introduces new event types
+				break;
 		}
 	};
 

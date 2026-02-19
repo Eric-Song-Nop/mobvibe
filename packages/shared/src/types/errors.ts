@@ -50,9 +50,13 @@ export const createInternalError = (
 		detail,
 	});
 
-export const isProtocolMismatch = (error: unknown) => {
+export const isProtocolMismatch = (error: unknown): boolean => {
 	if (error instanceof Error) {
-		return /protocol/i.test(error.message);
+		// Check JSON-RPC error code -32002 (protocol version mismatch)
+		if ("code" in error && (error as { code: number }).code === -32002) {
+			return true;
+		}
+		return /protocol.*version|version.*mismatch|protocol/i.test(error.message);
 	}
 	return false;
 };
