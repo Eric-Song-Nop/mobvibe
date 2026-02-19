@@ -57,14 +57,14 @@ Master Secret (32 bytes, 用户唯一根凭证)
       └── 使用: crypto_secretbox_easy(payload, randomNonce, dek) → 每个事件
 ```
 
-**使用的 libsodium 原语：**
+**使用的加密原语（tweetnacl + @noble/hashes 纯 JS 实现）：**
 
-| 操作 | 算法 |
-|------|------|
-| 密钥派生 | `crypto_kdf_derive_from_key` (BLAKE2B) |
-| 认证签名 | `crypto_sign_detached` (Ed25519) |
-| DEK 包装 | `crypto_box_seal` (X25519 + XSalsa20-Poly1305) |
-| 事件加密 | `crypto_secretbox_easy` (XSalsa20-Poly1305) |
+| 操作 | 算法 | 实现 |
+|------|------|------|
+| 密钥派生 | BLAKE2B KDF | `@noble/hashes/blake2b` |
+| 认证签名 | Ed25519 | `tweetnacl.sign` |
+| DEK 包装 | X25519 + XSalsa20-Poly1305 | `tweetnacl.box` |
+| 事件加密 | XSalsa20-Poly1305 | `tweetnacl.secretbox` |
 
 ## 加密事件格式
 
@@ -140,8 +140,8 @@ Gateway 中间件验证流程 (`cli-handlers.ts`):
 
 | 文件 | 功能 |
 |------|------|
-| `types.ts` | `EncryptedPayload`, `CryptoKeyPair`, `SignedAuthToken`, `SodiumLib` 接口 |
-| `init.ts` | `initCrypto()` 初始化 libsodium, `getSodium()` 获取实例 |
+| `types.ts` | `EncryptedPayload`, `CryptoKeyPair`, `SignedAuthToken` 接口 |
+| `init.ts` | `initCrypto()`, `ensureCryptoReady()` — 初始化加密模块 |
 | `keys.ts` | `generateMasterSecret`, `deriveAuthKeyPair`, `deriveContentKeyPair`, `generateDEK`, `wrapDEK`, `unwrapDEK` |
 | `envelope.ts` | `encryptPayload`, `decryptPayload`, `isEncryptedPayload` |
 | `auth.ts` | `createSignedToken`, `verifySignedToken` |
@@ -275,14 +275,6 @@ CREATE INDEX device_keys_public_key_idx ON device_keys(public_key);
 ### acpSessions 变更
 
 新增 `wrapped_dek TEXT` 列，存储 base64 编码的密封 DEK。
-
-## libsodium ESM 兼容性
-
-`libsodium-wrappers` 的 ESM 入口使用相对导入 `./libsodium.mjs`，但 `libsodium` 是独立的 npm 包。解决方案：
-
-- **TypeScript**: 定义 `SodiumLib` 接口避免 CJS/ESM 类型冲突，使用动态 `import()` + cast
-- **Vite 生产构建**: 自定义 Rollup 插件 `resolve-libsodium` 将相对路径映射到 `node_modules/libsodium/`
-- **Vitest (Gateway)**: 在测试中 mock `@mobvibe/shared` 的 `initCrypto`/`verifySignedToken`
 
 ## 测试覆盖
 

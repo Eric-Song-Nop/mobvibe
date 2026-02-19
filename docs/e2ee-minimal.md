@@ -5,6 +5,9 @@
 > with static keys derived from a master secret, rather than the per-connection
 > `crypto_kx` + `crypto_secretstream` channel model described below.
 >
+> The crypto library has been migrated from `libsodium-wrappers` (WASM) to
+> `tweetnacl` + `@noble/hashes` (pure JS) for better cross-platform compatibility.
+>
 > See [`docs/e2ee-implementation.md`](./e2ee-implementation.md) for the implemented design.
 
 ## Goal
