@@ -137,8 +137,13 @@ e2eeCmd
 	.command("status")
 	.description("Show E2EE key status")
 	.action(async () => {
-		const { initCrypto, deriveAuthKeyPair, deriveContentKeyPair, getSodium } =
-			await import("@mobvibe/shared");
+		const {
+			initCrypto,
+			deriveAuthKeyPair,
+			deriveContentKeyPair,
+			base64ToUint8,
+			uint8ToBase64,
+		} = await import("@mobvibe/shared");
 		const credentials = await loadCredentials();
 		if (!credentials) {
 			console.log("Status: Not logged in");
@@ -146,21 +151,11 @@ e2eeCmd
 			return;
 		}
 		await initCrypto();
-		const sodium = getSodium();
-		const masterSecret = sodium.from_base64(
-			credentials.masterSecret,
-			sodium.base64_variants.ORIGINAL,
-		);
+		const masterSecret = base64ToUint8(credentials.masterSecret);
 		const authKp = deriveAuthKeyPair(masterSecret);
 		const contentKp = deriveContentKeyPair(masterSecret);
-		const authPub = sodium.to_base64(
-			authKp.publicKey,
-			sodium.base64_variants.ORIGINAL,
-		);
-		const contentPub = sodium.to_base64(
-			contentKp.publicKey,
-			sodium.base64_variants.ORIGINAL,
-		);
+		const authPub = uint8ToBase64(authKp.publicKey);
+		const contentPub = uint8ToBase64(contentKp.publicKey);
 		console.log("Status: E2EE enabled");
 		console.log(`Auth public key:    ${authPub.slice(0, 16)}...`);
 		console.log(`Content public key: ${contentPub.slice(0, 16)}...`);

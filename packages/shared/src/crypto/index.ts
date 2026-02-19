@@ -4,12 +4,14 @@ export {
 	encryptPayload,
 	isEncryptedPayload,
 } from "./envelope.js";
-export { getSodium, initCrypto } from "./init.js";
+export { initCrypto } from "./init.js";
 export {
+	base64ToUint8,
 	deriveAuthKeyPair,
 	deriveContentKeyPair,
 	generateDEK,
 	generateMasterSecret,
+	uint8ToBase64,
 	unwrapDEK,
 	wrapDEK,
 } from "./keys.js";
@@ -17,5 +19,4 @@ export type {
 	CryptoKeyPair,
 	EncryptedPayload,
 	SignedAuthToken,
-	SodiumLib,
 } from "./types.js";

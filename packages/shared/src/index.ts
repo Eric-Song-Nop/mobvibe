@@ -4,10 +4,10 @@ export type {
 	CryptoKeyPair,
 	EncryptedPayload,
 	SignedAuthToken,
-	SodiumLib,
 } from "./crypto/index.js";
 // Crypto (E2EE)
 export {
+	base64ToUint8,
 	createSignedToken,
 	decryptPayload,
 	deriveAuthKeyPair,
@@ -15,9 +15,9 @@ export {
 	encryptPayload,
 	generateDEK,
 	generateMasterSecret,
-	getSodium,
 	initCrypto,
 	isEncryptedPayload,
+	uint8ToBase64,
 	unwrapDEK,
 	verifySignedToken,
 	wrapDEK,

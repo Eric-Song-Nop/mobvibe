@@ -1,5 +1,5 @@
 import {
-	type CryptoKeyPair,
+	base64ToUint8,
 	createSignedToken,
 	decryptPayload,
 	deriveAuthKeyPair,
@@ -8,14 +8,15 @@ import {
 	encryptPayload,
 	generateDEK,
 	generateMasterSecret,
-	getSodium,
 	initCrypto,
 	isEncryptedPayload,
+	uint8ToBase64,
 	unwrapDEK,
 	verifySignedToken,
 	wrapDEK,
 } from "@mobvibe/shared";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import nacl from "tweetnacl";
+import { beforeAll, describe, expect, it } from "vitest";
 
 beforeAll(async () => {
 	await initCrypto();
@@ -63,16 +64,12 @@ describe("encrypt/decrypt (secretbox)", () => {
 		const dek = generateDEK();
 		const encrypted = encryptPayload({ secret: "data" }, dek);
 
-		const sodium = getSodium();
-		const raw = sodium.from_base64(
-			encrypted.c,
-			sodium.base64_variants.ORIGINAL,
-		);
+		const raw = base64ToUint8(encrypted.c);
 		// Flip a byte in the ciphertext (after the nonce)
 		raw[raw.length - 1] ^= 0xff;
 		const tampered: EncryptedPayload = {
 			t: "encrypted",
-			c: sodium.to_base64(raw, sodium.base64_variants.ORIGINAL),
+			c: uint8ToBase64(raw),
 		};
 
 		expect(() => decryptPayload(tampered, dek)).toThrow();
@@ -139,14 +136,15 @@ describe("sign/verify token", () => {
 		const token = createSignedToken(auth);
 		// Set timestamp to 10 minutes ago
 		const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-		const sodium = getSodium();
 		const tamperedPayload = { ...token.payload, timestamp: oldTime };
 		// Re-sign with the old timestamp so the signature is valid
-		const payloadBytes = sodium.from_string(JSON.stringify(tamperedPayload));
-		const sig = sodium.crypto_sign_detached(payloadBytes, auth.secretKey);
+		const payloadBytes = new TextEncoder().encode(
+			JSON.stringify(tamperedPayload),
+		);
+		const sig = nacl.sign.detached(payloadBytes, auth.secretKey);
 		const expiredToken = {
 			payload: tamperedPayload,
-			signature: sodium.to_base64(sig, sodium.base64_variants.ORIGINAL),
+			signature: uint8ToBase64(sig),
 		};
 
 		const result = verifySignedToken(expiredToken, 5 * 60 * 1000);
@@ -159,15 +157,11 @@ describe("sign/verify token", () => {
 
 		const token = createSignedToken(auth);
 		// Corrupt the signature
-		const sodium = getSodium();
-		const sigBytes = sodium.from_base64(
-			token.signature,
-			sodium.base64_variants.ORIGINAL,
-		);
+		const sigBytes = base64ToUint8(token.signature);
 		sigBytes[0] ^= 0xff;
 		const badToken = {
 			...token,
-			signature: sodium.to_base64(sigBytes, sodium.base64_variants.ORIGINAL),
+			signature: uint8ToBase64(sigBytes),
 		};
 
 		const result = verifySignedToken(badToken, 5 * 60 * 1000);

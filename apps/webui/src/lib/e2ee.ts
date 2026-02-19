@@ -1,12 +1,13 @@
 import {
+	base64ToUint8,
 	type CryptoKeyPair,
 	decryptPayload,
 	deriveAuthKeyPair,
 	deriveContentKeyPair,
 	encryptPayload,
-	getSodium,
 	initCrypto,
 	isEncryptedPayload,
+	uint8ToBase64,
 	unwrapDEK,
 } from "@mobvibe/core";
 import type { SessionEvent } from "@/lib/acp";
@@ -47,11 +48,7 @@ class E2EEManager {
 			return;
 		}
 		await initCrypto();
-		const sodium = getSodium();
-		const masterSecret = sodium.from_base64(
-			base64Secret,
-			sodium.base64_variants.ORIGINAL,
-		);
+		const masterSecret = base64ToUint8(base64Secret);
 		const contentKeyPair = deriveContentKeyPair(masterSecret);
 		this.contentKeyPairs.set(base64Secret, contentKeyPair);
 		await this.persistSecrets();
@@ -157,16 +154,9 @@ class E2EEManager {
 	}
 
 	private computeFingerprint(base64Secret: string): string {
-		const sodium = getSodium();
-		const masterSecret = sodium.from_base64(
-			base64Secret,
-			sodium.base64_variants.ORIGINAL,
-		);
+		const masterSecret = base64ToUint8(base64Secret);
 		const authKp = deriveAuthKeyPair(masterSecret);
-		const authPub = sodium.to_base64(
-			authKp.publicKey,
-			sodium.base64_variants.ORIGINAL,
-		);
+		const authPub = uint8ToBase64(authKp.publicKey);
 		return authPub.slice(0, 8);
 	}
 

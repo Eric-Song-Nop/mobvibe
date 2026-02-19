@@ -7,16 +7,13 @@ WORKDIR /app
 
 # Copy workspace root files
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
-COPY scripts/ ./scripts/
 
 # Copy all workspace packages needed by gateway
 COPY packages/shared ./packages/shared
 COPY apps/gateway ./apps/gateway
 
-# Install dependencies (postinstall runs fix-libsodium-esm.cjs)
+# Install dependencies
 RUN pnpm install --frozen-lockfile
-# Ensure libsodium ESM fix applied (postinstall may silently fail in pnpm strict mode)
-RUN node scripts/fix-libsodium-esm.cjs
 
 # Build all packages in order
 RUN pnpm --filter @mobvibe/shared build
@@ -31,14 +28,11 @@ WORKDIR /app
 
 # Copy built artifacts and package files
 COPY --from=builder /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/package.json ./
-COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/packages/shared ./packages/shared
 COPY --from=builder /app/apps/gateway ./apps/gateway
 
 # Install all dependencies (need drizzle-kit for migrations)
 RUN pnpm install --frozen-lockfile
-# Ensure libsodium ESM fix applied
-RUN node scripts/fix-libsodium-esm.cjs
 
 WORKDIR /app/apps/gateway
 

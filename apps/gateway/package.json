@@ -41,6 +41,7 @@
 		"@types/pg": "^8.11.0",
 		"drizzle-kit": "^0.31.4",
 		"tsx": "^4.19.3",
+		"tweetnacl": "^1.0.3",
 		"typescript": "~5.9.3",
 		"vitest": "^2.1.8"
 	}

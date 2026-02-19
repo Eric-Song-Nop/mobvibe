@@ -2,11 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionEvent } from "@/lib/acp";
 
 const mockInitCrypto = vi.fn().mockResolvedValue(undefined);
-const mockGetSodium = vi.fn(() => ({
-	from_base64: (s: string) => new Uint8Array(Buffer.from(s, "base64")),
-	to_base64: (arr: Uint8Array) => Buffer.from(arr).toString("base64"),
-	base64_variants: { ORIGINAL: 0 },
-}));
+const mockBase64ToUint8 = vi.fn(
+	(s: string) => new Uint8Array(Buffer.from(s, "base64")),
+);
+const mockUint8ToBase64 = vi.fn((arr: Uint8Array) =>
+	Buffer.from(arr).toString("base64"),
+);
 const mockDeriveContentKeyPair = vi.fn((_masterSecret: Uint8Array) => ({
 	publicKey: new Uint8Array([1, 2, 3]),
 	secretKey: new Uint8Array([4, 5, 6]),
@@ -33,7 +34,8 @@ const mockIsEncryptedPayload = vi.fn(
 
 vi.mock("@mobvibe/core", () => ({
 	initCrypto: mockInitCrypto,
-	getSodium: mockGetSodium,
+	base64ToUint8: mockBase64ToUint8,
+	uint8ToBase64: mockUint8ToBase64,
 	deriveContentKeyPair: mockDeriveContentKeyPair,
 	deriveAuthKeyPair: mockDeriveAuthKeyPair,
 	unwrapDEK: mockUnwrapDEK,
