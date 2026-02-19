@@ -1,20 +1,24 @@
-import { getSodium } from "./init.js";
+import nacl from "tweetnacl";
+import { ensureCryptoReady } from "./init.js";
+import { base64ToUint8, uint8ToBase64 } from "./keys.js";
 import type { EncryptedPayload } from "./types.js";
+
+const NONCE_BYTES = 24; // crypto_secretbox_NONCEBYTES
 
 export function encryptPayload(
 	payload: unknown,
 	dek: Uint8Array,
 ): EncryptedPayload {
-	const sodium = getSodium();
-	const plaintext = sodium.from_string(JSON.stringify(payload));
-	const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
-	const ciphertext = sodium.crypto_secretbox_easy(plaintext, nonce, dek);
+	ensureCryptoReady();
+	const plaintext = new TextEncoder().encode(JSON.stringify(payload));
+	const nonce = nacl.randomBytes(NONCE_BYTES);
+	const ciphertext = nacl.secretbox(plaintext, nonce, dek);
 	const combined = new Uint8Array(nonce.length + ciphertext.length);
 	combined.set(nonce);
 	combined.set(ciphertext, nonce.length);
 	return {
 		t: "encrypted",
-		c: sodium.to_base64(combined, sodium.base64_variants.ORIGINAL),
+		c: uint8ToBase64(combined),
 	};
 }
 
@@ -22,15 +26,15 @@ export function decryptPayload(
 	encrypted: EncryptedPayload,
 	dek: Uint8Array,
 ): unknown {
-	const sodium = getSodium();
-	const combined = sodium.from_base64(
-		encrypted.c,
-		sodium.base64_variants.ORIGINAL,
-	);
-	const nonce = combined.slice(0, sodium.crypto_secretbox_NONCEBYTES);
-	const ciphertext = combined.slice(sodium.crypto_secretbox_NONCEBYTES);
-	const plaintext = sodium.crypto_secretbox_open_easy(ciphertext, nonce, dek);
-	return JSON.parse(sodium.to_string(plaintext));
+	ensureCryptoReady();
+	const combined = base64ToUint8(encrypted.c);
+	const nonce = combined.slice(0, NONCE_BYTES);
+	const ciphertext = combined.slice(NONCE_BYTES);
+	const plaintext = nacl.secretbox.open(ciphertext, nonce, dek);
+	if (!plaintext) {
+		throw new Error("Decryption failed: invalid ciphertext or key");
+	}
+	return JSON.parse(new TextDecoder().decode(plaintext));
 }
 
 export function isEncryptedPayload(

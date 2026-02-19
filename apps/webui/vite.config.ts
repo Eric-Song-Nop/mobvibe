@@ -13,35 +13,6 @@ export default defineConfig({
 		},
 		dedupe: ["react", "react-dom"],
 	},
-	optimizeDeps: {
-		include: ["libsodium-wrappers"],
-	},
-	build: {
-		rollupOptions: {
-			plugins: [
-				{
-					name: "resolve-libsodium",
-					resolveId(source, importer) {
-						// libsodium-wrappers ESM imports "./libsodium.mjs" expecting it relative,
-						// but libsodium is a separate npm package
-						if (
-							source === "./libsodium.mjs" &&
-							importer?.includes("libsodium-wrappers")
-						) {
-							return {
-								id: path.resolve(
-									__dirname,
-									"../../node_modules/libsodium/dist/modules-esm/libsodium.mjs",
-								),
-								external: false,
-							};
-						}
-						return null;
-					},
-				},
-			],
-		},
-	},
 	server: {
 		host: "0.0.0.0",
 	},

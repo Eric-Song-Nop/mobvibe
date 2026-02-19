@@ -9,8 +9,8 @@ import {
 	deriveContentKeyPair,
 	encryptPayload,
 	generateDEK,
-	getSodium,
 	isEncryptedPayload,
+	uint8ToBase64,
 	wrapDEK,
 } from "@mobvibe/shared";
 
@@ -78,11 +78,7 @@ export class CliCryptoService {
 	 * Get the base64-encoded auth public key.
 	 */
 	getAuthPublicKeyBase64(): string {
-		const sodium = getSodium();
-		return sodium.to_base64(
-			this.authKeyPair.publicKey,
-			sodium.base64_variants.ORIGINAL,
-		);
+		return uint8ToBase64(this.authKeyPair.publicKey);
 	}
 
 	/**

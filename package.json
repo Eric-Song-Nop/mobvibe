@@ -19,8 +19,7 @@
 		"android:init": "pnpm --filter webui android:init",
 		"android:dev": "pnpm --filter webui android:dev",
 		"ios:init": "pnpm --filter webui ios:init",
-		"ios:dev": "pnpm --filter webui ios:dev",
-		"postinstall": "node scripts/fix-libsodium-esm.cjs"
+		"ios:dev": "pnpm --filter webui ios:dev"
 	},
 	"pnpm": {
 		"overrides": {

@@ -1,10 +1,11 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import {
+	base64ToUint8,
 	decryptPayload,
 	deriveContentKeyPair,
 	encryptPayload,
+	generateDEK,
 	generateMasterSecret,
-	getSodium,
 	initCrypto,
 	isEncryptedPayload,
 	unwrapDEK,
@@ -36,8 +37,7 @@ describe("CliCryptoService", () => {
 	});
 
 	test("getWrappedDek returns cached value after setSessionDek", () => {
-		const sodium = getSodium();
-		const dek = sodium.randombytes_buf(32);
+		const dek = generateDEK();
 		service.setSessionDek("session-set", dek);
 
 		const wrapped = service.getWrappedDek("session-set");
@@ -122,8 +122,7 @@ describe("CliCryptoService", () => {
 		expect(typeof pubKey).toBe("string");
 		expect(pubKey.length).toBeGreaterThan(0);
 		// Should be valid base64
-		const sodium = getSodium();
-		const decoded = sodium.from_base64(pubKey, sodium.base64_variants.ORIGINAL);
+		const decoded = base64ToUint8(pubKey);
 		expect(decoded).toBeInstanceOf(Uint8Array);
 	});
 

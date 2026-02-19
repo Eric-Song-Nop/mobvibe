@@ -8,10 +8,11 @@ import os from "node:os";
 import * as readline from "node:readline/promises";
 import { Writable } from "node:stream";
 import {
+	base64ToUint8,
 	deriveAuthKeyPair,
 	generateMasterSecret,
-	getSodium,
 	initCrypto,
+	uint8ToBase64,
 } from "@mobvibe/shared";
 import { logger } from "../lib/logger.js";
 import {
@@ -94,7 +95,6 @@ function readPassword(prompt: string): Promise<string> {
 
 export async function login(): Promise<LoginResult> {
 	await initCrypto();
-	const sodium = getSodium();
 
 	logger.info("login_prompt_start");
 	console.log("Mobvibe E2EE Login\n");
@@ -157,10 +157,7 @@ export async function login(): Promise<LoginResult> {
 		// Step 2: Generate master secret and derive public key
 		const masterSecret = generateMasterSecret();
 		const authKeyPair = deriveAuthKeyPair(masterSecret);
-		const publicKeyBase64 = sodium.to_base64(
-			authKeyPair.publicKey,
-			sodium.base64_variants.ORIGINAL,
-		);
+		const publicKeyBase64 = uint8ToBase64(authKeyPair.publicKey);
 
 		// Step 3: Register device public key
 		console.log("Registering device...");
@@ -189,10 +186,7 @@ export async function login(): Promise<LoginResult> {
 		}
 
 		// Step 4: Store master secret
-		const masterSecretBase64 = sodium.to_base64(
-			masterSecret,
-			sodium.base64_variants.ORIGINAL,
-		);
+		const masterSecretBase64 = uint8ToBase64(masterSecret);
 		const credentials: Credentials = {
 			masterSecret: masterSecretBase64,
 			createdAt: Date.now(),
@@ -236,16 +230,9 @@ export async function loginStatus(): Promise<void> {
 	const credentials = await loadCredentials();
 	if (credentials) {
 		await initCrypto();
-		const sodium = getSodium();
-		const masterSecret = sodium.from_base64(
-			credentials.masterSecret,
-			sodium.base64_variants.ORIGINAL,
-		);
+		const masterSecret = base64ToUint8(credentials.masterSecret);
 		const authKeyPair = deriveAuthKeyPair(masterSecret);
-		const pubKeyBase64 = sodium.to_base64(
-			authKeyPair.publicKey,
-			sodium.base64_variants.ORIGINAL,
-		);
+		const pubKeyBase64 = uint8ToBase64(authKeyPair.publicKey);
 
 		logger.info("login_status_logged_in");
 		console.log("Status: Logged in (E2EE)");

@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { getSodium, initCrypto } from "@mobvibe/shared";
+import { base64ToUint8, initCrypto } from "@mobvibe/shared";
 import { SessionManager } from "../acp/session-manager.js";
 import { getMasterSecret } from "../auth/credentials.js";
 import type { CliConfig } from "../config.js";
@@ -212,11 +212,7 @@ export class DaemonManager {
 			logger.warn("daemon_exit_missing_master_secret");
 			process.exit(1);
 		}
-		const sodium = getSodium();
-		const masterSecret = sodium.from_base64(
-			masterSecretBase64,
-			sodium.base64_variants.ORIGINAL,
-		);
+		const masterSecret = base64ToUint8(masterSecretBase64);
 		const cryptoService = new CliCryptoService(masterSecret);
 		logger.info("daemon_crypto_initialized");
 

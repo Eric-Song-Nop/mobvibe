@@ -37,7 +37,7 @@ export function setupCliHandlers(
 ) {
 	const cliNamespace = io.of("/cli");
 
-	// Ensure libsodium is ready for signature verification
+	// Ensure crypto is ready for signature verification
 	const cryptoReady = initCrypto();
 
 	cliNamespace.use(async (socket: Socket, next) => {
