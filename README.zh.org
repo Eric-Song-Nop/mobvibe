@@ -15,17 +15,34 @@ Mobvibe 是一个分布式 ACP（Agent Client Protocol）WebUI，用于本地 Ag
 ** 架构
 
 #+begin_src
-┌─────────────────────────┐     Socket.io      ┌──────────────┐     Socket.io     ┌───────────────┐
-│        webui            │◄──────────────────►│   gateway    │◄─────────────────►│  mobvibe-cli  │
-│  (React + Tauri v2)     │    /webui ns       │  (Express)   │    /cli ns        │   (Bun CLI)   │
-│  Web / Desktop / Mobile │                    └──────────────┘                   └───────┬───────┘
-└─────────────────────────┘                           │                                   │
-                                                 REST API                           stdin/stdout
-                                                 (:3005)                                  │
-                                                                                  ┌───────▼───────┐
-                                                                                  │   ACP CLI     │
-                                                                                  │ (claude-code) │
-                                                                                  └───────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  Cloudflare (CDN + WAF + DNS)                                                   │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐              │
+│  │ mobvibe.net       │  │ app.mobvibe.net   │  │ api.mobvibe.net   │              │
+│  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘              │
+└───────────┼──────────────────────┼──────────────────────┼───────────────────────┘
+            │                      │                      │
+┌───────────┼──────────────────────┼──────────────────────┼───────────────────────┐
+│  Render (Oregon)                 │                      │                       │
+│  ┌────────▼─────────┐  ┌────────▼─────────┐  ┌────────▼─────────┐             │
+│  │   Website        │  │     WebUI        │  │    Gateway       │◄──Socket.io──┐│
+│  │ (Static Site)    │  │  (Static Site)   │  │ (Docker/Express) │             ││
+│  └──────────────────┘  └──────────────────┘  └────────┬─────────┘             ││
+│                                                       │                       ││
+│                                              ┌────────▼─────────┐             ││
+│                                              │   PostgreSQL     │             ││
+│                                              └──────────────────┘             ││
+└───────────────────────────────────────────────────────────────────────────────┘│
+                                                                                 │
+                                                                   ┌─────────────▼─┐
+                                                                   │  mobvibe-cli   │
+                                                                   │   (Bun CLI)    │
+                                                                   └───────┬────────┘
+                                                                           │ stdin/stdout
+                                                                   ┌───────▼────────┐
+                                                                   │   ACP Agent    │
+                                                                   │ (claude-code)  │
+                                                                   └────────────────┘
 #+end_src
 
 ** 前置要求
@@ -270,7 +287,34 @@ pnpm ios:dev        # 开发
 
 ** 部署
 
-参见 [[file:docs/deploy-railway-netlify.md][docs/deploy-railway-netlify.md]] 了解 Railway + Netlify 部署指南。
+Mobvibe 部署在 [[https://render.com][Render]] 上，使用 [[https://cloudflare.com][Cloudflare]] 提供 DNS 和 CDN 加速。
+
+*** 生产环境
+
+| 服务        | 类型         | 域名              |
+|-------------+--------------+-------------------|
+| Gateway     | Docker       | =api.mobvibe.net=  |
+| WebUI       | 静态站点     | =app.mobvibe.net=  |
+| Website     | 静态站点     | =mobvibe.net=      |
+| PostgreSQL  | 数据库       | 内部访问           |
+
+所有服务运行在 Render Oregon 区域。Cloudflare 提供 CDN 缓存、DDoS 防护和 TLS 终端。
+
+配置定义在 =render.yaml=（Render Blueprint）中。
+
+*** 预览环境
+
+每个 Pull Request 会自动创建完整的预览环境（Gateway + WebUI + Website + PostgreSQL）。预览环境在 PR 合并或关闭后 3 天自动清理。
+
+*** Cloudflare DNS 配置
+
+| 记录              | 类型  | 值                                 | 代理   |
+|-------------------+-------+------------------------------------+--------|
+| =api.mobvibe.net=  | CNAME | =mobvibe-gateway.onrender.com=     | 代理   |
+| =app.mobvibe.net=  | CNAME | =mobvibe-webui.onrender.com=       | 代理   |
+| =mobvibe.net=      | CNAME | =mobvibe-website.onrender.com=     | 代理   |
+
+SSL/TLS 模式：Full (Strict)。初次配置先设为 DNS Only，等 Render 签发 TLS 证书后再切换为 Proxied。
 
 ** 文档
 

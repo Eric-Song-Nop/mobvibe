@@ -152,6 +152,13 @@ React/UI（webui）
 - webui: `VITE_GATEWAY_URL`。
 - mobvibe-cli: `MOBVIBE_GATEWAY_URL`, `ANTHROPIC_AUTH_TOKEN`。
 
+## 部署
+
+- 平台：Render (Blueprint) + Cloudflare (DNS/CDN)
+- 配置文件：`render.yaml`（仓库根目录）
+- 域名：`api.mobvibe.net`（Gateway）、`app.mobvibe.net`（WebUI）、`mobvibe.net`（Website）
+- Preview 环境：每个 PR 自动创建，3 天后过期
+
 ## 其他说明
 
 - 不要提交 `node_modules/`, `.venv/`, `__pycache__/`, `.DS_Store`。

@@ -15,17 +15,34 @@ Mobvibe is a distributed ACP (Agent Client Protocol) WebUI for local agent workf
 ** Architecture
 
 #+begin_src
-┌─────────────────────────┐     Socket.io      ┌──────────────┐     Socket.io     ┌───────────────┐
-│        webui            │◄──────────────────►│   gateway    │◄─────────────────►│  mobvibe-cli  │
-│  (React + Tauri v2)     │    /webui ns       │  (Express)   │    /cli ns        │   (Bun CLI)   │
-│  Web / Desktop / Mobile │                    └──────────────┘                   └───────┬───────┘
-└─────────────────────────┘                           │                                   │
-                                                 REST API                           stdin/stdout
-                                                 (:3005)                                  │
-                                                                                  ┌───────▼───────┐
-                                                                                  │   ACP CLI     │
-                                                                                  │ (claude-code) │
-                                                                                  └───────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  Cloudflare (CDN + WAF + DNS)                                                   │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐              │
+│  │ mobvibe.net       │  │ app.mobvibe.net   │  │ api.mobvibe.net   │              │
+│  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘              │
+└───────────┼──────────────────────┼──────────────────────┼───────────────────────┘
+            │                      │                      │
+┌───────────┼──────────────────────┼──────────────────────┼───────────────────────┐
+│  Render (Oregon)                 │                      │                       │
+│  ┌────────▼─────────┐  ┌────────▼─────────┐  ┌────────▼─────────┐             │
+│  │   Website        │  │     WebUI        │  │    Gateway       │◄──Socket.io──┐│
+│  │ (Static Site)    │  │  (Static Site)   │  │ (Docker/Express) │             ││
+│  └──────────────────┘  └──────────────────┘  └────────┬─────────┘             ││
+│                                                       │                       ││
+│                                              ┌────────▼─────────┐             ││
+│                                              │   PostgreSQL     │             ││
+│                                              └──────────────────┘             ││
+└───────────────────────────────────────────────────────────────────────────────┘│
+                                                                                 │
+                                                                   ┌─────────────▼─┐
+                                                                   │  mobvibe-cli   │
+                                                                   │   (Bun CLI)    │
+                                                                   └───────┬────────┘
+                                                                           │ stdin/stdout
+                                                                   ┌───────▼────────┐
+                                                                   │   ACP Agent    │
+                                                                   │ (claude-code)  │
+                                                                   └────────────────┘
 #+end_src
 
 ** Prerequisites
@@ -270,7 +287,34 @@ pnpm ios:dev        # Development
 
 ** Deployment
 
-See [[file:docs/deploy-railway-netlify.md][docs/deploy-railway-netlify.md]] for Railway + Netlify deployment guide.
+Mobvibe is deployed on [[https://render.com][Render]] with [[https://cloudflare.com][Cloudflare]] for DNS and CDN.
+
+*** Production
+
+| Service     | Type         | Domain            |
+|-------------+--------------+-------------------|
+| Gateway     | Docker       | =api.mobvibe.net=  |
+| WebUI       | Static Site  | =app.mobvibe.net=  |
+| Website     | Static Site  | =mobvibe.net=      |
+| PostgreSQL  | Database     | Internal           |
+
+All services run in Render's Oregon region. Cloudflare provides CDN caching, DDoS protection, and TLS termination.
+
+Configuration is defined in =render.yaml= (Render Blueprint).
+
+*** Preview Environments
+
+Every pull request automatically creates a full preview environment (Gateway + WebUI + Website + PostgreSQL). Preview environments expire 3 days after the PR is merged or closed.
+
+*** Cloudflare DNS Setup
+
+| Record            | Type  | Value                              | Proxy  |
+|-------------------+-------+------------------------------------+--------|
+| =api.mobvibe.net=  | CNAME | =mobvibe-gateway.onrender.com=     | Proxied |
+| =app.mobvibe.net=  | CNAME | =mobvibe-webui.onrender.com=       | Proxied |
+| =mobvibe.net=      | CNAME | =mobvibe-website.onrender.com=     | Proxied |
+
+SSL/TLS mode: Full (Strict). Set DNS Only first, switch to Proxied after Render issues TLS certificates.
 
 ** Documentation
 
