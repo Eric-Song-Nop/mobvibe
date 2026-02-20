@@ -161,6 +161,12 @@ logger.info("better_auth_enabled");
 
 app.use(express.json());
 
+// Health check — mounted before auth-guarded routers so Render's
+// health probe (unauthenticated GET /health) is never blocked.
+const healthRouter = express.Router();
+setupHealthRoutes(healthRouter);
+app.use("/", healthRouter);
+
 // Machine routes (for CLI registration)
 const machineRouter = express.Router();
 setupMachineRoutes(machineRouter, cliRegistry);
@@ -179,10 +185,6 @@ app.use("/acp", acpRouter);
 const fsRouter = express.Router();
 setupFsRoutes(fsRouter, sessionRouter);
 app.use("/fs", fsRouter);
-
-const healthRouter = express.Router();
-setupHealthRoutes(healthRouter);
-app.use("/", healthRouter);
 
 // Start server
 const shouldStartServer = process.env.NODE_ENV !== "test";
