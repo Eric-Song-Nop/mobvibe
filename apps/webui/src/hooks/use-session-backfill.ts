@@ -1,5 +1,6 @@
 import type { SessionEvent, SessionEventsResponse } from "@mobvibe/shared";
 import { useCallback, useRef } from "react";
+import { isInTauri } from "@/lib/auth";
 
 type BackfillState = {
 	sessionId: string;
@@ -67,7 +68,7 @@ export function useSessionBackfill({
 				method: "GET",
 				headers,
 				signal,
-				credentials: "include",
+				credentials: isInTauri() ? "omit" : "include",
 			});
 
 			if (!response.ok) {
