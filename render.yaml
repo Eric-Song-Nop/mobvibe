@@ -9,10 +9,12 @@ services:
     runtime: docker
     dockerfilePath: ./apps/gateway/Dockerfile
     dockerContext: .
-    plan: starter
+    plan: pro
     region: oregon
     numInstances: 1
     healthCheckPath: /health
+    domains:
+      - api.mobvibe.net
     previews:
       plan: starter
       numInstances: 1
@@ -47,6 +49,8 @@ services:
     runtime: static
     buildCommand: pnpm install && pnpm --filter @mobvibe/shared build && pnpm --filter @mobvibe/core build && pnpm --filter webui build
     staticPublishPath: ./apps/webui/dist
+    domains:
+      - app.mobvibe.net
     routes:
       - type: rewrite
         source: /*
@@ -61,6 +65,22 @@ services:
           name: mobvibe-gateway
           type: web
           envVarKey: RENDER_EXTERNAL_URL
+
+  # --- Website (Landing Page) ---
+  - type: web
+    name: mobvibe-website
+    runtime: static
+    buildCommand: pnpm install && pnpm --filter website build
+    staticPublishPath: ./apps/website/dist
+    domains:
+      - mobvibe.net
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
 
 databases:
   - name: mobvibe-postgres
