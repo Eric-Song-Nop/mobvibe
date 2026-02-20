@@ -96,10 +96,6 @@ class GatewaySocket {
 		return Array.from(this.subscribedSessions);
 	}
 
-	sendPermissionDecision(payload: PermissionDecisionPayload) {
-		this.socket?.emit("permission:decision", payload);
-	}
-
 	onSessionAttached(handler: (payload: SessionAttachedPayload) => void) {
 		this.socket?.on("session:attached", handler);
 		return () => {

@@ -1,9 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-	getBackendCapability,
-	hasAnyBackendCapability,
-	useMachinesStore,
-} from "../machines-store";
+import { getBackendCapability, useMachinesStore } from "../machines-store";
 
 const resetStore = () => {
 	useMachinesStore.setState({
@@ -145,31 +141,6 @@ describe("machines-store", () => {
 			expect(
 				getBackendCapability(machine, "backend-a", "load"),
 			).toBeUndefined();
-		});
-	});
-
-	describe("hasAnyBackendCapability", () => {
-		it("returns true if any backend has capability", () => {
-			const machine = {
-				machineId: "m1",
-				connected: true,
-				backendCapabilities: {
-					"backend-a": { list: true, load: false },
-					"backend-b": { list: true, load: true },
-				},
-			};
-			expect(hasAnyBackendCapability(machine, "load")).toBe(true);
-		});
-
-		it("returns false if no backend has capability", () => {
-			const machine = {
-				machineId: "m1",
-				connected: true,
-				backendCapabilities: {
-					"backend-a": { list: true, load: false },
-				},
-			};
-			expect(hasAnyBackendCapability(machine, "load")).toBe(false);
 		});
 	});
 });

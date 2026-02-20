@@ -151,11 +151,6 @@ export type SendMessageResult = {
 	stopReason: StopReason;
 };
 
-// Close session RPC params
-export type CloseSessionParams = {
-	sessionId: string;
-};
-
 // Cancel session RPC params
 export type CancelSessionParams = {
 	sessionId: string;
@@ -297,7 +292,6 @@ export interface GatewayToCliEvents {
 
 	// RPC requests
 	"rpc:session:create": (request: RpcRequest<CreateSessionParams>) => void;
-	"rpc:session:close": (request: RpcRequest<CloseSessionParams>) => void;
 	"rpc:session:cancel": (request: RpcRequest<CancelSessionParams>) => void;
 	"rpc:session:mode": (request: RpcRequest<SetSessionModeParams>) => void;
 	"rpc:session:model": (request: RpcRequest<SetSessionModelParams>) => void;
@@ -340,7 +334,6 @@ export interface GatewayToCliEvents {
 export interface WebuiToGatewayEvents {
 	"subscribe:session": (payload: { sessionId: string }) => void;
 	"unsubscribe:session": (payload: { sessionId: string }) => void;
-	"permission:decision": (payload: PermissionDecisionPayload) => void;
 }
 
 // Gateway -> Webui events
@@ -353,7 +346,6 @@ export interface GatewayToWebuiEvents {
 	"permission:request": (payload: PermissionRequestPayload) => void;
 	"permission:result": (payload: PermissionDecisionPayload) => void;
 	"cli:status": (payload: CliStatusPayload) => void;
-	"sessions:list": (sessions: SessionSummary[]) => void;
 	"sessions:changed": (payload: SessionsChangedPayload) => void;
 }
 

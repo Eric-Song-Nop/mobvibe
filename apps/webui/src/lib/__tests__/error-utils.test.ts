@@ -3,7 +3,6 @@ import i18n from "@/i18n";
 import { ApiError, type ErrorDetail } from "../api";
 import {
 	buildSessionNotReadyError,
-	buildStreamDisconnectedError,
 	createFallbackError,
 	isErrorDetail,
 	normalizeError,
@@ -200,28 +199,6 @@ describe("error-utils", () => {
 				scope: 123,
 			};
 			expect(isErrorDetail(wrongScope)).toBe(false);
-		});
-	});
-
-	describe("buildStreamDisconnectedError", () => {
-		it("should create an error with STREAM_DISCONNECTED code", () => {
-			const error = buildStreamDisconnectedError();
-			expect(error.code).toBe("STREAM_DISCONNECTED");
-		});
-
-		it("should have appropriate message", () => {
-			const error = buildStreamDisconnectedError();
-			expect(error.message).toBe(i18n.t("errors.streamDisconnected"));
-		});
-
-		it("should mark as retryable", () => {
-			const error = buildStreamDisconnectedError();
-			expect(error.retryable).toBe(true);
-		});
-
-		it("should have stream scope", () => {
-			const error = buildStreamDisconnectedError();
-			expect(error.scope).toBe("stream");
 		});
 	});
 

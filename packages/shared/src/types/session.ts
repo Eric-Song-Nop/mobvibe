@@ -111,33 +111,9 @@ export type AgentSessionCapabilities = {
 	load: boolean;
 };
 
-/** Parameters for discovering sessions from agent */
-export type DiscoverSessionsParams = {
-	machineId?: string;
-	cwd?: string;
-	backendId: string;
-	cursor?: string;
-};
-
 /** Result of discovering sessions */
 export type DiscoverSessionsResult = {
 	sessions: AcpSessionInfo[];
 	capabilities: AgentSessionCapabilities;
 	nextCursor?: string;
-};
-
-/** Parameters for loading a historical session */
-export type LoadSessionParams = {
-	sessionId: string;
-	cwd: string;
-	backendId: string;
-	machineId?: string;
-};
-
-/** Parameters for reloading a historical session */
-export type ReloadSessionParams = {
-	sessionId: string;
-	cwd: string;
-	backendId: string;
-	machineId?: string;
 };

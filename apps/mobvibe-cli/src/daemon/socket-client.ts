@@ -312,28 +312,6 @@ export class SocketClient extends EventEmitter {
 			}
 		});
 
-		// Session close
-		this.socket.on("rpc:session:close", async (request) => {
-			try {
-				logger.info(
-					{ requestId: request.requestId, sessionId: request.params.sessionId },
-					"rpc_session_close",
-				);
-				await sessionManager.closeSession(request.params.sessionId);
-				this.sendRpcResponse(request.requestId, { ok: true });
-			} catch (error) {
-				logger.error(
-					{
-						err: error,
-						requestId: request.requestId,
-						sessionId: request.params.sessionId,
-					},
-					"rpc_session_close_error",
-				);
-				this.sendRpcError(request.requestId, error);
-			}
-		});
-
 		// Session cancel
 		this.socket.on("rpc:session:cancel", async (request) => {
 			try {

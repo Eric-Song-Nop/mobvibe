@@ -47,16 +47,6 @@ export const normalizeError = (
 };
 
 /**
- * Creates an ErrorDetail for a disconnected SSE stream.
- */
-export const buildStreamDisconnectedError = (): ErrorDetail => ({
-	code: "STREAM_DISCONNECTED",
-	message: i18n.t("errors.streamDisconnected"),
-	retryable: true,
-	scope: "stream",
-});
-
-/**
  * Creates an ErrorDetail for when a session is not ready.
  */
 export const buildSessionNotReadyError = (): ErrorDetail => ({

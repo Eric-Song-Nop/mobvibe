@@ -3,7 +3,6 @@ import type {
 	ArchiveSessionParams,
 	BulkArchiveSessionsParams,
 	CancelSessionParams,
-	CloseSessionParams,
 	CreateSessionParams,
 	DiscoverSessionsRpcParams,
 	DiscoverSessionsRpcResult,
@@ -159,7 +158,7 @@ export class SessionRouter {
 	 * @param userId - User ID for authorization
 	 */
 	async archiveSession(
-		params: CloseSessionParams,
+		params: ArchiveSessionParams,
 		userId: string,
 	): Promise<{ ok: boolean }> {
 		logger.info(

@@ -1,7 +1,6 @@
 import type { Server } from "socket.io";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CliRegistry } from "../../services/cli-registry.js";
-import type { SessionRouter } from "../../services/session-router.js";
 import { setupWebuiHandlers } from "../webui-handlers.js";
 
 const { mockGetSession } = vi.hoisted(() => ({
@@ -53,9 +52,7 @@ describe("webui-handlers auth middleware", () => {
 			onSessionsChanged: vi.fn(),
 		} as unknown as CliRegistry;
 
-		const mockSessionRouter = {} as unknown as SessionRouter;
-
-		setupWebuiHandlers(io, mockCliRegistry, mockSessionRouter);
+		setupWebuiHandlers(io, mockCliRegistry);
 
 		authMiddleware = capturedMiddleware!;
 	});

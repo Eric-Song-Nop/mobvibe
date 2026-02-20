@@ -546,12 +546,6 @@ export class SessionManager {
 		});
 	}
 
-	listPendingPermissions(sessionId: string): PermissionRequestPayload[] {
-		return Array.from(this.permissionRequests.values())
-			.filter((record) => record.sessionId === sessionId)
-			.map((record) => this.buildPermissionRequestPayload(record));
-	}
-
 	resolvePermissionRequest(
 		sessionId: string,
 		requestId: string,
@@ -1032,24 +1026,6 @@ export class SessionManager {
 	 */
 	getBackendCapabilities(): Record<string, AgentSessionCapabilities> {
 		return Object.fromEntries(this.backendCapabilities);
-	}
-
-	/**
-	 * Get previously discovered sessions from WAL storage.
-	 * Filters out sessions that are already loaded.
-	 * @param backendId Optional backend ID to filter by
-	 * @returns List of discovered sessions not currently loaded
-	 */
-	getPersistedDiscoveredSessions(backendId?: string): AcpSessionInfo[] {
-		return this.walStore
-			.getDiscoveredSessions(backendId)
-			.filter((s) => !this.sessions.has(s.sessionId) && s.cwd !== undefined)
-			.map((s) => ({
-				sessionId: s.sessionId,
-				cwd: s.cwd as string, // Safe because we filter above
-				title: s.title,
-				updatedAt: s.agentUpdatedAt,
-			}));
 	}
 
 	/**

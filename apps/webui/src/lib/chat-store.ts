@@ -1420,20 +1420,3 @@ export const useChatStore = create<ChatState>()(
 		},
 	),
 );
-
-/**
- * Get session cursor for backfill purposes.
- * Use this to determine where to start backfilling events.
- */
-export function getSessionCursor(sessionId: string): {
-	revision: number;
-	lastAppliedSeq: number;
-} | null {
-	const state = useChatStore.getState();
-	const session = state.sessions[sessionId];
-	if (!session || session.revision === undefined) return null;
-	return {
-		revision: session.revision,
-		lastAppliedSeq: session.lastAppliedSeq ?? 0,
-	};
-}

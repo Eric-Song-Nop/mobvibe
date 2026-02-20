@@ -56,24 +56,6 @@ export const setGatewayUrl = async (url: string): Promise<void> => {
 };
 
 /**
- * Clear the stored gateway URL from Tauri Store.
- */
-export const clearGatewayUrl = async (): Promise<void> => {
-	if (!isInTauri()) {
-		return;
-	}
-
-	try {
-		const { load } = await import("@tauri-apps/plugin-store");
-		const store = await load("gateway.json");
-		await store.delete("gatewayUrl");
-		await store.save();
-	} catch {
-		// Store not available
-	}
-};
-
-/**
  * Get the default gateway URL without checking Tauri Store.
  * Useful for synchronous operations where async is not possible.
  */

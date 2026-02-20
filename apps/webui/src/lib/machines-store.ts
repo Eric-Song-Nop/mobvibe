@@ -127,14 +127,3 @@ export const getBackendCapability = (
 	if (!machine?.backendCapabilities || !backendId) return undefined;
 	return machine.backendCapabilities[backendId]?.[capability];
 };
-
-/** Check if any backend supports a capability */
-export const hasAnyBackendCapability = (
-	machine: Machine | undefined,
-	capability: keyof AgentSessionCapabilities,
-): boolean => {
-	if (!machine?.backendCapabilities) return false;
-	return Object.values(machine.backendCapabilities).some(
-		(caps) => caps[capability] === true,
-	);
-};

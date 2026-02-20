@@ -38,49 +38,6 @@ export async function findDeviceByPublicKey(
 	}
 }
 
-export type MachineTokenValidation = {
-	machineId: string;
-	userId: string;
-	name: string;
-	hostname: string;
-};
-
-/**
- * Validate a machine token and get machine/user info.
- * Returns null if token is invalid.
- */
-export async function validateMachineToken(
-	machineToken: string,
-): Promise<MachineTokenValidation | null> {
-	try {
-		const result = await db
-			.select({
-				id: machines.id,
-				userId: machines.userId,
-				name: machines.name,
-				hostname: machines.hostname,
-			})
-			.from(machines)
-			.where(eq(machines.machineToken, machineToken))
-			.limit(1);
-
-		if (result.length === 0) {
-			return null;
-		}
-
-		const machine = result[0];
-		return {
-			machineId: machine.id,
-			userId: machine.userId,
-			name: machine.name,
-			hostname: machine.hostname,
-		};
-	} catch (error) {
-		logger.error({ err: error }, "db_validate_machine_token_error");
-		return null;
-	}
-}
-
 /**
  * Create or update a machine record.
  * Prefers legacy raw machineId for the same user; otherwise uses a user-scoped id.

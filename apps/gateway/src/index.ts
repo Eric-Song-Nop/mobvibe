@@ -57,7 +57,7 @@ const cliRegistry = new CliRegistry();
 const sessionRouter = new SessionRouter(cliRegistry);
 
 // Setup webui handlers first to get the emitter function
-const webuiEmitter = setupWebuiHandlers(io, cliRegistry, sessionRouter);
+const webuiEmitter = setupWebuiHandlers(io, cliRegistry);
 
 // Setup CLI handlers with webui emitter
 // Note: session:update, session:error, and terminal:output are deprecated
@@ -180,7 +180,7 @@ setupFsRoutes(fsRouter, sessionRouter);
 app.use("/fs", fsRouter);
 
 const healthRouter = express.Router();
-setupHealthRoutes(healthRouter, cliRegistry);
+setupHealthRoutes(healthRouter);
 app.use("/", healthRouter);
 
 // Start server

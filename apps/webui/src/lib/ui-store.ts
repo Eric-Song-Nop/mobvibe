@@ -58,7 +58,6 @@ type UiState = {
 	setDraftBackendId: (value?: string) => void;
 	setDraftCwd: (value?: string) => void;
 	setSelectedWorkspace: (machineId: string, cwd?: string) => void;
-	setMachineExpanded: (machineId: string, expanded: boolean) => void;
 	toggleMachineExpanded: (machineId: string) => void;
 	setMachineSidebarWidth: (width: number) => void;
 	setSessionSidebarWidth: (width: number) => void;
@@ -109,10 +108,6 @@ export const useUiStore = create<UiState>((set) => ({
 			}
 			return { selectedWorkspaceByMachine: next };
 		}),
-	setMachineExpanded: (machineId, expanded) =>
-		set((state) => ({
-			expandedMachines: { ...state.expandedMachines, [machineId]: expanded },
-		})),
 	toggleMachineExpanded: (machineId) =>
 		set((state) => ({
 			expandedMachines: {

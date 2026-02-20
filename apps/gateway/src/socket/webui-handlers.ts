@@ -9,7 +9,6 @@ import type { Server, Socket } from "socket.io";
 import { auth } from "../lib/auth.js";
 import { logger } from "../lib/logger.js";
 import type { CliRegistry } from "../services/cli-registry.js";
-import type { SessionRouter } from "../services/session-router.js";
 
 /**
  * Extended Socket with user context.
@@ -21,11 +20,7 @@ interface AuthenticatedSocket extends Socket {
 	};
 }
 
-export function setupWebuiHandlers(
-	io: Server,
-	cliRegistry: CliRegistry,
-	sessionRouter: SessionRouter,
-) {
+export function setupWebuiHandlers(io: Server, cliRegistry: CliRegistry) {
 	const webuiNamespace = io.of("/webui");
 
 	// Track session subscriptions with user context
@@ -176,54 +171,6 @@ export function setupWebuiHandlers(
 			logger.info({ socketId: socket.id, sessionId }, "webui_unsubscribed");
 		});
 
-		// Permission decision from webui - with ownership check
-		socket.on(
-			"permission:decision",
-			async (payload: PermissionDecisionPayload) => {
-				try {
-					// Check ownership if auth enabled
-					if (
-						userId &&
-						!cliRegistry.isSessionOwnedByUser(payload.sessionId, userId)
-					) {
-						logger.warn(
-							{
-								sessionId: payload.sessionId,
-								requestId: payload.requestId,
-								userId,
-							},
-							"permission_decision_denied",
-						);
-						socket.emit("permission:error", {
-							sessionId: payload.sessionId,
-							requestId: payload.requestId,
-							error: "Not authorized to make decisions for this session",
-						});
-						return;
-					}
-
-					await sessionRouter.sendPermissionDecision(payload, userId!);
-					logger.info(
-						{
-							sessionId: payload.sessionId,
-							requestId: payload.requestId,
-							userId,
-						},
-						"permission_decision_sent",
-					);
-				} catch (error) {
-					logger.error(
-						{
-							error,
-							sessionId: payload.sessionId,
-							requestId: payload.requestId,
-						},
-						"permission_decision_error",
-					);
-				}
-			},
-		);
-
 		// Disconnect
 		socket.on("disconnect", () => {
 			// Remove from all subscriptions
@@ -237,7 +184,6 @@ export function setupWebuiHandlers(
 
 	// Return emitter functions for CLI handlers to use
 	return {
-		emitToSubscribers,
 		emitToUser,
 		emitSessionEvent: (event: SessionEvent) => {
 			emitToSubscribers(event.sessionId, "session:event", event);
