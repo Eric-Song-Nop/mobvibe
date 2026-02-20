@@ -81,6 +81,11 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
+      - key: VITE_WEB_APP_URL
+        fromService:
+          name: mobvibe-webui
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
 
 databases:
   - name: mobvibe-postgres

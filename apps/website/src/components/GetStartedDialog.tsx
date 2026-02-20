@@ -20,6 +20,8 @@ interface GetStartedDialogProps {
 }
 
 const CLI_COMMAND = "npx @mobvibe/cli login";
+const WEB_APP_URL =
+	import.meta.env.VITE_WEB_APP_URL || "https://app.mobvibe.net";
 
 export function GetStartedDialog({
 	children,
@@ -87,7 +89,7 @@ export function GetStartedDialog({
 						</span>
 						<div className="flex flex-wrap gap-2">
 							<a
-								href="https://app.mobvibe.net"
+								href={WEB_APP_URL}
 								target="_blank"
 								rel="noopener noreferrer"
 							>
