@@ -2,7 +2,7 @@ import { tauri } from "@daveyplate/better-auth-tauri/plugin";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { bearer, openAPI } from "better-auth/plugins";
-import { getGatewayConfig } from "../config.js";
+import { getGatewayConfig, tauriOrigins } from "../config.js";
 import { db } from "../db/index.js";
 import * as schema from "../db/schema.js";
 import { sendEmail } from "./email.js";
@@ -13,13 +13,6 @@ import {
 import { logger } from "./logger.js";
 
 const config = getGatewayConfig();
-
-const tauriOrigins = [
-	"tauri://localhost",
-	"http://tauri.localhost",
-	"https://tauri.localhost",
-	"mobvibe://",
-];
 
 const trustedOrigins = [
 	config.siteUrl,

@@ -5,7 +5,7 @@ import { toNodeHandler } from "better-auth/node";
 import cors from "cors";
 import express, { type Express } from "express";
 import { Server } from "socket.io";
-import { getGatewayConfig } from "./config.js";
+import { getGatewayConfig, tauriOrigins } from "./config.js";
 import { closeDb } from "./db/index.js";
 import { auth } from "./lib/auth.js";
 import { logger } from "./lib/logger.js";
@@ -20,20 +20,21 @@ import { setupCliHandlers } from "./socket/cli-handlers.js";
 import { setupWebuiHandlers } from "./socket/webui-handlers.js";
 
 const config = getGatewayConfig();
-const tauriOrigins = [
-	"tauri://localhost",
-	"http://tauri.localhost",
-	"https://tauri.localhost",
-	"mobvibe://",
-];
 const allowedOrigins = [...config.corsOrigins, ...tauriOrigins];
 
 const isAllowedOrigin = (origin: string): boolean => {
-	return allowedOrigins.includes(origin);
+	const allowed = allowedOrigins.includes(origin);
+	if (!allowed) {
+		logger.warn({ origin }, "cors_origin_rejected");
+	}
+	return allowed;
 };
 
 const app: Express = express();
 const httpServer = createServer(app);
+
+// Trust Cloudflare and Render reverse proxy for correct client IP
+app.set("trust proxy", 1);
 
 // Socket.io server
 const io = new Server(httpServer, {

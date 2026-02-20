@@ -25,6 +25,14 @@ const parseOrigins = (value: string | undefined) => {
 		.filter((origin) => origin.length > 0);
 };
 
+/** Origins used by Tauri desktop and mobile apps. */
+export const tauriOrigins = [
+	"tauri://localhost",
+	"http://tauri.localhost",
+	"https://tauri.localhost",
+	"mobvibe://",
+];
+
 export const getGatewayConfig = (): GatewayConfig => {
 	const env = process.env;
 	return {
