@@ -20,14 +20,6 @@ export type SessionInfoPayload = {
 	_meta?: Record<string, unknown> | null;
 };
 
-// Note: PermissionDecisionResponse kept here because gateway actually returns
-// the decision payload back, which differs from the shared CancelSessionResponse.
-export type PermissionDecisionResponse = {
-	sessionId: string;
-	requestId: string;
-	outcome: import("@mobvibe/shared").PermissionOutcome;
-};
-
 // Extraction utility functions (these work with SDK types)
 export const extractTextChunk = (
 	notification: SessionNotification,

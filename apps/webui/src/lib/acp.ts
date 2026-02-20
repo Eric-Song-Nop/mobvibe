@@ -5,6 +5,7 @@ export type {
 	AvailableCommand,
 	CliStatusPayload,
 	ContentBlock,
+	EmbeddedResource,
 	GatewayToWebuiEvents,
 	ImageContent,
 	PermissionDecisionPayload,
@@ -15,9 +16,7 @@ export type {
 	PermissionRequestPayload,
 	PermissionResultNotification,
 	PermissionToolCall,
-	// Backwards-compatible aliases (still in use)
-	ResourceContent,
-	ResourceLinkContent,
+	ResourceLink,
 	SessionAttachedPayload,
 	SessionDetachedPayload,
 	SessionEvent,
@@ -34,13 +33,6 @@ export type {
 	ToolCallUpdate,
 	WebuiToGatewayEvents,
 } from "@mobvibe/shared";
-
-// Re-export extraction helper types and functions from acp-types
-export type {
-	SessionInfoPayload,
-	SessionModeUpdate,
-	SessionTextChunk,
-} from "./acp-types";
 
 export {
 	extractAvailableCommandsUpdate,

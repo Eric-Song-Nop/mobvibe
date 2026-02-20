@@ -411,3 +411,21 @@ export type SessionFsFilePreviewResponse = {
 	content: string;
 	mimeType?: string;
 };
+
+export type MachinesResponse = {
+	machines: Array<{
+		id: string;
+		name?: string | null;
+		hostname?: string | null;
+		platform?: string | null;
+		isOnline: boolean;
+		lastSeenAt?: string | null;
+		createdAt?: string | null;
+	}>;
+};
+
+export type PermissionDecisionResponse = {
+	sessionId: string;
+	requestId: string;
+	outcome: PermissionOutcome;
+};

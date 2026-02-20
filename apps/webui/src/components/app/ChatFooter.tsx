@@ -22,11 +22,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import type {
-	AvailableCommand,
-	ContentBlock,
-	ResourceLinkContent,
-} from "@/lib/acp";
+import type { AvailableCommand, ContentBlock, ResourceLink } from "@/lib/acp";
 import {
 	fetchSessionFsResources,
 	type SessionFsResourceEntry,
@@ -56,15 +52,14 @@ export type ChatFooterProps = {
 };
 
 type ResourceToken = {
-	resource: ResourceLinkContent;
+	resource: ResourceLink;
 	label: string;
 	start: number;
 	end: number;
 	index: number;
 };
 
-const buildResourceTokenLabel = (resource: ResourceLinkContent) =>
-	`@${resource.name}`;
+const buildResourceTokenLabel = (resource: ResourceLink) => `@${resource.name}`;
 
 const coalesceTextBlocks = (blocks: ContentBlock[]): ContentBlock[] => {
 	const merged: ContentBlock[] = [];
@@ -93,10 +88,10 @@ const coalesceTextBlocks = (blocks: ContentBlock[]): ContentBlock[] => {
 
 const syncResourcesWithInput = (
 	value: string,
-	resources: ResourceLinkContent[],
-): ResourceLinkContent[] => {
+	resources: ResourceLink[],
+): ResourceLink[] => {
 	let cursor = 0;
-	const nextResources: ResourceLinkContent[] = [];
+	const nextResources: ResourceLink[] = [];
 	resources.forEach((resource) => {
 		const tokenLabel = buildResourceTokenLabel(resource);
 		const tokenIndex = value.indexOf(tokenLabel, cursor);
@@ -111,7 +106,7 @@ const syncResourcesWithInput = (
 
 const buildContentsFromInput = (
 	value: string,
-	resources: ResourceLinkContent[],
+	resources: ResourceLink[],
 ): ContentBlock[] => {
 	const alignedResources = syncResourcesWithInput(value, resources);
 	if (alignedResources.length === 0) {
@@ -658,7 +653,7 @@ export function ChatFooter({
 	const setFileExplorerOpen = useUiStore((state) => state.setFileExplorerOpen);
 	const setFilePreviewPath = useUiStore((state) => state.setFilePreviewPath);
 	const handleOpenResourcePreview = useCallback(
-		(resource: ResourceLinkContent) => {
+		(resource: ResourceLink) => {
 			if (!fileExplorerAvailable) {
 				return;
 			}

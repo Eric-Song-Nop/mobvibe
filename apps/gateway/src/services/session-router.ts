@@ -153,36 +153,6 @@ export class SessionRouter {
 	}
 
 	/**
-	 * Close a session.
-	 * @param params - Session close parameters
-	 * @param userId - User ID for authorization
-	 */
-	async closeSession(
-		params: CloseSessionParams,
-		userId: string,
-	): Promise<{ ok: boolean }> {
-		const cli = this.resolveCliForSession(params.sessionId, userId);
-
-		logger.info(
-			{ sessionId: params.sessionId, userId },
-			"session_close_rpc_start",
-		);
-
-		const result = await this.sendRpc<CloseSessionParams, { ok: boolean }>(
-			cli.socket,
-			"rpc:session:close",
-			params,
-		);
-
-		logger.info(
-			{ sessionId: params.sessionId, userId },
-			"session_close_rpc_complete",
-		);
-
-		return result;
-	}
-
-	/**
 	 * Archive a session: send archive RPC to CLI which closes session, deletes WAL
 	 * messages, and marks as archived in local SQLite.
 	 * @param params - Session archive parameters

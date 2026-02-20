@@ -1,10 +1,7 @@
-// Re-export types from @mobvibe/shared
-// Re-export shared socket-events types used by webui
-// Re-export HTTP API response types from shared
+// Re-export shared types used by webui
 export type {
 	AcpBackendSummary,
 	AcpBackendsResponse,
-	AcpConnectionState,
 	CancelSessionResponse,
 	CreateSessionResponse,
 	DiscoverSessionsResult,
@@ -20,7 +17,9 @@ export type {
 	GitFileStatus,
 	GitStatusResponse,
 	HostFsRootsResponse,
+	MachinesResponse,
 	MessageIdResponse,
+	PermissionDecisionResponse,
 	SendMessageResult,
 	SessionFsFilePreviewResponse,
 	SessionFsFilePreviewType,
@@ -34,9 +33,6 @@ export type {
 // Re-export isErrorDetail for local use
 export { isErrorDetail } from "@mobvibe/shared";
 
-// Re-export webui-specific types from acp-types
-export type { PermissionDecisionResponse } from "./acp-types";
-
 // Import types for API functions
 import type {
 	AcpBackendsResponse,
@@ -49,31 +45,20 @@ import type {
 	FsResourcesResponse,
 	FsRootsResponse,
 	HostFsRootsResponse,
+	MachinesResponse,
 	MessageIdResponse,
 	PermissionDecisionPayload,
+	PermissionDecisionResponse,
 	SendMessageResult,
 	SessionFsFilePreviewResponse,
 	SessionSummary,
 	SessionsResponse,
 } from "@mobvibe/shared";
 import { isErrorDetail } from "@mobvibe/shared";
-import type { PermissionDecisionResponse } from "./acp-types";
 import { isInTauri } from "./auth";
 import { getAuthToken } from "./auth-token";
 import { e2ee } from "./e2ee";
 import { getDefaultGatewayUrl } from "./gateway-config";
-
-export type MachinesResponse = {
-	machines: Array<{
-		id: string;
-		name?: string | null;
-		hostname?: string | null;
-		platform?: string | null;
-		isOnline: boolean;
-		lastSeenAt?: string | null;
-		createdAt?: string | null;
-	}>;
-};
 
 let API_BASE_URL = getDefaultGatewayUrl();
 const SEND_MESSAGE_TIMEOUT_MS = 120_000;
@@ -84,11 +69,6 @@ const SEND_MESSAGE_TIMEOUT_MS = 120_000;
 export const setApiBaseUrl = (url: string): void => {
 	API_BASE_URL = url;
 };
-
-/**
- * Get the current API base URL.
- */
-export const getApiBaseUrl = (): string => API_BASE_URL;
 
 const buildRequestError = (message: string): ErrorDetail => ({
 	code: "INTERNAL_ERROR",

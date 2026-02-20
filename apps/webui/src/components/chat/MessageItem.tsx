@@ -11,10 +11,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import type {
 	AudioContent,
 	ContentBlock,
+	EmbeddedResource,
 	ImageContent,
 	PermissionOutcome,
-	ResourceContent,
-	ResourceLinkContent,
+	ResourceLink,
 	ToolCallContent,
 	ToolCallContentPayload,
 	ToolCallStatus,
@@ -246,14 +246,14 @@ const renderAudioContent = (
 	);
 };
 
-const renderResourceContent = (
-	content: ResourceContent,
+const renderEmbeddedResource = (
+	content: EmbeddedResource,
 	key: string,
 	getLabel: (key: string, options?: Record<string, unknown>) => string,
 	onOpenFilePreview?: (path: string) => void,
 ) => {
 	const label = resolveResourceLabel(content.resource.uri);
-	// SDK uses union type: TextResourceContents | BlobResourceContents
+	// SDK uses union type: TextEmbeddedResources | BlobEmbeddedResources
 	const hasText = "text" in content.resource;
 	const hasBlob = "blob" in content.resource;
 	return (
@@ -285,8 +285,8 @@ const renderResourceContent = (
 	);
 };
 
-const renderResourceLinkContent = (
-	content: ResourceLinkContent,
+const renderResourceLink = (
+	content: ResourceLink,
 	key: string,
 	getLabel: (key: string, options?: Record<string, unknown>) => string,
 	onOpenFilePreview?: (path: string) => void,
@@ -376,14 +376,9 @@ const renderContentBlock = (
 		case "audio":
 			return renderAudioContent(content, key, getLabel);
 		case "resource":
-			return renderResourceContent(content, key, getLabel, onOpenFilePreview);
+			return renderEmbeddedResource(content, key, getLabel, onOpenFilePreview);
 		case "resource_link":
-			return renderResourceLinkContent(
-				content,
-				key,
-				getLabel,
-				onOpenFilePreview,
-			);
+			return renderResourceLink(content, key, getLabel, onOpenFilePreview);
 		default:
 			return renderUnknownContent(content, key);
 	}
