@@ -716,8 +716,10 @@ export function ChatFooter({
 		const selectionOffset = getSelectionOffset(editor);
 		const nextContents = parseEditorContents(editor);
 		updateFromEditor(nextContents, selectionOffset);
-		renderEditorContents(editor, nextContents, selectionOffset);
-	}, [activeSessionId, renderEditorContents, updateFromEditor]);
+		// Skip renderEditorContents here — the browser DOM is already correct after
+		// native input. The useLayoutEffect will handle non-input re-renders
+		// (e.g. session switch, external state change).
+	}, [activeSessionId, updateFromEditor]);
 
 	const handleEditorBeforeInput = useCallback(
 		(event: FormEvent<HTMLDivElement>) => {
@@ -930,13 +932,21 @@ export function ChatFooter({
 			return;
 		}
 		if (document.activeElement !== editor) {
+			// Editor is not focused — external state change (e.g. session switch),
+			// must rebuild DOM.
 			renderEditorContents(editor, contentBlocks);
 			return;
 		}
-		if (!isComposingRef.current) {
-			renderEditorContents(editor, contentBlocks, inputCursor);
+		if (isComposingRef.current) {
+			// IME composing — never touch the DOM.
+			return;
 		}
-	}, [contentBlocks, inputCursor, renderEditorContents]);
+		// Editor is focused and user is typing — the browser DOM is already
+		// correct from native input events, so skip the expensive rebuild.
+		// handleEditorBeforeInput / handleEditorPaste will call
+		// renderEditorContents explicitly when they need to (e.g. token
+		// deletion, paste with resource links).
+	}, [contentBlocks, renderEditorContents]);
 
 	return (
 		<footer className="bg-background/90 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shrink-0">
@@ -976,7 +986,7 @@ export function ChatFooter({
 						aria-multiline="true"
 						contentEditable={Boolean(activeSessionId)}
 						suppressContentEditableWarning
-						className="min-h-10 whitespace-pre-wrap break-words px-2.5 py-2 text-xs outline-none md:min-h-16"
+						className="min-h-10 max-h-[40vh] overflow-y-auto whitespace-pre-wrap break-words px-2.5 py-2 text-xs outline-none md:min-h-16"
 						aria-label={t("chat.placeholder")}
 						data-placeholder={t("chat.placeholder")}
 						tabIndex={0}
