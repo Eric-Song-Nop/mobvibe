@@ -44,6 +44,7 @@ import { isInTauri } from "./auth";
 import { getAuthToken } from "./auth-token";
 import { e2ee } from "./e2ee";
 import { getDefaultGatewayUrl } from "./gateway-config";
+import { platformFetch } from "./tauri-fetch";
 
 let API_BASE_URL = getDefaultGatewayUrl();
 const SEND_MESSAGE_TIMEOUT_MS = 120_000;
@@ -85,7 +86,7 @@ const requestJson = async <ResponseType>(
 			headers.Authorization = `Bearer ${token}`;
 		}
 	}
-	const response = await fetch(`${API_BASE_URL}${path}`, {
+	const response = await platformFetch(`${API_BASE_URL}${path}`, {
 		...options,
 		credentials: tauriEnv ? "omit" : "include",
 		headers: {
