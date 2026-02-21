@@ -9,10 +9,11 @@ import {
 	UserAccountIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { UserMenu } from "@/components/auth/UserMenu";
 import { E2EESettings } from "@/components/settings/E2EESettings";
 import { ThemeProvider, useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
@@ -174,17 +175,16 @@ function SettingsSectionContent({ section }: { section: SettingsSection }) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Main Layout                                                        */
+/*  Settings Header                                                    */
 /* ------------------------------------------------------------------ */
 
-function SettingsContent() {
+function SettingsHeader() {
 	const { t } = useTranslation();
 	const navigate = useNavigate();
-	const [activeSection, setActiveSection] = useSettingsSection();
 
-	const pageHeader = useMemo(
-		() => (
-			<div className="flex items-center gap-2">
+	return (
+		<header className="bg-background/80 border-b px-4 py-3 backdrop-blur shrink-0">
+			<div className="flex w-full items-center gap-2">
 				<Button variant="ghost" size="sm" onClick={() => navigate("/")}>
 					<HugeiconsIcon
 						icon={ArrowLeft02Icon}
@@ -200,35 +200,43 @@ function SettingsContent() {
 					aria-hidden="true"
 				/>
 				<h1 className="text-xl font-semibold">{t("settings.title")}</h1>
+				<div className="ml-auto">
+					<UserMenu />
+				</div>
 			</div>
-		),
-		[t, navigate],
+		</header>
 	);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Main Layout                                                        */
+/* ------------------------------------------------------------------ */
+
+function SettingsContent() {
+	const [activeSection, setActiveSection] = useSettingsSection();
 
 	return (
-		<main className="min-h-screen bg-muted/40">
+		<main className="h-screen flex flex-col bg-muted/40">
+			<SettingsHeader />
+
 			{/* Desktop: sidebar + conditional content */}
-			<div className="hidden md:block">
-				<SidebarProvider>
-					<div className="flex min-h-screen">
-						<SettingsNav
-							activeSection={activeSection}
-							onSelect={setActiveSection}
-						/>
-						<SidebarInset className="flex-1 p-6">
-							<div className="mx-auto max-w-2xl space-y-4">
-								{pageHeader}
-								<SettingsSectionContent section={activeSection} />
-							</div>
-						</SidebarInset>
-					</div>
+			<div className="hidden md:flex flex-1 min-h-0">
+				<SidebarProvider className="!min-h-0 flex-1">
+					<SettingsNav
+						activeSection={activeSection}
+						onSelect={setActiveSection}
+					/>
+					<SidebarInset className="flex-1 overflow-y-auto p-6">
+						<div className="mx-auto max-w-3xl space-y-4">
+							<SettingsSectionContent section={activeSection} />
+						</div>
+					</SidebarInset>
 				</SidebarProvider>
 			</div>
 
 			{/* Mobile: stacked cards, no sidebar */}
-			<div className="block p-4 md:hidden">
-				<div className="mx-auto max-w-2xl space-y-4">
-					{pageHeader}
+			<div className="flex-1 overflow-y-auto p-4 md:hidden">
+				<div className="mx-auto max-w-3xl space-y-4">
 					<SecurityCard />
 					<ChangePasswordCard />
 					<AppearanceCard />
