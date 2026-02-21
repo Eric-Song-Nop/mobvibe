@@ -88,11 +88,7 @@ export function GetStartedDialog({
 							{t("getStarted.step2Title")}
 						</span>
 						<div className="flex flex-wrap gap-2">
-							<a
-								href={WEB_APP_URL}
-								target="_blank"
-								rel="noopener noreferrer"
-							>
+							<a href={WEB_APP_URL} target="_blank" rel="noopener noreferrer">
 								<Button variant="outline" size="sm">
 									{t("getStarted.webApp")}
 								</Button>
