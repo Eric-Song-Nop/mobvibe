@@ -3,19 +3,24 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { SessionFsResourceEntry } from "@/lib/api";
+import {
+	FuzzyHighlight,
+	type FuzzySearchResult,
+	sliceHighlightRanges,
+} from "@/lib/fuzzy-search";
 import { cn } from "@/lib/utils";
 
 export type ResourceComboboxProps = {
-	resources: SessionFsResourceEntry[];
+	results: FuzzySearchResult<SessionFsResourceEntry>[];
 	open: boolean;
 	highlightedIndex: number;
 	onHighlightChange: (index: number) => void;
-	onSelect: (resource: SessionFsResourceEntry) => void;
+	onSelect: (result: FuzzySearchResult<SessionFsResourceEntry>) => void;
 	className?: string;
 };
 
 export function ResourceCombobox({
-	resources,
+	results,
 	open,
 	highlightedIndex,
 	onHighlightChange,
@@ -48,14 +53,26 @@ export function ResourceCombobox({
 			)}
 			role="listbox"
 		>
-			{resources.length === 0 ? (
+			{results.length === 0 ? (
 				<div className="text-muted-foreground px-2 py-2 text-xs">
 					{t("chat.noMatchingResource")}
 				</div>
 			) : (
 				<div className="max-h-72 overflow-y-auto" ref={listRef}>
-					{resources.map((resource, index) => {
+					{results.map((result, index) => {
+						const { item: resource, highlightRanges } = result;
 						const isHighlighted = index === highlightedIndex;
+
+						// searchText = `${name} ${relativePath}`
+						const nameLen = resource.name.length;
+						const pathStart = nameLen + 1;
+						const pathLen = resource.relativePath.length;
+						const pathRanges = sliceHighlightRanges(
+							highlightRanges,
+							pathStart,
+							pathStart + pathLen,
+						);
+
 						return (
 							<button
 								type="button"
@@ -73,7 +90,7 @@ export function ResourceCombobox({
 								aria-selected={isHighlighted}
 								onMouseEnter={() => onHighlightChange(index)}
 								onMouseDown={(event) => event.preventDefault()}
-								onClick={() => onSelect(resource)}
+								onClick={() => onSelect(result)}
 							>
 								<HugeiconsIcon
 									icon={File01Icon}
@@ -81,7 +98,12 @@ export function ResourceCombobox({
 									aria-hidden="true"
 								/>
 								<div className="flex min-w-0 flex-1 flex-col gap-1">
-									<span className="font-medium">{resource.relativePath}</span>
+									<span className="font-medium">
+										<FuzzyHighlight
+											text={resource.relativePath}
+											ranges={pathRanges}
+										/>
+									</span>
 								</div>
 							</button>
 						);
