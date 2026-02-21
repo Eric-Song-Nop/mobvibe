@@ -37,6 +37,8 @@ git binary
 
 所有 git 操作必须在 CLI 侧执行，经 Socket.io RPC 管道传递。E2EE 要求内容端到端加密（git 元数据除外）。
 
+**非 Git 仓库策略**: `isGitRepo()` 返回 false 时，所有 Git 相关功能（状态、diff、历史、blame、分支等）完全隐藏，不实现任何降级替代方案。搜索功能中依赖 `git grep` 的文件内容搜索同样不可用。
+
 ---
 
 ## P0: 基础设施层
@@ -144,7 +146,7 @@ function FuzzyHighlight(props: {
 | `getGitStatusExtended()` | 分离 staged/unstaged/untracked            | `git status --porcelain=v1` (解析 X/Y 列) |
 | `searchGitLog()`         | 搜索提交消息/diff/作者                    | `git log --grep/--author/-S`              |
 | `getGitFileHistory()`    | 单文件提交历史                            | `git log -- <path>`                       |
-| `searchFileContents()`   | 文件内容搜索                              | `git grep` / `grep -rn`                   |
+| `searchFileContents()`   | 文件内容搜索                              | `git grep`                                |
 
 **共享类型** `packages/shared/src/types/socket-events.ts` — 新增:
 
@@ -198,7 +200,6 @@ type GitStashEntry = {
 };
 
 type GitStatusExtended = {
-  isGitRepo: boolean;
   branch?: string;
   staged: Array<{ path: string; status: GitFileStatus }>;
   unstaged: Array<{ path: string; status: GitFileStatus }>;
@@ -433,7 +434,7 @@ type GrepResult = {
 
 ### P3-C: 文件内容搜索 (Cmd+Shift+F)
 
-- CLI 侧 `searchFileContents()` 使用 `git grep`（git repo）或 `grep -rn`（非 git）
+- CLI 侧 `searchFileContents()` 使用 `git grep`（仅 Git 仓库可用）
 - WebUI 命令面板搜索模式，结果按文件分组
 - 支持: 大小写敏感切换、正则表达式、文件模式过滤 (`*.ts`)
 - 点击结果: 打开文件预览跳转到对应行
