@@ -168,12 +168,11 @@ export function CommitHistoryPanel({
 										<CommitRow
 											entry={entry}
 											isExpanded={isExpanded}
-											onToggle={() => toggleCommit(entry.hash)}
+											onToggle={toggleCommit}
 											sessionId={sessionId}
 											expandedFile={expandedFile}
 											onToggleFile={setExpandedFile}
 											onFileSelect={onFileSelect}
-											getLabel={t}
 										/>
 									</div>
 								);
@@ -212,12 +211,11 @@ type CommitRowProps = {
 		deletions?: number;
 	};
 	isExpanded: boolean;
-	onToggle: () => void;
+	onToggle: (hash: string) => void;
 	sessionId: string;
 	expandedFile: string | null;
 	onToggleFile: (key: string | null) => void;
 	onFileSelect?: (hash: string, filePath: string, diff: string) => void;
-	getLabel: (key: string, options?: Record<string, unknown>) => string;
 };
 
 function CommitRow({
@@ -228,9 +226,7 @@ function CommitRow({
 	expandedFile,
 	onToggleFile,
 	onFileSelect,
-	getLabel,
 }: CommitRowProps) {
-	const { t } = useTranslation();
 	const formattedDate = useMemo(() => {
 		try {
 			return new Date(entry.date).toLocaleDateString(undefined, {
@@ -248,7 +244,7 @@ function CommitRow({
 			<button
 				type="button"
 				className="hover:bg-muted flex min-h-[48px] w-full items-start gap-2 px-3 py-2 text-left text-xs"
-				onClick={onToggle}
+				onClick={() => onToggle(entry.hash)}
 			>
 				<HugeiconsIcon
 					icon={isExpanded ? ArrowDown01Icon : ArrowRight01Icon}
@@ -283,8 +279,6 @@ function CommitRow({
 					expandedFile={expandedFile}
 					onToggleFile={onToggleFile}
 					onFileSelect={onFileSelect}
-					getLabel={getLabel}
-					t={t}
 				/>
 			) : null}
 		</div>
@@ -299,8 +293,6 @@ type CommitDetailProps = {
 	expandedFile: string | null;
 	onToggleFile: (key: string | null) => void;
 	onFileSelect?: (hash: string, filePath: string, diff: string) => void;
-	getLabel: (key: string, options?: Record<string, unknown>) => string;
-	t: (key: string, options?: Record<string, unknown>) => string;
 };
 
 function CommitDetail({
@@ -309,13 +301,14 @@ function CommitDetail({
 	expandedFile,
 	onToggleFile,
 	onFileSelect,
-	getLabel,
-	t,
 }: CommitDetailProps) {
+	const { t } = useTranslation();
+
 	const detailQuery = useQuery({
 		queryKey: ["session-git-show", sessionId, hash],
 		queryFn: () => fetchSessionGitShow({ sessionId, hash }),
 		staleTime: 300_000, // Commit content does not change
+		enabled: !!sessionId && !!hash,
 	});
 
 	if (detailQuery.isLoading) {
@@ -374,7 +367,7 @@ function CommitDetail({
 								<UnifiedDiffView
 									diff={file.diff}
 									path={file.path}
-									getLabel={getLabel}
+									getLabel={t}
 								/>
 							</div>
 						) : null}
