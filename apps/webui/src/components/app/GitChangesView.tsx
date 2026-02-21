@@ -1,6 +1,6 @@
 import { ArrowDown01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileTypeLabel } from "@/components/app/file-type-label";
 import { GitStatusIndicator } from "@/components/app/git-status-indicator";
@@ -89,10 +89,11 @@ export function GitChangesView({
 	const totalCount = staged.length + unstaged.length + untracked.length;
 
 	// Map untracked to include status for FileGroup compatibility
-	const untrackedWithStatus = untracked.map((f) => ({
-		path: f.path,
-		status: "?" as GitFileStatus,
-	}));
+	const untrackedWithStatus = useMemo(
+		() =>
+			untracked.map((f) => ({ path: f.path, status: "?" as GitFileStatus })),
+		[untracked],
+	);
 
 	if (totalCount === 0) {
 		return (
