@@ -1,13 +1,15 @@
 import {
 	ArrowLeft02Icon,
 	ComputerIcon,
+	LockKeyIcon,
 	MoonIcon,
 	PaintBoardIcon,
 	Settings02Icon,
 	SunIcon,
+	UserAccountIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useState } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "@/components/auth/AuthProvider";
@@ -31,9 +33,67 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import {
+	Sidebar,
+	SidebarContent,
+	SidebarGroup,
+	SidebarGroupContent,
+	SidebarInset,
+	SidebarMenu,
+	SidebarMenuButton,
+	SidebarMenuItem,
+	SidebarProvider,
+} from "@/components/ui/sidebar";
 import i18n, { supportedLanguages } from "@/i18n";
 import { changePassword } from "@/lib/auth";
 import { toThemePreference } from "@/lib/ui-config";
+
+/* ------------------------------------------------------------------ */
+/*  Types & Constants                                                  */
+/* ------------------------------------------------------------------ */
+
+type SettingsSection = "security" | "account" | "appearance";
+
+const SETTINGS_SECTIONS = [
+	{ id: "security", labelKey: "settings.security", icon: LockKeyIcon },
+	{ id: "account", labelKey: "settings.account", icon: UserAccountIcon },
+	{ id: "appearance", labelKey: "settings.appearance", icon: PaintBoardIcon },
+] as const;
+
+const DEFAULT_SECTION: SettingsSection = "security";
+
+/* ------------------------------------------------------------------ */
+/*  useSettingsSection — URL-hash-based active section                 */
+/* ------------------------------------------------------------------ */
+
+function parseHash(): SettingsSection {
+	const raw = window.location.hash.replace("#", "");
+	const valid = SETTINGS_SECTIONS.some((s) => s.id === raw);
+	return valid ? (raw as SettingsSection) : DEFAULT_SECTION;
+}
+
+function subscribeHash(callback: () => void) {
+	window.addEventListener("hashchange", callback);
+	return () => window.removeEventListener("hashchange", callback);
+}
+
+function useSettingsSection() {
+	const section = useSyncExternalStore(
+		subscribeHash,
+		parseHash,
+		() => DEFAULT_SECTION,
+	);
+
+	const setSection = useCallback((id: SettingsSection) => {
+		window.location.hash = id;
+	}, []);
+
+	return [section, setSection] as const;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Page Root                                                          */
+/* ------------------------------------------------------------------ */
 
 export function SettingsPage() {
 	const { t } = useTranslation();
@@ -60,13 +120,71 @@ export function SettingsPage() {
 	);
 }
 
+/* ------------------------------------------------------------------ */
+/*  Settings Sidebar Nav                                               */
+/* ------------------------------------------------------------------ */
+
+function SettingsNav({
+	activeSection,
+	onSelect,
+}: {
+	activeSection: SettingsSection;
+	onSelect: (id: SettingsSection) => void;
+}) {
+	const { t } = useTranslation();
+
+	return (
+		<Sidebar collapsible="none" className="border-r bg-sidebar">
+			<SidebarContent>
+				<SidebarGroup>
+					<SidebarGroupContent>
+						<SidebarMenu>
+							{SETTINGS_SECTIONS.map((section) => (
+								<SidebarMenuItem key={section.id}>
+									<SidebarMenuButton
+										isActive={activeSection === section.id}
+										onClick={() => onSelect(section.id)}
+									>
+										<HugeiconsIcon icon={section.icon} />
+										<span>{t(section.labelKey)}</span>
+									</SidebarMenuButton>
+								</SidebarMenuItem>
+							))}
+						</SidebarMenu>
+					</SidebarGroupContent>
+				</SidebarGroup>
+			</SidebarContent>
+		</Sidebar>
+	);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Conditional Section Content                                        */
+/* ------------------------------------------------------------------ */
+
+function SettingsSectionContent({ section }: { section: SettingsSection }) {
+	switch (section) {
+		case "security":
+			return <SecurityCard />;
+		case "account":
+			return <ChangePasswordCard />;
+		case "appearance":
+			return <AppearanceCard />;
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/*  Main Layout                                                        */
+/* ------------------------------------------------------------------ */
+
 function SettingsContent() {
 	const { t } = useTranslation();
 	const navigate = useNavigate();
+	const [activeSection, setActiveSection] = useSettingsSection();
 
-	return (
-		<main className="min-h-screen bg-muted/40 p-4">
-			<div className="mx-auto max-w-2xl space-y-4">
+	const pageHeader = useMemo(
+		() => (
+			<div className="flex items-center gap-2">
 				<Button variant="ghost" size="sm" onClick={() => navigate("/")}>
 					<HugeiconsIcon
 						icon={ArrowLeft02Icon}
@@ -75,43 +193,77 @@ function SettingsContent() {
 					/>
 					{t("common.back")}
 				</Button>
+				<Separator orientation="vertical" className="mx-1 h-4" />
+				<HugeiconsIcon
+					icon={Settings02Icon}
+					className="h-5 w-5"
+					aria-hidden="true"
+				/>
+				<h1 className="text-xl font-semibold">{t("settings.title")}</h1>
+			</div>
+		),
+		[t, navigate],
+	);
 
-				{/* Page Header */}
-				<div className="flex items-center gap-2">
-					<HugeiconsIcon
-						icon={Settings02Icon}
-						className="h-5 w-5"
-						aria-hidden="true"
-					/>
-					<h1 className="text-xl font-semibold">{t("settings.title")}</h1>
+	return (
+		<main className="min-h-screen bg-muted/40">
+			{/* Desktop: sidebar + conditional content */}
+			<div className="hidden md:block">
+				<SidebarProvider>
+					<div className="flex min-h-screen">
+						<SettingsNav
+							activeSection={activeSection}
+							onSelect={setActiveSection}
+						/>
+						<SidebarInset className="flex-1 p-6">
+							<div className="mx-auto max-w-2xl space-y-4">
+								{pageHeader}
+								<SettingsSectionContent section={activeSection} />
+							</div>
+						</SidebarInset>
+					</div>
+				</SidebarProvider>
+			</div>
+
+			{/* Mobile: stacked cards, no sidebar */}
+			<div className="block p-4 md:hidden">
+				<div className="mx-auto max-w-2xl space-y-4">
+					{pageHeader}
+					<SecurityCard />
+					<ChangePasswordCard />
+					<AppearanceCard />
 				</div>
-
-				{/* Security Section */}
-				<Card>
-					<CardHeader>
-						<CardTitle>{t("settings.security")}</CardTitle>
-						<CardDescription>
-							{t("settings.securityDescription")}
-						</CardDescription>
-					</CardHeader>
-					<CardContent>
-						<div className="rounded-lg border bg-card p-4">
-							<E2EESettings />
-						</div>
-					</CardContent>
-				</Card>
-
-				{/* Account Section */}
-				<ChangePasswordCard />
-
-				{/* Appearance Section */}
-				<AppearanceCard />
 			</div>
 		</main>
 	);
 }
 
-/** 密码修改卡片 — 独立管理表单状态 */
+/* ------------------------------------------------------------------ */
+/*  Security Card                                                      */
+/* ------------------------------------------------------------------ */
+
+function SecurityCard() {
+	const { t } = useTranslation();
+
+	return (
+		<Card>
+			<CardHeader>
+				<CardTitle>{t("settings.security")}</CardTitle>
+				<CardDescription>{t("settings.securityDescription")}</CardDescription>
+			</CardHeader>
+			<CardContent>
+				<div className="rounded-lg border bg-card p-4">
+					<E2EESettings />
+				</div>
+			</CardContent>
+		</Card>
+	);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Change Password Card                                               */
+/* ------------------------------------------------------------------ */
+
 function ChangePasswordCard() {
 	const { t } = useTranslation();
 	const [error, setError] = useState<string | null>(null);
@@ -248,13 +400,12 @@ function ChangePasswordCard() {
 						)}
 
 						{success && (
-							<div
-								role="status"
-								className="rounded-sm bg-green-500/10 p-3 text-green-600 dark:text-green-400 text-sm"
+							<output
+								className="block rounded-sm bg-green-500/10 p-3 text-green-600 dark:text-green-400 text-sm"
 								aria-live="polite"
 							>
 								{success}
-							</div>
+							</output>
 						)}
 
 						<Button type="submit" disabled={isSubmitting}>
@@ -269,7 +420,10 @@ function ChangePasswordCard() {
 	);
 }
 
-/** 外观设置卡片 — 主题 + 语言 */
+/* ------------------------------------------------------------------ */
+/*  Appearance Card                                                    */
+/* ------------------------------------------------------------------ */
+
 function AppearanceCard() {
 	const { t } = useTranslation();
 	const { theme, setTheme } = useTheme();
