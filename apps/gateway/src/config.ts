@@ -37,14 +37,17 @@ export const tauriOrigins = [
 
 export const getGatewayConfig = (): GatewayConfig => {
 	const env = process.env;
+	const isPreview = env.IS_PULL_REQUEST === "true";
 	return {
 		port: parsePort(env.PORT ?? env.GATEWAY_PORT ?? "3005"),
 		corsOrigins: parseOrigins(env.GATEWAY_CORS_ORIGINS),
-		siteUrl: env.SITE_URL ?? env.RENDER_EXTERNAL_URL,
+		siteUrl: isPreview
+			? env.RENDER_EXTERNAL_URL
+			: (env.SITE_URL ?? env.RENDER_EXTERNAL_URL),
 		databaseUrl: env.DATABASE_URL,
 		resendApiKey: env.RESEND_API_KEY,
 		emailFrom: env.EMAIL_FROM ?? "Mobvibe <noreply@example.com>",
 		skipEmailVerification: env.SKIP_EMAIL_VERIFICATION === "true",
-		isPreview: !!env.RENDER && !env.SITE_URL,
+		isPreview,
 	};
 };
