@@ -17,13 +17,6 @@ import { UserMenu } from "@/components/auth/UserMenu";
 import { E2EESettings } from "@/components/settings/E2EESettings";
 import { ThemeProvider, useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -166,11 +159,11 @@ function SettingsNav({
 function SettingsSectionContent({ section }: { section: SettingsSection }) {
 	switch (section) {
 		case "security":
-			return <SecurityCard />;
+			return <SecuritySection />;
 		case "account":
-			return <ChangePasswordCard />;
+			return <AccountSection />;
 		case "appearance":
-			return <AppearanceCard />;
+			return <AppearanceSection />;
 	}
 }
 
@@ -234,12 +227,14 @@ function SettingsContent() {
 				</SidebarProvider>
 			</div>
 
-			{/* Mobile: stacked cards, no sidebar */}
+			{/* Mobile: stacked sections, no sidebar */}
 			<div className="flex-1 overflow-y-auto p-4 md:hidden">
-				<div className="mx-auto max-w-3xl space-y-4">
-					<SecurityCard />
-					<ChangePasswordCard />
-					<AppearanceCard />
+				<div className="mx-auto max-w-3xl space-y-8">
+					<SecuritySection />
+					<Separator />
+					<AccountSection />
+					<Separator />
+					<AppearanceSection />
 				</div>
 			</div>
 		</main>
@@ -247,32 +242,30 @@ function SettingsContent() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Security Card                                                      */
+/*  Security Section                                                   */
 /* ------------------------------------------------------------------ */
 
-function SecurityCard() {
+function SecuritySection() {
 	const { t } = useTranslation();
 
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle>{t("settings.security")}</CardTitle>
-				<CardDescription>{t("settings.securityDescription")}</CardDescription>
-			</CardHeader>
-			<CardContent>
-				<div className="rounded-lg border bg-card p-4">
-					<E2EESettings />
-				</div>
-			</CardContent>
-		</Card>
+		<section className="space-y-4">
+			<div>
+				<h2 className="text-lg font-semibold">{t("settings.security")}</h2>
+				<p className="text-muted-foreground text-sm">
+					{t("settings.securityDescription")}
+				</p>
+			</div>
+			<E2EESettings />
+		</section>
 	);
 }
 
 /* ------------------------------------------------------------------ */
-/*  Change Password Card                                               */
+/*  Account Section                                                    */
 /* ------------------------------------------------------------------ */
 
-function ChangePasswordCard() {
+function AccountSection() {
 	const { t } = useTranslation();
 	const [error, setError] = useState<string | null>(null);
 	const [success, setSuccess] = useState<string | null>(null);
@@ -327,213 +320,198 @@ function ChangePasswordCard() {
 	};
 
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle>{t("settings.account")}</CardTitle>
-				<CardDescription>{t("settings.accountDescription")}</CardDescription>
-			</CardHeader>
-			<CardContent>
-				<div className="rounded-lg border bg-card p-4">
-					<h3 className="mb-3 font-medium">{t("settings.changePassword")}</h3>
-					<form onSubmit={handleChangePassword} className="space-y-4">
-						<div className="space-y-2">
-							<Label htmlFor="currentPassword">
-								{t("settings.currentPassword")}
-							</Label>
-							<Input
-								id="currentPassword"
-								name="current-password"
-								autoComplete="current-password"
-								type="password"
-								value={formData.currentPassword}
-								onChange={(e) =>
-									setFormData((prev) => ({
-										...prev,
-										currentPassword: e.target.value,
-									}))
-								}
-								required
-								disabled={isSubmitting}
-							/>
-						</div>
-						<div className="space-y-2">
-							<Label htmlFor="newPassword">{t("settings.newPassword")}</Label>
-							<Input
-								id="newPassword"
-								name="new-password"
-								autoComplete="new-password"
-								type="password"
-								value={formData.newPassword}
-								onChange={(e) =>
-									setFormData((prev) => ({
-										...prev,
-										newPassword: e.target.value,
-									}))
-								}
-								required
-								disabled={isSubmitting}
-								minLength={8}
-							/>
-						</div>
-						<div className="space-y-2">
-							<Label htmlFor="confirmPassword">
-								{t("settings.confirmPassword")}
-							</Label>
-							<Input
-								id="confirmPassword"
-								name="confirm-password"
-								autoComplete="new-password"
-								type="password"
-								value={formData.confirmPassword}
-								onChange={(e) =>
-									setFormData((prev) => ({
-										...prev,
-										confirmPassword: e.target.value,
-									}))
-								}
-								required
-								disabled={isSubmitting}
-								minLength={8}
-							/>
-						</div>
-
-						{error && (
-							<div
-								role="alert"
-								className="rounded-sm bg-destructive/10 p-3 text-destructive text-sm"
-								aria-live="assertive"
-							>
-								{error}
-							</div>
-						)}
-
-						{success && (
-							<output
-								className="block rounded-sm bg-green-500/10 p-3 text-green-600 dark:text-green-400 text-sm"
-								aria-live="polite"
-							>
-								{success}
-							</output>
-						)}
-
-						<Button type="submit" disabled={isSubmitting}>
-							{isSubmitting
-								? t("common.loading")
-								: t("settings.updatePassword")}
-						</Button>
-					</form>
+		<section className="space-y-4">
+			<div>
+				<h2 className="text-lg font-semibold">{t("settings.account")}</h2>
+				<p className="text-muted-foreground text-sm">
+					{t("settings.accountDescription")}
+				</p>
+			</div>
+			<form onSubmit={handleChangePassword} className="space-y-4">
+				<div className="space-y-2">
+					<Label htmlFor="currentPassword">
+						{t("settings.currentPassword")}
+					</Label>
+					<Input
+						id="currentPassword"
+						name="current-password"
+						autoComplete="current-password"
+						type="password"
+						value={formData.currentPassword}
+						onChange={(e) =>
+							setFormData((prev) => ({
+								...prev,
+								currentPassword: e.target.value,
+							}))
+						}
+						required
+						disabled={isSubmitting}
+					/>
 				</div>
-			</CardContent>
-		</Card>
+				<div className="space-y-2">
+					<Label htmlFor="newPassword">{t("settings.newPassword")}</Label>
+					<Input
+						id="newPassword"
+						name="new-password"
+						autoComplete="new-password"
+						type="password"
+						value={formData.newPassword}
+						onChange={(e) =>
+							setFormData((prev) => ({
+								...prev,
+								newPassword: e.target.value,
+							}))
+						}
+						required
+						disabled={isSubmitting}
+						minLength={8}
+					/>
+				</div>
+				<div className="space-y-2">
+					<Label htmlFor="confirmPassword">
+						{t("settings.confirmPassword")}
+					</Label>
+					<Input
+						id="confirmPassword"
+						name="confirm-password"
+						autoComplete="new-password"
+						type="password"
+						value={formData.confirmPassword}
+						onChange={(e) =>
+							setFormData((prev) => ({
+								...prev,
+								confirmPassword: e.target.value,
+							}))
+						}
+						required
+						disabled={isSubmitting}
+						minLength={8}
+					/>
+				</div>
+
+				{error && (
+					<div
+						role="alert"
+						className="rounded-sm bg-destructive/10 p-3 text-destructive text-sm"
+						aria-live="assertive"
+					>
+						{error}
+					</div>
+				)}
+
+				{success && (
+					<output
+						className="block rounded-sm bg-green-500/10 p-3 text-green-600 dark:text-green-400 text-sm"
+						aria-live="polite"
+					>
+						{success}
+					</output>
+				)}
+
+				<Button type="submit" disabled={isSubmitting}>
+					{isSubmitting ? t("common.loading") : t("settings.updatePassword")}
+				</Button>
+			</form>
+		</section>
 	);
 }
 
 /* ------------------------------------------------------------------ */
-/*  Appearance Card                                                    */
+/*  Appearance Section                                                 */
 /* ------------------------------------------------------------------ */
 
-function AppearanceCard() {
+function AppearanceSection() {
 	const { t } = useTranslation();
 	const { theme, setTheme } = useTheme();
 
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle className="flex items-center gap-2">
-					<HugeiconsIcon
-						icon={PaintBoardIcon}
-						className="h-5 w-5"
-						aria-hidden="true"
-					/>
-					{t("settings.appearance")}
-				</CardTitle>
-				<CardDescription>{t("settings.appearanceDescription")}</CardDescription>
-			</CardHeader>
-			<CardContent>
-				<div className="space-y-4">
-					{/* Theme Select */}
-					<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-						<div className="space-y-0.5">
-							<Label htmlFor="theme-select">{t("theme.label")}</Label>
-							<p className="text-muted-foreground text-sm">
-								{t("settings.themeHint")}
-							</p>
-						</div>
-						<Select
-							value={theme}
-							onValueChange={(value) => setTheme(toThemePreference(value))}
-						>
-							<SelectTrigger id="theme-select" className="w-full sm:w-40">
-								<SelectValue />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="light">
-									<div className="flex items-center gap-2">
-										<HugeiconsIcon
-											icon={SunIcon}
-											strokeWidth={2}
-											className="h-4 w-4"
-											aria-hidden="true"
-										/>
-										{t("theme.light")}
-									</div>
-								</SelectItem>
-								<SelectItem value="dark">
-									<div className="flex items-center gap-2">
-										<HugeiconsIcon
-											icon={MoonIcon}
-											strokeWidth={2}
-											className="h-4 w-4"
-											aria-hidden="true"
-										/>
-										{t("theme.dark")}
-									</div>
-								</SelectItem>
-								<SelectItem value="system">
-									<div className="flex items-center gap-2">
-										<HugeiconsIcon
-											icon={ComputerIcon}
-											strokeWidth={2}
-											className="h-4 w-4"
-											aria-hidden="true"
-										/>
-										{t("theme.system")}
-									</div>
-								</SelectItem>
-							</SelectContent>
-						</Select>
-					</div>
+		<section className="space-y-4">
+			<div>
+				<h2 className="text-lg font-semibold">{t("settings.appearance")}</h2>
+				<p className="text-muted-foreground text-sm">
+					{t("settings.appearanceDescription")}
+				</p>
+			</div>
 
-					<Separator />
-
-					{/* Language Select */}
-					<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-						<div className="space-y-0.5">
-							<Label htmlFor="language-select">
-								{t("languageSwitcher.label")}
-							</Label>
-							<p className="text-muted-foreground text-sm">
-								{t("settings.languageHint")}
-							</p>
-						</div>
-						<Select
-							value={i18n.resolvedLanguage ?? "en"}
-							onValueChange={(value) => i18n.changeLanguage(value)}
-						>
-							<SelectTrigger id="language-select" className="w-full sm:w-40">
-								<SelectValue placeholder={t("languageSwitcher.placeholder")} />
-							</SelectTrigger>
-							<SelectContent>
-								{supportedLanguages.map((lang) => (
-									<SelectItem key={lang} value={lang}>
-										{t(`common.languages.${lang}`)}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-					</div>
+			{/* Theme Select */}
+			<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+				<div className="space-y-0.5">
+					<Label htmlFor="theme-select">{t("theme.label")}</Label>
+					<p className="text-muted-foreground text-sm">
+						{t("settings.themeHint")}
+					</p>
 				</div>
-			</CardContent>
-		</Card>
+				<Select
+					value={theme}
+					onValueChange={(value) => setTheme(toThemePreference(value))}
+				>
+					<SelectTrigger id="theme-select" className="w-full sm:w-40">
+						<SelectValue />
+					</SelectTrigger>
+					<SelectContent>
+						<SelectItem value="light">
+							<div className="flex items-center gap-2">
+								<HugeiconsIcon
+									icon={SunIcon}
+									strokeWidth={2}
+									className="h-4 w-4"
+									aria-hidden="true"
+								/>
+								{t("theme.light")}
+							</div>
+						</SelectItem>
+						<SelectItem value="dark">
+							<div className="flex items-center gap-2">
+								<HugeiconsIcon
+									icon={MoonIcon}
+									strokeWidth={2}
+									className="h-4 w-4"
+									aria-hidden="true"
+								/>
+								{t("theme.dark")}
+							</div>
+						</SelectItem>
+						<SelectItem value="system">
+							<div className="flex items-center gap-2">
+								<HugeiconsIcon
+									icon={ComputerIcon}
+									strokeWidth={2}
+									className="h-4 w-4"
+									aria-hidden="true"
+								/>
+								{t("theme.system")}
+							</div>
+						</SelectItem>
+					</SelectContent>
+				</Select>
+			</div>
+
+			<Separator />
+
+			{/* Language Select */}
+			<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+				<div className="space-y-0.5">
+					<Label htmlFor="language-select">{t("languageSwitcher.label")}</Label>
+					<p className="text-muted-foreground text-sm">
+						{t("settings.languageHint")}
+					</p>
+				</div>
+				<Select
+					value={i18n.resolvedLanguage ?? "en"}
+					onValueChange={(value) => i18n.changeLanguage(value)}
+				>
+					<SelectTrigger id="language-select" className="w-full sm:w-40">
+						<SelectValue placeholder={t("languageSwitcher.placeholder")} />
+					</SelectTrigger>
+					<SelectContent>
+						{supportedLanguages.map((lang) => (
+							<SelectItem key={lang} value={lang}>
+								{t(`common.languages.${lang}`)}
+							</SelectItem>
+						))}
+					</SelectContent>
+				</Select>
+			</div>
+		</section>
 	);
 }
