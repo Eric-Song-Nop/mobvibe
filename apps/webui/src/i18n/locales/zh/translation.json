@@ -140,9 +140,18 @@
 		"unsupportedFormat": "当前格式暂不支持",
 		"filesTab": "文件",
 		"changesTab": "变更",
+		"stagedGroup": "已暂存",
+		"unstagedGroup": "未暂存",
 		"changedGroup": "已更改",
 		"untrackedGroup": "未跟踪",
-		"noChanges": "未检测到变更"
+		"noChanges": "未检测到变更",
+		"historyTab": "历史",
+		"commitNoResults": "未找到提交",
+		"commitLoadMore": "加载更多",
+		"commitLoading": "加载提交中...",
+		"commitAuthorFilter": "按作者过滤",
+		"commitPathFilter": "按文件路径过滤",
+		"commitFilesChanged": "{{count}} 个文件变更"
 	},
 	"fileBrowser": {
 		"loading": "加载中...",
@@ -316,6 +325,18 @@
 		"placeholder": "搜索消息...",
 		"noResults": "未找到匹配",
 		"matchCount": "{{current}}/{{total}}"
+	},
+	"branchSelector": {
+		"title": "分支",
+		"searchPlaceholder": "搜索分支...",
+		"noBranches": "未找到分支",
+		"noMatches": "没有匹配的分支",
+		"current": "当前",
+		"remote": "远程"
+	},
+	"diffView": {
+		"unified": "统一视图",
+		"split": "并排对比"
 	},
 	"cli": {
 		"discoveringCapabilities": "正在获取 Agent 能力..."

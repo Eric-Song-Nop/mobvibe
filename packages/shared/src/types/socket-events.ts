@@ -410,6 +410,7 @@ export type GitCommitDetail = GitLogEntry & {
 		oldPath?: string;
 		insertions: number;
 		deletions: number;
+		diff?: string;
 	}>;
 };
 

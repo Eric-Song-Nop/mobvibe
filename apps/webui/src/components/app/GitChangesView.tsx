@@ -11,32 +11,12 @@ import type { GitFileStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export type GitChangesViewProps = {
-	files: Array<{ path: string; status: GitFileStatus }>;
+	staged: Array<{ path: string; status: GitFileStatus }>;
+	unstaged: Array<{ path: string; status: GitFileStatus }>;
+	untracked: Array<{ path: string }>;
 	onFileSelect: (relativePath: string) => void;
 	selectedFilePath?: string;
 };
-
-type GroupedFiles = {
-	changed: Array<{ path: string; status: GitFileStatus }>;
-	untracked: Array<{ path: string; status: GitFileStatus }>;
-};
-
-function groupFiles(
-	files: Array<{ path: string; status: GitFileStatus }>,
-): GroupedFiles {
-	const changed: Array<{ path: string; status: GitFileStatus }> = [];
-	const untracked: Array<{ path: string; status: GitFileStatus }> = [];
-
-	for (const file of files) {
-		if (file.status === "?") {
-			untracked.push(file);
-		} else {
-			changed.push(file);
-		}
-	}
-
-	return { changed, untracked };
-}
 
 function FileGroup({
 	title,
@@ -107,14 +87,22 @@ function FileGroup({
 }
 
 export function GitChangesView({
-	files,
+	staged,
+	unstaged,
+	untracked,
 	onFileSelect,
 	selectedFilePath,
 }: GitChangesViewProps) {
 	const { t } = useTranslation();
-	const { changed, untracked } = groupFiles(files);
+	const totalCount = staged.length + unstaged.length + untracked.length;
 
-	if (files.length === 0) {
+	// Map untracked to include status for FileGroup compatibility
+	const untrackedWithStatus = untracked.map((f) => ({
+		path: f.path,
+		status: "?" as GitFileStatus,
+	}));
+
+	if (totalCount === 0) {
 		return (
 			<div className="text-muted-foreground flex flex-1 items-center justify-center px-3 text-xs">
 				{t("fileExplorer.noChanges")}
@@ -125,14 +113,20 @@ export function GitChangesView({
 	return (
 		<div className="border-input bg-muted/30 flex min-h-0 flex-1 flex-col overflow-y-auto rounded-none border">
 			<FileGroup
-				title={t("fileExplorer.changedGroup")}
-				files={changed}
+				title={t("fileExplorer.stagedGroup")}
+				files={staged}
+				onFileSelect={onFileSelect}
+				selectedFilePath={selectedFilePath}
+			/>
+			<FileGroup
+				title={t("fileExplorer.unstagedGroup")}
+				files={unstaged}
 				onFileSelect={onFileSelect}
 				selectedFilePath={selectedFilePath}
 			/>
 			<FileGroup
 				title={t("fileExplorer.untrackedGroup")}
-				files={untracked}
+				files={untrackedWithStatus}
 				onFileSelect={onFileSelect}
 				selectedFilePath={selectedFilePath}
 			/>

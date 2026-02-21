@@ -140,9 +140,18 @@
 		"unsupportedFormat": "Format not supported yet",
 		"filesTab": "Files",
 		"changesTab": "Changes",
+		"stagedGroup": "Staged",
+		"unstagedGroup": "Unstaged",
 		"changedGroup": "Changed",
 		"untrackedGroup": "Untracked",
-		"noChanges": "No changes detected"
+		"noChanges": "No changes detected",
+		"historyTab": "History",
+		"commitNoResults": "No commits found",
+		"commitLoadMore": "Load more",
+		"commitLoading": "Loading commits...",
+		"commitAuthorFilter": "Filter by author",
+		"commitPathFilter": "Filter by file path",
+		"commitFilesChanged": "{{count}} files changed"
 	},
 	"fileBrowser": {
 		"loading": "Loading...",
@@ -316,6 +325,18 @@
 		"placeholder": "Search messages...",
 		"noResults": "No matches found",
 		"matchCount": "{{current}}/{{total}}"
+	},
+	"branchSelector": {
+		"title": "Branches",
+		"searchPlaceholder": "Search branches...",
+		"noBranches": "No branches found",
+		"noMatches": "No branches match your search",
+		"current": "Current",
+		"remote": "Remote"
+	},
+	"diffView": {
+		"unified": "Unified",
+		"split": "Split"
 	},
 	"cli": {
 		"discoveringCapabilities": "Discovering agent capabilities..."

@@ -393,7 +393,7 @@ export async function getGitShow(
 	hash: string,
 ): Promise<GitCommitDetail | undefined> {
 	try {
-		// Get commit info
+		// Get commit info with numstat and patch
 		const { stdout: infoOut } = await execFileAsync(
 			"git",
 			["show", "--format=%H%n%h%n%an%n%ae%n%aI%n%s%n%b", "--numstat", hash],
@@ -443,6 +443,26 @@ export async function getGitShow(
 			});
 		}
 
+		// Get patch output to attach diff per file
+		try {
+			const { stdout: patchOut } = await execFileAsync(
+				"git",
+				["show", "--format=", "--patch", hash],
+				{ cwd, maxBuffer: MAX_BUFFER },
+			);
+
+			// Split patch into per-file diffs
+			const fileDiffs = parsePerFileDiffs(patchOut);
+			for (const file of files) {
+				const diff = fileDiffs.get(file.path);
+				if (diff) {
+					file.diff = diff;
+				}
+			}
+		} catch {
+			// Patch retrieval failure is non-critical; files still returned without diff
+		}
+
 		return {
 			hash: commitHash,
 			shortHash,
@@ -459,6 +479,29 @@ export async function getGitShow(
 	} catch {
 		return undefined;
 	}
+}
+
+/**
+ * Parse combined patch output into per-file diff strings.
+ * Returns a map from file path to its unified diff content.
+ */
+function parsePerFileDiffs(patchOutput: string): Map<string, string> {
+	const result = new Map<string, string>();
+	// Split on "diff --git" boundaries
+	const parts = patchOutput.split(/^(?=diff --git )/m);
+
+	for (const part of parts) {
+		if (!part.startsWith("diff --git ")) continue;
+
+		// Extract file path from "diff --git a/path b/path"
+		const headerMatch = part.match(/^diff --git a\/.+ b\/(.+)/);
+		if (!headerMatch) continue;
+
+		const filePath = headerMatch[1].trim();
+		result.set(filePath, part.trim());
+	}
+
+	return result;
 }
 
 /**
