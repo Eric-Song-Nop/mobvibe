@@ -1,8 +1,6 @@
 import type { Token } from "prism-react-renderer";
 import { Highlight } from "prism-react-renderer";
-import { useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
-import { SideBySideDiffView } from "@/components/chat/SideBySideDiffView";
+import { useMemo } from "react";
 import {
 	getGruvboxTheme,
 	normalizeCode,
@@ -13,7 +11,6 @@ import {
 	buildDiffOps,
 	getIndicatorChar,
 	parseUnifiedDiff,
-	reconstructTextsFromDiff,
 	splitLines,
 	unifiedIndicatorTone,
 	unifiedLineTone,
@@ -144,7 +141,6 @@ export const UnifiedDiffView = ({
 	onOpenFilePreview,
 	fullHeight,
 }: UnifiedDiffViewProps) => {
-	const { t } = useTranslation();
 	const themeMode = useResolvedTheme();
 	const theme = getGruvboxTheme(themeMode);
 	const lines = useMemo(() => parseUnifiedDiff(diff), [diff]);
@@ -153,7 +149,6 @@ export const UnifiedDiffView = ({
 		[path],
 	);
 	const label = useMemo(() => resolveFileName(path), [path]);
-	const [viewMode, setViewMode] = useState<"unified" | "split">("unified");
 
 	// Build code string for syntax highlighting (excluding hunks)
 	const codeLines = useMemo(
@@ -161,12 +156,6 @@ export const UnifiedDiffView = ({
 		[lines],
 	);
 	const code = useMemo(() => normalizeCode(codeLines.join("\n")), [codeLines]);
-
-	// Reconstruct old/new text for split view
-	const { oldText, newText } = useMemo(
-		() => reconstructTextsFromDiff(lines),
-		[lines],
-	);
 
 	return (
 		<div
@@ -191,33 +180,6 @@ export const UnifiedDiffView = ({
 				) : (
 					<span className="text-xs text-foreground">{label}</span>
 				)}
-				{/* Unified / Split toggle — hidden on mobile */}
-				<div className="ml-auto hidden items-center gap-0.5 sm:flex">
-					<button
-						type="button"
-						className={cn(
-							"rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors",
-							viewMode === "unified"
-								? "bg-muted text-foreground"
-								: "text-muted-foreground hover:text-foreground",
-						)}
-						onClick={() => setViewMode("unified")}
-					>
-						{t("diffView.unified")}
-					</button>
-					<button
-						type="button"
-						className={cn(
-							"rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors",
-							viewMode === "split"
-								? "bg-muted text-foreground"
-								: "text-muted-foreground hover:text-foreground",
-						)}
-						onClick={() => setViewMode("split")}
-					>
-						{t("diffView.split")}
-					</button>
-				</div>
 			</div>
 			<div
 				className={cn(
@@ -225,67 +187,32 @@ export const UnifiedDiffView = ({
 					fullHeight && "min-h-0 flex-1 overflow-hidden",
 				)}
 			>
-				{viewMode === "split" ? (
-					<SideBySideDiffView oldText={oldText} newText={newText} path={path} />
-				) : (
-					<Highlight code={code} language={language} theme={theme}>
-						{({ tokens, getTokenProps, style }) => {
-							const renderTokens = trimTrailingEmptyTokens(tokens, code);
-							let tokenIndex = 0;
+				<Highlight code={code} language={language} theme={theme}>
+					{({ tokens, getTokenProps, style }) => {
+						const renderTokens = trimTrailingEmptyTokens(tokens, code);
+						let tokenIndex = 0;
 
-							return (
-								<div
-									className={cn(
-										"overflow-auto",
-										fullHeight ? "h-full" : "max-h-56",
-									)}
-									style={{ ...style, backgroundColor: "transparent" }}
-								>
-									{lines.map((line, lineIdx) => {
-										// Hunk lines are rendered differently
-										if (line.type === "hunk") {
-											return (
-												<div
-													key={`hunk-${lineIdx}`}
-													className={cn(
-														"grid grid-cols-[minmax(2rem,auto)_1ch_1fr] gap-1 px-2 py-0.5 font-mono text-[11px] leading-5",
-														unifiedLineTone(line.type),
-													)}
-												>
-													<span className="text-right text-muted-foreground">
-														...
-													</span>
-													<span
-														className={cn(
-															"text-center",
-															unifiedIndicatorTone(line.type),
-														)}
-													>
-														{getIndicatorChar(line.type)}
-													</span>
-													<span className="whitespace-pre text-muted-foreground italic">
-														{line.content.replace(/^@@.*@@/, "").trim() ||
-															line.content}
-													</span>
-												</div>
-											);
-										}
-
-										const tokenLine = renderTokens[tokenIndex];
-										tokenIndex += 1;
-
+						return (
+							<div
+								className={cn(
+									"overflow-auto",
+									fullHeight ? "h-full" : "max-h-56",
+								)}
+								style={{ ...style, backgroundColor: "transparent" }}
+							>
+								{lines.map((line, lineIdx) => {
+									// Hunk lines are rendered differently
+									if (line.type === "hunk") {
 										return (
 											<div
-												key={`line-${lineIdx}`}
+												key={`hunk-${lineIdx}`}
 												className={cn(
-													"grid grid-cols-[minmax(2rem,auto)_1ch_1fr] gap-1 px-2 py-0.5 font-mono text-[11px] leading-5",
+													"grid grid-cols-[minmax(2rem,auto)_1ch_1fr] items-start gap-1 px-2 py-0.5 font-mono text-[11px] leading-5",
 													unifiedLineTone(line.type),
 												)}
 											>
 												<span className="text-right text-muted-foreground">
-													{line.type === "removed"
-														? line.oldLineNum
-														: line.newLineNum}
+													...
 												</span>
 												<span
 													className={cn(
@@ -295,26 +222,57 @@ export const UnifiedDiffView = ({
 												>
 													{getIndicatorChar(line.type)}
 												</span>
-												<span className="whitespace-pre">
-													{tokenLine
-														? tokenLine.map((token, tIdx) => (
-																<span
-																	key={`token-${lineIdx}-${tIdx}`}
-																	{...getTokenProps({ token, key: tIdx })}
-																/>
-															))
-														: line.content.length > 0
-															? line.content
-															: " "}
+												<span className="whitespace-pre-wrap break-words text-muted-foreground italic">
+													{line.content.replace(/^@@.*@@/, "").trim() ||
+														line.content}
 												</span>
 											</div>
 										);
-									})}
-								</div>
-							);
-						}}
-					</Highlight>
-				)}
+									}
+
+									const tokenLine = renderTokens[tokenIndex];
+									tokenIndex += 1;
+
+									return (
+										<div
+											key={`line-${lineIdx}`}
+											className={cn(
+												"grid grid-cols-[minmax(2rem,auto)_1ch_1fr] items-start gap-1 px-2 py-0.5 font-mono text-[11px] leading-5",
+												unifiedLineTone(line.type),
+											)}
+										>
+											<span className="text-right text-muted-foreground">
+												{line.type === "removed"
+													? line.oldLineNum
+													: line.newLineNum}
+											</span>
+											<span
+												className={cn(
+													"text-center",
+													unifiedIndicatorTone(line.type),
+												)}
+											>
+												{getIndicatorChar(line.type)}
+											</span>
+											<span className="whitespace-pre-wrap break-words">
+												{tokenLine
+													? tokenLine.map((token, tIdx) => (
+															<span
+																key={`token-${lineIdx}-${tIdx}`}
+																{...getTokenProps({ token, key: tIdx })}
+															/>
+														))
+													: line.content.length > 0
+														? line.content
+														: " "}
+											</span>
+										</div>
+									);
+								})}
+							</div>
+						);
+					}}
+				</Highlight>
 			</div>
 		</div>
 	);

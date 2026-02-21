@@ -100,14 +100,14 @@
 	min-height: 0;
 	min-width: 0;
 	overflow: auto;
-	font-size: 0.75rem;
-	line-height: 1.5;
+	font-size: 11px;
+	line-height: 1.25rem;
 	color: hsl(var(--foreground));
 	flex: 1;
 }
 
 .file-preview-code--fullscreen .file-preview-code__content {
-	font-size: 0.8rem;
+	font-size: 12px;
 }
 
 .file-preview-code__pre {
@@ -121,19 +121,16 @@
 
 .file-preview-code__line {
 	display: grid;
-	grid-template-columns: 0.6rem 2.25rem 1fr;
+	grid-template-columns: minmax(2rem, auto) 1ch 1fr;
 	align-items: flex-start;
-	column-gap: 0.375rem;
-	line-height: 1.5;
+	column-gap: 0.25rem;
+	padding: 0.125rem 0.5rem;
 	white-space: pre-wrap;
 	word-break: break-word;
 }
 
 .file-preview-code__diff-indicator {
-	width: 0.6rem;
 	text-align: center;
-	font-size: 0.625rem;
-	line-height: 1.5;
 	flex-shrink: 0;
 	user-select: none;
 }
@@ -158,9 +155,7 @@
 .file-preview-code__line-number {
 	display: inline-flex;
 	justify-content: flex-end;
-	padding-right: 0.35rem;
 	color: hsl(var(--muted-foreground));
-	font-size: 0.65rem;
 	font-variant-numeric: tabular-nums;
 	font-feature-settings: "tnum";
 	user-select: none;

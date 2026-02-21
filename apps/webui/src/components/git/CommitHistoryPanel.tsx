@@ -10,7 +10,6 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileTypeLabel } from "@/components/app/file-type-label";
-import { UnifiedDiffView } from "@/components/chat/DiffView";
 import { Button } from "@/components/ui/button";
 import { fetchSessionGitLog, fetchSessionGitShow } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -18,6 +17,7 @@ import { cn } from "@/lib/utils";
 type CommitHistoryPanelProps = {
 	sessionId: string;
 	onFileSelect?: (hash: string, filePath: string, diff: string) => void;
+	selectedFile?: string;
 };
 
 const PAGE_SIZE = 50;
@@ -25,13 +25,13 @@ const PAGE_SIZE = 50;
 export function CommitHistoryPanel({
 	sessionId,
 	onFileSelect,
+	selectedFile,
 }: CommitHistoryPanelProps) {
 	const { t } = useTranslation();
 	const [authorFilter, setAuthorFilter] = useState("");
 	const [pathFilter, setPathFilter] = useState("");
 	const [filtersVisible, setFiltersVisible] = useState(false);
 	const [expandedCommit, setExpandedCommit] = useState<string | null>(null);
-	const [expandedFile, setExpandedFile] = useState<string | null>(null);
 
 	const parentRef = useRef<HTMLDivElement>(null);
 
@@ -70,7 +70,6 @@ export function CommitHistoryPanel({
 
 	const toggleCommit = useCallback((hash: string) => {
 		setExpandedCommit((prev) => (prev === hash ? null : hash));
-		setExpandedFile(null);
 	}, []);
 
 	const toggleFilters = useCallback(() => {
@@ -170,8 +169,7 @@ export function CommitHistoryPanel({
 											isExpanded={isExpanded}
 											onToggle={toggleCommit}
 											sessionId={sessionId}
-											expandedFile={expandedFile}
-											onToggleFile={setExpandedFile}
+											selectedFile={selectedFile}
 											onFileSelect={onFileSelect}
 										/>
 									</div>
@@ -213,8 +211,7 @@ type CommitRowProps = {
 	isExpanded: boolean;
 	onToggle: (hash: string) => void;
 	sessionId: string;
-	expandedFile: string | null;
-	onToggleFile: (key: string | null) => void;
+	selectedFile?: string;
 	onFileSelect?: (hash: string, filePath: string, diff: string) => void;
 };
 
@@ -223,8 +220,7 @@ function CommitRow({
 	isExpanded,
 	onToggle,
 	sessionId,
-	expandedFile,
-	onToggleFile,
+	selectedFile,
 	onFileSelect,
 }: CommitRowProps) {
 	const formattedDate = useMemo(() => {
@@ -276,8 +272,7 @@ function CommitRow({
 				<CommitDetail
 					sessionId={sessionId}
 					hash={entry.hash}
-					expandedFile={expandedFile}
-					onToggleFile={onToggleFile}
+					selectedFile={selectedFile}
 					onFileSelect={onFileSelect}
 				/>
 			) : null}
@@ -290,16 +285,14 @@ function CommitRow({
 type CommitDetailProps = {
 	sessionId: string;
 	hash: string;
-	expandedFile: string | null;
-	onToggleFile: (key: string | null) => void;
+	selectedFile?: string;
 	onFileSelect?: (hash: string, filePath: string, diff: string) => void;
 };
 
 function CommitDetail({
 	sessionId,
 	hash,
-	expandedFile,
-	onToggleFile,
+	selectedFile,
 	onFileSelect,
 }: CommitDetailProps) {
 	const { t } = useTranslation();
@@ -337,8 +330,7 @@ function CommitDetail({
 				{t("fileExplorer.commitFilesChanged", { count: files.length })}
 			</div>
 			{files.map((file) => {
-				const fileKey = `${hash}:${file.path}`;
-				const isFileExpanded = expandedFile === fileKey;
+				const isSelected = file.path === selectedFile;
 
 				return (
 					<div key={file.path} className="flex flex-col">
@@ -346,10 +338,9 @@ function CommitDetail({
 							type="button"
 							className={cn(
 								"hover:bg-muted flex min-h-[2.75rem] w-full items-center gap-2 px-8 py-1 text-left text-xs",
-								isFileExpanded && "bg-muted/50",
+								isSelected && "bg-muted",
 							)}
 							onClick={() => {
-								onToggleFile(isFileExpanded ? null : fileKey);
 								if (file.diff && onFileSelect) {
 									onFileSelect(hash, file.path, file.diff);
 								}
@@ -362,15 +353,6 @@ function CommitDetail({
 								<span className="text-destructive">-{file.deletions}</span>
 							</span>
 						</button>
-						{isFileExpanded && file.diff ? (
-							<div className="px-4 py-2">
-								<UnifiedDiffView
-									diff={file.diff}
-									path={file.path}
-									getLabel={t}
-								/>
-							</div>
-						) : null}
 					</div>
 				);
 			})}

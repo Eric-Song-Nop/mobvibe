@@ -228,32 +228,3 @@ export const getIndicatorChar = (type: UnifiedDiffLine["type"]): string => {
 			return " ";
 	}
 };
-
-/**
- * Reconstruct old/new text from parsed unified diff lines.
- * Useful for building side-by-side view from a parsed diff.
- */
-export const reconstructTextsFromDiff = (
-	lines: UnifiedDiffLine[],
-): { oldText: string; newText: string } => {
-	const oldLines: string[] = [];
-	const newLines: string[] = [];
-
-	for (const line of lines) {
-		switch (line.type) {
-			case "context":
-				oldLines.push(line.content);
-				newLines.push(line.content);
-				break;
-			case "removed":
-				oldLines.push(line.content);
-				break;
-			case "added":
-				newLines.push(line.content);
-				break;
-			// Skip hunk headers
-		}
-	}
-
-	return { oldText: oldLines.join("\n"), newText: newLines.join("\n") };
-};
