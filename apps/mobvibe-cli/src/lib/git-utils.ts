@@ -237,6 +237,7 @@ export async function getFileDiff(
 	addedLines: number[];
 	modifiedLines: number[];
 	deletedLines: number[];
+	rawDiff?: string;
 }> {
 	try {
 		// Get diff against HEAD (includes both staged and unstaged changes)
@@ -264,20 +265,27 @@ export async function getFileDiff(
 					? filePath
 					: path.resolve(cwd, relativePath);
 				const content = await readFile(absPath, "utf-8");
-				const lineCount = content
-					.split("\n")
-					.filter((l) => l.length > 0).length;
+				const lines = content.split("\n").filter((l) => l.length > 0);
+				const lineCount = lines.length;
+				// Build synthetic unified diff for new/untracked files
+				const syntheticDiff = [
+					`--- /dev/null`,
+					`+++ b/${relativePath}`,
+					`@@ -0,0 +1,${lineCount} @@`,
+					...lines.map((l) => `+${l}`),
+				].join("\n");
 				return {
 					addedLines: Array.from({ length: lineCount }, (_, i) => i + 1),
 					modifiedLines: [],
 					deletedLines: [],
+					rawDiff: syntheticDiff,
 				};
 			}
 
 			return { addedLines: [], modifiedLines: [], deletedLines: [] };
 		}
 
-		return parseDiffOutput(stdout);
+		return { ...parseDiffOutput(stdout), rawDiff: stdout };
 	} catch {
 		return { addedLines: [], modifiedLines: [], deletedLines: [] };
 	}

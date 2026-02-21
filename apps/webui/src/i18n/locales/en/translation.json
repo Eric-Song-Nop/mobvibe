@@ -135,6 +135,8 @@
 		"previewTitleFallback": "Preview",
 		"imageMode": "Image",
 		"codeMode": "Code",
+		"diffMode": "Diff",
+		"noDiffAvailable": "No diff available",
 		"selectFileHint": "Select a file to preview",
 		"loadingPreview": "Loading preview...",
 		"unsupportedFormat": "Format not supported yet",

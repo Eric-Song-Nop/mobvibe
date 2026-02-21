@@ -1,7 +1,6 @@
 import {
 	ArrowDown01Icon,
 	ArrowRight01Icon,
-	File01Icon,
 	FilterIcon,
 	Loading03Icon,
 } from "@hugeicons/core-free-icons";
@@ -10,6 +9,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { FileTypeLabel } from "@/components/app/file-type-label";
 import { UnifiedDiffView } from "@/components/chat/DiffView";
 import { Button } from "@/components/ui/button";
 import { fetchSessionGitLog, fetchSessionGitShow } from "@/lib/api";
@@ -17,11 +17,15 @@ import { cn } from "@/lib/utils";
 
 type CommitHistoryPanelProps = {
 	sessionId: string;
+	onFileSelect?: (hash: string, filePath: string, diff: string) => void;
 };
 
 const PAGE_SIZE = 50;
 
-export function CommitHistoryPanel({ sessionId }: CommitHistoryPanelProps) {
+export function CommitHistoryPanel({
+	sessionId,
+	onFileSelect,
+}: CommitHistoryPanelProps) {
 	const { t } = useTranslation();
 	const [authorFilter, setAuthorFilter] = useState("");
 	const [pathFilter, setPathFilter] = useState("");
@@ -168,6 +172,7 @@ export function CommitHistoryPanel({ sessionId }: CommitHistoryPanelProps) {
 											sessionId={sessionId}
 											expandedFile={expandedFile}
 											onToggleFile={setExpandedFile}
+											onFileSelect={onFileSelect}
 											getLabel={t}
 										/>
 									</div>
@@ -211,6 +216,7 @@ type CommitRowProps = {
 	sessionId: string;
 	expandedFile: string | null;
 	onToggleFile: (key: string | null) => void;
+	onFileSelect?: (hash: string, filePath: string, diff: string) => void;
 	getLabel: (key: string, options?: Record<string, unknown>) => string;
 };
 
@@ -221,6 +227,7 @@ function CommitRow({
 	sessionId,
 	expandedFile,
 	onToggleFile,
+	onFileSelect,
 	getLabel,
 }: CommitRowProps) {
 	const { t } = useTranslation();
@@ -275,6 +282,7 @@ function CommitRow({
 					hash={entry.hash}
 					expandedFile={expandedFile}
 					onToggleFile={onToggleFile}
+					onFileSelect={onFileSelect}
 					getLabel={getLabel}
 					t={t}
 				/>
@@ -290,6 +298,7 @@ type CommitDetailProps = {
 	hash: string;
 	expandedFile: string | null;
 	onToggleFile: (key: string | null) => void;
+	onFileSelect?: (hash: string, filePath: string, diff: string) => void;
 	getLabel: (key: string, options?: Record<string, unknown>) => string;
 	t: (key: string, options?: Record<string, unknown>) => string;
 };
@@ -299,6 +308,7 @@ function CommitDetail({
 	hash,
 	expandedFile,
 	onToggleFile,
+	onFileSelect,
 	getLabel,
 	t,
 }: CommitDetailProps) {
@@ -345,14 +355,14 @@ function CommitDetail({
 								"hover:bg-muted flex min-h-[2.75rem] w-full items-center gap-2 px-8 py-1 text-left text-xs",
 								isFileExpanded && "bg-muted/50",
 							)}
-							onClick={() => onToggleFile(isFileExpanded ? null : fileKey)}
+							onClick={() => {
+								onToggleFile(isFileExpanded ? null : fileKey);
+								if (file.diff && onFileSelect) {
+									onFileSelect(hash, file.path, file.diff);
+								}
+							}}
 						>
-							<HugeiconsIcon
-								icon={File01Icon}
-								strokeWidth={2}
-								className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-								aria-hidden="true"
-							/>
+							<FileTypeLabel path={file.path} />
 							<span className="min-w-0 flex-1 truncate">{file.path}</span>
 							<span className="text-muted-foreground shrink-0 text-[10px]">
 								<span className="text-emerald-600">+{file.insertions}</span>{" "}

@@ -823,7 +823,7 @@ export class SocketClient extends EventEmitter {
 					return;
 				}
 
-				const { addedLines, modifiedLines } = await getFileDiff(
+				const { addedLines, modifiedLines, rawDiff } = await getFileDiff(
 					record.cwd,
 					filePath,
 				);
@@ -833,6 +833,7 @@ export class SocketClient extends EventEmitter {
 					path: filePath,
 					addedLines,
 					modifiedLines,
+					rawDiff,
 				});
 			} catch (error) {
 				logger.error(

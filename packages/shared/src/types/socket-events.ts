@@ -387,6 +387,7 @@ export type GitFileDiffResponse = {
 	addedLines: number[];
 	modifiedLines: number[];
 	deletedLines: number[];
+	rawDiff?: string;
 };
 
 // Extended git types for RPC

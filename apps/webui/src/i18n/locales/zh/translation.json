@@ -135,6 +135,8 @@
 		"previewTitleFallback": "预览",
 		"imageMode": "图片模式",
 		"codeMode": "代码模式",
+		"diffMode": "差异对比",
+		"noDiffAvailable": "无可用差异",
 		"selectFileHint": "选择文件后查看预览",
 		"loadingPreview": "加载预览中...",
 		"unsupportedFormat": "当前格式暂不支持",
