@@ -3,7 +3,7 @@
  * Provides line-level diff computation and unified-diff parsing.
  */
 
-export type DiffOp = {
+type DiffOp = {
 	type: "equal" | "insert" | "delete";
 	text: string;
 };
@@ -74,7 +74,7 @@ export const buildDiffOps = (
 	return backtrackDiff(trace, oldLines, newLines, offset);
 };
 
-export const backtrackDiff = (
+const backtrackDiff = (
 	trace: number[][],
 	oldLines: string[],
 	newLines: string[],
