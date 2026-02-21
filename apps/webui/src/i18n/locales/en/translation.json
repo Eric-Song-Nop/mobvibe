@@ -137,7 +137,12 @@
 		"codeMode": "Code",
 		"selectFileHint": "Select a file to preview",
 		"loadingPreview": "Loading preview...",
-		"unsupportedFormat": "Format not supported yet"
+		"unsupportedFormat": "Format not supported yet",
+		"filesTab": "Files",
+		"changesTab": "Changes",
+		"changedGroup": "Changed",
+		"untrackedGroup": "Untracked",
+		"noChanges": "No changes detected"
 	},
 	"fileBrowser": {
 		"loading": "Loading...",
@@ -296,6 +301,21 @@
 		"remove": "Remove",
 		"removeTitle": "Remove machine?",
 		"removeDescription": "This will disconnect the machine and all its sessions."
+	},
+	"commandPalette": {
+		"openCommandPalette": "Command Palette",
+		"searchPlaceholder": "Type a command or search...",
+		"newSession": "New Session",
+		"openFileExplorer": "Open File Explorer",
+		"openChanges": "Open Changes",
+		"searchInChat": "Search in Chat",
+		"searchFiles": "Search Files",
+		"noResults": "No matching commands"
+	},
+	"chatSearch": {
+		"placeholder": "Search messages...",
+		"noResults": "No matches found",
+		"matchCount": "{{current}}/{{total}}"
 	},
 	"cli": {
 		"discoveringCapabilities": "Discovering agent capabilities..."

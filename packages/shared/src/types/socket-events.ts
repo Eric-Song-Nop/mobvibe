@@ -328,6 +328,17 @@ export interface GatewayToCliEvents {
 	// Git RPC requests
 	"rpc:git:status": (request: RpcRequest<GitStatusParams>) => void;
 	"rpc:git:fileDiff": (request: RpcRequest<GitFileDiffParams>) => void;
+	"rpc:git:log": (request: RpcRequest<GitLogParams>) => void;
+	"rpc:git:show": (request: RpcRequest<GitShowParams>) => void;
+	"rpc:git:blame": (request: RpcRequest<GitBlameParams>) => void;
+	"rpc:git:branches": (request: RpcRequest<GitBranchesParams>) => void;
+	"rpc:git:stashList": (request: RpcRequest<GitStashListParams>) => void;
+	"rpc:git:statusExtended": (
+		request: RpcRequest<GitStatusExtendedParams>,
+	) => void;
+	"rpc:git:searchLog": (request: RpcRequest<GitSearchLogParams>) => void;
+	"rpc:git:fileHistory": (request: RpcRequest<GitFileHistoryParams>) => void;
+	"rpc:git:grep": (request: RpcRequest<GitGrepParams>) => void;
 }
 
 // Webui -> Gateway events
@@ -377,6 +388,131 @@ export type GitFileDiffResponse = {
 	modifiedLines: number[];
 	deletedLines: number[];
 };
+
+// Extended git types for RPC
+export type GitLogEntry = {
+	hash: string;
+	shortHash: string;
+	author: string;
+	authorEmail: string;
+	date: string;
+	subject: string;
+	body?: string;
+	filesChanged?: number;
+	insertions?: number;
+	deletions?: number;
+};
+
+export type GitCommitDetail = GitLogEntry & {
+	files: Array<{
+		path: string;
+		status: "A" | "M" | "D" | "R" | "C";
+		oldPath?: string;
+		insertions: number;
+		deletions: number;
+	}>;
+};
+
+export type GitBlameLine = {
+	lineNumber: number;
+	commitHash: string;
+	shortHash: string;
+	author: string;
+	date: string;
+	content: string;
+};
+
+export type GitBranch = {
+	name: string;
+	current: boolean;
+	remote?: string;
+	upstream?: string;
+	aheadBehind?: { ahead: number; behind: number };
+	lastCommitDate?: string;
+};
+
+export type GitStashEntry = {
+	index: number;
+	message: string;
+	date: string;
+	branchName?: string;
+};
+
+export type GitStatusExtended = {
+	branch?: string;
+	staged: Array<{ path: string; status: GitFileStatus }>;
+	unstaged: Array<{ path: string; status: GitFileStatus }>;
+	untracked: Array<{ path: string }>;
+	dirStatus: Record<string, GitFileStatus>;
+};
+
+export type GrepResult = {
+	path: string;
+	lineNumber: number;
+	content: string;
+	matchStart: number;
+	matchEnd: number;
+};
+
+// Git RPC params/response types
+export type GitLogParams = {
+	sessionId: string;
+	maxCount?: number;
+	skip?: number;
+	path?: string;
+	author?: string;
+	search?: string;
+};
+export type GitLogResponse = {
+	entries: GitLogEntry[];
+	hasMore: boolean;
+};
+
+export type GitShowParams = { sessionId: string; hash: string };
+export type GitShowResponse = GitCommitDetail;
+
+export type GitBlameParams = {
+	sessionId: string;
+	path: string;
+	startLine?: number;
+	endLine?: number;
+};
+export type GitBlameResponse = { lines: GitBlameLine[] };
+
+export type GitBranchesParams = { sessionId: string };
+export type GitBranchesResponse = { branches: GitBranch[] };
+
+export type GitStashListParams = { sessionId: string };
+export type GitStashListResponse = { entries: GitStashEntry[] };
+
+export type GitStatusExtendedParams = { sessionId: string };
+export type GitStatusExtendedResponse = GitStatusExtended & {
+	isGitRepo: boolean;
+};
+
+export type GitSearchLogParams = {
+	sessionId: string;
+	query: string;
+	type: "message" | "diff" | "author";
+	maxCount?: number;
+};
+export type GitSearchLogResponse = { entries: GitLogEntry[] };
+
+export type GitFileHistoryParams = {
+	sessionId: string;
+	path: string;
+	maxCount?: number;
+};
+export type GitFileHistoryResponse = { entries: GitLogEntry[] };
+
+export type GitGrepParams = {
+	sessionId: string;
+	query: string;
+	caseSensitive?: boolean;
+	regex?: boolean;
+	glob?: string;
+};
+export type GitGrepResponse = { results: GrepResult[]; truncated: boolean };
 
 // HTTP API response types (used by gateway routes + webui client)
 export type AcpBackendsResponse = {

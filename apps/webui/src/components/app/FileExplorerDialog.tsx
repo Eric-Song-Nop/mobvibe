@@ -12,6 +12,7 @@ import {
 	useColumnFileBrowser,
 } from "@/components/app/ColumnFileBrowser";
 import { previewRenderers } from "@/components/app/file-preview-renderers";
+import { GitChangesView } from "@/components/app/GitChangesView";
 import {
 	AlertDialog,
 	AlertDialogCancel,
@@ -53,6 +54,7 @@ export function FileExplorerDialog({
 	const [activePane, setActivePane] = useState<"browser" | "preview">(
 		"browser",
 	);
+	const [activeTab, setActiveTab] = useState<"files" | "changes">("files");
 	const previousPreviewPathRef = useRef<string | undefined>(undefined);
 
 	const rootsQuery = useQuery({
@@ -102,6 +104,16 @@ export function FileExplorerDialog({
 		setSelectedFilePath(entry.path);
 		setActivePane("preview");
 	}, []);
+
+	const handleChangesFileSelect = useCallback(
+		(relativePath: string) => {
+			if (!rootPath) return;
+			const absolutePath = `${rootPath}/${relativePath}`;
+			setSelectedFilePath(absolutePath);
+			setActivePane("preview");
+		},
+		[rootPath],
+	);
 
 	const {
 		columns,
@@ -154,6 +166,7 @@ export function FileExplorerDialog({
 		setCurrentPath(undefined);
 		setSelectedFilePath(undefined);
 		setActivePane("browser");
+		setActiveTab("files");
 	}, []);
 
 	useEffect(() => {
@@ -242,7 +255,31 @@ export function FileExplorerDialog({
 								strokeWidth={2}
 								aria-hidden="true"
 							/>
-							{t("fileExplorer.sessionFiles")}
+							<div className="flex items-center gap-1">
+								<Button
+									variant={activeTab === "files" ? "secondary" : "ghost"}
+									size="sm"
+									className="h-7 px-2 text-sm font-medium"
+									onClick={() => setActiveTab("files")}
+								>
+									{t("fileExplorer.filesTab")}
+								</Button>
+								{gitStatus?.isGitRepo ? (
+									<Button
+										variant={activeTab === "changes" ? "secondary" : "ghost"}
+										size="sm"
+										className="h-7 px-2 text-sm font-medium"
+										onClick={() => setActiveTab("changes")}
+									>
+										{t("fileExplorer.changesTab")}
+										{gitStatus.files.length > 0 ? (
+											<span className="text-muted-foreground ml-1 text-xs">
+												({gitStatus.files.length})
+											</span>
+										) : null}
+									</Button>
+								) : null}
+							</div>
 							{gitStatus?.isGitRepo && gitStatus.branch ? (
 								<span className="text-muted-foreground flex items-center gap-1 text-xs font-normal">
 									<HugeiconsIcon
@@ -261,7 +298,9 @@ export function FileExplorerDialog({
 								size="sm"
 								onClick={() => setActivePane("browser")}
 							>
-								{t("fileExplorer.directories")}
+								{activeTab === "files"
+									? t("fileExplorer.directories")
+									: t("fileExplorer.changesTab")}
 							</Button>
 							<Button
 								variant={activePane === "preview" ? "secondary" : "outline"}
@@ -282,31 +321,41 @@ export function FileExplorerDialog({
 							browserPaneClassName,
 						)}
 					>
-						<div className="flex items-center justify-between gap-2">
-							<div className="text-xs font-medium">{rootLabel}</div>
-							{currentPath ? (
-								<span className="text-muted-foreground text-xs">
-									{currentPath.replace(rootPath ?? "", "") || "/"}
-								</span>
-							) : null}
-						</div>
-						{browserError ? (
-							<div className="text-destructive border-input bg-muted/30 flex min-h-0 flex-1 items-center justify-center rounded-none border text-xs">
-								{browserError}
-							</div>
+						{activeTab === "files" ? (
+							<>
+								<div className="flex items-center justify-between gap-2">
+									<div className="text-xs font-medium">{rootLabel}</div>
+									{currentPath ? (
+										<span className="text-muted-foreground text-xs">
+											{currentPath.replace(rootPath ?? "", "") || "/"}
+										</span>
+									) : null}
+								</div>
+								{browserError ? (
+									<div className="text-destructive border-input bg-muted/30 flex min-h-0 flex-1 items-center justify-center rounded-none border text-xs">
+										{browserError}
+									</div>
+								) : (
+									<ColumnFileBrowser
+										columns={columns}
+										currentPath={currentPath}
+										highlightedEntryPath={selectedFilePath ?? currentPath}
+										onColumnSelect={handleColumnSelect}
+										onEntrySelect={handleEntrySelect}
+										isLoading={isBrowserLoading}
+										scrollContainerRef={scrollContainerRef}
+										columnRefs={columnRefs}
+										className="min-h-0 min-w-0 flex-1"
+										rootPath={rootPath}
+										getGitStatus={getGitStatusForPath}
+									/>
+								)}
+							</>
 						) : (
-							<ColumnFileBrowser
-								columns={columns}
-								currentPath={currentPath}
-								highlightedEntryPath={selectedFilePath ?? currentPath}
-								onColumnSelect={handleColumnSelect}
-								onEntrySelect={handleEntrySelect}
-								isLoading={isBrowserLoading}
-								scrollContainerRef={scrollContainerRef}
-								columnRefs={columnRefs}
-								className="min-h-0 min-w-0 flex-1"
-								rootPath={rootPath}
-								getGitStatus={getGitStatusForPath}
+							<GitChangesView
+								files={gitStatus?.files ?? []}
+								onFileSelect={handleChangesFileSelect}
+								selectedFilePath={selectedFilePath}
 							/>
 						)}
 					</section>

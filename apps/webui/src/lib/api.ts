@@ -379,7 +379,28 @@ export const reloadSession = async (payload: {
 		body: JSON.stringify(payload),
 	});
 
-import type { GitFileDiffResponse, GitStatusResponse } from "@mobvibe/shared";
+import type {
+	GitBlameParams,
+	GitBlameResponse,
+	GitBranchesParams,
+	GitBranchesResponse,
+	GitFileDiffResponse,
+	GitFileHistoryParams,
+	GitFileHistoryResponse,
+	GitGrepParams,
+	GitGrepResponse,
+	GitLogParams,
+	GitLogResponse,
+	GitSearchLogParams,
+	GitSearchLogResponse,
+	GitShowParams,
+	GitShowResponse,
+	GitStashListParams,
+	GitStashListResponse,
+	GitStatusExtendedParams,
+	GitStatusExtendedResponse,
+	GitStatusResponse,
+} from "@mobvibe/shared";
 
 const buildSessionGitStatusPath = (sessionId: string) =>
 	`/fs/session/git/status?sessionId=${encodeURIComponent(sessionId)}`;
@@ -401,6 +422,111 @@ export const fetchSessionGitDiff = async (payload: {
 	requestJson<GitFileDiffResponse>(
 		buildSessionGitDiffPath(payload.sessionId, payload.path),
 	);
+
+// --- Extended Git API functions ---
+
+export const fetchSessionGitLog = async (
+	payload: GitLogParams,
+): Promise<GitLogResponse> => {
+	const params = new URLSearchParams({ sessionId: payload.sessionId });
+	if (payload.maxCount) params.set("maxCount", String(payload.maxCount));
+	if (payload.skip) params.set("skip", String(payload.skip));
+	if (payload.path) params.set("path", payload.path);
+	if (payload.author) params.set("author", payload.author);
+	if (payload.search) params.set("search", payload.search);
+	return requestJson<GitLogResponse>(
+		`/fs/session/git/log?${params.toString()}`,
+	);
+};
+
+export const fetchSessionGitShow = async (
+	payload: GitShowParams,
+): Promise<GitShowResponse> => {
+	const params = new URLSearchParams({
+		sessionId: payload.sessionId,
+		hash: payload.hash,
+	});
+	return requestJson<GitShowResponse>(
+		`/fs/session/git/show?${params.toString()}`,
+	);
+};
+
+export const fetchSessionGitBlame = async (
+	payload: GitBlameParams,
+): Promise<GitBlameResponse> => {
+	const params = new URLSearchParams({
+		sessionId: payload.sessionId,
+		path: payload.path,
+	});
+	if (payload.startLine) params.set("startLine", String(payload.startLine));
+	if (payload.endLine) params.set("endLine", String(payload.endLine));
+	return requestJson<GitBlameResponse>(
+		`/fs/session/git/blame?${params.toString()}`,
+	);
+};
+
+export const fetchSessionGitBranches = async (
+	payload: GitBranchesParams,
+): Promise<GitBranchesResponse> =>
+	requestJson<GitBranchesResponse>(
+		`/fs/session/git/branches?sessionId=${encodeURIComponent(payload.sessionId)}`,
+	);
+
+export const fetchSessionGitStashList = async (
+	payload: GitStashListParams,
+): Promise<GitStashListResponse> =>
+	requestJson<GitStashListResponse>(
+		`/fs/session/git/stash?sessionId=${encodeURIComponent(payload.sessionId)}`,
+	);
+
+export const fetchSessionGitStatusExtended = async (
+	payload: GitStatusExtendedParams,
+): Promise<GitStatusExtendedResponse> =>
+	requestJson<GitStatusExtendedResponse>(
+		`/fs/session/git/status-extended?sessionId=${encodeURIComponent(payload.sessionId)}`,
+	);
+
+export const fetchSessionGitSearchLog = async (
+	payload: GitSearchLogParams,
+): Promise<GitSearchLogResponse> => {
+	const params = new URLSearchParams({
+		sessionId: payload.sessionId,
+		query: payload.query,
+		type: payload.type,
+	});
+	if (payload.maxCount) params.set("maxCount", String(payload.maxCount));
+	return requestJson<GitSearchLogResponse>(
+		`/fs/session/git/search-log?${params.toString()}`,
+	);
+};
+
+export const fetchSessionGitFileHistory = async (
+	payload: GitFileHistoryParams,
+): Promise<GitFileHistoryResponse> => {
+	const params = new URLSearchParams({
+		sessionId: payload.sessionId,
+		path: payload.path,
+	});
+	if (payload.maxCount) params.set("maxCount", String(payload.maxCount));
+	return requestJson<GitFileHistoryResponse>(
+		`/fs/session/git/file-history?${params.toString()}`,
+	);
+};
+
+export const fetchSessionGitGrep = async (
+	payload: GitGrepParams,
+): Promise<GitGrepResponse> => {
+	const params = new URLSearchParams({
+		sessionId: payload.sessionId,
+		query: payload.query,
+	});
+	if (payload.caseSensitive) params.set("caseSensitive", "true");
+	if (payload.regex) params.set("regex", "true");
+	if (payload.glob) params.set("glob", payload.glob);
+	return requestJson<GitGrepResponse>(
+		`/fs/session/git/grep?${params.toString()}`,
+	);
+};
 
 // Note: SSE streaming (createSessionEventSource) has been replaced with Socket.io
 // See @/lib/socket.ts for the Socket.io implementation

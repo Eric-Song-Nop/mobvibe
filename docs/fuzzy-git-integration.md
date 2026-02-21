@@ -1,6 +1,6 @@
 # 模糊搜索 + Git 集成 极限产品特性方案
 
-> **状态**: 🚧 进行中（P0-A 已完成）
+> **状态**: 🚧 进行中（P0 全部完成，P1 全部完成）
 >
 > **目标**: 将模糊搜索和 Git 集成两个功能域推到极致，使 Mobvibe 成为最强大的 AI agent 感知工作空间。
 
@@ -8,20 +8,24 @@
 
 ### 现状分析
 
-**搜索能力（P0-A 已完成基础模糊搜索）**:
+**搜索能力（P0-A ~ P1-D 已完成）**:
 
 - 两处搜索已从 `String.includes()` 升级为 uFuzzy 模糊匹配（P0-A ✅）:
   - `/` 命令选择器 (`apps/webui/src/lib/command-utils.ts`) — 模糊搜索 ACP 命令 + `<mark>` 高亮
   - `@` 资源选择器 (`apps/webui/src/lib/resource-utils.ts`) — 模糊搜索文件路径 + `<mark>` 高亮
-- 统一搜索引擎 `apps/webui/src/lib/fuzzy-search.ts` 已就绪，可供后续命令面板等功能复用
-- 待建设: 全局搜索、命令面板、快捷键系统
+- 统一搜索引擎 `apps/webui/src/lib/fuzzy-search.ts` 已就绪
+- 全局快捷键系统 `apps/webui/src/lib/hotkeys.ts` 已就绪（P0-B ✅）
+- 全局命令面板 `apps/webui/src/components/app/CommandPalette.tsx` 已就绪（P1-A ✅），含模糊文件搜索 @ 模式（P1-B ✅）
+- 聊天内消息搜索 `apps/webui/src/components/chat/ChatSearchBar.tsx` 已就绪（P1-C ✅）
+- 列内文件模糊过滤 `apps/webui/src/components/app/ColumnFileBrowser.tsx` 已就绪（P1-D ✅）
 
-**Git 集成（有基础，远未极限）**:
+**Git 集成（P0-C ~ P1-E 已完成基础 + RPC 扩展）**:
 
-- CLI 侧 4 个函数: `isGitRepo()`, `getGitBranch()`, `getGitStatus()`, `getFileDiff()` (`apps/mobvibe-cli/src/lib/git-utils.ts`)
-- RPC 链路完整: WebUI → Gateway → CLI → git binary
+- CLI 侧 13 个函数: 原有 4 个 + 新增 9 个（P0-C ✅）
+- RPC 链路完整: WebUI → Gateway → CLI → git binary，共 11 个 RPC 端点
 - WebUI 展示: 文件状态字母(M/A/D/?)、分支名、行级 diff 高亮、unified diff 渲染
-- 缺失: 提交历史、blame、分支管理、staged/unstaged 分离、side-by-side diff、stash 等
+- FileExplorer Git Changes 视图已就绪（P1-E ✅）
+- 待建设: 提交历史查看器、blame、分支管理 UI、staged/unstaged 分离、side-by-side diff、stash 查看
 
 ### 架构约束
 
@@ -99,7 +103,7 @@ function FuzzyHighlight(props: {
 - `apps/webui/src/components/app/ResourceCombobox.tsx` — props 改为 `results`，relativePath 使用 `FuzzyHighlight` 渲染高亮
 - `apps/webui/src/components/app/ChatFooter.tsx` — 移除 `buildCommandSearchItems`/`buildResourceSearchItems` 中间层，回调类型更新为 `FuzzySearchResult` 包装
 
-### P0-B: 全局快捷键系统
+### P0-B: 全局快捷键系统 ✅
 
 **新建文件**:
 
@@ -123,14 +127,14 @@ function FuzzyHighlight(props: {
 | `Cmd/Ctrl+B`       | 切换侧边栏   | P0   |
 | `Cmd/Ctrl+N`       | 新建会话     | P0   |
 
-**移动端**: 移动端无物理键盘，所有快捷键功能通过 AppHeader 工具栏图标按钮触发。按钮优先级: 搜索(🔍) > 文件(📁) > Git，使用 `md:hidden` 仅在移动端显示（桌面端隐藏）。`isMobilePlatform()` 检测平台后条件渲染按钮组。
+**移动端**: 移动端无物理键盘，所有快捷键功能通过命令面板统一入口触发。AppHeader 仅新增一个命令面板按钮（`md:hidden`，仅移动端显示），用户通过命令面板的模式前缀（`>`/`@`/`#`/`git:` 等）访问各功能，避免 header 按钮堆积。
 
 **改造文件**:
 
 - `apps/webui/src/App.tsx` — 顶层注册全局快捷键
 - `apps/webui/src/lib/ui-store.ts` — 新增面板状态
 
-### P0-C: Git RPC 扩展
+### P0-C: Git RPC 扩展 ✅
 
 在现有 4 个 git 函数基础上大幅扩展 CLI 侧能力。
 
@@ -226,7 +230,7 @@ type GrepResult = {
 
 ## P1: 核心搜索体验
 
-### P1-A: 全局命令面板 (Cmd+K)
+### P1-A: 全局命令面板 (Cmd+K) ✅
 
 **新建** `apps/webui/src/components/app/CommandPalette.tsx`
 
@@ -242,11 +246,11 @@ type GrepResult = {
 - `@tanstack/react-virtual` 虚拟滚动（已是项目依赖）
 - 每个结果项显示快捷键提示
 
-**移动端**: 桌面为居中浮动面板（Cmd+K 触发），移动端切换为全屏模态（`100svh × 100vw`），从 AppHeader 搜索图标按钮触发。输入框自动聚焦并弹出原生虚拟键盘。结果列表使用 `@tanstack/react-virtual` 虚拟滚动。每项触摸目标增大至 `min-h-12`（48px），符合 WCAG 2.5.8 触摸目标建议和 Material Design 规范。
+**移动端**: 桌面为居中浮动面板（Cmd+K 触发），移动端切换为全屏模态（`100svh × 100vw`），从 AppHeader 命令面板按钮触发。输入框自动聚焦并弹出原生虚拟键盘。结果列表使用 `@tanstack/react-virtual` 虚拟滚动。每项触摸目标增大至 `min-h-12`（48px），符合 WCAG 2.5.8 触摸目标建议和 Material Design 规范。
 
-### P1-B: 模糊文件搜索 (Cmd+P)
+### P1-B: 模糊文件搜索 (Cmd+P) ✅
 
-- 命令面板的 `file` 模式
+- 命令面板的 `file` 模式（`@` 前缀触发）
 - 数据源: 复用 `fetchSessionFsResources` API（TanStack Query 缓存）
 - 搜索字段: `relativePath`，使用 P0-A 模糊引擎
 - 结果渲染: 文件图标 + 路径高亮 + git 状态标记
@@ -257,7 +261,7 @@ type GrepResult = {
 
 **依赖**: P0-A ✅（模糊搜索引擎）、P1-A（命令面板容器）
 
-### P1-C: 聊天内消息搜索 (Cmd+F)
+### P1-C: 聊天内消息搜索 (Cmd+F) ✅
 
 **新建** `apps/webui/src/components/chat/ChatSearchBar.tsx`
 
@@ -268,9 +272,9 @@ type GrepResult = {
 - Escape 关闭搜索条
 - **改造** `apps/webui/src/lib/ui-store.ts` — 新增搜索状态
 
-**移动端**: 桌面为顶部搜索条（Cmd+F 触发），移动端从 AppHeader 搜索按钮展开搜索栏，覆盖 header 区域。上/下导航按钮放置在输入框两侧，匹配计数（"3/12"）居中显示。Escape 键或关闭按钮收起搜索栏。
+**移动端**: 桌面为顶部搜索条（Cmd+F 触发），移动端通过命令面板的"聊天搜索"命令激活搜索栏，覆盖 header 区域。上/下导航按钮放置在输入框两侧，匹配计数（"3/12"）居中显示。Escape 键或关闭按钮收起搜索栏。
 
-### P1-D: 文件列表内实时模糊过滤
+### P1-D: 文件列表内实时模糊过滤 ✅
 
 **改造文件**:
 
@@ -292,7 +296,7 @@ type GrepResult = {
 **依赖**: P0-A ✅（fuzzySearch 引擎已就绪）
 **不依赖**: P0-B/P0-C — 可独立实施
 
-### P1-E: FileExplorer Git Changes 视图
+### P1-E: FileExplorer Git Changes 视图 ✅
 
 **新建文件**:
 
@@ -496,13 +500,13 @@ type GrepResult = {
 
 | 场景              | 桌面端实现                                      | 移动端触发                                |
 | ----------------- | ----------------------------------------------- | ----------------------------------------- |
-| 搜索变更文件      | 文件搜索中 git 变更文件置顶 + 状态标记 (Cmd+P)  | header 搜索图标 → 全屏模态                |
-| 搜索提交消息      | 命令面板 `git:` 前缀 → `rpc:git:searchLog`      | header 搜索 → 输入 `git:` 前缀            |
+| 搜索变更文件      | 文件搜索中 git 变更文件置顶 + 状态标记 (Cmd+P)  | 命令面板按钮 → `@` 模式                   |
+| 搜索提交消息      | 命令面板 `git:` 前缀 → `rpc:git:searchLog`      | 命令面板按钮 → `git:` 前缀                |
 | 模糊匹配分支      | 分支下拉菜单集成模糊搜索                        | 分支名 tap → Bottom Sheet + 模糊搜索      |
-| diff 内搜索       | diff 视图中 Cmd+F                               | header 搜索按钮 → 覆盖式搜索栏            |
+| diff 内搜索       | diff 视图中 Cmd+F                               | 命令面板 → 聊天搜索命令                   |
 | "agent 改了什么"  | 命令面板 `changes:` → tool_call + git 变更关联  | Changes tab 直接查看                      |
 | 文件历史搜索      | 文件预览 History tab 模糊搜索提交消息           | 全屏模态 History pane                     |
-| 跨会话 + git 关联 | "在哪个会话中修改了 X 文件" — 跨会话 git log    | header 搜索 → 输入 `#` 前缀               |
+| 跨会话 + git 关联 | "在哪个会话中修改了 X 文件" — 跨会话 git log    | 命令面板按钮 → `#` 前缀                   |
 | 列内快速过滤文件  | ColumnFileBrowser 搜索框 + uFuzzy (/) (P1-D)    | 搜索框直接可见，tap 聚焦                   |
 | 查看当前变更文件  | FileExplorer Changes tab (P1-E)                 | 同 Changes tab，点击文件 → preview         |
 
@@ -528,14 +532,14 @@ type GrepResult = {
 | **Bottom Sheet**    | 基于 Radix Dialog + CSS `transform: translateY()` 动画，从底部推入               | 用于分支管理、blame 详情等场景              |
 | **SafeArea 扩展**   | 全边缘 `env(safe-area-inset-*)` 支持，封装为 `SafeAreaView` 容器组件             | 当前仅 bottom，需扩展 top/left/right        |
 | **长按探测器 Hook** | `useLongPress(callback, delay)` — 基于 `pointerdown`/`pointerup` 计时器          | 替代桌面右键菜单，用于上下文操作            |
-| **Header 工具栏**   | AppHeader 新增移动端专用图标按钮组（搜索/文件/Git），`md:hidden` 仅移动端可见     | 替代桌面快捷键入口                          |
+| **Header 工具栏**   | AppHeader 新增移动端命令面板按钮（单个），`md:hidden` 仅移动端可见                | 命令面板为所有快捷键功能的统一入口          |
 
 ### 各功能移动端适配总览
 
 | 功能         | 桌面端                    | 移动端                                                 | 降级策略           |
 | ------------ | ------------------------- | ------------------------------------------------------ | ------------------ |
-| 命令面板     | 居中浮动面板 (Cmd+K)      | 全屏模态 (100svh) + header 搜索按钮触发                | —                  |
-| 快捷键       | 键盘快捷键                | AppHeader 图标按钮替代                                 | —                  |
+| 命令面板     | 居中浮动面板 (Cmd+K)      | 全屏模态 (100svh) + header 命令面板按钮触发            | —                  |
+| 快捷键       | 键盘快捷键                | 命令面板统一入口                                       | —                  |
 | 文件搜索     | 居中浮动面板 (Cmd+P)      | 全屏模态                                               | —                  |
 | 聊天内搜索   | 顶部搜索条 (Cmd+F)        | 覆盖 header 区域的搜索栏                               | —                  |
 | 提交历史     | 侧面板/新 tab             | 全屏模态 + pane 推入                                   | —                  |
@@ -571,13 +575,13 @@ type GrepResult = {
 
 ## 实施优先级
 
-| 阶段   | 内容                                             | 工作量 | 价值 | 周期    |
+| 阶段   | 内容                                             | 工作量 | 价值 | 状态    |
 | ------ | ------------------------------------------------ | ------ | ---- | ------- |
-| **P0** | 基础设施（搜索引擎 ✅ + 快捷键 + Git RPC）       | 中     | 极高 | ~1 周   |
-| **P1** | 核心搜索 + FileExplorer 增强（命令面板 + 文件搜索 + 聊天搜索 + 列内过滤 + Changes 视图） | 中     | 极高 | ~1.5 周 |
-| **P2** | 核心 Git（提交历史 + staged 分离 + diff + 分支） | 大     | 高   | ~2 周   |
-| **P3** | 高级功能（跨会话搜索 + blame + grep + stash）    | 大     | 中高 | ~2 周   |
-| **P4** | 极限功能（Agent 变更视图 + 冲突助手 + graph）    | 大     | 中   | ~2-3 周 |
+| **P0** | 基础设施（搜索引擎 ✅ + 快捷键 ✅ + Git RPC ✅）  | 中     | 极高 | ✅ 完成 |
+| **P1** | 核心搜索 + FileExplorer 增强（命令面板 ✅ + 文件搜索 ✅ + 聊天搜索 ✅ + 列内过滤 ✅ + Changes 视图 ✅） | 中     | 极高 | ✅ 完成 |
+| **P2** | 核心 Git（提交历史 + staged 分离 + diff + 分支） | 大     | 高   | 待开始  |
+| **P3** | 高级功能（跨会话搜索 + blame + grep + stash）    | 大     | 中高 | 待开始  |
+| **P4** | 极限功能（Agent 变更视图 + 冲突助手 + graph）    | 大     | 中   | 待开始  |
 
 **建议启动顺序**: P0 → P1-A + P1-C (并行) → P1-B → P1-D + P1-E (并行) → P2-A → P2-B → P2-C → P2-D → P3 → P4
 
