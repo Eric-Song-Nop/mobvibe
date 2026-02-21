@@ -7,12 +7,14 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { BranchSelector } from "@/components/app/BranchSelector";
 import {
 	ColumnFileBrowser,
 	useColumnFileBrowser,
 } from "@/components/app/ColumnFileBrowser";
 import { previewRenderers } from "@/components/app/file-preview-renderers";
 import { GitChangesView } from "@/components/app/GitChangesView";
+import { CommitHistoryPanel } from "@/components/git/CommitHistoryPanel";
 import {
 	AlertDialog,
 	AlertDialogCancel,
@@ -27,7 +29,7 @@ import {
 	fetchSessionFsEntries,
 	fetchSessionFsFile,
 	fetchSessionFsRoots,
-	fetchSessionGitStatus,
+	fetchSessionGitStatusExtended,
 } from "@/lib/api";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { resolveFileNameFromPath } from "@/lib/file-preview-utils";
@@ -54,7 +56,10 @@ export function FileExplorerDialog({
 	const [activePane, setActivePane] = useState<"browser" | "preview">(
 		"browser",
 	);
-	const [activeTab, setActiveTab] = useState<"files" | "changes">("files");
+	const [activeTab, setActiveTab] = useState<"files" | "changes" | "history">(
+		"files",
+	);
+	const [branchSelectorOpen, setBranchSelectorOpen] = useState(false);
 	const previousPreviewPathRef = useRef<string | undefined>(undefined);
 
 	const rootsQuery = useQuery({
@@ -74,7 +79,7 @@ export function FileExplorerDialog({
 			if (!sessionId) {
 				throw createFallbackError(t("errors.sessionUnavailable"), "request");
 			}
-			return fetchSessionGitStatus({ sessionId });
+			return fetchSessionGitStatusExtended({ sessionId });
 		},
 		enabled: open && !!sessionId,
 		staleTime: 30000, // Cache for 30 seconds
@@ -231,12 +236,26 @@ export function FileExplorerDialog({
 			if (!gitStatus?.isGitRepo) {
 				return undefined;
 			}
-			// Check if it's a file
-			const fileEntry = gitStatus.files.find(
+			// Check staged files
+			const stagedEntry = gitStatus.staged.find(
 				(f) => f.path === relativePath || f.path === `${relativePath}/`,
 			);
-			if (fileEntry) {
-				return fileEntry.status;
+			if (stagedEntry) {
+				return stagedEntry.status;
+			}
+			// Check unstaged files
+			const unstagedEntry = gitStatus.unstaged.find(
+				(f) => f.path === relativePath || f.path === `${relativePath}/`,
+			);
+			if (unstagedEntry) {
+				return unstagedEntry.status;
+			}
+			// Check untracked files
+			const untrackedEntry = gitStatus.untracked.find(
+				(f) => f.path === relativePath || f.path === `${relativePath}/`,
+			);
+			if (untrackedEntry) {
+				return "?";
 			}
 			// Check if it's a directory
 			return gitStatus.dirStatus[relativePath];
@@ -245,178 +264,215 @@ export function FileExplorerDialog({
 	);
 
 	return (
-		<AlertDialog open={open} onOpenChange={onOpenChange}>
-			<AlertDialogContent className="grid h-[100svh] w-[100vw] !max-w-none min-h-0 min-w-0 grid-rows-[auto_1fr_auto] overflow-hidden translate-x-0 translate-y-0 rounded-none p-4 sm:h-[82vh] sm:!w-[98vw] sm:!max-w-[98vw] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-none top-0 left-0 sm:top-1/2 sm:left-1/2">
-				<AlertDialogHeader className="gap-2">
-					{/* Row 1: Icon + Tabs + Git Branch */}
-					<div className="flex w-full items-center gap-2">
-						<AlertDialogTitle className="flex min-w-0 items-center gap-2">
-							<HugeiconsIcon
-								icon={FolderOpenIcon}
-								strokeWidth={2}
-								className="shrink-0"
-								aria-hidden="true"
-							/>
-							<div className="flex items-center gap-1">
-								<Button
-									variant={activeTab === "files" ? "secondary" : "ghost"}
-									size="sm"
-									className="h-7 px-2 text-sm font-medium"
-									onClick={() => setActiveTab("files")}
-								>
-									{t("fileExplorer.filesTab")}
-								</Button>
-								{gitStatus?.isGitRepo ? (
-									<Button
-										variant={activeTab === "changes" ? "secondary" : "ghost"}
-										size="sm"
-										className="h-7 px-2 text-sm font-medium"
-										onClick={() => setActiveTab("changes")}
-									>
-										{t("fileExplorer.changesTab")}
-										{gitStatus.files.length > 0 ? (
-											<span className="text-muted-foreground ml-1 text-xs">
-												({gitStatus.files.length})
-											</span>
-										) : null}
-									</Button>
-								) : null}
-							</div>
-						</AlertDialogTitle>
-						{gitStatus?.isGitRepo && gitStatus.branch ? (
-							<span className="text-muted-foreground ml-auto flex shrink-0 items-center gap-1 text-xs font-normal max-w-[8rem]">
+		<>
+			<AlertDialog open={open} onOpenChange={onOpenChange}>
+				<AlertDialogContent className="grid h-[100svh] w-[100vw] !max-w-none min-h-0 min-w-0 grid-rows-[auto_1fr_auto] overflow-hidden translate-x-0 translate-y-0 rounded-none p-4 sm:h-[82vh] sm:!w-[98vw] sm:!max-w-[98vw] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-none top-0 left-0 sm:top-1/2 sm:left-1/2">
+					<AlertDialogHeader className="gap-2">
+						{/* Row 1: Icon + Tabs + Git Branch */}
+						<div className="flex w-full items-center gap-2">
+							<AlertDialogTitle className="flex min-w-0 items-center gap-2">
 								<HugeiconsIcon
-									icon={GitBranchIcon}
+									icon={FolderOpenIcon}
 									strokeWidth={2}
-									className="h-3.5 w-3.5 shrink-0"
+									className="shrink-0"
 									aria-hidden="true"
 								/>
-								<span className="truncate">{gitStatus.branch}</span>
-							</span>
-						) : null}
-					</div>
-					{/* Row 2: Pane toggle — mobile only */}
-					<div className="flex items-center gap-2 sm:hidden">
-						<Button
-							variant={activePane === "browser" ? "secondary" : "outline"}
-							size="sm"
-							onClick={() => setActivePane("browser")}
-						>
-							{activeTab === "files"
-								? t("fileExplorer.directories")
-								: t("fileExplorer.changesTab")}
-						</Button>
-						<Button
-							variant={activePane === "preview" ? "secondary" : "outline"}
-							size="sm"
-							onClick={() => setActivePane("preview")}
-							disabled={!selectedFilePath}
-						>
-							{t("fileExplorer.preview")}
-						</Button>
-					</div>
-				</AlertDialogHeader>
+								<div className="flex items-center gap-1">
+									<Button
+										variant={activeTab === "files" ? "secondary" : "ghost"}
+										size="sm"
+										className="h-7 px-2 text-sm font-medium"
+										onClick={() => setActiveTab("files")}
+									>
+										{t("fileExplorer.filesTab")}
+									</Button>
+									{gitStatus?.isGitRepo ? (
+										<Button
+											variant={activeTab === "changes" ? "secondary" : "ghost"}
+											size="sm"
+											className="h-7 px-2 text-sm font-medium"
+											onClick={() => setActiveTab("changes")}
+										>
+											{t("fileExplorer.changesTab")}
+											{gitStatus.staged.length +
+												gitStatus.unstaged.length +
+												gitStatus.untracked.length >
+											0 ? (
+												<span className="text-muted-foreground ml-1 text-xs">
+													(
+													{gitStatus.staged.length +
+														gitStatus.unstaged.length +
+														gitStatus.untracked.length}
+													)
+												</span>
+											) : null}
+										</Button>
+									) : null}
+									{gitStatus?.isGitRepo ? (
+										<Button
+											variant={activeTab === "history" ? "secondary" : "ghost"}
+											size="sm"
+											className="h-7 px-2 text-sm font-medium"
+											onClick={() => setActiveTab("history")}
+										>
+											{t("fileExplorer.historyTab")}
+										</Button>
+									) : null}
+								</div>
+							</AlertDialogTitle>
+							{gitStatus?.isGitRepo && gitStatus.branch ? (
+								<button
+									type="button"
+									className="text-muted-foreground hover:text-foreground hover:bg-muted ml-auto flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-xs font-normal max-w-[8rem] transition-colors"
+									onClick={() => setBranchSelectorOpen(true)}
+								>
+									<HugeiconsIcon
+										icon={GitBranchIcon}
+										strokeWidth={2}
+										className="h-3.5 w-3.5 shrink-0"
+										aria-hidden="true"
+									/>
+									<span className="truncate">{gitStatus.branch}</span>
+								</button>
+							) : null}
+						</div>
+						{/* Row 2: Pane toggle — mobile only */}
+						<div className="flex items-center gap-2 sm:hidden">
+							<Button
+								variant={activePane === "browser" ? "secondary" : "outline"}
+								size="sm"
+								onClick={() => setActivePane("browser")}
+							>
+								{activeTab === "files"
+									? t("fileExplorer.directories")
+									: activeTab === "changes"
+										? t("fileExplorer.changesTab")
+										: t("fileExplorer.historyTab")}
+							</Button>
+							<Button
+								variant={activePane === "preview" ? "secondary" : "outline"}
+								size="sm"
+								onClick={() => setActivePane("preview")}
+								disabled={!selectedFilePath}
+							>
+								{t("fileExplorer.preview")}
+							</Button>
+						</div>
+					</AlertDialogHeader>
 
-				<div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden sm:flex-row">
-					<section
-						className={cn(
-							"flex-1 min-h-0 min-w-0 overflow-hidden sm:flex-none sm:w-[28rem]",
-							browserPaneClassName,
-						)}
-					>
-						{activeTab === "files" ? (
-							<>
+					<div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden sm:flex-row">
+						<section
+							className={cn(
+								"flex-1 min-h-0 min-w-0 overflow-hidden sm:flex-none sm:w-[28rem]",
+								browserPaneClassName,
+							)}
+						>
+							{activeTab === "files" ? (
+								<>
+									<div className="flex items-center justify-between gap-2">
+										<div className="text-xs font-medium">{rootLabel}</div>
+										{currentPath ? (
+											<span className="text-muted-foreground text-xs">
+												{currentPath.replace(rootPath ?? "", "") || "/"}
+											</span>
+										) : null}
+									</div>
+									{browserError ? (
+										<div className="text-destructive border-input bg-muted/30 flex min-h-0 flex-1 items-center justify-center rounded-none border text-xs">
+											{browserError}
+										</div>
+									) : (
+										<ColumnFileBrowser
+											columns={columns}
+											currentPath={currentPath}
+											highlightedEntryPath={selectedFilePath ?? currentPath}
+											onColumnSelect={handleColumnSelect}
+											onEntrySelect={handleEntrySelect}
+											isLoading={isBrowserLoading}
+											scrollContainerRef={scrollContainerRef}
+											columnRefs={columnRefs}
+											className="min-h-0 min-w-0 flex-1"
+											rootPath={rootPath}
+											getGitStatus={getGitStatusForPath}
+										/>
+									)}
+								</>
+							) : activeTab === "changes" ? (
+								<GitChangesView
+									staged={gitStatus?.staged ?? []}
+									unstaged={gitStatus?.unstaged ?? []}
+									untracked={gitStatus?.untracked ?? []}
+									onFileSelect={handleChangesFileSelect}
+									selectedFilePath={selectedFilePath}
+								/>
+							) : sessionId ? (
+								<CommitHistoryPanel sessionId={sessionId} />
+							) : null}
+						</section>
+
+						<section
+							className={cn(
+								"flex min-h-0 min-w-0 flex-1 overflow-hidden",
+								previewPaneClassName,
+							)}
+						>
+							<div className="flex min-h-0 flex-1 flex-col gap-2">
 								<div className="flex items-center justify-between gap-2">
-									<div className="text-xs font-medium">{rootLabel}</div>
-									{currentPath ? (
+									<div className="text-xs font-medium">
+										{selectedFileName ?? t("fileExplorer.previewTitleFallback")}
+									</div>
+									{selectedFilePath ? (
 										<span className="text-muted-foreground text-xs">
-											{currentPath.replace(rootPath ?? "", "") || "/"}
+											{previewQuery.data?.previewType === "image"
+												? t("fileExplorer.imageMode")
+												: t("fileExplorer.codeMode")}
 										</span>
 									) : null}
 								</div>
-								{browserError ? (
-									<div className="text-destructive border-input bg-muted/30 flex min-h-0 flex-1 items-center justify-center rounded-none border text-xs">
-										{browserError}
-									</div>
-								) : (
-									<ColumnFileBrowser
-										columns={columns}
-										currentPath={currentPath}
-										highlightedEntryPath={selectedFilePath ?? currentPath}
-										onColumnSelect={handleColumnSelect}
-										onEntrySelect={handleEntrySelect}
-										isLoading={isBrowserLoading}
-										scrollContainerRef={scrollContainerRef}
-										columnRefs={columnRefs}
-										className="min-h-0 min-w-0 flex-1"
-										rootPath={rootPath}
-										getGitStatus={getGitStatusForPath}
-									/>
-								)}
-							</>
-						) : (
-							<GitChangesView
-								files={gitStatus?.files ?? []}
-								onFileSelect={handleChangesFileSelect}
-								selectedFilePath={selectedFilePath}
-							/>
-						)}
-					</section>
-
-					<section
-						className={cn(
-							"flex min-h-0 min-w-0 flex-1 overflow-hidden",
-							previewPaneClassName,
-						)}
-					>
-						<div className="flex min-h-0 flex-1 flex-col gap-2">
-							<div className="flex items-center justify-between gap-2">
-								<div className="text-xs font-medium">
-									{selectedFileName ?? t("fileExplorer.previewTitleFallback")}
+								<div className="border-input bg-background flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-none border">
+									{!selectedFilePath ? (
+										<div className="text-muted-foreground flex flex-1 items-center justify-center px-3 text-xs">
+											{t("fileExplorer.selectFileHint")}
+										</div>
+									) : previewQuery.isLoading ? (
+										<div className="text-muted-foreground flex flex-1 items-center justify-center gap-2 text-xs">
+											<HugeiconsIcon
+												icon={Loading03Icon}
+												strokeWidth={2}
+												className="animate-spin"
+												aria-hidden="true"
+											/>
+											{t("fileExplorer.loadingPreview")}
+										</div>
+									) : previewError ? (
+										<div className="text-destructive flex flex-1 items-center justify-center px-3 text-xs">
+											{previewError}
+										</div>
+									) : previewQuery.data && previewRenderer ? (
+										previewRenderer(previewQuery.data, sessionId)
+									) : (
+										<div className="text-muted-foreground flex flex-1 items-center justify-center px-3 text-xs">
+											{t("fileExplorer.unsupportedFormat")}
+										</div>
+									)}
 								</div>
-								{selectedFilePath ? (
-									<span className="text-muted-foreground text-xs">
-										{previewQuery.data?.previewType === "image"
-											? t("fileExplorer.imageMode")
-											: t("fileExplorer.codeMode")}
-									</span>
-								) : null}
 							</div>
-							<div className="border-input bg-background flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-none border">
-								{!selectedFilePath ? (
-									<div className="text-muted-foreground flex flex-1 items-center justify-center px-3 text-xs">
-										{t("fileExplorer.selectFileHint")}
-									</div>
-								) : previewQuery.isLoading ? (
-									<div className="text-muted-foreground flex flex-1 items-center justify-center gap-2 text-xs">
-										<HugeiconsIcon
-											icon={Loading03Icon}
-											strokeWidth={2}
-											className="animate-spin"
-											aria-hidden="true"
-										/>
-										{t("fileExplorer.loadingPreview")}
-									</div>
-								) : previewError ? (
-									<div className="text-destructive flex flex-1 items-center justify-center px-3 text-xs">
-										{previewError}
-									</div>
-								) : previewQuery.data && previewRenderer ? (
-									previewRenderer(previewQuery.data, sessionId)
-								) : (
-									<div className="text-muted-foreground flex flex-1 items-center justify-center px-3 text-xs">
-										{t("fileExplorer.unsupportedFormat")}
-									</div>
-								)}
-							</div>
-						</div>
-					</section>
-				</div>
+						</section>
+					</div>
 
-				<AlertDialogFooter>
-					<AlertDialogCancel>{t("common.close")}</AlertDialogCancel>
-				</AlertDialogFooter>
-			</AlertDialogContent>
-		</AlertDialog>
+					<AlertDialogFooter>
+						<AlertDialogCancel>{t("common.close")}</AlertDialogCancel>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+			{sessionId && gitStatus?.isGitRepo ? (
+				<BranchSelector
+					sessionId={sessionId}
+					currentBranch={gitStatus.branch}
+					open={branchSelectorOpen}
+					onOpenChange={setBranchSelectorOpen}
+				/>
+			) : null}
+		</>
 	);
 }
