@@ -8,6 +8,9 @@ describe("api (browser environment)", () => {
 		vi.stubEnv("VITE_GATEWAY_URL", "http://localhost:3005");
 		vi.doMock("../auth", () => ({ isInTauri: () => false }));
 		vi.doMock("../auth-token", () => ({ getAuthToken: () => null }));
+		vi.doMock("../tauri-fetch", () => ({
+			platformFetch: mockFetch,
+		}));
 		global.fetch = mockFetch;
 	});
 
@@ -40,6 +43,9 @@ describe("api (Tauri environment)", () => {
 	beforeEach(() => {
 		vi.resetModules();
 		vi.stubEnv("VITE_GATEWAY_URL", "http://localhost:3005");
+		vi.doMock("../tauri-fetch", () => ({
+			platformFetch: mockFetch,
+		}));
 		global.fetch = mockFetch;
 	});
 
@@ -99,6 +105,9 @@ describe("api error handling", () => {
 		vi.stubEnv("VITE_GATEWAY_URL", "http://localhost:3005");
 		vi.doMock("../auth", () => ({ isInTauri: () => false }));
 		vi.doMock("../auth-token", () => ({ getAuthToken: () => null }));
+		vi.doMock("../tauri-fetch", () => ({
+			platformFetch: mockFetch,
+		}));
 		global.fetch = mockFetch;
 	});
 
