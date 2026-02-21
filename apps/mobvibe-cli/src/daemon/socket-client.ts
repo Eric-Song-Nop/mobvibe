@@ -24,9 +24,18 @@ import type { CliCryptoService } from "../e2ee/crypto-service.js";
 import {
 	aggregateDirStatus,
 	getFileDiff,
+	getGitBlame,
 	getGitBranch,
+	getGitBranches,
+	getGitFileHistory,
+	getGitLog,
+	getGitShow,
+	getGitStashList,
 	getGitStatus,
+	getGitStatusExtended,
 	isGitRepo,
+	searchFileContents,
+	searchGitLog,
 } from "../lib/git-utils.js";
 import { logger } from "../lib/logger.js";
 
@@ -849,6 +858,292 @@ export class SocketClient extends EventEmitter {
 						sessionId: request.params.sessionId,
 					},
 					"rpc_git_file_diff_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		// Git log handler
+		this.socket.on("rpc:git:log", async (request) => {
+			try {
+				const {
+					sessionId,
+					maxCount,
+					skip,
+					path: filePath,
+					author,
+					search,
+				} = request.params;
+				logger.debug(
+					{ requestId: request.requestId, sessionId },
+					"rpc_git_log",
+				);
+				const record = sessionManager.getSession(sessionId);
+				if (!record || !record.cwd) {
+					throw new Error("Session not found or no working directory");
+				}
+				const result = await getGitLog(record.cwd, {
+					maxCount,
+					skip,
+					path: filePath,
+					author,
+					search,
+				});
+				this.sendRpcResponse(request.requestId, result);
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_git_log_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		// Git show handler
+		this.socket.on("rpc:git:show", async (request) => {
+			try {
+				const { sessionId, hash } = request.params;
+				logger.debug(
+					{ requestId: request.requestId, sessionId, hash },
+					"rpc_git_show",
+				);
+				const record = sessionManager.getSession(sessionId);
+				if (!record || !record.cwd) {
+					throw new Error("Session not found or no working directory");
+				}
+				const result = await getGitShow(record.cwd, hash);
+				if (!result) {
+					throw new Error(`Commit ${hash} not found`);
+				}
+				this.sendRpcResponse(request.requestId, result);
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_git_show_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		// Git blame handler
+		this.socket.on("rpc:git:blame", async (request) => {
+			try {
+				const {
+					sessionId,
+					path: filePath,
+					startLine,
+					endLine,
+				} = request.params;
+				logger.debug(
+					{ requestId: request.requestId, sessionId, path: filePath },
+					"rpc_git_blame",
+				);
+				const record = sessionManager.getSession(sessionId);
+				if (!record || !record.cwd) {
+					throw new Error("Session not found or no working directory");
+				}
+				resolveWithinCwd(record.cwd, filePath);
+				const lines = await getGitBlame(
+					record.cwd,
+					filePath,
+					startLine,
+					endLine,
+				);
+				this.sendRpcResponse(request.requestId, { lines });
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_git_blame_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		// Git branches handler
+		this.socket.on("rpc:git:branches", async (request) => {
+			try {
+				const { sessionId } = request.params;
+				logger.debug(
+					{ requestId: request.requestId, sessionId },
+					"rpc_git_branches",
+				);
+				const record = sessionManager.getSession(sessionId);
+				if (!record || !record.cwd) {
+					throw new Error("Session not found or no working directory");
+				}
+				const branches = await getGitBranches(record.cwd);
+				this.sendRpcResponse(request.requestId, { branches });
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_git_branches_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		// Git stash list handler
+		this.socket.on("rpc:git:stashList", async (request) => {
+			try {
+				const { sessionId } = request.params;
+				logger.debug(
+					{ requestId: request.requestId, sessionId },
+					"rpc_git_stash_list",
+				);
+				const record = sessionManager.getSession(sessionId);
+				if (!record || !record.cwd) {
+					throw new Error("Session not found or no working directory");
+				}
+				const entries = await getGitStashList(record.cwd);
+				this.sendRpcResponse(request.requestId, { entries });
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_git_stash_list_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		// Git status extended handler
+		this.socket.on("rpc:git:statusExtended", async (request) => {
+			try {
+				const { sessionId } = request.params;
+				logger.debug(
+					{ requestId: request.requestId, sessionId },
+					"rpc_git_status_extended",
+				);
+				const record = sessionManager.getSession(sessionId);
+				if (!record || !record.cwd) {
+					throw new Error("Session not found or no working directory");
+				}
+				const isRepo = await isGitRepo(record.cwd);
+				if (!isRepo) {
+					this.sendRpcResponse(request.requestId, {
+						isGitRepo: false,
+						staged: [],
+						unstaged: [],
+						untracked: [],
+						dirStatus: {},
+					});
+					return;
+				}
+				const result = await getGitStatusExtended(record.cwd);
+				this.sendRpcResponse(request.requestId, { isGitRepo: true, ...result });
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_git_status_extended_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		// Git search log handler
+		this.socket.on("rpc:git:searchLog", async (request) => {
+			try {
+				const { sessionId, query, type, maxCount } = request.params;
+				logger.debug(
+					{ requestId: request.requestId, sessionId, query, type },
+					"rpc_git_search_log",
+				);
+				const record = sessionManager.getSession(sessionId);
+				if (!record || !record.cwd) {
+					throw new Error("Session not found or no working directory");
+				}
+				const entries = await searchGitLog(record.cwd, query, type, maxCount);
+				this.sendRpcResponse(request.requestId, { entries });
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_git_search_log_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		// Git file history handler
+		this.socket.on("rpc:git:fileHistory", async (request) => {
+			try {
+				const { sessionId, path: filePath, maxCount } = request.params;
+				logger.debug(
+					{ requestId: request.requestId, sessionId, path: filePath },
+					"rpc_git_file_history",
+				);
+				const record = sessionManager.getSession(sessionId);
+				if (!record || !record.cwd) {
+					throw new Error("Session not found or no working directory");
+				}
+				resolveWithinCwd(record.cwd, filePath);
+				const entries = await getGitFileHistory(record.cwd, filePath, maxCount);
+				this.sendRpcResponse(request.requestId, { entries });
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_git_file_history_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		// Git grep handler
+		this.socket.on("rpc:git:grep", async (request) => {
+			try {
+				const { sessionId, query, caseSensitive, regex, glob } = request.params;
+				logger.debug(
+					{ requestId: request.requestId, sessionId, query },
+					"rpc_git_grep",
+				);
+				const record = sessionManager.getSession(sessionId);
+				if (!record || !record.cwd) {
+					throw new Error("Session not found or no working directory");
+				}
+				const result = await searchFileContents(record.cwd, query, {
+					caseSensitive,
+					regex,
+					glob,
+				});
+				this.sendRpcResponse(request.requestId, result);
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_git_grep_error",
 				);
 				this.sendRpcError(request.requestId, error);
 			}

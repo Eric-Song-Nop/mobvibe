@@ -354,5 +354,404 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 		},
 	);
 
+	// Get git log for session
+	router.get(
+		"/session/git/log",
+		async (request: AuthenticatedRequest, response) => {
+			const sessionId =
+				typeof request.query.sessionId === "string"
+					? request.query.sessionId
+					: undefined;
+			if (!sessionId) {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId required"),
+					400,
+				);
+				return;
+			}
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			try {
+				const maxCount = request.query.maxCount
+					? Number.parseInt(String(request.query.maxCount), 10)
+					: undefined;
+				const skip = request.query.skip
+					? Number.parseInt(String(request.query.skip), 10)
+					: undefined;
+				const path =
+					typeof request.query.path === "string"
+						? request.query.path
+						: undefined;
+				const author =
+					typeof request.query.author === "string"
+						? request.query.author
+						: undefined;
+				const search =
+					typeof request.query.search === "string"
+						? request.query.search
+						: undefined;
+				const result = await sessionRouter.getGitLog(
+					{ sessionId, maxCount, skip, path, author, search },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
+				} else {
+					respondError(response, createInternalError("request"));
+				}
+			}
+		},
+	);
+
+	// Get git commit detail
+	router.get(
+		"/session/git/show",
+		async (request: AuthenticatedRequest, response) => {
+			const sessionId =
+				typeof request.query.sessionId === "string"
+					? request.query.sessionId
+					: undefined;
+			const hash =
+				typeof request.query.hash === "string" ? request.query.hash : undefined;
+			if (!sessionId || !hash) {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId and hash required"),
+					400,
+				);
+				return;
+			}
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			try {
+				const result = await sessionRouter.getGitShow(
+					{ sessionId, hash },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
+				} else {
+					respondError(response, createInternalError("request"));
+				}
+			}
+		},
+	);
+
+	// Get git blame for file
+	router.get(
+		"/session/git/blame",
+		async (request: AuthenticatedRequest, response) => {
+			const sessionId =
+				typeof request.query.sessionId === "string"
+					? request.query.sessionId
+					: undefined;
+			const path =
+				typeof request.query.path === "string" ? request.query.path : undefined;
+			if (!sessionId || !path) {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId and path required"),
+					400,
+				);
+				return;
+			}
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			try {
+				const startLine = request.query.startLine
+					? Number.parseInt(String(request.query.startLine), 10)
+					: undefined;
+				const endLine = request.query.endLine
+					? Number.parseInt(String(request.query.endLine), 10)
+					: undefined;
+				const result = await sessionRouter.getGitBlame(
+					{ sessionId, path, startLine, endLine },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
+				} else {
+					respondError(response, createInternalError("request"));
+				}
+			}
+		},
+	);
+
+	// Get git branches
+	router.get(
+		"/session/git/branches",
+		async (request: AuthenticatedRequest, response) => {
+			const sessionId =
+				typeof request.query.sessionId === "string"
+					? request.query.sessionId
+					: undefined;
+			if (!sessionId) {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId required"),
+					400,
+				);
+				return;
+			}
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			try {
+				const result = await sessionRouter.getGitBranches(
+					{ sessionId },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
+				} else {
+					respondError(response, createInternalError("request"));
+				}
+			}
+		},
+	);
+
+	// Get git stash list
+	router.get(
+		"/session/git/stash",
+		async (request: AuthenticatedRequest, response) => {
+			const sessionId =
+				typeof request.query.sessionId === "string"
+					? request.query.sessionId
+					: undefined;
+			if (!sessionId) {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId required"),
+					400,
+				);
+				return;
+			}
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			try {
+				const result = await sessionRouter.getGitStashList(
+					{ sessionId },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
+				} else {
+					respondError(response, createInternalError("request"));
+				}
+			}
+		},
+	);
+
+	// Get extended git status
+	router.get(
+		"/session/git/status-extended",
+		async (request: AuthenticatedRequest, response) => {
+			const sessionId =
+				typeof request.query.sessionId === "string"
+					? request.query.sessionId
+					: undefined;
+			if (!sessionId) {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId required"),
+					400,
+				);
+				return;
+			}
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			try {
+				const result = await sessionRouter.getGitStatusExtended(
+					{ sessionId },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
+				} else {
+					respondError(response, createInternalError("request"));
+				}
+			}
+		},
+	);
+
+	// Search git log
+	router.get(
+		"/session/git/search-log",
+		async (request: AuthenticatedRequest, response) => {
+			const sessionId =
+				typeof request.query.sessionId === "string"
+					? request.query.sessionId
+					: undefined;
+			const query =
+				typeof request.query.query === "string"
+					? request.query.query
+					: undefined;
+			const type =
+				typeof request.query.type === "string" ? request.query.type : undefined;
+			if (!sessionId || !query || !type) {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId, query, and type required"),
+					400,
+				);
+				return;
+			}
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			try {
+				const maxCount = request.query.maxCount
+					? Number.parseInt(String(request.query.maxCount), 10)
+					: undefined;
+				const result = await sessionRouter.getGitSearchLog(
+					{
+						sessionId,
+						query,
+						type: type as "message" | "diff" | "author",
+						maxCount,
+					},
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
+				} else {
+					respondError(response, createInternalError("request"));
+				}
+			}
+		},
+	);
+
+	// Get git file history
+	router.get(
+		"/session/git/file-history",
+		async (request: AuthenticatedRequest, response) => {
+			const sessionId =
+				typeof request.query.sessionId === "string"
+					? request.query.sessionId
+					: undefined;
+			const path =
+				typeof request.query.path === "string" ? request.query.path : undefined;
+			if (!sessionId || !path) {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId and path required"),
+					400,
+				);
+				return;
+			}
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			try {
+				const maxCount = request.query.maxCount
+					? Number.parseInt(String(request.query.maxCount), 10)
+					: undefined;
+				const result = await sessionRouter.getGitFileHistory(
+					{ sessionId, path, maxCount },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
+				} else {
+					respondError(response, createInternalError("request"));
+				}
+			}
+		},
+	);
+
+	// Git grep (search file contents)
+	router.get(
+		"/session/git/grep",
+		async (request: AuthenticatedRequest, response) => {
+			const sessionId =
+				typeof request.query.sessionId === "string"
+					? request.query.sessionId
+					: undefined;
+			const query =
+				typeof request.query.query === "string"
+					? request.query.query
+					: undefined;
+			if (!sessionId || !query) {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId and query required"),
+					400,
+				);
+				return;
+			}
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			try {
+				const caseSensitive = request.query.caseSensitive === "true";
+				const regex = request.query.regex === "true";
+				const glob =
+					typeof request.query.glob === "string"
+						? request.query.glob
+						: undefined;
+				const result = await sessionRouter.getGitGrep(
+					{ sessionId, query, caseSensitive, regex, glob },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
+				} else {
+					respondError(response, createInternalError("request"));
+				}
+			}
+		},
+	);
+
 	return router;
 }

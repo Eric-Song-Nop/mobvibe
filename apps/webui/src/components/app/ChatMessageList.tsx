@@ -1,7 +1,13 @@
 import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useRef } from "react";
+import {
+	forwardRef,
+	useCallback,
+	useEffect,
+	useImperativeHandle,
+	useRef,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { MessageItem } from "@/components/chat/MessageItem";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
@@ -11,6 +17,10 @@ import type { ChatSession } from "@/lib/chat-store";
 import { useUiStore } from "@/lib/ui-store";
 
 const SCROLL_THRESHOLD = 64;
+
+export type ChatMessageListHandle = {
+	scrollToIndex: (index: number) => void;
+};
 
 export type ChatMessageListProps = {
 	activeSession?: ChatSession;
@@ -22,13 +32,19 @@ export type ChatMessageListProps = {
 		outcome: PermissionResultNotification["outcome"];
 	}) => void;
 };
-export function ChatMessageList({
-	activeSession,
-	loadingMessage,
-	hasMachineSelected,
-	onCreateSession,
-	onPermissionDecision,
-}: ChatMessageListProps) {
+export const ChatMessageList = forwardRef<
+	ChatMessageListHandle,
+	ChatMessageListProps
+>(function ChatMessageList(
+	{
+		activeSession,
+		loadingMessage,
+		hasMachineSelected,
+		onCreateSession,
+		onPermissionDecision,
+	},
+	ref,
+) {
 	const { setFileExplorerOpen, setFilePreviewPath } = useUiStore();
 	const { t } = useTranslation();
 	const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -49,6 +65,13 @@ export function ChatMessageList({
 				: (messages[index]?.id ?? `message-${index}`),
 	});
 	const virtualItems = virtualizer.getVirtualItems();
+
+	useImperativeHandle(ref, () => ({
+		scrollToIndex: (index: number) => {
+			isPinnedRef.current = false;
+			virtualizer.scrollToIndex(index, { align: "center" });
+		},
+	}));
 
 	const handleOpenFilePreview = useCallback(
 		(path: string) => {
@@ -193,4 +216,4 @@ export function ChatMessageList({
 			</div>
 		</main>
 	);
-}
+});

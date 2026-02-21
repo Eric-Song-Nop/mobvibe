@@ -38,6 +38,8 @@ type UiState = {
 	createDialogOpen: boolean;
 	fileExplorerOpen: boolean;
 	filePreviewPath?: string;
+	commandPaletteOpen: boolean;
+	chatSearchOpen: boolean;
 	editingSessionId: string | null;
 	editingTitle: string;
 	draftTitle: string;
@@ -51,6 +53,8 @@ type UiState = {
 	setCreateDialogOpen: (open: boolean) => void;
 	setFileExplorerOpen: (open: boolean) => void;
 	setFilePreviewPath: (path?: string) => void;
+	setCommandPaletteOpen: (open: boolean) => void;
+	setChatSearchOpen: (open: boolean) => void;
 	startEditingSession: (sessionId: string, title: string) => void;
 	setEditingTitle: (value: string) => void;
 	clearEditingSession: () => void;
@@ -68,6 +72,8 @@ export const useUiStore = create<UiState>((set) => ({
 	createDialogOpen: false,
 	fileExplorerOpen: false,
 	filePreviewPath: undefined,
+	commandPaletteOpen: false,
+	chatSearchOpen: false,
 	editingSessionId: null,
 	editingTitle: "",
 	draftTitle: "",
@@ -91,6 +97,8 @@ export const useUiStore = create<UiState>((set) => ({
 			filePreviewPath: open ? state.filePreviewPath : undefined,
 		})),
 	setFilePreviewPath: (path) => set({ filePreviewPath: path }),
+	setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
+	setChatSearchOpen: (open) => set({ chatSearchOpen: open }),
 	startEditingSession: (sessionId, title) =>
 		set({ editingSessionId: sessionId, editingTitle: title }),
 	setEditingTitle: (value) => set({ editingTitle: value }),

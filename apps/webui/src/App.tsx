@@ -1,5 +1,5 @@
 import { useBetterAuthTauri } from "@daveyplate/better-auth-tauri/react";
-import { lazy, Suspense, useEffect, useMemo, useRef } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
@@ -10,6 +10,7 @@ import { ChatMessageList } from "@/components/app/ChatMessageList";
 import { CreateSessionDialog } from "@/components/app/CreateSessionDialog";
 import { FileExplorerDialog } from "@/components/app/FileExplorerDialog";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { ChatSearchBar } from "@/components/chat/ChatSearchBar";
 import { MachinesSidebar } from "@/components/machines/MachinesSidebar";
 import { parsePairingUrl } from "@/components/settings/E2EESettings";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -27,9 +28,15 @@ import { getAuthClient, isInTauri } from "@/lib/auth";
 import { useChatStore } from "@/lib/chat-store";
 import { e2ee } from "@/lib/e2ee";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
+import { isInputFocused, registerHotkeys } from "@/lib/hotkeys";
 import { getBackendCapability, useMachinesStore } from "@/lib/machines-store";
 import { ensureNotificationPermission } from "@/lib/notifications";
 import { useUiStore } from "@/lib/ui-store";
+
+const CommandPalette = lazy(async () => {
+	const module = await import("@/components/app/CommandPalette");
+	return { default: module.CommandPalette };
+});
 
 const SettingsPage = lazy(async () => {
 	const module = await import("@/pages/SettingsPage");
@@ -99,6 +106,8 @@ function MainApp() {
 		createDialogOpen,
 		fileExplorerOpen,
 		filePreviewPath,
+		commandPaletteOpen,
+		chatSearchOpen,
 		draftBackendId,
 		selectedWorkspaceByMachine,
 	} = useUiStore(
@@ -106,6 +115,8 @@ function MainApp() {
 			createDialogOpen: s.createDialogOpen,
 			fileExplorerOpen: s.fileExplorerOpen,
 			filePreviewPath: s.filePreviewPath,
+			commandPaletteOpen: s.commandPaletteOpen,
+			chatSearchOpen: s.chatSearchOpen,
 			draftBackendId: s.draftBackendId,
 			selectedWorkspaceByMachine: s.selectedWorkspaceByMachine,
 		})),
@@ -118,6 +129,8 @@ function MainApp() {
 			setCreateDialogOpen: s.setCreateDialogOpen,
 			setFileExplorerOpen: s.setFileExplorerOpen,
 			setFilePreviewPath: s.setFilePreviewPath,
+			setCommandPaletteOpen: s.setCommandPaletteOpen,
+			setChatSearchOpen: s.setChatSearchOpen,
 			clearEditingSession: s.clearEditingSession,
 			setDraftTitle: s.setDraftTitle,
 			setDraftBackendId: s.setDraftBackendId,
@@ -305,6 +318,54 @@ function MainApp() {
 		uiActions.setDraftBackendId,
 	]);
 
+	// --- Global hotkeys ---
+	const chatMessageListRef = useRef<{ scrollToIndex: (index: number) => void }>(
+		null,
+	);
+
+	useEffect(() => {
+		return registerHotkeys([
+			{
+				key: "k",
+				mod: true,
+				handler: () => uiActions.setCommandPaletteOpen(true),
+			},
+			{
+				key: "p",
+				mod: true,
+				handler: () => {
+					uiActions.setCommandPaletteOpen(true);
+					// Mode will be set to "@" by CommandPalette when it detects this
+					// via initialMode prop
+				},
+			},
+			{
+				key: "f",
+				mod: true,
+				handler: () => {
+					if (!isInputFocused()) {
+						uiActions.setChatSearchOpen(true);
+					}
+				},
+			},
+			{
+				key: "b",
+				mod: true,
+				handler: () =>
+					uiActions.setMobileMenuOpen(!useUiStore.getState().mobileMenuOpen),
+			},
+			{
+				key: "n",
+				mod: true,
+				handler: () => handleOpenCreateDialog(),
+			},
+		]);
+	}, [uiActions, handleOpenCreateDialog]);
+
+	const handleScrollToMessage = useCallback((index: number) => {
+		chatMessageListRef.current?.scrollToIndex(index);
+	}, []);
+
 	// --- Derived display state ---
 
 	const fileExplorerAvailable = Boolean(activeSessionId && activeSession?.cwd);
@@ -461,6 +522,18 @@ function MainApp() {
 					sessionId={activeSessionId}
 					initialFilePath={filePreviewPath}
 				/>
+				<Suspense fallback={null}>
+					{commandPaletteOpen ? (
+						<CommandPalette
+							open={commandPaletteOpen}
+							onOpenChange={uiActions.setCommandPaletteOpen}
+							onOpenFileExplorer={() => uiActions.setFileExplorerOpen(true)}
+							onCreateSession={handleOpenCreateDialog}
+							onOpenChatSearch={() => uiActions.setChatSearchOpen(true)}
+							activeSessionId={activeSessionId}
+						/>
+					) : null}
+				</Suspense>
 
 				<MachinesSidebar />
 
@@ -496,6 +569,7 @@ function MainApp() {
 						loadingMessage={loadingMessage}
 						onOpenMobileMenu={() => uiActions.setMobileMenuOpen(true)}
 						onOpenFileExplorer={() => uiActions.setFileExplorerOpen(true)}
+						onOpenCommandPalette={() => uiActions.setCommandPaletteOpen(true)}
 						onSyncHistory={handleSyncHistory}
 						onForceReload={handleForceReload}
 						showFileExplorer={fileExplorerAvailable}
@@ -504,7 +578,14 @@ function MainApp() {
 						syncHistoryDisabled={syncHistoryDisabled}
 						forceReloadDisabled={forceReloadDisabled}
 					/>
+					<ChatSearchBar
+						open={chatSearchOpen}
+						onOpenChange={uiActions.setChatSearchOpen}
+						messages={activeSession?.messages ?? []}
+						onScrollToMessage={handleScrollToMessage}
+					/>
 					<ChatMessageList
+						ref={chatMessageListRef}
 						activeSession={activeSession}
 						loadingMessage={loadingMessage}
 						hasMachineSelected={Boolean(selectedMachineId)}

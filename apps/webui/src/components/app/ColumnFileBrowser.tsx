@@ -1,49 +1,25 @@
 import {
+	Cancel01Icon,
 	File01Icon,
 	FolderIcon,
 	Loading03Icon,
+	Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
 	useCallback,
 	useEffect,
 	useLayoutEffect,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { GitStatusIndicator } from "@/components/app/git-status-indicator";
 import type { FsEntriesResponse, FsEntry, GitFileStatus } from "@/lib/api";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
+import { FuzzyHighlight, fuzzySearch } from "@/lib/fuzzy-search";
 import { cn } from "@/lib/utils";
-
-const GIT_STATUS_CONFIG: Record<
-	GitFileStatus,
-	{ label: string; className: string }
-> = {
-	M: { label: "Modified", className: "text-amber-500" },
-	A: { label: "Added", className: "text-green-500" },
-	D: { label: "Deleted", className: "text-red-500" },
-	"?": { label: "Untracked", className: "text-blue-400" },
-	R: { label: "Renamed", className: "text-purple-500" },
-	C: { label: "Copied", className: "text-cyan-500" },
-	U: { label: "Unmerged", className: "text-orange-500" },
-	"!": { label: "Ignored", className: "text-gray-400" },
-};
-
-function GitStatusIndicator({ status }: { status: GitFileStatus }) {
-	const config = GIT_STATUS_CONFIG[status];
-	return (
-		<span
-			className={cn(
-				"ml-auto shrink-0 text-[0.65rem] font-medium",
-				config.className,
-			)}
-			title={config.label}
-		>
-			{status}
-		</span>
-	);
-}
 
 const normalizePath = (value: string) => value.replace(/\/+$/, "");
 
@@ -373,6 +349,14 @@ export function ColumnFileBrowser({
 }: ColumnFileBrowserProps) {
 	const { t } = useTranslation();
 	const resolvedEmptyLabel = emptyLabel ?? t("fileBrowser.empty");
+	const [searchQuery, setSearchQuery] = useState("");
+	const searchInputRef = useRef<HTMLInputElement>(null);
+
+	// Reset search when columns change (navigated to a different directory)
+	// biome-ignore lint/correctness/useExhaustiveDependencies: columns.length triggers reset on navigation
+	useEffect(() => {
+		setSearchQuery("");
+	}, [columns.length]);
 
 	const getRelativePath = useCallback(
 		(absolutePath: string): string => {
@@ -402,75 +386,31 @@ export function ColumnFileBrowser({
 				<div className="flex h-full w-max flex-nowrap gap-3 pr-2">
 					{columns.map((column, columnIndex) => {
 						const isColumnSelected = column.path === currentPath;
-						const entries = filterEntry
+						const isLastColumn = columnIndex === columns.length - 1;
+						const baseEntries = filterEntry
 							? column.entries.filter(filterEntry)
 							: column.entries;
+
 						return (
-							<div
+							<ColumnPanel
 								key={column.path}
-								ref={(node) => {
-									if (node) {
-										columnRefs.current[column.path] = node;
-										return;
-									}
-									delete columnRefs.current[column.path];
-								}}
-								className="border-input bg-background/80 flex h-full min-h-0 min-w-[12rem] shrink-0 flex-col rounded-none border"
-							>
-								<button
-									type="button"
-									className={cn(
-										"text-muted-foreground border-input flex shrink-0 items-center gap-2 border-b px-2 py-1 text-xs",
-										isColumnSelected && "bg-muted text-foreground",
-									)}
-									onClick={() => onColumnSelect(columnIndex)}
-								>
-									<HugeiconsIcon
-										icon={FolderIcon}
-										strokeWidth={2}
-										aria-hidden="true"
-									/>
-									<span className="truncate">{column.name}</span>
-								</button>
-								<div className="flex min-h-0 flex-col overflow-y-auto">
-									{entries.length === 0 ? (
-										<div className="text-muted-foreground px-2 py-3 text-xs">
-											{resolvedEmptyLabel}
-										</div>
-									) : (
-										entries.map((entry) => {
-											const isSelected =
-												entry.path === (highlightedEntryPath ?? currentPath);
-											const icon =
-												entry.type === "directory" ? FolderIcon : File01Icon;
-											const relativePath = getRelativePath(entry.path);
-											const gitStatus = getGitStatus?.(relativePath);
-											return (
-												<button
-													key={entry.path}
-													type="button"
-													className={cn(
-														"hover:bg-muted flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs",
-														isSelected && "bg-muted",
-													)}
-													onClick={() => onEntrySelect(entry, columnIndex)}
-												>
-													<HugeiconsIcon
-														icon={icon}
-														strokeWidth={2}
-														className="shrink-0"
-														aria-hidden="true"
-													/>
-													<span className="truncate">{entry.name}</span>
-													{gitStatus ? (
-														<GitStatusIndicator status={gitStatus} />
-													) : null}
-												</button>
-											);
-										})
-									)}
-								</div>
-							</div>
+								column={column}
+								columnIndex={columnIndex}
+								isColumnSelected={isColumnSelected}
+								isLastColumn={isLastColumn}
+								entries={baseEntries}
+								searchQuery={searchQuery}
+								onSearchQueryChange={setSearchQuery}
+								searchInputRef={isLastColumn ? searchInputRef : undefined}
+								emptyLabel={resolvedEmptyLabel}
+								highlightedEntryPath={highlightedEntryPath}
+								currentPath={currentPath}
+								onColumnSelect={onColumnSelect}
+								onEntrySelect={onEntrySelect}
+								getRelativePath={getRelativePath}
+								getGitStatus={getGitStatus}
+								columnRefs={columnRefs}
+							/>
 						);
 					})}
 					{isLoading ? (
@@ -485,6 +425,173 @@ export function ColumnFileBrowser({
 						</div>
 					) : null}
 				</div>
+			</div>
+		</div>
+	);
+}
+
+type ColumnPanelProps = {
+	column: ColumnFileBrowserColumn;
+	columnIndex: number;
+	isColumnSelected: boolean;
+	isLastColumn: boolean;
+	entries: FsEntry[];
+	searchQuery: string;
+	onSearchQueryChange: (query: string) => void;
+	searchInputRef?: React.RefObject<HTMLInputElement | null>;
+	emptyLabel: string;
+	highlightedEntryPath?: string;
+	currentPath?: string;
+	onColumnSelect: (columnIndex: number) => void;
+	onEntrySelect: (entry: FsEntry, columnIndex: number) => void;
+	getRelativePath: (absolutePath: string) => string;
+	getGitStatus?: (relativePath: string) => GitFileStatus | undefined;
+	columnRefs: React.MutableRefObject<Record<string, HTMLDivElement | null>>;
+};
+
+function ColumnPanel({
+	column,
+	columnIndex,
+	isColumnSelected,
+	isLastColumn,
+	entries,
+	searchQuery,
+	onSearchQueryChange,
+	searchInputRef,
+	emptyLabel,
+	highlightedEntryPath,
+	currentPath,
+	onColumnSelect,
+	onEntrySelect,
+	getRelativePath,
+	getGitStatus,
+	columnRefs,
+}: ColumnPanelProps) {
+	const activeQuery = isLastColumn ? searchQuery : "";
+
+	const filteredResults = useMemo(() => {
+		if (!activeQuery.trim()) {
+			return entries.map((item) => ({
+				item,
+				score: 0,
+				highlightRanges: [] as [number, number][],
+			}));
+		}
+		return fuzzySearch({
+			items: entries,
+			getText: (e) => e.name,
+			query: activeQuery,
+		});
+	}, [entries, activeQuery]);
+
+	const handleSearchKeyDown = useCallback(
+		(e: React.KeyboardEvent) => {
+			if (e.key === "Escape") {
+				e.preventDefault();
+				onSearchQueryChange("");
+				searchInputRef?.current?.blur();
+			}
+		},
+		[onSearchQueryChange, searchInputRef],
+	);
+
+	return (
+		<div
+			ref={(node) => {
+				if (node) {
+					columnRefs.current[column.path] = node;
+					return;
+				}
+				delete columnRefs.current[column.path];
+			}}
+			className="border-input bg-background/80 flex h-full min-h-0 min-w-[12rem] shrink-0 flex-col rounded-none border"
+		>
+			<button
+				type="button"
+				className={cn(
+					"text-muted-foreground border-input flex shrink-0 items-center gap-2 border-b px-2 py-1 text-xs",
+					isColumnSelected && "bg-muted text-foreground",
+				)}
+				onClick={() => onColumnSelect(columnIndex)}
+			>
+				<HugeiconsIcon icon={FolderIcon} strokeWidth={2} aria-hidden="true" />
+				<span className="truncate">{column.name}</span>
+			</button>
+			{isLastColumn && entries.length > 0 ? (
+				<div className="border-input flex shrink-0 items-center gap-1 border-b px-1.5 py-1">
+					<HugeiconsIcon
+						icon={Search01Icon}
+						strokeWidth={2}
+						className="text-muted-foreground h-3 w-3 shrink-0"
+						aria-hidden="true"
+					/>
+					<input
+						ref={searchInputRef}
+						type="text"
+						className="bg-transparent min-w-0 flex-1 text-xs outline-none placeholder:text-muted-foreground"
+						placeholder="/"
+						value={searchQuery}
+						onChange={(e) => onSearchQueryChange(e.target.value)}
+						onKeyDown={handleSearchKeyDown}
+					/>
+					{searchQuery ? (
+						<button
+							type="button"
+							className="text-muted-foreground hover:text-foreground shrink-0"
+							onClick={() => onSearchQueryChange("")}
+						>
+							<HugeiconsIcon
+								icon={Cancel01Icon}
+								strokeWidth={2}
+								className="h-3 w-3"
+								aria-hidden="true"
+							/>
+						</button>
+					) : null}
+				</div>
+			) : null}
+			<div className="flex min-h-0 flex-col overflow-y-auto">
+				{filteredResults.length === 0 ? (
+					<div className="text-muted-foreground px-2 py-3 text-xs">
+						{emptyLabel}
+					</div>
+				) : (
+					filteredResults.map(({ item: entry, highlightRanges }) => {
+						const isSelected =
+							entry.path === (highlightedEntryPath ?? currentPath);
+						const icon = entry.type === "directory" ? FolderIcon : File01Icon;
+						const relativePath = getRelativePath(entry.path);
+						const gitStatus = getGitStatus?.(relativePath);
+						return (
+							<button
+								key={entry.path}
+								type="button"
+								className={cn(
+									"hover:bg-muted flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs",
+									isSelected && "bg-muted",
+								)}
+								onClick={() => onEntrySelect(entry, columnIndex)}
+							>
+								<HugeiconsIcon
+									icon={icon}
+									strokeWidth={2}
+									className="shrink-0"
+									aria-hidden="true"
+								/>
+								{activeQuery && highlightRanges.length > 0 ? (
+									<FuzzyHighlight
+										text={entry.name}
+										ranges={highlightRanges}
+										className="truncate"
+									/>
+								) : (
+									<span className="truncate">{entry.name}</span>
+								)}
+								{gitStatus ? <GitStatusIndicator status={gitStatus} /> : null}
+							</button>
+						);
+					})
+				)}
 			</div>
 		</div>
 	);

@@ -2,6 +2,7 @@ import {
 	FolderOpenIcon,
 	Refresh01Icon,
 	Refresh03Icon,
+	Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
@@ -28,6 +29,7 @@ export type AppHeaderProps = {
 	loadingMessage?: string;
 	onOpenMobileMenu: () => void;
 	onOpenFileExplorer?: () => void;
+	onOpenCommandPalette?: () => void;
 	onSyncHistory?: () => void;
 	onForceReload?: () => void;
 	showFileExplorer?: boolean;
@@ -45,6 +47,7 @@ export function AppHeader({
 	loadingMessage,
 	onOpenMobileMenu,
 	onOpenFileExplorer,
+	onOpenCommandPalette,
 	onSyncHistory,
 	onForceReload,
 	showFileExplorer = false,
@@ -67,6 +70,19 @@ export function AppHeader({
 					aria-label={t("common.toggleMenu", "Toggle menu")}
 				>
 					☰
+				</Button>
+				<Button
+					variant="outline"
+					size="icon"
+					className="md:hidden"
+					onClick={() => onOpenCommandPalette?.()}
+					aria-label={t("commandPalette.openCommandPalette")}
+				>
+					<HugeiconsIcon
+						icon={Search01Icon}
+						strokeWidth={2}
+						aria-hidden="true"
+					/>
 				</Button>
 				<div className="flex flex-1 flex-wrap items-center gap-2">
 					{backendLabel ? (

@@ -12,8 +12,26 @@ import type {
 	FsResourcesParams,
 	FsResourcesResponse,
 	FsRootsResponse,
+	GitBlameParams,
+	GitBlameResponse,
+	GitBranchesParams,
+	GitBranchesResponse,
 	GitFileDiffParams,
 	GitFileDiffResponse,
+	GitFileHistoryParams,
+	GitFileHistoryResponse,
+	GitGrepParams,
+	GitGrepResponse,
+	GitLogParams,
+	GitLogResponse,
+	GitSearchLogParams,
+	GitSearchLogResponse,
+	GitShowParams,
+	GitShowResponse,
+	GitStashListParams,
+	GitStashListResponse,
+	GitStatusExtendedParams,
+	GitStatusExtendedResponse,
 	GitStatusParams,
 	GitStatusResponse,
 	HostFsEntriesParams,
@@ -810,6 +828,217 @@ export class SessionRouter {
 		logger.debug(
 			{ sessionId: params.sessionId, path: params.path, userId },
 			"git_file_diff_rpc_complete",
+		);
+		return result;
+	}
+
+	/**
+	 * Get git log for a session's working directory.
+	 */
+	async getGitLog(
+		params: GitLogParams,
+		userId: string,
+	): Promise<GitLogResponse> {
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+		logger.debug({ sessionId: params.sessionId, userId }, "git_log_rpc_start");
+		const result = await this.sendRpc<GitLogParams, GitLogResponse>(
+			cli.socket,
+			"rpc:git:log",
+			params,
+		);
+		logger.debug(
+			{ sessionId: params.sessionId, userId },
+			"git_log_rpc_complete",
+		);
+		return result;
+	}
+
+	/**
+	 * Get git commit detail.
+	 */
+	async getGitShow(
+		params: GitShowParams,
+		userId: string,
+	): Promise<GitShowResponse> {
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+		logger.debug(
+			{ sessionId: params.sessionId, hash: params.hash, userId },
+			"git_show_rpc_start",
+		);
+		const result = await this.sendRpc<GitShowParams, GitShowResponse>(
+			cli.socket,
+			"rpc:git:show",
+			params,
+		);
+		logger.debug(
+			{ sessionId: params.sessionId, hash: params.hash, userId },
+			"git_show_rpc_complete",
+		);
+		return result;
+	}
+
+	/**
+	 * Get git blame for a file.
+	 */
+	async getGitBlame(
+		params: GitBlameParams,
+		userId: string,
+	): Promise<GitBlameResponse> {
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+		logger.debug(
+			{ sessionId: params.sessionId, path: params.path, userId },
+			"git_blame_rpc_start",
+		);
+		const result = await this.sendRpc<GitBlameParams, GitBlameResponse>(
+			cli.socket,
+			"rpc:git:blame",
+			params,
+		);
+		logger.debug(
+			{ sessionId: params.sessionId, path: params.path, userId },
+			"git_blame_rpc_complete",
+		);
+		return result;
+	}
+
+	/**
+	 * Get git branches.
+	 */
+	async getGitBranches(
+		params: GitBranchesParams,
+		userId: string,
+	): Promise<GitBranchesResponse> {
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+		logger.debug(
+			{ sessionId: params.sessionId, userId },
+			"git_branches_rpc_start",
+		);
+		const result = await this.sendRpc<GitBranchesParams, GitBranchesResponse>(
+			cli.socket,
+			"rpc:git:branches",
+			params,
+		);
+		logger.debug(
+			{ sessionId: params.sessionId, userId },
+			"git_branches_rpc_complete",
+		);
+		return result;
+	}
+
+	/**
+	 * Get git stash list.
+	 */
+	async getGitStashList(
+		params: GitStashListParams,
+		userId: string,
+	): Promise<GitStashListResponse> {
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+		logger.debug(
+			{ sessionId: params.sessionId, userId },
+			"git_stash_list_rpc_start",
+		);
+		const result = await this.sendRpc<GitStashListParams, GitStashListResponse>(
+			cli.socket,
+			"rpc:git:stashList",
+			params,
+		);
+		logger.debug(
+			{ sessionId: params.sessionId, userId },
+			"git_stash_list_rpc_complete",
+		);
+		return result;
+	}
+
+	/**
+	 * Get extended git status.
+	 */
+	async getGitStatusExtended(
+		params: GitStatusExtendedParams,
+		userId: string,
+	): Promise<GitStatusExtendedResponse> {
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+		logger.debug(
+			{ sessionId: params.sessionId, userId },
+			"git_status_extended_rpc_start",
+		);
+		const result = await this.sendRpc<
+			GitStatusExtendedParams,
+			GitStatusExtendedResponse
+		>(cli.socket, "rpc:git:statusExtended", params);
+		logger.debug(
+			{ sessionId: params.sessionId, userId },
+			"git_status_extended_rpc_complete",
+		);
+		return result;
+	}
+
+	/**
+	 * Search git log.
+	 */
+	async getGitSearchLog(
+		params: GitSearchLogParams,
+		userId: string,
+	): Promise<GitSearchLogResponse> {
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+		logger.debug(
+			{ sessionId: params.sessionId, query: params.query, userId },
+			"git_search_log_rpc_start",
+		);
+		const result = await this.sendRpc<GitSearchLogParams, GitSearchLogResponse>(
+			cli.socket,
+			"rpc:git:searchLog",
+			params,
+		);
+		logger.debug(
+			{ sessionId: params.sessionId, query: params.query, userId },
+			"git_search_log_rpc_complete",
+		);
+		return result;
+	}
+
+	/**
+	 * Get git file history.
+	 */
+	async getGitFileHistory(
+		params: GitFileHistoryParams,
+		userId: string,
+	): Promise<GitFileHistoryResponse> {
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+		logger.debug(
+			{ sessionId: params.sessionId, path: params.path, userId },
+			"git_file_history_rpc_start",
+		);
+		const result = await this.sendRpc<
+			GitFileHistoryParams,
+			GitFileHistoryResponse
+		>(cli.socket, "rpc:git:fileHistory", params);
+		logger.debug(
+			{ sessionId: params.sessionId, path: params.path, userId },
+			"git_file_history_rpc_complete",
+		);
+		return result;
+	}
+
+	/**
+	 * Search file contents via git grep.
+	 */
+	async getGitGrep(
+		params: GitGrepParams,
+		userId: string,
+	): Promise<GitGrepResponse> {
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+		logger.debug(
+			{ sessionId: params.sessionId, query: params.query, userId },
+			"git_grep_rpc_start",
+		);
+		const result = await this.sendRpc<GitGrepParams, GitGrepResponse>(
+			cli.socket,
+			"rpc:git:grep",
+			params,
+		);
+		logger.debug(
+			{ sessionId: params.sessionId, query: params.query, userId },
+			"git_grep_rpc_complete",
 		);
 		return result;
 	}

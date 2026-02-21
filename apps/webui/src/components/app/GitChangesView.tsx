@@ -1,0 +1,141 @@
+import {
+	ArrowDown01Icon,
+	ArrowRight01Icon,
+	File01Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { GitStatusIndicator } from "@/components/app/git-status-indicator";
+import type { GitFileStatus } from "@/lib/api";
+import { cn } from "@/lib/utils";
+
+export type GitChangesViewProps = {
+	files: Array<{ path: string; status: GitFileStatus }>;
+	onFileSelect: (relativePath: string) => void;
+	selectedFilePath?: string;
+};
+
+type GroupedFiles = {
+	changed: Array<{ path: string; status: GitFileStatus }>;
+	untracked: Array<{ path: string; status: GitFileStatus }>;
+};
+
+function groupFiles(
+	files: Array<{ path: string; status: GitFileStatus }>,
+): GroupedFiles {
+	const changed: Array<{ path: string; status: GitFileStatus }> = [];
+	const untracked: Array<{ path: string; status: GitFileStatus }> = [];
+
+	for (const file of files) {
+		if (file.status === "?") {
+			untracked.push(file);
+		} else {
+			changed.push(file);
+		}
+	}
+
+	return { changed, untracked };
+}
+
+function FileGroup({
+	title,
+	files,
+	defaultExpanded = true,
+	onFileSelect,
+	selectedFilePath,
+}: {
+	title: string;
+	files: Array<{ path: string; status: GitFileStatus }>;
+	defaultExpanded?: boolean;
+	onFileSelect: (relativePath: string) => void;
+	selectedFilePath?: string;
+}) {
+	const [expanded, setExpanded] = useState(defaultExpanded);
+
+	const toggleExpand = useCallback(() => {
+		setExpanded((prev) => !prev);
+	}, []);
+
+	if (files.length === 0) return null;
+
+	return (
+		<div className="flex flex-col">
+			<button
+				type="button"
+				className="text-muted-foreground hover:bg-muted flex items-center gap-1.5 px-2 py-1.5 text-xs font-medium"
+				onClick={toggleExpand}
+			>
+				<HugeiconsIcon
+					icon={expanded ? ArrowDown01Icon : ArrowRight01Icon}
+					strokeWidth={2}
+					className="h-3.5 w-3.5 shrink-0"
+					aria-hidden="true"
+				/>
+				<span>{title}</span>
+				<span className="text-muted-foreground/60 ml-1">({files.length})</span>
+			</button>
+			{expanded ? (
+				<div className="flex flex-col">
+					{files.map((file) => {
+						const isSelected = file.path === selectedFilePath;
+						return (
+							<button
+								key={file.path}
+								type="button"
+								className={cn(
+									"hover:bg-muted flex min-h-[2.75rem] w-full items-center gap-2 px-3 py-1.5 text-left text-xs",
+									isSelected && "bg-muted",
+								)}
+								onClick={() => onFileSelect(file.path)}
+							>
+								<HugeiconsIcon
+									icon={File01Icon}
+									strokeWidth={2}
+									className="shrink-0"
+									aria-hidden="true"
+								/>
+								<span className="min-w-0 flex-1 truncate">{file.path}</span>
+								<GitStatusIndicator status={file.status} />
+							</button>
+						);
+					})}
+				</div>
+			) : null}
+		</div>
+	);
+}
+
+export function GitChangesView({
+	files,
+	onFileSelect,
+	selectedFilePath,
+}: GitChangesViewProps) {
+	const { t } = useTranslation();
+	const { changed, untracked } = groupFiles(files);
+
+	if (files.length === 0) {
+		return (
+			<div className="text-muted-foreground flex flex-1 items-center justify-center px-3 text-xs">
+				{t("fileExplorer.noChanges")}
+			</div>
+		);
+	}
+
+	return (
+		<div className="border-input bg-muted/30 flex min-h-0 flex-1 flex-col overflow-y-auto rounded-none border">
+			<FileGroup
+				title={t("fileExplorer.changedGroup")}
+				files={changed}
+				onFileSelect={onFileSelect}
+				selectedFilePath={selectedFilePath}
+			/>
+			<FileGroup
+				title={t("fileExplorer.untrackedGroup")}
+				files={untracked}
+				onFileSelect={onFileSelect}
+				selectedFilePath={selectedFilePath}
+			/>
+		</div>
+	);
+}
