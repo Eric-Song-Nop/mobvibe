@@ -6,6 +6,7 @@ export type GatewayConfig = {
 	resendApiKey: string | undefined;
 	emailFrom: string;
 	skipEmailVerification: boolean;
+	isPreview: boolean;
 };
 
 const parsePort = (value: string) => {
@@ -44,5 +45,6 @@ export const getGatewayConfig = (): GatewayConfig => {
 		resendApiKey: env.RESEND_API_KEY,
 		emailFrom: env.EMAIL_FROM ?? "Mobvibe <noreply@example.com>",
 		skipEmailVerification: env.SKIP_EMAIL_VERIFICATION === "true",
+		isPreview: !!env.RENDER && !env.SITE_URL,
 	};
 };

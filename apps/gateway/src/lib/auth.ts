@@ -21,7 +21,7 @@ const trustedOrigins = config.corsOrigins.includes("*")
 		) as string[]);
 
 const isDevelopment = process.env.NODE_ENV === "development";
-const { skipEmailVerification } = config;
+const { skipEmailVerification, isPreview } = config;
 
 if (skipEmailVerification) {
 	logger.warn("Email verification is disabled (SKIP_EMAIL_VERIFICATION=true)");
@@ -85,10 +85,10 @@ export const auth = betterAuth({
 		},
 	},
 	advanced: {
-		useSecureCookies: !isDevelopment,
+		useSecureCookies: !isDevelopment && !isPreview,
 		defaultCookieAttributes: {
 			secure: !isDevelopment,
-			sameSite: "lax",
+			sameSite: isPreview ? "none" : "lax",
 		},
 	},
 	plugins: [
