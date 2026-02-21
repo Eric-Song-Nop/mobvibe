@@ -14,6 +14,7 @@ import {
 } from "@/components/app/ColumnFileBrowser";
 import { previewRenderers } from "@/components/app/file-preview-renderers";
 import { GitChangesView } from "@/components/app/GitChangesView";
+import { UnifiedDiffView } from "@/components/chat/DiffView";
 import { CommitHistoryPanel } from "@/components/git/CommitHistoryPanel";
 import {
 	AlertDialog,
@@ -29,11 +30,19 @@ import {
 	fetchSessionFsEntries,
 	fetchSessionFsFile,
 	fetchSessionFsRoots,
+	fetchSessionGitDiff,
 	fetchSessionGitStatusExtended,
 } from "@/lib/api";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { resolveFileNameFromPath } from "@/lib/file-preview-utils";
 import { cn } from "@/lib/utils";
+
+// --- Preview intent discriminated union ---
+
+type PreviewIntent =
+	| { type: "file"; path: string }
+	| { type: "workingDiff"; relativePath: string }
+	| { type: "commitDiff"; hash: string; filePath: string; diff: string };
 
 export type FileExplorerDialogProps = {
 	open: boolean;
@@ -50,8 +59,8 @@ export function FileExplorerDialog({
 }: FileExplorerDialogProps) {
 	const { t } = useTranslation();
 	const [currentPath, setCurrentPath] = useState<string | undefined>();
-	const [selectedFilePath, setSelectedFilePath] = useState<
-		string | undefined
+	const [previewIntent, setPreviewIntent] = useState<
+		PreviewIntent | undefined
 	>();
 	const [activePane, setActivePane] = useState<"browser" | "preview">(
 		"browser",
@@ -61,6 +70,19 @@ export function FileExplorerDialog({
 	);
 	const [branchSelectorOpen, setBranchSelectorOpen] = useState(false);
 	const previousPreviewPathRef = useRef<string | undefined>(undefined);
+
+	// Derive selectedFilePath for UI display (file name, mobile toggle disabled state, etc.)
+	const selectedFilePath = useMemo(() => {
+		if (!previewIntent) return undefined;
+		switch (previewIntent.type) {
+			case "file":
+				return previewIntent.path;
+			case "workingDiff":
+				return previewIntent.relativePath;
+			case "commitDiff":
+				return previewIntent.filePath;
+		}
+	}, [previewIntent]);
 
 	const rootsQuery = useQuery({
 		queryKey: ["session-fs-roots", sessionId],
@@ -100,24 +122,38 @@ export function FileExplorerDialog({
 		[sessionId, t],
 	);
 
+	// --- Callbacks ---
+
 	const handleDirectorySelect = useCallback((_nextPath: string) => {
-		setSelectedFilePath(undefined);
+		setPreviewIntent(undefined);
 		setActivePane("browser");
 	}, []);
 
 	const handleFileSelect = useCallback((entry: FsEntry) => {
-		setSelectedFilePath(entry.path);
+		setPreviewIntent({ type: "file", path: entry.path });
 		setActivePane("preview");
 	}, []);
 
-	const handleChangesFileSelect = useCallback(
-		(relativePath: string) => {
-			if (!rootPath) return;
-			const absolutePath = `${rootPath}/${relativePath}`;
-			setSelectedFilePath(absolutePath);
+	const handleChangesFileSelect = useCallback((relativePath: string) => {
+		setPreviewIntent({ type: "workingDiff", relativePath });
+		setActivePane("preview");
+	}, []);
+
+	const handleHistoryFileSelect = useCallback(
+		(hash: string, filePath: string, diff: string) => {
+			setPreviewIntent({ type: "commitDiff", hash, filePath, diff });
 			setActivePane("preview");
 		},
-		[rootPath],
+		[],
+	);
+
+	const handleTabChange = useCallback(
+		(tab: "files" | "changes" | "history") => {
+			setActiveTab(tab);
+			setPreviewIntent(undefined);
+			setActivePane("browser");
+		},
+		[],
 	);
 
 	const {
@@ -156,20 +192,44 @@ export function FileExplorerDialog({
 		void buildColumnsForPath(parentPath || rootPath);
 	}, [buildColumnsForPath, initialFilePath, open, rootPath]);
 
-	const previewQuery = useQuery({
-		queryKey: ["session-fs-file", sessionId, selectedFilePath],
+	// --- Preview queries (conditional on intent type) ---
+
+	const filePreviewQuery = useQuery({
+		queryKey: [
+			"session-fs-file",
+			sessionId,
+			previewIntent?.type === "file" ? previewIntent.path : null,
+		],
 		queryFn: () => {
-			if (!sessionId || !selectedFilePath) {
+			if (!sessionId || previewIntent?.type !== "file") {
 				throw createFallbackError(t("errors.pathUnavailable"), "request");
 			}
-			return fetchSessionFsFile({ sessionId, path: selectedFilePath });
+			return fetchSessionFsFile({ sessionId, path: previewIntent.path });
 		},
-		enabled: open && !!sessionId && !!selectedFilePath,
+		enabled: open && !!sessionId && previewIntent?.type === "file",
+	});
+
+	const workingDiffQuery = useQuery({
+		queryKey: [
+			"session-git-diff",
+			sessionId,
+			previewIntent?.type === "workingDiff" ? previewIntent.relativePath : null,
+		],
+		queryFn: () => {
+			if (!sessionId || previewIntent?.type !== "workingDiff") {
+				throw createFallbackError(t("errors.pathUnavailable"), "request");
+			}
+			return fetchSessionGitDiff({
+				sessionId,
+				path: previewIntent.relativePath,
+			});
+		},
+		enabled: open && !!sessionId && previewIntent?.type === "workingDiff",
 	});
 
 	const resetState = useCallback(() => {
 		setCurrentPath(undefined);
-		setSelectedFilePath(undefined);
+		setPreviewIntent(undefined);
 		setActivePane("browser");
 		setActiveTab("files");
 	}, []);
@@ -187,11 +247,13 @@ export function FileExplorerDialog({
 		}
 		resetState();
 		if (initialFilePath) {
-			setSelectedFilePath(initialFilePath);
+			setPreviewIntent({ type: "file", path: initialFilePath });
 			setActivePane("preview");
 			return;
 		}
 	}, [initialFilePath, open, resetState, sessionId]);
+
+	// --- Error handling ---
 
 	const rootsError = rootsQuery.isError
 		? normalizeError(
@@ -199,19 +261,21 @@ export function FileExplorerDialog({
 				createFallbackError(t("errors.rootLoadFailed"), "request"),
 			).message
 		: undefined;
-	const previewError = previewQuery.isError
+	const filePreviewError = filePreviewQuery.isError
 		? normalizeError(
-				previewQuery.error,
+				filePreviewQuery.error,
 				createFallbackError(t("errors.previewLoadFailed"), "request"),
 			).message
 		: undefined;
 
 	const previewRenderer = useMemo(() => {
-		if (!previewQuery.data) {
+		if (!filePreviewQuery.data) {
 			return undefined;
 		}
-		return previewRenderers[previewQuery.data.previewType];
-	}, [previewQuery.data]);
+		return previewRenderers[filePreviewQuery.data.previewType];
+	}, [filePreviewQuery.data]);
+
+	// --- Derived values ---
 
 	const browserPaneClassName = cn(
 		"min-h-0 flex-col gap-2",
@@ -230,6 +294,30 @@ export function FileExplorerDialog({
 		() => resolveFileNameFromPath(selectedFilePath),
 		[selectedFilePath],
 	);
+
+	// Preview panel title and mode label
+	const previewModeLabel = useMemo(() => {
+		if (!previewIntent) return undefined;
+		switch (previewIntent.type) {
+			case "file":
+				return filePreviewQuery.data?.previewType === "image"
+					? t("fileExplorer.imageMode")
+					: t("fileExplorer.codeMode");
+			case "workingDiff":
+			case "commitDiff":
+				return t("fileExplorer.diffMode");
+		}
+	}, [previewIntent, filePreviewQuery.data, t]);
+
+	// For GitChangesView selected highlight (use relative path)
+	const changesSelectedPath =
+		previewIntent?.type === "workingDiff"
+			? previewIntent.relativePath
+			: undefined;
+
+	// For ColumnFileBrowser highlighted entry (use absolute path)
+	const filesHighlightedPath =
+		previewIntent?.type === "file" ? previewIntent.path : undefined;
 
 	const getGitStatusForPath = useCallback(
 		(relativePath: string): GitFileStatus | undefined => {
@@ -263,6 +351,100 @@ export function FileExplorerDialog({
 		[gitStatus],
 	);
 
+	// --- Render preview panel content based on intent type ---
+
+	const renderPreviewContent = () => {
+		if (!previewIntent) {
+			return (
+				<div className="text-muted-foreground flex flex-1 items-center justify-center px-3 text-xs">
+					{t("fileExplorer.selectFileHint")}
+				</div>
+			);
+		}
+
+		switch (previewIntent.type) {
+			case "file": {
+				if (filePreviewQuery.isLoading) {
+					return (
+						<div className="text-muted-foreground flex flex-1 items-center justify-center gap-2 text-xs">
+							<HugeiconsIcon
+								icon={Loading03Icon}
+								strokeWidth={2}
+								className="animate-spin"
+								aria-hidden="true"
+							/>
+							{t("fileExplorer.loadingPreview")}
+						</div>
+					);
+				}
+				if (filePreviewError) {
+					return (
+						<div className="text-destructive flex flex-1 items-center justify-center px-3 text-xs">
+							{filePreviewError}
+						</div>
+					);
+				}
+				if (filePreviewQuery.data && previewRenderer) {
+					return previewRenderer(filePreviewQuery.data, sessionId);
+				}
+				return (
+					<div className="text-muted-foreground flex flex-1 items-center justify-center px-3 text-xs">
+						{t("fileExplorer.unsupportedFormat")}
+					</div>
+				);
+			}
+
+			case "workingDiff": {
+				if (workingDiffQuery.isLoading) {
+					return (
+						<div className="text-muted-foreground flex flex-1 items-center justify-center gap-2 text-xs">
+							<HugeiconsIcon
+								icon={Loading03Icon}
+								strokeWidth={2}
+								className="animate-spin"
+								aria-hidden="true"
+							/>
+							{t("fileExplorer.loadingPreview")}
+						</div>
+					);
+				}
+				if (workingDiffQuery.data?.rawDiff) {
+					return (
+						<UnifiedDiffView
+							diff={workingDiffQuery.data.rawDiff}
+							path={previewIntent.relativePath}
+							getLabel={t}
+							fullHeight
+						/>
+					);
+				}
+				return (
+					<div className="text-muted-foreground flex flex-1 items-center justify-center px-3 text-xs">
+						{t("fileExplorer.noDiffAvailable")}
+					</div>
+				);
+			}
+
+			case "commitDiff": {
+				if (previewIntent.diff) {
+					return (
+						<UnifiedDiffView
+							diff={previewIntent.diff}
+							path={previewIntent.filePath}
+							getLabel={t}
+							fullHeight
+						/>
+					);
+				}
+				return (
+					<div className="text-muted-foreground flex flex-1 items-center justify-center px-3 text-xs">
+						{t("fileExplorer.noDiffAvailable")}
+					</div>
+				);
+			}
+		}
+	};
+
 	return (
 		<>
 			<AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -282,7 +464,7 @@ export function FileExplorerDialog({
 										variant={activeTab === "files" ? "secondary" : "ghost"}
 										size="sm"
 										className="h-7 px-2 text-sm font-medium"
-										onClick={() => setActiveTab("files")}
+										onClick={() => handleTabChange("files")}
 									>
 										{t("fileExplorer.filesTab")}
 									</Button>
@@ -291,7 +473,7 @@ export function FileExplorerDialog({
 											variant={activeTab === "changes" ? "secondary" : "ghost"}
 											size="sm"
 											className="h-7 px-2 text-sm font-medium"
-											onClick={() => setActiveTab("changes")}
+											onClick={() => handleTabChange("changes")}
 										>
 											{t("fileExplorer.changesTab")}
 											{gitStatus.staged.length +
@@ -313,7 +495,7 @@ export function FileExplorerDialog({
 											variant={activeTab === "history" ? "secondary" : "ghost"}
 											size="sm"
 											className="h-7 px-2 text-sm font-medium"
-											onClick={() => setActiveTab("history")}
+											onClick={() => handleTabChange("history")}
 										>
 											{t("fileExplorer.historyTab")}
 										</Button>
@@ -353,7 +535,7 @@ export function FileExplorerDialog({
 								variant={activePane === "preview" ? "secondary" : "outline"}
 								size="sm"
 								onClick={() => setActivePane("preview")}
-								disabled={!selectedFilePath}
+								disabled={!previewIntent}
 							>
 								{t("fileExplorer.preview")}
 							</Button>
@@ -385,7 +567,7 @@ export function FileExplorerDialog({
 										<ColumnFileBrowser
 											columns={columns}
 											currentPath={currentPath}
-											highlightedEntryPath={selectedFilePath ?? currentPath}
+											highlightedEntryPath={filesHighlightedPath ?? currentPath}
 											onColumnSelect={handleColumnSelect}
 											onEntrySelect={handleEntrySelect}
 											isLoading={isBrowserLoading}
@@ -403,10 +585,13 @@ export function FileExplorerDialog({
 									unstaged={gitStatus?.unstaged ?? []}
 									untracked={gitStatus?.untracked ?? []}
 									onFileSelect={handleChangesFileSelect}
-									selectedFilePath={selectedFilePath}
+									selectedFilePath={changesSelectedPath}
 								/>
 							) : sessionId ? (
-								<CommitHistoryPanel sessionId={sessionId} />
+								<CommitHistoryPanel
+									sessionId={sessionId}
+									onFileSelect={handleHistoryFileSelect}
+								/>
 							) : null}
 						</section>
 
@@ -421,40 +606,14 @@ export function FileExplorerDialog({
 									<div className="text-xs font-medium">
 										{selectedFileName ?? t("fileExplorer.previewTitleFallback")}
 									</div>
-									{selectedFilePath ? (
+									{previewIntent ? (
 										<span className="text-muted-foreground text-xs">
-											{previewQuery.data?.previewType === "image"
-												? t("fileExplorer.imageMode")
-												: t("fileExplorer.codeMode")}
+											{previewModeLabel}
 										</span>
 									) : null}
 								</div>
 								<div className="border-input bg-background flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-none border">
-									{!selectedFilePath ? (
-										<div className="text-muted-foreground flex flex-1 items-center justify-center px-3 text-xs">
-											{t("fileExplorer.selectFileHint")}
-										</div>
-									) : previewQuery.isLoading ? (
-										<div className="text-muted-foreground flex flex-1 items-center justify-center gap-2 text-xs">
-											<HugeiconsIcon
-												icon={Loading03Icon}
-												strokeWidth={2}
-												className="animate-spin"
-												aria-hidden="true"
-											/>
-											{t("fileExplorer.loadingPreview")}
-										</div>
-									) : previewError ? (
-										<div className="text-destructive flex flex-1 items-center justify-center px-3 text-xs">
-											{previewError}
-										</div>
-									) : previewQuery.data && previewRenderer ? (
-										previewRenderer(previewQuery.data, sessionId)
-									) : (
-										<div className="text-muted-foreground flex flex-1 items-center justify-center px-3 text-xs">
-											{t("fileExplorer.unsupportedFormat")}
-										</div>
-									)}
+									{renderPreviewContent()}
 								</div>
 							</div>
 						</section>

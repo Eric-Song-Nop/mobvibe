@@ -26,6 +26,7 @@ type UnifiedDiffViewProps = {
 	path: string;
 	getLabel: (key: string, options?: Record<string, unknown>) => string;
 	onOpenFilePreview?: (path: string) => void;
+	fullHeight?: boolean;
 };
 
 export const buildUnifiedDiffString = (
@@ -141,6 +142,7 @@ export const UnifiedDiffView = ({
 	path,
 	getLabel,
 	onOpenFilePreview,
+	fullHeight,
 }: UnifiedDiffViewProps) => {
 	const { t } = useTranslation();
 	const themeMode = useResolvedTheme();
@@ -167,7 +169,12 @@ export const UnifiedDiffView = ({
 	);
 
 	return (
-		<div className="rounded border border-border bg-background/80 px-2 py-1 text-xs text-muted-foreground">
+		<div
+			className={cn(
+				"rounded border border-border bg-background/80 px-2 py-1 text-xs text-muted-foreground",
+				fullHeight && "flex min-h-0 flex-1 flex-col",
+			)}
+		>
 			<div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
 				<span>{getLabel("toolCall.changes")}</span>
 				{onOpenFilePreview ? (
@@ -212,7 +219,12 @@ export const UnifiedDiffView = ({
 					</button>
 				</div>
 			</div>
-			<div className="mt-2 rounded border border-border bg-muted/30">
+			<div
+				className={cn(
+					"mt-2 rounded border border-border bg-muted/30",
+					fullHeight && "min-h-0 flex-1 overflow-hidden",
+				)}
+			>
 				{viewMode === "split" ? (
 					<SideBySideDiffView oldText={oldText} newText={newText} path={path} />
 				) : (
@@ -223,7 +235,10 @@ export const UnifiedDiffView = ({
 
 							return (
 								<div
-									className="max-h-56 overflow-auto"
+									className={cn(
+										"overflow-auto",
+										fullHeight ? "h-full" : "max-h-56",
+									)}
 									style={{ ...style, backgroundColor: "transparent" }}
 								>
 									{lines.map((line, lineIdx) => {
