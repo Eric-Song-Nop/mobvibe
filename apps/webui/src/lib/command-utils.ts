@@ -1,32 +1,12 @@
 import type { AvailableCommand } from "@/lib/acp";
-
-export type CommandSearchItem = {
-	command: AvailableCommand;
-	searchText: string;
-};
-
-const buildSearchText = (command: AvailableCommand) => {
-	const hint = command.input?.hint ?? "";
-	return `${command.name} ${command.description} ${hint}`.toLowerCase();
-};
-
-export const buildCommandSearchItems = (
-	commands: AvailableCommand[],
-): CommandSearchItem[] =>
-	commands.map((command) => ({
-		command,
-		searchText: buildSearchText(command),
-	}));
+import { type FuzzySearchResult, fuzzySearch } from "@/lib/fuzzy-search";
 
 export const filterCommandItems = (
-	items: CommandSearchItem[],
+	commands: AvailableCommand[],
 	query: string,
-): AvailableCommand[] => {
-	const normalized = query.trim().toLowerCase();
-	if (!normalized) {
-		return items.map((item) => item.command);
-	}
-	return items
-		.filter((item) => item.searchText.includes(normalized))
-		.map((item) => item.command);
-};
+): FuzzySearchResult<AvailableCommand>[] =>
+	fuzzySearch({
+		items: commands,
+		getText: (cmd) => `${cmd.name} ${cmd.description} ${cmd.input?.hint ?? ""}`,
+		query,
+	});

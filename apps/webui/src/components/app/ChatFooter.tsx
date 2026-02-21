@@ -28,15 +28,10 @@ import {
 	type SessionFsResourceEntry,
 } from "@/lib/api";
 import { type ChatSession, useChatStore } from "@/lib/chat-store";
-import {
-	buildCommandSearchItems,
-	filterCommandItems,
-} from "@/lib/command-utils";
+import { filterCommandItems } from "@/lib/command-utils";
 import { createDefaultContentBlocks } from "@/lib/content-block-utils";
-import {
-	buildResourceSearchItems,
-	filterResourceItems,
-} from "@/lib/resource-utils";
+import type { FuzzySearchResult } from "@/lib/fuzzy-search";
+import { filterResourceItems } from "@/lib/resource-utils";
 import { useUiStore } from "@/lib/ui-store";
 import { cn } from "@/lib/utils";
 
@@ -405,10 +400,6 @@ export function ChatFooter({
 	const isReady = Boolean(
 		activeSession?.isAttached && !activeSession?.isLoading,
 	);
-	const searchItems = useMemo(
-		() => buildCommandSearchItems(availableCommands),
-		[availableCommands],
-	);
 	const contentBlocks =
 		activeSession?.inputContents ?? createDefaultContentBlocks("");
 	const rawInput = useMemo(
@@ -421,8 +412,8 @@ export function ChatFooter({
 		? (slashInput.trim().split(/\s+/)[0] ?? "")
 		: "";
 	const commandMatches = useMemo(
-		() => filterCommandItems(searchItems, commandQuery),
-		[commandQuery, searchItems],
+		() => filterCommandItems(availableCommands, commandQuery),
+		[availableCommands, commandQuery],
 	);
 	const commandPickerDisabled = !activeSessionId || !isReady;
 	const [commandHighlight, setCommandHighlight] = useState(0);
@@ -443,10 +434,6 @@ export function ChatFooter({
 		enabled: Boolean(activeSessionId),
 	});
 	const resourceEntries = resourcesQuery.data?.entries ?? [];
-	const resourceSearchItems = useMemo(
-		() => buildResourceSearchItems(resourceEntries),
-		[resourceEntries],
-	);
 	const resourceTokens = useMemo(
 		() => buildResourceTokens(contentBlocks),
 		[contentBlocks],
@@ -469,9 +456,9 @@ export function ChatFooter({
 	const resourceMatches = useMemo(
 		() =>
 			resourceTrigger
-				? filterResourceItems(resourceSearchItems, resourceTrigger.query)
+				? filterResourceItems(resourceEntries, resourceTrigger.query)
 				: [],
-		[resourceSearchItems, resourceTrigger],
+		[resourceEntries, resourceTrigger],
 	);
 
 	const resourcePickerDisabled = !activeSessionId || !isReady;
@@ -486,8 +473,8 @@ export function ChatFooter({
 		resourceHighlight >= resourceMatches.length ? 0 : resourceHighlight;
 
 	const handleCommandClick = useCallback(
-		(command: AvailableCommand) => {
-			const nextValue = `/${command.name}`;
+		(result: FuzzySearchResult<AvailableCommand>) => {
+			const nextValue = `/${result.item.name}`;
 			if (activeSessionId) {
 				setInput(activeSessionId, nextValue);
 				setInputContents(
@@ -534,13 +521,14 @@ export function ChatFooter({
 	);
 
 	const applyResourceSelection = useCallback(
-		(resource: SessionFsResourceEntry) => {
+		(result: FuzzySearchResult<SessionFsResourceEntry>) => {
 			if (!activeSessionId) {
 				return false;
 			}
 			if (!resourceTrigger) {
 				return false;
 			}
+			const resource = result.item;
 			const filename = resource.name;
 			const tokenLabel = `@${filename}`;
 			const nextInput =
@@ -579,8 +567,8 @@ export function ChatFooter({
 	}, [applyResourceSelection, effectiveResourceHighlight, resourceMatches]);
 
 	const handleResourceClick = useCallback(
-		(resource: SessionFsResourceEntry) => {
-			applyResourceSelection(resource);
+		(result: FuzzySearchResult<SessionFsResourceEntry>) => {
+			applyResourceSelection(result);
 		},
 		[applyResourceSelection],
 	);
@@ -960,7 +948,7 @@ export function ChatFooter({
 				>
 					{shouldShowResourcePicker ? (
 						<ResourceCombobox
-							resources={resourceMatches}
+							results={resourceMatches}
 							open={shouldShowResourcePicker}
 							highlightedIndex={effectiveResourceHighlight}
 							onHighlightChange={setResourceHighlight}
@@ -970,7 +958,7 @@ export function ChatFooter({
 					) : null}
 					{shouldShowCommandPicker ? (
 						<CommandCombobox
-							commands={commandMatches}
+							results={commandMatches}
 							open={shouldShowCommandPicker}
 							highlightedIndex={effectiveCommandHighlight}
 							onHighlightChange={setCommandHighlight}
