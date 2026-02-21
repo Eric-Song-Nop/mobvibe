@@ -36,6 +36,9 @@ services:
       - key: GATEWAY_CORS_ORIGINS
         value: https://app.mobvibe.net,https://mobvibe.net
         previewValue: "*"
+      - key: SKIP_EMAIL_VERIFICATION
+        value: "false"
+        previewValue: "true"
       - key: RESEND_API_KEY
         sync: false
       - key: EMAIL_FROM

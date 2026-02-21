@@ -21,6 +21,11 @@ const trustedOrigins = config.corsOrigins.includes("*")
 		) as string[]);
 
 const isDevelopment = process.env.NODE_ENV === "development";
+const { skipEmailVerification } = config;
+
+if (skipEmailVerification) {
+	logger.warn("Email verification is disabled (SKIP_EMAIL_VERIFICATION=true)");
+}
 
 logger.info(
 	{
@@ -54,12 +59,12 @@ export const auth = betterAuth({
 				html: template.html,
 			});
 		},
-		sendOnSignUp: true,
-		sendOnSignIn: true,
+		sendOnSignUp: !skipEmailVerification,
+		sendOnSignIn: !skipEmailVerification,
 	},
 	emailAndPassword: {
 		enabled: true,
-		requireEmailVerification: true,
+		requireEmailVerification: !skipEmailVerification,
 		sendResetPassword: async ({ user, url }) => {
 			const template = passwordResetEmailTemplate({
 				userName: user.name,

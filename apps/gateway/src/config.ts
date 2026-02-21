@@ -5,6 +5,7 @@ export type GatewayConfig = {
 	databaseUrl: string | undefined;
 	resendApiKey: string | undefined;
 	emailFrom: string;
+	skipEmailVerification: boolean;
 };
 
 const parsePort = (value: string) => {
@@ -42,5 +43,6 @@ export const getGatewayConfig = (): GatewayConfig => {
 		databaseUrl: env.DATABASE_URL,
 		resendApiKey: env.RESEND_API_KEY,
 		emailFrom: env.EMAIL_FROM ?? "Mobvibe <noreply@example.com>",
+		skipEmailVerification: env.SKIP_EMAIL_VERIFICATION === "true",
 	};
 };
