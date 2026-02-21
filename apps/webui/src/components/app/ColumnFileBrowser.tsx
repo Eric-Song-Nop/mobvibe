@@ -1,6 +1,5 @@
 import {
 	Cancel01Icon,
-	File01Icon,
 	FolderIcon,
 	Loading03Icon,
 	Search01Icon,
@@ -15,6 +14,7 @@ import {
 	useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { FileTypeLabel } from "@/components/app/file-type-label";
 import { GitStatusIndicator } from "@/components/app/git-status-indicator";
 import type { FsEntriesResponse, FsEntry, GitFileStatus } from "@/lib/api";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
@@ -559,7 +559,6 @@ function ColumnPanel({
 					filteredResults.map(({ item: entry, highlightRanges }) => {
 						const isSelected =
 							entry.path === (highlightedEntryPath ?? currentPath);
-						const icon = entry.type === "directory" ? FolderIcon : File01Icon;
 						const relativePath = getRelativePath(entry.path);
 						const gitStatus = getGitStatus?.(relativePath);
 						return (
@@ -572,12 +571,16 @@ function ColumnPanel({
 								)}
 								onClick={() => onEntrySelect(entry, columnIndex)}
 							>
-								<HugeiconsIcon
-									icon={icon}
-									strokeWidth={2}
-									className="shrink-0"
-									aria-hidden="true"
-								/>
+								{entry.type === "directory" ? (
+									<HugeiconsIcon
+										icon={FolderIcon}
+										strokeWidth={2}
+										className="shrink-0"
+										aria-hidden="true"
+									/>
+								) : (
+									<FileTypeLabel path={entry.name} />
+								)}
 								{activeQuery && highlightRanges.length > 0 ? (
 									<FuzzyHighlight
 										text={entry.name}

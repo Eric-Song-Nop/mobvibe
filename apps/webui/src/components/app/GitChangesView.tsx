@@ -1,11 +1,8 @@
-import {
-	ArrowDown01Icon,
-	ArrowRight01Icon,
-	File01Icon,
-} from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { FileTypeLabel } from "@/components/app/file-type-label";
 import { GitStatusIndicator } from "@/components/app/git-status-indicator";
 import type { GitFileStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -69,12 +66,7 @@ function FileGroup({
 								)}
 								onClick={() => onFileSelect(file.path)}
 							>
-								<HugeiconsIcon
-									icon={File01Icon}
-									strokeWidth={2}
-									className="shrink-0"
-									aria-hidden="true"
-								/>
+								<FileTypeLabel path={file.path} />
 								<span className="min-w-0 flex-1 truncate">{file.path}</span>
 								<GitStatusIndicator status={file.status} />
 							</button>
