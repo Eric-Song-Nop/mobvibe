@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionSidebar } from "../src/components/session/SessionSidebar";
 import { ThemeProvider } from "../src/components/theme-provider";
@@ -111,20 +112,22 @@ const renderSidebar = (
 	options?: Partial<Parameters<typeof SessionSidebar>[0]>,
 ) =>
 	render(
-		<ThemeProvider>
-			<SessionSidebar
-				sessions={sessions}
-				activeSessionId={options?.activeSessionId}
-				onCreateSession={options?.onCreateSession ?? (() => {})}
-				onSelectSession={options?.onSelectSession ?? (() => {})}
-				onEditSubmit={options?.onEditSubmit ?? (() => {})}
-				onArchiveSession={options?.onArchiveSession ?? (() => {})}
-				onArchiveAllSessions={options?.onArchiveAllSessions ?? (() => {})}
-				isBulkArchiving={options?.isBulkArchiving ?? false}
-				isCreating={options?.isCreating ?? false}
-				mutations={options?.mutations ?? defaultMutations}
-			/>
-		</ThemeProvider>,
+		<MemoryRouter>
+			<ThemeProvider>
+				<SessionSidebar
+					sessions={sessions}
+					activeSessionId={options?.activeSessionId}
+					onCreateSession={options?.onCreateSession ?? (() => {})}
+					onSelectSession={options?.onSelectSession ?? (() => {})}
+					onEditSubmit={options?.onEditSubmit ?? (() => {})}
+					onArchiveSession={options?.onArchiveSession ?? (() => {})}
+					onArchiveAllSessions={options?.onArchiveAllSessions ?? (() => {})}
+					isBulkArchiving={options?.isBulkArchiving ?? false}
+					isCreating={options?.isCreating ?? false}
+					mutations={options?.mutations ?? defaultMutations}
+				/>
+			</ThemeProvider>
+		</MemoryRouter>,
 	);
 
 describe("SessionSidebar", () => {
