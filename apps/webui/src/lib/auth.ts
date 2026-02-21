@@ -1,5 +1,6 @@
 import { createAuthClient } from "better-auth/react";
 import { clearAuthToken, getAuthToken, setAuthToken } from "./auth-token";
+import { platformFetch } from "./tauri-fetch";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL as string | undefined;
 
@@ -26,7 +27,7 @@ const authClient = GATEWAY_URL
 						input: RequestInfo | URL,
 						init?: RequestInit,
 					) => {
-						const res = await fetch(input, init);
+						const res = await platformFetch(input, init);
 						const token = res.headers.get("set-auth-token");
 						if (token) setAuthToken(token);
 						return res;
