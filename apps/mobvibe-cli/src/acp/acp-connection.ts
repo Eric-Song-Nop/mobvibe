@@ -39,6 +39,7 @@ import {
 	type TerminalOutputEvent,
 } from "@mobvibe/shared";
 import type { AcpBackendConfig } from "../config.js";
+import { buildShellCommand, resolveShell } from "../lib/shell.js";
 
 type ClientInfo = {
 	name: string;
@@ -513,7 +514,9 @@ export class AcpConnection {
 		};
 		this.terminals.set(terminalId, record);
 
-		const child = spawn(params.command, params.args ?? [], {
+		const shell = resolveShell();
+		const fullCommand = buildShellCommand(params.command, params.args ?? []);
+		const child = spawn(shell, ["-c", fullCommand], {
 			cwd: params.cwd ?? undefined,
 			env: resolvedEnv ? { ...process.env, ...resolvedEnv } : process.env,
 		});
