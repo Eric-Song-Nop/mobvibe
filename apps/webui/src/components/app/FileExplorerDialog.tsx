@@ -247,12 +247,14 @@ export function FileExplorerDialog({
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
 			<AlertDialogContent className="grid h-[100svh] w-[100vw] !max-w-none min-h-0 min-w-0 grid-rows-[auto_1fr_auto] overflow-hidden translate-x-0 translate-y-0 rounded-none p-4 sm:h-[82vh] sm:!w-[98vw] sm:!max-w-[98vw] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-none top-0 left-0 sm:top-1/2 sm:left-1/2">
-				<AlertDialogHeader className="gap-3">
-					<div className="flex w-full items-center justify-between gap-3">
-						<AlertDialogTitle className="flex items-center gap-2">
+				<AlertDialogHeader className="gap-2">
+					{/* Row 1: Icon + Tabs + Git Branch */}
+					<div className="flex w-full items-center gap-2">
+						<AlertDialogTitle className="flex min-w-0 items-center gap-2">
 							<HugeiconsIcon
 								icon={FolderOpenIcon}
 								strokeWidth={2}
+								className="shrink-0"
 								aria-hidden="true"
 							/>
 							<div className="flex items-center gap-1">
@@ -280,37 +282,38 @@ export function FileExplorerDialog({
 									</Button>
 								) : null}
 							</div>
-							{gitStatus?.isGitRepo && gitStatus.branch ? (
-								<span className="text-muted-foreground flex items-center gap-1 text-xs font-normal">
-									<HugeiconsIcon
-										icon={GitBranchIcon}
-										strokeWidth={2}
-										className="h-3.5 w-3.5"
-										aria-hidden="true"
-									/>
-									{gitStatus.branch}
-								</span>
-							) : null}
 						</AlertDialogTitle>
-						<div className="flex items-center gap-2 sm:hidden">
-							<Button
-								variant={activePane === "browser" ? "secondary" : "outline"}
-								size="sm"
-								onClick={() => setActivePane("browser")}
-							>
-								{activeTab === "files"
-									? t("fileExplorer.directories")
-									: t("fileExplorer.changesTab")}
-							</Button>
-							<Button
-								variant={activePane === "preview" ? "secondary" : "outline"}
-								size="sm"
-								onClick={() => setActivePane("preview")}
-								disabled={!selectedFilePath}
-							>
-								{t("fileExplorer.preview")}
-							</Button>
-						</div>
+						{gitStatus?.isGitRepo && gitStatus.branch ? (
+							<span className="text-muted-foreground ml-auto flex shrink-0 items-center gap-1 text-xs font-normal max-w-[8rem]">
+								<HugeiconsIcon
+									icon={GitBranchIcon}
+									strokeWidth={2}
+									className="h-3.5 w-3.5 shrink-0"
+									aria-hidden="true"
+								/>
+								<span className="truncate">{gitStatus.branch}</span>
+							</span>
+						) : null}
+					</div>
+					{/* Row 2: Pane toggle — mobile only */}
+					<div className="flex items-center gap-2 sm:hidden">
+						<Button
+							variant={activePane === "browser" ? "secondary" : "outline"}
+							size="sm"
+							onClick={() => setActivePane("browser")}
+						>
+							{activeTab === "files"
+								? t("fileExplorer.directories")
+								: t("fileExplorer.changesTab")}
+						</Button>
+						<Button
+							variant={activePane === "preview" ? "secondary" : "outline"}
+							size="sm"
+							onClick={() => setActivePane("preview")}
+							disabled={!selectedFilePath}
+						>
+							{t("fileExplorer.preview")}
+						</Button>
 					</div>
 				</AlertDialogHeader>
 
