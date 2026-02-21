@@ -254,6 +254,8 @@ type GrepResult = {
 
 **移动端**: 复用命令面板全屏模态容器（同 P1-A），文件图标 + 路径高亮 + git 状态 badge 布局保持一致。
 
+**依赖**: P0-A ✅（模糊搜索引擎）、P1-A（命令面板容器）
+
 ### P1-C: 聊天内消息搜索 (Cmd+F)
 
 **新建** `apps/webui/src/components/chat/ChatSearchBar.tsx`
@@ -266,6 +268,79 @@ type GrepResult = {
 - **改造** `apps/webui/src/lib/ui-store.ts` — 新增搜索状态
 
 **移动端**: 桌面为顶部搜索条（Cmd+F 触发），移动端从 AppHeader 搜索按钮展开搜索栏，覆盖 header 区域。上/下导航按钮放置在输入框两侧，匹配计数（"3/12"）居中显示。Escape 键或关闭按钮收起搜索栏。
+
+### P1-D: 文件列表内实时模糊过滤
+
+**改造文件**:
+
+- `apps/webui/src/components/app/ColumnFileBrowser.tsx` — 最后一列增加搜索输入框，集成 fuzzySearch + FuzzyHighlight
+
+**设计要点**:
+
+- 搜索框位置: 仅最后一列（当前活跃目录）的列头下方、条目列表上方
+- 搜索范围: 当前列文件名（entry.name），不含路径前缀
+- 搜索引擎: 复用 P0-A 的 fuzzySearch() + FuzzyHighlight 组件
+- 空搜索返回全部条目（保持现有行为），有搜索时按相关性排序 + 名称高亮
+- 与现有 filterEntry prop 正交: filterEntry 先过滤，fuzzySearch 后匹配
+- 列切换时（导航进入子目录或返回父目录）自动清空搜索状态
+- 快捷键 `/` 聚焦搜索框，Escape 清空并退出，ArrowDown/Up + Enter 键盘导航
+- 不修改 useColumnFileBrowser hook — 搜索过滤在组件展示层处理
+
+**移动端**: 搜索输入框直接可见（无快捷键依赖），min-h 44px 触摸目标，内置 clear 按钮。虚拟键盘弹出时列表自适应缩小。
+
+**依赖**: P0-A ✅（fuzzySearch 引擎已就绪）
+**不依赖**: P0-B/P0-C — 可独立实施
+
+### P1-E: FileExplorer Git Changes 视图
+
+**新建文件**:
+
+- `apps/webui/src/components/app/GitChangesView.tsx` — 变更文件分组折叠列表
+- `apps/webui/src/components/app/git-status-indicator.tsx` — 提取 GitStatusIndicator + GIT_STATUS_CONFIG 为共享模块
+
+**改造文件**:
+
+- `apps/webui/src/components/app/FileExplorerDialog.tsx`:
+  - Header "Session files" 文字替换为 [Files | Changes] tab 按钮组
+  - 新增 activeTab: "files" | "changes" 状态
+  - Changes tab 激活时显示 GitChangesView，替代 ColumnFileBrowser
+  - 预览区域两个 tab 共享: Changes 中点击文件同样触发文件预览
+- `apps/webui/src/components/app/ColumnFileBrowser.tsx`:
+  - GitStatusIndicator 和 GIT_STATUS_CONFIG 提取到独立模块后改为导入
+
+**数据来源（Phase 1，基于现有 API，无需后端改动）**:
+
+- 复用 gitStatusQuery（GitStatusResponse.files），按 status 分两组:
+  - "Changed" 分组: status 为 M/A/D/R/C/U 的文件
+  - "Untracked" 分组: status 为 ? 的文件
+- Phase 2（P2-B 完成后）升级为三分组: Staged / Unstaged / Untracked
+
+**交互设计**:
+
+- 桌面端: Changes 列表占左侧（同 ColumnFileBrowser 位置），预览区域在右侧
+- 移动端: Changes 列表全屏，点击文件 → setActivePane("preview") 切到预览
+- 分组标题可折叠/展开，显示文件计数（如 "Changed (5)"）
+- 每个文件条目: 相对路径 + GitStatusIndicator（复用共享模块）
+- 点击文件条目: 设置 selectedFilePath + 切到 preview pane
+
+**Header Tab + 移动端 Pane 切换矩阵**:
+
+| activeTab | activePane | 桌面端                    | 移动端          |
+| --------- | ---------- | ------------------------- | --------------- |
+| files     | browser    | ColumnFileBrowser + Preview | ColumnFileBrowser |
+| files     | preview    | ColumnFileBrowser + Preview | Preview         |
+| changes   | browser    | GitChangesView + Preview  | GitChangesView  |
+| changes   | preview    | GitChangesView + Preview  | Preview         |
+
+移动端 header 按钮:
+
+- activeTab=files → [Directories | Preview] 切换
+- activeTab=changes → [Changes | Preview] 切换
+
+**移动端**: 折叠列表天然适合纵向滚动，条目 min-h 44px 触摸区域。不需要 Bottom Sheet 等新基础设施，完全复用现有 Button + AlertDialog + activePane 机制。
+
+**依赖**: 无（仅使用现有 gitStatusQuery + 现有组件）
+**升级路径**: P0-C 完成后 → P2-B 使用 GitStatusExtended 升级为三分组
 
 ---
 
@@ -284,27 +359,40 @@ type GrepResult = {
 
 **移动端**: 桌面为 FileExplorer 新 tab 或侧面板，移动端使用全屏模态（复用 `FileExplorerDialog` 的 `100svh × 100vw` 模式），列表项增大触摸区域（min-h 48px）。点击提交 → 推入新 pane 显示提交详情（复用 `FileExplorerDialog` 的 `activePane` 切换模式），展开的文件列表 → 二级 pane。
 
-### P2-B: Staged vs Unstaged 分离视图
+**依赖**: P0-C（getGitLog RPC）
 
-- CLI 侧 `getGitStatusExtended()` — 拆分 porcelain X/Y 列
-- WebUI 文件浏览器新增 "Changes" 视图:
-  - **Staged** — 已暂存的变更
-  - **Unstaged** — 未暂存的变更
-  - **Untracked** — 未追踪的文件
+### P2-B: Staged vs Unstaged 完整分离
+
+> P1-E 已实现基础 Changes 视图（Changed / Untracked 两分组），本阶段升级为完整的三分组分离。
+
+**后端**:
+
+- CLI 侧 getGitStatusExtended() — 拆分 porcelain X/Y 列（依赖 P0-C）
+- Gateway + shared 类型扩展
+
+**前端升级**:
+
+- GitChangesView.tsx 从两分组升级为三分组（Staged / Unstaged / Untracked）
+- FileExplorerDialog 的 gitStatusQuery 切换为调用 fetchSessionGitStatusExtended
+- 条件降级: getGitStatusExtended 不可用时回退到 getGitStatus（Phase 1 行为）
 - Mobvibe 是只读监控面板 — 展示状态帮助理解 agent 行为
 
-**移动端**: 使用分段按钮（Segmented Control: Staged | Unstaged | Untracked）切换三类视图，替代桌面端的并排/折叠布局。每段使用独立的 `@tanstack/react-virtual` 虚拟滚动列表。
+**移动端**: 保持 P1-E 的折叠列表布局，分组数量从 2 增至 3，无额外适配。
+
+**依赖**: P0-C（Git RPC 扩展）、P1-E（Changes 视图 Phase 1）
 
 ### P2-C: Side-by-Side Diff 视图
 
 **新建** `apps/webui/src/components/chat/SideBySideDiffView.tsx`
 
-- 复用 `DiffView.tsx` 的 `buildDiffOps` / `parseUnifiedDiff` 逻辑
+- 复用 `DiffView.tsx` 的 `buildDiffOps` / `parseUnifiedDiff` 逻辑（当前为未导出的内部函数，需先导出或提取到 `lib/diff-utils.ts` 共享模块）
 - 左栏旧文件 / 右栏新文件，匹配行对齐，空行填充
 - 复用 Prism 语法高亮
 - 在 `UnifiedDiffView` 旁添加 Unified | Split 视图切换按钮
 
 **移动端**: 直接隐藏 side-by-side 选项 — 移动端屏幕宽度不足以并排显示两栏代码，仅保留 unified 模式。检测方式: `sm:` 响应式断点隐藏切换按钮，或通过 `isMobilePlatform()` 条件渲染。
+
+**依赖**: 无（仅复用现有 DiffView.tsx 逻辑）
 
 ### P2-D: 分支管理 UI
 
@@ -314,6 +402,8 @@ type GrepResult = {
 - 只读操作（查看分支信息，不执行 checkout 等写操作）
 
 **移动端**: 桌面为 header 内下拉菜单，移动端使用 Bottom Sheet（从底部推入），由分支名 tap 触发。分支列表内集成模糊搜索过滤输入框，列表项增大触摸区域。
+
+**依赖**: P0-C（getGitBranches RPC）、P0-A（模糊搜索过滤）
 
 ---
 
@@ -327,6 +417,8 @@ type GrepResult = {
 
 **移动端**: 复用命令面板 `#` 模式的全屏模态容器（同 P1-A），交互方式与桌面端一致。
 
+**依赖**: P1-A（命令面板）
+
 ### P3-B: Git Blame 集成
 
 - `CodePreview.tsx` 新增 blame 模式
@@ -337,6 +429,8 @@ type GrepResult = {
 
 **移动端**: 桌面左侧 gutter 显示 blame 注释，移动端默认隐藏 blame 列（屏幕宽度有限），提供切换按钮开启。点击代码行 → Bottom Sheet 显示 blame 详情（commit hash + 作者 + 日期 + 提交消息），替代桌面端的 hover tooltip（触屏无 hover 事件）。
 
+**依赖**: P0-C（getGitBlame RPC）
+
 ### P3-C: 文件内容搜索 (Cmd+Shift+F)
 
 - CLI 侧 `searchFileContents()` 使用 `git grep`（git repo）或 `grep -rn`（非 git）
@@ -346,6 +440,8 @@ type GrepResult = {
 
 **移动端**: 复用命令面板搜索模式的全屏模态容器。结果点击 → 推入文件预览 pane（同 `FileExplorerDialog` 的 `activePane` 切换模式）。
 
+**依赖**: P0-C（searchFileContents RPC）、P1-A（命令面板）
+
 ### P3-D: Git Stash 查看
 
 - Git 面板新增 Stash tab
@@ -353,6 +449,8 @@ type GrepResult = {
 - 只读查看
 
 **移动端**: 嵌入 Git 面板内，列表项增大触摸区域（min-h 48px），布局与桌面端一致。
+
+**依赖**: P0-C（getGitStashList RPC）
 
 ---
 
@@ -404,6 +502,8 @@ type GrepResult = {
 | "agent 改了什么"  | 命令面板 `changes:` → tool_call + git 变更关联  | Changes tab 直接查看                      |
 | 文件历史搜索      | 文件预览 History tab 模糊搜索提交消息           | 全屏模态 History pane                     |
 | 跨会话 + git 关联 | "在哪个会话中修改了 X 文件" — 跨会话 git log    | header 搜索 → 输入 `#` 前缀               |
+| 列内快速过滤文件  | ColumnFileBrowser 搜索框 + uFuzzy (/) (P1-D)    | 搜索框直接可见，tap 聚焦                   |
+| 查看当前变更文件  | FileExplorer Changes tab (P1-E)                 | 同 Changes tab，点击文件 → preview         |
 
 ---
 
@@ -444,6 +544,8 @@ type GrepResult = {
 | Git Blame    | 左侧 gutter + hover       | 默认隐藏，tap 行 → Bottom Sheet 详情                   | 隐藏 gutter        |
 | 文件内容搜索 | 命令面板模式              | 全屏模态 + pane 推入                                   | —                  |
 | Git Stash    | 面板 tab                  | 面板 tab，增大触摸区域                                 | —                  |
+| 列内模糊过滤 | 最后一列搜索框 + `/` 快捷键 | 搜索框直接可见，tap 聚焦                               | —                  |
+| Changes 视图 | FileExplorer Changes tab  | 同 Changes tab，折叠列表全屏                           | —                  |
 | Agent 变更   | 内嵌 tab                  | 全屏 tab 切换 (Chat/Changes/Files)                     | —                  |
 | 冲突解决     | 三路合并视图              | 冲突文件列表 + "在桌面端查看" 提示                     | 隐藏三路合并视图   |
 | Git Graph    | SVG 分支拓扑图            | 线性提交列表 + 分支标签                                | 不渲染 SVG 拓扑图  |
@@ -471,9 +573,11 @@ type GrepResult = {
 | 阶段   | 内容                                             | 工作量 | 价值 | 周期    |
 | ------ | ------------------------------------------------ | ------ | ---- | ------- |
 | **P0** | 基础设施（搜索引擎 ✅ + 快捷键 + Git RPC）       | 中     | 极高 | ~1 周   |
-| **P1** | 核心搜索（命令面板 + 文件搜索 + 聊天搜索）       | 中     | 极高 | ~1 周   |
+| **P1** | 核心搜索 + FileExplorer 增强（命令面板 + 文件搜索 + 聊天搜索 + 列内过滤 + Changes 视图） | 中     | 极高 | ~1.5 周 |
 | **P2** | 核心 Git（提交历史 + staged 分离 + diff + 分支） | 大     | 高   | ~2 周   |
 | **P3** | 高级功能（跨会话搜索 + blame + grep + stash）    | 大     | 中高 | ~2 周   |
 | **P4** | 极限功能（Agent 变更视图 + 冲突助手 + graph）    | 大     | 中   | ~2-3 周 |
 
-**建议启动顺序**: P0 → P1-A + P1-C (并行) → P1-B → P2-A → P2-B → P2-C → P2-D → P3 → P4
+**建议启动顺序**: P0 → P1-A + P1-C (并行) → P1-B → P1-D + P1-E (并行) → P2-A → P2-B → P2-C → P2-D → P3 → P4
+
+注: P1-D（列内模糊过滤）和 P1-E（Changes 视图）不依赖 P0-B/P0-C，可提前启动或与 P1-A/P1-C 并行。
