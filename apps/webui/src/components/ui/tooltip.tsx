@@ -1,9 +1,12 @@
+"use client";
+
 import { Tooltip as TooltipPrimitive } from "radix-ui";
-import type * as React from "react";
+import * as React from "react";
+
 import { cn } from "@/lib/utils";
 
 function TooltipProvider({
-	delayDuration = 300,
+	delayDuration = 0,
 	...props
 }: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
 	return (
@@ -29,7 +32,8 @@ function TooltipTrigger({
 
 function TooltipContent({
 	className,
-	sideOffset = 4,
+	sideOffset = 0,
+	children,
 	...props
 }: React.ComponentProps<typeof TooltipPrimitive.Content>) {
 	return (
@@ -38,16 +42,16 @@ function TooltipContent({
 				data-slot="tooltip-content"
 				sideOffset={sideOffset}
 				className={cn(
-					"ring-foreground/10 bg-popover text-popover-foreground z-50 overflow-hidden rounded-none px-2 py-1.5 text-xs shadow-md ring-1",
-					"data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
-					"data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95",
-					"data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+					"data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 rounded-none px-3 py-1.5 text-xs bg-foreground text-background z-50 w-fit max-w-xs origin-(--radix-tooltip-content-transform-origin)",
 					className,
 				)}
 				{...props}
-			/>
+			>
+				{children}
+				<TooltipPrimitive.Arrow className="size-2.5 rotate-45 rounded-none bg-foreground fill-foreground z-50 translate-y-[calc(-50%_-_2px)]" />
+			</TooltipPrimitive.Content>
 		</TooltipPrimitive.Portal>
 	);
 }
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider };
+export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger };
