@@ -14,11 +14,11 @@ import { logger } from "./logger.js";
 
 const config = getGatewayConfig();
 
-const trustedOrigins = [
-	config.siteUrl,
-	...config.corsOrigins,
-	...tauriOrigins,
-].filter(Boolean) as string[];
+const trustedOrigins = config.corsOrigins.includes("*")
+	? ["*"]
+	: ([config.siteUrl, ...config.corsOrigins, ...tauriOrigins].filter(
+			Boolean,
+		) as string[]);
 
 const isDevelopment = process.env.NODE_ENV === "development";
 

@@ -23,6 +23,9 @@ const config = getGatewayConfig();
 const allowedOrigins = [...config.corsOrigins, ...tauriOrigins];
 
 const isAllowedOrigin = (origin: string): boolean => {
+	if (allowedOrigins.includes("*")) {
+		return true;
+	}
 	const allowed = allowedOrigins.includes(origin);
 	if (!allowed) {
 		logger.warn({ origin }, "cors_origin_rejected");

@@ -38,7 +38,7 @@ export const getGatewayConfig = (): GatewayConfig => {
 	return {
 		port: parsePort(env.PORT ?? env.GATEWAY_PORT ?? "3005"),
 		corsOrigins: parseOrigins(env.GATEWAY_CORS_ORIGINS),
-		siteUrl: env.SITE_URL,
+		siteUrl: env.SITE_URL ?? env.RENDER_EXTERNAL_URL,
 		databaseUrl: env.DATABASE_URL,
 		resendApiKey: env.RESEND_API_KEY,
 		emailFrom: env.EMAIL_FROM ?? "Mobvibe <noreply@example.com>",
