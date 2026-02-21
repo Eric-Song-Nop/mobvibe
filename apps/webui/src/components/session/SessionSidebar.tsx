@@ -1,14 +1,8 @@
-import {
-	ComputerIcon,
-	Loading01Icon,
-	MoonIcon,
-	PaintBoardIcon,
-	SunIcon,
-} from "@hugeicons/core-free-icons";
+import { Loading01Icon, Settings02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useTheme } from "@/components/theme-provider";
+import { Link } from "react-router-dom";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -22,23 +16,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuLabel,
-	DropdownMenuRadioGroup,
-	DropdownMenuRadioItem,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
-import i18n, { supportedLanguages } from "@/i18n";
 import { type ChatSession } from "@/lib/chat-store";
 import {
 	getSessionDisplayStatus,
@@ -47,17 +25,6 @@ import {
 } from "@/lib/session-utils";
 import { useUiStore } from "@/lib/ui-store";
 import { cn } from "@/lib/utils";
-
-const toThemePreference = (value: string): "light" | "dark" | "system" => {
-	switch (value) {
-		case "light":
-		case "dark":
-		case "system":
-			return value;
-		default:
-			return "system";
-	}
-};
 
 const getSessionStamp = (session: ChatSession) =>
 	session.updatedAt ?? session.createdAt ?? "";
@@ -101,7 +68,6 @@ export const SessionSidebar = ({
 	mutations,
 }: SessionSidebarProps) => {
 	const { t } = useTranslation();
-	const { theme, setTheme } = useTheme();
 	const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
 		{},
 	);
@@ -165,31 +131,7 @@ export const SessionSidebar = ({
 	return (
 		<div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden">
 			<div className="flex items-center justify-between">
-				<div className="flex items-center gap-2">
-					<div className="text-sm font-semibold">{t("session.title")}</div>
-					<div className="flex items-center">
-						<Select
-							value={i18n.resolvedLanguage ?? "en"}
-							onValueChange={(value) => i18n.changeLanguage(value)}
-						>
-							<SelectTrigger
-								size="sm"
-								className="h-7 w-20 justify-between px-2 text-xs"
-								aria-label={t("languageSwitcher.label")}
-								title={t("languageSwitcher.chooseLanguage")}
-							>
-								<SelectValue placeholder={t("languageSwitcher.placeholder")} />
-							</SelectTrigger>
-							<SelectContent>
-								{supportedLanguages.map((lang) => (
-									<SelectItem key={lang} value={lang}>
-										{t(`common.languages.${lang}`)}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
-					</div>
-				</div>
+				<div className="text-sm font-semibold">{t("session.title")}</div>
 
 				<div className="flex items-center gap-2">
 					{sessions.length > 0 ? (
@@ -223,37 +165,11 @@ export const SessionSidebar = ({
 							</AlertDialogContent>
 						</AlertDialog>
 					) : null}
-					<DropdownMenu>
-						<DropdownMenuTrigger asChild>
-							<Button
-								variant="outline"
-								size="icon-sm"
-								aria-label={t("theme.toggle")}
-							>
-								<HugeiconsIcon icon={PaintBoardIcon} strokeWidth={2} />
-							</Button>
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="end" className="w-40">
-							<DropdownMenuLabel>{t("theme.label")}</DropdownMenuLabel>
-							<DropdownMenuRadioGroup
-								value={theme}
-								onValueChange={(value) => setTheme(toThemePreference(value))}
-							>
-								<DropdownMenuRadioItem value="light">
-									<HugeiconsIcon icon={SunIcon} strokeWidth={2} />
-									{t("theme.light")}
-								</DropdownMenuRadioItem>
-								<DropdownMenuRadioItem value="dark">
-									<HugeiconsIcon icon={MoonIcon} strokeWidth={2} />
-									{t("theme.dark")}
-								</DropdownMenuRadioItem>
-								<DropdownMenuRadioItem value="system">
-									<HugeiconsIcon icon={ComputerIcon} strokeWidth={2} />
-									{t("theme.system")}
-								</DropdownMenuRadioItem>
-							</DropdownMenuRadioGroup>
-						</DropdownMenuContent>
-					</DropdownMenu>
+					<Button variant="outline" size="icon-sm" asChild>
+						<Link to="/settings" aria-label={t("settings.title")}>
+							<HugeiconsIcon icon={Settings02Icon} strokeWidth={2} />
+						</Link>
+					</Button>
 
 					<Button onClick={onCreateSession} size="sm" disabled={isCreating}>
 						{t("common.new")}
