@@ -336,10 +336,6 @@
 		"current": "当前",
 		"remote": "远程"
 	},
-	"diffView": {
-		"unified": "统一视图",
-		"split": "并排对比"
-	},
 	"cli": {
 		"discoveringCapabilities": "正在获取 Agent 能力..."
 	}

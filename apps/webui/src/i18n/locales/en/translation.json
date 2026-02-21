@@ -336,10 +336,6 @@
 		"current": "Current",
 		"remote": "Remote"
 	},
-	"diffView": {
-		"unified": "Unified",
-		"split": "Split"
-	},
 	"cli": {
 		"discoveringCapabilities": "Discovering agent capabilities..."
 	}

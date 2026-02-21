@@ -591,6 +591,11 @@ export function FileExplorerDialog({
 								<CommitHistoryPanel
 									sessionId={sessionId}
 									onFileSelect={handleHistoryFileSelect}
+									selectedFile={
+										previewIntent?.type === "commitDiff"
+											? previewIntent.filePath
+											: undefined
+									}
 								/>
 							) : null}
 						</section>

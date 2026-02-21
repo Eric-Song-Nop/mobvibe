@@ -1263,6 +1263,12 @@ export function CodePreview({ payload, sessionId }: CodePreviewProps) {
 														data-line={lineNum}
 													>
 														<span
+															className="file-preview-code__line-number"
+															aria-hidden="true"
+														>
+															{lineNum}
+														</span>
+														<span
 															className={cn(
 																"file-preview-code__diff-indicator",
 																diffClassName,
@@ -1270,12 +1276,6 @@ export function CodePreview({ payload, sessionId }: CodePreviewProps) {
 															aria-hidden="true"
 														>
 															{diffIndicator}
-														</span>
-														<span
-															className="file-preview-code__line-number"
-															aria-hidden="true"
-														>
-															{lineNum}
 														</span>
 														<span
 															{...restLineProps}
