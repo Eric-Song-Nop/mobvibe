@@ -38,6 +38,7 @@ import {
 	searchGitLog,
 } from "../lib/git-utils.js";
 import { logger } from "../lib/logger.js";
+import { resolveWithinCwd } from "./path-utils.js";
 
 type SocketClientOptions = {
 	config: CliConfig;
@@ -132,23 +133,6 @@ const readDirectoryEntries = async (dirPath: string): Promise<FsEntry[]> => {
 
 const filterVisibleEntries = (entries: FsEntry[]) =>
 	entries.filter((entry) => !entry.hidden);
-
-/**
- * Resolve a request path within the given cwd.
- * Rejects absolute paths and paths that escape the cwd via "..".
- * Returns the resolved absolute path.
- */
-const resolveWithinCwd = (cwd: string, requestPath: string): string => {
-	if (path.isAbsolute(requestPath)) {
-		throw new Error("Absolute paths are not allowed");
-	}
-	const resolved = path.resolve(cwd, requestPath);
-	// Ensure resolved path is within cwd (cwd itself or a descendant)
-	if (resolved !== cwd && !resolved.startsWith(`${cwd}/`)) {
-		throw new Error("Path escapes working directory");
-	}
-	return resolved;
-};
 
 const buildHostFsRoots = async (): Promise<HostFsRootsResponse> => {
 	const homePath = homedir();
