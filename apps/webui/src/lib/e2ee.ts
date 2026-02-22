@@ -13,6 +13,8 @@ import {
 import type { SessionEvent } from "@/lib/acp";
 import { isInTauri } from "@/lib/auth";
 
+export type E2EEStatus = "none" | "ok" | "missing_key";
+
 const STORAGE_KEY = "mobvibe_e2ee_secrets";
 const LEGACY_STORAGE_KEY = "mobvibe_e2ee_master_secret";
 
@@ -133,10 +135,7 @@ class E2EEManager {
 		}
 	}
 
-	getSessionE2EEStatus(
-		sessionId: string,
-		hasWrappedDek: boolean,
-	): "none" | "ok" | "missing_key" {
+	getSessionE2EEStatus(sessionId: string, hasWrappedDek: boolean): E2EEStatus {
 		if (!hasWrappedDek) return "none";
 		return this.sessionDeks.has(sessionId) ? "ok" : "missing_key";
 	}

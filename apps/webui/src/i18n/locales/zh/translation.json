@@ -300,7 +300,7 @@
 		"missingKeyBadge": "缺少密钥",
 		"missingKeyTitle": "E2EE 密钥缺失",
 		"missingKeyDescription": "此对话已启用端到端加密，但未找到匹配的解密密钥，消息内容无法解密。",
-		"missingKeyCliHint": "在 CLI 运行 `mobvibe e2ee show` 获取主密钥，然后在设置中配对。",
+		"missingKeyCliHint": "在 CLI 运行 <code>mobvibe e2ee show</code> 获取主密钥，然后在设置中配对。",
 		"missingKeySettingsLink": "前往 E2EE 设置"
 	},
 	"machines": {

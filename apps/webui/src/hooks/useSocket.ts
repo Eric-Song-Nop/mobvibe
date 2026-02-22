@@ -431,9 +431,11 @@ export function useSocket({
 	};
 
 	handleSessionsChangedRef.current = (payload: SessionsChangedPayload) => {
+		const addedOrUpdated = [...payload.added, ...payload.updated];
+
 		// Unwrap DEKs from new/updated sessions
 		if (e2ee.isEnabled()) {
-			for (const session of [...payload.added, ...payload.updated]) {
+			for (const session of addedOrUpdated) {
 				if (session.wrappedDek) {
 					e2ee.unwrapSessionDek(session.sessionId, session.wrappedDek);
 				}
@@ -443,7 +445,7 @@ export function useSocket({
 
 		// Set E2EE status for added/updated sessions
 		const { setSessionE2EEStatus } = useChatStore.getState();
-		for (const session of [...payload.added, ...payload.updated]) {
+		for (const session of addedOrUpdated) {
 			setSessionE2EEStatus(
 				session.sessionId,
 				e2ee.getSessionE2EEStatus(

@@ -18,6 +18,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import i18n from "@/i18n";
 import { createDefaultContentBlocks } from "./content-block-utils";
+import type { E2EEStatus } from "./e2ee";
 import { getStorageAdapter } from "./storage-adapter";
 
 export type ChatRole = "user" | "assistant";
@@ -154,7 +155,7 @@ export type ChatSession = {
 	revision?: number;
 	lastAppliedSeq?: number;
 	/** Runtime-only E2EE status (not persisted) */
-	e2eeStatus?: "none" | "ok" | "missing_key";
+	e2eeStatus?: E2EEStatus;
 };
 
 type ChatState = {

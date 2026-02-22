@@ -300,7 +300,7 @@
 		"missingKeyBadge": "Key missing",
 		"missingKeyTitle": "E2EE key missing",
 		"missingKeyDescription": "This session is end-to-end encrypted but no matching decryption key was found. Messages cannot be decrypted.",
-		"missingKeyCliHint": "Run `mobvibe e2ee show` on the CLI to retrieve the master secret, then pair it in Settings.",
+		"missingKeyCliHint": "Run <code>mobvibe e2ee show</code> on the CLI to retrieve the master secret, then pair it in Settings.",
 		"missingKeySettingsLink": "Go to E2EE Settings"
 	},
 	"machines": {

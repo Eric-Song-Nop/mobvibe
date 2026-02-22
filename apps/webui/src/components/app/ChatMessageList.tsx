@@ -124,9 +124,9 @@ export const ChatMessageList = forwardRef<
 	return (
 		<main className="flex min-h-0 flex-1 flex-col overflow-hidden">
 			<div className="mx-auto flex w-full max-w-5xl flex-1 min-h-0 flex-col gap-4 px-4 py-6">
-				<E2EEMissingBanner
-					visible={activeSession?.e2eeStatus === "missing_key"}
-				/>
+				{activeSession?.e2eeStatus === "missing_key" ? (
+					<E2EEMissingBanner />
+				) : null}
 				<div className="flex min-h-0 flex-1 flex-col gap-4">
 					{!activeSession ? (
 						<div
