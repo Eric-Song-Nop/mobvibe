@@ -1,6 +1,7 @@
 {
 	"$schema": "https://schemas.tauri.app/config/2/capabilities",
 	"identifier": "mobile",
+	"windows": ["main"],
 	"platforms": ["android", "iOS"],
 	"permissions": [
 		"barcode-scanner:allow-scan",
