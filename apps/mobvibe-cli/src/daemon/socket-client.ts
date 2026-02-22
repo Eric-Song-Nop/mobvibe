@@ -8,6 +8,7 @@ import type {
 	FsEntry,
 	FsRoot,
 	GatewayToCliEvents,
+	GitBranchesForCwdResponse,
 	HostFsRootsResponse,
 	RpcResponse,
 	SessionEventsResponse,
@@ -1129,6 +1130,38 @@ export class SocketClient extends EventEmitter {
 						sessionId: request.params.sessionId,
 					},
 					"rpc_git_grep_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		// Git branches for cwd (no session required — used before session creation)
+		this.socket.on("rpc:git:branchesForCwd", async (request) => {
+			try {
+				const { cwd } = request.params;
+				logger.debug(
+					{ requestId: request.requestId, cwd },
+					"rpc_git_branches_for_cwd",
+				);
+				const isRepo = await isGitRepo(cwd);
+				if (!isRepo) {
+					const result: GitBranchesForCwdResponse = {
+						isGitRepo: false,
+						branches: [],
+					};
+					this.sendRpcResponse(request.requestId, result);
+					return;
+				}
+				const branches = await getGitBranches(cwd);
+				const result: GitBranchesForCwdResponse = {
+					isGitRepo: true,
+					branches,
+				};
+				this.sendRpcResponse(request.requestId, result);
+			} catch (error) {
+				logger.error(
+					{ err: error, requestId: request.requestId },
+					"rpc_git_branches_for_cwd_error",
 				);
 				this.sendRpcError(request.requestId, error);
 			}

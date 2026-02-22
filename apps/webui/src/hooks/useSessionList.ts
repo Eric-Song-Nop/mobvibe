@@ -21,6 +21,10 @@ export type UseSessionListReturn = {
 	sessionList: ChatSession[];
 };
 
+/** Get the workspace group key for a session (worktree sessions group under the source repo) */
+const getSessionGroupCwd = (session: ChatSession): string | undefined =>
+	session.worktreeSourceCwd || session.cwd;
+
 export function useSessionList({
 	sessions,
 	activeSessionId,
@@ -36,7 +40,7 @@ export function useSessionList({
 
 	const activeWorkspaceCwd =
 		activeSession?.machineId === selectedMachineId
-			? activeSession.cwd
+			? getSessionGroupCwd(activeSession)
 			: undefined;
 
 	const selectedWorkspaceCwd = selectedMachineId
@@ -54,7 +58,7 @@ export function useSessionList({
 						return false;
 					}
 					if (effectiveWorkspaceCwd) {
-						return s.cwd === effectiveWorkspaceCwd;
+						return getSessionGroupCwd(s) === effectiveWorkspaceCwd;
 					}
 					return true;
 				})

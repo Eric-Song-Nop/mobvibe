@@ -89,7 +89,7 @@ export function setupSessionRoutes(
 			return;
 		}
 		try {
-			const { cwd, title, backendId, machineId } = request.body ?? {};
+			const { cwd, title, backendId, machineId, worktree } = request.body ?? {};
 
 			if (typeof backendId !== "string" || backendId.trim().length === 0) {
 				respondError(
@@ -99,6 +99,25 @@ export function setupSessionRoutes(
 				);
 				return;
 			}
+
+			// Parse worktree options
+			const worktreeOptions =
+				worktree &&
+				typeof worktree === "object" &&
+				typeof worktree.branch === "string" &&
+				worktree.branch.trim().length > 0 &&
+				typeof worktree.sourceCwd === "string" &&
+				worktree.sourceCwd.trim().length > 0
+					? {
+							branch: worktree.branch.trim(),
+							baseBranch:
+								typeof worktree.baseBranch === "string" &&
+								worktree.baseBranch.trim().length > 0
+									? worktree.baseBranch.trim()
+									: undefined,
+							sourceCwd: worktree.sourceCwd.trim(),
+						}
+					: undefined;
 
 			logger.info({ userId, backendId, machineId }, "session_create_request");
 
@@ -115,6 +134,7 @@ export function setupSessionRoutes(
 						typeof machineId === "string" && machineId.trim().length > 0
 							? machineId.trim()
 							: undefined,
+					worktree: worktreeOptions,
 				},
 				userId,
 			);

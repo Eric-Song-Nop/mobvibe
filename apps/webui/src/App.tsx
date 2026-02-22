@@ -135,6 +135,7 @@ function MainApp() {
 			setDraftTitle: s.setDraftTitle,
 			setDraftBackendId: s.setDraftBackendId,
 			setDraftCwd: s.setDraftCwd,
+			resetDraftWorktree: s.resetDraftWorktree,
 			setSelectedWorkspace: s.setSelectedWorkspace,
 		})),
 	);

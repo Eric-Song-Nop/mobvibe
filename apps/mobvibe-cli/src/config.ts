@@ -55,6 +55,8 @@ export type CliConfig = {
 	userConfigPath?: string;
 	userConfigErrors?: string[];
 	compaction: CompactionConfig;
+	/** Base directory for git worktrees (default: ~/.mobvibe/worktrees) */
+	worktreeBaseDir: string;
 };
 
 // Default opencode backend
@@ -147,5 +149,9 @@ export const getCliConfig = async (): Promise<CliConfig> => {
 			// Allow enabling via env var
 			enabled: env.MOBVIBE_COMPACTION_ENABLED === "true",
 		},
+		worktreeBaseDir:
+			env.MOBVIBE_WORKTREE_BASE_DIR ??
+			userConfigResult.config?.worktreeBaseDir ??
+			path.join(homePath, "worktrees"),
 	};
 };

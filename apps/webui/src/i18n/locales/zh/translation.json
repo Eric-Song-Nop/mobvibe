@@ -81,6 +81,14 @@
 		"archiveAllTitle": "归档所有对话？",
 		"archiveAllDescription": "将归档 {{count}} 个对话，结束后端进程并从列表中隐藏。",
 		"archiveAllConfirm": "确认全部归档",
+		"worktree": {
+			"enable": "在新 Worktree 中创建",
+			"branchLabel": "新分支",
+			"branchPlaceholder": "例如 feat/my-feature",
+			"baseBranchLabel": "基于分支",
+			"baseBranchPlaceholder": "选择基准分支（默认：HEAD）",
+			"pathLabel": "Worktree 路径"
+		},
 		"status": {
 			"active": "活跃",
 			"loading": "加载中",

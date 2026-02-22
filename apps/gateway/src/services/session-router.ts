@@ -14,6 +14,8 @@ import type {
 	FsRootsResponse,
 	GitBlameParams,
 	GitBlameResponse,
+	GitBranchesForCwdParams,
+	GitBranchesForCwdResponse,
 	GitBranchesParams,
 	GitBranchesResponse,
 	GitFileDiffParams,
@@ -154,6 +156,7 @@ export class SessionRouter {
 			cwd: params.cwd,
 			title: params.title,
 			backendId: params.backendId,
+			worktree: params.worktree,
 		};
 		const result = await this.sendRpc<CreateSessionParams, SessionSummary>(
 			cli.socket,
@@ -921,6 +924,29 @@ export class SessionRouter {
 		logger.debug(
 			{ sessionId: params.sessionId, userId },
 			"git_branches_rpc_complete",
+		);
+		return result;
+	}
+
+	/**
+	 * Get git branches for a cwd (no session required — used before session creation).
+	 */
+	async getGitBranchesForCwd(
+		params: GitBranchesForCwdParams & { machineId: string },
+		userId: string,
+	): Promise<GitBranchesForCwdResponse> {
+		const cli = this.resolveMachineForUser(params.machineId, userId);
+		logger.debug(
+			{ cwd: params.cwd, machineId: params.machineId, userId },
+			"git_branches_for_cwd_rpc_start",
+		);
+		const result = await this.sendRpc<
+			GitBranchesForCwdParams,
+			GitBranchesForCwdResponse
+		>(cli.socket, "rpc:git:branchesForCwd", { cwd: params.cwd });
+		logger.debug(
+			{ cwd: params.cwd, userId },
+			"git_branches_for_cwd_rpc_complete",
 		);
 		return result;
 	}

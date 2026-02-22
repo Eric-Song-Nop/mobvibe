@@ -29,6 +29,7 @@ import type {
 	FsEntriesResponse,
 	FsResourcesResponse,
 	FsRootsResponse,
+	GitBranchesForCwdResponse,
 	HostFsRootsResponse,
 	MachinesResponse,
 	MessageIdResponse,
@@ -266,6 +267,11 @@ export const createSession = async (payload?: {
 	title?: string;
 	backendId?: string;
 	machineId?: string;
+	worktree?: {
+		branch: string;
+		baseBranch?: string;
+		sourceCwd: string;
+	};
 }): Promise<CreateSessionResponse> =>
 	requestJson<CreateSessionResponse>("/acp/session", {
 		method: "POST",
@@ -470,6 +476,15 @@ export const fetchSessionGitBranches = async (
 ): Promise<GitBranchesResponse> =>
 	requestJson<GitBranchesResponse>(
 		`/fs/session/git/branches?sessionId=${encodeURIComponent(payload.sessionId)}`,
+	);
+
+/** Get git branches for a cwd (no session required — used before session creation) */
+export const fetchGitBranchesForCwd = async (payload: {
+	machineId: string;
+	cwd: string;
+}): Promise<GitBranchesForCwdResponse> =>
+	requestJson<GitBranchesForCwdResponse>(
+		`/fs/git/branches?machineId=${encodeURIComponent(payload.machineId)}&cwd=${encodeURIComponent(payload.cwd)}`,
 	);
 
 export const fetchSessionGitStashList = async (

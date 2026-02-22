@@ -263,7 +263,9 @@ const SessionListItem = ({
 	onArchive,
 }: SessionListItemProps) => {
 	const { t } = useTranslation();
-	const cwdLabel = getPathBasename(session.cwd) ?? t("common.unknown");
+	const cwdLabel =
+		getPathBasename(session.worktreeSourceCwd || session.cwd) ??
+		t("common.unknown");
 	const handleSelect = () => onSelect(session.sessionId);
 
 	const renderStatusBadge = () => {
@@ -343,7 +345,15 @@ const SessionListItem = ({
 						) : null}
 					</div>
 				</div>
-				<span className="text-muted-foreground text-xs">{cwdLabel}</span>
+				<span className="text-muted-foreground text-xs">
+					{cwdLabel}
+					{session.worktreeBranch ? (
+						<span className="ml-1 inline-flex items-center gap-0.5">
+							<span className="opacity-50">&middot;</span>
+							<span>{session.worktreeBranch}</span>
+						</span>
+					) : null}
+				</span>
 				{session.detachedReason ? (
 					<span className="text-muted-foreground text-xs">
 						{t("status.error")}: {session.detachedReason}

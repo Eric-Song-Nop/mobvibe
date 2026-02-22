@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
+import path from "node:path";
 import type {
 	AvailableCommand,
 	RequestPermissionRequest,
@@ -13,6 +14,7 @@ import {
 	type AcpSessionInfo,
 	type AgentSessionCapabilities,
 	AppError,
+	type CreateSessionWorktreeOptions,
 	createErrorDetail,
 	type DiscoverSessionsRpcResult,
 	type PermissionDecisionPayload,
@@ -27,6 +29,7 @@ import {
 } from "@mobvibe/shared";
 import type { AcpBackendConfig, CliConfig } from "../config.js";
 import type { CliCryptoService } from "../e2ee/crypto-service.js";
+import { createGitWorktree, isGitRepo } from "../lib/git-utils.js";
 import { logger } from "../lib/logger.js";
 import { WalStore } from "../wal/index.js";
 import { AcpConnection } from "./acp-connection.js";
@@ -60,6 +63,10 @@ type SessionRecord = {
 	revision: number;
 	/** Agent-defined metadata from session_info_update RFD */
 	_meta?: Record<string, unknown> | null;
+	/** Original repo cwd (only for worktree sessions) */
+	worktreeSourceCwd?: string;
+	/** Branch name of the worktree (only for worktree sessions) */
+	worktreeBranch?: string;
 };
 
 type PermissionRequestRecord = {
@@ -620,11 +627,61 @@ export class SessionManager {
 		cwd?: string;
 		title?: string;
 		backendId: string;
+		worktree?: CreateSessionWorktreeOptions;
 	}): Promise<SessionSummary> {
 		const backend = this.resolveBackend(options.backendId);
+
+		// Handle worktree creation before acquiring connection
+		let effectiveCwd = options.cwd;
+		let worktreeSourceCwd: string | undefined;
+		let worktreeBranch: string | undefined;
+
+		if (options.worktree) {
+			const repoDir = options.worktree.sourceCwd;
+			if (!(await isGitRepo(repoDir))) {
+				throw new AppError(
+					createErrorDetail({
+						code: "REQUEST_VALIDATION_FAILED",
+						message: `Not a git repository: ${repoDir}`,
+						retryable: false,
+						scope: "request",
+					}),
+					400,
+				);
+			}
+
+			const sanitizedBranch = options.worktree.branch.replace(/[/\\]/g, "-");
+			const repoName = path.basename(repoDir);
+			const targetPath = path.join(
+				this.config.worktreeBaseDir,
+				repoName,
+				sanitizedBranch,
+			);
+
+			logger.info(
+				{
+					repoDir,
+					branch: options.worktree.branch,
+					baseBranch: options.worktree.baseBranch,
+					targetPath,
+				},
+				"creating_git_worktree",
+			);
+
+			const result = await createGitWorktree(repoDir, {
+				branch: options.worktree.branch,
+				targetPath,
+				baseBranch: options.worktree.baseBranch,
+			});
+
+			effectiveCwd = result.path;
+			worktreeSourceCwd = repoDir;
+			worktreeBranch = options.worktree.branch;
+		}
+
 		const connection = await this.acquireConnection(backend);
 		try {
-			const session = await connection.createSession({ cwd: options?.cwd });
+			const session = await connection.createSession({ cwd: effectiveCwd });
 			connection.setPermissionHandler((params) =>
 				this.handlePermissionRequest(session.sessionId, params),
 			);
@@ -642,7 +699,7 @@ export class SessionManager {
 				sessionId: session.sessionId,
 				machineId: this.config.machineId,
 				backendId: backend.id,
-				cwd: options?.cwd,
+				cwd: effectiveCwd,
 				title: options?.title ?? `Session ${this.sessions.size + 1}`,
 			});
 
@@ -659,7 +716,9 @@ export class SessionManager {
 				connection,
 				createdAt: now,
 				updatedAt: now,
-				cwd: options?.cwd,
+				cwd: effectiveCwd,
+				worktreeSourceCwd,
+				worktreeBranch,
 				agentName: agentInfo?.title ?? agentInfo?.name,
 				modelId,
 				modelName,
@@ -1587,6 +1646,8 @@ export class SessionManager {
 			wrappedDek:
 				this.cryptoService?.getWrappedDek(record.sessionId) ?? undefined,
 			_meta: record._meta,
+			worktreeSourceCwd: record.worktreeSourceCwd,
+			worktreeBranch: record.worktreeBranch,
 		};
 	}
 }

@@ -142,6 +142,15 @@ const validateUserConfig = (
 		}
 	}
 
+	// Validate worktreeBaseDir (optional string)
+	if (record.worktreeBaseDir !== undefined) {
+		if (typeof record.worktreeBaseDir !== "string") {
+			errors.push("worktreeBaseDir: must be a string");
+		} else if (record.worktreeBaseDir.trim().length > 0) {
+			config.worktreeBaseDir = record.worktreeBaseDir.trim();
+		}
+	}
+
 	if (errors.length > 0) {
 		return { config: null, errors };
 	}

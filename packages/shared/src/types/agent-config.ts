@@ -20,4 +20,6 @@ export type UserAgentConfig = {
 export type MobvibeUserConfig = {
 	/** List of agent configurations */
 	agents?: UserAgentConfig[];
+	/** Base directory for git worktrees (default: ~/.mobvibe/worktrees) */
+	worktreeBaseDir?: string;
 };

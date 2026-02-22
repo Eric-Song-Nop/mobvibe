@@ -156,6 +156,10 @@ export type ChatSession = {
 	lastAppliedSeq?: number;
 	/** Runtime-only E2EE status (not persisted) */
 	e2eeStatus?: E2EEStatus;
+	/** Original repo cwd (only for worktree sessions) */
+	worktreeSourceCwd?: string;
+	/** Branch name of the worktree (only for worktree sessions) */
+	worktreeBranch?: string;
 };
 
 type ChatState = {
@@ -475,6 +479,8 @@ const createSessionState = (
 		availableModels?: SessionModelOption[];
 		availableCommands?: AvailableCommand[];
 		machineId?: string;
+		worktreeSourceCwd?: string;
+		worktreeBranch?: string;
 	},
 ): ChatSession => ({
 	sessionId,
@@ -509,6 +515,8 @@ const createSessionState = (
 	detachedAt: undefined,
 	detachedReason: undefined,
 	isLoading: false,
+	worktreeSourceCwd: options?.worktreeSourceCwd,
+	worktreeBranch: options?.worktreeBranch,
 });
 
 const STORAGE_KEY = "mobvibe.chat-store";
@@ -694,6 +702,9 @@ export const useChatStore = create<ChatState>()(
 								availableCommands:
 									added.availableCommands ?? existing.availableCommands,
 								machineId: added.machineId ?? existing.machineId,
+								worktreeSourceCwd:
+									added.worktreeSourceCwd ?? existing.worktreeSourceCwd,
+								worktreeBranch: added.worktreeBranch ?? existing.worktreeBranch,
 							};
 						} else {
 							nextSessions[added.sessionId] = createSessionState(
@@ -712,6 +723,8 @@ export const useChatStore = create<ChatState>()(
 									availableModels: added.availableModels,
 									availableCommands: added.availableCommands,
 									machineId: added.machineId,
+									worktreeSourceCwd: added.worktreeSourceCwd,
+									worktreeBranch: added.worktreeBranch,
 								},
 							);
 						}
@@ -741,6 +754,10 @@ export const useChatStore = create<ChatState>()(
 								availableCommands:
 									updated.availableCommands ?? existing.availableCommands,
 								machineId: updated.machineId ?? existing.machineId,
+								worktreeSourceCwd:
+									updated.worktreeSourceCwd ?? existing.worktreeSourceCwd,
+								worktreeBranch:
+									updated.worktreeBranch ?? existing.worktreeBranch,
 							};
 						}
 					}
@@ -821,6 +838,8 @@ export const useChatStore = create<ChatState>()(
 								availableModels: summary.availableModels,
 								availableCommands: summary.availableCommands,
 								machineId: summary.machineId,
+								worktreeSourceCwd: summary.worktreeSourceCwd,
+								worktreeBranch: summary.worktreeBranch,
 							});
 
 						nextSessions[summary.sessionId] = {
@@ -843,6 +862,9 @@ export const useChatStore = create<ChatState>()(
 							availableCommands:
 								summary.availableCommands ?? existing.availableCommands,
 							machineId: summary.machineId ?? existing.machineId,
+							worktreeSourceCwd:
+								summary.worktreeSourceCwd ?? existing.worktreeSourceCwd,
+							worktreeBranch: summary.worktreeBranch ?? existing.worktreeBranch,
 						};
 					});
 

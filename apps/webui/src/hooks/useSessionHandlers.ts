@@ -18,6 +18,11 @@ type Mutations = {
 			cwd: string;
 			title?: string;
 			machineId: string;
+			worktree?: {
+				branch: string;
+				baseBranch?: string;
+				sourceCwd: string;
+			};
 		}) => Promise<unknown>;
 		isPending: boolean;
 	};
@@ -89,6 +94,7 @@ type UiActions = {
 	setDraftTitle: (title: string) => void;
 	setDraftBackendId: (id: string | undefined) => void;
 	setDraftCwd: (cwd: string | undefined) => void;
+	resetDraftWorktree: () => void;
 	clearEditingSession: () => void;
 };
 
@@ -138,11 +144,19 @@ export function useSessionHandlers({
 		uiActions.setDraftCwd(
 			selectedMachineId ? lastCreatedCwd[selectedMachineId] : undefined,
 		);
+		uiActions.resetDraftWorktree();
 		uiActions.setCreateDialogOpen(true);
 	};
 
 	const handleCreateSession = async () => {
-		const { draftTitle, draftBackendId, draftCwd } = useUiStore.getState();
+		const {
+			draftTitle,
+			draftBackendId,
+			draftCwd,
+			draftWorktreeEnabled,
+			draftWorktreeBranch,
+			draftWorktreeBaseBranch,
+		} = useUiStore.getState();
 		if (!selectedMachineId) {
 			chatActions.setAppError(
 				createFallbackError(t("errors.selectMachine"), "request"),
@@ -163,12 +177,24 @@ export function useSessionHandlers({
 		}
 		const title = draftTitle.trim();
 		chatActions.setAppError(undefined);
+
+		// Build worktree options if enabled
+		const worktree =
+			draftWorktreeEnabled && draftWorktreeBranch.trim().length > 0
+				? {
+						branch: draftWorktreeBranch.trim(),
+						baseBranch: draftWorktreeBaseBranch || undefined,
+						sourceCwd: draftCwd,
+					}
+				: undefined;
+
 		try {
 			await mutations.createSessionMutation.mutateAsync({
 				backendId: draftBackendId,
 				cwd: draftCwd,
 				title: title.length > 0 ? title : undefined,
 				machineId: selectedMachineId,
+				worktree,
 			});
 			uiActions.setCreateDialogOpen(false);
 			uiActions.setMobileMenuOpen(false);

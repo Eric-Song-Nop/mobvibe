@@ -5,6 +5,8 @@ export type WorkspaceSummary = {
 	cwd: string;
 	label: string;
 	updatedAt?: string;
+	/** Number of worktree sessions under this workspace */
+	worktreeSessions: number;
 };
 
 const getWorkspaceLabel = (cwd: string): string => {
@@ -18,6 +20,11 @@ const compareWorkspaceUpdatedAt = (left?: string, right?: string) => {
 	return rightStamp.localeCompare(leftStamp);
 };
 
+/**
+ * Collect unique workspaces from sessions.
+ * Groups sessions by `worktreeSourceCwd || cwd` so that worktree sessions
+ * and their parent repo sessions appear under one workspace entry.
+ */
 export const collectWorkspaces = (
 	sessions: Record<string, ChatSession>,
 	machineId?: string | null,
@@ -31,20 +38,30 @@ export const collectWorkspaces = (
 		if (machineId && session.machineId !== machineId) {
 			continue;
 		}
+
+		// Group by original repo cwd for worktree sessions
+		const groupKey = session.worktreeSourceCwd || session.cwd;
 		const updatedAt = session.updatedAt ?? session.createdAt;
-		const existing = byCwd.get(session.cwd);
+		const isWorktreeSession = Boolean(session.worktreeSourceCwd);
+		const existing = byCwd.get(groupKey);
+
 		if (!existing) {
-			byCwd.set(session.cwd, {
+			byCwd.set(groupKey, {
 				machineId: session.machineId,
-				cwd: session.cwd,
-				label: getWorkspaceLabel(session.cwd),
+				cwd: groupKey,
+				label: getWorkspaceLabel(groupKey),
 				updatedAt,
+				worktreeSessions: isWorktreeSession ? 1 : 0,
 			});
 			continue;
 		}
 
+		if (isWorktreeSession) {
+			existing.worktreeSessions++;
+		}
+
 		if (compareWorkspaceUpdatedAt(existing.updatedAt, updatedAt) > 0) {
-			byCwd.set(session.cwd, {
+			byCwd.set(groupKey, {
 				...existing,
 				updatedAt,
 			});

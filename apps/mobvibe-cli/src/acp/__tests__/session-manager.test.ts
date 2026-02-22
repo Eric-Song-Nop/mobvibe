@@ -105,6 +105,7 @@ const createMockConfig = (): CliConfig => ({
 		runIntervalHours: 24,
 		minEventsToKeep: 1000,
 	},
+	worktreeBaseDir: "/tmp/mobvibe-test/worktrees",
 });
 
 describe("SessionManager", () => {

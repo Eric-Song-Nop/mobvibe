@@ -81,6 +81,14 @@
 		"archiveAllTitle": "Archive all sessions?",
 		"archiveAllDescription": "This will archive {{count}} session(s), ending their backend processes and hiding them from the list.",
 		"archiveAllConfirm": "Archive all",
+		"worktree": {
+			"enable": "Create in new worktree",
+			"branchLabel": "New branch",
+			"branchPlaceholder": "e.g. feat/my-feature",
+			"baseBranchLabel": "Based on",
+			"baseBranchPlaceholder": "Select base branch (default: HEAD)",
+			"pathLabel": "Worktree path"
+		},
 		"status": {
 			"active": "Active",
 			"loading": "Loading",
