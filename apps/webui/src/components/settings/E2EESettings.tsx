@@ -1,3 +1,5 @@
+import { Cancel01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -12,8 +14,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useQrScanner } from "@/hooks/use-qr-scanner";
+import { isInTauri } from "@/lib/auth";
 import { e2ee } from "@/lib/e2ee";
-import { isMobilePlatform } from "@/lib/platform";
 
 interface PairedDevice {
 	secret: string;
@@ -42,15 +45,89 @@ export function parsePairingUrl(url: string): string | null {
 	}
 }
 
+/* ------------------------------------------------------------------ */
+/*  Scanner Overlay (shown while camera is active)                     */
+/* ------------------------------------------------------------------ */
+
+function ScannerOverlay({
+	onCancel,
+	videoRef,
+}: {
+	onCancel: () => void;
+	videoRef: React.RefObject<HTMLVideoElement | null>;
+}) {
+	const { t } = useTranslation();
+	const isTauri = isInTauri();
+
+	return (
+		<div className="fixed inset-0 z-[9999]">
+			{/* Web: video background behind the overlay masks */}
+			{!isTauri && (
+				<video
+					ref={videoRef}
+					autoPlay
+					playsInline
+					muted
+					className="absolute inset-0 h-full w-full object-cover"
+				/>
+			)}
+
+			<div className="relative flex h-full w-full flex-col items-center justify-center">
+				{/* Top mask */}
+				<div className="w-full flex-1 bg-black/60" />
+
+				{/* Middle row: left mask + scan frame + right mask */}
+				<div className="flex w-full items-center justify-center">
+					<div className="h-64 flex-1 bg-black/60" />
+					<div className="relative h-64 w-64">
+						{/* Corner decorations */}
+						<div className="absolute top-0 left-0 h-6 w-6 border-t-2 border-l-2 border-white" />
+						<div className="absolute top-0 right-0 h-6 w-6 border-t-2 border-r-2 border-white" />
+						<div className="absolute bottom-0 left-0 h-6 w-6 border-b-2 border-l-2 border-white" />
+						<div className="absolute bottom-0 right-0 h-6 w-6 border-b-2 border-r-2 border-white" />
+					</div>
+					<div className="h-64 flex-1 bg-black/60" />
+				</div>
+
+				{/* Hint text */}
+				<div className="w-full bg-black/60 pt-6 pb-2 text-center">
+					<p className="text-sm text-white/80">{t("e2ee.scanOverlayHint")}</p>
+				</div>
+
+				{/* Bottom mask + cancel button */}
+				<div className="w-full flex-1 bg-black/60 flex flex-col items-center pt-8 pb-[calc(2rem+env(safe-area-inset-bottom))]">
+					<button
+						type="button"
+						onClick={onCancel}
+						className="flex items-center gap-2 rounded-full bg-white/20 px-6 py-3 text-sm font-medium text-white backdrop-blur-sm transition-colors active:bg-white/30"
+					>
+						<HugeiconsIcon
+							icon={Cancel01Icon}
+							strokeWidth={2}
+							className="size-5"
+						/>
+						{t("common.cancel")}
+					</button>
+				</div>
+			</div>
+		</div>
+	);
+}
+
+/* ------------------------------------------------------------------ */
+/*  E2EE Settings                                                      */
+/* ------------------------------------------------------------------ */
+
 export function E2EESettings() {
 	const { t } = useTranslation();
 	const [secret, setSecret] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const [pairedDevices, setPairedDevices] = useState<PairedDevice[]>([]);
 	const [isSubmitting, setIsSubmitting] = useState(false);
-	const [isMobile, setIsMobile] = useState(false);
-	const [isScanning, setIsScanning] = useState(false);
 	const [removeTarget, setRemoveTarget] = useState<PairedDevice | null>(null);
+
+	const { canScan, isScanning, startScan, cancelScan, videoRef } =
+		useQrScanner();
 
 	const refreshDevices = useCallback(() => {
 		const devices = e2ee.getPairedSecrets();
@@ -63,7 +140,6 @@ export function E2EESettings() {
 	}, []);
 
 	useEffect(() => {
-		isMobilePlatform().then(setIsMobile);
 		refreshDevices();
 	}, [refreshDevices]);
 
@@ -88,42 +164,26 @@ export function E2EESettings() {
 	};
 
 	const handleScanQr = async () => {
-		setIsScanning(true);
 		setError(null);
-
 		try {
-			const { scan, Format, checkPermissions, requestPermissions } =
-				await import("@tauri-apps/plugin-barcode-scanner");
-
-			let permState = await checkPermissions();
-			if (permState === "prompt") {
-				permState = await requestPermissions();
-			}
-			if (permState !== "granted") {
-				setError(t("e2ee.cameraPermissionDenied"));
-				return;
-			}
-
-			const result = await scan({ formats: [Format.QRCode] });
-			if (!result?.content) {
-				setError(t("e2ee.scanError"));
-				return;
-			}
-
-			const base64Secret = parsePairingUrl(result.content);
+			const content = await startScan();
+			if (!content) return; // User cancelled
+			const base64Secret = parsePairingUrl(content);
 			if (!base64Secret) {
 				setError(t("e2ee.invalidQrCode"));
 				return;
 			}
-
 			await e2ee.addPairedSecret(base64Secret);
 			refreshDevices();
 		} catch (err) {
-			console.error("QR scan error:", err);
 			const errMsg = err instanceof Error ? err.message : String(err);
+			if (errMsg.toLowerCase().includes("cancel")) return;
+			if (errMsg === "camera_permission_denied") {
+				setError(t("e2ee.cameraPermissionDenied"));
+				return;
+			}
+			console.error("QR scan error:", err);
 			setError(`${t("e2ee.scanError")}: ${errMsg}`);
-		} finally {
-			setIsScanning(false);
 		}
 	};
 
@@ -189,11 +249,9 @@ export function E2EESettings() {
 				</div>
 			)}
 
-			<p className="text-muted-foreground text-sm">
-				{isMobile ? t("e2ee.scanHint") : t("e2ee.pasteHint")}
-			</p>
+			<p className="text-muted-foreground text-sm">{t("e2ee.scanHint")}</p>
 
-			{isMobile && (
+			{canScan && (
 				<Button onClick={handleScanQr} disabled={isScanning} className="w-full">
 					{isScanning ? t("e2ee.scanning") : t("e2ee.scanQrCode")}
 				</Button>
@@ -238,6 +296,10 @@ export function E2EESettings() {
 					</AlertDialogFooter>
 				</AlertDialogContent>
 			</AlertDialog>
+
+			{isScanning && (
+				<ScannerOverlay onCancel={cancelScan} videoRef={videoRef} />
+			)}
 		</div>
 	);
 }
