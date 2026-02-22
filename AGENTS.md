@@ -25,6 +25,8 @@ mobvibe/
 - 缩进与格式化交给 Biome；不要手改导入顺序。
 - 提交前运行 `pnpm format && pnpm lint`，修复 lint 错误。
 - 提交前运行 `pnpm build`，确保整个项目都可以正常构建。
+- 与webui相关提交前使用 React Best Practice 检查。
+- 与webui相关提交前使用 Web Design Guideline 检查。
 
 ## 根目录常用命令
 
