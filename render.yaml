@@ -50,7 +50,10 @@ services:
   - type: web
     name: mobvibe-webui
     runtime: static
-    buildCommand: pnpm install && pnpm --filter @mobvibe/shared build && pnpm --filter @mobvibe/core build && pnpm --filter webui build
+    buildCommand: >-
+      pnpm install && pnpm --filter @mobvibe/shared build && pnpm --filter @mobvibe/core build &&
+      if [ "$IS_PULL_REQUEST" != "true" ]; then export VITE_GATEWAY_URL=https://api.mobvibe.net; fi &&
+      pnpm --filter webui build
     staticPublishPath: ./apps/webui/dist
     domains:
       - app.mobvibe.net
@@ -61,7 +64,7 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
-      # Production: override to https://api.mobvibe.net in Render Dashboard
+      # Production: buildCommand auto-overrides to https://api.mobvibe.net
       # Preview: auto-resolves to the preview Gateway's RENDER_EXTERNAL_URL
       - key: VITE_GATEWAY_URL
         fromService:
@@ -73,7 +76,10 @@ services:
   - type: web
     name: mobvibe-website
     runtime: static
-    buildCommand: pnpm install && pnpm --filter website build
+    buildCommand: >-
+      pnpm install &&
+      if [ "$IS_PULL_REQUEST" != "true" ]; then export VITE_WEB_APP_URL=https://app.mobvibe.net; fi &&
+      pnpm --filter website build
     staticPublishPath: ./apps/website/dist
     domains:
       - mobvibe.net
