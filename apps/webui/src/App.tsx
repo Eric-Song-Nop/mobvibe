@@ -295,10 +295,12 @@ function MainApp() {
 		if (!activeSession?.machineId || !activeSession.cwd) {
 			return;
 		}
-		uiActions.setSelectedWorkspace(activeSession.machineId, activeSession.cwd);
+		const workspaceCwd = activeSession.worktreeSourceCwd || activeSession.cwd;
+		uiActions.setSelectedWorkspace(activeSession.machineId, workspaceCwd);
 	}, [
 		activeSession?.cwd,
 		activeSession?.machineId,
+		activeSession?.worktreeSourceCwd,
 		uiActions.setSelectedWorkspace,
 	]);
 

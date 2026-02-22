@@ -75,7 +75,9 @@ export function MachineWorkspaces({
 		workspaceValidityQueries.some((query) => query.isFetching);
 	const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
 	const activeWorkspaceCwd =
-		activeSession?.machineId === machineId ? activeSession.cwd : undefined;
+		activeSession?.machineId === machineId
+			? activeSession.worktreeSourceCwd || activeSession.cwd
+			: undefined;
 	const selectedWorkspaceCwd = selectedWorkspaceByMachine[machineId];
 	const effectiveWorkspaceCwd = activeWorkspaceCwd ?? selectedWorkspaceCwd;
 
@@ -135,7 +137,9 @@ export function MachineWorkspaces({
 		);
 		const nextSession = sortSessionsByUpdatedAt(
 			Object.values(sessions).filter(
-				(session) => session.machineId === machineId && session.cwd === cwd,
+				(session) =>
+					session.machineId === machineId &&
+					(session.worktreeSourceCwd || session.cwd) === cwd,
 			),
 		)[0];
 		if (nextSession) {
