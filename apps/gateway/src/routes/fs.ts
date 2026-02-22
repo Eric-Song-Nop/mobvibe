@@ -534,6 +534,46 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 		},
 	);
 
+	// Get git branches for a cwd (no session required — used before session creation)
+	router.get(
+		"/git/branches",
+		async (request: AuthenticatedRequest, response) => {
+			const machineId =
+				typeof request.query.machineId === "string"
+					? request.query.machineId
+					: undefined;
+			const cwd =
+				typeof request.query.cwd === "string" ? request.query.cwd : undefined;
+			if (!machineId || !cwd) {
+				respondError(
+					response,
+					buildRequestValidationError("machineId and cwd required"),
+					400,
+				);
+				return;
+			}
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			try {
+				const result = await sessionRouter.getGitBranchesForCwd(
+					{ machineId, cwd },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				if (message.includes("Machine not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
+				} else {
+					respondError(response, createInternalError("request"));
+				}
+			}
+		},
+	);
+
 	// Get git stash list
 	router.get(
 		"/session/git/stash",

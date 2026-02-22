@@ -32,6 +32,22 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
 }
 
 /**
+ * Create a git worktree with a new branch.
+ * Executes: git worktree add -b <branch> <targetPath> [baseBranch]
+ */
+export async function createGitWorktree(
+	cwd: string,
+	opts: { branch: string; targetPath: string; baseBranch?: string },
+): Promise<{ path: string; branch: string }> {
+	const args = ["worktree", "add", "-b", opts.branch, opts.targetPath];
+	if (opts.baseBranch) {
+		args.push(opts.baseBranch);
+	}
+	await execFileAsync("git", args, { cwd, maxBuffer: MAX_BUFFER });
+	return { path: opts.targetPath, branch: opts.branch };
+}
+
+/**
  * Get the current git branch name.
  */
 export async function getGitBranch(cwd: string): Promise<string | undefined> {

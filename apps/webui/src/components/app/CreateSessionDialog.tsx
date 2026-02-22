@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { WorkingDirectoryDialog } from "@/components/app/WorkingDirectoryDialog";
 import {
@@ -27,7 +27,11 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { type AcpBackendSummary, fetchFsRoots } from "@/lib/api";
+import {
+	type AcpBackendSummary,
+	fetchFsRoots,
+	fetchGitBranchesForCwd,
+} from "@/lib/api";
 import { useMachinesStore } from "@/lib/machines-store";
 import { useUiStore } from "@/lib/ui-store";
 
@@ -37,6 +41,15 @@ export type CreateSessionDialogProps = {
 	availableBackends: AcpBackendSummary[];
 	isCreating: boolean;
 	onCreate: () => void;
+};
+
+/** Sanitize branch name for worktree path preview */
+const sanitizeBranch = (branch: string) => branch.replace(/[/\\]/g, "-");
+
+/** Extract directory basename */
+const getBasename = (p: string) => {
+	const parts = p.split(/[\\/]/).filter(Boolean);
+	return parts.length > 0 ? parts[parts.length - 1] : p;
 };
 
 export function CreateSessionDialog({
@@ -52,9 +65,15 @@ export function CreateSessionDialog({
 		draftTitle,
 		draftBackendId,
 		draftCwd,
+		draftWorktreeEnabled,
+		draftWorktreeBranch,
+		draftWorktreeBaseBranch,
 		setDraftTitle,
 		setDraftBackendId,
 		setDraftCwd,
+		setDraftWorktreeEnabled,
+		setDraftWorktreeBranch,
+		setDraftWorktreeBaseBranch,
 	} = useUiStore();
 	const { selectedMachineId } = useMachinesStore();
 	const rootsQuery = useQuery({
@@ -62,6 +81,32 @@ export function CreateSessionDialog({
 		queryFn: () => fetchFsRoots({ machineId: selectedMachineId ?? undefined }),
 		enabled: open && Boolean(selectedMachineId),
 	});
+
+	// Query git branches for the selected cwd (no session needed)
+	const branchesQuery = useQuery({
+		queryKey: ["git-branches-for-cwd", selectedMachineId, draftCwd],
+		queryFn: () =>
+			fetchGitBranchesForCwd({
+				machineId: selectedMachineId!,
+				cwd: draftCwd!,
+			}),
+		enabled:
+			open &&
+			Boolean(selectedMachineId) &&
+			Boolean(draftCwd) &&
+			draftCwd!.trim().length > 0,
+	});
+
+	const isGitRepo = branchesQuery.data?.isGitRepo ?? false;
+	const branches = branchesQuery.data?.branches ?? [];
+
+	// Worktree path preview
+	const worktreePathPreview = useMemo(() => {
+		if (!draftCwd || !draftWorktreeBranch) return "";
+		const repoName = getBasename(draftCwd);
+		const sanitized = sanitizeBranch(draftWorktreeBranch);
+		return `~/.mobvibe/worktrees/${repoName}/${sanitized}`;
+	}, [draftCwd, draftWorktreeBranch]);
 
 	useEffect(() => {
 		if (!open) {
@@ -84,6 +129,13 @@ export function CreateSessionDialog({
 		selectedMachineId,
 		setDraftCwd,
 	]);
+
+	// Reset worktree when cwd changes or is not a git repo
+	useEffect(() => {
+		if (!isGitRepo && draftWorktreeEnabled) {
+			setDraftWorktreeEnabled(false);
+		}
+	}, [isGitRepo, draftWorktreeEnabled, setDraftWorktreeEnabled]);
 
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -161,6 +213,77 @@ export function CreateSessionDialog({
 							</div>
 						) : null}
 					</div>
+
+					{/* Worktree option — only shown when cwd is a git repo */}
+					{isGitRepo ? (
+						<div className="flex flex-col gap-2">
+							<label className="flex items-center gap-2 cursor-pointer select-none">
+								<input
+									type="checkbox"
+									checked={draftWorktreeEnabled}
+									onChange={(e) => setDraftWorktreeEnabled(e.target.checked)}
+									className="h-4 w-4 rounded border-border accent-primary"
+								/>
+								<span className="text-sm font-medium">
+									{t("session.worktree.enable")}
+								</span>
+							</label>
+
+							{draftWorktreeEnabled ? (
+								<div className="border-border bg-muted/30 flex flex-col gap-2 rounded-md border p-3">
+									<div className="flex flex-col gap-1">
+										<Label htmlFor="worktree-branch">
+											{t("session.worktree.branchLabel")}
+										</Label>
+										<Input
+											id="worktree-branch"
+											name="worktree-branch"
+											autoComplete="off"
+											value={draftWorktreeBranch}
+											onChange={(e) => setDraftWorktreeBranch(e.target.value)}
+											placeholder={t("session.worktree.branchPlaceholder")}
+										/>
+									</div>
+									<div className="flex flex-col gap-1">
+										<Label htmlFor="worktree-base-branch">
+											{t("session.worktree.baseBranchLabel")}
+										</Label>
+										<Select
+											value={draftWorktreeBaseBranch ?? ""}
+											onValueChange={(v) =>
+												setDraftWorktreeBaseBranch(v || undefined)
+											}
+										>
+											<SelectTrigger id="worktree-base-branch">
+												<SelectValue
+													placeholder={t(
+														"session.worktree.baseBranchPlaceholder",
+													)}
+												/>
+											</SelectTrigger>
+											<SelectContent>
+												{branches.map((b) => (
+													<SelectItem key={b.name} value={b.name}>
+														{b.name}
+														{b.current ? " (HEAD)" : ""}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									</div>
+									{worktreePathPreview ? (
+										<div className="text-muted-foreground text-xs">
+											{t("session.worktree.pathLabel")}:{" "}
+											<code className="bg-muted rounded px-1">
+												{worktreePathPreview}
+											</code>
+										</div>
+									) : null}
+								</div>
+							) : null}
+						</div>
+					) : null}
+
 					<WorkingDirectoryDialog
 						open={directoryDialogOpen}
 						onOpenChange={setDirectoryDialogOpen}
@@ -173,7 +296,11 @@ export function CreateSessionDialog({
 					<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
 					<AlertDialogAction
 						disabled={
-							isCreating || !draftBackendId || !draftCwd || !selectedMachineId
+							isCreating ||
+							!draftBackendId ||
+							!draftCwd ||
+							!selectedMachineId ||
+							(draftWorktreeEnabled && !draftWorktreeBranch.trim())
 						}
 						onClick={(event) => {
 							event.preventDefault();

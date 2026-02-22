@@ -132,12 +132,24 @@ export type RpcResponse<TResult> = {
 	error?: ErrorDetail;
 };
 
+// Worktree options for session creation
+export type CreateSessionWorktreeOptions = {
+	/** New branch name to create */
+	branch: string;
+	/** Base branch to create from (defaults to current HEAD) */
+	baseBranch?: string;
+	/** Original repo directory */
+	sourceCwd: string;
+};
+
 // Create session RPC params
 export type CreateSessionParams = {
 	cwd?: string;
 	title?: string;
 	backendId: AcpBackendId;
 	machineId?: string;
+	/** Worktree options — if provided, CLI creates a git worktree before starting the session */
+	worktree?: CreateSessionWorktreeOptions;
 };
 
 // Send message RPC params
@@ -339,6 +351,9 @@ export interface GatewayToCliEvents {
 	"rpc:git:searchLog": (request: RpcRequest<GitSearchLogParams>) => void;
 	"rpc:git:fileHistory": (request: RpcRequest<GitFileHistoryParams>) => void;
 	"rpc:git:grep": (request: RpcRequest<GitGrepParams>) => void;
+	"rpc:git:branchesForCwd": (
+		request: RpcRequest<GitBranchesForCwdParams>,
+	) => void;
 }
 
 // Webui -> Gateway events
@@ -483,6 +498,13 @@ export type GitBlameResponse = { lines: GitBlameLine[] };
 
 export type GitBranchesParams = { sessionId: string };
 export type GitBranchesResponse = { branches: GitBranch[] };
+
+/** Git branches query by cwd (no session required — used before session creation) */
+export type GitBranchesForCwdParams = { cwd: string };
+export type GitBranchesForCwdResponse = {
+	isGitRepo: boolean;
+	branches: GitBranch[];
+};
 
 export type GitStashListParams = { sessionId: string };
 export type GitStashListResponse = { entries: GitStashEntry[] };

@@ -45,6 +45,9 @@ type UiState = {
 	draftTitle: string;
 	draftBackendId?: string;
 	draftCwd?: string;
+	draftWorktreeEnabled: boolean;
+	draftWorktreeBranch: string;
+	draftWorktreeBaseBranch?: string;
 	selectedWorkspaceByMachine: Record<string, string>;
 	expandedMachines: Record<string, boolean>;
 	machineSidebarWidth: number;
@@ -61,6 +64,10 @@ type UiState = {
 	setDraftTitle: (value: string) => void;
 	setDraftBackendId: (value?: string) => void;
 	setDraftCwd: (value?: string) => void;
+	setDraftWorktreeEnabled: (value: boolean) => void;
+	setDraftWorktreeBranch: (value: string) => void;
+	setDraftWorktreeBaseBranch: (value?: string) => void;
+	resetDraftWorktree: () => void;
 	setSelectedWorkspace: (machineId: string, cwd?: string) => void;
 	toggleMachineExpanded: (machineId: string) => void;
 	setMachineSidebarWidth: (width: number) => void;
@@ -79,6 +86,9 @@ export const useUiStore = create<UiState>((set) => ({
 	draftTitle: "",
 	draftBackendId: undefined,
 	draftCwd: undefined,
+	draftWorktreeEnabled: false,
+	draftWorktreeBranch: "",
+	draftWorktreeBaseBranch: undefined,
 	selectedWorkspaceByMachine: {},
 	expandedMachines: {},
 	machineSidebarWidth: loadStoredWidth(
@@ -106,6 +116,16 @@ export const useUiStore = create<UiState>((set) => ({
 	setDraftTitle: (value) => set({ draftTitle: value }),
 	setDraftBackendId: (value) => set({ draftBackendId: value }),
 	setDraftCwd: (value) => set({ draftCwd: value }),
+	setDraftWorktreeEnabled: (value) => set({ draftWorktreeEnabled: value }),
+	setDraftWorktreeBranch: (value) => set({ draftWorktreeBranch: value }),
+	setDraftWorktreeBaseBranch: (value) =>
+		set({ draftWorktreeBaseBranch: value }),
+	resetDraftWorktree: () =>
+		set({
+			draftWorktreeEnabled: false,
+			draftWorktreeBranch: "",
+			draftWorktreeBaseBranch: undefined,
+		}),
 	setSelectedWorkspace: (machineId, cwd) =>
 		set((state) => {
 			const next = { ...state.selectedWorkspaceByMachine };

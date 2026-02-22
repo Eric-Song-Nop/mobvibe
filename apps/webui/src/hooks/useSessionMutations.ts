@@ -47,6 +47,8 @@ type SessionMetadata = Partial<
 		| "availableModes"
 		| "availableModels"
 		| "availableCommands"
+		| "worktreeSourceCwd"
+		| "worktreeBranch"
 	>
 >;
 
@@ -208,11 +210,16 @@ export function useSessionMutations(store: ChatStoreActions) {
 				availableModes: data.availableModes,
 				availableModels: data.availableModels,
 				availableCommands: data.availableCommands,
+				worktreeSourceCwd: data.worktreeSourceCwd,
+				worktreeBranch: data.worktreeBranch,
 			});
 
 			store.setActiveSessionId(data.sessionId);
-			if (data.machineId && data.cwd) {
-				store.setLastCreatedCwd(data.machineId, data.cwd);
+			// Use original repo cwd for lastCreatedCwd so reopening the dialog
+			// pre-fills the source repo path, not the worktree path
+			const lastCwd = data.worktreeSourceCwd ?? data.cwd;
+			if (data.machineId && lastCwd) {
+				store.setLastCreatedCwd(data.machineId, lastCwd);
 			}
 			store.setAppError(undefined);
 		},

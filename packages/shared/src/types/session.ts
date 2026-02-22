@@ -52,6 +52,10 @@ export type SessionSummary = {
 	wrappedDek?: string;
 	/** Agent-defined metadata from session_info_update RFD */
 	_meta?: Record<string, unknown> | null;
+	/** Original repo cwd (only for worktree sessions) */
+	worktreeSourceCwd?: string;
+	/** Branch name of the worktree (only for worktree sessions) */
+	worktreeBranch?: string;
 };
 
 /** Sessions changed event payload for incremental sync */
