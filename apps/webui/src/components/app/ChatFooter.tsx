@@ -22,6 +22,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { useIsMobile } from "@/hooks/use-mobile";
 import type { AvailableCommand, ContentBlock, ResourceLink } from "@/lib/acp";
 import {
 	fetchSessionFsResources,
@@ -392,6 +393,7 @@ export function ChatFooter({
 }: ChatFooterProps) {
 	const { setInput, setInputContents } = useChatStore();
 	const { t } = useTranslation();
+	const isMobile = useIsMobile();
 	const availableModels = activeSession?.availableModels ?? [];
 	const availableModes = activeSession?.availableModes ?? [];
 	const availableCommands = activeSession?.availableCommands ?? [];
@@ -982,7 +984,7 @@ export function ChatFooter({
 						className="min-h-10 max-h-[40vh] overflow-y-auto whitespace-pre-wrap break-words px-2.5 py-2 text-xs outline-none md:min-h-16"
 						aria-label={t("chat.placeholder")}
 						data-placeholder={t("chat.placeholder")}
-						tabIndex={0}
+						tabIndex={isMobile ? -1 : 0}
 						onInput={handleEditorInput}
 						onKeyDown={handleEditorKeyDown}
 						onClick={handleEditorClick}

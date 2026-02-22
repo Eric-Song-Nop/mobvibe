@@ -3,7 +3,7 @@ import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useDiscoverSessionsMutation } from "@/hooks/useSessionQueries";
 import { fetchFsEntries } from "@/lib/api";
-import { type ChatSession, useChatStore } from "@/lib/chat-store";
+import { useChatStore } from "@/lib/chat-store";
 import { useMachinesStore } from "@/lib/machines-store";
 import { useUiStore } from "@/lib/ui-store";
 import { cn } from "@/lib/utils";
@@ -17,13 +17,6 @@ const getWorkspaceInitials = (label: string) => {
 	return trimmed.slice(0, 2).toUpperCase();
 };
 
-const sortSessionsByUpdatedAt = (sessions: ChatSession[]) =>
-	[...sessions].sort((left, right) => {
-		const leftStamp = left.updatedAt ?? left.createdAt ?? "";
-		const rightStamp = right.updatedAt ?? right.createdAt ?? "";
-		return rightStamp.localeCompare(leftStamp);
-	});
-
 type MachineWorkspacesProps = {
 	machineId: string;
 	isExpanded: boolean;
@@ -36,7 +29,7 @@ export function MachineWorkspaces({
 	className,
 }: MachineWorkspacesProps) {
 	const { t } = useTranslation();
-	const { sessions, activeSessionId, setActiveSessionId } = useChatStore();
+	const { sessions, activeSessionId } = useChatStore();
 	const { machines, setSelectedMachineId, updateBackendCapabilities } =
 		useMachinesStore();
 	const {
@@ -135,16 +128,7 @@ export function MachineWorkspaces({
 				},
 			},
 		);
-		const nextSession = sortSessionsByUpdatedAt(
-			Object.values(sessions).filter(
-				(session) =>
-					session.machineId === machineId &&
-					(session.worktreeSourceCwd || session.cwd) === cwd,
-			),
-		)[0];
-		if (nextSession) {
-			setActiveSessionId(nextSession.sessionId);
-		}
+		// 不自动选中 session，由 App.tsx 验证 effect 处理无效状态
 	};
 
 	const handleEmptyClick = () => {

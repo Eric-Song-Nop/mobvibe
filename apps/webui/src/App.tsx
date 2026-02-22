@@ -185,12 +185,14 @@ function MainApp() {
 		resetSessionForRevision: chatActions.resetSessionForRevision,
 	});
 
-	const { machines, selectedMachineId } = useMachinesStore(
-		useShallow((s) => ({
-			machines: s.machines,
-			selectedMachineId: s.selectedMachineId,
-		})),
-	);
+	const { machines, selectedMachineId, setSelectedMachineId } =
+		useMachinesStore(
+			useShallow((s) => ({
+				machines: s.machines,
+				selectedMachineId: s.selectedMachineId,
+				setSelectedMachineId: s.setSelectedMachineId,
+			})),
+		);
 	const updateBackendCapabilities = useMachinesStore(
 		(s) => s.updateBackendCapabilities,
 	);
@@ -276,18 +278,29 @@ function MainApp() {
 		ensureNotificationPermission();
 	}, []);
 
+	// 启动时从持久化的 activeSession 恢复 selectedMachineId
 	useEffect(() => {
-		if (sessionList.length === 0) {
-			if (activeSessionId) {
-				chatActions.setActiveSessionId(undefined);
-			}
-			return;
+		if (selectedMachineId) return;
+		if (!activeSession?.machineId) return;
+		const machine = machines[activeSession.machineId];
+		if (machine) {
+			setSelectedMachineId(activeSession.machineId);
 		}
+	}, [
+		selectedMachineId,
+		activeSession?.machineId,
+		machines,
+		setSelectedMachineId,
+	]);
+
+	// 清除无效的 activeSessionId（不自动选中）
+	useEffect(() => {
+		if (!activeSessionId) return;
 		const isActiveInList = sessionList.some(
 			(session) => session.sessionId === activeSessionId,
 		);
 		if (!isActiveInList) {
-			chatActions.setActiveSessionId(sessionList[0].sessionId);
+			chatActions.setActiveSessionId(undefined);
 		}
 	}, [activeSessionId, sessionList, chatActions.setActiveSessionId]);
 
