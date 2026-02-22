@@ -1,6 +1,6 @@
 # 模糊搜索 + Git 集成 极限产品特性方案
 
-> **状态**: 🚧 进行中（P0 全部完成，P1 全部完成）
+> **状态**: ✅ 完成（P0 + P1 + P2 全部完成）
 >
 > **目标**: 将模糊搜索和 Git 集成两个功能域推到极致，使 Mobvibe 成为最强大的 AI agent 感知工作空间。
 
@@ -19,13 +19,13 @@
 - 聊天内消息搜索 `apps/webui/src/components/chat/ChatSearchBar.tsx` 已就绪（P1-C ✅）
 - 列内文件模糊过滤 `apps/webui/src/components/app/ColumnFileBrowser.tsx` 已就绪（P1-D ✅）
 
-**Git 集成（P0-C ~ P1-E 已完成基础 + RPC 扩展）**:
+**Git 集成（P0-C ~ P2-D 已完成基础 + RPC 扩展 + 核心 Git 体验）**:
 
 - CLI 侧 13 个函数: 原有 4 个 + 新增 9 个（P0-C ✅）
 - RPC 链路完整: WebUI → Gateway → CLI → git binary，共 11 个 RPC 端点
 - WebUI 展示: 文件状态字母(M/A/D/?)、分支名、行级 diff 高亮、unified diff 渲染
 - FileExplorer Git Changes 视图已就绪（P1-E ✅）
-- 待建设: 提交历史查看器、blame、分支管理 UI、staged/unstaged 分离、side-by-side diff、stash 查看
+- 提交历史查看器已就绪（P2-A ✅）、staged/unstaged 分离已就绪（P2-B ✅）、side-by-side diff 已就绪（P2-C ✅）、分支管理 UI 已就绪（P2-D ✅）
 
 ### 架构约束
 
@@ -122,7 +122,6 @@ function FuzzyHighlight(props: {
 | `Cmd/Ctrl+K`       | 命令面板     | P1   |
 | `Cmd/Ctrl+P`       | 模糊文件搜索 | P1   |
 | `Cmd/Ctrl+F`       | 聊天内搜索   | P1   |
-| `Cmd/Ctrl+Shift+F` | 文件内容搜索 | P3   |
 | `Cmd/Ctrl+G`       | Git 面板     | P2   |
 | `Cmd/Ctrl+B`       | 切换侧边栏   | P0   |
 | `Cmd/Ctrl+N`       | 新建会话     | P0   |
@@ -351,7 +350,7 @@ type GrepResult = {
 
 ## P2: 核心 Git 体验
 
-### P2-A: 提交历史查看器
+### P2-A: 提交历史查看器 ✅
 
 **新建** `apps/webui/src/components/git/CommitHistoryPanel.tsx`
 
@@ -366,7 +365,7 @@ type GrepResult = {
 
 **依赖**: P0-C（getGitLog RPC）
 
-### P2-B: Staged vs Unstaged 完整分离
+### P2-B: Staged vs Unstaged 完整分离 ✅
 
 > P1-E 已实现基础 Changes 视图（Changed / Untracked 两分组），本阶段升级为完整的三分组分离。
 
@@ -386,7 +385,7 @@ type GrepResult = {
 
 **依赖**: P0-C（Git RPC 扩展）、P1-E（Changes 视图 Phase 1）
 
-### P2-C: Side-by-Side Diff 视图
+### P2-C: Side-by-Side Diff 视图 ✅
 
 **新建** `apps/webui/src/components/chat/SideBySideDiffView.tsx`
 
@@ -399,7 +398,7 @@ type GrepResult = {
 
 **依赖**: 无（仅复用现有 DiffView.tsx 逻辑）
 
-### P2-D: 分支管理 UI
+### P2-D: 分支管理 UI ✅
 
 - 文件浏览器 header 分支名 → 可点击下拉菜单
 - 内容: 本地 + 远程分支列表，内置模糊搜索过滤
@@ -409,88 +408,6 @@ type GrepResult = {
 **移动端**: 桌面为 header 内下拉菜单，移动端使用 Bottom Sheet（从底部推入），由分支名 tap 触发。分支列表内集成模糊搜索过滤输入框，列表项增大触摸区域。
 
 **依赖**: P0-C（getGitBranches RPC）、P0-A（模糊搜索过滤）
-
----
-
-## P3: 高级搜索 + 高级 Git
-
-### P3-A: 跨会话搜索
-
-- 命令面板 `#` 模式
-- 搜索: 会话标题 + cwd + backend 名称（从 Zustand chat-store）
-- 深度搜索（可选扩展）: 新 RPC `rpc:session:searchMessages` 在 CLI 侧检索消息内容
-
-**移动端**: 复用命令面板 `#` 模式的全屏模态容器（同 P1-A），交互方式与桌面端一致。
-
-**依赖**: P1-A（命令面板）
-
-### P3-B: Git Blame 集成
-
-- `CodePreview.tsx` 新增 blame 模式
-- 左侧 gutter: 短 hash + 作者 + 日期
-- 同一提交连续行合并显示
-- 大文件: 只请求可见行范围（`git blame -L`）
-- 点击 blame 注释: 弹出提交详情卡片
-
-**移动端**: 桌面左侧 gutter 显示 blame 注释，移动端默认隐藏 blame 列（屏幕宽度有限），提供切换按钮开启。点击代码行 → Bottom Sheet 显示 blame 详情（commit hash + 作者 + 日期 + 提交消息），替代桌面端的 hover tooltip（触屏无 hover 事件）。
-
-**依赖**: P0-C（getGitBlame RPC）
-
-### P3-C: 文件内容搜索 (Cmd+Shift+F)
-
-- CLI 侧 `searchFileContents()` 使用 `git grep`（仅 Git 仓库可用）
-- WebUI 命令面板搜索模式，结果按文件分组
-- 支持: 大小写敏感切换、正则表达式、文件模式过滤 (`*.ts`)
-- 点击结果: 打开文件预览跳转到对应行
-
-**移动端**: 复用命令面板搜索模式的全屏模态容器。结果点击 → 推入文件预览 pane（同 `FileExplorerDialog` 的 `activePane` 切换模式）。
-
-**依赖**: P0-C（searchFileContents RPC）、P1-A（命令面板）
-
-### P3-D: Git Stash 查看
-
-- Git 面板新增 Stash tab
-- 列表: stash 索引 + 消息 + 分支名 + 日期
-- 只读查看
-
-**移动端**: 嵌入 Git 面板内，列表项增大触摸区域（min-h 48px），布局与桌面端一致。
-
-**依赖**: P0-C（getGitStashList RPC）
-
----
-
-## P4: 极限功能
-
-### P4-A: "Agent 做了什么" 专用视图
-
-> **Mobvibe 最核心的差异化功能** — 用户打开远程 AI agent WebUI，第一个问题就是 "agent 刚才改了什么"。
-
-- 会话视图新增 **"Changes" tab**（与 Chat / Files 并列）
-- 自动追踪: 每次 `turn_end` 事件后刷新 git status
-- 展示: 本次 turn 的 git 变更 + 关联的 tool_call 事件
-- 时间线视图: 聊天消息 + git 提交交错排列
-- 关联 `ToolCallLocation` 类型，将工具调用与文件变更映射
-
-**移动端**: 使用全屏 tab 切换模式（Chat | Changes | Files），tab 栏固定在顶部。时间线视图保持竖向布局，天然适合移动端纵向滚动。变更文件列表项增大触摸区域。
-
-### P4-B: 冲突解决助手
-
-- 检测 `U`（Unmerged）状态文件
-- 自动解析冲突标记 (`<<<<<<<`, `=======`, `>>>>>>>`)
-- 三路合并视图: ours / theirs / merged
-- 辅助用户生成 agent prompt 解决冲突（不直接编辑文件）
-
-**移动端**: 保留冲突检测 + 通知功能，但三路合并视图仅桌面端可用（移动端屏幕宽度无法承载三栏对比）。移动端显示简化的冲突文件列表 + "在桌面端查看完整合并视图" 提示。
-
-### P4-C: Git Graph 可视化
-
-- 轻量 SVG 渲染的分支拓扑图
-- 节点 = 提交，边 = 父子关系，颜色 = 分支
-- 与 commit history 联动: 点击节点显示提交详情
-- 简单 SVG path 绘制（不引入 d3.js）
-- lazy import 控制 bundle 大小
-
-**移动端**: 不渲染 SVG 分支拓扑图 — 小屏幕上分支图不可读且交互困难。替代方案: 线性提交列表，每项附带分支名称标签（badge），通过 `isMobilePlatform()` 条件渲染切换。
 
 ---
 
@@ -504,9 +421,7 @@ type GrepResult = {
 | 搜索提交消息      | 命令面板 `git:` 前缀 → `rpc:git:searchLog`      | 命令面板按钮 → `git:` 前缀                |
 | 模糊匹配分支      | 分支下拉菜单集成模糊搜索                        | 分支名 tap → Bottom Sheet + 模糊搜索      |
 | diff 内搜索       | diff 视图中 Cmd+F                               | 命令面板 → 聊天搜索命令                   |
-| "agent 改了什么"  | 命令面板 `changes:` → tool_call + git 变更关联  | Changes tab 直接查看                      |
 | 文件历史搜索      | 文件预览 History tab 模糊搜索提交消息           | 全屏模态 History pane                     |
-| 跨会话 + git 关联 | "在哪个会话中修改了 X 文件" — 跨会话 git log    | 命令面板按钮 → `#` 前缀                   |
 | 列内快速过滤文件  | ColumnFileBrowser 搜索框 + uFuzzy (/) (P1-D)    | 搜索框直接可见，tap 聚焦                   |
 | 查看当前变更文件  | FileExplorer Changes tab (P1-E)                 | 同 Changes tab，点击文件 → preview         |
 
@@ -525,11 +440,11 @@ type GrepResult = {
 
 ### 基础设施前置（P0 阶段新增）
 
-在 P0 阶段需新增以下移动端基础设施，供后续 P1-P4 功能复用:
+在 P0 阶段需新增以下移动端基础设施，供后续 P1-P2 功能复用:
 
 | 组件                | 实现方案                                                                         | 备注                                        |
 | ------------------- | -------------------------------------------------------------------------------- | ------------------------------------------- |
-| **Bottom Sheet**    | 基于 Radix Dialog + CSS `transform: translateY()` 动画，从底部推入               | 用于分支管理、blame 详情等场景              |
+| **Bottom Sheet**    | 基于 Radix Dialog + CSS `transform: translateY()` 动画，从底部推入               | 用于分支管理等场景                          |
 | **SafeArea 扩展**   | 全边缘 `env(safe-area-inset-*)` 支持，封装为 `SafeAreaView` 容器组件             | 当前仅 bottom，需扩展 top/left/right        |
 | **长按探测器 Hook** | `useLongPress(callback, delay)` — 基于 `pointerdown`/`pointerup` 计时器          | 替代桌面右键菜单，用于上下文操作            |
 | **Header 工具栏**   | AppHeader 新增移动端命令面板按钮（单个），`md:hidden` 仅移动端可见                | 命令面板为所有快捷键功能的统一入口          |
@@ -546,14 +461,8 @@ type GrepResult = {
 | Staged 视图  | 并排/折叠列表             | 分段按钮切换 (Staged/Unstaged/Untracked)               | —                  |
 | Side-by-Side | Unified/Split 切换        | 仅 unified                                             | 隐藏 Split 选项    |
 | 分支管理     | 下拉菜单                  | Bottom Sheet                                           | —                  |
-| Git Blame    | 左侧 gutter + hover       | 默认隐藏，tap 行 → Bottom Sheet 详情                   | 隐藏 gutter        |
-| 文件内容搜索 | 命令面板模式              | 全屏模态 + pane 推入                                   | —                  |
-| Git Stash    | 面板 tab                  | 面板 tab，增大触摸区域                                 | —                  |
 | 列内模糊过滤 | 最后一列搜索框 + `/` 快捷键 | 搜索框直接可见，tap 聚焦                               | —                  |
 | Changes 视图 | FileExplorer Changes tab  | 同 Changes tab，折叠列表全屏                           | —                  |
-| Agent 变更   | 内嵌 tab                  | 全屏 tab 切换 (Chat/Changes/Files)                     | —                  |
-| 冲突解决     | 三路合并视图              | 冲突文件列表 + "在桌面端查看" 提示                     | 隐藏三路合并视图   |
-| Git Graph    | SVG 分支拓扑图            | 线性提交列表 + 分支标签                                | 不渲染 SVG 拓扑图  |
 
 ---
 
@@ -564,11 +473,11 @@ type GrepResult = {
 | RPC 三跳延迟（WebUI→Gateway→CLI） | TanStack Query 缓存 (staleTime) + 骨架屏 + 乐观更新                                      |
 | 大仓库 git 操作慢                 | CLI 侧始终带 `--max-count` 限制 + 分页加载                                               |
 | E2EE 兼容性                       | Git 元数据不含对话内容，无需加密；消息搜索在客户端解密后执行                             |
-| Bundle 大小增长                   | uFuzzy ~2KB；git graph 等高级组件 lazy import                                            |
+| Bundle 大小增长                   | uFuzzy ~2KB；高级组件 lazy import                                                        |
 | CLI 断连时 git 不可用             | 优雅降级 + "CLI 离线，Git 功能不可用" 提示                                               |
 | 移动端虚拟键盘遮挡输入框         | `visualViewport` API 监听键盘高度，动态调整模态框底部 padding                            |
 | 触屏误触（触摸目标过小）         | 所有可交互元素 min-h 44px（iOS HIG）/ 48dp（Material Design），符合 WCAG 2.5.8           |
-| 移动端首屏加载慢                  | P2+ 功能 lazy import（`React.lazy`）；Git 面板按需加载，不计入首屏 bundle                |
+| 移动端首屏加载慢                  | Git 面板等高级组件 lazy import（`React.lazy`），不计入首屏 bundle                         |
 | SafeArea 适配不完整               | 封装 `SafeAreaView` 组件统一处理 `env(safe-area-inset-*)`，覆盖 top/bottom/left/right    |
 
 ---
@@ -579,10 +488,4 @@ type GrepResult = {
 | ------ | ------------------------------------------------ | ------ | ---- | ------- |
 | **P0** | 基础设施（搜索引擎 ✅ + 快捷键 ✅ + Git RPC ✅）  | 中     | 极高 | ✅ 完成 |
 | **P1** | 核心搜索 + FileExplorer 增强（命令面板 ✅ + 文件搜索 ✅ + 聊天搜索 ✅ + 列内过滤 ✅ + Changes 视图 ✅） | 中     | 极高 | ✅ 完成 |
-| **P2** | 核心 Git（提交历史 + staged 分离 + diff + 分支） | 大     | 高   | 待开始  |
-| **P3** | 高级功能（跨会话搜索 + blame + grep + stash）    | 大     | 中高 | 待开始  |
-| **P4** | 极限功能（Agent 变更视图 + 冲突助手 + graph）    | 大     | 中   | 待开始  |
-
-**建议启动顺序**: P0 → P1-A + P1-C (并行) → P1-B → P1-D + P1-E (并行) → P2-A → P2-B → P2-C → P2-D → P3 → P4
-
-注: P1-D（列内模糊过滤）和 P1-E（Changes 视图）不依赖 P0-B/P0-C，可提前启动或与 P1-A/P1-C 并行。
+| **P2** | 核心 Git（提交历史 ✅ + staged 分离 ✅ + diff ✅ + 分支 ✅） | 大     | 高   | ✅ 完成 |
