@@ -1,20 +1,17 @@
 import { Alert01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 
-type E2EEMissingBannerProps = {
-	visible: boolean;
-};
-
-export function E2EEMissingBanner({ visible }: E2EEMissingBannerProps) {
+export function E2EEMissingBanner() {
 	const { t } = useTranslation();
 
-	if (!visible) return null;
-
 	return (
-		<div className="border-warning/40 bg-warning/5 flex flex-col gap-2 rounded-none border p-4">
+		<div
+			role="alert"
+			className="border-warning/40 bg-warning/10 flex flex-col gap-2 rounded-none border p-4"
+		>
 			<div className="flex items-center gap-2">
 				<HugeiconsIcon
 					icon={Alert01Icon}
@@ -29,11 +26,14 @@ export function E2EEMissingBanner({ visible }: E2EEMissingBannerProps) {
 				{t("e2ee.missingKeyDescription")}
 			</p>
 			<p className="text-muted-foreground text-sm">
-				{t("e2ee.missingKeyCliHint").split("`mobvibe e2ee show`")[0]}
-				<code className="bg-muted rounded px-1 py-0.5 font-mono text-xs">
-					mobvibe e2ee show
-				</code>
-				{t("e2ee.missingKeyCliHint").split("`mobvibe e2ee show`")[1]}
+				<Trans
+					i18nKey="e2ee.missingKeyCliHint"
+					components={{
+						code: (
+							<code className="bg-muted rounded px-1 py-0.5 font-mono text-xs" />
+						),
+					}}
+				/>
 			</p>
 			<div className="mt-1">
 				<Button variant="outline" size="sm" asChild>

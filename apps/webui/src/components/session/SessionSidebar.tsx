@@ -266,7 +266,7 @@ const SessionListItem = ({
 	const cwdLabel = getPathBasename(session.cwd) ?? t("common.unknown");
 	const handleSelect = () => onSelect(session.sessionId);
 
-	const StatusBadge = () => {
+	const renderStatusBadge = () => {
 		switch (displayStatus) {
 			case "loading":
 				return (
@@ -335,7 +335,7 @@ const SessionListItem = ({
 						<span className="text-sm font-medium">{session.title}</span>
 					)}
 					<div className="flex items-center gap-2 shrink-0">
-						<StatusBadge />
+						{renderStatusBadge()}
 						{session.e2eeStatus === "missing_key" ? (
 							<Badge variant="outline" className="text-warning border-warning">
 								{t("e2ee.missingKeyBadge")}
