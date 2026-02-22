@@ -457,6 +457,13 @@ export class SessionManager {
 		this.writeAndEmitEvent(sessionId, record.revision, "turn_end", {
 			stopReason,
 		});
+		// 将更新后的 updatedAt 推送给 WebUI，确保侧边栏排序正确
+		const summary = this.buildSummary(record);
+		this.emitSessionsChanged({
+			added: [],
+			updated: [summary],
+			removed: [],
+		});
 	}
 
 	/**
