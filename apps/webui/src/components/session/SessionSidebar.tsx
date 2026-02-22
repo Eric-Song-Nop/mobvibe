@@ -24,23 +24,11 @@ import {
 	type SessionMutationsSnapshot,
 } from "@/lib/session-utils";
 import { useUiStore } from "@/lib/ui-store";
+import { getPathBasename } from "@/lib/ui-utils";
 import { cn } from "@/lib/utils";
 
 const getSessionStamp = (session: ChatSession) =>
 	session.updatedAt ?? session.createdAt ?? "";
-
-const getPathBasename = (path?: string) => {
-	if (!path) {
-		return undefined;
-	}
-	const trimmed = path.replace(/\/+$/, "");
-	if (trimmed.length === 0) {
-		return undefined;
-	}
-	const parts = trimmed.split("/");
-	const tail = parts[parts.length - 1];
-	return tail && tail.length > 0 ? tail : undefined;
-};
 
 type SessionSidebarProps = {
 	sessions: ChatSession[];

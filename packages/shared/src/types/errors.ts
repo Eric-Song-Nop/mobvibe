@@ -11,6 +11,7 @@ export type ErrorCode =
 	| "REQUEST_VALIDATION_FAILED"
 	| "AUTHORIZATION_FAILED"
 	| "STREAM_DISCONNECTED"
+	| "GIT_WORKTREE_FAILED"
 	| "INTERNAL_ERROR";
 
 export type ErrorDetail = {

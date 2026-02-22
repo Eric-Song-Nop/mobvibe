@@ -32,6 +32,36 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
 }
 
 /**
+ * Validate a git ref name (branch, tag, etc.).
+ * Rejects names that could be interpreted as flags or contain dangerous patterns.
+ */
+export function validateGitRef(ref: string): void {
+	if (!ref || ref.trim().length === 0) {
+		throw new Error("Git ref name cannot be empty");
+	}
+	if (ref.startsWith("-")) {
+		throw new Error(`Invalid git ref name: "${ref}" (cannot start with "-")`);
+	}
+	if (ref.includes("..")) {
+		throw new Error(`Invalid git ref name: "${ref}" (cannot contain "..")`);
+	}
+	// Check for control characters and git-special characters
+	const hasInvalidChar = Array.from(ref).some((ch) => {
+		const code = ch.charCodeAt(0);
+		// Control characters (0x00-0x1F, 0x7F) and git-special chars
+		return code <= 0x1f || code === 0x7f || "~^:?*[\\".includes(ch);
+	});
+	if (hasInvalidChar) {
+		throw new Error(
+			`Invalid git ref name: "${ref}" (contains invalid characters)`,
+		);
+	}
+	if (ref.endsWith(".lock") || ref.endsWith("/") || ref.endsWith(".")) {
+		throw new Error(`Invalid git ref name: "${ref}"`);
+	}
+}
+
+/**
  * Create a git worktree with a new branch.
  * Executes: git worktree add -b <branch> <targetPath> [baseBranch]
  */
@@ -39,6 +69,10 @@ export async function createGitWorktree(
 	cwd: string,
 	opts: { branch: string; targetPath: string; baseBranch?: string },
 ): Promise<{ path: string; branch: string }> {
+	validateGitRef(opts.branch);
+	if (opts.baseBranch) {
+		validateGitRef(opts.baseBranch);
+	}
 	const args = ["worktree", "add", "-b", opts.branch, opts.targetPath];
 	if (opts.baseBranch) {
 		args.push(opts.baseBranch);

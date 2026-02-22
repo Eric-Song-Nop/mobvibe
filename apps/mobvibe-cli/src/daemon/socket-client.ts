@@ -1156,6 +1156,7 @@ export class SocketClient extends EventEmitter {
 				const result: GitBranchesForCwdResponse = {
 					isGitRepo: true,
 					branches,
+					worktreeBaseDir: this.options.config.worktreeBaseDir,
 				};
 				this.sendRpcResponse(request.requestId, result);
 			} catch (error) {

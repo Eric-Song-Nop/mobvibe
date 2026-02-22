@@ -1,17 +1,11 @@
 import type { ChatSession } from "@/lib/chat-store";
+import { getPathBasename } from "@/lib/ui-utils";
 
 export type WorkspaceSummary = {
 	machineId: string;
 	cwd: string;
 	label: string;
 	updatedAt?: string;
-	/** Number of worktree sessions under this workspace */
-	worktreeSessions: number;
-};
-
-const getWorkspaceLabel = (cwd: string): string => {
-	const parts = cwd.split(/[\\/]/).filter(Boolean);
-	return parts.length > 0 ? parts[parts.length - 1] : cwd;
 };
 
 const compareWorkspaceUpdatedAt = (left?: string, right?: string) => {
@@ -42,22 +36,16 @@ export const collectWorkspaces = (
 		// Group by original repo cwd for worktree sessions
 		const groupKey = session.worktreeSourceCwd || session.cwd;
 		const updatedAt = session.updatedAt ?? session.createdAt;
-		const isWorktreeSession = Boolean(session.worktreeSourceCwd);
 		const existing = byCwd.get(groupKey);
 
 		if (!existing) {
 			byCwd.set(groupKey, {
 				machineId: session.machineId,
 				cwd: groupKey,
-				label: getWorkspaceLabel(groupKey),
+				label: getPathBasename(groupKey) ?? groupKey,
 				updatedAt,
-				worktreeSessions: isWorktreeSession ? 1 : 0,
 			});
 			continue;
-		}
-
-		if (isWorktreeSession) {
-			existing.worktreeSessions++;
 		}
 
 		if (compareWorkspaceUpdatedAt(existing.updatedAt, updatedAt) > 0) {

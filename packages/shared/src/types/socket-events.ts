@@ -504,6 +504,8 @@ export type GitBranchesForCwdParams = { cwd: string };
 export type GitBranchesForCwdResponse = {
 	isGitRepo: boolean;
 	branches: GitBranch[];
+	/** CLI-configured worktree base directory */
+	worktreeBaseDir?: string;
 };
 
 export type GitStashListParams = { sessionId: string };

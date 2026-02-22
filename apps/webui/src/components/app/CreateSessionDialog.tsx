@@ -12,6 +12,7 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
 	InputGroup,
@@ -27,6 +28,8 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
 	type AcpBackendSummary,
 	fetchFsRoots,
@@ -34,6 +37,7 @@ import {
 } from "@/lib/api";
 import { useMachinesStore } from "@/lib/machines-store";
 import { useUiStore } from "@/lib/ui-store";
+import { getPathBasename } from "@/lib/ui-utils";
 
 export type CreateSessionDialogProps = {
 	open: boolean;
@@ -45,12 +49,6 @@ export type CreateSessionDialogProps = {
 
 /** Sanitize branch name for worktree path preview */
 const sanitizeBranch = (branch: string) => branch.replace(/[/\\]/g, "-");
-
-/** Extract directory basename */
-const getBasename = (p: string) => {
-	const parts = p.split(/[\\/]/).filter(Boolean);
-	return parts.length > 0 ? parts[parts.length - 1] : p;
-};
 
 export function CreateSessionDialog({
 	open,
@@ -82,31 +80,36 @@ export function CreateSessionDialog({
 		enabled: open && Boolean(selectedMachineId),
 	});
 
+	// Debounce cwd input to avoid excessive RPC requests
+	const debouncedCwd = useDebouncedValue(draftCwd, 500);
+
 	// Query git branches for the selected cwd (no session needed)
 	const branchesQuery = useQuery({
-		queryKey: ["git-branches-for-cwd", selectedMachineId, draftCwd],
+		queryKey: ["git-branches-for-cwd", selectedMachineId, debouncedCwd],
 		queryFn: () =>
 			fetchGitBranchesForCwd({
 				machineId: selectedMachineId!,
-				cwd: draftCwd!,
+				cwd: debouncedCwd!,
 			}),
 		enabled:
 			open &&
 			Boolean(selectedMachineId) &&
-			Boolean(draftCwd) &&
-			draftCwd!.trim().length > 0,
+			Boolean(debouncedCwd) &&
+			debouncedCwd!.trim().length > 0,
 	});
 
 	const isGitRepo = branchesQuery.data?.isGitRepo ?? false;
 	const branches = branchesQuery.data?.branches ?? [];
+	const worktreeBaseDir = branchesQuery.data?.worktreeBaseDir;
 
-	// Worktree path preview
+	// Worktree path preview using CLI-configured base dir
 	const worktreePathPreview = useMemo(() => {
 		if (!draftCwd || !draftWorktreeBranch) return "";
-		const repoName = getBasename(draftCwd);
+		const repoName = getPathBasename(draftCwd) ?? draftCwd;
 		const sanitized = sanitizeBranch(draftWorktreeBranch);
-		return `~/.mobvibe/worktrees/${repoName}/${sanitized}`;
-	}, [draftCwd, draftWorktreeBranch]);
+		const base = worktreeBaseDir ?? "~/.mobvibe/worktrees";
+		return `${base}/${repoName}/${sanitized}`;
+	}, [draftCwd, draftWorktreeBranch, worktreeBaseDir]);
 
 	useEffect(() => {
 		if (!open) {
@@ -130,12 +133,17 @@ export function CreateSessionDialog({
 		setDraftCwd,
 	]);
 
-	// Reset worktree when cwd changes or is not a git repo
+	// Reset worktree when query completes and cwd is not a git repo
 	useEffect(() => {
-		if (!isGitRepo && draftWorktreeEnabled) {
+		if (branchesQuery.isFetched && !isGitRepo && draftWorktreeEnabled) {
 			setDraftWorktreeEnabled(false);
 		}
-	}, [isGitRepo, draftWorktreeEnabled, setDraftWorktreeEnabled]);
+	}, [
+		branchesQuery.isFetched,
+		isGitRepo,
+		draftWorktreeEnabled,
+		setDraftWorktreeEnabled,
+	]);
 
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -214,15 +222,34 @@ export function CreateSessionDialog({
 						) : null}
 					</div>
 
-					{/* Worktree option — only shown when cwd is a git repo */}
-					{isGitRepo ? (
+					{/* Loading skeleton while checking git repo */}
+					{branchesQuery.isFetching && !branchesQuery.data ? (
+						<div className="flex items-center gap-2 px-1">
+							<Skeleton className="h-4 w-4" />
+							<Skeleton className="h-4 w-32" />
+						</div>
+					) : null}
+
+					{/* Error state */}
+					{branchesQuery.isError ? (
+						<div className="text-destructive text-xs">
+							{t("session.worktree.queryError")}
+						</div>
+					) : null}
+
+					{/* Worktree option — only shown after query completes and cwd is a git repo */}
+					{branchesQuery.isFetched && isGitRepo ? (
 						<div className="flex flex-col gap-2">
-							<label className="flex items-center gap-2 cursor-pointer select-none">
-								<input
-									type="checkbox"
+							<label
+								htmlFor="worktree-enable"
+								className="flex items-center gap-2 cursor-pointer select-none"
+							>
+								<Checkbox
+									id="worktree-enable"
 									checked={draftWorktreeEnabled}
-									onChange={(e) => setDraftWorktreeEnabled(e.target.checked)}
-									className="h-4 w-4 rounded border-border accent-primary"
+									onCheckedChange={(checked) =>
+										setDraftWorktreeEnabled(checked === true)
+									}
 								/>
 								<span className="text-sm font-medium">
 									{t("session.worktree.enable")}

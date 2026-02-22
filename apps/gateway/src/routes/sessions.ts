@@ -119,6 +119,19 @@ export function setupSessionRoutes(
 						}
 					: undefined;
 
+			// Validate branch names to prevent flag injection
+			if (
+				worktreeOptions?.branch.startsWith("-") ||
+				worktreeOptions?.baseBranch?.startsWith("-")
+			) {
+				respondError(
+					response,
+					buildRequestValidationError("Branch name cannot start with '-'"),
+					400,
+				);
+				return;
+			}
+
 			logger.info({ userId, backendId, machineId }, "session_create_request");
 
 			const session = await sessionRouter.createSession(
