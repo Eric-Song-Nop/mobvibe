@@ -791,4 +791,249 @@ describe("useSocket (webui)", () => {
 			"Hello from CLI",
 		);
 	});
+
+	// =========================================================================
+	// socket event type handling — covers all dispatch branches in applySessionEvent
+	// =========================================================================
+	describe("socket event type handling", () => {
+		/**
+		 * Helper: render the hook with a session at seq=0, fire an event, return the store.
+		 */
+		const setupAndFire = (
+			kind: string,
+			payload: unknown,
+			sessionOverrides: Partial<ChatSession> = {},
+		) => {
+			const store = createStore();
+			const sessions = {
+				"session-1": buildSession({
+					sessionId: "session-1",
+					isAttached: true,
+					revision: 1,
+					lastAppliedSeq: 0,
+					...sessionOverrides,
+				}),
+			};
+			mockStoreState.sessions = { ...sessions };
+
+			renderHook(() =>
+				useSocket({
+					sessions,
+					setSending: store.setSending,
+					setCanceling: store.setCanceling,
+					finalizeAssistantMessage: store.finalizeAssistantMessage,
+					appendAssistantChunk: store.appendAssistantChunk,
+					appendThoughtChunk: store.appendThoughtChunk,
+					appendUserChunk: store.appendUserChunk,
+					updateSessionMeta: store.updateSessionMeta,
+					setStreamError: store.setStreamError,
+					addPermissionRequest: store.addPermissionRequest,
+					setPermissionDecisionState: store.setPermissionDecisionState,
+					setPermissionOutcome: store.setPermissionOutcome,
+					addToolCall: store.addToolCall,
+					updateToolCall: store.updateToolCall,
+					appendTerminalOutput: store.appendTerminalOutput,
+					handleSessionsChanged: store.handleSessionsChanged,
+					markSessionAttached: store.markSessionAttached,
+					markSessionDetached: store.markSessionDetached,
+					createLocalSession: store.createLocalSession,
+					updateSessionCursor: store.updateSessionCursor,
+					resetSessionForRevision: store.resetSessionForRevision,
+				}),
+			);
+
+			handlers.sessionEvent?.({
+				sessionId: "session-1",
+				revision: 1,
+				seq: 1,
+				kind,
+				payload,
+			});
+
+			return store;
+		};
+
+		it("dispatches agent_thought_chunk to appendThoughtChunk", () => {
+			const store = setupAndFire("agent_thought_chunk", {
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "I'm thinking" },
+				},
+			});
+
+			expect(store.appendThoughtChunk).toHaveBeenCalledWith(
+				"session-1",
+				"I'm thinking",
+			);
+		});
+
+		it("dispatches tool_call to addToolCall", () => {
+			const store = setupAndFire("tool_call", {
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "tool_call",
+					toolCallId: "tc-1",
+					status: "running",
+					title: "Reading file",
+				},
+			});
+
+			expect(store.addToolCall).toHaveBeenCalledWith(
+				"session-1",
+				expect.objectContaining({
+					sessionUpdate: "tool_call",
+					toolCallId: "tc-1",
+				}),
+			);
+		});
+
+		it("dispatches tool_call_update to updateToolCall", () => {
+			const store = setupAndFire("tool_call_update", {
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "tool_call_update",
+					toolCallId: "tc-1",
+					status: "completed",
+					title: "Done",
+				},
+			});
+
+			expect(store.updateToolCall).toHaveBeenCalledWith(
+				"session-1",
+				expect.objectContaining({
+					sessionUpdate: "tool_call_update",
+					toolCallId: "tc-1",
+				}),
+			);
+		});
+
+		it("dispatches terminal_output to appendTerminalOutput", () => {
+			const store = setupAndFire("terminal_output", {
+				terminalId: "term-1",
+				delta: "$ ls\nfoo.ts\n",
+				truncated: false,
+				exitStatus: { exitCode: 0, signal: null },
+			});
+
+			expect(store.appendTerminalOutput).toHaveBeenCalledWith("session-1", {
+				terminalId: "term-1",
+				delta: "$ ls\nfoo.ts\n",
+				truncated: false,
+				output: undefined,
+				exitStatus: { exitCode: 0, signal: null },
+			});
+		});
+
+		it("dispatches session_info_update to updateSessionMeta", () => {
+			const store = setupAndFire("session_info_update", {
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "session_info_update",
+					title: "New Title",
+				},
+			});
+
+			expect(store.updateSessionMeta).toHaveBeenCalledWith(
+				"session-1",
+				expect.objectContaining({ title: "New Title" }),
+			);
+		});
+
+		it("dispatches permission_request to addPermissionRequest", () => {
+			const store = setupAndFire("permission_request", {
+				requestId: "req-1",
+				toolCall: { toolCallId: "tc-1", status: "running" },
+				options: [{ id: "allow", label: "Allow", isRecommended: true }],
+			});
+
+			expect(store.addPermissionRequest).toHaveBeenCalledWith("session-1", {
+				requestId: "req-1",
+				toolCall: { toolCallId: "tc-1", status: "running" },
+				options: [{ id: "allow", label: "Allow", isRecommended: true }],
+			});
+		});
+
+		it("dispatches permission_result to setPermissionOutcome + setPermissionDecisionState", () => {
+			const store = setupAndFire("permission_result", {
+				sessionId: "session-1",
+				requestId: "req-1",
+				outcome: { outcome: "selected", selectedOptionId: "allow" },
+			});
+
+			expect(store.setPermissionOutcome).toHaveBeenCalledWith(
+				"session-1",
+				"req-1",
+				{ outcome: "selected", selectedOptionId: "allow" },
+			);
+			expect(store.setPermissionDecisionState).toHaveBeenCalledWith(
+				"session-1",
+				"req-1",
+				"idle",
+			);
+		});
+
+		it("dispatches session_error to setStreamError", () => {
+			const store = setupAndFire("session_error", {
+				error: {
+					code: "RATE_LIMIT",
+					message: "Too many requests",
+					retryable: true,
+					scope: "session",
+				},
+			});
+
+			expect(store.setStreamError).toHaveBeenCalledWith(
+				"session-1",
+				expect.objectContaining({
+					code: "RATE_LIMIT",
+					message: "Too many requests",
+				}),
+			);
+		});
+
+		it("dispatches usage_update to updateSessionMeta", () => {
+			const store = setupAndFire("usage_update", {
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "usage_update",
+					used: 1000,
+					size: 200000,
+					cost: { totalCost: 0.05 },
+				},
+			});
+
+			expect(store.updateSessionMeta).toHaveBeenCalledWith("session-1", {
+				usage: {
+					used: 1000,
+					size: 200000,
+					cost: { totalCost: 0.05 },
+				},
+			});
+		});
+
+		it("silently ignores unknown_update events", () => {
+			const store = setupAndFire("unknown_update", {
+				sessionId: "session-1",
+				update: { sessionUpdate: "some_future_type" },
+			});
+
+			// No dispatch should happen for unknown events
+			expect(store.appendAssistantChunk).not.toHaveBeenCalled();
+			expect(store.appendThoughtChunk).not.toHaveBeenCalled();
+			expect(store.appendUserChunk).not.toHaveBeenCalled();
+			expect(store.addToolCall).not.toHaveBeenCalled();
+			expect(store.updateToolCall).not.toHaveBeenCalled();
+			expect(store.appendTerminalOutput).not.toHaveBeenCalled();
+			expect(store.addPermissionRequest).not.toHaveBeenCalled();
+			// setStreamError is called once on subscribe with undefined (reset),
+			// but should NOT be called with an actual error from unknown_update
+			expect(store.setStreamError).not.toHaveBeenCalledWith(
+				"session-1",
+				expect.objectContaining({ code: expect.any(String) }),
+			);
+			// But cursor should still advance
+			expect(store.updateSessionCursor).toHaveBeenCalledWith("session-1", 1, 1);
+		});
+	});
 });

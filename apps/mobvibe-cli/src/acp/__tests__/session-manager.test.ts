@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
+import type { SessionNotification } from "@agentclientprotocol/sdk";
 import type { CliConfig } from "../../config.js";
 
 mock.module("node:fs/promises", () => ({
 	default: {
 		stat: mock(() => Promise.resolve({ isDirectory: () => true })),
+		readFile: mock(() => Promise.resolve("")),
 	},
+	stat: mock(() => Promise.resolve({ isDirectory: () => true })),
+	readFile: mock(() => Promise.resolve("")),
 }));
 
 // Mock the logger
@@ -19,6 +23,14 @@ mock.module("../../lib/logger.js", () => ({
 
 // Dynamic import so that mock.module calls above are registered first
 const { SessionManager } = await import("../session-manager.js");
+
+/**
+ * Captured callback from `onSessionUpdate`.
+ * Allows tests to trigger session update notifications.
+ */
+let sessionUpdateCallback:
+	| ((notification: SessionNotification) => void)
+	| undefined;
 
 const createMockConnection = () => ({
 	connect: mock(() => Promise.resolve(undefined)),
@@ -73,7 +85,12 @@ const createMockConnection = () => ({
 		}),
 	),
 	setPermissionHandler: mock(() => {}),
-	onSessionUpdate: mock(() => () => {}),
+	onSessionUpdate: mock((cb: (n: SessionNotification) => void) => {
+		sessionUpdateCallback = cb;
+		return () => {
+			sessionUpdateCallback = undefined;
+		};
+	}),
 	onTerminalOutput: mock(() => () => {}),
 	onStatusChange: mock(() => () => {}),
 });
@@ -117,6 +134,7 @@ describe("SessionManager", () => {
 		mockConfig = createMockConfig();
 		sessionManager = new SessionManager(mockConfig);
 		mockConnection = createMockConnection();
+		sessionUpdateCallback = undefined;
 		sessionManager.createConnection = () => mockConnection as any;
 	});
 
@@ -399,6 +417,465 @@ describe("SessionManager", () => {
 
 			expect(result.events).toHaveLength(0);
 			expect(result.hasMore).toBe(false);
+		});
+	});
+
+	// =========================================================================
+	// 2.1 message event mapping (writeSessionUpdateToWal)
+	// =========================================================================
+	describe("message event mapping (writeSessionUpdateToWal)", () => {
+		/**
+		 * Helper: create a session, get the sessionId, and attach an event listener.
+		 * Returns `{ sessionId, eventListener }`.
+		 */
+		const setupSessionWithListener = async () => {
+			await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const sessions = sessionManager.listSessions();
+			const sessionId = sessions[0].sessionId;
+			const eventListener = mock(() => {});
+			sessionManager.onSessionEvent(eventListener);
+			return { sessionId, eventListener };
+		};
+
+		it("maps user_message_chunk → user_message WAL event", async () => {
+			const { sessionId, eventListener } = await setupSessionWithListener();
+			expect(sessionUpdateCallback).toBeDefined();
+
+			sessionUpdateCallback!({
+				sessionId,
+				update: {
+					sessionUpdate: "user_message_chunk",
+					content: { type: "text", text: "Hello" },
+				},
+			} as SessionNotification);
+
+			expect(eventListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId,
+					kind: "user_message",
+				}),
+			);
+
+			const events = sessionManager.getSessionEvents({
+				sessionId,
+				revision: 1,
+				afterSeq: 0,
+			});
+			expect(events.events.some((event) => event.kind === "user_message")).toBe(
+				true,
+			);
+		});
+
+		it("maps agent_message_chunk → agent_message_chunk WAL event", async () => {
+			const { sessionId, eventListener } = await setupSessionWithListener();
+
+			sessionUpdateCallback!({
+				sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "Hello from assistant" },
+				},
+			} as SessionNotification);
+
+			expect(eventListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId,
+					kind: "agent_message_chunk",
+				}),
+			);
+		});
+
+		it("maps agent_thought_chunk → agent_thought_chunk WAL event", async () => {
+			const { sessionId, eventListener } = await setupSessionWithListener();
+
+			sessionUpdateCallback!({
+				sessionId,
+				update: {
+					sessionUpdate: "agent_thought_chunk",
+					content: { type: "text", text: "Thinking..." },
+				},
+			} as SessionNotification);
+
+			expect(eventListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId,
+					kind: "agent_thought_chunk",
+				}),
+			);
+		});
+
+		it("maps tool_call → tool_call WAL event", async () => {
+			const { sessionId, eventListener } = await setupSessionWithListener();
+
+			sessionUpdateCallback!({
+				sessionId,
+				update: {
+					sessionUpdate: "tool_call",
+					toolCallId: "tc-1",
+					status: "in_progress",
+					title: "Reading file",
+				},
+			} as SessionNotification);
+
+			expect(eventListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId,
+					kind: "tool_call",
+				}),
+			);
+		});
+
+		it("maps tool_call_update → tool_call_update WAL event", async () => {
+			const { sessionId, eventListener } = await setupSessionWithListener();
+
+			sessionUpdateCallback!({
+				sessionId,
+				update: {
+					sessionUpdate: "tool_call_update",
+					toolCallId: "tc-1",
+					status: "completed",
+				},
+			} as SessionNotification);
+
+			expect(eventListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId,
+					kind: "tool_call_update",
+				}),
+			);
+		});
+
+		it("maps session_info_update → session_info_update WAL event", async () => {
+			const { sessionId, eventListener } = await setupSessionWithListener();
+
+			sessionUpdateCallback!({
+				sessionId,
+				update: {
+					sessionUpdate: "session_info_update",
+					title: "Updated Title",
+				},
+			} as SessionNotification);
+
+			expect(eventListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId,
+					kind: "session_info_update",
+				}),
+			);
+		});
+
+		it("maps current_mode_update → session_info_update WAL event", async () => {
+			const { sessionId, eventListener } = await setupSessionWithListener();
+
+			sessionUpdateCallback!({
+				sessionId,
+				update: {
+					sessionUpdate: "current_mode_update",
+					currentModeId: "architect",
+				},
+			} as SessionNotification);
+
+			expect(eventListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId,
+					kind: "session_info_update",
+				}),
+			);
+		});
+
+		it("maps usage_update → usage_update WAL event", async () => {
+			const { sessionId, eventListener } = await setupSessionWithListener();
+
+			sessionUpdateCallback!({
+				sessionId,
+				update: {
+					sessionUpdate: "usage_update",
+					used: 100,
+					size: 200,
+				},
+			} as SessionNotification);
+
+			expect(eventListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId,
+					kind: "usage_update",
+				}),
+			);
+		});
+
+		it("maps unknown update type → unknown_update WAL event", async () => {
+			const { sessionId, eventListener } = await setupSessionWithListener();
+
+			sessionUpdateCallback!({
+				sessionId,
+				update: {
+					sessionUpdate: "totally_new_type",
+				},
+			} as unknown as SessionNotification);
+
+			expect(eventListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId,
+					kind: "unknown_update",
+				}),
+			);
+		});
+	});
+
+	// =========================================================================
+	// 2.2 recordTurnEnd — sessionsChanged emission
+	// =========================================================================
+	describe("recordTurnEnd (sessionsChanged)", () => {
+		it("emits sessionsChanged with updated session summary", async () => {
+			await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const sessions = sessionManager.listSessions();
+			const sessionId = sessions[0].sessionId;
+
+			const changedListener = mock(() => {});
+			sessionManager.onSessionsChanged(changedListener);
+
+			sessionManager.recordTurnEnd(sessionId, "end_turn");
+
+			expect(changedListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					added: [],
+					updated: expect.arrayContaining([
+						expect.objectContaining({ sessionId }),
+					]),
+					removed: [],
+				}),
+			);
+		});
+
+		it("updates session.updatedAt before emitting", async () => {
+			await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const sessions = sessionManager.listSessions();
+			const sessionId = sessions[0].sessionId;
+			const beforeUpdatedAt = sessions[0].updatedAt;
+
+			// Small delay to ensure time difference
+			await new Promise((resolve) => setTimeout(resolve, 10));
+
+			sessionManager.recordTurnEnd(sessionId, "end_turn");
+
+			const updatedSessions = sessionManager.listSessions();
+			const afterUpdatedAt = updatedSessions[0].updatedAt;
+			expect(afterUpdatedAt >= beforeUpdatedAt).toBe(true);
+		});
+
+		it("no-op for non-existent session", () => {
+			const eventListener = mock(() => {});
+			sessionManager.onSessionEvent(eventListener);
+
+			// Should not throw or emit any event
+			sessionManager.recordTurnEnd("non-existent-session", "end_turn");
+
+			expect(eventListener).not.toHaveBeenCalled();
+		});
+	});
+
+	// =========================================================================
+	// 2.3 message event sequence integrity
+	// =========================================================================
+	describe("message event sequence integrity", () => {
+		it("emits events with incrementing seq numbers", async () => {
+			await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const sessions = sessionManager.listSessions();
+			const sessionId = sessions[0].sessionId;
+			expect(sessionUpdateCallback).toBeDefined();
+
+			// Trigger multiple updates
+			sessionUpdateCallback!({
+				sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "A" },
+				},
+			} as SessionNotification);
+			sessionUpdateCallback!({
+				sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "B" },
+				},
+			} as SessionNotification);
+			sessionUpdateCallback!({
+				sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "C" },
+				},
+			} as SessionNotification);
+
+			const events = sessionManager.getSessionEvents({
+				sessionId,
+				revision: 1,
+				afterSeq: 0,
+			});
+
+			// Verify seq numbers increment
+			const seqs = events.events.map((e) => e.seq);
+			for (let i = 1; i < seqs.length; i++) {
+				expect(seqs[i]).toBeGreaterThan(seqs[i - 1]);
+			}
+		});
+
+		it("maintains correct seq across mixed event types", async () => {
+			await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const sessions = sessionManager.listSessions();
+			const sessionId = sessions[0].sessionId;
+			expect(sessionUpdateCallback).toBeDefined();
+
+			// Mix different event types
+			sessionUpdateCallback!({
+				sessionId,
+				update: {
+					sessionUpdate: "user_message_chunk",
+					content: { type: "text", text: "Hello" },
+				},
+			} as SessionNotification);
+			sessionUpdateCallback!({
+				sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "Hi" },
+				},
+			} as SessionNotification);
+			sessionUpdateCallback!({
+				sessionId,
+				update: {
+					sessionUpdate: "tool_call",
+					toolCallId: "tc-1",
+					status: "in_progress",
+					title: "Test tool",
+				},
+			} as SessionNotification);
+
+			const events = sessionManager.getSessionEvents({
+				sessionId,
+				revision: 1,
+				afterSeq: 0,
+			});
+
+			expect(events.events.length).toBeGreaterThanOrEqual(3);
+			// Kinds should match the order of dispatch
+			const kinds = events.events.map((e) => e.kind);
+			expect(kinds).toContain("user_message");
+			expect(kinds).toContain("agent_message_chunk");
+			expect(kinds).toContain("tool_call");
+
+			// Seqs should be strictly increasing
+			const seqs = events.events.map((e) => e.seq);
+			for (let i = 1; i < seqs.length; i++) {
+				expect(seqs[i]).toBeGreaterThan(seqs[i - 1]);
+			}
+		});
+
+		it("events carry correct revision number", async () => {
+			await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const sessions = sessionManager.listSessions();
+			const sessionId = sessions[0].sessionId;
+			expect(sessionUpdateCallback).toBeDefined();
+
+			sessionUpdateCallback!({
+				sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "text" },
+				},
+			} as SessionNotification);
+
+			const events = sessionManager.getSessionEvents({
+				sessionId,
+				revision: 1,
+				afterSeq: 0,
+			});
+
+			for (const event of events.events) {
+				expect(event.revision).toBe(1);
+			}
+		});
+	});
+
+	// =========================================================================
+	// 2.4 session update subscription lifecycle
+	// =========================================================================
+	describe("session update subscription lifecycle", () => {
+		it("subscribes to onSessionUpdate when session is created", async () => {
+			await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			// onSessionUpdate should have been called during createSession
+			expect(mockConnection.onSessionUpdate).toHaveBeenCalled();
+			expect(sessionUpdateCallback).toBeDefined();
+		});
+
+		it("unsubscribes when session is closed", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			expect(sessionUpdateCallback).toBeDefined();
+
+			await sessionManager.closeSession(created.sessionId);
+
+			// After close, the callback should have been cleared by the unsubscribe function
+			expect(sessionUpdateCallback).toBeUndefined();
+		});
+
+		it("handles updates after session is closed gracefully", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const sessionId = created.sessionId;
+
+			// Capture the callback before close
+			const capturedCallback = sessionUpdateCallback;
+			expect(capturedCallback).toBeDefined();
+
+			// Record count of events before close
+			const beforeEvents = sessionManager.getSessionEvents({
+				sessionId,
+				revision: 1,
+				afterSeq: 0,
+			});
+			const eventCountBeforeClose = beforeEvents.events.length;
+
+			// Close the session (clears callback via unsubscribe)
+			await sessionManager.closeSession(sessionId);
+
+			// After close, the callback should have been cleared by the unsubscribe function
+			expect(sessionUpdateCallback).toBeUndefined();
+
+			// Verify no new events were written post-close
+			const afterEvents = sessionManager.getSessionEvents({
+				sessionId,
+				revision: 1,
+				afterSeq: 0,
+			});
+			expect(afterEvents.events.length).toBe(eventCountBeforeClose);
 		});
 	});
 });
