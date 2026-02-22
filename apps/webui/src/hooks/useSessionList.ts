@@ -15,7 +15,6 @@ export type UseSessionListParams = {
 export type UseSessionListReturn = {
 	workspaceList: WorkspaceSummary[];
 	activeSession: ChatSession | undefined;
-	activeWorkspaceCwd: string | undefined;
 	selectedWorkspaceCwd: string | undefined;
 	effectiveWorkspaceCwd: string | undefined;
 	sessionList: ChatSession[];
@@ -38,17 +37,11 @@ export function useSessionList({
 
 	const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
 
-	const activeWorkspaceCwd =
-		activeSession?.machineId === selectedMachineId
-			? getSessionGroupCwd(activeSession)
-			: undefined;
-
 	const selectedWorkspaceCwd = selectedMachineId
 		? selectedWorkspaceByMachine[selectedMachineId]
 		: undefined;
 
-	const effectiveWorkspaceCwd =
-		activeWorkspaceCwd ?? selectedWorkspaceCwd ?? workspaceList[0]?.cwd;
+	const effectiveWorkspaceCwd = selectedWorkspaceCwd ?? workspaceList[0]?.cwd;
 
 	const sessionList = useMemo(() => {
 		const allSessions = Object.values(sessions);
@@ -73,7 +66,6 @@ export function useSessionList({
 	return {
 		workspaceList,
 		activeSession,
-		activeWorkspaceCwd,
 		selectedWorkspaceCwd,
 		effectiveWorkspaceCwd,
 		sessionList,

@@ -117,7 +117,6 @@ vi.mock("@/hooks/useSessionList", () => ({
 	useSessionList: () => ({
 		workspaceList: [],
 		activeSession: undefined,
-		activeWorkspaceCwd: undefined,
 		selectedWorkspaceCwd: undefined,
 		effectiveWorkspaceCwd: undefined,
 		sessionList: [],

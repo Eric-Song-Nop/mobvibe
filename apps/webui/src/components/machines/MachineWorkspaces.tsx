@@ -29,7 +29,7 @@ export function MachineWorkspaces({
 	className,
 }: MachineWorkspacesProps) {
 	const { t } = useTranslation();
-	const { sessions, activeSessionId } = useChatStore();
+	const { sessions } = useChatStore();
 	const { machines, setSelectedMachineId, updateBackendCapabilities } =
 		useMachinesStore();
 	const {
@@ -66,13 +66,8 @@ export function MachineWorkspaces({
 	const isValidating =
 		canValidateWorkspaces &&
 		workspaceValidityQueries.some((query) => query.isFetching);
-	const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
-	const activeWorkspaceCwd =
-		activeSession?.machineId === machineId
-			? activeSession.worktreeSourceCwd || activeSession.cwd
-			: undefined;
 	const selectedWorkspaceCwd = selectedWorkspaceByMachine[machineId];
-	const effectiveWorkspaceCwd = activeWorkspaceCwd ?? selectedWorkspaceCwd;
+	const effectiveWorkspaceCwd = selectedWorkspaceCwd;
 
 	const selectedWorkspaceQueryState = useMemo(() => {
 		if (!canValidateWorkspaces || !selectedWorkspaceCwd) return undefined;
