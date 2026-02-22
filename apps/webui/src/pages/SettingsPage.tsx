@@ -96,7 +96,7 @@ export function SettingsPage() {
 	if (authLoading) {
 		return (
 			<ThemeProvider>
-				<div className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
+				<div className="flex min-h-dvh items-center justify-center bg-muted/40 p-4">
 					<div className="text-muted-foreground">{t("common.loading")}</div>
 				</div>
 			</ThemeProvider>
@@ -176,7 +176,7 @@ function SettingsHeader() {
 	const navigate = useNavigate();
 
 	return (
-		<header className="bg-background/80 border-b px-4 py-3 backdrop-blur shrink-0">
+		<header className="bg-background/80 border-b px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur shrink-0">
 			<div className="flex w-full items-center gap-2">
 				<Button variant="ghost" size="sm" onClick={() => navigate("/")}>
 					<HugeiconsIcon
@@ -209,7 +209,7 @@ function SettingsContent() {
 	const [activeSection, setActiveSection] = useSettingsSection();
 
 	return (
-		<main className="h-screen flex flex-col bg-muted/40">
+		<main className="h-dvh flex flex-col bg-muted/40">
 			<SettingsHeader />
 
 			{/* Desktop: sidebar + conditional content */}
@@ -228,7 +228,7 @@ function SettingsContent() {
 			</div>
 
 			{/* Mobile: stacked sections, no sidebar */}
-			<div className="flex-1 overflow-y-auto p-4 md:hidden">
+			<div className="flex-1 overflow-y-auto p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:hidden">
 				<div className="mx-auto max-w-3xl space-y-8">
 					<SecuritySection />
 					<Separator />

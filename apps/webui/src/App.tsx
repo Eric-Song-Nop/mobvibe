@@ -701,7 +701,7 @@ function TauriPairHandler() {
 
 function RoutePending() {
 	return (
-		<div className="text-muted-foreground flex min-h-screen items-center justify-center bg-muted/40">
+		<div className="text-muted-foreground flex min-h-dvh items-center justify-center bg-muted/40">
 			Loading…
 		</div>
 	);
@@ -720,7 +720,7 @@ export function App() {
 	if (isLoading) {
 		return (
 			<ThemeProvider>
-				<div className="flex min-h-screen items-center justify-center bg-muted/40">
+				<div className="flex min-h-dvh items-center justify-center bg-muted/40">
 					<div className="text-muted-foreground">Loading…</div>
 				</div>
 			</ThemeProvider>
