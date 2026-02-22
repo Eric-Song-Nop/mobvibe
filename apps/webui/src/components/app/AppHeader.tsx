@@ -60,7 +60,7 @@ export function AppHeader({
 	const { t } = useTranslation();
 
 	return (
-		<header className="bg-background/80 border-b px-4 py-3 backdrop-blur shrink-0">
+		<header className="bg-background/80 border-b px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur shrink-0">
 			<div className="mx-auto flex w-full max-w-5xl items-center gap-2">
 				<Button
 					variant="outline"

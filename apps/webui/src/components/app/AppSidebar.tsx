@@ -79,7 +79,7 @@ export function AppSidebar({
 				}
 			/>
 			{mobileMenuOpen ? (
-				<div className="fixed inset-0 z-50 flex md:hidden">
+				<div className="fixed inset-0 z-50 flex md:hidden pt-[env(safe-area-inset-top)]">
 					<div className="bg-background/90 border-r w-80 p-0 flex h-full overflow-hidden">
 						<MobileMachineColumn />
 						<div className="flex-1 p-4 overflow-hidden flex flex-col min-w-0">
