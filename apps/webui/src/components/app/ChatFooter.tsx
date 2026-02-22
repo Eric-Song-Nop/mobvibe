@@ -840,6 +840,10 @@ export function ChatFooter({
 			if (event.key === "Enter" && !event.shiftKey) {
 				event.preventDefault();
 				onSend();
+				// 主动清空 DOM —— useLayoutEffect 在编辑器聚焦时会跳过重建
+				if (editorRef.current) {
+					editorRef.current.innerHTML = "";
+				}
 			}
 		},
 		[
@@ -973,6 +977,7 @@ export function ChatFooter({
 						role="textbox"
 						aria-multiline="true"
 						contentEditable={Boolean(activeSessionId)}
+						enterKeyHint="send"
 						suppressContentEditableWarning
 						className="min-h-10 max-h-[40vh] overflow-y-auto whitespace-pre-wrap break-words px-2.5 py-2 text-xs outline-none md:min-h-16"
 						aria-label={t("chat.placeholder")}
