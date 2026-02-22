@@ -133,6 +133,14 @@ class E2EEManager {
 		}
 	}
 
+	getSessionE2EEStatus(
+		sessionId: string,
+		hasWrappedDek: boolean,
+	): "none" | "ok" | "missing_key" {
+		if (!hasWrappedDek) return "none";
+		return this.sessionDeks.has(sessionId) ? "ok" : "missing_key";
+	}
+
 	encryptPayloadForSession(sessionId: string, payload: unknown): unknown {
 		const dek = this.sessionDeks.get(sessionId);
 		if (!dek) return payload;

@@ -256,6 +256,18 @@ function MainApp() {
 				}
 			}
 			chatActions.syncSessions(sessionsQuery.data.sessions);
+
+			// Set E2EE status for all sessions (independent of e2ee.isEnabled)
+			const { setSessionE2EEStatus } = useChatStore.getState();
+			for (const session of sessionsQuery.data.sessions) {
+				setSessionE2EEStatus(
+					session.sessionId,
+					e2ee.getSessionE2EEStatus(
+						session.sessionId,
+						Boolean(session.wrappedDek),
+					),
+				);
+			}
 		}
 	}, [sessionsQuery.data?.sessions, chatActions.syncSessions]);
 

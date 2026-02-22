@@ -296,7 +296,12 @@
 		"invalidSecret": "Invalid master secret. Please check and try again.",
 		"secretPlaceholder": "Paste master secret (base64)",
 		"pairing": "Pairing...",
-		"addDevice": "Add Device"
+		"addDevice": "Add Device",
+		"missingKeyBadge": "Key missing",
+		"missingKeyTitle": "E2EE key missing",
+		"missingKeyDescription": "This session is end-to-end encrypted but no matching decryption key was found. Messages cannot be decrypted.",
+		"missingKeyCliHint": "Run `mobvibe e2ee show` on the CLI to retrieve the master secret, then pair it in Settings.",
+		"missingKeySettingsLink": "Go to E2EE Settings"
 	},
 	"machines": {
 		"title": "Machines",
