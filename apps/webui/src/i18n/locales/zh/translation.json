@@ -87,7 +87,8 @@
 			"branchPlaceholder": "例如 feat/my-feature",
 			"baseBranchLabel": "基于分支",
 			"baseBranchPlaceholder": "选择基准分支（默认：HEAD）",
-			"pathLabel": "Worktree 路径"
+			"pathLabel": "Worktree 路径",
+			"queryError": "无法检查 Git 仓库状态"
 		},
 		"status": {
 			"active": "活跃",

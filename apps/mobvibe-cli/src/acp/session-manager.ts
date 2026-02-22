@@ -668,13 +668,26 @@ export class SessionManager {
 				"creating_git_worktree",
 			);
 
-			const result = await createGitWorktree(repoDir, {
-				branch: options.worktree.branch,
-				targetPath,
-				baseBranch: options.worktree.baseBranch,
-			});
+			try {
+				const result = await createGitWorktree(repoDir, {
+					branch: options.worktree.branch,
+					targetPath,
+					baseBranch: options.worktree.baseBranch,
+				});
+				effectiveCwd = result.path;
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				throw new AppError(
+					createErrorDetail({
+						code: "GIT_WORKTREE_FAILED",
+						message: `Failed to create worktree: ${message}`,
+						retryable: false,
+						scope: "request",
+					}),
+					400,
+				);
+			}
 
-			effectiveCwd = result.path;
 			worktreeSourceCwd = repoDir;
 			worktreeBranch = options.worktree.branch;
 		}
@@ -779,6 +792,12 @@ export class SessionManager {
 			this.emitSessionAttached(session.sessionId);
 			return summary;
 		} catch (error) {
+			if (worktreeSourceCwd) {
+				logger.warn(
+					{ worktreePath: effectiveCwd, branch: worktreeBranch },
+					"session_creation_failed_after_worktree_created",
+				);
+			}
 			const status = connection.getStatus();
 			await connection.disconnect();
 			if (status.error) {

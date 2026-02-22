@@ -87,7 +87,8 @@
 			"branchPlaceholder": "e.g. feat/my-feature",
 			"baseBranchLabel": "Based on",
 			"baseBranchPlaceholder": "Select base branch (default: HEAD)",
-			"pathLabel": "Worktree path"
+			"pathLabel": "Worktree path",
+			"queryError": "Failed to check git repository status"
 		},
 		"status": {
 			"active": "Active",

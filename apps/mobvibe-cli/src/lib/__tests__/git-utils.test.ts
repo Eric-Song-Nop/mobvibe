@@ -24,6 +24,7 @@ const {
 	getGitStatus,
 	getFileDiff,
 	aggregateDirStatus,
+	validateGitRef,
 } = await import("../git-utils.js");
 
 describe("git-utils", () => {
@@ -229,6 +230,69 @@ describe("git-utils", () => {
 				"a/b/c": "M",
 				"a/b/c/d": "M",
 			});
+		});
+	});
+
+	describe("validateGitRef", () => {
+		it("accepts a normal branch name", () => {
+			expect(() => validateGitRef("feat/my-feature")).not.toThrow();
+			expect(() => validateGitRef("main")).not.toThrow();
+			expect(() => validateGitRef("release-1.0")).not.toThrow();
+		});
+
+		it("rejects names starting with '-'", () => {
+			expect(() => validateGitRef("-malicious")).toThrow(
+				'cannot start with "-"',
+			);
+			expect(() => validateGitRef("--flag")).toThrow('cannot start with "-"');
+		});
+
+		it("rejects names containing '..'", () => {
+			expect(() => validateGitRef("a..b")).toThrow('cannot contain ".."');
+		});
+
+		it("rejects empty string", () => {
+			expect(() => validateGitRef("")).toThrow("cannot be empty");
+			expect(() => validateGitRef("   ")).toThrow("cannot be empty");
+		});
+
+		it("rejects names ending with '.lock'", () => {
+			expect(() => validateGitRef("branch.lock")).toThrow("Invalid git ref");
+		});
+
+		it("rejects names ending with '/' or '.'", () => {
+			expect(() => validateGitRef("branch/")).toThrow("Invalid git ref");
+			expect(() => validateGitRef("branch.")).toThrow("Invalid git ref");
+		});
+
+		it("rejects names with control characters", () => {
+			expect(() => validateGitRef("branch\x00name")).toThrow(
+				"contains invalid characters",
+			);
+		});
+
+		it("rejects names with special git characters", () => {
+			expect(() => validateGitRef("branch~1")).toThrow(
+				"contains invalid characters",
+			);
+			expect(() => validateGitRef("branch^2")).toThrow(
+				"contains invalid characters",
+			);
+			expect(() => validateGitRef("branch:ref")).toThrow(
+				"contains invalid characters",
+			);
+			expect(() => validateGitRef("branch?")).toThrow(
+				"contains invalid characters",
+			);
+			expect(() => validateGitRef("branch*")).toThrow(
+				"contains invalid characters",
+			);
+			expect(() => validateGitRef("branch[0]")).toThrow(
+				"contains invalid characters",
+			);
+			expect(() => validateGitRef("branch\\name")).toThrow(
+				"contains invalid characters",
+			);
 		});
 	});
 
