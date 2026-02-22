@@ -441,6 +441,18 @@ export function useSocket({
 		}
 		handleSessionsChanged(payload);
 
+		// Set E2EE status for added/updated sessions
+		const { setSessionE2EEStatus } = useChatStore.getState();
+		for (const session of [...payload.added, ...payload.updated]) {
+			setSessionE2EEStatus(
+				session.sessionId,
+				e2ee.getSessionE2EEStatus(
+					session.sessionId,
+					Boolean(session.wrappedDek),
+				),
+			);
+		}
+
 		// Extract per-backend capabilities if present
 		if (payload.backendCapabilities) {
 			const machineId =

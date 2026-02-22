@@ -9,6 +9,7 @@ import {
 	useRef,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { E2EEMissingBanner } from "@/components/app/E2EEMissingBanner";
 import { MessageItem } from "@/components/chat/MessageItem";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { Button } from "@/components/ui/button";
@@ -123,6 +124,9 @@ export const ChatMessageList = forwardRef<
 	return (
 		<main className="flex min-h-0 flex-1 flex-col overflow-hidden">
 			<div className="mx-auto flex w-full max-w-5xl flex-1 min-h-0 flex-col gap-4 px-4 py-6">
+				<E2EEMissingBanner
+					visible={activeSession?.e2eeStatus === "missing_key"}
+				/>
 				<div className="flex min-h-0 flex-1 flex-col gap-4">
 					{!activeSession ? (
 						<div

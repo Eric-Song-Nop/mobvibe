@@ -153,6 +153,8 @@ export type ChatSession = {
 	/** WAL cursor tracking for sync */
 	revision?: number;
 	lastAppliedSeq?: number;
+	/** Runtime-only E2EE status (not persisted) */
+	e2eeStatus?: "none" | "ok" | "missing_key";
 };
 
 type ChatState = {
@@ -287,6 +289,11 @@ type ChatState = {
 	) => void;
 	/** Reset session cursor when revision changes (clear messages) */
 	resetSessionForRevision: (sessionId: string, newRevision: number) => void;
+	/** Set E2EE status for a session (runtime-only, not persisted) */
+	setSessionE2EEStatus: (
+		sessionId: string,
+		status: ChatSession["e2eeStatus"],
+	) => void;
 };
 
 type PersistedChatState = Pick<
@@ -531,6 +538,7 @@ const sanitizeSessionForPersist = (session: ChatSession): ChatSession => ({
 	attachedAt: undefined,
 	detachedAt: undefined,
 	detachedReason: undefined,
+	e2eeStatus: undefined,
 	// Preserve messages even when cursor is set so detached sessions keep history.
 	// Backfill applies only new events based on the cursor.
 	messages: session.messages.map(sanitizeMessageForPersist),
@@ -1389,6 +1397,18 @@ export const useChatStore = create<ChatState>()(
 								revision: newRevision,
 								lastAppliedSeq: 0,
 							},
+						},
+					};
+				}),
+			setSessionE2EEStatus: (sessionId, status) =>
+				set((state: ChatState) => {
+					const session = state.sessions[sessionId];
+					if (!session) return state;
+					if (session.e2eeStatus === status) return state;
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: { ...session, e2eeStatus: status },
 						},
 					};
 				}),

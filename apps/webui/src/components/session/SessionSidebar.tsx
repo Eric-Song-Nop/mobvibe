@@ -336,6 +336,11 @@ const SessionListItem = ({
 					)}
 					<div className="flex items-center gap-2 shrink-0">
 						<StatusBadge />
+						{session.e2eeStatus === "missing_key" ? (
+							<Badge variant="outline" className="text-warning border-warning">
+								{t("e2ee.missingKeyBadge")}
+							</Badge>
+						) : null}
 					</div>
 				</div>
 				<span className="text-muted-foreground text-xs">{cwdLabel}</span>

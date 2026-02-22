@@ -296,7 +296,12 @@
 		"invalidSecret": "无效的主密钥，请检查后重试。",
 		"secretPlaceholder": "粘贴主密钥（base64）",
 		"pairing": "配对中...",
-		"addDevice": "添加设备"
+		"addDevice": "添加设备",
+		"missingKeyBadge": "缺少密钥",
+		"missingKeyTitle": "E2EE 密钥缺失",
+		"missingKeyDescription": "此对话已启用端到端加密，但未找到匹配的解密密钥，消息内容无法解密。",
+		"missingKeyCliHint": "在 CLI 运行 `mobvibe e2ee show` 获取主密钥，然后在设置中配对。",
+		"missingKeySettingsLink": "前往 E2EE 设置"
 	},
 	"machines": {
 		"title": "设备",
