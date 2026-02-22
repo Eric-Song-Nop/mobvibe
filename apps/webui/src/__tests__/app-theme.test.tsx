@@ -47,14 +47,17 @@ const mockChatStore = vi.hoisted(() => ({
 		appendTerminalOutput: vi.fn(),
 		finalizeAssistantMessage: vi.fn(),
 		handleSessionsChanged: vi.fn(),
+		setSessionE2EEStatus: vi.fn(),
 	},
 }));
 
 vi.mock("@/lib/chat-store", async (importOriginal) => {
 	const original = await importOriginal<typeof import("@/lib/chat-store")>();
+	const hook = () => mockChatStore.value;
+	hook.getState = () => mockChatStore.value;
 	return {
 		...original,
-		useChatStore: () => mockChatStore.value,
+		useChatStore: hook,
 	};
 });
 
