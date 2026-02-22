@@ -132,6 +132,11 @@ export function useSocket({
 
 		switch (event.kind) {
 			case "user_message": {
+				// Skip user_message events while sending — WebUI already added
+				// the user message optimistically via addUserMessage()
+				if (session?.sending) {
+					break;
+				}
 				const notification = event.payload as SessionNotification;
 				const textChunk = extractTextChunk(notification);
 				if (textChunk?.role === "user") {

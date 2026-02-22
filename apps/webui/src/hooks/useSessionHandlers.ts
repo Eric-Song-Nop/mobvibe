@@ -56,11 +56,6 @@ type Mutations = {
 			prompt: ChatSession["inputContents"];
 		}) => void;
 	};
-	createMessageIdMutation: {
-		mutateAsync: (params: {
-			sessionId: string;
-		}) => Promise<{ messageId: string }>;
-	};
 	permissionDecisionMutation: {
 		mutate: (params: {
 			sessionId: string;
@@ -355,7 +350,7 @@ export function useSessionHandlers({
 		syncSessionHistory(activeSessionId);
 	};
 
-	const handleSend = async () => {
+	const handleSend = () => {
 		if (!activeSessionId || !activeSession) {
 			return;
 		}
@@ -368,21 +363,13 @@ export function useSessionHandlers({
 			return;
 		}
 
+		const messageId = crypto.randomUUID();
+
 		chatActions.setSending(activeSessionId, true);
 		chatActions.setCanceling(activeSessionId, false);
 		chatActions.setError(activeSessionId, undefined);
 		chatActions.setInput(activeSessionId, "");
 		chatActions.setInputContents(activeSessionId, [{ type: "text", text: "" }]);
-
-		let messageId: string;
-		try {
-			const response = await mutations.createMessageIdMutation.mutateAsync({
-				sessionId: activeSessionId,
-			});
-			messageId = response.messageId;
-		} catch {
-			return;
-		}
 
 		chatActions.addUserMessage(activeSessionId, activeSession.input ?? "", {
 			messageId,

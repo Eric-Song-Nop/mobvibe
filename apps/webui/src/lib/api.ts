@@ -32,7 +32,6 @@ import type {
 	GitBranchesForCwdResponse,
 	HostFsRootsResponse,
 	MachinesResponse,
-	MessageIdResponse,
 	PermissionDecisionPayload,
 	PermissionDecisionResponse,
 	SendMessageResult,
@@ -307,14 +306,6 @@ export const cancelSession = async (payload: {
 	sessionId: string;
 }): Promise<CancelSessionResponse> =>
 	requestJson<CancelSessionResponse>("/acp/session/cancel", {
-		method: "POST",
-		body: JSON.stringify(payload),
-	});
-
-export const createMessageId = async (payload: {
-	sessionId: string;
-}): Promise<MessageIdResponse> =>
-	requestJson<MessageIdResponse>("/acp/message/id", {
 		method: "POST",
 		body: JSON.stringify(payload),
 	});

@@ -95,7 +95,6 @@ vi.mock("@/hooks/useSessionMutations", () => ({
 		setSessionModeMutation: { mutate: vi.fn(), isPending: false },
 		setSessionModelMutation: { mutate: vi.fn(), isPending: false },
 		sendMessageMutation: { mutate: vi.fn() },
-		createMessageIdMutation: { mutateAsync: vi.fn() },
 		permissionDecisionMutation: { mutate: vi.fn() },
 		loadSessionMutation: { isPending: false, mutateAsync: vi.fn() },
 		reloadSessionMutation: { isPending: false, mutateAsync: vi.fn() },

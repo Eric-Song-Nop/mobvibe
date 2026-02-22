@@ -678,4 +678,117 @@ describe("useSocket (webui)", () => {
 		expect(store.setSending).toHaveBeenCalledWith("session-1", false);
 		expect(store.setCanceling).toHaveBeenCalledWith("session-1", false);
 	});
+
+	it("skips user_message event when session is sending", async () => {
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				revision: 1,
+				lastAppliedSeq: 0,
+				sending: true,
+			}),
+		};
+		mockStoreState.sessions = { ...sessions };
+
+		renderHook(() =>
+			useSocket({
+				sessions,
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				appendUserChunk: store.appendUserChunk,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		handlers.sessionEvent?.({
+			sessionId: "session-1",
+			revision: 1,
+			seq: 1,
+			kind: "user_message",
+			payload: {
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "user_message_chunk",
+					content: { type: "text", text: "Hello" },
+				},
+			},
+		});
+
+		// Cursor should advance but appendUserChunk should NOT be called
+		expect(store.updateSessionCursor).toHaveBeenCalledWith("session-1", 1, 1);
+		expect(store.appendUserChunk).not.toHaveBeenCalled();
+	});
+
+	it("processes user_message event when session is not sending", async () => {
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				revision: 1,
+				lastAppliedSeq: 0,
+				sending: false,
+			}),
+		};
+		mockStoreState.sessions = { ...sessions };
+
+		renderHook(() =>
+			useSocket({
+				sessions,
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				appendUserChunk: store.appendUserChunk,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		handlers.sessionEvent?.({
+			sessionId: "session-1",
+			revision: 1,
+			seq: 1,
+			kind: "user_message",
+			payload: {
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "user_message_chunk",
+					content: { type: "text", text: "Hello from CLI" },
+				},
+			},
+		});
+
+		// Both cursor and appendUserChunk should be called
+		expect(store.updateSessionCursor).toHaveBeenCalledWith("session-1", 1, 1);
+		expect(store.appendUserChunk).toHaveBeenCalledWith(
+			"session-1",
+			"Hello from CLI",
+		);
+	});
 });

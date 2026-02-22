@@ -12,7 +12,6 @@ import {
 	archiveSession,
 	bulkArchiveSessions,
 	cancelSession,
-	createMessageId,
 	createSession,
 	loadSession,
 	reloadSession,
@@ -380,20 +379,6 @@ export function useSessionMutations(store: ChatStoreActions) {
 		},
 	});
 
-	const createMessageIdMutation = useMutation({
-		mutationFn: createMessageId,
-		onError: (mutationError: unknown, variables) => {
-			store.setSending(variables.sessionId, false);
-			store.setCanceling(variables.sessionId, false);
-			store.setAppError(
-				normalizeError(
-					mutationError,
-					createFallbackError(t("errors.messageIdFailed"), "session"),
-				),
-			);
-		},
-	});
-
 	const permissionDecisionMutation = useMutation({
 		mutationFn: sendPermissionDecision,
 		onMutate: (variables) => {
@@ -497,7 +482,6 @@ export function useSessionMutations(store: ChatStoreActions) {
 		setSessionModeMutation,
 		setSessionModelMutation,
 		sendMessageMutation,
-		createMessageIdMutation,
 		permissionDecisionMutation,
 		loadSessionMutation,
 		reloadSessionMutation,
