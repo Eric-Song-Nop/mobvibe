@@ -149,8 +149,8 @@ describe("setupCliHandlers", () => {
 			deviceId: "device-123",
 		});
 		registry.updateSessions("socket-1", [
-			createMockSessionSummary({ sessionId: "session-1" }),
-			createMockSessionSummary({ sessionId: "session-2" }),
+			createMockSessionSummary({ sessionId: "session-1", isAttached: true }),
+			createMockSessionSummary({ sessionId: "session-2", isAttached: true }),
 		]);
 
 		await socketHandlers.disconnect?.("transport close");

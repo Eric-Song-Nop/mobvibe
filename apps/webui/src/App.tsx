@@ -1,4 +1,5 @@
 import { useBetterAuthTauri } from "@daveyplate/better-auth-tauri/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
@@ -140,6 +141,7 @@ function MainApp() {
 		})),
 	);
 
+	const queryClient = useQueryClient();
 	const {
 		sessionsQuery,
 		backendsQuery,
@@ -183,6 +185,10 @@ function MainApp() {
 		createLocalSession: chatActions.createLocalSession,
 		updateSessionCursor: chatActions.updateSessionCursor,
 		resetSessionForRevision: chatActions.resetSessionForRevision,
+		onReconnect: () => {
+			queryClient.invalidateQueries({ queryKey: ["sessions"] });
+			queryClient.invalidateQueries({ queryKey: ["acp-backends"] });
+		},
 	});
 
 	const { machines, selectedMachineId, setSelectedMachineId } =

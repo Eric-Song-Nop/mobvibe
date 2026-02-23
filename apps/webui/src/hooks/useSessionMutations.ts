@@ -28,6 +28,7 @@ import type {
 	PermissionDecisionState,
 	StatusVariant,
 } from "@/lib/chat-store";
+import { useChatStore } from "@/lib/chat-store";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { notifyResponseCompleted } from "@/lib/notifications";
 
@@ -410,9 +411,12 @@ export function useSessionMutations(store: ChatStoreActions) {
 	const loadSessionMutation = useMutation({
 		mutationFn: loadSession,
 		onSuccess: (data) => {
-			// If revision is provided, reset cursor to trigger backfill
+			// Only reset if revision actually changed (avoid wiping backfill results)
 			if (data.revision !== undefined) {
-				store.resetSessionForRevision(data.sessionId, data.revision);
+				const current = useChatStore.getState().sessions[data.sessionId];
+				if (!current || current.revision !== data.revision) {
+					store.resetSessionForRevision(data.sessionId, data.revision);
+				}
 			}
 
 			store.updateSessionMeta(data.sessionId, {
@@ -443,9 +447,12 @@ export function useSessionMutations(store: ChatStoreActions) {
 	const reloadSessionMutation = useMutation({
 		mutationFn: reloadSession,
 		onSuccess: (data) => {
-			// If revision is provided, reset cursor to trigger backfill
+			// Only reset if revision actually changed (avoid wiping backfill results)
 			if (data.revision !== undefined) {
-				store.resetSessionForRevision(data.sessionId, data.revision);
+				const current = useChatStore.getState().sessions[data.sessionId];
+				if (!current || current.revision !== data.revision) {
+					store.resetSessionForRevision(data.sessionId, data.revision);
+				}
 			}
 
 			store.updateSessionMeta(data.sessionId, {

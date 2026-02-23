@@ -389,6 +389,9 @@ export function setupCliHandlers(
 					"cli_disconnected",
 				);
 				for (const session of record.sessions) {
+					// Only emit detached for sessions that were actually attached
+					// (skip discovered sessions that were never attached)
+					if (!session.isAttached) continue;
 					emitToWebui(
 						"session:detached",
 						{

@@ -56,6 +56,8 @@ export type SessionSummary = {
 	worktreeSourceCwd?: string;
 	/** Branch name of the worktree (only for worktree sessions) */
 	worktreeBranch?: string;
+	/** Whether this session is currently attached (agent running) on the CLI */
+	isAttached?: boolean;
 };
 
 /** Sessions changed event payload for incremental sync */

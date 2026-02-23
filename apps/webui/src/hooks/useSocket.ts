@@ -33,6 +33,8 @@ type UseSocketOptions = {
 	setSending?: ChatStoreActions["setSending"];
 	setCanceling?: ChatStoreActions["setCanceling"];
 	finalizeAssistantMessage?: ChatStoreActions["finalizeAssistantMessage"];
+	/** Called on socket reconnect (not the initial connect) */
+	onReconnect?: () => void;
 } & Pick<
 	ChatStoreActions,
 	| "appendAssistantChunk"
@@ -85,6 +87,7 @@ export function useSocket({
 	createLocalSession,
 	updateSessionCursor,
 	resetSessionForRevision,
+	onReconnect,
 }: UseSocketOptions) {
 	const subscribedSessionsRef = useRef<Set<string>>(new Set());
 	const sessionsRef = useRef(sessions);
@@ -399,11 +402,14 @@ export function useSocket({
 	handleSessionAttachedRef.current = (payload: SessionAttachedPayload) => {
 		markSessionAttached(payload);
 
-		// If revision is provided, trigger backfill
+		// If revision is provided, trigger backfill (skip if still loading)
 		if (payload.revision !== undefined) {
 			const session = sessionsRef.current[payload.sessionId];
+			const isLoading =
+				useChatStore.getState().sessions[payload.sessionId]?.isLoading;
 			if (
 				session &&
+				!isLoading &&
 				!initialBackfillTriggeredRef.current.has(payload.sessionId)
 			) {
 				initialBackfillTriggeredRef.current.add(payload.sessionId);
@@ -622,9 +628,13 @@ export function useSocket({
 				subscribedSessionsRef.current.add(sessionId);
 				setStreamError(sessionId, undefined);
 
-				// Trigger initial backfill on subscription
+				// Trigger initial backfill on subscription (skip if still loading)
 				const session = sessions[sessionId];
-				if (session && !initialBackfillTriggeredRef.current.has(sessionId)) {
+				if (
+					session &&
+					!session.isLoading &&
+					!initialBackfillTriggeredRef.current.has(sessionId)
+				) {
 					initialBackfillTriggeredRef.current.add(sessionId);
 					const cursor = getCursor(sessionId);
 					const revision = cursor.revision ?? 1;
@@ -646,10 +656,36 @@ export function useSocket({
 				initialBackfillTriggeredRef.current.delete(sessionId);
 			}
 		}
+
+		// Compensate: trigger backfill for subscribed sessions that finished loading
+		// but haven't had their initial backfill yet (were skipped due to isLoading)
+		for (const sessionId of subscribedSessionsRef.current) {
+			if (!subscribableIds.has(sessionId)) continue;
+			const session = sessions[sessionId];
+			if (
+				session &&
+				!session.isLoading &&
+				!initialBackfillTriggeredRef.current.has(sessionId)
+			) {
+				initialBackfillTriggeredRef.current.add(sessionId);
+				const cursor = getCursor(sessionId);
+				const revision = cursor.revision ?? 1;
+				triggerBackfillRef.current?.(
+					sessionId,
+					revision,
+					cursor.lastAppliedSeq,
+				);
+			}
+		}
 	}, [sessions, setStreamError, cancelBackfill]);
+
+	// Stable ref for onReconnect callback
+	const onReconnectRef = useRef(onReconnect);
+	onReconnectRef.current = onReconnect;
 
 	// Re-subscribe on reconnect
 	useEffect(() => {
+		let isFirstConnect = true;
 		const handleConnect = () => {
 			for (const sessionId of subscribedSessionsRef.current) {
 				gatewaySocket.subscribeToSession(sessionId);
@@ -661,6 +697,12 @@ export function useSocket({
 					const afterSeq = session.lastAppliedSeq ?? 0;
 					triggerBackfillRef.current?.(sessionId, revision, afterSeq);
 				}
+			}
+
+			if (isFirstConnect) {
+				isFirstConnect = false;
+			} else {
+				onReconnectRef.current?.();
 			}
 		};
 
