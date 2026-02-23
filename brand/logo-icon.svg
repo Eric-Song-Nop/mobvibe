@@ -1,0 +1,13 @@
+<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#fdc700"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <!-- Solid gradient background for app icons -->
+  <circle cx="128" cy="128" r="128" fill="url(#bg)"/>
+  <!-- Wavy M -->
+  <path d="M 76,186 V 70 C 86,70 106,200 128,128 C 150,56 170,70 180,70 V 186"
+        fill="none" stroke="#18181b" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

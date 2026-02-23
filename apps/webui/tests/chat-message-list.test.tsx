@@ -207,14 +207,13 @@ describe("ChatMessageList", () => {
 		expect(screen.getByText("Connecting...")).toBeInTheDocument();
 	});
 
-	it("shows start banner when session has no messages", () => {
+	it("shows logo when session has no messages", () => {
 		const session = buildSession({ messages: [] });
 		const { container } = render(
 			<ChatMessageList activeSession={session} onPermissionDecision={noop} />,
 		);
-		const banner = container.querySelector(".whitespace-pre.font-mono");
-		expect(banner).toBeTruthy();
-		expect(banner?.textContent).toContain("██");
+		const logo = container.querySelector('img[src="/logo.svg"]');
+		expect(logo).toBeTruthy();
 	});
 
 	it("renders messages via virtualizer", async () => {
