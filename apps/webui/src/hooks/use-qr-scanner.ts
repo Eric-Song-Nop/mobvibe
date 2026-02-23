@@ -132,8 +132,17 @@ async function startTauriScan(
 		await cancel();
 	};
 
+	// Make the WebView transparent so the native camera preview behind it
+	// is visible. The plugin sets the Android WebView background to
+	// transparent when `windowed: true`, but the HTML/CSS backgrounds
+	// (body, .app-root) would still block the view without this class.
+	document.documentElement.classList.add("qr-scanning");
+
 	try {
-		const result = await scan({ formats: [Format.QRCode] });
+		const result = await scan({
+			formats: [Format.QRCode],
+			windowed: true,
+		});
 		popstateCleanup();
 		popstateCleanup = null;
 		return result?.content ?? null;
@@ -145,6 +154,8 @@ async function startTauriScan(
 			return null;
 		}
 		throw err;
+	} finally {
+		document.documentElement.classList.remove("qr-scanning");
 	}
 }
 

@@ -140,6 +140,15 @@
 	}
 }
 
+/* When the native barcode-scanner camera is active (windowed mode),
+   make all opaque layers transparent so the camera preview behind the
+   Android WebView is visible through the HTML overlay. */
+html.qr-scanning,
+html.qr-scanning body,
+html.qr-scanning .app-root {
+	background: transparent !important;
+}
+
 @keyframes sparkle-breathing {
 	0%,
 	100% {
