@@ -142,6 +142,46 @@ describe("setupCliHandlers", () => {
 		);
 	});
 
+	it("does NOT emit detached for discovered (non-attached) sessions on disconnect", async () => {
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+		registry.updateSessions("socket-1", [
+			createMockSessionSummary({
+				sessionId: "attached-session",
+				isAttached: true,
+			}),
+			createMockSessionSummary({
+				sessionId: "discovered-session",
+				// isAttached not set → should be skipped
+			}),
+		]);
+
+		await socketHandlers.disconnect?.("transport close");
+
+		// Should only emit for the attached session
+		expect(emitToWebui).toHaveBeenCalledTimes(1);
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"session:detached",
+			expect.objectContaining({
+				sessionId: "attached-session",
+				machineId: "machine-1",
+				reason: "cli_disconnect",
+			}),
+			"user-1",
+		);
+		// Should NOT have been called for discovered-session
+		expect(emitToWebui).not.toHaveBeenCalledWith(
+			"session:detached",
+			expect.objectContaining({
+				sessionId: "discovered-session",
+			}),
+			expect.anything(),
+		);
+	});
+
 	it("emits detached events for active sessions on disconnect", async () => {
 		const info = createMockRegistrationInfo({ machineId: "machine-1" });
 		registry.register(socket, info, {

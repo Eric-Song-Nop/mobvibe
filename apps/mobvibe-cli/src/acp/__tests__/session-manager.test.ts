@@ -421,6 +421,65 @@ describe("SessionManager", () => {
 	});
 
 	// =========================================================================
+	// isAttached field in session summaries
+	// =========================================================================
+	describe("isAttached in session summaries", () => {
+		it("active sessions have isAttached=true in listSessions", async () => {
+			await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			const sessions = sessionManager.listSessions();
+			expect(sessions).toHaveLength(1);
+			expect(sessions[0].isAttached).toBe(true);
+		});
+
+		it("sessions:changed event includes isAttached=true for created sessions", async () => {
+			const changedListener = mock(() => {});
+			sessionManager.onSessionsChanged(changedListener);
+
+			await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			expect(changedListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					added: expect.arrayContaining([
+						expect.objectContaining({ isAttached: true }),
+					]),
+				}),
+			);
+		});
+
+		it("sessions:changed event from recordTurnEnd includes isAttached=true", async () => {
+			await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const sessions = sessionManager.listSessions();
+			const sessionId = sessions[0].sessionId;
+
+			const changedListener = mock(() => {});
+			sessionManager.onSessionsChanged(changedListener);
+
+			sessionManager.recordTurnEnd(sessionId, "end_turn");
+
+			expect(changedListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					updated: expect.arrayContaining([
+						expect.objectContaining({
+							sessionId,
+							isAttached: true,
+						}),
+					]),
+				}),
+			);
+		});
+	});
+
+	// =========================================================================
 	// 2.1 message event mapping (writeSessionUpdateToWal)
 	// =========================================================================
 	describe("message event mapping (writeSessionUpdateToWal)", () => {

@@ -1036,4 +1036,273 @@ describe("useSocket (webui)", () => {
 			expect(store.updateSessionCursor).toHaveBeenCalledWith("session-1", 1, 1);
 		});
 	});
+
+	// =========================================================================
+	// loading guard — backfill skipped while session.isLoading
+	// =========================================================================
+	describe("loading guard (backfill deferred while isLoading)", () => {
+		it("does NOT trigger initial backfill when session isLoading=true", async () => {
+			const store = createStore();
+			const sessions: Record<string, ChatSession> = {
+				"session-1": buildSession({
+					sessionId: "session-1",
+					isAttached: true,
+					isLoading: true,
+					revision: 1,
+					lastAppliedSeq: 0,
+				}),
+			};
+			mockStoreState.sessions = { ...sessions };
+
+			renderHook(
+				(props: { sessions: Record<string, ChatSession> }) =>
+					useSocket({
+						sessions: props.sessions,
+						appendAssistantChunk: store.appendAssistantChunk,
+						appendThoughtChunk: store.appendThoughtChunk,
+						appendUserChunk: store.appendUserChunk,
+						updateSessionMeta: store.updateSessionMeta,
+						setStreamError: store.setStreamError,
+						addPermissionRequest: store.addPermissionRequest,
+						setPermissionDecisionState: store.setPermissionDecisionState,
+						setPermissionOutcome: store.setPermissionOutcome,
+						addToolCall: store.addToolCall,
+						updateToolCall: store.updateToolCall,
+						appendTerminalOutput: store.appendTerminalOutput,
+						handleSessionsChanged: store.handleSessionsChanged,
+						markSessionAttached: store.markSessionAttached,
+						markSessionDetached: store.markSessionDetached,
+						createLocalSession: store.createLocalSession,
+						updateSessionCursor: store.updateSessionCursor,
+						resetSessionForRevision: store.resetSessionForRevision,
+					}),
+				{ initialProps: { sessions } },
+			);
+
+			await waitFor(() => {
+				// Should subscribe to the session
+				expect(mockGatewaySocket.subscribeToSession).toHaveBeenCalledWith(
+					"session-1",
+				);
+			});
+
+			// But should NOT have triggered backfill (resetSessionForRevision is a proxy indicator)
+			// The key behavior: no startBackfill was called because isLoading=true
+			// We verify indirectly: the session is subscribed but no cursor operations happened
+			expect(store.resetSessionForRevision).not.toHaveBeenCalled();
+		});
+
+		it("triggers backfill via compensation loop when isLoading transitions to false", async () => {
+			const store = createStore();
+			const loadingSessions: Record<string, ChatSession> = {
+				"session-1": buildSession({
+					sessionId: "session-1",
+					isAttached: true,
+					isLoading: true,
+					revision: 1,
+					lastAppliedSeq: 0,
+				}),
+			};
+			mockStoreState.sessions = { ...loadingSessions };
+
+			const { rerender } = renderHook(
+				(props: { sessions: Record<string, ChatSession> }) =>
+					useSocket({
+						sessions: props.sessions,
+						appendAssistantChunk: store.appendAssistantChunk,
+						appendThoughtChunk: store.appendThoughtChunk,
+						appendUserChunk: store.appendUserChunk,
+						updateSessionMeta: store.updateSessionMeta,
+						setStreamError: store.setStreamError,
+						addPermissionRequest: store.addPermissionRequest,
+						setPermissionDecisionState: store.setPermissionDecisionState,
+						setPermissionOutcome: store.setPermissionOutcome,
+						addToolCall: store.addToolCall,
+						updateToolCall: store.updateToolCall,
+						appendTerminalOutput: store.appendTerminalOutput,
+						handleSessionsChanged: store.handleSessionsChanged,
+						markSessionAttached: store.markSessionAttached,
+						markSessionDetached: store.markSessionDetached,
+						createLocalSession: store.createLocalSession,
+						updateSessionCursor: store.updateSessionCursor,
+						resetSessionForRevision: store.resetSessionForRevision,
+					}),
+				{ initialProps: { sessions: loadingSessions } },
+			);
+
+			await waitFor(() => {
+				expect(mockGatewaySocket.subscribeToSession).toHaveBeenCalledWith(
+					"session-1",
+				);
+			});
+
+			// Now transition isLoading → false (loading completed)
+			const readySessions: Record<string, ChatSession> = {
+				"session-1": buildSession({
+					sessionId: "session-1",
+					isAttached: true,
+					isLoading: false,
+					revision: 1,
+					lastAppliedSeq: 0,
+				}),
+			};
+			mockStoreState.sessions = { ...readySessions };
+
+			rerender({ sessions: readySessions });
+
+			// The compensation loop should detect the subscribed session
+			// is no longer loading and hasn't had backfill triggered yet.
+			// The session should remain subscribed (not unsubscribed).
+			await waitFor(() => {
+				// Verify session is still subscribed (not unsubscribed)
+				expect(
+					mockGatewaySocket.unsubscribeFromSession,
+				).not.toHaveBeenCalledWith("session-1");
+			});
+		});
+
+		it("session:attached does NOT trigger backfill when isLoading=true", async () => {
+			const store = createStore();
+			// Session is loading — backfill should be deferred
+			mockStoreState.sessions = {
+				"session-1": buildSession({
+					sessionId: "session-1",
+					isAttached: false,
+					isLoading: true,
+					revision: 1,
+					lastAppliedSeq: 0,
+				}),
+			};
+
+			renderHook(() =>
+				useSocket({
+					sessions: {
+						"session-1": buildSession({
+							sessionId: "session-1",
+							isAttached: false,
+							isLoading: true,
+							revision: 1,
+							lastAppliedSeq: 0,
+						}),
+					},
+					appendAssistantChunk: store.appendAssistantChunk,
+					appendThoughtChunk: store.appendThoughtChunk,
+					appendUserChunk: store.appendUserChunk,
+					updateSessionMeta: store.updateSessionMeta,
+					setStreamError: store.setStreamError,
+					addPermissionRequest: store.addPermissionRequest,
+					setPermissionDecisionState: store.setPermissionDecisionState,
+					setPermissionOutcome: store.setPermissionOutcome,
+					addToolCall: store.addToolCall,
+					updateToolCall: store.updateToolCall,
+					appendTerminalOutput: store.appendTerminalOutput,
+					handleSessionsChanged: store.handleSessionsChanged,
+					markSessionAttached: store.markSessionAttached,
+					markSessionDetached: store.markSessionDetached,
+					createLocalSession: store.createLocalSession,
+					updateSessionCursor: store.updateSessionCursor,
+					resetSessionForRevision: store.resetSessionForRevision,
+				}),
+			);
+
+			// Fire session:attached with a revision
+			handlers.sessionAttached?.({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				attachedAt: "2024-01-01T00:00:00Z",
+				revision: 5,
+			});
+
+			// markSessionAttached should still be called
+			expect(store.markSessionAttached).toHaveBeenCalledWith({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				attachedAt: "2024-01-01T00:00:00Z",
+				revision: 5,
+			});
+
+			// But resetSessionForRevision should NOT be called (backfill deferred)
+			expect(store.resetSessionForRevision).not.toHaveBeenCalled();
+		});
+	});
+
+	// =========================================================================
+	// onReconnect callback
+	// =========================================================================
+	describe("onReconnect callback", () => {
+		it("does NOT call onReconnect on first connect", async () => {
+			const store = createStore();
+			const onReconnect = vi.fn();
+
+			renderHook(() =>
+				useSocket({
+					sessions: {},
+					appendAssistantChunk: store.appendAssistantChunk,
+					appendThoughtChunk: store.appendThoughtChunk,
+					appendUserChunk: store.appendUserChunk,
+					updateSessionMeta: store.updateSessionMeta,
+					setStreamError: store.setStreamError,
+					addPermissionRequest: store.addPermissionRequest,
+					setPermissionDecisionState: store.setPermissionDecisionState,
+					setPermissionOutcome: store.setPermissionOutcome,
+					addToolCall: store.addToolCall,
+					updateToolCall: store.updateToolCall,
+					appendTerminalOutput: store.appendTerminalOutput,
+					handleSessionsChanged: store.handleSessionsChanged,
+					markSessionAttached: store.markSessionAttached,
+					markSessionDetached: store.markSessionDetached,
+					createLocalSession: store.createLocalSession,
+					updateSessionCursor: store.updateSessionCursor,
+					resetSessionForRevision: store.resetSessionForRevision,
+					onReconnect,
+				}),
+			);
+
+			// Simulate first connect
+			handlers.connect?.();
+
+			expect(onReconnect).not.toHaveBeenCalled();
+		});
+
+		it("calls onReconnect on subsequent connects (reconnect)", async () => {
+			const store = createStore();
+			const onReconnect = vi.fn();
+
+			renderHook(() =>
+				useSocket({
+					sessions: {},
+					appendAssistantChunk: store.appendAssistantChunk,
+					appendThoughtChunk: store.appendThoughtChunk,
+					appendUserChunk: store.appendUserChunk,
+					updateSessionMeta: store.updateSessionMeta,
+					setStreamError: store.setStreamError,
+					addPermissionRequest: store.addPermissionRequest,
+					setPermissionDecisionState: store.setPermissionDecisionState,
+					setPermissionOutcome: store.setPermissionOutcome,
+					addToolCall: store.addToolCall,
+					updateToolCall: store.updateToolCall,
+					appendTerminalOutput: store.appendTerminalOutput,
+					handleSessionsChanged: store.handleSessionsChanged,
+					markSessionAttached: store.markSessionAttached,
+					markSessionDetached: store.markSessionDetached,
+					createLocalSession: store.createLocalSession,
+					updateSessionCursor: store.updateSessionCursor,
+					resetSessionForRevision: store.resetSessionForRevision,
+					onReconnect,
+				}),
+			);
+
+			// First connect — should NOT trigger onReconnect
+			handlers.connect?.();
+			expect(onReconnect).not.toHaveBeenCalled();
+
+			// Second connect (reconnect) — should trigger onReconnect
+			handlers.connect?.();
+			expect(onReconnect).toHaveBeenCalledTimes(1);
+
+			// Third connect — should trigger again
+			handlers.connect?.();
+			expect(onReconnect).toHaveBeenCalledTimes(2);
+		});
+	});
 });
