@@ -4,6 +4,19 @@ import type { ChatSession } from "@/lib/chat-store";
 import { useSessionActivation } from "../useSessionActivation";
 import type { ChatStoreActions } from "../useSessionMutations";
 
+// Mutable store state for useChatStore.getState()
+let mockChatStoreState: { sessions: Record<string, ChatSession> };
+
+vi.mock("@/lib/chat-store", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/lib/chat-store")>();
+	return {
+		...actual,
+		useChatStore: {
+			getState: () => mockChatStoreState,
+		},
+	};
+});
+
 let machinesState: {
 	machines: Record<
 		string,
@@ -102,6 +115,7 @@ const createStore = (): ChatStoreActions =>
 
 describe("useSessionActivation", () => {
 	beforeEach(() => {
+		mockChatStoreState = { sessions: {} };
 		machinesState = {
 			machines: {},
 			updateBackendCapabilities: vi.fn(),
@@ -117,6 +131,7 @@ describe("useSessionActivation", () => {
 		const session = buildSession({
 			isAttached: true,
 		});
+		mockChatStoreState.sessions[session.sessionId] = session;
 
 		const { result } = renderHook(() => useSessionActivation(store));
 
@@ -135,6 +150,7 @@ describe("useSessionActivation", () => {
 			cwd: "/home/user/project",
 			machineId: "machine-1",
 		});
+		mockChatStoreState.sessions[session.sessionId] = session;
 
 		machinesState = {
 			machines: {
@@ -165,6 +181,7 @@ describe("useSessionActivation", () => {
 			machineId: "machine-1",
 			backendId: "backend-1",
 		});
+		mockChatStoreState.sessions[session.sessionId] = session;
 
 		machinesState = {
 			machines: {
@@ -200,6 +217,7 @@ describe("useSessionActivation", () => {
 			machineId: "machine-1",
 			backendId: "backend-1",
 		});
+		mockChatStoreState.sessions[session.sessionId] = session;
 
 		machinesState = {
 			machines: {
@@ -232,6 +250,7 @@ describe("useSessionActivation", () => {
 			machineId: "machine-1",
 			backendId: "backend-1",
 		});
+		mockChatStoreState.sessions[session.sessionId] = session;
 
 		machinesState = {
 			machines: {
@@ -274,6 +293,7 @@ describe("useSessionActivation", () => {
 			backendId: "backend-1",
 			isAttached: true,
 		});
+		mockChatStoreState.sessions[session.sessionId] = session;
 
 		machinesState = {
 			machines: {
@@ -323,6 +343,7 @@ describe("useSessionActivation", () => {
 				},
 			],
 		});
+		mockChatStoreState.sessions[session.sessionId] = session;
 
 		machinesState = {
 			machines: {

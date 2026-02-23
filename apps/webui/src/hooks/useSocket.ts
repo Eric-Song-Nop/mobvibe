@@ -18,7 +18,11 @@ import {
 	type SessionsChangedPayload,
 	type TerminalOutputEvent,
 } from "@/lib/acp";
-import { type ChatSession, useChatStore } from "@/lib/chat-store";
+import {
+	type ChatMessage,
+	type ChatSession,
+	useChatStore,
+} from "@/lib/chat-store";
 import { e2ee } from "@/lib/e2ee";
 import { isErrorDetail } from "@/lib/error-utils";
 import { useMachinesStore } from "@/lib/machines-store";
@@ -55,6 +59,23 @@ type UseSocketOptions = {
 	| "updateSessionCursor"
 	| "resetSessionForRevision"
 >;
+
+/**
+ * Find the last completed (non-streaming) user text message,
+ * stopping at any assistant message to avoid false matches with older history.
+ */
+function findLastCompletedUserMessage(
+	messages: ChatMessage[],
+): { content: string } | undefined {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const msg = messages[i];
+		if (msg.role === "assistant") return undefined;
+		if (msg.role === "user" && msg.kind === "text" && !msg.isStreaming) {
+			return { content: msg.content };
+		}
+	}
+	return undefined;
+}
 
 // Helper to get cursor from store directly (unified source of truth)
 const getCursor = (sessionId: string) => {
@@ -143,6 +164,18 @@ export function useSocket({
 				const notification = event.payload as SessionNotification;
 				const textChunk = extractTextChunk(notification);
 				if (textChunk?.role === "user") {
+					// Dedup: skip if the last completed user message has identical content
+					// (handles reconnect backfill replaying already-optimistically-added messages)
+					const currentSession =
+						useChatStore.getState().sessions[event.sessionId];
+					if (currentSession) {
+						const lastUserMsg = findLastCompletedUserMessage(
+							currentSession.messages,
+						);
+						if (lastUserMsg && lastUserMsg.content === textChunk.text) {
+							break;
+						}
+					}
 					appendUserChunk(event.sessionId, textChunk.text);
 				}
 				break;
@@ -211,11 +244,22 @@ export function useSocket({
 			}
 			case "permission_request": {
 				const payload = event.payload as PermissionRequestPayload;
+				// Check if this permission request already exists (dedup with live socket path)
+				const prSession = useChatStore.getState().sessions[event.sessionId];
+				const alreadyExists = prSession?.messages.some(
+					(m) => m.kind === "permission" && m.requestId === payload.requestId,
+				);
 				addPermissionRequest(event.sessionId, {
 					requestId: payload.requestId,
 					toolCall: payload.toolCall,
 					options: payload.options ?? [],
 				});
+				// Notify only for genuinely new permission requests
+				if (!alreadyExists) {
+					notifyPermissionRequest(payload, {
+						sessions: sessionsRef.current,
+					});
+				}
 				break;
 			}
 			case "permission_result": {
@@ -388,13 +432,13 @@ export function useSocket({
 		[startBackfill],
 	);
 
-	// Trigger backfill helper
+	// Trigger backfill helper — delegates directly to startBackfill which
+	// already handles cancel-and-restart when a backfill is in progress.
 	triggerBackfillRef.current = (
 		sessionId: string,
 		revision: number,
 		afterSeq: number,
 	) => {
-		if (isBackfilling(sessionId)) return;
 		startBackfill(sessionId, revision, afterSeq);
 	};
 
@@ -428,12 +472,19 @@ export function useSocket({
 	};
 
 	handlePermissionRequestRef.current = (payload: PermissionRequestPayload) => {
+		const currentSession = useChatStore.getState().sessions[payload.sessionId];
+		const alreadyExists = currentSession?.messages.some(
+			(m) => m.kind === "permission" && m.requestId === payload.requestId,
+		);
 		addPermissionRequest(payload.sessionId, {
 			requestId: payload.requestId,
 			toolCall: payload.toolCall,
 			options: payload.options ?? [],
 		});
-		notifyPermissionRequest(payload, { sessions: sessionsRef.current });
+		// Notify only for genuinely new permission requests (dedup with WAL backfill path)
+		if (!alreadyExists) {
+			notifyPermissionRequest(payload, { sessions: sessionsRef.current });
+		}
 	};
 
 	handlePermissionResultRef.current = (payload: PermissionDecisionPayload) => {
