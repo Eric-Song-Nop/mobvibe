@@ -415,6 +415,211 @@ describe("useChatStore", () => {
 		});
 	});
 
+	describe("syncSessions applies isAttached from server summary", () => {
+		it("marks session attached when summary has isAttached=true", () => {
+			useChatStore.getState().createLocalSession("session-1", {
+				title: "Local Session",
+			});
+
+			const serverSession = createMockSessionSummary({
+				sessionId: "session-1",
+				title: "Server Session",
+				isAttached: true,
+			});
+
+			useChatStore.getState().syncSessions([serverSession]);
+
+			const session = useChatStore.getState().sessions["session-1"];
+			expect(session.isAttached).toBe(true);
+			expect(session.attachedAt).toBeDefined();
+			expect(session.detachedAt).toBeUndefined();
+			expect(session.detachedReason).toBeUndefined();
+		});
+
+		it("does NOT mark session attached when summary lacks isAttached", () => {
+			useChatStore.getState().createLocalSession("session-1", {
+				title: "Local Session",
+			});
+
+			const serverSession = createMockSessionSummary({
+				sessionId: "session-1",
+				title: "Discovered Session",
+				// isAttached not set (undefined)
+			});
+
+			useChatStore.getState().syncSessions([serverSession]);
+
+			const session = useChatStore.getState().sessions["session-1"];
+			expect(session.isAttached).toBe(false);
+		});
+
+		it("preserves existing attachedAt when already set", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("session-1", { title: "Local" });
+			store.markSessionAttached({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				attachedAt: "2024-06-01T00:00:00Z",
+			});
+
+			const serverSession = createMockSessionSummary({
+				sessionId: "session-1",
+				title: "Updated",
+				isAttached: true,
+			});
+
+			useChatStore.getState().syncSessions([serverSession]);
+
+			const session = useChatStore.getState().sessions["session-1"];
+			expect(session.isAttached).toBe(true);
+			expect(session.attachedAt).toBe("2024-06-01T00:00:00Z");
+		});
+
+		it("creates new session with attached state from summary", () => {
+			const serverSession = createMockSessionSummary({
+				sessionId: "new-session",
+				title: "New Attached",
+				isAttached: true,
+				machineId: "machine-1",
+			});
+
+			useChatStore.getState().syncSessions([serverSession]);
+
+			const session = useChatStore.getState().sessions["new-session"];
+			expect(session).toBeTruthy();
+			// New sessions are created via createSessionState which defaults isAttached=false
+			// then attached fields are spread on top if isAttached=true
+			expect(session.isAttached).toBe(true);
+			expect(session.attachedAt).toBeDefined();
+		});
+	});
+
+	describe("handleSessionsChanged applies isAttached", () => {
+		it("marks added session as attached when isAttached=true", () => {
+			useChatStore.getState().createLocalSession("session-1", {
+				title: "Existing",
+			});
+
+			useChatStore.getState().handleSessionsChanged({
+				added: [
+					createMockSessionSummary({
+						sessionId: "session-1",
+						title: "Updated",
+						isAttached: true,
+					}),
+				],
+				updated: [],
+				removed: [],
+			});
+
+			const session = useChatStore.getState().sessions["session-1"];
+			expect(session.isAttached).toBe(true);
+			expect(session.attachedAt).toBeDefined();
+			expect(session.detachedAt).toBeUndefined();
+		});
+
+		it("does NOT mark added session as attached when isAttached is absent", () => {
+			useChatStore.getState().createLocalSession("session-1", {
+				title: "Existing",
+			});
+
+			useChatStore.getState().handleSessionsChanged({
+				added: [
+					createMockSessionSummary({
+						sessionId: "session-1",
+						title: "Discovered",
+					}),
+				],
+				updated: [],
+				removed: [],
+			});
+
+			const session = useChatStore.getState().sessions["session-1"];
+			expect(session.isAttached).toBe(false);
+		});
+
+		it("marks updated session as attached when isAttached=true", () => {
+			useChatStore.getState().createLocalSession("session-1", {
+				title: "Existing",
+			});
+
+			useChatStore.getState().handleSessionsChanged({
+				added: [],
+				updated: [
+					createMockSessionSummary({
+						sessionId: "session-1",
+						title: "Updated",
+						isAttached: true,
+					}),
+				],
+				removed: [],
+			});
+
+			const session = useChatStore.getState().sessions["session-1"];
+			expect(session.isAttached).toBe(true);
+			expect(session.attachedAt).toBeDefined();
+			expect(session.detachedAt).toBeUndefined();
+		});
+
+		it("does NOT mark updated session as attached when isAttached is absent", () => {
+			useChatStore.getState().createLocalSession("session-1", {
+				title: "Existing",
+			});
+
+			useChatStore.getState().handleSessionsChanged({
+				added: [],
+				updated: [
+					createMockSessionSummary({
+						sessionId: "session-1",
+						title: "Updated",
+					}),
+				],
+				removed: [],
+			});
+
+			const session = useChatStore.getState().sessions["session-1"];
+			expect(session.isAttached).toBe(false);
+		});
+
+		it("clears detached fields when re-attaching via updated summary", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("session-1", { title: "Test" });
+			store.markSessionAttached({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				attachedAt: "2024-01-01T00:00:00Z",
+			});
+			store.markSessionDetached({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				detachedAt: "2024-01-01T01:00:00Z",
+				reason: "cli_disconnect",
+			});
+
+			let session = useChatStore.getState().sessions["session-1"];
+			expect(session.isAttached).toBe(false);
+			expect(session.detachedAt).toBeDefined();
+			expect(session.detachedReason).toBe("cli_disconnect");
+
+			useChatStore.getState().handleSessionsChanged({
+				added: [],
+				updated: [
+					createMockSessionSummary({
+						sessionId: "session-1",
+						title: "Reconnected",
+						isAttached: true,
+					}),
+				],
+				removed: [],
+			});
+
+			session = useChatStore.getState().sessions["session-1"];
+			expect(session.isAttached).toBe(true);
+			expect(session.detachedAt).toBeUndefined();
+			expect(session.detachedReason).toBeUndefined();
+		});
+	});
+
 	describe("syncSessions (extended)", () => {
 		it("updates existing session with new metadata", () => {
 			useChatStore.getState().createLocalSession("session-1", {

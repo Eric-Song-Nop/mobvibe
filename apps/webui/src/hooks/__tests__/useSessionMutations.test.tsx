@@ -7,6 +7,24 @@ import type { ContentBlock } from "@/lib/acp";
 import * as apiModule from "@/lib/api";
 import { useSessionMutations } from "../useSessionMutations";
 
+// Mutable store state for useChatStore.getState()
+const mockChatStoreState = vi.hoisted(
+	() =>
+		({
+			sessions: {} as Record<string, { revision?: number }>,
+		}) as { sessions: Record<string, { revision?: number }> },
+);
+
+vi.mock("@/lib/chat-store", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/lib/chat-store")>();
+	return {
+		...actual,
+		useChatStore: {
+			getState: () => mockChatStoreState,
+		},
+	};
+});
+
 // Mock the API module
 vi.mock("@/lib/api", async () => {
 	const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -81,6 +99,7 @@ describe("useSessionMutations", () => {
 			},
 		});
 		mockStore = createMockStore();
+		mockChatStoreState.sessions = {};
 		vi.clearAllMocks();
 	});
 
@@ -488,6 +507,213 @@ describe("useSessionMutations", () => {
 
 			// Should not call finalizeAssistantMessage with undefined
 			// This test verifies the onSettled logic handles undefined correctly
+		});
+	});
+
+	describe("loadSessionMutation (conditional reset)", () => {
+		const mockLoadResponse = {
+			sessionId: "session-1",
+			title: "Loaded Session",
+			backendId: "backend-1",
+			backendLabel: "Backend 1",
+			createdAt: "2025-01-01T00:00:00Z",
+			updatedAt: "2025-01-01T00:00:00Z",
+			revision: 5,
+		};
+
+		it("resets session when revision differs from current", async () => {
+			// Current session has revision 3, server returns 5
+			mockChatStoreState.sessions = {
+				"session-1": { revision: 3 },
+			};
+
+			vi.mocked(apiModule.loadSession).mockResolvedValue(mockLoadResponse);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.loadSessionMutation.mutateAsync({
+				sessionId: "session-1",
+				cwd: "/project",
+				backendId: "backend-1",
+			});
+
+			expect(mockStore.resetSessionForRevision).toHaveBeenCalledWith(
+				"session-1",
+				5,
+			);
+		});
+
+		it("does NOT reset when revision matches current", async () => {
+			// Current session already has revision 5
+			mockChatStoreState.sessions = {
+				"session-1": { revision: 5 },
+			};
+
+			vi.mocked(apiModule.loadSession).mockResolvedValue(mockLoadResponse);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.loadSessionMutation.mutateAsync({
+				sessionId: "session-1",
+				cwd: "/project",
+				backendId: "backend-1",
+			});
+
+			expect(mockStore.resetSessionForRevision).not.toHaveBeenCalled();
+		});
+
+		it("resets when session does not exist locally", async () => {
+			// No local session
+			mockChatStoreState.sessions = {};
+
+			vi.mocked(apiModule.loadSession).mockResolvedValue(mockLoadResponse);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.loadSessionMutation.mutateAsync({
+				sessionId: "session-1",
+				cwd: "/project",
+				backendId: "backend-1",
+			});
+
+			expect(mockStore.resetSessionForRevision).toHaveBeenCalledWith(
+				"session-1",
+				5,
+			);
+		});
+
+		it("does NOT reset when response has no revision", async () => {
+			const noRevisionResponse = {
+				...mockLoadResponse,
+				revision: undefined,
+			};
+
+			vi.mocked(apiModule.loadSession).mockResolvedValue(
+				noRevisionResponse as any,
+			);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.loadSessionMutation.mutateAsync({
+				sessionId: "session-1",
+				cwd: "/project",
+				backendId: "backend-1",
+			});
+
+			expect(mockStore.resetSessionForRevision).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("reloadSessionMutation (conditional reset)", () => {
+		const mockReloadResponse = {
+			sessionId: "session-1",
+			title: "Reloaded Session",
+			backendId: "backend-1",
+			backendLabel: "Backend 1",
+			createdAt: "2025-01-01T00:00:00Z",
+			updatedAt: "2025-01-01T00:00:00Z",
+			revision: 7,
+		};
+
+		it("resets session when revision differs from current", async () => {
+			mockChatStoreState.sessions = {
+				"session-1": { revision: 4 },
+			};
+
+			vi.mocked(apiModule.reloadSession).mockResolvedValue(mockReloadResponse);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.reloadSessionMutation.mutateAsync({
+				sessionId: "session-1",
+				cwd: "/project",
+				backendId: "backend-1",
+			});
+
+			expect(mockStore.resetSessionForRevision).toHaveBeenCalledWith(
+				"session-1",
+				7,
+			);
+		});
+
+		it("does NOT reset when revision matches current", async () => {
+			mockChatStoreState.sessions = {
+				"session-1": { revision: 7 },
+			};
+
+			vi.mocked(apiModule.reloadSession).mockResolvedValue(mockReloadResponse);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.reloadSessionMutation.mutateAsync({
+				sessionId: "session-1",
+				cwd: "/project",
+				backendId: "backend-1",
+			});
+
+			expect(mockStore.resetSessionForRevision).not.toHaveBeenCalled();
+		});
+
+		it("resets when session does not exist locally", async () => {
+			mockChatStoreState.sessions = {};
+
+			vi.mocked(apiModule.reloadSession).mockResolvedValue(mockReloadResponse);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.reloadSessionMutation.mutateAsync({
+				sessionId: "session-1",
+				cwd: "/project",
+				backendId: "backend-1",
+			});
+
+			expect(mockStore.resetSessionForRevision).toHaveBeenCalledWith(
+				"session-1",
+				7,
+			);
+		});
+
+		it("still updates session meta even when revision matches", async () => {
+			mockChatStoreState.sessions = {
+				"session-1": { revision: 7 },
+			};
+
+			vi.mocked(apiModule.reloadSession).mockResolvedValue(mockReloadResponse);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.reloadSessionMutation.mutateAsync({
+				sessionId: "session-1",
+				cwd: "/project",
+				backendId: "backend-1",
+			});
+
+			// Should NOT reset but SHOULD still update meta
+			expect(mockStore.resetSessionForRevision).not.toHaveBeenCalled();
+			expect(mockStore.updateSessionMeta).toHaveBeenCalledWith(
+				"session-1",
+				expect.objectContaining({
+					updatedAt: "2025-01-01T00:00:00Z",
+				}),
+			);
+			expect(mockStore.setActiveSessionId).toHaveBeenCalledWith("session-1");
+			expect(mockStore.setAppError).toHaveBeenCalledWith(undefined);
 		});
 	});
 });
