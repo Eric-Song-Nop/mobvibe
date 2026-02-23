@@ -118,6 +118,13 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 		<div className="flex min-h-dvh items-center justify-center bg-muted/40 p-4">
 			<Card className="w-full max-w-md">
 				<CardHeader className="text-center">
+					<div className="flex justify-center mb-2">
+						<img
+							src="/logo.svg"
+							alt={t("common.appName")}
+							className="size-12"
+						/>
+					</div>
 					<CardTitle className="text-xl">
 						{mode === "login" ? t("auth.signIn") : t("auth.createAccount")}
 					</CardTitle>

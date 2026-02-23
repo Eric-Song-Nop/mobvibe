@@ -707,8 +707,9 @@ function TauriPairHandler() {
 
 function RoutePending() {
 	return (
-		<div className="text-muted-foreground flex min-h-dvh items-center justify-center bg-muted/40">
-			Loading…
+		<div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-muted/40">
+			<img src="/logo.svg" alt="Mobvibe" className="size-10 animate-pulse" />
+			<span className="text-muted-foreground text-sm">Loading…</span>
 		</div>
 	);
 }
@@ -726,8 +727,13 @@ export function App() {
 	if (isLoading) {
 		return (
 			<ThemeProvider>
-				<div className="flex min-h-dvh items-center justify-center bg-muted/40">
-					<div className="text-muted-foreground">Loading…</div>
+				<div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-muted/40">
+					<img
+						src="/logo.svg"
+						alt="Mobvibe"
+						className="size-10 animate-pulse"
+					/>
+					<div className="text-muted-foreground text-sm">Loading…</div>
 				</div>
 			</ThemeProvider>
 		);
