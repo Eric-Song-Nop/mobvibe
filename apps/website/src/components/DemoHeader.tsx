@@ -33,6 +33,7 @@ export function DemoHeader({
 					<span className="sr-only">{t("header.toggleMenu")}</span>
 				</Button>
 
+				<img src="/logo.svg" alt="" className="size-5" aria-hidden="true" />
 				<span className="text-sm font-medium">{t("common.appName")}</span>
 				{activeFeatureTitle && (
 					<>
