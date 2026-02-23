@@ -1,6 +1,10 @@
 import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import type { ChatMessage, ChatSession } from "@/lib/chat-store";
+import {
+	type ChatMessage,
+	type ChatSession,
+	useChatStore,
+} from "@/lib/chat-store";
 import { createFallbackError } from "@/lib/error-utils";
 import { getBackendCapability, useMachinesStore } from "@/lib/machines-store";
 import { gatewaySocket } from "@/lib/socket";
@@ -25,71 +29,76 @@ export function useSessionActivation(store: ChatStoreActions) {
 		async (session: ChatSession, options?: { force?: boolean }) => {
 			const force = options?.force === true;
 
-			if (session.isAttached && !force) {
-				store.setActiveSessionId(session.sessionId);
+			// Read fresh state from store to avoid stale closure/props
+			// (prevents concurrent mutations on rapid double-click)
+			const fresh = useChatStore.getState().sessions[session.sessionId];
+			if (!fresh) return;
+
+			if (fresh.isAttached && !force) {
+				store.setActiveSessionId(fresh.sessionId);
 				return;
 			}
 
-			if (session.isLoading) {
+			if (fresh.isLoading) {
 				return;
 			}
 
-			if (!session.cwd || !session.machineId) {
+			if (!fresh.cwd || !fresh.machineId) {
 				return;
 			}
 
-			const machine = machines[session.machineId];
+			const machine = machines[fresh.machineId];
 			if (!machine?.connected) {
 				store.setError(
-					session.sessionId,
+					fresh.sessionId,
 					createFallbackError(t("errors.cliOffline"), "service"),
 				);
 				return;
 			}
 
 			// Per-backend capability check: false → known unsupported, undefined → unknown (proceed optimistically)
-			const loadCap = getBackendCapability(machine, session.backendId, "load");
+			const loadCap = getBackendCapability(machine, fresh.backendId, "load");
 			if (loadCap === false) {
 				store.setError(
-					session.sessionId,
+					fresh.sessionId,
 					createFallbackError(t("errors.sessionLoadNotSupported"), "session"),
 				);
 				return;
 			}
 			// loadCap === true or undefined → proceed, server validates
 
-			if (!session.backendId) {
+			if (!fresh.backendId) {
 				store.setError(
-					session.sessionId,
+					fresh.sessionId,
 					createFallbackError(t("errors.missingBackendId"), "session"),
 				);
 				return;
 			}
 
 			const params = {
-				sessionId: session.sessionId,
-				cwd: session.cwd,
-				backendId: session.backendId,
-				machineId: session.machineId,
+				sessionId: fresh.sessionId,
+				cwd: fresh.cwd,
+				backendId: fresh.backendId,
+				machineId: fresh.machineId,
 			};
 
-			store.setSessionLoading(session.sessionId, true);
-			const backupMessages: ChatMessage[] = [...session.messages];
-			const backupLastAppliedSeq = session.lastAppliedSeq;
-			store.clearSessionMessages(session.sessionId);
-			gatewaySocket.subscribeToSession(session.sessionId);
+			store.setSessionLoading(fresh.sessionId, true);
+			const backupMessages: ChatMessage[] = [...fresh.messages];
+			const backupLastAppliedSeq = fresh.lastAppliedSeq;
+			store.clearSessionMessages(fresh.sessionId);
+			gatewaySocket.subscribeToSession(fresh.sessionId);
 
 			try {
 				const mutation = force ? reloadSessionMutation : loadSessionMutation;
 				await mutation.mutateAsync(params);
-				store.setActiveSessionId(session.sessionId);
+				store.setActiveSessionId(fresh.sessionId);
 			} catch {
-				store.restoreSessionMessages(session.sessionId, backupMessages, {
+				store.restoreSessionMessages(fresh.sessionId, backupMessages, {
 					lastAppliedSeq: backupLastAppliedSeq,
 				});
-				gatewaySocket.unsubscribeFromSession(session.sessionId);
+				gatewaySocket.unsubscribeFromSession(fresh.sessionId);
 			} finally {
-				store.setSessionLoading(session.sessionId, false);
+				store.setSessionLoading(fresh.sessionId, false);
 			}
 		},
 		[loadSessionMutation, reloadSessionMutation, machines, store, t],
