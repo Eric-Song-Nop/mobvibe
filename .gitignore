@@ -11,6 +11,10 @@ dist-bin/
 # Tree-sitter WASM files (copied during postinstall)
 apps/webui/public/*.wasm
 
+# Brand assets copied during postinstall (source is brand/)
+apps/webui/public/logo.svg
+apps/website/public/logo.svg
+
 # Daemon files
 .mobvibe/
 

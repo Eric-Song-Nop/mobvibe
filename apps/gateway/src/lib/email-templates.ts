@@ -35,6 +35,7 @@ const wrapTemplate = (content: string): string => `
   <div class="container">
     <div class="card">
       <div class="logo">
+        <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" width="48" height="48" style="vertical-align:middle;margin-right:8px"><circle cx="128" cy="128" r="128" fill="#fdc700"/><path fill="#18181b" d="M53,68h30v120h-30z M173,68h30v120h-30z M83,83h15v15h-15z M158,83h15v15h-15z M83,98h30v15h-30z M143,98h30v15h-30z M98,113h60v15h-60z M113,128h30v15h-30z"/></svg>
         <span class="logo-text">Mobvibe</span>
       </div>
       ${content}
