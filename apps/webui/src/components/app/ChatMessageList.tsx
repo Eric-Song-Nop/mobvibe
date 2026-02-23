@@ -162,10 +162,15 @@ export const ChatMessageList = forwardRef<
 					!activeSession.isLoading &&
 					activeSession.messages.length === 0 ? (
 						<div
-							className="text-muted-foreground mt-8 text-center text-sm whitespace-pre font-mono"
+							className="flex flex-1 items-center justify-center opacity-30"
 							aria-live="polite"
 						>
-							{t("chat.startConversation")}
+							<img
+								src="/logo.svg"
+								alt={t("common.appName")}
+								className="h-20 w-20"
+								draggable={false}
+							/>
 						</div>
 					) : null}
 					<div

@@ -39,7 +39,7 @@
 		"welcomeSelectMachine": "Select a machine from the sidebar to get started.",
 		"welcomeCreateSession": "Create a session to start chatting.",
 		"createSession": "Create Session",
-		"startConversation": "██   ██  █████  ██████  ██   ██  ███████  ██████  ███████\n███ ███  ██   ██  ██   ██  ██   ██   ███   ██   ██  ██     \n██ █ ██  ██   ██  ██████  ██   ██   ███   ██████  ██████ \n██   ██  ██   ██  ██   ██   ██ ██    ███   ██   ██  ██     \n██   ██   █████   ██████    ███   ███████  ██████  ███████\n ░░░░░░   ░░░░░   ░░░░░░     ░░     ░░░░░░   ░░░░░   ░░░░  ",
+		"startConversation": "",
 		"noMatchingCommand": "No matching commands",
 		"noMatchingResource": "No matching files",
 		"modeLabel": "Mode",

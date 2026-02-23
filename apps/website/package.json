@@ -11,7 +11,8 @@
 		"format": "biome format --write .",
 		"format:check": "biome format .",
 		"lint": "biome check --write .",
-		"lint:check": "biome check ."
+		"lint:check": "biome check .",
+		"postinstall": "node scripts/postinstall.mjs"
 	},
 	"dependencies": {
 		"@fontsource-variable/jetbrains-mono": "^5.2.8",

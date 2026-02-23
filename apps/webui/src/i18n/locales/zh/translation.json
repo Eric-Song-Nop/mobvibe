@@ -39,7 +39,7 @@
 		"welcomeSelectMachine": "请从左侧栏选择一台机器以开始使用。",
 		"welcomeCreateSession": "创建一个对话以开始聊天。",
 		"createSession": "创建对话",
-		"startConversation": "██   ██  █████  ██████  ██   ██  ███████  ██████  ███████\n███ ███  ██   ██  ██   ██  ██   ██   ███   ██   ██  ██     \n██ █ ██  ██   ██  ██████  ██   ██   ███   ██████  ██████ \n██   ██  ██   ██  ██   ██   ██ ██    ███   ██   ██  ██     \n██   ██   █████   ██████    ███   ███████  ██████  ███████\n ░░░░░░   ░░░░░   ░░░░░░     ░░     ░░░░░░   ░░░░░   ░░░░  ",
+		"startConversation": "",
 		"noMatchingCommand": "没有匹配的命令",
 		"noMatchingResource": "没有匹配的文件",
 		"modeLabel": "模式",
