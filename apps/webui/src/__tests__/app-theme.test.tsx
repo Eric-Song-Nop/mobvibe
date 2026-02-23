@@ -61,6 +61,17 @@ vi.mock("@/lib/chat-store", async (importOriginal) => {
 	};
 });
 
+vi.mock("@tanstack/react-query", async (importOriginal) => {
+	const original =
+		await importOriginal<typeof import("@tanstack/react-query")>();
+	return {
+		...original,
+		useQueryClient: () => ({
+			invalidateQueries: vi.fn(),
+		}),
+	};
+});
+
 vi.mock("@/hooks/useSessionQueries", () => ({
 	useSessionQueries: () => ({
 		sessionsQuery: {

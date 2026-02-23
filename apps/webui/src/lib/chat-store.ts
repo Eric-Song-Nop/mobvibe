@@ -682,6 +682,17 @@ export const useChatStore = create<ChatState>()(
 					for (const added of payload.added) {
 						const existing = nextSessions[added.sessionId];
 						if (existing) {
+							// Apply isAttached from server summary
+							const isAttachedVal = added.isAttached === true;
+							const attachedFieldsVal = isAttachedVal
+								? {
+										isAttached: true as const,
+										attachedAt: existing.attachedAt ?? new Date().toISOString(),
+										detachedAt: undefined,
+										detachedReason: undefined,
+									}
+								: {};
+
 							nextSessions[added.sessionId] = {
 								...existing,
 								title: added.title ?? existing.title,
@@ -705,6 +716,7 @@ export const useChatStore = create<ChatState>()(
 								worktreeSourceCwd:
 									added.worktreeSourceCwd ?? existing.worktreeSourceCwd,
 								worktreeBranch: added.worktreeBranch ?? existing.worktreeBranch,
+								...attachedFieldsVal,
 							};
 						} else {
 							nextSessions[added.sessionId] = createSessionState(
@@ -733,6 +745,17 @@ export const useChatStore = create<ChatState>()(
 					for (const updated of payload.updated) {
 						const existing = nextSessions[updated.sessionId];
 						if (existing) {
+							// Apply isAttached from server summary
+							const isAttachedUpd = updated.isAttached === true;
+							const attachedFieldsUpd = isAttachedUpd
+								? {
+										isAttached: true as const,
+										attachedAt: existing.attachedAt ?? new Date().toISOString(),
+										detachedAt: undefined,
+										detachedReason: undefined,
+									}
+								: {};
+
 							nextSessions[updated.sessionId] = {
 								...existing,
 								title: updated.title ?? existing.title,
@@ -758,6 +781,7 @@ export const useChatStore = create<ChatState>()(
 									updated.worktreeSourceCwd ?? existing.worktreeSourceCwd,
 								worktreeBranch:
 									updated.worktreeBranch ?? existing.worktreeBranch,
+								...attachedFieldsUpd,
 							};
 						}
 					}
@@ -842,6 +866,17 @@ export const useChatStore = create<ChatState>()(
 								worktreeBranch: summary.worktreeBranch,
 							});
 
+						// Apply isAttached from server summary
+						const isAttached = summary.isAttached === true;
+						const attachedFields = isAttached
+							? {
+									isAttached: true as const,
+									attachedAt: existing.attachedAt ?? new Date().toISOString(),
+									detachedAt: undefined,
+									detachedReason: undefined,
+								}
+							: {};
+
 						nextSessions[summary.sessionId] = {
 							...existing,
 							title: summary.title ?? existing.title,
@@ -865,6 +900,7 @@ export const useChatStore = create<ChatState>()(
 							worktreeSourceCwd:
 								summary.worktreeSourceCwd ?? existing.worktreeSourceCwd,
 							worktreeBranch: summary.worktreeBranch ?? existing.worktreeBranch,
+							...attachedFields,
 						};
 					});
 

@@ -1674,6 +1674,7 @@ export class SessionManager {
 			_meta: record._meta,
 			worktreeSourceCwd: record.worktreeSourceCwd,
 			worktreeBranch: record.worktreeBranch,
+			isAttached: true,
 		};
 	}
 }
