@@ -40,54 +40,12 @@ jobs:
         run: npm publish --access public --provenance
         working-directory: apps/mobvibe-cli
 
-  cli-bin:
-    needs: ci
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: bun-linux-x64
-            name: mobvibe-linux-x64
-          - os: macos-latest
-            target: bun-darwin-arm64
-            name: mobvibe-macos-arm64
-          - os: windows-latest
-            target: bun-windows-x64
-            name: mobvibe-windows-x64.exe
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: oven-sh/setup-bun@v2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - name: Build CLI single binary
-        run: pnpm -C apps/mobvibe-cli build:bin
-        env:
-          MOBVIBE_BUN_TARGET: ${{ matrix.target }}
-          MOBVIBE_BIN_OUTFILE: dist-bin/${{ matrix.name }}
-      - name: Upload CLI binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: cli-bin-${{ matrix.name }}
-          path: apps/mobvibe-cli/dist-bin/${{ matrix.name }}
-          if-no-files-found: error
-
   release:
-    needs: [ci, publish, cli-bin]
+    needs: [ci, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: cli-bin-*
-          path: dist
-          merge-multiple: true
       - uses: actions/download-artifact@v4
         with:
           name: tauri-android
@@ -101,7 +59,4 @@ jobs:
           files: |
             dist/mobvibe-*.apk
             dist/mobvibe-*.aab
-            dist/mobvibe-linux-x64
-            dist/mobvibe-macos-arm64
-            dist/mobvibe-windows-x64.exe
           generate_release_notes: true
