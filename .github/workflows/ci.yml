@@ -114,7 +114,7 @@ jobs:
           echo "password=${{ secrets.ANDROID_KEY_PASSWORD }}" >> keystore.properties
           echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
       - name: Build Android (Tauri)
-        run: pnpm -C apps/webui exec tauri android build --target aarch64
+        run: pnpm -C apps/webui exec tauri android build --target aarch64 --apk
         env:
           VITE_GATEWAY_URL: https://api.mobvibe.net
       - name: Prepare Android artifacts
@@ -127,11 +127,6 @@ jobs:
           apk=$(find apps/webui/src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -path "*release*" ! -name "*unsigned*" | head -1)
           if [ -n "$apk" ]; then
             cp "$apk" "dist/mobvibe-${VERSION}.apk"
-          fi
-          # Copy and rename AAB
-          aab=$(find apps/webui/src-tauri/gen/android/app/build/outputs/bundle -name "*.aab" -path "*release*" | head -1)
-          if [ -n "$aab" ]; then
-            cp "$aab" "dist/mobvibe-${VERSION}.aab"
           fi
           ls -la dist/
       - name: Upload Android artifacts
