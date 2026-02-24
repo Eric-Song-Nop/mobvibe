@@ -373,8 +373,9 @@ export function useSocket({
 					const buf = encryptedBufferRef.current.get(sessionId) ?? [];
 					buf.push(rawEvent);
 					encryptedBufferRef.current.set(sessionId, buf);
-					// Still advance cursor so backfill doesn't re-fetch these seqs
-					updateSessionCursor(sessionId, rawEvent.revision, rawEvent.seq);
+					// Do NOT advance cursor — cursor should only reflect actually
+					// processed events. When DEK arrives, onDekReady will replay
+					// buffered events through handleSessionEventRef normally.
 					continue;
 				}
 
@@ -437,16 +438,19 @@ export function useSocket({
 	});
 
 	const syncSessionHistory = useCallback(
-		(sessionId: string, options?: { fromStart?: boolean }) => {
+		(sessionId: string) => {
 			const session = useChatStore.getState().sessions[sessionId];
-			if (!session) {
-				return;
-			}
+			if (!session || session.sending) return;
+
 			const revision = session.revision ?? 1;
-			const afterSeq = options?.fromStart ? 0 : (session.lastAppliedSeq ?? 0);
-			startBackfill(sessionId, revision, afterSeq);
+
+			// Full re-sync: clear all buffers, reset messages, replay from seq 0
+			pendingEventsRef.current.delete(sessionId);
+			encryptedBufferRef.current.delete(sessionId);
+			resetSessionForRevision(sessionId, revision);
+			startBackfill(sessionId, revision, 0);
 		},
-		[startBackfill],
+		[startBackfill, resetSessionForRevision],
 	);
 
 	// Trigger backfill helper — delegates directly to startBackfill which
@@ -780,6 +784,12 @@ export function useSocket({
 	useEffect(() => {
 		let isFirstConnect = true;
 		const handleConnect = () => {
+			// Reset backfill tracking — stale refs from previous connection
+			// would block session:attached from triggering fresh backfill
+			for (const sessionId of subscribedSessionsRef.current) {
+				initialBackfillTriggeredRef.current.delete(sessionId);
+			}
+
 			for (const sessionId of subscribedSessionsRef.current) {
 				gatewaySocket.subscribeToSession(sessionId);
 
