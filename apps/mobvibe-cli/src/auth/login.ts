@@ -96,7 +96,6 @@ function readPassword(prompt: string): Promise<string> {
 export async function login(): Promise<LoginResult> {
 	await initCrypto();
 
-	logger.info("login_prompt_start");
 	console.log("Mobvibe E2EE Login\n");
 
 	const rl = readline.createInterface({
