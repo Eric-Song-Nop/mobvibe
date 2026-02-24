@@ -47,7 +47,9 @@
 		"modeLabelWithValue": "Mode: {{value}}",
 		"modelLabelWithValue": "Model: {{value}}",
 		"commandModeLabel": "Mode: {{value}}",
-		"commandModelLabel": "Model: {{value}}"
+		"commandModelLabel": "Model: {{value}}",
+		"copyMessage": "Copy",
+		"copied": "Copied"
 	},
 	"session": {
 		"title": "Sessions",
