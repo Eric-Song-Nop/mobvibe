@@ -942,8 +942,37 @@ export function ChatFooter({
 		// deletion, paste with resource links).
 	}, [contentBlocks, renderEditorContents]);
 
-	return (
-		<footer className="bg-background/90 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shrink-0">
+	// Mobile virtual keyboard: track keyboard height via visualViewport
+	const footerRef = useRef<HTMLElement | null>(null);
+	useEffect(() => {
+		if (!isMobile) {
+			return;
+		}
+		const vv = window.visualViewport;
+		if (!vv) {
+			return;
+		}
+		const update = () => {
+			const kbHeight = window.innerHeight - vv.height;
+			const footer = footerRef.current;
+			if (footer) {
+				footer.style.setProperty("--kb-height", `${Math.max(0, kbHeight)}px`);
+			}
+		};
+		update();
+		vv.addEventListener("resize", update);
+		return () => vv.removeEventListener("resize", update);
+	}, [isMobile]);
+
+	const footerContent = (
+		<footer
+			ref={footerRef}
+			style={isMobile ? { bottom: "var(--kb-height, 0px)" } : undefined}
+			className={cn(
+				"bg-background/90 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shrink-0",
+				isMobile && "fixed inset-x-0 bottom-0 z-50",
+			)}
+		>
 			<div className="mx-auto w-full max-w-5xl">
 				<div
 					className={cn(
@@ -1079,5 +1108,24 @@ export function ChatFooter({
 				</div>
 			</div>
 		</footer>
+	);
+
+	if (!isMobile) {
+		return footerContent;
+	}
+
+	// Mobile: spacer keeps flex layout from collapsing + fixed footer floats above keyboard
+	return (
+		<>
+			<div className="shrink-0 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+				<div className="mx-auto w-full max-w-5xl">
+					<div className="min-h-10 border border-transparent px-2.5 py-2 text-xs" />
+					<div className="flex items-center gap-1 px-2 pb-2">
+						<div className="h-5" />
+					</div>
+				</div>
+			</div>
+			{footerContent}
+		</>
 	);
 }
