@@ -908,7 +908,7 @@ const MessageItemInner = ({
 					{!message.isStreaming && (
 						<button
 							type="button"
-							className="shrink-0 flex items-center justify-center size-6 rounded-full border border-border bg-background text-muted-foreground shadow-sm transition-all hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 opacity-0 group-hover/user-msg:opacity-100 focus-visible:opacity-100"
+							className="shrink-0 flex items-center justify-center size-6 rounded-full border border-border bg-background text-muted-foreground shadow-sm transition-all hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 md:opacity-0 group-hover/user-msg:opacity-100 focus-visible:opacity-100"
 							onClick={(e) => {
 								e.stopPropagation();
 								handleCopy();
