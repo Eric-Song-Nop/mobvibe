@@ -28,6 +28,47 @@ class E2EEManager {
 	private contentKeyPairs: Map<string, CryptoKeyPair> = new Map();
 	private sessionToSecret: Map<string, string> = new Map();
 	private sessionDeks: Map<string, Uint8Array> = new Map();
+	private dekReadyListeners: Array<(sessionId: string) => void> = [];
+
+	/**
+	 * Register a listener invoked when a session DEK becomes available.
+	 * Returns an unsubscribe function.
+	 */
+	onDekReady(listener: (sessionId: string) => void): () => void {
+		this.dekReadyListeners.push(listener);
+		return () => {
+			this.dekReadyListeners = this.dekReadyListeners.filter(
+				(l) => l !== listener,
+			);
+		};
+	}
+
+	private notifyDekReady(sessionId: string): void {
+		for (const listener of this.dekReadyListeners) {
+			listener(sessionId);
+		}
+	}
+
+	/**
+	 * Check whether a DEK has been unwrapped for the given session.
+	 */
+	hasSessionDek(sessionId: string): boolean {
+		return this.sessionDeks.has(sessionId);
+	}
+
+	/**
+	 * Attempt to unwrap DEKs for all provided sessions.
+	 * Skips sessions that already have a DEK or lack a wrappedDek.
+	 */
+	unwrapAllSessionDeks(
+		sessions: Array<{ sessionId: string; wrappedDek?: string }>,
+	): void {
+		for (const session of sessions) {
+			if (!session.wrappedDek) continue;
+			if (this.sessionDeks.has(session.sessionId)) continue;
+			this.unwrapSessionDek(session.sessionId, session.wrappedDek);
+		}
+	}
 
 	isEnabled(): boolean {
 		return this.contentKeyPairs.size > 0;
@@ -154,6 +195,7 @@ class E2EEManager {
 		try {
 			const dek = unwrapDEK(wrappedDek, keypair.publicKey, keypair.secretKey);
 			this.sessionDeks.set(sessionId, dek);
+			this.notifyDekReady(sessionId);
 			return true;
 		} catch {
 			return false;
