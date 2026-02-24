@@ -1,4 +1,6 @@
-import { memo } from "react";
+import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	buildUnifiedDiffString,
@@ -319,6 +321,19 @@ const renderResourceLink = (
 	);
 };
 
+const extractUserMessageText = (
+	message: Extract<ChatMessage, { kind: "text" }>,
+): string => {
+	const blocks = message.contentBlocks;
+	if (blocks.length === 0) return message.content;
+	return blocks
+		.filter(
+			(b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text",
+		)
+		.map((b) => b.text)
+		.join("\n");
+};
+
 const renderUserContent = (
 	message: Extract<ChatMessage, { kind: "text" }>,
 	onOpenFilePreview?: (path: string) => void,
@@ -574,6 +589,49 @@ const MessageItemInner = ({
 	const getLabel = (key: string, options?: Record<string, unknown>) =>
 		t(key, { defaultValue: key, ...options });
 	const isUser = message.role === "user";
+
+	// User message copy button state
+	const [showCopy, setShowCopy] = useState(false);
+	const [copied, setCopied] = useState(false);
+	const wrapperRef = useRef<HTMLDivElement>(null);
+
+	useEffect(() => {
+		if (!showCopy) return;
+		const handler = (e: MouseEvent) => {
+			if (
+				wrapperRef.current &&
+				!wrapperRef.current.contains(e.target as Node)
+			) {
+				setShowCopy(false);
+				setCopied(false);
+			}
+		};
+		document.addEventListener("mousedown", handler);
+		return () => document.removeEventListener("mousedown", handler);
+	}, [showCopy]);
+
+	const handleCopy = useCallback(async () => {
+		if (message.kind !== "text" || !isUser) return;
+		const text = extractUserMessageText(
+			message as Extract<ChatMessage, { kind: "text" }>,
+		);
+		try {
+			await navigator.clipboard.writeText(text);
+		} catch {
+			const textarea = document.createElement("textarea");
+			textarea.value = text;
+			document.body.appendChild(textarea);
+			textarea.select();
+			document.execCommand("copy");
+			document.body.removeChild(textarea);
+		}
+		setCopied(true);
+		setTimeout(() => {
+			setShowCopy(false);
+			setCopied(false);
+		}, 1200);
+	}, [message, isUser]);
+
 	const terminalOutputMap = useChatStore((state) => {
 		if (message.kind !== "tool_call" || !message.sessionId) return undefined;
 		return state.sessions[message.sessionId]?.terminalOutputs;
@@ -862,21 +920,54 @@ const MessageItemInner = ({
 			</div>
 		);
 	}
-	// User messages: keep bubble style
+	// User messages: keep bubble style with copy button
 	if (isUser) {
 		return (
 			<div className="flex flex-col gap-1 items-end">
-				<Card
-					size="sm"
-					className={cn(
-						"max-w-[85%] border-primary/30 bg-primary/10",
-						message.isStreaming ? "opacity-90" : "opacity-100",
+				<div ref={wrapperRef} className="flex items-center gap-1.5 max-w-[85%]">
+					{showCopy && (
+						<button
+							type="button"
+							className="shrink-0 flex items-center justify-center size-6 rounded-full border border-border bg-background text-muted-foreground shadow-sm transition-colors hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+							onClick={(e) => {
+								e.stopPropagation();
+								handleCopy();
+							}}
+							aria-label={t("chat.copyMessage")}
+						>
+							<HugeiconsIcon
+								icon={copied ? Tick02Icon : Copy01Icon}
+								size={14}
+								aria-hidden="true"
+							/>
+						</button>
 					)}
-				>
-					<CardContent className="text-sm">
-						{renderUserContent(message, onOpenFilePreview)}
-					</CardContent>
-				</Card>
+					<Card
+						size="sm"
+						role="button"
+						tabIndex={0}
+						className={cn(
+							"border-primary/30 bg-primary/10 cursor-pointer min-w-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:outline-none",
+							message.isStreaming ? "opacity-90" : "opacity-100",
+						)}
+						onClick={() => {
+							if (!message.isStreaming) setShowCopy(true);
+						}}
+						onKeyDown={(e) => {
+							if (
+								(e.key === "Enter" || e.key === " ") &&
+								!message.isStreaming
+							) {
+								e.preventDefault();
+								setShowCopy(true);
+							}
+						}}
+					>
+						<CardContent className="text-sm">
+							{renderUserContent(message, onOpenFilePreview)}
+						</CardContent>
+					</Card>
+				</div>
 			</div>
 		);
 	}
