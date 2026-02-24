@@ -277,7 +277,7 @@ export function CommandPalette({
 
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
-			<AlertDialogContent className="flex h-[100svh] w-[100vw] !max-w-none flex-col overflow-hidden translate-x-0 translate-y-0 rounded-none p-0 top-0 left-0 sm:h-auto sm:max-h-[28rem] sm:!w-[36rem] sm:!max-w-[36rem] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg sm:top-1/2 sm:left-1/2">
+			<AlertDialogContent className="flex h-[100svh] w-[100vw] !max-w-none flex-col overflow-hidden translate-x-0 translate-y-0 rounded-none p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] sm:pt-0 sm:pb-0 top-0 left-0 sm:h-auto sm:max-h-[28rem] sm:!w-[36rem] sm:!max-w-[36rem] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg sm:top-1/2 sm:left-1/2">
 				{/* Search input */}
 				<div className="border-b px-4 py-3">
 					<div className="flex items-center gap-2">

@@ -67,7 +67,7 @@ export function BranchSelector({
 		<Sheet open={open} onOpenChange={onOpenChange}>
 			<SheetContent
 				side="bottom"
-				className="sm:inset-x-auto sm:bottom-auto sm:top-1/2 sm:left-1/2 sm:h-auto sm:max-h-[70vh] sm:w-[28rem] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg sm:border"
+				className="sm:inset-x-auto sm:bottom-auto sm:top-1/2 sm:left-1/2 sm:h-auto sm:max-h-[70vh] sm:w-[28rem] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg sm:border sm:pb-0"
 			>
 				<SheetHeader>
 					<SheetTitle className="flex items-center gap-2">

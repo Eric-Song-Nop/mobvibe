@@ -448,7 +448,7 @@ export function FileExplorerDialog({
 	return (
 		<>
 			<AlertDialog open={open} onOpenChange={onOpenChange}>
-				<AlertDialogContent className="grid h-[100svh] w-[100vw] !max-w-none min-h-0 min-w-0 grid-rows-[auto_1fr_auto] overflow-hidden translate-x-0 translate-y-0 rounded-none p-4 sm:h-[82vh] sm:!w-[98vw] sm:!max-w-[98vw] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-none top-0 left-0 sm:top-1/2 sm:left-1/2">
+				<AlertDialogContent className="grid h-[100svh] w-[100vw] !max-w-none min-h-0 min-w-0 grid-rows-[auto_1fr_auto] overflow-hidden translate-x-0 translate-y-0 rounded-none px-4 pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))] sm:pt-4 sm:pb-4 sm:h-[82vh] sm:!w-[98vw] sm:!max-w-[98vw] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-none top-0 left-0 sm:top-1/2 sm:left-1/2">
 					<AlertDialogHeader className="gap-2">
 						{/* Row 1: Icon + Tabs + Git Branch */}
 						<div className="flex w-full items-center gap-2">
