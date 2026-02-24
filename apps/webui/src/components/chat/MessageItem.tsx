@@ -1,6 +1,6 @@
 import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	buildUnifiedDiffString,
@@ -591,24 +591,7 @@ const MessageItemInner = ({
 	const isUser = message.role === "user";
 
 	// User message copy button state
-	const [showCopy, setShowCopy] = useState(false);
 	const [copied, setCopied] = useState(false);
-	const wrapperRef = useRef<HTMLDivElement>(null);
-
-	useEffect(() => {
-		if (!showCopy) return;
-		const handler = (e: MouseEvent) => {
-			if (
-				wrapperRef.current &&
-				!wrapperRef.current.contains(e.target as Node)
-			) {
-				setShowCopy(false);
-				setCopied(false);
-			}
-		};
-		document.addEventListener("mousedown", handler);
-		return () => document.removeEventListener("mousedown", handler);
-	}, [showCopy]);
 
 	const handleCopy = useCallback(async () => {
 		if (message.kind !== "text" || !isUser) return;
@@ -626,10 +609,7 @@ const MessageItemInner = ({
 			document.body.removeChild(textarea);
 		}
 		setCopied(true);
-		setTimeout(() => {
-			setShowCopy(false);
-			setCopied(false);
-		}, 1200);
+		setTimeout(() => setCopied(false), 1200);
 	}, [message, isUser]);
 
 	const terminalOutputMap = useChatStore((state) => {
@@ -920,15 +900,15 @@ const MessageItemInner = ({
 			</div>
 		);
 	}
-	// User messages: keep bubble style with copy button
+	// User messages: bubble style with hover-reveal copy button
 	if (isUser) {
 		return (
 			<div className="flex flex-col gap-1 items-end">
-				<div ref={wrapperRef} className="flex items-center gap-1.5 max-w-[85%]">
-					{showCopy && (
+				<div className="group/user-msg flex items-center gap-1.5 max-w-[85%]">
+					{!message.isStreaming && (
 						<button
 							type="button"
-							className="shrink-0 flex items-center justify-center size-6 rounded-full border border-border bg-background text-muted-foreground shadow-sm transition-colors hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+							className="shrink-0 flex items-center justify-center size-6 rounded-full border border-border bg-background text-muted-foreground shadow-sm transition-all hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 opacity-0 group-hover/user-msg:opacity-100 focus-visible:opacity-100"
 							onClick={(e) => {
 								e.stopPropagation();
 								handleCopy();
@@ -944,24 +924,10 @@ const MessageItemInner = ({
 					)}
 					<Card
 						size="sm"
-						role="button"
-						tabIndex={0}
 						className={cn(
-							"border-primary/30 bg-primary/10 cursor-pointer min-w-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:outline-none",
+							"border-primary/30 bg-primary/10 min-w-0",
 							message.isStreaming ? "opacity-90" : "opacity-100",
 						)}
-						onClick={() => {
-							if (!message.isStreaming) setShowCopy(true);
-						}}
-						onKeyDown={(e) => {
-							if (
-								(e.key === "Enter" || e.key === " ") &&
-								!message.isStreaming
-							) {
-								e.preventDefault();
-								setShowCopy(true);
-							}
-						}}
 					>
 						<CardContent className="text-sm">
 							{renderUserContent(message, onOpenFilePreview)}
