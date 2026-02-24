@@ -25,6 +25,7 @@ import { useSessionList } from "@/hooks/useSessionList";
 import { useSessionMutations } from "@/hooks/useSessionMutations";
 import { useSessionQueries } from "@/hooks/useSessionQueries";
 import { useSocket } from "@/hooks/useSocket";
+import type { SessionsResponse } from "@/lib/api";
 import { getAuthClient, isInTauri } from "@/lib/auth";
 import { useChatStore } from "@/lib/chat-store";
 import { e2ee } from "@/lib/e2ee";
@@ -256,17 +257,18 @@ function MainApp() {
 
 	useEffect(() => {
 		if (sessionsQuery.data?.sessions) {
-			// Unwrap DEKs from initial session list
-			if (e2ee.isEnabled()) {
-				for (const session of sessionsQuery.data.sessions) {
-					if (session.wrappedDek) {
-						e2ee.unwrapSessionDek(session.sessionId, session.wrappedDek);
-					}
+			// Always attempt DEK unwrap — no-op when no paired secrets exist.
+			// Removing the isEnabled() gate ensures that DEKs are unwrapped
+			// immediately after pairing (when the sessions query re-fires),
+			// and triggers onDekReady to flush any buffered encrypted events.
+			for (const session of sessionsQuery.data.sessions) {
+				if (session.wrappedDek) {
+					e2ee.unwrapSessionDek(session.sessionId, session.wrappedDek);
 				}
 			}
 			chatActions.syncSessions(sessionsQuery.data.sessions);
 
-			// Set E2EE status for all sessions (independent of e2ee.isEnabled)
+			// Set E2EE status for all sessions
 			const { setSessionE2EEStatus } = useChatStore.getState();
 			for (const session of sessionsQuery.data.sessions) {
 				setSessionE2EEStatus(
@@ -670,6 +672,7 @@ function TauriAuthHandler({
  */
 function TauriPairHandler() {
 	const unlistenRef = useRef<(() => void) | null>(null);
+	const queryClientRef = useRef(useQueryClient());
 
 	useEffect(() => {
 		let cancelled = false;
@@ -681,7 +684,26 @@ function TauriPairHandler() {
 					for (const url of urls) {
 						const secret = parsePairingUrl(url);
 						if (secret) {
-							void e2ee.setPairedSecret(secret);
+							void e2ee.setPairedSecret(secret).then(() => {
+								// Unwrap DEKs for all known sessions after pairing
+								const cached =
+									queryClientRef.current.getQueryData<SessionsResponse>([
+										"sessions",
+									]);
+								if (cached?.sessions) {
+									e2ee.unwrapAllSessionDeks(cached.sessions);
+									const { setSessionE2EEStatus } = useChatStore.getState();
+									for (const session of cached.sessions) {
+										setSessionE2EEStatus(
+											session.sessionId,
+											e2ee.getSessionE2EEStatus(
+												session.sessionId,
+												Boolean(session.wrappedDek),
+											),
+										);
+									}
+								}
+							});
 							break;
 						}
 					}

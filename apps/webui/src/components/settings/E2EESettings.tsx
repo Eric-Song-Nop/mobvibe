@@ -1,5 +1,6 @@
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -15,7 +16,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useQrScanner } from "@/hooks/use-qr-scanner";
+import type { SessionsResponse } from "@/lib/api";
 import { isInTauri } from "@/lib/auth";
+import { useChatStore } from "@/lib/chat-store";
 import { e2ee } from "@/lib/e2ee";
 
 interface PairedDevice {
@@ -126,8 +129,29 @@ export function E2EESettings() {
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [removeTarget, setRemoveTarget] = useState<PairedDevice | null>(null);
 
+	const queryClient = useQueryClient();
+
 	const { canScan, isScanning, startScan, cancelScan, videoRef } =
 		useQrScanner();
+
+	/** After pairing, unwrap DEKs for all known sessions and update E2EE status. */
+	const unwrapAfterPairing = useCallback(() => {
+		const cached = queryClient.getQueryData<SessionsResponse>(["sessions"]);
+		if (!cached?.sessions) return;
+
+		e2ee.unwrapAllSessionDeks(cached.sessions);
+
+		const { setSessionE2EEStatus } = useChatStore.getState();
+		for (const session of cached.sessions) {
+			setSessionE2EEStatus(
+				session.sessionId,
+				e2ee.getSessionE2EEStatus(
+					session.sessionId,
+					Boolean(session.wrappedDek),
+				),
+			);
+		}
+	}, [queryClient]);
 
 	const refreshDevices = useCallback(() => {
 		const devices = e2ee.getPairedSecrets();
@@ -156,6 +180,7 @@ export function E2EESettings() {
 			await e2ee.addPairedSecret(secret.trim());
 			setSecret("");
 			refreshDevices();
+			unwrapAfterPairing();
 		} catch {
 			setError(t("e2ee.invalidSecret"));
 		} finally {
@@ -175,6 +200,7 @@ export function E2EESettings() {
 			}
 			await e2ee.addPairedSecret(base64Secret);
 			refreshDevices();
+			unwrapAfterPairing();
 		} catch (err) {
 			const errMsg = err instanceof Error ? err.message : String(err);
 			if (errMsg.toLowerCase().includes("cancel")) return;

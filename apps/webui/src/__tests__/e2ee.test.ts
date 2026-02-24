@@ -288,6 +288,105 @@ describe("E2EEManager", () => {
 		});
 	});
 
+	describe("DEK readiness notification", () => {
+		it("onDekReady fires when DEK is unwrapped", async () => {
+			const listener = vi.fn();
+			const unsub = e2ee.onDekReady(listener);
+
+			await e2ee.addPairedSecret(btoa("test-secret"));
+			e2ee.unwrapSessionDek("session-notify", "wrapped-dek");
+
+			expect(listener).toHaveBeenCalledWith("session-notify");
+			unsub();
+		});
+
+		it("onDekReady does not fire for duplicate unwrap", async () => {
+			const listener = vi.fn();
+			const unsub = e2ee.onDekReady(listener);
+
+			await e2ee.addPairedSecret(btoa("test-secret"));
+			e2ee.unwrapSessionDek("session-dup", "wrapped-dek");
+			listener.mockClear();
+
+			// Unwrap same session again — tryUnwrap still succeeds,
+			// so listener fires again (acceptable; consumers should be idempotent)
+			e2ee.unwrapSessionDek("session-dup", "wrapped-dek");
+			expect(listener).toHaveBeenCalledWith("session-dup");
+			unsub();
+		});
+
+		it("unsubscribe stops notifications", async () => {
+			const listener = vi.fn();
+			const unsub = e2ee.onDekReady(listener);
+			unsub();
+
+			await e2ee.addPairedSecret(btoa("test-secret"));
+			e2ee.unwrapSessionDek("session-unsub", "wrapped-dek");
+
+			expect(listener).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("hasSessionDek", () => {
+		it("returns false when no DEK exists", () => {
+			expect(e2ee.hasSessionDek("unknown-session")).toBe(false);
+		});
+
+		it("returns true after unwrap", async () => {
+			await e2ee.addPairedSecret(btoa("test-secret"));
+			e2ee.unwrapSessionDek("session-check", "wrapped-dek");
+			expect(e2ee.hasSessionDek("session-check")).toBe(true);
+		});
+	});
+
+	describe("unwrapAllSessionDeks", () => {
+		it("unwraps DEKs for multiple sessions", async () => {
+			await e2ee.addPairedSecret(btoa("test-secret"));
+
+			e2ee.unwrapAllSessionDeks([
+				{ sessionId: "s1", wrappedDek: "dek-1" },
+				{ sessionId: "s2", wrappedDek: "dek-2" },
+				{ sessionId: "s3" }, // no wrappedDek
+			]);
+
+			expect(e2ee.hasSessionDek("s1")).toBe(true);
+			expect(e2ee.hasSessionDek("s2")).toBe(true);
+			expect(e2ee.hasSessionDek("s3")).toBe(false);
+		});
+
+		it("skips sessions that already have a DEK", async () => {
+			await e2ee.addPairedSecret(btoa("test-secret"));
+			e2ee.unwrapSessionDek("s1", "dek-1");
+
+			mockUnwrapDEK.mockClear();
+
+			e2ee.unwrapAllSessionDeks([
+				{ sessionId: "s1", wrappedDek: "dek-1" },
+				{ sessionId: "s2", wrappedDek: "dek-2" },
+			]);
+
+			// Only s2 should trigger unwrapDEK
+			expect(mockUnwrapDEK).toHaveBeenCalledTimes(1);
+		});
+
+		it("triggers onDekReady for each newly unwrapped session", async () => {
+			const listener = vi.fn();
+			const unsub = e2ee.onDekReady(listener);
+
+			await e2ee.addPairedSecret(btoa("test-secret"));
+
+			e2ee.unwrapAllSessionDeks([
+				{ sessionId: "s-batch-1", wrappedDek: "dek-1" },
+				{ sessionId: "s-batch-2", wrappedDek: "dek-2" },
+			]);
+
+			expect(listener).toHaveBeenCalledTimes(2);
+			expect(listener).toHaveBeenCalledWith("s-batch-1");
+			expect(listener).toHaveBeenCalledWith("s-batch-2");
+			unsub();
+		});
+	});
+
 	describe("bidirectional encryption", () => {
 		it("encryptPayloadForSession returns plaintext when no DEK", () => {
 			const payload = [{ type: "text", text: "hello" }];

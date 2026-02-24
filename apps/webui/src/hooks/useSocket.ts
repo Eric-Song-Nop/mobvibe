@@ -1,3 +1,4 @@
+import { isEncryptedPayload } from "@mobvibe/shared";
 import { useCallback, useEffect, useRef } from "react";
 import { useSessionBackfill } from "@/hooks/use-session-backfill";
 import type { ChatStoreActions } from "@/hooks/useSessionMutations";
@@ -116,6 +117,9 @@ export function useSocket({
 
 	// Pending events buffer for out-of-order events (local to hook)
 	const pendingEventsRef = useRef<Map<string, SessionEvent[]>>(new Map());
+
+	// Buffer for encrypted events received before DEK is ready
+	const encryptedBufferRef = useRef<Map<string, SessionEvent[]>>(new Map());
 
 	// Track which sessions have triggered initial backfill
 	const initialBackfillTriggeredRef = useRef<Set<string>>(new Set());
@@ -361,6 +365,19 @@ export function useSocket({
 		gatewayUrl: gatewaySocket.getGatewayUrl(),
 		onEvents: (sessionId, events) => {
 			for (const rawEvent of events) {
+				// Buffer encrypted events when DEK is not yet available
+				if (
+					isEncryptedPayload(rawEvent.payload) &&
+					!e2ee.hasSessionDek(sessionId)
+				) {
+					const buf = encryptedBufferRef.current.get(sessionId) ?? [];
+					buf.push(rawEvent);
+					encryptedBufferRef.current.set(sessionId, buf);
+					// Still advance cursor so backfill doesn't re-fetch these seqs
+					updateSessionCursor(sessionId, rawEvent.revision, rawEvent.seq);
+					continue;
+				}
+
 				// Decrypt event payload if encrypted
 				const event = e2ee.decryptEvent(rawEvent);
 
@@ -495,12 +512,11 @@ export function useSocket({
 	handleSessionsChangedRef.current = (payload: SessionsChangedPayload) => {
 		const addedOrUpdated = [...payload.added, ...payload.updated];
 
-		// Unwrap DEKs from new/updated sessions
-		if (e2ee.isEnabled()) {
-			for (const session of addedOrUpdated) {
-				if (session.wrappedDek) {
-					e2ee.unwrapSessionDek(session.sessionId, session.wrappedDek);
-				}
+		// Unwrap DEKs from new/updated sessions (always attempt — no-op when
+		// no paired secrets exist; triggers onDekReady to flush buffered events)
+		for (const session of addedOrUpdated) {
+			if (session.wrappedDek) {
+				e2ee.unwrapSessionDek(session.sessionId, session.wrappedDek);
 			}
 		}
 		handleSessionsChanged(payload);
@@ -530,6 +546,17 @@ export function useSocket({
 	};
 
 	handleSessionEventRef.current = (incomingEvent: SessionEvent) => {
+		// Buffer encrypted events when DEK is not yet available
+		if (
+			isEncryptedPayload(incomingEvent.payload) &&
+			!e2ee.hasSessionDek(incomingEvent.sessionId)
+		) {
+			const buf = encryptedBufferRef.current.get(incomingEvent.sessionId) ?? [];
+			buf.push(incomingEvent);
+			encryptedBufferRef.current.set(incomingEvent.sessionId, buf);
+			return;
+		}
+
 		// Decrypt event payload if encrypted
 		const event = e2ee.decryptEvent(incomingEvent);
 
@@ -596,6 +623,21 @@ export function useSocket({
 			triggerBackfillRef.current?.(event.sessionId, event.revision, lastSeq);
 		}
 	};
+
+	// Flush buffered encrypted events once a DEK becomes available
+	useEffect(() => {
+		const unsubDekReady = e2ee.onDekReady((sessionId) => {
+			const buffered = encryptedBufferRef.current.get(sessionId);
+			if (!buffered || buffered.length === 0) return;
+			encryptedBufferRef.current.delete(sessionId);
+
+			// Re-process each buffered event through the normal handler
+			for (const rawEvent of buffered) {
+				handleSessionEventRef.current?.(rawEvent);
+			}
+		});
+		return unsubDekReady;
+	}, []);
 
 	// Connect to gateway and register listeners on mount
 	useEffect(() => {
