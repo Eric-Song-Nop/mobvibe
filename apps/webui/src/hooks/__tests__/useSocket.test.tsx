@@ -136,6 +136,7 @@ const createStore = (): ChatStoreActions => {
 		appendAssistantChunk: vi.fn(),
 		appendThoughtChunk: vi.fn(),
 		appendUserChunk: vi.fn(),
+		confirmOrAppendUserMessage: vi.fn(),
 		finalizeAssistantMessage: vi.fn(),
 		addPermissionRequest: vi.fn(),
 		setPermissionDecisionState: vi.fn(),
@@ -261,7 +262,7 @@ describe("useSocket (webui)", () => {
 					sessions: props.sessions,
 					appendAssistantChunk: store.appendAssistantChunk,
 					appendThoughtChunk: store.appendThoughtChunk,
-					appendUserChunk: store.appendUserChunk,
+					confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
 					updateSessionMeta: store.updateSessionMeta,
 					setStreamError: store.setStreamError,
 					addPermissionRequest: store.addPermissionRequest,
@@ -309,7 +310,7 @@ describe("useSocket (webui)", () => {
 				sessions: {},
 				appendAssistantChunk: store.appendAssistantChunk,
 				appendThoughtChunk: store.appendThoughtChunk,
-				appendUserChunk: store.appendUserChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
 				updateSessionMeta: store.updateSessionMeta,
 				setStreamError: store.setStreamError,
 				addPermissionRequest: store.addPermissionRequest,
@@ -355,7 +356,7 @@ describe("useSocket (webui)", () => {
 				sessions,
 				appendAssistantChunk: store.appendAssistantChunk,
 				appendThoughtChunk: store.appendThoughtChunk,
-				appendUserChunk: store.appendUserChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
 				updateSessionMeta: store.updateSessionMeta,
 				setStreamError: store.setStreamError,
 				addPermissionRequest: store.addPermissionRequest,
@@ -402,7 +403,7 @@ describe("useSocket (webui)", () => {
 				sessions,
 				appendAssistantChunk: store.appendAssistantChunk,
 				appendThoughtChunk: store.appendThoughtChunk,
-				appendUserChunk: store.appendUserChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
 				updateSessionMeta: store.updateSessionMeta,
 				setStreamError: store.setStreamError,
 				addPermissionRequest: store.addPermissionRequest,
@@ -502,7 +503,7 @@ describe("useSocket (webui)", () => {
 				sessions,
 				appendAssistantChunk: store.appendAssistantChunk,
 				appendThoughtChunk: store.appendThoughtChunk,
-				appendUserChunk: store.appendUserChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
 				updateSessionMeta: store.updateSessionMeta,
 				setStreamError: store.setStreamError,
 				addPermissionRequest: store.addPermissionRequest,
@@ -558,7 +559,7 @@ describe("useSocket (webui)", () => {
 				sessions,
 				appendAssistantChunk: store.appendAssistantChunk,
 				appendThoughtChunk: store.appendThoughtChunk,
-				appendUserChunk: store.appendUserChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
 				updateSessionMeta: store.updateSessionMeta,
 				setStreamError: store.setStreamError,
 				addPermissionRequest: store.addPermissionRequest,
@@ -646,7 +647,7 @@ describe("useSocket (webui)", () => {
 				finalizeAssistantMessage: store.finalizeAssistantMessage,
 				appendAssistantChunk: store.appendAssistantChunk,
 				appendThoughtChunk: store.appendThoughtChunk,
-				appendUserChunk: store.appendUserChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
 				updateSessionMeta: store.updateSessionMeta,
 				setStreamError: store.setStreamError,
 				addPermissionRequest: store.addPermissionRequest,
@@ -679,7 +680,7 @@ describe("useSocket (webui)", () => {
 		expect(store.setCanceling).toHaveBeenCalledWith("session-1", false);
 	});
 
-	it("skips user_message event when session is sending", async () => {
+	it("user_message event calls confirmOrAppendUserMessage regardless of sending state", async () => {
 		const store = createStore();
 		const sessions = {
 			"session-1": buildSession({
@@ -697,7 +698,7 @@ describe("useSocket (webui)", () => {
 				sessions,
 				appendAssistantChunk: store.appendAssistantChunk,
 				appendThoughtChunk: store.appendThoughtChunk,
-				appendUserChunk: store.appendUserChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
 				updateSessionMeta: store.updateSessionMeta,
 				setStreamError: store.setStreamError,
 				addPermissionRequest: store.addPermissionRequest,
@@ -729,9 +730,13 @@ describe("useSocket (webui)", () => {
 			},
 		});
 
-		// Cursor should advance but appendUserChunk should NOT be called
+		// Cursor should advance and confirmOrAppendUserMessage should be called
+		// (provisional pattern handles dedup internally via store action)
 		expect(store.updateSessionCursor).toHaveBeenCalledWith("session-1", 1, 1);
-		expect(store.appendUserChunk).not.toHaveBeenCalled();
+		expect(store.confirmOrAppendUserMessage).toHaveBeenCalledWith(
+			"session-1",
+			"Hello",
+		);
 	});
 
 	it("processes user_message event when session is not sending", async () => {
@@ -752,7 +757,7 @@ describe("useSocket (webui)", () => {
 				sessions,
 				appendAssistantChunk: store.appendAssistantChunk,
 				appendThoughtChunk: store.appendThoughtChunk,
-				appendUserChunk: store.appendUserChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
 				updateSessionMeta: store.updateSessionMeta,
 				setStreamError: store.setStreamError,
 				addPermissionRequest: store.addPermissionRequest,
@@ -784,9 +789,9 @@ describe("useSocket (webui)", () => {
 			},
 		});
 
-		// Both cursor and appendUserChunk should be called
+		// Both cursor and confirmOrAppendUserMessage should be called
 		expect(store.updateSessionCursor).toHaveBeenCalledWith("session-1", 1, 1);
-		expect(store.appendUserChunk).toHaveBeenCalledWith(
+		expect(store.confirmOrAppendUserMessage).toHaveBeenCalledWith(
 			"session-1",
 			"Hello from CLI",
 		);
@@ -824,7 +829,7 @@ describe("useSocket (webui)", () => {
 					finalizeAssistantMessage: store.finalizeAssistantMessage,
 					appendAssistantChunk: store.appendAssistantChunk,
 					appendThoughtChunk: store.appendThoughtChunk,
-					appendUserChunk: store.appendUserChunk,
+					confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
 					updateSessionMeta: store.updateSessionMeta,
 					setStreamError: store.setStreamError,
 					addPermissionRequest: store.addPermissionRequest,
@@ -1021,7 +1026,7 @@ describe("useSocket (webui)", () => {
 			// No dispatch should happen for unknown events
 			expect(store.appendAssistantChunk).not.toHaveBeenCalled();
 			expect(store.appendThoughtChunk).not.toHaveBeenCalled();
-			expect(store.appendUserChunk).not.toHaveBeenCalled();
+			expect(store.confirmOrAppendUserMessage).not.toHaveBeenCalled();
 			expect(store.addToolCall).not.toHaveBeenCalled();
 			expect(store.updateToolCall).not.toHaveBeenCalled();
 			expect(store.appendTerminalOutput).not.toHaveBeenCalled();
@@ -1060,7 +1065,7 @@ describe("useSocket (webui)", () => {
 						sessions: props.sessions,
 						appendAssistantChunk: store.appendAssistantChunk,
 						appendThoughtChunk: store.appendThoughtChunk,
-						appendUserChunk: store.appendUserChunk,
+						confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
 						updateSessionMeta: store.updateSessionMeta,
 						setStreamError: store.setStreamError,
 						addPermissionRequest: store.addPermissionRequest,
@@ -1111,7 +1116,7 @@ describe("useSocket (webui)", () => {
 						sessions: props.sessions,
 						appendAssistantChunk: store.appendAssistantChunk,
 						appendThoughtChunk: store.appendThoughtChunk,
-						appendUserChunk: store.appendUserChunk,
+						confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
 						updateSessionMeta: store.updateSessionMeta,
 						setStreamError: store.setStreamError,
 						addPermissionRequest: store.addPermissionRequest,
@@ -1187,7 +1192,7 @@ describe("useSocket (webui)", () => {
 					},
 					appendAssistantChunk: store.appendAssistantChunk,
 					appendThoughtChunk: store.appendThoughtChunk,
-					appendUserChunk: store.appendUserChunk,
+					confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
 					updateSessionMeta: store.updateSessionMeta,
 					setStreamError: store.setStreamError,
 					addPermissionRequest: store.addPermissionRequest,
@@ -1239,7 +1244,7 @@ describe("useSocket (webui)", () => {
 					sessions: {},
 					appendAssistantChunk: store.appendAssistantChunk,
 					appendThoughtChunk: store.appendThoughtChunk,
-					appendUserChunk: store.appendUserChunk,
+					confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
 					updateSessionMeta: store.updateSessionMeta,
 					setStreamError: store.setStreamError,
 					addPermissionRequest: store.addPermissionRequest,
@@ -1273,7 +1278,7 @@ describe("useSocket (webui)", () => {
 					sessions: {},
 					appendAssistantChunk: store.appendAssistantChunk,
 					appendThoughtChunk: store.appendThoughtChunk,
-					appendUserChunk: store.appendUserChunk,
+					confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
 					updateSessionMeta: store.updateSessionMeta,
 					setStreamError: store.setStreamError,
 					addPermissionRequest: store.addPermissionRequest,
