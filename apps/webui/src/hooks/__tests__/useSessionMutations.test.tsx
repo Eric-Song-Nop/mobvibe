@@ -70,7 +70,6 @@ describe("useSessionMutations", () => {
 		addStatusMessage: vi.fn(),
 		appendAssistantChunk: vi.fn(),
 		appendThoughtChunk: vi.fn(),
-		appendUserChunk: vi.fn(),
 		confirmOrAppendUserMessage: vi.fn(),
 		finalizeAssistantMessage: vi.fn(),
 		addPermissionRequest: vi.fn(),

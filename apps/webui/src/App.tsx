@@ -87,7 +87,6 @@ function MainApp() {
 			addStatusMessage: s.addStatusMessage,
 			appendAssistantChunk: s.appendAssistantChunk,
 			appendThoughtChunk: s.appendThoughtChunk,
-			appendUserChunk: s.appendUserChunk,
 			confirmOrAppendUserMessage: s.confirmOrAppendUserMessage,
 			finalizeAssistantMessage: s.finalizeAssistantMessage,
 			addPermissionRequest: s.addPermissionRequest,
