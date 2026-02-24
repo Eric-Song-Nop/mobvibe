@@ -85,6 +85,7 @@ export function useSessionActivation(store: ChatStoreActions) {
 			store.setSessionLoading(fresh.sessionId, true);
 			const backupMessages: ChatMessage[] = [...fresh.messages];
 			const backupLastAppliedSeq = fresh.lastAppliedSeq;
+			const backupRevision = fresh.revision;
 			store.clearSessionMessages(fresh.sessionId);
 			gatewaySocket.subscribeToSession(fresh.sessionId);
 
@@ -95,6 +96,7 @@ export function useSessionActivation(store: ChatStoreActions) {
 			} catch {
 				store.restoreSessionMessages(fresh.sessionId, backupMessages, {
 					lastAppliedSeq: backupLastAppliedSeq,
+					revision: backupRevision,
 				});
 				gatewaySocket.unsubscribeFromSession(fresh.sessionId);
 			} finally {

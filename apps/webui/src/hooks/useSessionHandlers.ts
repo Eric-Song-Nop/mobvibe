@@ -79,7 +79,11 @@ type ChatActions = {
 	addUserMessage: (
 		sessionId: string,
 		content: string,
-		meta?: { messageId?: string; contentBlocks?: ChatSession["inputContents"] },
+		meta?: {
+			messageId?: string;
+			contentBlocks?: ChatSession["inputContents"];
+			provisional?: boolean;
+		},
 	) => void;
 };
 
@@ -374,6 +378,7 @@ export function useSessionHandlers({
 		chatActions.addUserMessage(activeSessionId, activeSession.input ?? "", {
 			messageId,
 			contentBlocks: promptContents,
+			provisional: true,
 		});
 		mutations.sendMessageMutation.mutate({
 			sessionId: activeSessionId,

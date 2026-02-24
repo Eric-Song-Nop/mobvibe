@@ -31,6 +31,8 @@ type TextMessage = {
 	contentBlocks: ContentBlock[];
 	createdAt: string;
 	isStreaming: boolean;
+	/** Optimistically added user message, awaiting server confirmation */
+	provisional?: boolean;
 };
 
 type ThoughtMessage = {
@@ -190,7 +192,7 @@ type ChatState = {
 	restoreSessionMessages: (
 		sessionId: string,
 		messages: ChatMessage[],
-		cursor?: { lastAppliedSeq?: number },
+		cursor?: { lastAppliedSeq?: number; revision?: number },
 	) => void;
 	createLocalSession: (
 		sessionId: string,
@@ -242,8 +244,14 @@ type ChatState = {
 	addUserMessage: (
 		sessionId: string,
 		content: string,
-		options?: { messageId?: string; contentBlocks?: ContentBlock[] },
+		options?: {
+			messageId?: string;
+			contentBlocks?: ContentBlock[];
+			provisional?: boolean;
+		},
 	) => void;
+	/** Confirm a provisional user message or append a new one (backfill) */
+	confirmOrAppendUserMessage: (sessionId: string, text: string) => void;
 	addStatusMessage: (
 		sessionId: string,
 		payload: {
@@ -814,7 +822,7 @@ export const useChatStore = create<ChatState>()(
 			restoreSessionMessages: (
 				sessionId: string,
 				messages: ChatMessage[],
-				cursor?: { lastAppliedSeq?: number },
+				cursor?: { lastAppliedSeq?: number; revision?: number },
 			) =>
 				set((state: ChatState) => {
 					const session = state.sessions[sessionId];
@@ -827,6 +835,9 @@ export const useChatStore = create<ChatState>()(
 								messages,
 								...(cursor?.lastAppliedSeq !== undefined
 									? { lastAppliedSeq: cursor.lastAppliedSeq }
+									: {}),
+								...(cursor?.revision !== undefined
+									? { revision: cursor.revision }
 									: {}),
 							},
 						},
@@ -1076,6 +1087,7 @@ export const useChatStore = create<ChatState>()(
 						isStreaming: false,
 						contentBlocks:
 							options?.contentBlocks ?? createDefaultContentBlocks(content),
+						provisional: options?.provisional ?? false,
 					};
 					return {
 						sessions: {
@@ -1083,6 +1095,48 @@ export const useChatStore = create<ChatState>()(
 							[sessionId]: {
 								...session,
 								messages: [...session.messages, nextMessage],
+							},
+						},
+					};
+				}),
+			confirmOrAppendUserMessage: (sessionId, text) =>
+				set((state: ChatState) => {
+					const session = state.sessions[sessionId];
+					if (!session) return state;
+
+					// Search backward for a provisional user message (stop at assistant boundary)
+					for (let i = session.messages.length - 1; i >= 0; i--) {
+						const msg = session.messages[i];
+						if (msg.role === "assistant") break;
+						if (msg.role === "user" && msg.kind === "text" && msg.provisional) {
+							// Confirm the optimistic message
+							const messages = [...session.messages];
+							messages[i] = { ...msg, provisional: false };
+							return {
+								sessions: {
+									...state.sessions,
+									[sessionId]: { ...session, messages },
+								},
+							};
+						}
+					}
+
+					// No provisional found → append new message (backfill scenario)
+					const newMsg: TextMessage = {
+						id: createLocalId(),
+						role: "user",
+						kind: "text",
+						content: text,
+						contentBlocks: createDefaultContentBlocks(text),
+						createdAt: new Date().toISOString(),
+						isStreaming: false,
+					};
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: {
+								...session,
+								messages: [...session.messages, newMsg],
 							},
 						},
 					};
@@ -1429,6 +1483,14 @@ export const useChatStore = create<ChatState>()(
 				set((state: ChatState) => {
 					const session = state.sessions[sessionId];
 					if (!session) return state;
+					// Monotonic guard: same revision → cursor can only advance
+					if (
+						session.revision === revision &&
+						session.lastAppliedSeq !== undefined &&
+						session.lastAppliedSeq >= lastAppliedSeq
+					) {
+						return state;
+					}
 					return {
 						sessions: {
 							...state.sessions,

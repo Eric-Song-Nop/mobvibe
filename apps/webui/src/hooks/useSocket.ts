@@ -19,11 +19,7 @@ import {
 	type SessionsChangedPayload,
 	type TerminalOutputEvent,
 } from "@/lib/acp";
-import {
-	type ChatMessage,
-	type ChatSession,
-	useChatStore,
-} from "@/lib/chat-store";
+import { type ChatSession, useChatStore } from "@/lib/chat-store";
 import { e2ee } from "@/lib/e2ee";
 import { isErrorDetail } from "@/lib/error-utils";
 import { useMachinesStore } from "@/lib/machines-store";
@@ -44,7 +40,7 @@ type UseSocketOptions = {
 	ChatStoreActions,
 	| "appendAssistantChunk"
 	| "appendThoughtChunk"
-	| "appendUserChunk"
+	| "confirmOrAppendUserMessage"
 	| "updateSessionMeta"
 	| "setStreamError"
 	| "addPermissionRequest"
@@ -60,23 +56,6 @@ type UseSocketOptions = {
 	| "updateSessionCursor"
 	| "resetSessionForRevision"
 >;
-
-/**
- * Find the last completed (non-streaming) user text message,
- * stopping at any assistant message to avoid false matches with older history.
- */
-function findLastCompletedUserMessage(
-	messages: ChatMessage[],
-): { content: string } | undefined {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const msg = messages[i];
-		if (msg.role === "assistant") return undefined;
-		if (msg.role === "user" && msg.kind === "text" && !msg.isStreaming) {
-			return { content: msg.content };
-		}
-	}
-	return undefined;
-}
 
 // Helper to get cursor from store directly (unified source of truth)
 const getCursor = (sessionId: string) => {
@@ -94,7 +73,7 @@ export function useSocket({
 	finalizeAssistantMessage,
 	appendAssistantChunk,
 	appendThoughtChunk,
-	appendUserChunk,
+	confirmOrAppendUserMessage,
 	updateSessionMeta,
 	setStreamError,
 	addPermissionRequest,
@@ -160,27 +139,10 @@ export function useSocket({
 
 		switch (event.kind) {
 			case "user_message": {
-				// Skip user_message events while sending — WebUI already added
-				// the user message optimistically via addUserMessage()
-				if (session?.sending) {
-					break;
-				}
 				const notification = event.payload as SessionNotification;
 				const textChunk = extractTextChunk(notification);
 				if (textChunk?.role === "user") {
-					// Dedup: skip if the last completed user message has identical content
-					// (handles reconnect backfill replaying already-optimistically-added messages)
-					const currentSession =
-						useChatStore.getState().sessions[event.sessionId];
-					if (currentSession) {
-						const lastUserMsg = findLastCompletedUserMessage(
-							currentSession.messages,
-						);
-						if (lastUserMsg && lastUserMsg.content === textChunk.text) {
-							break;
-						}
-					}
-					appendUserChunk(event.sessionId, textChunk.text);
+					confirmOrAppendUserMessage(event.sessionId, textChunk.text);
 				}
 				break;
 			}
@@ -392,6 +354,11 @@ export function useSocket({
 				if (event.seq === lastSeq + 1) {
 					applySessionEventRef.current?.(event);
 					updateSessionCursor(sessionId, event.revision, event.seq);
+				} else if (event.seq > lastSeq + 1) {
+					// Gap (e.g. encrypted events created holes) — buffer for later
+					const pending = pendingEventsRef.current.get(sessionId) ?? [];
+					pending.push(event);
+					pendingEventsRef.current.set(sessionId, pending);
 				}
 			}
 			// Flush any pending events
@@ -690,6 +657,30 @@ export function useSocket({
 			}
 		});
 
+		// Cross-tab cursor sync: when another tab writes to localStorage,
+		// merge cursors using max(local, remote) to prevent regression.
+		// (storage event only fires for *other* tabs, not the current one)
+		const handleStorageChange = (e: StorageEvent) => {
+			if (e.key !== "mobvibe.chat-store" || !e.newValue) return;
+			try {
+				const external = JSON.parse(e.newValue)?.state?.sessions as
+					| Record<string, { revision?: number; lastAppliedSeq?: number }>
+					| undefined;
+				if (!external) return;
+				for (const [sessionId, ext] of Object.entries(external)) {
+					if (ext.revision !== undefined && ext.lastAppliedSeq !== undefined) {
+						// updateSessionCursor has monotonic guard — only advances
+						useChatStore
+							.getState()
+							.updateSessionCursor(sessionId, ext.revision, ext.lastAppliedSeq);
+					}
+				}
+			} catch {
+				// Malformed storage data — ignore
+			}
+		};
+		window.addEventListener("storage", handleStorageChange);
+
 		return () => {
 			unsubCliStatus();
 			unsubSessionAttached();
@@ -699,6 +690,7 @@ export function useSocket({
 			unsubSessionsChanged();
 			unsubSessionEvent();
 			unsubDisconnect();
+			window.removeEventListener("storage", handleStorageChange);
 			gatewaySocket.disconnect();
 		};
 	}, []);
@@ -741,6 +733,15 @@ export function useSocket({
 						cursor.lastAppliedSeq,
 					);
 				}
+			}
+		}
+
+		// Cancel backfill for sessions that entered loading state (re-activation)
+		for (const sessionId of subscribedSessionsRef.current) {
+			const session = sessions[sessionId];
+			if (session?.isLoading) {
+				cancelBackfill(sessionId);
+				initialBackfillTriggeredRef.current.delete(sessionId);
 			}
 		}
 
@@ -793,12 +794,16 @@ export function useSocket({
 			for (const sessionId of subscribedSessionsRef.current) {
 				gatewaySocket.subscribeToSession(sessionId);
 
-				// Trigger backfill on reconnect
+				// Trigger backfill on reconnect (skip sessions currently loading)
 				const session = sessionsRef.current[sessionId];
 				if (session) {
-					const revision = session.revision ?? 1;
-					const afterSeq = session.lastAppliedSeq ?? 0;
-					triggerBackfillRef.current?.(sessionId, revision, afterSeq);
+					const isLoading =
+						useChatStore.getState().sessions[sessionId]?.isLoading;
+					if (!isLoading) {
+						const revision = session.revision ?? 1;
+						const afterSeq = session.lastAppliedSeq ?? 0;
+						triggerBackfillRef.current?.(sessionId, revision, afterSeq);
+					}
 				}
 			}
 

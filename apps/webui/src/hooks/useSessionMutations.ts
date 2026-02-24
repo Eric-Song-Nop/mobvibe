@@ -119,8 +119,13 @@ export interface ChatStoreActions {
 	addUserMessage: (
 		sessionId: string,
 		content: string,
-		meta?: { messageId?: string; contentBlocks?: ContentBlock[] },
+		meta?: {
+			messageId?: string;
+			contentBlocks?: ContentBlock[];
+			provisional?: boolean;
+		},
 	) => void;
+	confirmOrAppendUserMessage: (sessionId: string, text: string) => void;
 	addStatusMessage: (sessionId: string, status: StatusPayload) => void;
 	appendAssistantChunk: (sessionId: string, text: string) => void;
 	appendThoughtChunk: (sessionId: string, text: string) => void;
@@ -157,7 +162,7 @@ export interface ChatStoreActions {
 	restoreSessionMessages: (
 		sessionId: string,
 		messages: ChatMessage[],
-		cursor?: { lastAppliedSeq?: number },
+		cursor?: { lastAppliedSeq?: number; revision?: number },
 	) => void;
 	// Session cursor tracking for backfill
 	updateSessionCursor: (
