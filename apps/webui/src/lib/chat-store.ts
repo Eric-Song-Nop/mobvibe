@@ -805,6 +805,7 @@ export const useChatStore = create<ChatState>()(
 								streamingMessageId: undefined,
 								streamingMessageRole: undefined,
 								streamingThoughtId: undefined,
+								revision: undefined,
 								lastAppliedSeq: 0,
 							},
 						},
