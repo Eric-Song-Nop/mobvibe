@@ -262,7 +262,6 @@ type ChatState = {
 	) => void;
 	appendAssistantChunk: (sessionId: string, content: string) => void;
 	appendThoughtChunk: (sessionId: string, content: string) => void;
-	appendUserChunk: (sessionId: string, content: string) => void;
 	addPermissionRequest: (
 		sessionId: string,
 		payload: {
@@ -1237,49 +1236,6 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
-			appendUserChunk: (sessionId, content) =>
-				set((state: ChatState) => {
-					const session =
-						state.sessions[sessionId] ?? createSessionState(sessionId);
-					let { streamingMessageId, streamingMessageRole } = session;
-					let messages = session.messages;
-
-					if (!streamingMessageId || streamingMessageRole !== "user") {
-						const message = createMessage("user", "");
-						streamingMessageId = message.id;
-						streamingMessageRole = "user";
-						messages = [...messages, message];
-					}
-
-					const idx = messages.findIndex((m) => m.id === streamingMessageId);
-					if (idx === -1) return state;
-
-					const msg = messages[idx];
-					if (!isTextMessage(msg)) return state;
-
-					const nextContent = `${msg.content}${content}`;
-					const nextBlocks = msg.contentBlocks.map((b) =>
-						b.type === "text" ? { ...b, text: nextContent } : b,
-					);
-
-					messages = [
-						...messages.slice(0, idx),
-						{ ...msg, content: nextContent, contentBlocks: nextBlocks },
-						...messages.slice(idx + 1),
-					];
-
-					return {
-						sessions: {
-							...state.sessions,
-							[sessionId]: {
-								...session,
-								messages,
-								streamingMessageId,
-								streamingMessageRole,
-							},
-						},
-					};
-				}),
 			addPermissionRequest: (sessionId, payload) =>
 				set((state) => {
 					const session =
@@ -1483,6 +1439,10 @@ export const useChatStore = create<ChatState>()(
 				set((state: ChatState) => {
 					const session = state.sessions[sessionId];
 					if (!session) return state;
+					// Reject updates from older revisions (cross-tab storage race)
+					if (session.revision !== undefined && revision < session.revision) {
+						return state;
+					}
 					// Monotonic guard: same revision → cursor can only advance
 					if (
 						session.revision === revision &&

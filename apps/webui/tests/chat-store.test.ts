@@ -878,84 +878,6 @@ describe("useChatStore", () => {
 	// =========================================================================
 	// 1.3 appendUserChunk
 	// =========================================================================
-	describe("appendUserChunk", () => {
-		it("creates new user message on first chunk", () => {
-			const store = useChatStore.getState();
-			store.createLocalSession("session-1", { title: "Test" });
-			store.appendUserChunk("session-1", "Hello ");
-
-			const session = useChatStore.getState().sessions["session-1"];
-			expect(session.messages).toHaveLength(1);
-			expect(session.messages[0].role).toBe("user");
-			expect(session.messages[0].kind).toBe("text");
-			expect(session.messages[0].isStreaming).toBe(true);
-			if (session.messages[0].kind === "text") {
-				expect(session.messages[0].content).toBe("Hello ");
-			}
-			expect(session.streamingMessageRole).toBe("user");
-		});
-
-		it("appends to existing user streaming message", () => {
-			const store = useChatStore.getState();
-			store.createLocalSession("session-1", { title: "Test" });
-			store.appendUserChunk("session-1", "Hello ");
-			store.appendUserChunk("session-1", "world");
-
-			const session = useChatStore.getState().sessions["session-1"];
-			expect(session.messages).toHaveLength(1);
-			if (session.messages[0].kind === "text") {
-				expect(session.messages[0].content).toBe("Hello world");
-			}
-		});
-
-		it("switches from assistant stream to new user stream", () => {
-			const store = useChatStore.getState();
-			store.createLocalSession("session-1", { title: "Test" });
-
-			// Start assistant stream
-			store.appendAssistantChunk("session-1", "I am assistant");
-			let session = useChatStore.getState().sessions["session-1"];
-			expect(session.streamingMessageRole).toBe("assistant");
-
-			// Start user chunk — should create new message
-			store.appendUserChunk("session-1", "User input");
-
-			session = useChatStore.getState().sessions["session-1"];
-			expect(session.messages).toHaveLength(2);
-			expect(session.messages[0].role).toBe("assistant");
-			expect(session.messages[1].role).toBe("user");
-			expect(session.streamingMessageRole).toBe("user");
-		});
-
-		it("updates contentBlocks text in sync with content", () => {
-			const store = useChatStore.getState();
-			store.createLocalSession("session-1", { title: "Test" });
-			store.appendUserChunk("session-1", "Hello ");
-			store.appendUserChunk("session-1", "world");
-
-			const session = useChatStore.getState().sessions["session-1"];
-			const msg = session.messages[0];
-			if (msg.kind === "text") {
-				expect(msg.content).toBe("Hello world");
-				const textBlock = msg.contentBlocks.find((b) => b.type === "text");
-				expect(textBlock).toBeDefined();
-				if (textBlock?.type === "text") {
-					expect(textBlock.text).toBe("Hello world");
-				}
-			}
-		});
-
-		it("auto-creates session for unknown sessionId", () => {
-			useChatStore.getState().appendUserChunk("auto-session", "First chunk");
-
-			const session = useChatStore.getState().sessions["auto-session"];
-			expect(session).toBeTruthy();
-			expect(session.messages).toHaveLength(1);
-			expect(session.messages[0].role).toBe("user");
-		});
-	});
-
-	// =========================================================================
 	// 1.4 permission workflow
 	// =========================================================================
 	describe("permission workflow", () => {
@@ -1656,42 +1578,6 @@ describe("useChatStore", () => {
 			if (session.messages[0].kind === "text") {
 				expect(session.messages[0].content).toBe("Part 1 Part 2");
 			}
-		});
-
-		it("assistant→user: creates new user message, resets streamingMessageId", () => {
-			const store = useChatStore.getState();
-			store.createLocalSession("session-1", { title: "Test" });
-
-			store.appendAssistantChunk("session-1", "Assistant text");
-			const assistantMsgId =
-				useChatStore.getState().sessions["session-1"].streamingMessageId;
-
-			store.appendUserChunk("session-1", "User text");
-			const session = useChatStore.getState().sessions["session-1"];
-
-			expect(session.messages).toHaveLength(2);
-			expect(session.messages[0].role).toBe("assistant");
-			expect(session.messages[1].role).toBe("user");
-			expect(session.streamingMessageId).not.toBe(assistantMsgId);
-			expect(session.streamingMessageRole).toBe("user");
-		});
-
-		it("user→assistant: creates new assistant message, resets streamingMessageId", () => {
-			const store = useChatStore.getState();
-			store.createLocalSession("session-1", { title: "Test" });
-
-			store.appendUserChunk("session-1", "User text");
-			const userMsgId =
-				useChatStore.getState().sessions["session-1"].streamingMessageId;
-
-			store.appendAssistantChunk("session-1", "Assistant text");
-			const session = useChatStore.getState().sessions["session-1"];
-
-			expect(session.messages).toHaveLength(2);
-			expect(session.messages[0].role).toBe("user");
-			expect(session.messages[1].role).toBe("assistant");
-			expect(session.streamingMessageId).not.toBe(userMsgId);
-			expect(session.streamingMessageRole).toBe("assistant");
 		});
 
 		it("finalize clears both streamingMessageId and streamingThoughtId", () => {
