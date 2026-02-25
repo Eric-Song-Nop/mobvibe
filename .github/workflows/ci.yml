@@ -114,7 +114,7 @@ jobs:
           echo "password=${{ secrets.ANDROID_KEY_PASSWORD }}" >> keystore.properties
           echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
       - name: Build Android (Tauri)
-        run: pnpm -C apps/webui exec tauri android build --target aarch64 --apk
+        run: pnpm -C apps/webui exec tauri android build --target aarch64 --apk true
         env:
           VITE_GATEWAY_URL: https://api.mobvibe.net
       - name: Prepare Android artifacts
