@@ -474,21 +474,62 @@ export function ChatFooter({
 	const effectiveResourceHighlight =
 		resourceHighlight >= resourceMatches.length ? 0 : resourceHighlight;
 
+	const renderEditorContents = useCallback(
+		(
+			target: HTMLDivElement,
+			blocks: ContentBlock[],
+			selectionOverride?: number,
+		) => {
+			const selectionOffset = selectionOverride ?? getSelectionOffset(target);
+			target.innerHTML = "";
+			blocks.forEach((block) => {
+				if (block.type === "text") {
+					if (!block.text) {
+						return;
+					}
+					target.appendChild(document.createTextNode(block.text));
+					return;
+				}
+				if (block.type === "resource_link") {
+					const label = buildResourceTokenLabel(block);
+					const button = document.createElement("button");
+					button.type = "button";
+					button.textContent = label;
+					button.contentEditable = "false";
+					button.dataset.resourceLink = "true";
+					button.dataset.resourceUri = block.uri;
+					button.dataset.resourceName = block.name;
+					button.dataset.resourceLabel = label;
+					button.className = cn(
+						badgeVariants({ variant: "outline" }),
+						"cursor-pointer text-primary hover:text-primary/80",
+					);
+					target.appendChild(button);
+				}
+			});
+			setSelectionOffset(target, selectionOffset);
+		},
+		[],
+	);
+
 	const handleCommandClick = useCallback(
 		(result: FuzzySearchResult<AvailableCommand>) => {
 			const nextValue = `/${result.item.name}`;
 			if (activeSessionId) {
+				const nextBlocks = createDefaultContentBlocks(nextValue);
 				setInput(activeSessionId, nextValue);
-				setInputContents(
-					activeSessionId,
-					createDefaultContentBlocks(nextValue),
-				);
+				setInputContents(activeSessionId, nextBlocks);
 				setInputCursor(nextValue.length);
+				// 程序化变更——浏览器 DOM 不会自动反映，需显式重建
+				const editor = editorRef.current;
+				if (editor) {
+					renderEditorContents(editor, nextBlocks, nextValue.length);
+				}
 			}
 			setCommandHighlight(0);
 			setCommandPickerSuppressed(true);
 		},
-		[activeSessionId, setInput, setInputContents],
+		[activeSessionId, setInput, setInputContents, renderEditorContents],
 	);
 
 	const handleResourceNavigate = useCallback(
@@ -547,6 +588,11 @@ export function ChatFooter({
 			const nextContents = buildContentsFromInput(nextInput, nextResources);
 			const nextCursor = resourceTrigger.start + tokenLabel.length;
 			updateFromEditor(nextContents, nextCursor);
+			// 程序化变更——浏览器 DOM 不会自动反映，需显式重建
+			const editor = editorRef.current;
+			if (editor) {
+				renderEditorContents(editor, nextContents, nextCursor);
+			}
 			setResourceHighlight(0);
 			setResourcePickerSuppressed(true);
 			return true;
@@ -557,6 +603,7 @@ export function ChatFooter({
 			resourceTrigger,
 			resourceTokens,
 			updateFromEditor,
+			renderEditorContents,
 		],
 	);
 
@@ -655,43 +702,6 @@ export function ChatFooter({
 			setFileExplorerOpen(true);
 		},
 		[fileExplorerAvailable, setFileExplorerOpen, setFilePreviewPath],
-	);
-	const renderEditorContents = useCallback(
-		(
-			target: HTMLDivElement,
-			blocks: ContentBlock[],
-			selectionOverride?: number,
-		) => {
-			const selectionOffset = selectionOverride ?? getSelectionOffset(target);
-			target.innerHTML = "";
-			blocks.forEach((block) => {
-				if (block.type === "text") {
-					if (!block.text) {
-						return;
-					}
-					target.appendChild(document.createTextNode(block.text));
-					return;
-				}
-				if (block.type === "resource_link") {
-					const label = buildResourceTokenLabel(block);
-					const button = document.createElement("button");
-					button.type = "button";
-					button.textContent = label;
-					button.contentEditable = "false";
-					button.dataset.resourceLink = "true";
-					button.dataset.resourceUri = block.uri;
-					button.dataset.resourceName = block.name;
-					button.dataset.resourceLabel = label;
-					button.className = cn(
-						badgeVariants({ variant: "outline" }),
-						"cursor-pointer text-primary hover:text-primary/80",
-					);
-					target.appendChild(button);
-				}
-			});
-			setSelectionOffset(target, selectionOffset);
-		},
-		[],
 	);
 
 	const handleEditorInput = useCallback(() => {
