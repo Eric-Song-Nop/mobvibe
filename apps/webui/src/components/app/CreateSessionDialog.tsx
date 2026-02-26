@@ -1,3 +1,5 @@
+import { ComputerIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -73,7 +75,11 @@ export function CreateSessionDialog({
 		setDraftWorktreeBranch,
 		setDraftWorktreeBaseBranch,
 	} = useUiStore();
-	const { selectedMachineId } = useMachinesStore();
+	const { selectedMachineId, machines } = useMachinesStore();
+	const machineDisplayName = selectedMachineId
+		? (machines[selectedMachineId]?.hostname ?? selectedMachineId.slice(0, 8))
+		: undefined;
+
 	const rootsQuery = useQuery({
 		queryKey: ["fs-roots", selectedMachineId],
 		queryFn: () => fetchFsRoots({ machineId: selectedMachineId ?? undefined }),
@@ -157,6 +163,18 @@ export function CreateSessionDialog({
 						{t("session.createDescription")}
 					</AlertDialogDescription>
 				</AlertDialogHeader>
+				{machineDisplayName ? (
+					<div className="text-muted-foreground flex items-center gap-1.5 text-sm">
+						<HugeiconsIcon
+							icon={ComputerIcon}
+							strokeWidth={2}
+							className="size-4"
+						/>
+						<span>
+							{t("session.targetMachine", { name: machineDisplayName })}
+						</span>
+					</div>
+				) : null}
 				<div className="flex min-w-0 flex-col gap-3">
 					<div className="flex flex-col gap-2">
 						<Label htmlFor="session-title">{t("session.titleLabel")}</Label>
