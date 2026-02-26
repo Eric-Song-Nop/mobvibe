@@ -14,28 +14,53 @@ export interface DemoFeature {
 	messages: DemoMessage[];
 }
 
-const featureIds = [
-	"multi-machine",
-	"streaming",
-	"sessions",
-	"file-explorer",
-	"e2ee",
-	"cross-platform",
-	"acp",
+export interface FeatureGroup {
+	key: string;
+	label: string;
+	features: DemoFeature[];
+}
+
+const featureGroupDefs = [
+	{
+		key: "intro",
+		featureIds: ["what-is-mobvibe", "acp"],
+	},
+	{
+		key: "getting-started",
+		featureIds: ["install-login", "e2ee", "sessions", "cross-platform"],
+	},
+	{
+		key: "features",
+		featureIds: [
+			"multi-machine",
+			"streaming",
+			"file-explorer",
+			"git-integration",
+		],
+	},
 ] as const;
 
-export function useFeatures(): DemoFeature[] {
+export function useFeatureGroups(): FeatureGroup[] {
 	const { t } = useTranslation();
 
 	return useMemo(
 		() =>
-			featureIds.map((id) => ({
-				id,
-				title: t(`features.${id}.title`),
-				messages: t(`features.${id}.messages`, {
-					returnObjects: true,
-				}) as DemoMessage[],
+			featureGroupDefs.map((group) => ({
+				key: group.key,
+				label: t(`sidebar.groups.${group.key}`),
+				features: group.featureIds.map((id) => ({
+					id,
+					title: t(`features.${id}.title`),
+					messages: t(`features.${id}.messages`, {
+						returnObjects: true,
+					}) as DemoMessage[],
+				})),
 			})),
 		[t],
 	);
+}
+
+export function useFeatures(): DemoFeature[] {
+	const groups = useFeatureGroups();
+	return useMemo(() => groups.flatMap((g) => g.features), [groups]);
 }

@@ -16,12 +16,12 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
-import type { DemoFeature } from "@/data/features";
+import type { FeatureGroup } from "@/data/features";
 import { supportedLanguages } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 interface DemoSidebarProps {
-	features: DemoFeature[];
+	groups: FeatureGroup[];
 	activeFeatureId: string;
 	onFeatureSelect: (id: string) => void;
 	open: boolean;
@@ -29,7 +29,7 @@ interface DemoSidebarProps {
 }
 
 export function DemoSidebar({
-	features,
+	groups,
 	activeFeatureId,
 	onFeatureSelect,
 	open,
@@ -65,30 +65,38 @@ export function DemoSidebar({
 
 				<Separator />
 
-				{/* Feature list */}
+				{/* Feature list — grouped */}
 				<nav className="flex-1 overflow-y-auto p-2">
 					<div className="flex flex-col gap-0.5">
-						{features.map((feature) => {
-							const isActive = feature.id === activeFeatureId;
-							return (
-								<button
-									key={feature.id}
-									type="button"
-									onClick={() => {
-										onFeatureSelect(feature.id);
-										onClose();
-									}}
-									className={cn(
-										"flex items-center gap-2 rounded-none border p-2 text-left text-xs transition-colors",
-										isActive
-											? "border-primary/40 bg-muted"
-											: "border-transparent hover:bg-muted/50",
-									)}
-								>
-									<span className="truncate">{feature.title}</span>
-								</button>
-							);
-						})}
+						{groups.map((group, groupIndex) => (
+							<div key={group.key}>
+								{groupIndex > 0 && <Separator className="my-2" />}
+								<span className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+									{group.label}
+								</span>
+								{group.features.map((feature) => {
+									const isActive = feature.id === activeFeatureId;
+									return (
+										<button
+											key={feature.id}
+											type="button"
+											onClick={() => {
+												onFeatureSelect(feature.id);
+												onClose();
+											}}
+											className={cn(
+												"flex items-center gap-2 rounded-none border p-2 text-left text-xs transition-colors",
+												isActive
+													? "border-primary/40 bg-muted"
+													: "border-transparent hover:bg-muted/50",
+											)}
+										>
+											<span className="truncate">{feature.title}</span>
+										</button>
+									);
+								})}
+							</div>
+						))}
 					</div>
 				</nav>
 
