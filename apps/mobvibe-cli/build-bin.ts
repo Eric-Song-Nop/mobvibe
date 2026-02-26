@@ -1,35 +1,54 @@
 import { mkdir, rm } from "node:fs/promises";
 
-const target = process.env.MOBVIBE_BUN_TARGET;
-const outfile = process.env.MOBVIBE_BIN_OUTFILE;
+const TARGETS = [
+	{ platform: "linux-x64", bunTarget: "bun-linux-x64", bin: "mobvibe" },
+	{ platform: "linux-arm64", bunTarget: "bun-linux-arm64", bin: "mobvibe" },
+	{ platform: "darwin-x64", bunTarget: "bun-darwin-x64", bin: "mobvibe" },
+	{
+		platform: "darwin-arm64",
+		bunTarget: "bun-darwin-arm64",
+		bin: "mobvibe",
+	},
+	{
+		platform: "win32-x64",
+		bunTarget: "bun-windows-x64",
+		bin: "mobvibe.exe",
+	},
+];
 
-if (!target || !outfile) {
-	console.error(
-		"Missing MOBVIBE_BUN_TARGET or MOBVIBE_BIN_OUTFILE environment variables.",
+// Support filtering to a single target (backward compat + CI parallel optimization)
+const filterPlatform = process.env.MOBVIBE_BUN_TARGET;
+
+for (const target of TARGETS) {
+	if (filterPlatform && !target.bunTarget.includes(filterPlatform)) continue;
+
+	const outDir = `npm/${target.platform}/bin`;
+	await rm(outDir, { recursive: true, force: true });
+	await mkdir(outDir, { recursive: true });
+
+	const outfile = `${outDir}/${target.bin}`;
+	console.log(`Building ${target.bunTarget} → ${outfile}`);
+
+	const proc = Bun.spawn(
+		[
+			"bun",
+			"build",
+			"./src/index.ts",
+			"--compile",
+			"--minify",
+			"--outfile",
+			outfile,
+			"--target",
+			target.bunTarget,
+		],
+		{ stdio: ["inherit", "inherit", "inherit"] },
 	);
-	process.exit(1);
+
+	const exitCode = await proc.exited;
+	if (exitCode !== 0) {
+		console.error(`Build failed for ${target.platform}`);
+		process.exit(exitCode);
+	}
 }
 
-await rm("dist-bin", { recursive: true, force: true });
-await mkdir("dist-bin", { recursive: true });
-
-const proc = Bun.spawn(
-	[
-		"bun",
-		"build",
-		"./src/index.ts",
-		"--compile",
-		"--outfile",
-		outfile,
-		"--target",
-		target,
-	],
-	{ stdio: ["inherit", "inherit", "inherit"] },
-);
-
-const exitCode = await proc.exited;
-if (exitCode !== 0) {
-	process.exit(exitCode);
-}
-
-console.log(`Binary build complete: ${outfile}`);
+console.log("All binary builds complete!");

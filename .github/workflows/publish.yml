@@ -33,12 +33,30 @@ jobs:
         run: |
           VERSION="${{ github.ref_name }}"
           VERSION="${VERSION#v}"  # Strip v prefix
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           jq --arg v "$VERSION" '.version = $v' apps/mobvibe-cli/package.json > tmp.json && mv tmp.json apps/mobvibe-cli/package.json
           echo "Set @mobvibe/cli version to $VERSION"
+      # 1. Build JS packages (library API + type declarations)
       - run: pnpm build
+
+      # 2. Cross-compile all platform binaries
+      - name: Build platform binaries
+        working-directory: apps/mobvibe-cli
+        run: bun run build-bin.ts
+
+      # 3. Publish platform packages (before main package)
+      - name: Publish platform packages
+        working-directory: apps/mobvibe-cli
+        run: bash publish-platform.sh "$VERSION"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # 4. Publish main package
       - name: Publish @mobvibe/cli
         run: npm publish --access public --provenance
         working-directory: apps/mobvibe-cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   release:
     needs: [ci, publish]
