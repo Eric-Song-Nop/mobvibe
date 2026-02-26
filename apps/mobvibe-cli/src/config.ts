@@ -4,6 +4,8 @@ import type { AcpBackendId, UserAgentConfig } from "@mobvibe/shared";
 import { getGatewayUrl } from "./auth/credentials.js";
 import { loadUserConfig } from "./config-loader.js";
 import { logger } from "./lib/logger.js";
+import { detectAgents } from "./registry/agent-detector.js";
+import { getRegistry } from "./registry/registry-client.js";
 
 export type AcpBackendConfig = {
 	id: AcpBackendId;
@@ -11,6 +13,8 @@ export type AcpBackendConfig = {
 	command: string;
 	args: string[];
 	envOverrides?: Record<string, string>;
+	icon?: string;
+	description?: string;
 };
 
 export type CompactionConfig = {
@@ -59,14 +63,6 @@ export type CliConfig = {
 	worktreeBaseDir: string;
 };
 
-// Default opencode backend
-const DEFAULT_OPENCODE_BACKEND: AcpBackendConfig = {
-	id: "opencode",
-	label: "opencode",
-	command: "opencode",
-	args: ["acp"],
-};
-
 const generateMachineId = (): string => {
 	const hostname = os.hostname();
 	const platform = os.platform();
@@ -85,25 +81,37 @@ const userAgentToBackendConfig = (
 	envOverrides: agent.env,
 });
 
-const mergeBackends = (
-	defaultBackend: AcpBackendConfig,
+/**
+ * Merge registry-detected backends with user-configured agents.
+ *
+ * 1. Registry agents form the base list
+ * 2. User agents with a matching ID override the registry entry
+ * 3. User agents with a new ID are appended (custom/private agents)
+ */
+export const mergeBackends = (
+	registryBackends: AcpBackendConfig[],
 	userAgents: UserAgentConfig[] | undefined,
 ): AcpBackendConfig[] => {
-	// No user agents: use default opencode only
 	if (!userAgents || userAgents.length === 0) {
-		return [defaultBackend];
+		return registryBackends;
 	}
 
-	// Check if user defined opencode (override case)
-	const userOpencode = userAgents.find((a) => a.id === "opencode");
+	const userMap = new Map(
+		userAgents.map((a) => [a.id, userAgentToBackendConfig(a)]),
+	);
 
-	if (userOpencode) {
-		// User overrides opencode - use only user-defined agents
-		return userAgents.map(userAgentToBackendConfig);
+	// Replace registry entries that the user overrides
+	const merged = registryBackends.map((rb) => userMap.get(rb.id) ?? rb);
+
+	// Append user-only agents not found in registry
+	const registryIds = new Set(registryBackends.map((b) => b.id));
+	for (const [id, backend] of userMap) {
+		if (!registryIds.has(id)) {
+			merged.push(backend);
+		}
 	}
 
-	// User didn't define opencode - prepend default opencode to user agents
-	return [defaultBackend, ...userAgents.map(userAgentToBackendConfig)];
+	return merged;
 };
 
 export const getCliConfig = async (): Promise<CliConfig> => {
@@ -120,9 +128,25 @@ export const getCliConfig = async (): Promise<CliConfig> => {
 		}
 	}
 
-	// Merge backends
+	const registryConfig = userConfigResult.config?.registry;
+
+	// Detect backends from registry (unless disabled)
+	let registryBackends: AcpBackendConfig[] = [];
+	if (!registryConfig?.disabled) {
+		const registry = await getRegistry({
+			homePath,
+			url: registryConfig?.url,
+			cacheTtlMs: registryConfig?.cacheTtlMs,
+		});
+
+		if (registry) {
+			registryBackends = await detectAgents(registry);
+		}
+	}
+
+	// Merge registry + user backends
 	const backends = mergeBackends(
-		DEFAULT_OPENCODE_BACKEND,
+		registryBackends,
 		userConfigResult.config?.agents,
 	);
 

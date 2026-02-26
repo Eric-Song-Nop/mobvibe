@@ -71,6 +71,7 @@ export type {
 // Agent configuration types
 export type {
 	MobvibeUserConfig,
+	RegistryConfig,
 	UserAgentConfig,
 } from "./types/agent-config.js";
 // Error types
@@ -88,6 +89,15 @@ export {
 	isProtocolMismatch,
 	withScope,
 } from "./types/errors.js";
+// Registry types
+export type {
+	BinaryPlatformEntry,
+	NpxDistribution,
+	RegistryAgent,
+	RegistryData,
+	RegistryPlatformKey,
+	UvxDistribution,
+} from "./types/registry.js";
 // Session types
 export type {
 	AcpBackendId,
@@ -106,7 +116,6 @@ export type {
 	SessionSummary,
 	SessionsChangedPayload,
 } from "./types/session.js";
-
 // Socket event types
 export type {
 	// HTTP API response types

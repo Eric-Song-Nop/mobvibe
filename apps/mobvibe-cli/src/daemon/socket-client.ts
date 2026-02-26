@@ -1461,6 +1461,8 @@ export class SocketClient extends EventEmitter {
 			backends: config.acpBackends.map((backend) => ({
 				backendId: backend.id,
 				backendLabel: backend.label,
+				icon: backend.icon,
+				description: backend.description,
 			})),
 		});
 		logger.info({ machineId: config.machineId }, "cli_register_sessions_list");
