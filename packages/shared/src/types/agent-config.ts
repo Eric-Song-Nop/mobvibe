@@ -21,4 +21,6 @@ export type UserAgentConfig = {
 export type MobvibeUserConfig = {
 	/** Base directory for git worktrees (default: ~/.mobvibe/worktrees) */
 	worktreeBaseDir?: string;
+	/** Agent IDs the user has chosen to enable (e.g., ["claude-code", "aider"]) */
+	enabledAgents?: string[];
 };
