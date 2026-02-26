@@ -58,13 +58,6 @@
 		"qrcode": "^1.5.4",
 		"socket.io-client": "^4.8.1"
 	},
-	"optionalDependencies": {
-		"@mobvibe/cli-linux-x64": "0.0.0-dev",
-		"@mobvibe/cli-linux-arm64": "0.0.0-dev",
-		"@mobvibe/cli-darwin-x64": "0.0.0-dev",
-		"@mobvibe/cli-darwin-arm64": "0.0.0-dev",
-		"@mobvibe/cli-win32-x64": "0.0.0-dev"
-	},
 	"devDependencies": {
 		"@biomejs/biome": "2.3.11",
 		"@mobvibe/shared": "workspace:*",
