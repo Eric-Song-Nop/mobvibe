@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { MobvibeUserConfig, UserAgentConfig } from "@mobvibe/shared";
+import type { MobvibeUserConfig } from "@mobvibe/shared";
+import { logger } from "./lib/logger.js";
 
 export type ConfigLoadResult = {
 	config: MobvibeUserConfig | null;
@@ -9,97 +10,6 @@ export type ConfigLoadResult = {
 };
 
 const CONFIG_FILENAME = ".config.json";
-
-const validateAgentConfig = (
-	agent: unknown,
-	index: number,
-): { valid: UserAgentConfig | null; errors: string[] } => {
-	const errors: string[] = [];
-	const prefix = `agents[${index}]`;
-
-	if (typeof agent !== "object" || agent === null) {
-		errors.push(`${prefix}: must be an object`);
-		return { valid: null, errors };
-	}
-
-	const record = agent as Record<string, unknown>;
-
-	// Validate id (required)
-	if (typeof record.id !== "string" || record.id.trim().length === 0) {
-		errors.push(`${prefix}.id: must be a non-empty string`);
-		return { valid: null, errors };
-	}
-
-	// Validate command (required)
-	if (
-		typeof record.command !== "string" ||
-		record.command.trim().length === 0
-	) {
-		errors.push(`${prefix}.command: must be a non-empty string`);
-		return { valid: null, errors };
-	}
-
-	const validated: UserAgentConfig = {
-		id: record.id.trim(),
-		command: record.command.trim(),
-	};
-
-	// Validate label (optional string)
-	if (record.label !== undefined) {
-		if (typeof record.label !== "string") {
-			errors.push(`${prefix}.label: must be a string`);
-		} else if (record.label.trim().length > 0) {
-			validated.label = record.label.trim();
-		}
-	}
-
-	// Validate args (optional string array)
-	if (record.args !== undefined) {
-		if (!Array.isArray(record.args)) {
-			errors.push(`${prefix}.args: must be an array of strings`);
-		} else {
-			const validArgs = record.args.filter((arg): arg is string => {
-				if (typeof arg !== "string") {
-					errors.push(`${prefix}.args: all elements must be strings`);
-					return false;
-				}
-				return true;
-			});
-			if (validArgs.length > 0) {
-				validated.args = validArgs;
-			}
-		}
-	}
-
-	// Validate env (optional object with string values)
-	if (record.env !== undefined) {
-		if (typeof record.env !== "object" || record.env === null) {
-			errors.push(`${prefix}.env: must be an object`);
-		} else {
-			const envRecord = record.env as Record<string, unknown>;
-			const validEnv: Record<string, string> = {};
-			let hasEnv = false;
-			for (const [key, value] of Object.entries(envRecord)) {
-				if (typeof value !== "string") {
-					errors.push(`${prefix}.env.${key}: must be a string`);
-				} else {
-					validEnv[key] = value;
-					hasEnv = true;
-				}
-			}
-			if (hasEnv) {
-				validated.env = validEnv;
-			}
-		}
-	}
-
-	// Return null if there were any errors after id/command validation
-	if (errors.length > 0) {
-		return { valid: null, errors };
-	}
-
-	return { valid: validated, errors: [] };
-};
 
 const validateUserConfig = (
 	data: unknown,
@@ -114,82 +24,12 @@ const validateUserConfig = (
 	const record = data as Record<string, unknown>;
 	const config: MobvibeUserConfig = {};
 
-	// Validate agents array
-	if (record.agents !== undefined) {
-		if (!Array.isArray(record.agents)) {
-			errors.push("agents: must be an array");
-		} else {
-			const validAgents: UserAgentConfig[] = [];
-			const seenIds = new Set<string>();
-
-			for (let i = 0; i < record.agents.length; i++) {
-				const result = validateAgentConfig(record.agents[i], i);
-				errors.push(...result.errors);
-
-				if (result.valid) {
-					if (seenIds.has(result.valid.id)) {
-						errors.push(`agents[${i}].id: duplicate id "${result.valid.id}"`);
-					} else {
-						seenIds.add(result.valid.id);
-						validAgents.push(result.valid);
-					}
-				}
-			}
-
-			if (validAgents.length > 0) {
-				config.agents = validAgents;
-			}
-		}
-	}
-
 	// Validate worktreeBaseDir (optional string)
 	if (record.worktreeBaseDir !== undefined) {
 		if (typeof record.worktreeBaseDir !== "string") {
 			errors.push("worktreeBaseDir: must be a string");
 		} else if (record.worktreeBaseDir.trim().length > 0) {
 			config.worktreeBaseDir = record.worktreeBaseDir.trim();
-		}
-	}
-
-	// Validate registry (optional object)
-	if (record.registry !== undefined) {
-		if (typeof record.registry !== "object" || record.registry === null) {
-			errors.push("registry: must be an object");
-		} else {
-			const reg = record.registry as Record<string, unknown>;
-			const registryConfig: MobvibeUserConfig["registry"] = {};
-			let hasRegistryFields = false;
-
-			if (reg.disabled !== undefined) {
-				if (typeof reg.disabled !== "boolean") {
-					errors.push("registry.disabled: must be a boolean");
-				} else {
-					registryConfig.disabled = reg.disabled;
-					hasRegistryFields = true;
-				}
-			}
-
-			if (reg.cacheTtlMs !== undefined) {
-				if (typeof reg.cacheTtlMs !== "number" || reg.cacheTtlMs < 0) {
-					errors.push("registry.cacheTtlMs: must be a non-negative number");
-				} else {
-					registryConfig.cacheTtlMs = reg.cacheTtlMs;
-					hasRegistryFields = true;
-				}
-			}
-
-			if (reg.url !== undefined) {
-				if (typeof reg.url !== "string" || reg.url.trim().length === 0) {
-					errors.push("registry.url: must be a non-empty string");
-				} else {
-					registryConfig.url = reg.url.trim();
-					hasRegistryFields = true;
-				}
-			}
-
-			if (hasRegistryFields) {
-				config.registry = registryConfig;
-			}
 		}
 	}
 
@@ -204,7 +44,7 @@ export const loadUserConfig = async (
 	homePath: string,
 ): Promise<ConfigLoadResult> => {
 	const configPath = path.join(homePath, CONFIG_FILENAME);
-	console.log(`[config] Loading config from: ${configPath}`);
+	logger.debug({ configPath }, "loading config");
 
 	try {
 		const content = await fs.readFile(configPath, "utf-8");
@@ -213,7 +53,7 @@ export const loadUserConfig = async (
 		try {
 			parsed = JSON.parse(content);
 		} catch {
-			console.log(`[config] Invalid JSON in config file: ${configPath}`);
+			logger.warn({ configPath }, "invalid JSON in config file");
 			return {
 				config: null,
 				errors: ["Invalid JSON in config file"],
@@ -224,25 +64,25 @@ export const loadUserConfig = async (
 		const { config, errors } = validateUserConfig(parsed);
 
 		if (errors.length > 0) {
-			console.log("[config] Validation errors:", errors);
+			logger.warn({ errors }, "config validation errors");
 		}
 
 		if (config) {
-			console.log("[config] Loaded config:", JSON.stringify(config, null, 2));
+			logger.debug({ config }, "loaded config");
 		}
 
 		return { config, errors, path: configPath };
 	} catch (error) {
 		// File not found is not an error, just return null config
 		if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-			console.log(`[config] No config file found at: ${configPath}`);
+			logger.debug({ configPath }, "no config file found");
 			return { config: null, errors: [], path: configPath };
 		}
 
 		// Other errors (permissions, etc.)
 		const message =
 			error instanceof Error ? error.message : "Unknown error reading config";
-		console.log(`[config] Error reading config: ${message}`);
+		logger.warn({ configPath, error: message }, "error reading config");
 		return { config: null, errors: [message], path: configPath };
 	}
 };
