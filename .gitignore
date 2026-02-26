@@ -8,6 +8,9 @@ node_modules/
 dist/
 dist-bin/
 
+# Platform binary build artifacts
+apps/mobvibe-cli/npm/*/bin/
+
 # Tree-sitter WASM files (copied during postinstall)
 apps/webui/public/*.wasm
 

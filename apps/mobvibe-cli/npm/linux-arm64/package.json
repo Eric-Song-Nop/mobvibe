@@ -1,0 +1,23 @@
+{
+	"name": "@mobvibe/cli-linux-arm64",
+	"version": "0.0.0-dev",
+	"description": "Platform-specific binary for @mobvibe/cli (linux-arm64)",
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Eric-Song-Nop/mobvibe.git",
+		"directory": "apps/mobvibe-cli"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"os": [
+		"linux"
+	],
+	"cpu": [
+		"arm64"
+	],
+	"files": [
+		"bin/"
+	]
+}
