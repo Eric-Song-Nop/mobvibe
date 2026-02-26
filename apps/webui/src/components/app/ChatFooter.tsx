@@ -512,6 +512,16 @@ export function ChatFooter({
 		[],
 	);
 
+	const syncEditorDOM = useCallback(
+		(blocks: ContentBlock[], cursor: number) => {
+			const editor = editorRef.current;
+			if (editor) {
+				renderEditorContents(editor, blocks, cursor);
+			}
+		},
+		[renderEditorContents],
+	);
+
 	const handleCommandClick = useCallback(
 		(result: FuzzySearchResult<AvailableCommand>) => {
 			const nextValue = `/${result.item.name}`;
@@ -521,15 +531,12 @@ export function ChatFooter({
 				setInputContents(activeSessionId, nextBlocks);
 				setInputCursor(nextValue.length);
 				// 程序化变更——浏览器 DOM 不会自动反映，需显式重建
-				const editor = editorRef.current;
-				if (editor) {
-					renderEditorContents(editor, nextBlocks, nextValue.length);
-				}
+				syncEditorDOM(nextBlocks, nextValue.length);
 			}
 			setCommandHighlight(0);
 			setCommandPickerSuppressed(true);
 		},
-		[activeSessionId, setInput, setInputContents, renderEditorContents],
+		[activeSessionId, setInput, setInputContents, syncEditorDOM],
 	);
 
 	const handleResourceNavigate = useCallback(
@@ -589,10 +596,7 @@ export function ChatFooter({
 			const nextCursor = resourceTrigger.start + tokenLabel.length;
 			updateFromEditor(nextContents, nextCursor);
 			// 程序化变更——浏览器 DOM 不会自动反映，需显式重建
-			const editor = editorRef.current;
-			if (editor) {
-				renderEditorContents(editor, nextContents, nextCursor);
-			}
+			syncEditorDOM(nextContents, nextCursor);
 			setResourceHighlight(0);
 			setResourcePickerSuppressed(true);
 			return true;
@@ -603,7 +607,7 @@ export function ChatFooter({
 			resourceTrigger,
 			resourceTokens,
 			updateFromEditor,
-			renderEditorContents,
+			syncEditorDOM,
 		],
 	);
 
