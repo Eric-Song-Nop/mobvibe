@@ -5,6 +5,7 @@ import type {
 	PermissionOption,
 	PermissionOutcome,
 	PermissionToolCall,
+	PlanEntry,
 	SessionModelOption,
 	SessionModeOption,
 	SessionSummary,
@@ -162,6 +163,8 @@ export type ChatSession = {
 	worktreeSourceCwd?: string;
 	/** Branch name of the worktree (only for worktree sessions) */
 	worktreeBranch?: string;
+	/** Agent execution plan entries (replaced in full on each update) */
+	plan?: PlanEntry[];
 };
 
 type ChatState = {
@@ -238,6 +241,7 @@ type ChatState = {
 				| "availableCommands"
 				| "usage"
 				| "_meta"
+				| "plan"
 			>
 		>,
 	) => void;
@@ -602,6 +606,7 @@ const sanitizeSessionForPersist = (session: ChatSession): ChatSession => ({
 	detachedAt: undefined,
 	detachedReason: undefined,
 	e2eeStatus: undefined,
+	plan: undefined,
 	// Preserve messages even when cursor is set so detached sessions keep history.
 	// Backfill applies only new events based on the cursor.
 	messages: session.messages.map(sanitizeMessageForPersist),
@@ -1018,6 +1023,9 @@ export const useChatStore = create<ChatState>()(
 					if (payload._meta !== undefined) {
 						nextSession._meta = payload._meta;
 					}
+					if (payload.plan !== undefined) {
+						nextSession.plan = payload.plan;
+					}
 					return {
 						sessions: {
 							...state.sessions,
@@ -1425,6 +1433,7 @@ export const useChatStore = create<ChatState>()(
 								streamingMessageId: undefined,
 								streamingMessageRole: undefined,
 								streamingThoughtId: undefined,
+								plan: undefined,
 								revision: newRevision,
 								lastAppliedSeq: 0,
 							},

@@ -603,6 +603,7 @@ function MainApp() {
 						statusMessage={statusMessage}
 						streamError={streamError}
 						loadingMessage={loadingMessage}
+						plan={activeSession?.plan}
 						onOpenMobileMenu={() => uiActions.setMobileMenuOpen(true)}
 						onOpenFileExplorer={() => uiActions.setFileExplorerOpen(true)}
 						onOpenCommandPalette={() => uiActions.setCommandPaletteOpen(true)}

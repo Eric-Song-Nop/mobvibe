@@ -368,5 +368,20 @@
 	},
 	"cli": {
 		"discoveringCapabilities": "Discovering agent capabilities..."
+	},
+	"plan": {
+		"title": "Plan",
+		"completedCount": "{{completed}} of {{total}} completed",
+		"summaryCompleted": "{{count}} completed",
+		"summaryInProgress": "{{count}} in progress",
+		"summaryPending": "{{count}} pending",
+		"completedSection": "{{count}} completed",
+		"showMore": "Show more",
+		"showLess": "Show less",
+		"priority": {
+			"high": "HIGH",
+			"medium": "MED",
+			"low": "LOW"
+		}
 	}
 }

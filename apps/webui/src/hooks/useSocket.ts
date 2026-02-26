@@ -5,6 +5,7 @@ import type { ChatStoreActions } from "@/hooks/useSessionMutations";
 import {
 	type CliStatusPayload,
 	extractAvailableCommandsUpdate,
+	extractPlanUpdate,
 	extractSessionInfoUpdate,
 	extractSessionModeUpdate,
 	extractTextChunk,
@@ -215,6 +216,10 @@ export function useSocket({
 				const availableCommands = extractAvailableCommandsUpdate(notification);
 				if (availableCommands !== null) {
 					updateSessionMeta(event.sessionId, { availableCommands });
+				}
+				const planUpdate = extractPlanUpdate(notification);
+				if (planUpdate) {
+					updateSessionMeta(event.sessionId, { plan: planUpdate.entries });
 				}
 				break;
 			}

@@ -16,6 +16,10 @@ export type {
 	PermissionRequestPayload,
 	PermissionResultNotification,
 	PermissionToolCall,
+	// Plan types
+	PlanEntry,
+	PlanEntryPriority,
+	PlanEntryStatus,
 	ResourceLink,
 	SessionAttachedPayload,
 	SessionDetachedPayload,
@@ -36,6 +40,7 @@ export type {
 
 export {
 	extractAvailableCommandsUpdate,
+	extractPlanUpdate,
 	extractSessionInfoUpdate,
 	extractSessionModeUpdate,
 	extractTextChunk,
