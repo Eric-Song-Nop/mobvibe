@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -27,8 +28,8 @@ beforeEach(async () => {
 	tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "registry-test-"));
 });
 
-afterEach(async () => {
-	await fs.rm(tmpDir, { recursive: true, force: true });
+afterEach(() => {
+	fsSync.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 describe("getRegistry", () => {
