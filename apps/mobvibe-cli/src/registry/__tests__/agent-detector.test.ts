@@ -213,6 +213,34 @@ describe("detectAgents", () => {
 		expect(results[0].envOverrides).toEqual({ DISABLE_UPDATE: "1" });
 	});
 
+	it("strips ./ prefix from binary cmd for PATH lookup", async () => {
+		const dotSlashAgent: RegistryAgent = {
+			id: "dotslash-bin",
+			name: "DotSlash Agent",
+			version: "1.0.0",
+			description: "Binary with ./ prefix",
+			distribution: {
+				binary: {
+					"linux-x86_64": {
+						archive: "https://example.com/archive.tar.gz",
+						cmd: "./dotslash-bin",
+						args: ["acp"],
+					},
+				},
+			},
+		};
+
+		Bun.which = mock((cmd: string) =>
+			cmd === "dotslash-bin" ? "/usr/bin/dotslash-bin" : null,
+		) as typeof Bun.which;
+
+		const results = await detectAgents(makeRegistry([dotSlashAgent]));
+
+		expect(results).toHaveLength(1);
+		expect(results[0].command).toBe("dotslash-bin");
+		expect(results[0].args).toEqual(["acp"]);
+	});
+
 	it("omits envOverrides when distribution has no env", async () => {
 		Bun.which = mock((cmd: string) =>
 			cmd === "uvx" ? "/usr/bin/uvx" : null,
