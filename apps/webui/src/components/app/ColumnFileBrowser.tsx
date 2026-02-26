@@ -467,6 +467,7 @@ function ColumnPanel({
 	getGitStatus,
 	columnRefs,
 }: ColumnPanelProps) {
+	const { t } = useTranslation();
 	const activeQuery = isLastColumn ? searchQuery : "";
 
 	const filteredResults = useMemo(() => {
@@ -528,7 +529,8 @@ function ColumnPanel({
 					<input
 						ref={searchInputRef}
 						type="text"
-						className="bg-transparent min-w-0 flex-1 text-xs outline-none placeholder:text-muted-foreground"
+						aria-label={t("fileExplorer.searchFiles")}
+						className="bg-transparent min-w-0 flex-1 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring/50 placeholder:text-muted-foreground"
 						placeholder="/"
 						value={searchQuery}
 						onChange={(e) => onSearchQueryChange(e.target.value)}

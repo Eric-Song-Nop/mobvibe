@@ -44,7 +44,7 @@ export function UserMenu() {
 					variant="outline"
 					size="icon-sm"
 					className="shrink-0"
-					aria-label="User menu"
+					aria-label={t("auth.userMenuAriaLabel")}
 				>
 					{user.image ? (
 						<img

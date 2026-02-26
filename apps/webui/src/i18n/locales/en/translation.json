@@ -18,7 +18,8 @@
 		"new": "New",
 		"empty": "No items",
 		"unknown": "Unknown",
-		"back": "Back"
+		"back": "Back",
+		"closeMenu": "Close menu"
 	},
 	"status": {
 		"idle": "Idle",
@@ -165,7 +166,8 @@
 		"commitLoading": "Loading commits...",
 		"commitAuthorFilter": "Filter by author",
 		"commitPathFilter": "Filter by file path",
-		"commitFilesChanged": "{{count}} files changed"
+		"commitFilesChanged": "{{count}} files changed",
+		"searchFiles": "Search files"
 	},
 	"fileBrowser": {
 		"loading": "Loading...",
@@ -269,7 +271,8 @@
 		"loginFailed": "Login failed",
 		"registrationFailed": "Registration failed",
 		"errorOccurred": "An error occurred",
-		"emailVerified": "Email verified successfully"
+		"emailVerified": "Email verified successfully",
+		"userMenuAriaLabel": "User menu"
 	},
 	"settings": {
 		"title": "Settings",
@@ -333,7 +336,9 @@
 		"commandCopied": "Command copied to clipboard",
 		"remove": "Remove",
 		"removeTitle": "Remove machine?",
-		"removeDescription": "This will disconnect the machine and all its sessions."
+		"removeDescription": "This will disconnect the machine and all its sessions.",
+		"refreshAriaLabel": "Refresh",
+		"addMachineAriaLabel": "Add machine"
 	},
 	"commandPalette": {
 		"openCommandPalette": "Command Palette",
@@ -348,7 +353,10 @@
 	"chatSearch": {
 		"placeholder": "Search messages...",
 		"noResults": "No matches found",
-		"matchCount": "{{current}}/{{total}}"
+		"matchCount": "{{current}}/{{total}}",
+		"previousMatch": "Previous match",
+		"nextMatch": "Next match",
+		"closeSearch": "Close search"
 	},
 	"branchSelector": {
 		"title": "Branches",

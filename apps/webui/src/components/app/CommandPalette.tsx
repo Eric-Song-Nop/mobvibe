@@ -154,18 +154,21 @@ export function CommandPalette({
 	const fileResults = useMemo(() => {
 		if (!isFileMode || !resourcesQuery.data) return [];
 
+		// Pre-build a lookup map for O(1) git status access
+		const gitStatusMap = new Map<string, string>();
+		if (gitStatusQuery.data?.files) {
+			for (const f of gitStatusQuery.data.files) {
+				gitStatusMap.set(f.path, f.status);
+			}
+		}
+
 		const resources: FileSearchResult[] = resourcesQuery.data.entries.map(
-			(entry) => {
-				const gitFile = gitStatusQuery.data?.files.find(
-					(f) => f.path === entry.relativePath,
-				);
-				return {
-					name: entry.name,
-					relativePath: entry.relativePath,
-					path: entry.path,
-					gitStatus: gitFile?.status,
-				};
-			},
+			(entry) => ({
+				name: entry.name,
+				relativePath: entry.relativePath,
+				path: entry.path,
+				gitStatus: gitStatusMap.get(entry.relativePath),
+			}),
 		);
 
 		if (!searchQuery) {
@@ -290,6 +293,15 @@ export function CommandPalette({
 						<input
 							ref={inputRef}
 							type="text"
+							role="combobox"
+							aria-expanded="true"
+							aria-controls="command-palette-list"
+							aria-activedescendant={
+								selectedIndex >= 0
+									? `command-palette-item-${selectedIndex}`
+									: undefined
+							}
+							aria-label={t("commandPalette.searchPlaceholder")}
 							className="bg-transparent flex-1 text-sm outline-none placeholder:text-muted-foreground"
 							placeholder={t("commandPalette.searchPlaceholder")}
 							value={query}
@@ -319,7 +331,12 @@ export function CommandPalette({
 				</div>
 
 				{/* Results list */}
-				<div ref={listRef} className="flex-1 overflow-y-auto">
+				<div
+					ref={listRef}
+					id="command-palette-list"
+					role="listbox"
+					className="flex-1 overflow-y-auto"
+				>
 					{totalItems === 0 ? (
 						<div className="text-muted-foreground flex items-center justify-center px-4 py-8 text-sm">
 							{t("commandPalette.noResults")}
@@ -342,7 +359,10 @@ export function CommandPalette({
 									return (
 										<button
 											key={item.relativePath}
+											id={`command-palette-item-${index}`}
 											type="button"
+											role="option"
+											aria-selected={isSelected}
 											ref={virtualizer.measureElement}
 											data-index={index}
 											className={cn(
@@ -391,7 +411,10 @@ export function CommandPalette({
 								return (
 									<button
 										key={command.id}
+										id={`command-palette-item-${index}`}
 										type="button"
+										role="option"
+										aria-selected={isSelected}
 										ref={virtualizer.measureElement}
 										data-index={index}
 										className={cn(

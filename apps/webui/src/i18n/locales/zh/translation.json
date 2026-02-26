@@ -18,7 +18,8 @@
 		"new": "新建",
 		"empty": "暂无内容",
 		"unknown": "未知",
-		"back": "返回"
+		"back": "返回",
+		"closeMenu": "关闭菜单"
 	},
 	"status": {
 		"idle": "空闲",
@@ -165,7 +166,8 @@
 		"commitLoading": "加载提交中...",
 		"commitAuthorFilter": "按作者过滤",
 		"commitPathFilter": "按文件路径过滤",
-		"commitFilesChanged": "{{count}} 个文件变更"
+		"commitFilesChanged": "{{count}} 个文件变更",
+		"searchFiles": "搜索文件"
 	},
 	"fileBrowser": {
 		"loading": "加载中...",
@@ -269,7 +271,8 @@
 		"loginFailed": "登录失败",
 		"registrationFailed": "注册失败",
 		"errorOccurred": "发生错误",
-		"emailVerified": "邮箱验证成功"
+		"emailVerified": "邮箱验证成功",
+		"userMenuAriaLabel": "用户菜单"
 	},
 	"settings": {
 		"title": "设置",
@@ -333,7 +336,9 @@
 		"commandCopied": "命令已复制到剪贴板",
 		"remove": "移除",
 		"removeTitle": "移除设备？",
-		"removeDescription": "这将断开设备连接并关闭所有会话。"
+		"removeDescription": "这将断开设备连接并关闭所有会话。",
+		"refreshAriaLabel": "刷新",
+		"addMachineAriaLabel": "添加设备"
 	},
 	"commandPalette": {
 		"openCommandPalette": "命令面板",
@@ -348,7 +353,10 @@
 	"chatSearch": {
 		"placeholder": "搜索消息...",
 		"noResults": "未找到匹配",
-		"matchCount": "{{current}}/{{total}}"
+		"matchCount": "{{current}}/{{total}}",
+		"previousMatch": "上一个匹配",
+		"nextMatch": "下一个匹配",
+		"closeSearch": "关闭搜索"
 	},
 	"branchSelector": {
 		"title": "分支",

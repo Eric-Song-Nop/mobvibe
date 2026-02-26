@@ -66,6 +66,27 @@ const getCursor = (sessionId: string) => {
 	};
 };
 
+/** Dedup-aware permission request handler — shared by WAL backfill and live socket paths. */
+function processPermissionRequest(
+	sessionId: string,
+	payload: PermissionRequestPayload,
+	sessionsRef: { current: Record<string, ChatSession> },
+	addPermissionRequest: ChatStoreActions["addPermissionRequest"],
+) {
+	const currentSession = useChatStore.getState().sessions[sessionId];
+	const alreadyExists = currentSession?.messages.some(
+		(m) => m.kind === "permission" && m.requestId === payload.requestId,
+	);
+	addPermissionRequest(sessionId, {
+		requestId: payload.requestId,
+		toolCall: payload.toolCall,
+		options: payload.options ?? [],
+	});
+	if (!alreadyExists) {
+		notifyPermissionRequest(payload, { sessions: sessionsRef.current });
+	}
+}
+
 export function useSocket({
 	sessions,
 	setSending,
@@ -210,22 +231,12 @@ export function useSocket({
 			}
 			case "permission_request": {
 				const payload = event.payload as PermissionRequestPayload;
-				// Check if this permission request already exists (dedup with live socket path)
-				const prSession = useChatStore.getState().sessions[event.sessionId];
-				const alreadyExists = prSession?.messages.some(
-					(m) => m.kind === "permission" && m.requestId === payload.requestId,
+				processPermissionRequest(
+					event.sessionId,
+					payload,
+					sessionsRef,
+					addPermissionRequest,
 				);
-				addPermissionRequest(event.sessionId, {
-					requestId: payload.requestId,
-					toolCall: payload.toolCall,
-					options: payload.options ?? [],
-				});
-				// Notify only for genuinely new permission requests
-				if (!alreadyExists) {
-					notifyPermissionRequest(payload, {
-						sessions: sessionsRef.current,
-					});
-				}
 				break;
 			}
 			case "permission_result": {
@@ -460,19 +471,12 @@ export function useSocket({
 	};
 
 	handlePermissionRequestRef.current = (payload: PermissionRequestPayload) => {
-		const currentSession = useChatStore.getState().sessions[payload.sessionId];
-		const alreadyExists = currentSession?.messages.some(
-			(m) => m.kind === "permission" && m.requestId === payload.requestId,
+		processPermissionRequest(
+			payload.sessionId,
+			payload,
+			sessionsRef,
+			addPermissionRequest,
 		);
-		addPermissionRequest(payload.sessionId, {
-			requestId: payload.requestId,
-			toolCall: payload.toolCall,
-			options: payload.options ?? [],
-		});
-		// Notify only for genuinely new permission requests (dedup with WAL backfill path)
-		if (!alreadyExists) {
-			notifyPermissionRequest(payload, { sessions: sessionsRef.current });
-		}
 	};
 
 	handlePermissionResultRef.current = (payload: PermissionDecisionPayload) => {
@@ -691,7 +695,7 @@ export function useSocket({
 			unsubSessionEvent();
 			unsubDisconnect();
 			window.removeEventListener("storage", handleStorageChange);
-			gatewaySocket.disconnect();
+			gatewaySocket.destroy();
 		};
 	}, []);
 

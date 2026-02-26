@@ -38,6 +38,11 @@ const authClient = GATEWAY_URL
 		})
 	: null;
 
+function requireAuthClient() {
+	if (!authClient) throw new Error("Auth not configured");
+	return authClient;
+}
+
 export function isAuthEnabled(): boolean {
 	return authClient !== null;
 }
@@ -58,10 +63,7 @@ export const useSession = () => {
 // Auth actions
 export const signIn = {
 	email: async (credentials: { email: string; password: string }) => {
-		if (!authClient) {
-			throw new Error("Auth not configured");
-		}
-		return authClient.signIn.email({
+		return requireAuthClient().signIn.email({
 			...credentials,
 			callbackURL: `${window.location.origin}/login?verified=1`,
 		});
@@ -69,10 +71,7 @@ export const signIn = {
 };
 
 export const sendVerificationEmail = async (params: { email: string }) => {
-	if (!authClient) {
-		throw new Error("Auth not configured");
-	}
-	return authClient.sendVerificationEmail({
+	return requireAuthClient().sendVerificationEmail({
 		...params,
 		callbackURL: `${window.location.origin}/login?verified=1`,
 	});
@@ -80,10 +79,7 @@ export const sendVerificationEmail = async (params: { email: string }) => {
 
 export const signUp = {
 	email: async (data: { email: string; password: string; name: string }) => {
-		if (!authClient) {
-			throw new Error("Auth not configured");
-		}
-		return authClient.signUp.email({
+		return requireAuthClient().signUp.email({
 			...data,
 			callbackURL: `${window.location.origin}/login?verified=1`,
 		});
@@ -91,10 +87,7 @@ export const signUp = {
 };
 
 export const signOut = async () => {
-	if (!authClient) {
-		throw new Error("Auth not configured");
-	}
-	const result = await authClient.signOut();
+	const result = await requireAuthClient().signOut();
 	await clearAuthToken();
 	return result;
 };
@@ -103,8 +96,5 @@ export const changePassword = async (data: {
 	currentPassword: string;
 	newPassword: string;
 }) => {
-	if (!authClient) {
-		throw new Error("Auth not configured");
-	}
-	return authClient.changePassword(data);
+	return requireAuthClient().changePassword(data);
 };

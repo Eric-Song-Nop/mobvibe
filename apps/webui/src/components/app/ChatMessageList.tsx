@@ -17,10 +17,7 @@ import { ToolCallGroup } from "@/components/chat/tool-call-group";
 import { Button } from "@/components/ui/button";
 import type { PermissionResultNotification } from "@/lib/acp";
 import type { ChatSession } from "@/lib/chat-store";
-import {
-	groupMessages,
-	messageIndexToDisplayIndex,
-} from "@/lib/group-tool-calls";
+import { buildMessageIndexMap, groupMessages } from "@/lib/group-tool-calls";
 import { useUiStore } from "@/lib/ui-store";
 
 const SCROLL_THRESHOLD = 64;
@@ -82,10 +79,17 @@ export const ChatMessageList = forwardRef<
 	});
 	const virtualItems = virtualizer.getVirtualItems();
 
+	// Pre-computed O(1) lookup map for message → display index
+	const msgIndexMap = useMemo(
+		() => buildMessageIndexMap(displayItems),
+		[displayItems],
+	);
+
 	useImperativeHandle(ref, () => ({
 		scrollToIndex: (msgIndex: number) => {
 			isPinnedRef.current = false;
-			const displayIndex = messageIndexToDisplayIndex(displayItems, msgIndex);
+			const displayIndex =
+				msgIndexMap.get(msgIndex) ?? Math.max(0, displayItems.length - 1);
 			virtualizer.scrollToIndex(displayIndex, { align: "center" });
 		},
 	}));

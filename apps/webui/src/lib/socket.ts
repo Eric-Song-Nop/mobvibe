@@ -47,6 +47,10 @@ class GatewaySocket {
 		this.socket.on("connect", () => {
 			this.isConnecting = false;
 			console.log("[webui] Connected to gateway");
+			// Re-subscribe all sessions after reconnect
+			for (const sessionId of this.subscribedSessions) {
+				this.socket?.emit("subscribe:session", { sessionId });
+			}
 			// Notify listeners that connection is ready
 			this.onConnectCallbacks.forEach((cb) => cb());
 		});
@@ -75,7 +79,18 @@ class GatewaySocket {
 		}
 		this.socket?.disconnect();
 		this.socket = null;
+	}
+
+	/**
+	 * Full reset: clear all subscriptions and disconnect.
+	 * Use this when the component is unmounting or the connection is being fully torn down.
+	 */
+	destroy() {
 		this.subscribedSessions.clear();
+		this.onConnectCallbacks.clear();
+		this.isConnecting = false;
+		this.socket?.disconnect();
+		this.socket = null;
 	}
 
 	getSocket(): TypedSocket | null {
@@ -96,53 +111,43 @@ class GatewaySocket {
 		return Array.from(this.subscribedSessions);
 	}
 
-	onSessionAttached(handler: (payload: SessionAttachedPayload) => void) {
-		this.socket?.on("session:attached", handler);
+	/** Register a handler for a typed socket event, returning an unsubscribe function. */
+	private registerHandler<E extends keyof GatewayToWebuiEvents>(
+		event: E,
+		handler: GatewayToWebuiEvents[E],
+	): () => void {
+		this.socket?.on(event, handler as never);
 		return () => {
-			this.socket?.off("session:attached", handler);
+			this.socket?.off(event, handler as never);
 		};
+	}
+
+	onSessionAttached(handler: (payload: SessionAttachedPayload) => void) {
+		return this.registerHandler("session:attached", handler);
 	}
 
 	onSessionDetached(handler: (payload: SessionDetachedPayload) => void) {
-		this.socket?.on("session:detached", handler);
-		return () => {
-			this.socket?.off("session:detached", handler);
-		};
+		return this.registerHandler("session:detached", handler);
 	}
 
 	onPermissionRequest(handler: (payload: PermissionRequestPayload) => void) {
-		this.socket?.on("permission:request", handler);
-		return () => {
-			this.socket?.off("permission:request", handler);
-		};
+		return this.registerHandler("permission:request", handler);
 	}
 
 	onPermissionResult(handler: (payload: PermissionDecisionPayload) => void) {
-		this.socket?.on("permission:result", handler);
-		return () => {
-			this.socket?.off("permission:result", handler);
-		};
+		return this.registerHandler("permission:result", handler);
 	}
 
 	onCliStatus(handler: (payload: CliStatusPayload) => void) {
-		this.socket?.on("cli:status", handler);
-		return () => {
-			this.socket?.off("cli:status", handler);
-		};
+		return this.registerHandler("cli:status", handler);
 	}
 
 	onSessionsChanged(handler: (payload: SessionsChangedPayload) => void) {
-		this.socket?.on("sessions:changed", handler);
-		return () => {
-			this.socket?.off("sessions:changed", handler);
-		};
+		return this.registerHandler("sessions:changed", handler);
 	}
 
 	onSessionEvent(handler: (event: SessionEvent) => void) {
-		this.socket?.on("session:event", handler);
-		return () => {
-			this.socket?.off("session:event", handler);
-		};
+		return this.registerHandler("session:event", handler);
 	}
 
 	isConnected(): boolean {

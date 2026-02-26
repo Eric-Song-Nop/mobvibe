@@ -1047,7 +1047,7 @@ export function ChatFooter({
 							>
 								<SelectTrigger
 									size="sm"
-									className="h-auto w-auto max-w-32 truncate border-0 bg-transparent px-1 py-0.5 text-xs text-muted-foreground hover:text-foreground focus:ring-0"
+									className="h-auto w-auto max-w-32 truncate border-0 bg-transparent px-1 py-0.5 text-xs text-muted-foreground hover:text-foreground focus:ring-0 focus-visible:ring-1 focus-visible:ring-ring/50"
 								>
 									<SelectValue placeholder={t("chat.modelLabel")} />
 								</SelectTrigger>
@@ -1073,7 +1073,7 @@ export function ChatFooter({
 							>
 								<SelectTrigger
 									size="sm"
-									className="h-auto w-auto max-w-32 truncate border-0 bg-transparent px-1 py-0.5 text-xs text-muted-foreground hover:text-foreground focus:ring-0"
+									className="h-auto w-auto max-w-32 truncate border-0 bg-transparent px-1 py-0.5 text-xs text-muted-foreground hover:text-foreground focus:ring-0 focus-visible:ring-1 focus-visible:ring-ring/50"
 								>
 									<SelectValue placeholder={t("chat.modeLabel")} />
 								</SelectTrigger>

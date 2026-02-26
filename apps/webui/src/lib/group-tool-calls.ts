@@ -137,6 +137,28 @@ function hasToolCallAhead(
 // --- Index mapping for search ---
 
 /**
+ * Build a pre-computed Map from message index → display index.
+ * Covers both single items and every message index within a tool_call_group range.
+ * Cache the result with useMemo in the component for O(1) lookups.
+ */
+export function buildMessageIndexMap(
+	items: DisplayItem[],
+): Map<number, number> {
+	const map = new Map<number, number>();
+	for (let i = 0; i < items.length; i++) {
+		const item = items[i];
+		if (item.type === "single") {
+			map.set(item.messageIndex, i);
+		} else if (item.type === "tool_call_group") {
+			for (let m = item.messageIndex; m <= item.messageEndIndex; m++) {
+				map.set(m, i);
+			}
+		}
+	}
+	return map;
+}
+
+/**
  * Maps a raw message index to the corresponding displayItem index.
  * Used by the search bar to scroll to the correct virtualizer position.
  */

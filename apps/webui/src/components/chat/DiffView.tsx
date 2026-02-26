@@ -15,7 +15,10 @@ import {
 	unifiedIndicatorTone,
 	unifiedLineTone,
 } from "@/lib/diff-utils";
-import { resolveLanguageFromPath } from "@/lib/file-preview-utils";
+import {
+	resolveFileNameFromPath,
+	resolveLanguageFromPath,
+} from "@/lib/file-preview-utils";
 import { cn } from "@/lib/utils";
 
 type UnifiedDiffViewProps = {
@@ -129,11 +132,6 @@ const trimTrailingEmptyTokens = (tokens: Token[][], code: string) => {
 	return tokens;
 };
 
-const resolveFileName = (pathValue: string) => {
-	const parts = pathValue.split(/[/\\]/).filter(Boolean);
-	return parts.at(-1) ?? pathValue;
-};
-
 export const UnifiedDiffView = ({
 	diff,
 	path,
@@ -148,7 +146,7 @@ export const UnifiedDiffView = ({
 		() => resolvePrismLanguage(resolveLanguageFromPath(path)),
 		[path],
 	);
-	const label = useMemo(() => resolveFileName(path), [path]);
+	const label = useMemo(() => resolveFileNameFromPath(path), [path]);
 
 	// Build code string for syntax highlighting (excluding hunks)
 	const codeLines = useMemo(

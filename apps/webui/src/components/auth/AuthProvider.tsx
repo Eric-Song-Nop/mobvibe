@@ -32,15 +32,26 @@ type AuthProviderProps = {
 
 export function AuthProvider({ children }: AuthProviderProps) {
 	const session = useSession();
-	// Extract user from session
-	const user = session.data?.user
-		? {
-				id: session.data.user.id,
-				email: session.data.user.email,
-				name: session.data.user.name ?? undefined,
-				image: session.data.user.image ?? undefined,
-			}
-		: null;
+	const sessionUser = session.data?.user;
+
+	// Stable user object — only recomputes when individual fields change
+	const user = useMemo<User | null>(
+		() =>
+			sessionUser
+				? {
+						id: sessionUser.id,
+						email: sessionUser.email,
+						name: sessionUser.name ?? undefined,
+						image: sessionUser.image ?? undefined,
+					}
+				: null,
+		[
+			sessionUser?.id,
+			sessionUser?.email,
+			sessionUser?.name,
+			sessionUser?.image,
+		],
+	);
 
 	const handleSignOut = useCallback(async () => {
 		await signOut();

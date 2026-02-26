@@ -795,8 +795,12 @@ export function App() {
 												window.location.search,
 											);
 											const returnUrl = params.get("returnUrl");
-											if (returnUrl) {
-												window.location.href = returnUrl;
+											if (
+												returnUrl &&
+												returnUrl.startsWith("/") &&
+												!returnUrl.startsWith("//")
+											) {
+												navigate(returnUrl);
 											} else {
 												navigate("/");
 											}

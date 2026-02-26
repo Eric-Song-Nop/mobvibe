@@ -40,6 +40,7 @@ function FileGroup({
 		<div className="flex flex-col">
 			<button
 				type="button"
+				aria-expanded={expanded}
 				className="text-muted-foreground hover:bg-muted flex items-center gap-1.5 px-2 py-1.5 text-xs font-medium"
 				onClick={toggleExpand}
 			>

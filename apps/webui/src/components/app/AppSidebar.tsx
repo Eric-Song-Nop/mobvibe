@@ -47,6 +47,7 @@ export function AppSidebar({
 	isCreating,
 	mutations,
 }: AppSidebarProps) {
+	const { t } = useTranslation();
 	const {
 		mobileMenuOpen,
 		setMobileMenuOpen,
@@ -103,7 +104,7 @@ export function AppSidebar({
 					<button
 						type="button"
 						className="bg-black/30 flex-1"
-						aria-label="Close menu"
+						aria-label={t("common.closeMenu")}
 						onClick={() => setMobileMenuOpen(false)}
 					/>
 				</div>
