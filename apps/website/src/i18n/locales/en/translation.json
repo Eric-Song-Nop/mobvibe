@@ -12,7 +12,12 @@
 		"getStarted": "Get Started"
 	},
 	"sidebar": {
-		"closeSidebar": "Close sidebar"
+		"closeSidebar": "Close sidebar",
+		"groups": {
+			"intro": "About Mobvibe",
+			"getting-started": "Getting Started",
+			"features": "Core Features"
+		}
 	},
 	"theme": {
 		"light": "Light",
@@ -39,6 +44,132 @@
 		"viewOnGitHub": "View on GitHub"
 	},
 	"features": {
+		"what-is-mobvibe": {
+			"title": "What is Mobvibe?",
+			"messages": [
+				{
+					"role": "user",
+					"content": "What is Mobvibe?"
+				},
+				{
+					"role": "assistant",
+					"content": "Mobvibe is a **remote AI coding agent management platform**. It lets you monitor and control AI agents (like Claude Code, Codex, Gemini CLI) running on any of your machines — from a single web or native interface.\n\nThe architecture is simple:\n- **CLI daemon** runs alongside your agent on each machine\n- **Gateway** relays messages between CLI and frontends\n- **WebUI / Desktop / Mobile** provides the unified interface\n\nEverything is open source, and you can self-host the entire stack."
+				},
+				{
+					"role": "user",
+					"content": "How is it different from just using the terminal?"
+				},
+				{
+					"role": "assistant",
+					"content": "Using agents directly in the terminal works, but Mobvibe adds several layers on top:\n\n- **Unified interface** — manage sessions across all machines from one place\n- **Session persistence** — reconnect anytime without losing context\n- **End-to-end encryption** — your code stays private, even from the gateway\n- **Real-time streaming** — see agent output token by token with rich rendering\n- **File explorer** — browse remote files, use @mentions to reference them\n- **Git integration** — view diffs, blame, branches without leaving the UI\n- **Permission approval** — review and approve tool calls before they execute"
+				}
+			]
+		},
+		"acp": {
+			"title": "Agent Support",
+			"messages": [
+				{
+					"role": "user",
+					"content": "Which AI agents does Mobvibe support?"
+				},
+				{
+					"role": "assistant",
+					"content": "Mobvibe supports multiple AI coding agents through the **ACP (Agent Communication Protocol)**:\n\n- **Claude Code** — Anthropic's coding agent\n- **Codex** — OpenAI's coding agent\n- **Gemini CLI** — Google's coding agent\n- **OpenCode** — Open-source coding agent\n\nACP is a transport-agnostic, streaming-first open protocol. Any agent that speaks ACP can plug into Mobvibe — new agents can be added without modifying the platform."
+				},
+				{
+					"role": "user",
+					"content": "Can I use different agents at the same time?"
+				},
+				{
+					"role": "assistant",
+					"content": "Absolutely. Each machine runs its own agent independently, so you can have:\n\n- Claude Code on your main workstation\n- Codex on a cloud VM\n- Gemini CLI on another server\n\nAll sessions appear in the same sidebar, grouped by machine. You can switch between agents instantly and even compare their approaches to the same task."
+				}
+			]
+		},
+		"install-login": {
+			"title": "Install & Login",
+			"messages": [
+				{
+					"role": "user",
+					"content": "How do I get started with Mobvibe?"
+				},
+				{
+					"role": "assistant",
+					"content": "Getting started takes just one command:\n\n```bash\nnpx @mobvibe/cli login\n```\n\nThis will:\n1. Install the Mobvibe CLI globally\n2. Open your browser for authentication\n3. Generate an **Ed25519 keypair** for secure signing\n4. Register your machine with the gateway\n\nOnce logged in, the CLI daemon starts automatically and your machine appears in the web UI at **app.mobvibe.net**."
+				},
+				{
+					"role": "user",
+					"content": "Do I need to deploy my own gateway?"
+				},
+				{
+					"role": "assistant",
+					"content": "No — by default, the CLI connects to the **public Mobvibe gateway** at `api.mobvibe.net`. This is the fastest way to get started.\n\nIf you want full control, you can self-host:\n- The gateway is a Node.js + Express + Socket.io server\n- PostgreSQL for persistence\n- Deploy anywhere — Docker, Render, or bare metal\n\nJust set `MOBVIBE_GATEWAY_URL` in your CLI config to point to your own instance."
+				}
+			]
+		},
+		"e2ee": {
+			"title": "End-to-End Encryption",
+			"messages": [
+				{
+					"role": "user",
+					"content": "How does Mobvibe protect my code?"
+				},
+				{
+					"role": "assistant",
+					"content": "Mobvibe supports **end-to-end encryption (E2EE)** using proven cryptographic primitives. When enabled, all messages are encrypted on the CLI daemon before transmission and decrypted only in your browser.\n\nThe encryption stack:\n- **X25519** for key exchange (Diffie-Hellman over Curve25519)\n- **XChaCha20-Poly1305** for authenticated encryption\n- **Ed25519** for message signing\n\nThe gateway **never sees plaintext** — it only relays encrypted payloads. Even if the gateway is compromised, your code and conversations remain private."
+				},
+				{
+					"role": "user",
+					"content": "How is the key exchange handled?"
+				},
+				{
+					"role": "assistant",
+					"content": "During the E2EE handshake, the CLI daemon and web client each generate **ephemeral X25519 keypairs**. After the Diffie-Hellman exchange, a shared secret is derived and used for symmetric encryption.\n\nKey properties:\n- **No keys stored on gateway** — it only relays the handshake\n- **Forward secrecy** — each session uses fresh keypairs\n- **Automatic setup** — E2EE is negotiated transparently when both sides support it\n\nYou can verify the encryption status in the session header — a lock icon confirms E2EE is active."
+				}
+			]
+		},
+		"sessions": {
+			"title": "Create & Manage Sessions",
+			"messages": [
+				{
+					"role": "user",
+					"content": "How do I create and manage sessions?"
+				},
+				{
+					"role": "assistant",
+					"content": "Sessions are the core of Mobvibe — each one represents a conversation with an AI agent. Here's the workflow:\n\n1. **Create** — click \"New Session\" and select a machine + working directory\n2. **Chat** — interact with the agent, send code references with @mentions\n3. **Rename** — give sessions meaningful names for easy reference\n4. **Archive** — hide completed sessions without deleting them\n\nSessions persist across reconnections. If your browser disconnects, you pick up right where you left off — full message history, agent context, everything."
+				},
+				{
+					"role": "user",
+					"content": "Can I resume a session later?"
+				},
+				{
+					"role": "assistant",
+					"content": "Absolutely. Sessions maintain their full message history including code blocks, tool outputs, and file changes. When you reconnect:\n\n- All previous messages are restored instantly\n- The agent retains its context\n- File references and @mentions remain valid\n- You can continue the conversation seamlessly\n\nThis makes Mobvibe ideal for long-running tasks — start a refactoring session in the morning, review progress in the evening, all from any device."
+				}
+			]
+		},
+		"cross-platform": {
+			"title": "Access Anywhere",
+			"messages": [
+				{
+					"role": "user",
+					"content": "What platforms does Mobvibe support?"
+				},
+				{
+					"role": "assistant",
+					"content": "Mobvibe is truly cross-platform:\n\n- **Web** — works in any modern browser\n- **Desktop** — native apps via Tauri for macOS, Windows, and Linux\n- **Mobile** — iOS and Android apps (also via Tauri)\n\nAll platforms share the same React codebase and connect to the same gateway, so your sessions sync everywhere."
+				},
+				{
+					"role": "user",
+					"content": "Are there differences between platforms?"
+				},
+				{
+					"role": "assistant",
+					"content": "The core experience is identical. Desktop and mobile apps get a few extras:\n\n- **Native notifications** when the agent completes a task\n- **Deep linking** to open sessions directly\n- **Persistent storage** for offline access to session history\n- **System theme** integration that follows your OS appearance\n\nThe web version works great too — it's the easiest way to get started."
+				}
+			]
+		},
 		"multi-machine": {
 			"title": "Multi-Machine Management",
 			"messages": [
@@ -81,29 +212,8 @@
 				}
 			]
 		},
-		"sessions": {
-			"title": "Session Management",
-			"messages": [
-				{
-					"role": "user",
-					"content": "How do sessions work in Mobvibe?"
-				},
-				{
-					"role": "assistant",
-					"content": "Each conversation with an AI agent is a **session**. Sessions persist across reconnections — if your browser disconnects, you pick up right where you left off.\n\nYou can:\n- Create new sessions on any connected machine\n- **Rename** sessions for easy reference\n- **Archive** sessions you're done with\n- Switch between active sessions instantly"
-				},
-				{
-					"role": "user",
-					"content": "Can I resume a session later?"
-				},
-				{
-					"role": "assistant",
-					"content": "Absolutely. Sessions maintain their full message history. When you reconnect, all previous messages — including code blocks, tool outputs, and file changes — are restored. The agent retains its context too, so you can continue the conversation seamlessly."
-				}
-			]
-		},
 		"file-explorer": {
-			"title": "File Explorer",
+			"title": "File Explorer & @Mentions",
 			"messages": [
 				{
 					"role": "user",
@@ -111,78 +221,36 @@
 				},
 				{
 					"role": "assistant",
-					"content": "The built-in **file explorer** lets you browse the remote file system of any connected machine directly from the web UI. You can:\n\n- Navigate directories with a familiar tree view\n- **Preview files** with syntax highlighting\n- Reference files in your messages using `@filename` mentions\n- See which files the agent has modified during a session"
+					"content": "The built-in **file explorer** lets you browse the remote file system of any connected machine directly from the web UI. You can:\n\n- Navigate directories with a familiar tree view\n- **Preview files** with syntax highlighting\n- Reference files in your messages using `@filename` mentions\n- See which files the agent has modified during a session\n- Use the **command palette** (`Ctrl+K`) to quickly jump to any file"
 				},
 				{
 					"role": "user",
-					"content": "How do @file mentions work?"
+					"content": "How does the file search work?"
 				},
 				{
 					"role": "assistant",
-					"content": "Type `@` in the message input to trigger the file picker. As you type, it filters matching files from the session's working directory. Select a file, and it gets attached as context — the agent sees the file's contents along with your message.\n\nThis is perfect for saying things like \"refactor `@utils.ts` to use async/await\"."
+					"content": "Mobvibe uses **uFuzzy** for blazing-fast fuzzy file search. Type `@` in the message input to trigger the file picker, then start typing — it matches filenames, paths, and even partial fragments.\n\nThe command palette (`Ctrl+K`) provides the same search across all files in the working directory. Results are ranked by relevance, and you can navigate with keyboard shortcuts.\n\nSelected files get attached as context — the agent sees their contents along with your message. Perfect for requests like \"refactor `@utils.ts` to use async/await\"."
 				}
 			]
 		},
-		"e2ee": {
-			"title": "End-to-End Encryption",
+		"git-integration": {
+			"title": "Git Integration",
 			"messages": [
 				{
 					"role": "user",
-					"content": "How does end-to-end encryption work?"
+					"content": "What Git features does Mobvibe offer?"
 				},
 				{
 					"role": "assistant",
-					"content": "Mobvibe supports **end-to-end encryption (E2EE)** using proven cryptographic primitives (XSalsa20-Poly1305, X25519, Ed25519). When enabled, messages are encrypted on the CLI daemon before transmission and decrypted only in your browser.\n\nThe gateway **never sees plaintext** — it only relays encrypted payloads. This means even if the gateway is compromised, your code and conversations remain private."
+					"content": "Mobvibe includes a comprehensive **Git integration** with 13 built-in functions accessible from the web UI:\n\n- **Diff viewer** — side-by-side or unified diff for any file or commit\n- **Blame** — see who changed each line and when\n- **Branch management** — create, switch, and delete branches\n- **Commit history** — browse the full log with filtering\n- **Status** — see staged, unstaged, and untracked changes\n- **Stash** — save and restore work in progress\n\nAll operations run on the remote machine and results stream back in real time."
 				},
 				{
 					"role": "user",
-					"content": "How is the key exchange handled?"
+					"content": "Are Git operations executed remotely?"
 				},
 				{
 					"role": "assistant",
-					"content": "Key exchange uses **X25519** (Diffie-Hellman over Curve25519). The CLI daemon and web client each generate ephemeral keypairs. After the handshake, a shared secret is derived and used for **XChaCha20-Poly1305** authenticated encryption.\n\nNo keys are ever stored on the gateway. Each session establishes a fresh keypair, providing forward secrecy."
-				}
-			]
-		},
-		"cross-platform": {
-			"title": "Desktop & Mobile",
-			"messages": [
-				{
-					"role": "user",
-					"content": "What platforms does Mobvibe support?"
-				},
-				{
-					"role": "assistant",
-					"content": "Mobvibe is truly cross-platform:\n\n- **Web** — works in any modern browser\n- **Desktop** — native apps via Tauri for macOS, Windows, and Linux\n- **Mobile** — iOS and Android apps (also via Tauri)\n\nAll platforms share the same React codebase and connect to the same gateway, so your sessions sync everywhere."
-				},
-				{
-					"role": "user",
-					"content": "Are there differences between platforms?"
-				},
-				{
-					"role": "assistant",
-					"content": "The core experience is identical. Desktop and mobile apps get a few extras:\n\n- **Native notifications** when the agent completes a task\n- **Deep linking** to open sessions directly\n- **Persistent storage** for offline access to session history\n- **System theme** integration that follows your OS appearance\n\nThe web version works great too — it's the easiest way to get started."
-				}
-			]
-		},
-		"acp": {
-			"title": "Use whatever agent you want claude code or codex.",
-			"messages": [
-				{
-					"role": "user",
-					"content": "What is ACP?"
-				},
-				{
-					"role": "assistant",
-					"content": "**ACP (Agent Communication Protocol)** is the open protocol Mobvibe uses for communication between the gateway, CLI daemons, and frontends. It's designed to be:\n\n- **Transport-agnostic** — works over WebSocket, HTTP, or stdio\n- **Extensible** — new message types can be added without breaking existing clients\n- **Streaming-first** — all responses support incremental delivery\n- **Secure** — optional E2EE layer built into the protocol"
-				},
-				{
-					"role": "user",
-					"content": "Can I build my own client?"
-				},
-				{
-					"role": "assistant",
-					"content": "Yes! ACP is fully documented and designed for third-party integration. You can:\n\n- Build custom frontends that connect to any Mobvibe gateway\n- Create CLI tools that interact with agents programmatically\n- Integrate agent capabilities into your existing tools and workflows\n\nThe `@mobvibe/shared` package provides TypeScript types for all protocol messages."
+					"content": "Yes — all Git operations execute on the remote machine through the CLI daemon's **RPC pipeline**. Results are streamed back to your browser in real time.\n\nWhen E2EE is enabled, file contents in diffs and blame output are encrypted end-to-end — the gateway never sees your source code.\n\nThis means you can review diffs, browse commit history, and manage branches on a remote server, all from your phone or tablet — no SSH required."
 				}
 			]
 		}
