@@ -1,8 +1,10 @@
 import { Database } from "bun:sqlite";
+import { cancel, intro, isCancel, multiselect, outro } from "@clack/prompts";
 import { Command } from "commander";
 import { loadCredentials } from "./auth/credentials.js";
 import { login, loginStatus, logout } from "./auth/login.js";
 import { getCliConfig } from "./config.js";
+import { saveUserConfig } from "./config-loader.js";
 import { DaemonManager } from "./daemon/daemon.js";
 import { logger } from "./lib/logger.js";
 import { WalCompactor, WalStore } from "./wal/index.js";
@@ -24,6 +26,40 @@ program
 			process.env.MOBVIBE_GATEWAY_URL = options.gateway;
 		}
 		const config = await getCliConfig();
+
+		// First run with interactive terminal → prompt user to select agents
+		if (config.enabledAgents === undefined && process.stdout.isTTY) {
+			if (config.acpBackends.length > 0) {
+				intro("Welcome to Mobvibe!");
+				const selected = await multiselect({
+					message: "Which agents do you want to enable?",
+					options: config.acpBackends.map((b) => ({
+						value: b.id,
+						label: b.label,
+						hint: b.description,
+					})),
+					required: false,
+				});
+				if (isCancel(selected)) {
+					cancel("Setup cancelled.");
+					process.exit(0);
+				}
+				await saveUserConfig(config.homePath, {
+					enabledAgents: selected as string[],
+				});
+				// Apply filtering in-place without reloading config
+				const enabled = new Set(selected as string[]);
+				config.acpBackends = config.acpBackends.filter((b) =>
+					enabled.has(b.id),
+				);
+				config.enabledAgents = selected as string[];
+				outro(
+					`Enabled ${(selected as string[]).length} agent(s). Config saved to ${config.homePath}/.config.json`,
+				);
+			}
+		}
+		// Non-TTY + not configured → use all backends (backwards-compatible for CI/scripts)
+
 		const daemon = new DaemonManager(config);
 		await daemon.start({ foreground: options.foreground });
 	});

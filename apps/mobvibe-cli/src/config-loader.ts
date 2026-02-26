@@ -33,11 +33,45 @@ const validateUserConfig = (
 		}
 	}
 
+	// Validate enabledAgents (optional string[])
+	if (record.enabledAgents !== undefined) {
+		if (!Array.isArray(record.enabledAgents)) {
+			errors.push("enabledAgents: must be an array of strings");
+		} else if (
+			!record.enabledAgents.every((item: unknown) => typeof item === "string")
+		) {
+			errors.push("enabledAgents: every element must be a string");
+		} else {
+			config.enabledAgents = record.enabledAgents as string[];
+		}
+	}
+
 	if (errors.length > 0) {
 		return { config: null, errors };
 	}
 
 	return { config, errors: [] };
+};
+
+/**
+ * Merge-save a partial user config into the config file.
+ * Reads existing config, merges the patch, and writes back.
+ */
+export const saveUserConfig = async (
+	homePath: string,
+	patch: Partial<MobvibeUserConfig>,
+): Promise<void> => {
+	const configPath = path.join(homePath, CONFIG_FILENAME);
+	let existing: Record<string, unknown> = {};
+	try {
+		const content = await fs.readFile(configPath, "utf-8");
+		existing = JSON.parse(content) as Record<string, unknown>;
+	} catch {
+		/* file doesn't exist or invalid JSON — start fresh */
+	}
+	const merged = { ...existing, ...patch };
+	await fs.mkdir(path.dirname(configPath), { recursive: true });
+	await fs.writeFile(configPath, JSON.stringify(merged, null, 2) + "\n");
 };
 
 export const loadUserConfig = async (

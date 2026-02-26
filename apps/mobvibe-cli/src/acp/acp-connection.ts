@@ -39,6 +39,7 @@ import {
 	type TerminalOutputEvent,
 } from "@mobvibe/shared";
 import type { AcpBackendConfig } from "../config.js";
+import { logger } from "../lib/logger.js";
 import { buildShellCommand, resolveShell } from "../lib/shell.js";
 
 type ClientInfo = {
@@ -388,7 +389,15 @@ export class AcpConnection {
 			);
 			this.process = child;
 			this.sessionId = undefined;
-			child.stderr.pipe(process.stderr);
+			child.stderr.on("data", (chunk: Buffer) => {
+				const text = chunk.toString("utf8").trimEnd();
+				if (text) {
+					logger.debug(
+						{ backendId: this.options.backend.id, stderr: text },
+						"acp_backend_stderr",
+					);
+				}
+			});
 
 			const input = Writable.toWeb(child.stdin) as WritableStream<Uint8Array>;
 			const output = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;

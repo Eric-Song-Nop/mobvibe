@@ -61,6 +61,8 @@ export type CliConfig = {
 	compaction: CompactionConfig;
 	/** Base directory for git worktrees (default: ~/.mobvibe/worktrees) */
 	worktreeBaseDir: string;
+	/** undefined = not yet configured (first run); string[] = user's selection */
+	enabledAgents?: string[];
 };
 
 const generateMachineId = (): string => {
@@ -85,11 +87,23 @@ export const getCliConfig = async (): Promise<CliConfig> => {
 		}
 	}
 
+	const userConfig = userConfigResult.config;
+
 	// Detect backends from registry
 	let backends: AcpBackendConfig[] = [];
 	const registry = await getRegistry({ homePath });
 	if (registry) {
 		backends = await detectAgents(registry);
+	}
+
+	// Resolve enabled agents: env var > user config > undefined (first run)
+	const enabledAgents =
+		env.MOBVIBE_ENABLED_AGENTS?.split(",") ?? userConfig?.enabledAgents;
+
+	// Filter backends to only include user-enabled agents
+	if (enabledAgents) {
+		const enabled = new Set(enabledAgents);
+		backends = backends.filter((b) => enabled.has(b.id));
 	}
 
 	// Get gateway URL (env var > credentials file > default production URL)
@@ -98,6 +112,7 @@ export const getCliConfig = async (): Promise<CliConfig> => {
 	return {
 		gatewayUrl,
 		acpBackends: backends,
+		enabledAgents,
 		clientName: env.MOBVIBE_ACP_CLIENT_NAME ?? "mobvibe-cli",
 		clientVersion: env.MOBVIBE_ACP_CLIENT_VERSION ?? "0.0.0",
 		homePath,
