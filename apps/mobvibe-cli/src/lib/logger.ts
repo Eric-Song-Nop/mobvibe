@@ -1,4 +1,5 @@
 import pino from "pino";
+import PinoPretty from "pino-pretty";
 
 const LOG_LEVEL = process.env.LOG_LEVEL ?? "info";
 const isPretty = process.env.NODE_ENV !== "production";
@@ -17,15 +18,14 @@ const redact = {
 	censor: "[redacted]",
 };
 
-const transport = isPretty
-	? {
-			target: "pino-pretty",
-			options: {
-				colorize: true,
-				translateTime: "SYS:standard",
-				ignore: "pid,hostname",
-			},
-		}
+// Use pino-pretty's synchronous Transform stream instead of pino.transport()
+// to avoid thread-stream Worker path resolution failures in compiled binaries.
+const prettyStream = isPretty
+	? PinoPretty({
+			colorize: true,
+			translateTime: "SYS:standard",
+			ignore: "pid,hostname",
+		})
 	: undefined;
 
 export const logger = pino(
@@ -38,5 +38,5 @@ export const logger = pino(
 			error: pino.stdSerializers.err,
 		},
 	},
-	transport ? pino.transport(transport) : undefined,
+	prettyStream,
 );
