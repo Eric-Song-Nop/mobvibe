@@ -1,5 +1,6 @@
 /**
  * User-defined agent configuration for custom ACP backends.
+ * Used internally by registry agent-detector; no longer part of user config.
  */
 export type UserAgentConfig = {
 	/** Unique identifier for this agent (e.g., "opencode", "my-agent") */
@@ -14,24 +15,10 @@ export type UserAgentConfig = {
 	env?: Record<string, string>;
 };
 
-/** Registry auto-detection settings */
-export type RegistryConfig = {
-	/** Disable registry auto-detection entirely */
-	disabled?: boolean;
-	/** Cache TTL in milliseconds (default: 3600000 = 1 hour) */
-	cacheTtlMs?: number;
-	/** Custom registry URL (overrides the default CDN) */
-	url?: string;
-};
-
 /**
  * User configuration file format for $HOME/.mobvibe/.config.json
  */
 export type MobvibeUserConfig = {
-	/** List of agent configurations */
-	agents?: UserAgentConfig[];
 	/** Base directory for git worktrees (default: ~/.mobvibe/worktrees) */
 	worktreeBaseDir?: string;
-	/** Registry auto-detection settings */
-	registry?: RegistryConfig;
 };

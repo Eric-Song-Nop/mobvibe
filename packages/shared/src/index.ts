@@ -71,7 +71,6 @@ export type {
 // Agent configuration types
 export type {
 	MobvibeUserConfig,
-	RegistryConfig,
 	UserAgentConfig,
 } from "./types/agent-config.js";
 // Error types
