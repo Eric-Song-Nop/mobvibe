@@ -140,9 +140,17 @@ export function useSessionHandlers({
 	const handleOpenCreateDialog = () => {
 		uiActions.setDraftTitle(buildSessionTitle(sessionList, t));
 		uiActions.setDraftBackendId(defaultBackendId);
-		uiActions.setDraftCwd(
-			selectedMachineId ? lastCreatedCwd[selectedMachineId] : undefined,
-		);
+
+		// CWD priority: lastCreatedCwd > activeSession cwd (same machine) > undefined (fallback to homePath in dialog)
+		let initialCwd: string | undefined;
+		if (selectedMachineId) {
+			initialCwd = lastCreatedCwd[selectedMachineId];
+			if (!initialCwd && activeSession?.machineId === selectedMachineId) {
+				initialCwd = activeSession.worktreeSourceCwd || activeSession.cwd;
+			}
+		}
+		uiActions.setDraftCwd(initialCwd);
+
 		uiActions.resetDraftWorktree();
 		uiActions.setCreateDialogOpen(true);
 	};

@@ -79,6 +79,7 @@
 		"cwdLabel": "Working directory",
 		"cwdPlaceholder": "Enter or paste a Home path",
 		"browse": "Browse",
+		"targetMachine": "Target: {{name}}",
 		"archiveAll": "Archive All",
 		"archiveAllTitle": "Archive all sessions?",
 		"archiveAllDescription": "This will archive {{count}} session(s), ending their backend processes and hiding them from the list.",
