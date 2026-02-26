@@ -212,7 +212,11 @@
 		"statusCompleted": "完成",
 		"statusFailed": "失败",
 		"statusUnknown": "未知",
-		"details": "详情"
+		"details": "详情",
+		"toolCallGroup": "{{count}} 个工具调用",
+		"toolCallGroupCompleted": "{{count}} 完成",
+		"toolCallGroupFailed": "{{count}} 失败",
+		"toolCallGroupPending": "{{count}} 进行中"
 	},
 	"languageSwitcher": {
 		"label": "语言",
