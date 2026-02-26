@@ -21,10 +21,12 @@ const resolveAgentCommand = (
 	if (distribution.binary && platformKey) {
 		const entry = distribution.binary[platformKey];
 		if (entry) {
-			const binPath = Bun.which(entry.cmd);
+			// Registry cmd may use "./" prefix (archive-relative); strip it for PATH lookup
+			const cmdName = entry.cmd.replace(/^\.\//, "");
+			const binPath = Bun.which(cmdName);
 			if (binPath) {
 				return {
-					command: entry.cmd,
+					command: cmdName,
 					args: entry.args ?? [],
 					envOverrides:
 						entry.env && Object.keys(entry.env).length > 0
