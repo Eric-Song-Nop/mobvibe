@@ -6,15 +6,21 @@ import {
 	useCallback,
 	useEffect,
 	useImperativeHandle,
+	useMemo,
 	useRef,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { E2EEMissingBanner } from "@/components/app/E2EEMissingBanner";
 import { MessageItem } from "@/components/chat/MessageItem";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
+import { ToolCallGroup } from "@/components/chat/tool-call-group";
 import { Button } from "@/components/ui/button";
 import type { PermissionResultNotification } from "@/lib/acp";
 import type { ChatSession } from "@/lib/chat-store";
+import {
+	groupMessages,
+	messageIndexToDisplayIndex,
+} from "@/lib/group-tool-calls";
 import { useUiStore } from "@/lib/ui-store";
 
 const SCROLL_THRESHOLD = 64;
@@ -53,24 +59,34 @@ export const ChatMessageList = forwardRef<
 	const messages = activeSession?.messages ?? [];
 	const showIndicator = !!activeSession?.sending;
 	const isThinking = showIndicator && !activeSession?.streamingMessageId;
-	const totalItems = messages.length + (showIndicator ? 1 : 0);
+
+	const displayItems = useMemo(() => groupMessages(messages), [messages]);
+	const totalItems = displayItems.length + (showIndicator ? 1 : 0);
 
 	const virtualizer = useVirtualizer({
 		count: totalItems,
 		getScrollElement: () => scrollContainerRef.current,
 		estimateSize: () => 112,
 		overscan: 8,
-		getItemKey: (index) =>
-			showIndicator && index === messages.length
-				? "__thinking-indicator__"
-				: (messages[index]?.id ?? `message-${index}`),
+		getItemKey: (index) => {
+			if (showIndicator && index === displayItems.length) {
+				return "__thinking-indicator__";
+			}
+			const displayItem = displayItems[index];
+			if (!displayItem) return `display-${index}`;
+			if (displayItem.type === "tool_call_group") {
+				return `group-${displayItem.messageIndex}`;
+			}
+			return displayItem.message.id ?? `message-${displayItem.messageIndex}`;
+		},
 	});
 	const virtualItems = virtualizer.getVirtualItems();
 
 	useImperativeHandle(ref, () => ({
-		scrollToIndex: (index: number) => {
+		scrollToIndex: (msgIndex: number) => {
 			isPinnedRef.current = false;
-			virtualizer.scrollToIndex(index, { align: "center" });
+			const displayIndex = messageIndexToDisplayIndex(displayItems, msgIndex);
+			virtualizer.scrollToIndex(displayIndex, { align: "center" });
 		},
 	}));
 
@@ -182,7 +198,7 @@ export const ChatMessageList = forwardRef<
 							style={{ height: `${virtualizer.getTotalSize()}px` }}
 						>
 							{virtualItems.map((item) => {
-								if (showIndicator && item.index === messages.length) {
+								if (showIndicator && item.index === displayItems.length) {
 									return (
 										<div
 											key={item.key}
@@ -197,8 +213,8 @@ export const ChatMessageList = forwardRef<
 										</div>
 									);
 								}
-								const message = messages[item.index];
-								if (!message) {
+								const displayItem = displayItems[item.index];
+								if (!displayItem) {
 									return null;
 								}
 								return (
@@ -211,11 +227,18 @@ export const ChatMessageList = forwardRef<
 											transform: `translateY(${item.start}px)`,
 										}}
 									>
-										<MessageItem
-											message={message}
-											onPermissionDecision={onPermissionDecision}
-											onOpenFilePreview={handleOpenFilePreview}
-										/>
+										{displayItem.type === "tool_call_group" ? (
+											<ToolCallGroup
+												group={displayItem}
+												onOpenFilePreview={handleOpenFilePreview}
+											/>
+										) : (
+											<MessageItem
+												message={displayItem.message}
+												onPermissionDecision={onPermissionDecision}
+												onOpenFilePreview={handleOpenFilePreview}
+											/>
+										)}
 									</div>
 								);
 							})}

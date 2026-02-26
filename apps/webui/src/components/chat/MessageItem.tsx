@@ -580,6 +580,195 @@ const extractUnifiedDiff = (
 	return typeof diff === "string" ? diff : undefined;
 };
 
+// --- Extracted sub-components for reuse in ToolCallGroup ---
+
+type ToolCallItemContentProps = {
+	message: Extract<ChatMessage, { kind: "tool_call" }>;
+	onOpenFilePreview?: (path: string) => void;
+};
+
+export const ToolCallItemContent = ({
+	message,
+	onOpenFilePreview,
+}: ToolCallItemContentProps) => {
+	const { t } = useTranslation();
+	const getLabel = (key: string, options?: Record<string, unknown>) =>
+		t(key, { defaultValue: key, ...options });
+
+	const terminalOutputMap = useChatStore((state) => {
+		if (!message.sessionId) return undefined;
+		return state.sessions[message.sessionId]?.terminalOutputs;
+	});
+
+	const label = message.title ?? message.name ?? getLabel("toolCall.toolCall");
+	const statusLabel = resolveStatusLabel(message.status, getLabel);
+	const statusBadgeVariant =
+		message.status === "failed" ? "destructive" : "secondary";
+	const commandLine =
+		message.command || message.args?.length
+			? `${message.command ?? ""}${message.args?.length ? ` ${message.args.join(" ")}` : ""}`.trim()
+			: undefined;
+	const detailPaths = collectToolCallPaths(message);
+	const displayPaths = detailPaths.map((pathValue) => ({
+		path: pathValue,
+		name: resolveFileName(pathValue),
+	}));
+	const summaryPaths = displayPaths.slice(0, TOOL_CALL_PATH_SUMMARY_LIMIT);
+	const overflowCount = Math.max(0, displayPaths.length - summaryPaths.length);
+	const outputBlocks = message.content?.map((contentBlock, index) => {
+		const key = `${message.toolCallId}-content-${index}`;
+		if (contentBlock.type === "content") {
+			return renderToolCallContentPayload(
+				contentBlock.content,
+				key,
+				getLabel,
+				onOpenFilePreview,
+			);
+		}
+		if (contentBlock.type === "diff") {
+			return renderDiffBlock(contentBlock, key, getLabel, onOpenFilePreview);
+		}
+		return null;
+	});
+	const terminalIds = message.content?.flatMap((contentBlock) =>
+		contentBlock.type === "terminal" ? [contentBlock.terminalId] : [],
+	);
+	const unifiedDiff = extractUnifiedDiff(message.rawOutput);
+	const hasOutputs = Boolean(
+		outputBlocks?.some(Boolean) ||
+			(terminalIds && terminalIds.length > 0) ||
+			unifiedDiff ||
+			message.rawOutput,
+	);
+	const isTaskTool = message.name === "Task" || message.name === "task";
+
+	return (
+		<div className="flex flex-col gap-0.5 items-start">
+			<div className="flex items-start gap-2">
+				<span
+					className={cn(
+						"mt-1 size-2 shrink-0 rounded-full",
+						getStatusDotColor(message.status),
+					)}
+				/>
+				<div className="flex flex-col gap-0.5 min-w-0">
+					<div className="flex flex-wrap items-center gap-1.5 text-sm">
+						<span className="font-medium text-foreground">
+							{isTaskTool ? "Task" : label}
+						</span>
+						{isTaskTool ? (
+							<span className="text-muted-foreground italic">{label}</span>
+						) : null}
+						{message.status === "failed" ? (
+							<Badge variant={statusBadgeVariant} className="text-[10px]">
+								{statusLabel}
+							</Badge>
+						) : null}
+					</div>
+					{summaryPaths.length > 0 ? (
+						<div className="flex flex-wrap items-center gap-1 text-xs">
+							{summaryPaths.map((item) => (
+								<button
+									key={item.path}
+									type="button"
+									className="text-primary hover:underline"
+									onClick={(event) => {
+										event.preventDefault();
+										onOpenFilePreview?.(item.path);
+									}}
+									disabled={!onOpenFilePreview}
+								>
+									{item.name}
+								</button>
+							))}
+							{overflowCount > 0 ? (
+								<span className="text-muted-foreground">+{overflowCount}</span>
+							) : null}
+						</div>
+					) : null}
+					{commandLine || message.error || hasOutputs ? (
+						<details className="mt-1 text-xs">
+							<summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+								{getLabel("toolCall.details")}
+							</summary>
+							<div className="mt-1 flex flex-col gap-2 pl-2 border-l border-border">
+								{commandLine ? (
+									<div className="text-muted-foreground">{commandLine}</div>
+								) : null}
+								{message.error ? (
+									<div className="text-destructive">{message.error}</div>
+								) : null}
+								{hasOutputs ? (
+									<div className="flex flex-col gap-2">
+										{outputBlocks?.filter(Boolean)}
+										{terminalIds?.map((terminalId) => {
+											const output = terminalOutputMap?.[terminalId];
+											return (
+												<TerminalOutputBlock
+													key={`${message.toolCallId}-${terminalId}`}
+													terminalId={terminalId}
+													output={output?.output}
+													truncated={output?.truncated}
+													exitStatus={output?.exitStatus}
+													getLabel={getLabel}
+												/>
+											);
+										})}
+										{unifiedDiff ? (
+											<UnifiedDiffView
+												diff={unifiedDiff}
+												path={displayPaths[0]?.path ?? ""}
+												getLabel={getLabel}
+												onOpenFilePreview={onOpenFilePreview}
+											/>
+										) : null}
+										{message.rawOutput ? (
+											<details className="rounded border border-border bg-background/80 px-2 py-1">
+												<summary className="cursor-pointer text-muted-foreground">
+													{getLabel("toolCall.rawOutput")}
+												</summary>
+												<pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-muted-foreground">
+													{JSON.stringify(message.rawOutput, null, 2)}
+												</pre>
+											</details>
+										) : null}
+									</div>
+								) : null}
+							</div>
+						</details>
+					) : null}
+				</div>
+			</div>
+		</div>
+	);
+};
+
+type ThoughtItemContentProps = {
+	message: Extract<ChatMessage, { kind: "thought" }>;
+};
+
+export const ThoughtItemContent = ({ message }: ThoughtItemContentProps) => {
+	const { t } = useTranslation();
+	return (
+		<div className="flex flex-col gap-1 items-start">
+			<details className="w-full max-w-[85%]">
+				<summary className="flex items-center gap-2 cursor-pointer text-xs text-muted-foreground hover:text-foreground transition-colors">
+					<span className="size-1.5 rounded-full bg-muted-foreground/50" />
+					<span className="italic">
+						{message.isStreaming ? t("thought.thinking") : t("thought.thought")}
+					</span>
+				</summary>
+				<div className="mt-1 ml-3.5 pl-2 border-l border-muted text-xs text-muted-foreground">
+					<LazyStreamdown>{message.content}</LazyStreamdown>
+				</div>
+			</details>
+		</div>
+	);
+};
+
+// Also export getStatusDotColor for reuse in ToolCallGroup summary
+export { getStatusDotColor };
+
 const MessageItemInner = ({
 	message,
 	onPermissionDecision,
@@ -612,10 +801,6 @@ const MessageItemInner = ({
 		setTimeout(() => setCopied(false), 1200);
 	}, [message, isUser]);
 
-	const terminalOutputMap = useChatStore((state) => {
-		if (message.kind !== "tool_call" || !message.sessionId) return undefined;
-		return state.sessions[message.sessionId]?.terminalOutputs;
-	});
 	if (message.kind === "status") {
 		const badgeVariant =
 			message.variant === "success"
@@ -732,173 +917,16 @@ const MessageItemInner = ({
 		);
 	}
 	if (message.kind === "tool_call") {
-		const label =
-			message.title ?? message.name ?? getLabel("toolCall.toolCall");
-		const statusLabel = resolveStatusLabel(message.status, getLabel);
-		const statusBadgeVariant =
-			message.status === "failed" ? "destructive" : "secondary";
-		const commandLine =
-			message.command || message.args?.length
-				? `${message.command ?? ""}${message.args?.length ? ` ${message.args.join(" ")}` : ""}`.trim()
-				: undefined;
-		const detailPaths = collectToolCallPaths(message);
-		const displayPaths = detailPaths.map((pathValue) => ({
-			path: pathValue,
-			name: resolveFileName(pathValue),
-		}));
-		const summaryPaths = displayPaths.slice(0, TOOL_CALL_PATH_SUMMARY_LIMIT);
-		const overflowCount = Math.max(
-			0,
-			displayPaths.length - summaryPaths.length,
-		);
-		const outputBlocks = message.content?.map((contentBlock, index) => {
-			const key = `${message.toolCallId}-content-${index}`;
-			if (contentBlock.type === "content") {
-				return renderToolCallContentPayload(
-					contentBlock.content,
-					key,
-					getLabel,
-					onOpenFilePreview,
-				);
-			}
-			if (contentBlock.type === "diff") {
-				return renderDiffBlock(contentBlock, key, getLabel, onOpenFilePreview);
-			}
-			return null;
-		});
-		const terminalIds = message.content?.flatMap((contentBlock) =>
-			contentBlock.type === "terminal" ? [contentBlock.terminalId] : [],
-		);
-		const unifiedDiff = extractUnifiedDiff(message.rawOutput);
-		const hasOutputs = Boolean(
-			outputBlocks?.some(Boolean) ||
-				(terminalIds && terminalIds.length > 0) ||
-				unifiedDiff ||
-				message.rawOutput,
-		);
-		// Determine if this is a Task (agent) tool call
-		const isTaskTool = message.name === "Task" || message.name === "task";
 		return (
-			<div className="flex flex-col gap-0.5 items-start">
-				<div className="flex items-start gap-2">
-					<span
-						className={cn(
-							"mt-1 size-2 shrink-0 rounded-full",
-							getStatusDotColor(message.status),
-						)}
-					/>
-					<div className="flex flex-col gap-0.5 min-w-0">
-						<div className="flex flex-wrap items-center gap-1.5 text-sm">
-							<span className="font-medium text-foreground">
-								{isTaskTool ? "Task" : label}
-							</span>
-							{isTaskTool ? (
-								<span className="text-muted-foreground italic">{label}</span>
-							) : null}
-							{message.status === "failed" ? (
-								<Badge variant={statusBadgeVariant} className="text-[10px]">
-									{statusLabel}
-								</Badge>
-							) : null}
-						</div>
-						{summaryPaths.length > 0 ? (
-							<div className="flex flex-wrap items-center gap-1 text-xs">
-								{summaryPaths.map((item) => (
-									<button
-										key={item.path}
-										type="button"
-										className="text-primary hover:underline"
-										onClick={(event) => {
-											event.preventDefault();
-											onOpenFilePreview?.(item.path);
-										}}
-										disabled={!onOpenFilePreview}
-									>
-										{item.name}
-									</button>
-								))}
-								{overflowCount > 0 ? (
-									<span className="text-muted-foreground">
-										+{overflowCount}
-									</span>
-								) : null}
-							</div>
-						) : null}
-						{commandLine || message.error || hasOutputs ? (
-							<details className="mt-1 text-xs">
-								<summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-									{getLabel("toolCall.details")}
-								</summary>
-								<div className="mt-1 flex flex-col gap-2 pl-2 border-l border-border">
-									{commandLine ? (
-										<div className="text-muted-foreground">{commandLine}</div>
-									) : null}
-									{message.error ? (
-										<div className="text-destructive">{message.error}</div>
-									) : null}
-									{hasOutputs ? (
-										<div className="flex flex-col gap-2">
-											{outputBlocks?.filter(Boolean)}
-											{terminalIds?.map((terminalId) => {
-												const output = terminalOutputMap?.[terminalId];
-												return (
-													<TerminalOutputBlock
-														key={`${message.toolCallId}-${terminalId}`}
-														terminalId={terminalId}
-														output={output?.output}
-														truncated={output?.truncated}
-														exitStatus={output?.exitStatus}
-														getLabel={getLabel}
-													/>
-												);
-											})}
-											{unifiedDiff ? (
-												<UnifiedDiffView
-													diff={unifiedDiff}
-													path={displayPaths[0]?.path ?? ""}
-													getLabel={getLabel}
-													onOpenFilePreview={onOpenFilePreview}
-												/>
-											) : null}
-											{message.rawOutput ? (
-												<details className="rounded border border-border bg-background/80 px-2 py-1">
-													<summary className="cursor-pointer text-muted-foreground">
-														{getLabel("toolCall.rawOutput")}
-													</summary>
-													<pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-muted-foreground">
-														{JSON.stringify(message.rawOutput, null, 2)}
-													</pre>
-												</details>
-											) : null}
-										</div>
-									) : null}
-								</div>
-							</details>
-						) : null}
-					</div>
-				</div>
-			</div>
+			<ToolCallItemContent
+				message={message}
+				onOpenFilePreview={onOpenFilePreview}
+			/>
 		);
 	}
 	// Thought messages: collapsible light block
 	if (message.kind === "thought") {
-		return (
-			<div className="flex flex-col gap-1 items-start">
-				<details className="w-full max-w-[85%]">
-					<summary className="flex items-center gap-2 cursor-pointer text-xs text-muted-foreground hover:text-foreground transition-colors">
-						<span className="size-1.5 rounded-full bg-muted-foreground/50" />
-						<span className="italic">
-							{message.isStreaming
-								? t("thought.thinking")
-								: t("thought.thought")}
-						</span>
-					</summary>
-					<div className="mt-1 ml-3.5 pl-2 border-l border-muted text-xs text-muted-foreground">
-						<LazyStreamdown>{message.content}</LazyStreamdown>
-					</div>
-				</details>
-			</div>
-		);
+		return <ThoughtItemContent message={message} />;
 	}
 	// User messages: bubble style with hover-reveal copy button
 	if (isUser) {

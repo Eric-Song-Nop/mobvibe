@@ -212,7 +212,11 @@
 		"statusCompleted": "Completed",
 		"statusFailed": "Failed",
 		"statusUnknown": "Unknown",
-		"details": "Details"
+		"details": "Details",
+		"toolCallGroup": "{{count}} tool calls",
+		"toolCallGroupCompleted": "{{count}} completed",
+		"toolCallGroupFailed": "{{count}} failed",
+		"toolCallGroupPending": "{{count}} pending"
 	},
 	"languageSwitcher": {
 		"label": "Language",
