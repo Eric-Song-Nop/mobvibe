@@ -13,6 +13,8 @@ export type AcpBackendId = string;
 export type AcpBackendSummary = {
 	backendId: string;
 	backendLabel: string;
+	icon?: string;
+	description?: string;
 };
 
 export type SessionModeOption = {

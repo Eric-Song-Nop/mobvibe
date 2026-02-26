@@ -151,6 +151,48 @@ const validateUserConfig = (
 		}
 	}
 
+	// Validate registry (optional object)
+	if (record.registry !== undefined) {
+		if (typeof record.registry !== "object" || record.registry === null) {
+			errors.push("registry: must be an object");
+		} else {
+			const reg = record.registry as Record<string, unknown>;
+			const registryConfig: MobvibeUserConfig["registry"] = {};
+			let hasRegistryFields = false;
+
+			if (reg.disabled !== undefined) {
+				if (typeof reg.disabled !== "boolean") {
+					errors.push("registry.disabled: must be a boolean");
+				} else {
+					registryConfig.disabled = reg.disabled;
+					hasRegistryFields = true;
+				}
+			}
+
+			if (reg.cacheTtlMs !== undefined) {
+				if (typeof reg.cacheTtlMs !== "number" || reg.cacheTtlMs < 0) {
+					errors.push("registry.cacheTtlMs: must be a non-negative number");
+				} else {
+					registryConfig.cacheTtlMs = reg.cacheTtlMs;
+					hasRegistryFields = true;
+				}
+			}
+
+			if (reg.url !== undefined) {
+				if (typeof reg.url !== "string" || reg.url.trim().length === 0) {
+					errors.push("registry.url: must be a non-empty string");
+				} else {
+					registryConfig.url = reg.url.trim();
+					hasRegistryFields = true;
+				}
+			}
+
+			if (hasRegistryFields) {
+				config.registry = registryConfig;
+			}
+		}
+	}
+
 	if (errors.length > 0) {
 		return { config: null, errors };
 	}
