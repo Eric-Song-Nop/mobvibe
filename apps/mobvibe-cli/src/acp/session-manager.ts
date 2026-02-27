@@ -31,6 +31,7 @@ import type { AcpBackendConfig, CliConfig } from "../config.js";
 import type { CliCryptoService } from "../e2ee/crypto-service.js";
 import { createGitWorktree, isGitRepo } from "../lib/git-utils.js";
 import { logger } from "../lib/logger.js";
+import { WalConsolidator } from "../wal/consolidator.js";
 import { WalStore } from "../wal/index.js";
 import { AcpConnection } from "./acp-connection.js";
 
@@ -76,6 +77,36 @@ type PermissionRequestRecord = {
 	promise: Promise<RequestPermissionResponse>;
 	resolve: (response: RequestPermissionResponse) => void;
 };
+
+type ConsolidationTracker = {
+	/** toolCallId → anchor + accumulated updates */
+	pendingToolCalls: Map<
+		string,
+		{
+			anchorId: number;
+			anchorPayload: SessionNotification;
+			updateIds: number[];
+			updatePayloads: SessionNotification[];
+		}
+	>;
+	/** Current consecutive chunk sequence (null when no active run) */
+	chunkRun: {
+		kind: "agent_message_chunk" | "agent_thought_chunk";
+		ids: number[];
+		payloads: SessionNotification[];
+	} | null;
+	/** terminalId → accumulated output events */
+	terminalRuns: Map<string, { ids: number[]; payloads: unknown[] }>;
+	/** usage_update event IDs for current turn */
+	usageUpdateIds: number[];
+};
+
+const createConsolidationTracker = (): ConsolidationTracker => ({
+	pendingToolCalls: new Map(),
+	chunkRun: null,
+	terminalRuns: new Map(),
+	usageUpdateIds: [],
+});
 
 const buildPermissionKey = (sessionId: string, requestId: string) =>
 	`${sessionId}:${requestId}`;
@@ -155,6 +186,8 @@ export class SessionManager {
 	private readonly sessionEventEmitter = new EventEmitter();
 	private readonly walStore: WalStore;
 	private readonly cryptoService?: CliCryptoService;
+	private readonly consolidator?: WalConsolidator;
+	private consolidationTrackers = new Map<string, ConsolidationTracker>();
 
 	/** Per-backend idle connections (initialized but no session bound) */
 	private idleConnections = new Map<string, AcpConnection>();
@@ -171,6 +204,9 @@ export class SessionManager {
 		);
 		this.walStore = new WalStore(config.walDbPath);
 		this.cryptoService = cryptoService;
+		if (config.consolidation?.enabled) {
+			this.consolidator = new WalConsolidator(this.walStore);
+		}
 	}
 
 	createConnection(backend: AcpBackendConfig): AcpConnection {
@@ -454,9 +490,14 @@ export class SessionManager {
 			return;
 		}
 		record.updatedAt = new Date();
-		this.writeAndEmitEvent(sessionId, record.revision, "turn_end", {
-			stopReason,
-		});
+		const payload = { stopReason };
+		const event = this.writeAndEmitEvent(
+			sessionId,
+			record.revision,
+			"turn_end",
+			payload,
+		);
+		this.trackAndConsolidate(record, "turn_end", payload, event);
 		// 将更新后的 updatedAt 推送给 WebUI，确保侧边栏排序正确
 		const summary = this.buildSummary(record);
 		this.emitSessionsChanged({
@@ -468,13 +509,14 @@ export class SessionManager {
 
 	/**
 	 * Write an event to the WAL and emit it.
+	 * Returns the SessionEvent along with the WAL row ID for consolidation.
 	 */
 	private writeAndEmitEvent(
 		sessionId: string,
 		revision: number,
 		kind: SessionEventKind,
 		payload: unknown,
-	): SessionEvent {
+	): SessionEvent & { walEventId: number } {
 		logger.debug(
 			{ sessionId, revision, kind },
 			"session_write_and_emit_event_start",
@@ -487,7 +529,7 @@ export class SessionManager {
 			payload,
 		});
 
-		const event: SessionEvent = {
+		const event: SessionEvent & { walEventId: number } = {
 			sessionId: walEvent.sessionId,
 			machineId: this.config.machineId,
 			revision: walEvent.revision,
@@ -495,6 +537,7 @@ export class SessionManager {
 			kind: walEvent.kind,
 			createdAt: walEvent.createdAt,
 			payload: walEvent.payload,
+			walEventId: walEvent.id,
 		};
 
 		logger.info(
@@ -770,12 +813,13 @@ export class SessionManager {
 					"acp_terminal_output_received",
 				);
 				// Write terminal output to WAL (emits via session:event)
-				this.writeAndEmitEvent(
+				const walEvent = this.writeAndEmitEvent(
 					record.sessionId,
 					record.revision,
 					"terminal_output",
 					event,
 				);
+				this.trackAndConsolidate(record, "terminal_output", event, walEvent);
 			});
 			connection.onStatusChange((status) => {
 				if (status.error) {
@@ -1582,12 +1626,145 @@ export class SessionManager {
 			"write_session_update_to_wal_mapped",
 		);
 
-		this.writeAndEmitEvent(
+		const event = this.writeAndEmitEvent(
 			record.sessionId,
 			record.revision,
 			kind,
 			notification,
 		);
+
+		this.trackAndConsolidate(record, kind, notification, event);
+	}
+
+	// ========== WAL Event Consolidation ==========
+
+	private getOrCreateTracker(sessionId: string): ConsolidationTracker {
+		let tracker = this.consolidationTrackers.get(sessionId);
+		if (!tracker) {
+			tracker = createConsolidationTracker();
+			this.consolidationTrackers.set(sessionId, tracker);
+		}
+		return tracker;
+	}
+
+	/**
+	 * Track events for consolidation and trigger merge when conditions are met.
+	 * Called synchronously after writeAndEmitEvent — real-time stream is already sent.
+	 */
+	private trackAndConsolidate(
+		record: SessionRecord,
+		kind: SessionEventKind,
+		payload: unknown,
+		event: SessionEvent & { walEventId: number },
+	): void {
+		if (!this.consolidator) return;
+		const tracker = this.getOrCreateTracker(record.sessionId);
+		const walEventId = event.walEventId;
+
+		// 1. Flush pending chunk run if current event is a different kind
+		if (tracker.chunkRun && kind !== tracker.chunkRun.kind) {
+			if (tracker.chunkRun.ids.length > 1) {
+				this.consolidator.consolidateChunks(
+					tracker.chunkRun.ids,
+					tracker.chunkRun.payloads,
+					tracker.chunkRun.kind,
+				);
+			}
+			tracker.chunkRun = null;
+		}
+
+		// 2. Track by event type
+		switch (kind) {
+			case "tool_call": {
+				const notification = payload as SessionNotification;
+				const update = notification.update as { toolCallId?: string };
+				if (update.toolCallId) {
+					tracker.pendingToolCalls.set(update.toolCallId, {
+						anchorId: walEventId,
+						anchorPayload: notification,
+						updateIds: [],
+						updatePayloads: [],
+					});
+				}
+				break;
+			}
+			case "tool_call_update": {
+				const notification = payload as SessionNotification;
+				const update = notification.update as {
+					toolCallId?: string;
+					status?: string;
+				};
+				if (!update.toolCallId) break;
+				const pending = tracker.pendingToolCalls.get(update.toolCallId);
+				if (!pending) break;
+
+				pending.updateIds.push(walEventId);
+				pending.updatePayloads.push(notification);
+
+				// Terminal status → trigger consolidation
+				if (update.status === "completed" || update.status === "failed") {
+					this.consolidator.consolidateToolCall(
+						pending.anchorId,
+						pending.updateIds,
+						pending.anchorPayload,
+						pending.updatePayloads,
+					);
+					tracker.pendingToolCalls.delete(update.toolCallId);
+				}
+				break;
+			}
+			case "agent_message_chunk":
+			case "agent_thought_chunk": {
+				if (!tracker.chunkRun || tracker.chunkRun.kind !== kind) {
+					tracker.chunkRun = { kind, ids: [], payloads: [] };
+				}
+				tracker.chunkRun.ids.push(walEventId);
+				tracker.chunkRun.payloads.push(payload as SessionNotification);
+				break;
+			}
+			case "terminal_output": {
+				const p = payload as { terminalId?: string };
+				const terminalId = p.terminalId ?? "__default__";
+				let run = tracker.terminalRuns.get(terminalId);
+				if (!run) {
+					run = { ids: [], payloads: [] };
+					tracker.terminalRuns.set(terminalId, run);
+				}
+				run.ids.push(walEventId);
+				run.payloads.push(payload);
+				break;
+			}
+			case "usage_update": {
+				tracker.usageUpdateIds.push(walEventId);
+				break;
+			}
+			case "turn_end": {
+				// Flush any pending chunk run
+				if (tracker.chunkRun && tracker.chunkRun.ids.length > 1) {
+					this.consolidator.consolidateChunks(
+						tracker.chunkRun.ids,
+						tracker.chunkRun.payloads,
+						tracker.chunkRun.kind,
+					);
+				}
+				tracker.chunkRun = null;
+
+				// Consolidate terminal outputs
+				for (const [, run] of tracker.terminalRuns) {
+					if (run.ids.length > 1) {
+						this.consolidator.consolidateTerminalOutput(run.ids, run.payloads);
+					}
+				}
+				tracker.terminalRuns.clear();
+
+				// Deduplicate usage updates
+				if (tracker.usageUpdateIds.length > 1) {
+					this.consolidator.deduplicateUsageUpdates(tracker.usageUpdateIds);
+				}
+				tracker.usageUpdateIds = [];
+				break;
+			}
+		}
 	}
 
 	/**
@@ -1625,12 +1802,13 @@ export class SessionManager {
 		record.unsubscribeTerminal = connection.onTerminalOutput((event) => {
 			logger.debug({ sessionId }, "acp_terminal_output_received_via_setup");
 			// Write terminal output to WAL (emits via session:event)
-			this.writeAndEmitEvent(
+			const walEvent = this.writeAndEmitEvent(
 				sessionId,
 				record.revision,
 				"terminal_output",
 				event,
 			);
+			this.trackAndConsolidate(record, "terminal_output", event, walEvent);
 		});
 
 		connection.onStatusChange((status) => {

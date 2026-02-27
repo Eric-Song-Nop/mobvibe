@@ -85,6 +85,10 @@ export class WalStore {
 	private stmtMarkDiscoveredSessionStale: ReturnType<Database["query"]>;
 	private stmtDeleteStaleDiscoveredSessions: ReturnType<Database["query"]>;
 
+	// Consolidation statements
+	private stmtQueryBySeqRange: ReturnType<Database["query"]>;
+	private stmtUpdatePayload: ReturnType<Database["query"]>;
+
 	// Archive statements
 	private stmtDeleteSessionEvents: ReturnType<Database["query"]>;
 	private stmtDeleteSession: ReturnType<Database["query"]>;
@@ -167,6 +171,19 @@ export class WalStore {
       SELECT MAX(seq) as max_seq
       FROM session_events
       WHERE session_id = $sessionId AND revision = $revision
+    `);
+
+		// Consolidation statements
+		this.stmtQueryBySeqRange = this.db.query(`
+      SELECT id, session_id, revision, seq, kind, payload, created_at, acked_at
+      FROM session_events
+      WHERE session_id = $sessionId AND revision = $revision
+        AND seq >= $fromSeq AND seq <= $toSeq
+      ORDER BY seq ASC
+    `);
+
+		this.stmtUpdatePayload = this.db.query(`
+      UPDATE session_events SET payload = $payload WHERE id = $id
     `);
 
 		// Discovered sessions statements
@@ -472,6 +489,46 @@ export class WalStore {
 	 */
 	getCurrentSeq(sessionId: string, revision: number): number {
 		return this.seqGenerator.current(sessionId, revision);
+	}
+
+	// ========== Consolidation Methods ==========
+
+	/**
+	 * Query events by sequence range (inclusive).
+	 */
+	queryEventsBySeqRange(
+		sessionId: string,
+		revision: number,
+		fromSeq: number,
+		toSeq: number,
+	): WalEvent[] {
+		const rows = this.stmtQueryBySeqRange.all({
+			$sessionId: sessionId,
+			$revision: revision,
+			$fromSeq: fromSeq,
+			$toSeq: toSeq,
+		}) as WalEventRow[];
+		return rows.map((row) => this.rowToEvent(row));
+	}
+
+	/**
+	 * Update the payload of a single event by ID.
+	 */
+	updateEventPayload(eventId: number, payload: unknown): void {
+		this.stmtUpdatePayload.run({
+			$id: eventId,
+			$payload: JSON.stringify(payload),
+		});
+	}
+
+	/**
+	 * Stub multiple event payloads in batch (replace with `{"_c":true}`).
+	 */
+	stubEventPayloads(eventIds: number[]): void {
+		const stubJson = JSON.stringify({ _c: true });
+		for (const id of eventIds) {
+			this.stmtUpdatePayload.run({ $id: id, $payload: stubJson });
+		}
 	}
 
 	// ========== Discovered Sessions Methods ==========
