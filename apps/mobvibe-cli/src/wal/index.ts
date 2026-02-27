@@ -3,6 +3,7 @@ export type {
 	CompactionStats,
 } from "./compactor.js";
 export { WalCompactor } from "./compactor.js";
+export { WalConsolidator } from "./consolidator.js";
 export { runMigrations } from "./migrations.js";
 export { SeqGenerator } from "./seq-generator.js";
 export type {

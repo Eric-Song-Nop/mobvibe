@@ -44,6 +44,15 @@ export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
 	minEventsToKeep: 1000,
 };
 
+export type ConsolidationConfig = {
+	/** Enable WAL event consolidation (default: true) */
+	enabled: boolean;
+};
+
+export const DEFAULT_CONSOLIDATION_CONFIG: ConsolidationConfig = {
+	enabled: true,
+};
+
 export type CliConfig = {
 	gatewayUrl: string;
 	acpBackends: AcpBackendConfig[];
@@ -59,6 +68,7 @@ export type CliConfig = {
 	userConfigPath?: string;
 	userConfigErrors?: string[];
 	compaction: CompactionConfig;
+	consolidation: ConsolidationConfig;
 	/** Base directory for git worktrees (default: ~/.mobvibe/worktrees) */
 	worktreeBaseDir: string;
 	/** undefined = not yet configured (first run); string[] = user's selection */
@@ -129,6 +139,11 @@ export const getCliConfig = async (): Promise<CliConfig> => {
 			...DEFAULT_COMPACTION_CONFIG,
 			// Allow enabling via env var
 			enabled: env.MOBVIBE_COMPACTION_ENABLED === "true",
+		},
+		consolidation: {
+			...DEFAULT_CONSOLIDATION_CONFIG,
+			// Allow disabling via env var (enabled by default)
+			enabled: env.MOBVIBE_CONSOLIDATION_ENABLED !== "false",
 		},
 		worktreeBaseDir:
 			env.MOBVIBE_WORKTREE_BASE_DIR ??

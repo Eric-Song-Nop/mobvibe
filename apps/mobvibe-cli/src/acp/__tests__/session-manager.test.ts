@@ -123,6 +123,9 @@ const createMockConfig = (): CliConfig => ({
 		runIntervalHours: 24,
 		minEventsToKeep: 1000,
 	},
+	consolidation: {
+		enabled: false,
+	},
 	worktreeBaseDir: "/tmp/mobvibe-test/worktrees",
 });
 
