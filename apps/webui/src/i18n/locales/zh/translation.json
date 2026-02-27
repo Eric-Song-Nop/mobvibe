@@ -368,5 +368,20 @@
 	},
 	"cli": {
 		"discoveringCapabilities": "正在获取 Agent 能力..."
+	},
+	"plan": {
+		"title": "计划",
+		"completedCount": "已完成 {{completed}}/{{total}}",
+		"summaryCompleted": "{{count}} 已完成",
+		"summaryInProgress": "{{count}} 进行中",
+		"summaryPending": "{{count}} 待处理",
+		"completedSection": "{{count}} 已完成",
+		"showMore": "展开",
+		"showLess": "收起",
+		"priority": {
+			"high": "高",
+			"medium": "中",
+			"low": "低"
+		}
 	}
 }

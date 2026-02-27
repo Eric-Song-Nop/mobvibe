@@ -113,6 +113,8 @@ export interface ChatStoreActions {
 				| "availableModels"
 				| "availableCommands"
 				| "usage"
+				| "_meta"
+				| "plan"
 			>
 		>,
 	) => void;

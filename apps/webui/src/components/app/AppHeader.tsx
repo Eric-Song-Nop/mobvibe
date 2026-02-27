@@ -7,6 +7,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
 import { UserMenu } from "@/components/auth/UserMenu";
+import PlanIndicator from "@/components/plan/plan-indicator";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -20,6 +21,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import type { PlanEntry } from "@/lib/acp";
 import type { ChatSession } from "@/lib/chat-store";
 
 export type AppHeaderProps = {
@@ -27,6 +29,7 @@ export type AppHeaderProps = {
 	statusMessage?: string;
 	streamError?: ChatSession["streamError"];
 	loadingMessage?: string;
+	plan?: PlanEntry[];
 	onOpenMobileMenu: () => void;
 	onOpenFileExplorer?: () => void;
 	onOpenCommandPalette?: () => void;
@@ -45,6 +48,7 @@ export function AppHeader({
 	statusMessage,
 	streamError,
 	loadingMessage,
+	plan,
 	onOpenMobileMenu,
 	onOpenFileExplorer,
 	onOpenCommandPalette,
@@ -90,6 +94,7 @@ export function AppHeader({
 							{backendLabel}
 						</Badge>
 					) : null}
+					{plan && plan.length > 0 ? <PlanIndicator plan={plan} /> : null}
 				</div>
 				{showSyncHistory ? (
 					<Button

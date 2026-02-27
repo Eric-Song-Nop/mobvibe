@@ -1,5 +1,6 @@
 import type {
 	AvailableCommand,
+	PlanEntry,
 	SessionNotification,
 	ToolCallUpdate,
 } from "@mobvibe/shared";
@@ -81,6 +82,21 @@ export const extractToolCallUpdate = (
 		return null;
 	}
 	return update as ToolCallUpdate;
+};
+
+export type PlanUpdatePayload = {
+	entries: PlanEntry[];
+};
+
+export const extractPlanUpdate = (
+	notification: SessionNotification,
+): PlanUpdatePayload | null => {
+	const { update } = notification;
+	if (update.sessionUpdate !== "plan") {
+		return null;
+	}
+	const planUpdate = update as unknown as { entries?: PlanEntry[] };
+	return { entries: planUpdate.entries ?? [] };
 };
 
 export const extractAvailableCommandsUpdate = (

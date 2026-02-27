@@ -39,6 +39,35 @@ export type {
 	UsageUpdate,
 } from "@agentclientprotocol/sdk";
 
+// Plan types — SDK defines these in schema but doesn't export TS types yet
+// Matches schema.json: Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus
+
+/** Priority levels for plan entries */
+export type PlanEntryPriority = "high" | "medium" | "low";
+
+/** Status of a plan entry in the execution flow */
+export type PlanEntryStatus = "pending" | "in_progress" | "completed";
+
+/** A single entry in the execution plan */
+export type PlanEntry = {
+	/** Human-readable description of what this task aims to accomplish */
+	content: string;
+	/** The relative importance of this task */
+	priority: PlanEntryPriority;
+	/** Current execution status of this task */
+	status: PlanEntryStatus;
+	/** Extensibility metadata */
+	_meta?: Record<string, unknown> | null;
+};
+
+/** An execution plan for accomplishing complex tasks */
+export type Plan = {
+	/** The list of tasks to be accomplished (full replacement on each update) */
+	entries: PlanEntry[];
+	/** Extensibility metadata */
+	_meta?: Record<string, unknown> | null;
+};
+
 // Backwards-compatible aliases still in use
 import type { EmbeddedResource, ResourceLink } from "@agentclientprotocol/sdk";
 
