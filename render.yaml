@@ -1,5 +1,5 @@
 previews:
-  generation: automatic
+  generation: manual
   expireAfterDays: 3
 
 services:
