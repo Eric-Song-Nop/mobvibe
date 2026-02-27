@@ -1,7 +1,8 @@
 import type { CliRegistrationInfo, SessionSummary } from "@mobvibe/shared";
-import type { Server } from "socket.io";
+import type { Server, Socket } from "socket.io";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CliRegistry } from "../../services/cli-registry.js";
+import type { SessionRouter } from "../../services/session-router.js";
 import { setupCliHandlers } from "../cli-handlers.js";
 
 vi.mock("@mobvibe/shared", () => ({
@@ -48,9 +49,9 @@ const createMockRegistrationInfo = (
 describe("setupCliHandlers", () => {
 	let registry: CliRegistry;
 	let emitToWebui: ReturnType<typeof vi.fn>;
-	let connectionHandler: ((socket: any) => void) | undefined;
-	let socketHandlers: Record<string, (payload?: any) => void>;
-	let socket: any;
+	let connectionHandler: ((socket: Socket) => void) | undefined;
+	let socketHandlers: Record<string, (payload?: unknown) => void>;
+	let socket: Socket;
 
 	beforeEach(() => {
 		registry = new CliRegistry();
@@ -60,16 +61,16 @@ describe("setupCliHandlers", () => {
 			id: "socket-1",
 			handshake: { headers: {} },
 			data: { userId: "user-1", deviceId: "device-123" },
-			on: vi.fn((event: string, handler: (payload?: any) => void) => {
+			on: vi.fn((event: string, handler: (payload?: unknown) => void) => {
 				socketHandlers[event] = handler;
 			}),
 			emit: vi.fn(),
 			disconnect: vi.fn(),
-		};
+		} as unknown as Socket;
 
 		const namespace = {
 			use: vi.fn(),
-			on: vi.fn((event: string, handler: (socket: any) => void) => {
+			on: vi.fn((event: string, handler: (socket: Socket) => void) => {
 				if (event === "connection") {
 					connectionHandler = handler;
 				}
@@ -83,7 +84,7 @@ describe("setupCliHandlers", () => {
 		setupCliHandlers(
 			io,
 			registry,
-			{ handleRpcResponse: vi.fn() } as any,
+			{ handleRpcResponse: vi.fn() } as unknown as SessionRouter,
 			emitToWebui,
 		);
 

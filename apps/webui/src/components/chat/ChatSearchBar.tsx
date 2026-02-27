@@ -134,7 +134,7 @@ export function ChatSearchBar({
 					size="icon-sm"
 					onClick={goToPrevious}
 					disabled={matches.length === 0}
-					aria-label="Previous match"
+					aria-label={t("chatSearch.previousMatch")}
 				>
 					<HugeiconsIcon
 						icon={ArrowUp01Icon}
@@ -148,7 +148,7 @@ export function ChatSearchBar({
 					size="icon-sm"
 					onClick={goToNext}
 					disabled={matches.length === 0}
-					aria-label="Next match"
+					aria-label={t("chatSearch.nextMatch")}
 				>
 					<HugeiconsIcon
 						icon={ArrowDown01Icon}
@@ -161,7 +161,7 @@ export function ChatSearchBar({
 					variant="ghost"
 					size="icon-sm"
 					onClick={() => onOpenChange(false)}
-					aria-label="Close search"
+					aria-label={t("chatSearch.closeSearch")}
 				>
 					<HugeiconsIcon
 						icon={Cancel01Icon}

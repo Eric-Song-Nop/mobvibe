@@ -31,7 +31,9 @@ export function ResizeHandle({ onResize, className }: ResizeHandleProps) {
 	return (
 		<div
 			role="separator"
+			tabIndex={0}
 			aria-orientation="vertical"
+			aria-valuenow={0}
 			onPointerDown={handlePointerDown}
 			className={cn(
 				"w-1.5 cursor-col-resize bg-transparent hover:bg-border/60 active:bg-border/80",

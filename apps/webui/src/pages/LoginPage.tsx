@@ -190,19 +190,30 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 						</div>
 
 						{emailVerifiedSuccess && (
-							<div className="rounded-sm bg-green-500/10 p-3 text-green-600 dark:text-green-400 text-xs">
+							<div
+								role="status"
+								aria-live="polite"
+								className="rounded-sm bg-green-500/10 p-3 text-green-600 dark:text-green-400 text-xs"
+							>
 								{t("auth.emailVerified")}
 							</div>
 						)}
 
 						{error && (
-							<div className="rounded-sm bg-destructive/10 p-3 text-destructive text-xs">
+							<div
+								role="alert"
+								className="rounded-sm bg-destructive/10 p-3 text-destructive text-xs"
+							>
 								{error}
 							</div>
 						)}
 
 						{showVerificationMessage && (
-							<div className="rounded-sm bg-primary/10 p-3 text-primary text-xs">
+							<div
+								role="status"
+								aria-live="polite"
+								className="rounded-sm bg-primary/10 p-3 text-primary text-xs"
+							>
 								{mode === "register"
 									? t("auth.verificationEmailSent")
 									: t("auth.pleaseVerifyEmail")}

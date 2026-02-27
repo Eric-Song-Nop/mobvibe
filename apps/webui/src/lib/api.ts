@@ -56,12 +56,7 @@ export const setApiBaseUrl = (url: string): void => {
 	API_BASE_URL = url;
 };
 
-const buildRequestError = (message: string): ErrorDetail => ({
-	code: "INTERNAL_ERROR",
-	message,
-	retryable: true,
-	scope: "request",
-});
+import { createFallbackError } from "./error-utils";
 
 export class ApiError extends Error {
 	readonly detail: ErrorDetail;
@@ -110,7 +105,7 @@ const requestJson = async <ResponseType>(
 				throw parseError;
 			}
 		}
-		throw new ApiError(buildRequestError(fallbackMessage));
+		throw new ApiError(createFallbackError(fallbackMessage, "request"));
 	}
 
 	return (await response.json()) as ResponseType;
@@ -139,7 +134,10 @@ const requestJsonWithTimeout = async <ResponseType>(
 	} catch (error) {
 		if (isAbortError(error)) {
 			throw new ApiError(
-				buildRequestError(`Request timed out after ${timeoutMs}ms`),
+				createFallbackError(
+					`Request timed out after ${timeoutMs}ms`,
+					"request",
+				),
 			);
 		}
 		throw error;
@@ -426,8 +424,9 @@ export const fetchSessionGitLog = async (
 	payload: GitLogParams,
 ): Promise<GitLogResponse> => {
 	const params = new URLSearchParams({ sessionId: payload.sessionId });
-	if (payload.maxCount) params.set("maxCount", String(payload.maxCount));
-	if (payload.skip) params.set("skip", String(payload.skip));
+	if (payload.maxCount != null)
+		params.set("maxCount", String(payload.maxCount));
+	if (payload.skip != null) params.set("skip", String(payload.skip));
 	if (payload.path) params.set("path", payload.path);
 	if (payload.author) params.set("author", payload.author);
 	if (payload.search) params.set("search", payload.search);
@@ -455,8 +454,9 @@ export const fetchSessionGitBlame = async (
 		sessionId: payload.sessionId,
 		path: payload.path,
 	});
-	if (payload.startLine) params.set("startLine", String(payload.startLine));
-	if (payload.endLine) params.set("endLine", String(payload.endLine));
+	if (payload.startLine != null)
+		params.set("startLine", String(payload.startLine));
+	if (payload.endLine != null) params.set("endLine", String(payload.endLine));
 	return requestJson<GitBlameResponse>(
 		`/fs/session/git/blame?${params.toString()}`,
 	);
@@ -500,7 +500,8 @@ export const fetchSessionGitSearchLog = async (
 		query: payload.query,
 		type: payload.type,
 	});
-	if (payload.maxCount) params.set("maxCount", String(payload.maxCount));
+	if (payload.maxCount != null)
+		params.set("maxCount", String(payload.maxCount));
 	return requestJson<GitSearchLogResponse>(
 		`/fs/session/git/search-log?${params.toString()}`,
 	);
@@ -513,7 +514,8 @@ export const fetchSessionGitFileHistory = async (
 		sessionId: payload.sessionId,
 		path: payload.path,
 	});
-	if (payload.maxCount) params.set("maxCount", String(payload.maxCount));
+	if (payload.maxCount != null)
+		params.set("maxCount", String(payload.maxCount));
 	return requestJson<GitFileHistoryResponse>(
 		`/fs/session/git/file-history?${params.toString()}`,
 	);

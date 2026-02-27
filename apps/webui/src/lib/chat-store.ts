@@ -313,22 +313,7 @@ type PersistedChatState = Pick<
 	"sessions" | "activeSessionId" | "lastCreatedCwd"
 >;
 
-const createLocalId = () => {
-	const cryptoRef = globalThis.crypto;
-	if (cryptoRef?.randomUUID) {
-		return cryptoRef.randomUUID();
-	}
-	if (cryptoRef?.getRandomValues) {
-		const bytes = new Uint8Array(16);
-		cryptoRef.getRandomValues(bytes);
-		bytes[6] = (bytes[6] & 0x0f) | 0x40;
-		bytes[8] = (bytes[8] & 0x3f) | 0x80;
-		const toHex = (value: number) => value.toString(16).padStart(2, "0");
-		const hex = Array.from(bytes, toHex);
-		return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
-	}
-	return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
-};
+import { createLocalId } from "./id-utils";
 
 const createMessage = (role: ChatRole, content: string): TextMessage => ({
 	id: createLocalId(),
@@ -526,6 +511,68 @@ const createSessionState = (
 	worktreeBranch: options?.worktreeBranch,
 });
 
+/**
+ * Merge a server session summary into an existing local session state.
+ * Shared by handleSessionsChanged (added/updated) and syncSessions.
+ */
+const mergeSessionFromSummary = (
+	existing: ChatSession,
+	summary: {
+		title?: string | null;
+		error?: ChatSession["error"];
+		createdAt?: string;
+		updatedAt?: string;
+		backendId?: string;
+		backendLabel?: string | null;
+		cwd?: string;
+		agentName?: string | null;
+		modelId?: string | null;
+		modelName?: string | null;
+		modeId?: string | null;
+		modeName?: string | null;
+		availableModes?: ChatSession["availableModes"];
+		availableModels?: ChatSession["availableModels"];
+		availableCommands?: ChatSession["availableCommands"];
+		machineId?: string;
+		worktreeSourceCwd?: string | null;
+		worktreeBranch?: string | null;
+		isAttached?: boolean;
+	},
+): ChatSession => {
+	const isAttached = summary.isAttached === true;
+	const attachedFields = isAttached
+		? {
+				isAttached: true as const,
+				attachedAt: existing.attachedAt ?? new Date().toISOString(),
+				detachedAt: undefined,
+				detachedReason: undefined,
+			}
+		: {};
+
+	return {
+		...existing,
+		title: summary.title ?? existing.title,
+		error: summary.error,
+		createdAt: summary.createdAt ?? existing.createdAt,
+		updatedAt: summary.updatedAt ?? existing.updatedAt,
+		backendId: summary.backendId ?? existing.backendId,
+		backendLabel: summary.backendLabel ?? existing.backendLabel,
+		cwd: summary.cwd ?? existing.cwd,
+		agentName: summary.agentName ?? existing.agentName,
+		modelId: summary.modelId ?? existing.modelId,
+		modelName: summary.modelName ?? existing.modelName,
+		modeId: summary.modeId ?? existing.modeId,
+		modeName: summary.modeName ?? existing.modeName,
+		availableModes: summary.availableModes ?? existing.availableModes,
+		availableModels: summary.availableModels ?? existing.availableModels,
+		availableCommands: summary.availableCommands ?? existing.availableCommands,
+		machineId: summary.machineId ?? existing.machineId,
+		worktreeSourceCwd: summary.worktreeSourceCwd ?? existing.worktreeSourceCwd,
+		worktreeBranch: summary.worktreeBranch ?? existing.worktreeBranch,
+		...attachedFields,
+	};
+};
+
 const STORAGE_KEY = "mobvibe.chat-store";
 
 const sanitizeMessageForPersist = (message: ChatMessage): ChatMessage => {
@@ -689,42 +736,10 @@ export const useChatStore = create<ChatState>()(
 					for (const added of payload.added) {
 						const existing = nextSessions[added.sessionId];
 						if (existing) {
-							// Apply isAttached from server summary
-							const isAttachedVal = added.isAttached === true;
-							const attachedFieldsVal = isAttachedVal
-								? {
-										isAttached: true as const,
-										attachedAt: existing.attachedAt ?? new Date().toISOString(),
-										detachedAt: undefined,
-										detachedReason: undefined,
-									}
-								: {};
-
-							nextSessions[added.sessionId] = {
-								...existing,
-								title: added.title ?? existing.title,
-								error: added.error,
-								createdAt: added.createdAt,
-								updatedAt: added.updatedAt,
-								backendId: added.backendId ?? existing.backendId,
-								backendLabel: added.backendLabel ?? existing.backendLabel,
-								cwd: added.cwd ?? existing.cwd,
-								agentName: added.agentName ?? existing.agentName,
-								modelId: added.modelId ?? existing.modelId,
-								modelName: added.modelName ?? existing.modelName,
-								modeId: added.modeId ?? existing.modeId,
-								modeName: added.modeName ?? existing.modeName,
-								availableModes: added.availableModes ?? existing.availableModes,
-								availableModels:
-									added.availableModels ?? existing.availableModels,
-								availableCommands:
-									added.availableCommands ?? existing.availableCommands,
-								machineId: added.machineId ?? existing.machineId,
-								worktreeSourceCwd:
-									added.worktreeSourceCwd ?? existing.worktreeSourceCwd,
-								worktreeBranch: added.worktreeBranch ?? existing.worktreeBranch,
-								...attachedFieldsVal,
-							};
+							nextSessions[added.sessionId] = mergeSessionFromSummary(
+								existing,
+								added,
+							);
 						} else {
 							nextSessions[added.sessionId] = createSessionState(
 								added.sessionId,
@@ -752,44 +767,10 @@ export const useChatStore = create<ChatState>()(
 					for (const updated of payload.updated) {
 						const existing = nextSessions[updated.sessionId];
 						if (existing) {
-							// Apply isAttached from server summary
-							const isAttachedUpd = updated.isAttached === true;
-							const attachedFieldsUpd = isAttachedUpd
-								? {
-										isAttached: true as const,
-										attachedAt: existing.attachedAt ?? new Date().toISOString(),
-										detachedAt: undefined,
-										detachedReason: undefined,
-									}
-								: {};
-
-							nextSessions[updated.sessionId] = {
-								...existing,
-								title: updated.title ?? existing.title,
-								error: updated.error,
-								createdAt: updated.createdAt ?? existing.createdAt,
-								updatedAt: updated.updatedAt,
-								backendId: updated.backendId ?? existing.backendId,
-								backendLabel: updated.backendLabel ?? existing.backendLabel,
-								cwd: updated.cwd ?? existing.cwd,
-								agentName: updated.agentName ?? existing.agentName,
-								modelId: updated.modelId ?? existing.modelId,
-								modelName: updated.modelName ?? existing.modelName,
-								modeId: updated.modeId ?? existing.modeId,
-								modeName: updated.modeName ?? existing.modeName,
-								availableModes:
-									updated.availableModes ?? existing.availableModes,
-								availableModels:
-									updated.availableModels ?? existing.availableModels,
-								availableCommands:
-									updated.availableCommands ?? existing.availableCommands,
-								machineId: updated.machineId ?? existing.machineId,
-								worktreeSourceCwd:
-									updated.worktreeSourceCwd ?? existing.worktreeSourceCwd,
-								worktreeBranch:
-									updated.worktreeBranch ?? existing.worktreeBranch,
-								...attachedFieldsUpd,
-							};
+							nextSessions[updated.sessionId] = mergeSessionFromSummary(
+								existing,
+								updated,
+							);
 						}
 					}
 
@@ -877,42 +858,10 @@ export const useChatStore = create<ChatState>()(
 								worktreeBranch: summary.worktreeBranch,
 							});
 
-						// Apply isAttached from server summary
-						const isAttached = summary.isAttached === true;
-						const attachedFields = isAttached
-							? {
-									isAttached: true as const,
-									attachedAt: existing.attachedAt ?? new Date().toISOString(),
-									detachedAt: undefined,
-									detachedReason: undefined,
-								}
-							: {};
-
-						nextSessions[summary.sessionId] = {
-							...existing,
-							title: summary.title ?? existing.title,
-							error: summary.error,
-							createdAt: summary.createdAt,
-							updatedAt: summary.updatedAt,
-							backendId: summary.backendId ?? existing.backendId,
-							backendLabel: summary.backendLabel ?? existing.backendLabel,
-							cwd: summary.cwd ?? existing.cwd,
-							agentName: summary.agentName ?? existing.agentName,
-							modelId: summary.modelId ?? existing.modelId,
-							modelName: summary.modelName ?? existing.modelName,
-							modeId: summary.modeId ?? existing.modeId,
-							modeName: summary.modeName ?? existing.modeName,
-							availableModes: summary.availableModes ?? existing.availableModes,
-							availableModels:
-								summary.availableModels ?? existing.availableModels,
-							availableCommands:
-								summary.availableCommands ?? existing.availableCommands,
-							machineId: summary.machineId ?? existing.machineId,
-							worktreeSourceCwd:
-								summary.worktreeSourceCwd ?? existing.worktreeSourceCwd,
-							worktreeBranch: summary.worktreeBranch ?? existing.worktreeBranch,
-							...attachedFields,
-						};
+						nextSessions[summary.sessionId] = mergeSessionFromSummary(
+							existing,
+							summary,
+						);
 					});
 
 					Object.keys(nextSessions).forEach((sessionId) => {
@@ -1510,7 +1459,13 @@ export const useChatStore = create<ChatState>()(
 			storage: {
 				getItem: (name) => {
 					const value = getStorageAdapter().getItem(name);
-					return value ? JSON.parse(value) : null;
+					if (!value) return null;
+					try {
+						return JSON.parse(value);
+					} catch {
+						getStorageAdapter().removeItem(name);
+						return null;
+					}
 				},
 				setItem: (name, value) => {
 					getStorageAdapter().setItem(name, JSON.stringify(value));

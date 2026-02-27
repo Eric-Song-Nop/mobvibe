@@ -412,9 +412,8 @@ export function useSessionMutations(store: ChatStoreActions) {
 		},
 	});
 
-	const loadSessionMutation = useMutation({
-		mutationFn: loadSession,
-		onSuccess: (data) => {
+	const createSessionLoadCallbacks = (errorKey: string) => ({
+		onSuccess: (data: SessionSummary) => {
 			// Only reset if revision actually changed (avoid wiping backfill results)
 			if (data.revision !== undefined) {
 				const current = useChatStore.getState().sessions[data.sessionId];
@@ -442,46 +441,20 @@ export function useSessionMutations(store: ChatStoreActions) {
 			store.setAppError(
 				normalizeError(
 					mutationError,
-					createFallbackError(t("errors.loadSessionFailed"), "session"),
+					createFallbackError(t(errorKey), "session"),
 				),
 			);
 		},
 	});
 
+	const loadSessionMutation = useMutation({
+		mutationFn: loadSession,
+		...createSessionLoadCallbacks("errors.loadSessionFailed"),
+	});
+
 	const reloadSessionMutation = useMutation({
 		mutationFn: reloadSession,
-		onSuccess: (data) => {
-			// Only reset if revision actually changed (avoid wiping backfill results)
-			if (data.revision !== undefined) {
-				const current = useChatStore.getState().sessions[data.sessionId];
-				if (!current || current.revision !== data.revision) {
-					store.resetSessionForRevision(data.sessionId, data.revision);
-				}
-			}
-
-			store.updateSessionMeta(data.sessionId, {
-				updatedAt: data.updatedAt,
-				cwd: data.cwd,
-				agentName: data.agentName,
-				modelId: data.modelId,
-				modelName: data.modelName,
-				modeId: data.modeId,
-				modeName: data.modeName,
-				availableModes: data.availableModes,
-				availableModels: data.availableModels,
-				availableCommands: data.availableCommands,
-			});
-			store.setActiveSessionId(data.sessionId);
-			store.setAppError(undefined);
-		},
-		onError: (mutationError: unknown) => {
-			store.setAppError(
-				normalizeError(
-					mutationError,
-					createFallbackError(t("errors.reloadSessionFailed"), "session"),
-				),
-			);
-		},
+		...createSessionLoadCallbacks("errors.reloadSessionFailed"),
 	});
 
 	return {

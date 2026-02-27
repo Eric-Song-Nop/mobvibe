@@ -38,6 +38,7 @@ vi.mock("@/hooks/use-session-backfill", () => ({
 const mockGatewaySocket = vi.hoisted(() => ({
 	connect: vi.fn(),
 	disconnect: vi.fn(),
+	destroy: vi.fn(),
 	subscribeToSession: vi.fn(),
 	unsubscribeFromSession: vi.fn(),
 	getSubscribedSessions: vi.fn(() => []),

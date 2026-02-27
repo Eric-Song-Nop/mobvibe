@@ -58,15 +58,11 @@ export function useDiscoverSessionsMutation() {
 		): Promise<DiscoverSessionsMutationResult> => {
 			const backendCapabilities: Record<string, AgentSessionCapabilities> = {};
 			let lastError: unknown;
-			const hasExplicitBackendSelection =
-				normalizeBackendIds([
-					variables.backendId,
-					...(variables.backendIds ?? []),
-				]).length > 0;
 			let backendIds = normalizeBackendIds([
 				variables.backendId,
 				...(variables.backendIds ?? []),
 			]);
+			const hasExplicitBackendSelection = backendIds.length > 0;
 			if (backendIds.length === 0) {
 				const cachedBackends = queryClient.getQueryData<AcpBackendsResponse>(
 					queryKeys.backends,

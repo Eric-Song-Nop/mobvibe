@@ -95,7 +95,6 @@ export function BranchSelector({
 						placeholder={t("branchSelector.searchPlaceholder")}
 						value={searchQuery}
 						onChange={(e) => setSearchQuery(e.target.value)}
-						autoFocus
 					/>
 				</div>
 

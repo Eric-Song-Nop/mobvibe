@@ -12,6 +12,11 @@ import {
 } from "@mobvibe/shared";
 import type { SessionEvent } from "@/lib/acp";
 import { isInTauri } from "@/lib/auth";
+import {
+	tauriStoreDelete,
+	tauriStoreGet,
+	tauriStoreSet,
+} from "@/lib/tauri-store";
 
 export type E2EEStatus = "none" | "ok" | "missing_key";
 
@@ -224,10 +229,10 @@ class E2EEManager {
 	private async getStoredSecrets(): Promise<StoredSecret[] | null> {
 		if (isInTauri()) {
 			try {
-				const { load } = await import("@tauri-apps/plugin-store");
-				const store = await load("app-state.json");
-				const value = await store.get<StoredSecret[]>(STORAGE_KEY);
-				return value ?? null;
+				return await tauriStoreGet<StoredSecret[]>(
+					"app-state.json",
+					STORAGE_KEY,
+				);
 			} catch {
 				return null;
 			}
@@ -244,10 +249,10 @@ class E2EEManager {
 	private async getLegacyStoredSecret(): Promise<string | null> {
 		if (isInTauri()) {
 			try {
-				const { load } = await import("@tauri-apps/plugin-store");
-				const store = await load("app-state.json");
-				const value = await store.get<string>(LEGACY_STORAGE_KEY);
-				return value ?? null;
+				return await tauriStoreGet<string>(
+					"app-state.json",
+					LEGACY_STORAGE_KEY,
+				);
 			} catch {
 				return null;
 			}
@@ -258,10 +263,7 @@ class E2EEManager {
 	private async storeSecrets(secrets: StoredSecret[]): Promise<void> {
 		if (isInTauri()) {
 			try {
-				const { load } = await import("@tauri-apps/plugin-store");
-				const store = await load("app-state.json");
-				await store.set(STORAGE_KEY, secrets);
-				await store.save();
+				await tauriStoreSet("app-state.json", STORAGE_KEY, secrets);
 				return;
 			} catch {
 				// Fall through to localStorage
@@ -273,10 +275,7 @@ class E2EEManager {
 	private async removeStoredSecrets(): Promise<void> {
 		if (isInTauri()) {
 			try {
-				const { load } = await import("@tauri-apps/plugin-store");
-				const store = await load("app-state.json");
-				await store.delete(STORAGE_KEY);
-				await store.save();
+				await tauriStoreDelete("app-state.json", STORAGE_KEY);
 			} catch {
 				// Ignore
 			}
@@ -287,10 +286,7 @@ class E2EEManager {
 	private async removeLegacyStoredSecret(): Promise<void> {
 		if (isInTauri()) {
 			try {
-				const { load } = await import("@tauri-apps/plugin-store");
-				const store = await load("app-state.json");
-				await store.delete(LEGACY_STORAGE_KEY);
-				await store.save();
+				await tauriStoreDelete("app-state.json", LEGACY_STORAGE_KEY);
 			} catch {
 				// Ignore
 			}

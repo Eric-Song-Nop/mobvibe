@@ -126,7 +126,7 @@ describe("sign/verify token", () => {
 		const token = createSignedToken(auth);
 		const result = verifySignedToken(token, 5 * 60 * 1000);
 		expect(result).not.toBeNull();
-		expect(result!.publicKey).toBe(token.payload.publicKey);
+		expect(result?.publicKey).toBe(token.payload.publicKey);
 	});
 
 	it("returns null for expired token", () => {

@@ -106,7 +106,7 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 								variant="ghost"
 								size="icon-sm"
 								onClick={handleRefresh}
-								aria-label="Refresh"
+								aria-label={t("machines.refreshAriaLabel")}
 							>
 								<HugeiconsIcon
 									icon={Refresh01Icon}
@@ -160,7 +160,7 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 							size="icon-sm"
 							onClick={handleAddMachine}
 							className="mt-auto"
-							aria-label="Add machine"
+							aria-label={t("machines.addMachineAriaLabel")}
 						>
 							<HugeiconsIcon
 								icon={AddCircleIcon}

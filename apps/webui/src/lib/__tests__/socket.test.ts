@@ -22,7 +22,7 @@ describe("gatewaySocket", () => {
 	});
 
 	it("registers and unregisters session attached handler", () => {
-		gatewaySocket.disconnect();
+		gatewaySocket.destroy();
 		gatewaySocket.connect();
 		const handler = vi.fn();
 		const unsubscribe = gatewaySocket.onSessionAttached(handler);
@@ -34,7 +34,7 @@ describe("gatewaySocket", () => {
 	});
 
 	it("registers and unregisters session detached handler", () => {
-		gatewaySocket.disconnect();
+		gatewaySocket.destroy();
 		gatewaySocket.connect();
 		const handler = vi.fn();
 		const unsubscribe = gatewaySocket.onSessionDetached(handler);
@@ -46,7 +46,7 @@ describe("gatewaySocket", () => {
 	});
 
 	it("registers and unregisters disconnect handler", () => {
-		gatewaySocket.disconnect();
+		gatewaySocket.destroy();
 		gatewaySocket.connect();
 		const handler = vi.fn();
 		const unsubscribe = gatewaySocket.onDisconnect(handler);

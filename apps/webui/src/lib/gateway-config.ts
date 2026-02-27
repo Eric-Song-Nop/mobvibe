@@ -1,4 +1,5 @@
 import { isInTauri } from "./auth";
+import { tauriStoreGet, tauriStoreSet } from "./tauri-store";
 
 /**
  * Get the gateway URL based on the current environment.
@@ -18,9 +19,10 @@ export const getGatewayUrl = async (): Promise<string> => {
 	// In Tauri, check for stored gateway URL
 	if (isInTauri()) {
 		try {
-			const { load } = await import("@tauri-apps/plugin-store");
-			const store = await load("gateway.json");
-			const storedUrl = await store.get<string>("gatewayUrl");
+			const storedUrl = await tauriStoreGet<string>(
+				"gateway.json",
+				"gatewayUrl",
+			);
 			if (storedUrl) {
 				return storedUrl;
 			}
@@ -46,10 +48,7 @@ export const setGatewayUrl = async (url: string): Promise<void> => {
 	}
 
 	try {
-		const { load } = await import("@tauri-apps/plugin-store");
-		const store = await load("gateway.json");
-		await store.set("gatewayUrl", url);
-		await store.save();
+		await tauriStoreSet("gateway.json", "gatewayUrl", url);
 	} catch {
 		// Store not available
 	}

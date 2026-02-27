@@ -1,4 +1,5 @@
 import { isInTauri } from "./auth";
+import { tauriStoreDelete, tauriStoreGet, tauriStoreSet } from "./tauri-store";
 
 let tokenCache: string | null = null;
 
@@ -21,9 +22,7 @@ export const clearAuthToken = async (): Promise<void> => {
 export const loadAuthToken = async (): Promise<void> => {
 	if (!isInTauri()) return;
 	try {
-		const { load } = await import("@tauri-apps/plugin-store");
-		const store = await load("auth.json");
-		const token = await store.get<string>("bearerToken");
+		const token = await tauriStoreGet<string>("auth.json", "bearerToken");
 		if (token) {
 			tokenCache = token;
 		}
@@ -34,10 +33,7 @@ export const loadAuthToken = async (): Promise<void> => {
 
 const persistToken = async (token: string): Promise<void> => {
 	try {
-		const { load } = await import("@tauri-apps/plugin-store");
-		const store = await load("auth.json");
-		await store.set("bearerToken", token);
-		await store.save();
+		await tauriStoreSet("auth.json", "bearerToken", token);
 	} catch {
 		// Store not available
 	}
@@ -45,10 +41,7 @@ const persistToken = async (token: string): Promise<void> => {
 
 const clearPersistedToken = async (): Promise<void> => {
 	try {
-		const { load } = await import("@tauri-apps/plugin-store");
-		const store = await load("auth.json");
-		await store.delete("bearerToken");
-		await store.save();
+		await tauriStoreDelete("auth.json", "bearerToken");
 	} catch {
 		// Store not available
 	}

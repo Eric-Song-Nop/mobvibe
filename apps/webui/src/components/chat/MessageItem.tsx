@@ -77,10 +77,7 @@ const TerminalOutputBlock = ({
 	</div>
 );
 
-const resolveFileName = (pathValue: string) => {
-	const parts = pathValue.split(/[/\\]/).filter(Boolean);
-	return parts.at(-1) ?? pathValue;
-};
+import { resolveFileNameFromPath } from "@/lib/file-preview-utils";
 
 const isAbsolutePath = (pathValue: string) => pathValue.startsWith("/");
 
@@ -108,7 +105,7 @@ const resolveResourceLabel = (
 	const normalized = uri.startsWith("file://")
 		? uri.slice("file://".length)
 		: uri;
-	return resolveFileName(normalized);
+	return resolveFileNameFromPath(normalized) ?? uri;
 };
 
 const formatBytes = (value: number) => {
@@ -611,7 +608,7 @@ export const ToolCallItemContent = ({
 	const detailPaths = collectToolCallPaths(message);
 	const displayPaths = detailPaths.map((pathValue) => ({
 		path: pathValue,
-		name: resolveFileName(pathValue),
+		name: resolveFileNameFromPath(pathValue),
 	}));
 	const summaryPaths = displayPaths.slice(0, TOOL_CALL_PATH_SUMMARY_LIMIT);
 	const overflowCount = Math.max(0, displayPaths.length - summaryPaths.length);

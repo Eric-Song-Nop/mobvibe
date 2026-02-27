@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import type { CliConfig } from "../../config.js";
+import type { AcpConnection } from "../acp-connection.js";
 
 mock.module("node:fs/promises", () => ({
 	default: {
@@ -135,7 +136,8 @@ describe("SessionManager", () => {
 		sessionManager = new SessionManager(mockConfig);
 		mockConnection = createMockConnection();
 		sessionUpdateCallback = undefined;
-		sessionManager.createConnection = () => mockConnection as any;
+		sessionManager.createConnection = () =>
+			mockConnection as unknown as AcpConnection;
 	});
 
 	describe("discoverSessions", () => {
@@ -503,7 +505,7 @@ describe("SessionManager", () => {
 			const { sessionId, eventListener } = await setupSessionWithListener();
 			expect(sessionUpdateCallback).toBeDefined();
 
-			sessionUpdateCallback!({
+			sessionUpdateCallback?.({
 				sessionId,
 				update: {
 					sessionUpdate: "user_message_chunk",
@@ -531,7 +533,7 @@ describe("SessionManager", () => {
 		it("maps agent_message_chunk → agent_message_chunk WAL event", async () => {
 			const { sessionId, eventListener } = await setupSessionWithListener();
 
-			sessionUpdateCallback!({
+			sessionUpdateCallback?.({
 				sessionId,
 				update: {
 					sessionUpdate: "agent_message_chunk",
@@ -550,7 +552,7 @@ describe("SessionManager", () => {
 		it("maps agent_thought_chunk → agent_thought_chunk WAL event", async () => {
 			const { sessionId, eventListener } = await setupSessionWithListener();
 
-			sessionUpdateCallback!({
+			sessionUpdateCallback?.({
 				sessionId,
 				update: {
 					sessionUpdate: "agent_thought_chunk",
@@ -569,7 +571,7 @@ describe("SessionManager", () => {
 		it("maps tool_call → tool_call WAL event", async () => {
 			const { sessionId, eventListener } = await setupSessionWithListener();
 
-			sessionUpdateCallback!({
+			sessionUpdateCallback?.({
 				sessionId,
 				update: {
 					sessionUpdate: "tool_call",
@@ -590,7 +592,7 @@ describe("SessionManager", () => {
 		it("maps tool_call_update → tool_call_update WAL event", async () => {
 			const { sessionId, eventListener } = await setupSessionWithListener();
 
-			sessionUpdateCallback!({
+			sessionUpdateCallback?.({
 				sessionId,
 				update: {
 					sessionUpdate: "tool_call_update",
@@ -610,7 +612,7 @@ describe("SessionManager", () => {
 		it("maps session_info_update → session_info_update WAL event", async () => {
 			const { sessionId, eventListener } = await setupSessionWithListener();
 
-			sessionUpdateCallback!({
+			sessionUpdateCallback?.({
 				sessionId,
 				update: {
 					sessionUpdate: "session_info_update",
@@ -629,7 +631,7 @@ describe("SessionManager", () => {
 		it("maps current_mode_update → session_info_update WAL event", async () => {
 			const { sessionId, eventListener } = await setupSessionWithListener();
 
-			sessionUpdateCallback!({
+			sessionUpdateCallback?.({
 				sessionId,
 				update: {
 					sessionUpdate: "current_mode_update",
@@ -648,7 +650,7 @@ describe("SessionManager", () => {
 		it("maps usage_update → usage_update WAL event", async () => {
 			const { sessionId, eventListener } = await setupSessionWithListener();
 
-			sessionUpdateCallback!({
+			sessionUpdateCallback?.({
 				sessionId,
 				update: {
 					sessionUpdate: "usage_update",
@@ -668,7 +670,7 @@ describe("SessionManager", () => {
 		it("maps unknown update type → unknown_update WAL event", async () => {
 			const { sessionId, eventListener } = await setupSessionWithListener();
 
-			sessionUpdateCallback!({
+			sessionUpdateCallback?.({
 				sessionId,
 				update: {
 					sessionUpdate: "totally_new_type",
@@ -756,21 +758,21 @@ describe("SessionManager", () => {
 			expect(sessionUpdateCallback).toBeDefined();
 
 			// Trigger multiple updates
-			sessionUpdateCallback!({
+			sessionUpdateCallback?.({
 				sessionId,
 				update: {
 					sessionUpdate: "agent_message_chunk",
 					content: { type: "text", text: "A" },
 				},
 			} as SessionNotification);
-			sessionUpdateCallback!({
+			sessionUpdateCallback?.({
 				sessionId,
 				update: {
 					sessionUpdate: "agent_message_chunk",
 					content: { type: "text", text: "B" },
 				},
 			} as SessionNotification);
-			sessionUpdateCallback!({
+			sessionUpdateCallback?.({
 				sessionId,
 				update: {
 					sessionUpdate: "agent_message_chunk",
@@ -801,21 +803,21 @@ describe("SessionManager", () => {
 			expect(sessionUpdateCallback).toBeDefined();
 
 			// Mix different event types
-			sessionUpdateCallback!({
+			sessionUpdateCallback?.({
 				sessionId,
 				update: {
 					sessionUpdate: "user_message_chunk",
 					content: { type: "text", text: "Hello" },
 				},
 			} as SessionNotification);
-			sessionUpdateCallback!({
+			sessionUpdateCallback?.({
 				sessionId,
 				update: {
 					sessionUpdate: "agent_message_chunk",
 					content: { type: "text", text: "Hi" },
 				},
 			} as SessionNotification);
-			sessionUpdateCallback!({
+			sessionUpdateCallback?.({
 				sessionId,
 				update: {
 					sessionUpdate: "tool_call",
@@ -854,7 +856,7 @@ describe("SessionManager", () => {
 			const sessionId = sessions[0].sessionId;
 			expect(sessionUpdateCallback).toBeDefined();
 
-			sessionUpdateCallback!({
+			sessionUpdateCallback?.({
 				sessionId,
 				update: {
 					sessionUpdate: "agent_message_chunk",

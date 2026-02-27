@@ -319,36 +319,40 @@ export function FileExplorerDialog({
 	const filesHighlightedPath =
 		previewIntent?.type === "file" ? previewIntent.path : undefined;
 
+	// Pre-build lookup maps for O(1) git status access
+	const gitStatusMaps = useMemo(() => {
+		if (!gitStatus?.isGitRepo) return null;
+		const staged = new Map<string, GitFileStatus>();
+		for (const f of gitStatus.staged) {
+			staged.set(f.path, f.status);
+		}
+		const unstaged = new Map<string, GitFileStatus>();
+		for (const f of gitStatus.unstaged) {
+			unstaged.set(f.path, f.status);
+		}
+		const untracked = new Set<string>();
+		for (const f of gitStatus.untracked) {
+			untracked.add(f.path);
+		}
+		return { staged, unstaged, untracked, dirStatus: gitStatus.dirStatus };
+	}, [gitStatus]);
+
 	const getGitStatusForPath = useCallback(
 		(relativePath: string): GitFileStatus | undefined => {
-			if (!gitStatus?.isGitRepo) {
-				return undefined;
-			}
-			// Check staged files
-			const stagedEntry = gitStatus.staged.find(
-				(f) => f.path === relativePath || f.path === `${relativePath}/`,
+			if (!gitStatusMaps) return undefined;
+			const withSlash = `${relativePath}/`;
+			return (
+				gitStatusMaps.staged.get(relativePath) ??
+				gitStatusMaps.staged.get(withSlash) ??
+				gitStatusMaps.unstaged.get(relativePath) ??
+				gitStatusMaps.unstaged.get(withSlash) ??
+				(gitStatusMaps.untracked.has(relativePath) ||
+				gitStatusMaps.untracked.has(withSlash)
+					? "?"
+					: gitStatusMaps.dirStatus[relativePath])
 			);
-			if (stagedEntry) {
-				return stagedEntry.status;
-			}
-			// Check unstaged files
-			const unstagedEntry = gitStatus.unstaged.find(
-				(f) => f.path === relativePath || f.path === `${relativePath}/`,
-			);
-			if (unstagedEntry) {
-				return unstagedEntry.status;
-			}
-			// Check untracked files
-			const untrackedEntry = gitStatus.untracked.find(
-				(f) => f.path === relativePath || f.path === `${relativePath}/`,
-			);
-			if (untrackedEntry) {
-				return "?";
-			}
-			// Check if it's a directory
-			return gitStatus.dirStatus[relativePath];
 		},
-		[gitStatus],
+		[gitStatusMaps],
 	);
 
 	// --- Render preview panel content based on intent type ---
