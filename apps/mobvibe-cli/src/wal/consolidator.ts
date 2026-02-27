@@ -52,10 +52,10 @@ export class WalConsolidator {
 		// Concatenate all text content
 		const texts: string[] = [];
 		for (const payload of payloads) {
-			const update = payload.update as {
-				content?: { type?: string; text?: string };
-			};
-			if (update.content?.type === "text" && update.content.text) {
+			const update = (payload as Record<string, unknown>)?.update as
+				| { content?: { type?: string; text?: string } }
+				| undefined;
+			if (update?.content?.type === "text" && update.content.text) {
 				texts.push(update.content.text);
 			}
 		}
@@ -165,7 +165,10 @@ export class WalConsolidator {
 		let merged = { ...anchorUpdate };
 
 		for (const u of updates) {
-			const update = u.update as Record<string, unknown>;
+			const update = (u as Record<string, unknown>)?.update as
+				| Record<string, unknown>
+				| undefined;
+			if (!update) continue;
 			// Only override non-null/undefined values
 			for (const key of Object.keys(update)) {
 				if (
