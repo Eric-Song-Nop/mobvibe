@@ -19,6 +19,12 @@
 			"features": "核心功能"
 		}
 	},
+	"profile": {
+		"openToWork": "求职中",
+		"description": "全栈开发者，正在寻找新机会",
+		"email": "邮箱",
+		"github": "GitHub"
+	},
 	"theme": {
 		"light": "浅色",
 		"dark": "深色",

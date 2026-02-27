@@ -19,6 +19,12 @@
 			"features": "Core Features"
 		}
 	},
+	"profile": {
+		"openToWork": "Open to Work",
+		"description": "Full-stack Developer seeking new opportunities",
+		"email": "Email",
+		"github": "GitHub"
+	},
 	"theme": {
 		"light": "Light",
 		"dark": "Dark",
