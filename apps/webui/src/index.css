@@ -148,7 +148,7 @@
 html.qr-scanning,
 html.qr-scanning body,
 html.qr-scanning .app-root {
-	background: transparent !important;
+	background: transparent;
 }
 
 @keyframes collapsible-down {

@@ -44,19 +44,24 @@ const inputGroupAddonVariants = cva(
 function InputGroupAddon({
 	className,
 	align = "inline-start",
+	onClick,
 	...props
 }: React.ComponentProps<"div"> & VariantProps<typeof inputGroupAddonVariants>) {
-	return (
-		<div
-			data-slot="input-group-addon"
-			data-align={align}
-			className={cn(inputGroupAddonVariants({ align }), className)}
-			onClick={(event) => {
+	const handleClick = onClick
+		? onClick
+		: (event: React.MouseEvent<HTMLDivElement>) => {
 				if ((event.target as HTMLElement).closest("button")) {
 					return;
 				}
 				event.currentTarget.parentElement?.querySelector("input")?.focus();
-			}}
+			};
+	return (
+		<div
+			data-slot="input-group-addon"
+			data-align={align}
+			role="presentation"
+			className={cn(inputGroupAddonVariants({ align }), className)}
+			onClick={handleClick}
 			{...props}
 		/>
 	);

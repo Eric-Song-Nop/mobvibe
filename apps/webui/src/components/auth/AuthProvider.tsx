@@ -35,6 +35,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 	const sessionUser = session.data?.user;
 
 	// Stable user object — only recomputes when individual fields change
+	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional fine-grained deps to avoid re-render on sessionUser reference change
 	const user = useMemo<User | null>(
 		() =>
 			sessionUser

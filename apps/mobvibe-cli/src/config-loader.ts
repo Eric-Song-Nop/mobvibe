@@ -71,7 +71,7 @@ export const saveUserConfig = async (
 	}
 	const merged = { ...existing, ...patch };
 	await fs.mkdir(path.dirname(configPath), { recursive: true });
-	await fs.writeFile(configPath, JSON.stringify(merged, null, 2) + "\n");
+	await fs.writeFile(configPath, `${JSON.stringify(merged, null, 2)}\n`);
 };
 
 export const loadUserConfig = async (

@@ -119,12 +119,17 @@ export function setupWebuiHandlers(io: Server, cliRegistry: CliRegistry) {
 	webuiNamespace.on("connection", (socket: Socket) => {
 		const authSocket = socket as AuthenticatedSocket;
 		const userId = authSocket.data.userId;
+		if (!userId) {
+			logger.error({ socketId: socket.id }, "webui_missing_userId");
+			socket.disconnect(true);
+			return;
+		}
 		socketUserMap.set(socket.id, userId);
 
 		logger.info({ socketId: socket.id, userId }, "webui_authenticated");
 
 		// Send current CLI status for this user (auth middleware guarantees userId)
-		const clis = cliRegistry.getClisForUser(userId!);
+		const clis = cliRegistry.getClisForUser(userId);
 
 		for (const cli of clis) {
 			socket.emit("cli:status", {
@@ -157,7 +162,7 @@ export function setupWebuiHandlers(io: Server, cliRegistry: CliRegistry) {
 			if (!sessionSubscriptions.has(sessionId)) {
 				sessionSubscriptions.set(sessionId, new Map());
 			}
-			sessionSubscriptions.get(sessionId)!.set(socket.id, userId);
+			sessionSubscriptions.get(sessionId)?.set(socket.id, userId);
 			logger.info(
 				{ socketId: socket.id, sessionId, userId },
 				"webui_subscribed",

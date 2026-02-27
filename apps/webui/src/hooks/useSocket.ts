@@ -284,7 +284,6 @@ export function useSocket({
 				setCanceling?.(event.sessionId, false);
 				break;
 			}
-			case "unknown_update":
 			default:
 				// Forward-compatible: silently ignore unknown event kinds
 				// so the UI doesn't crash when SDK introduces new event types

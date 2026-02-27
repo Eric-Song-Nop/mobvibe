@@ -59,7 +59,7 @@ export async function requireAuth(
  */
 export async function optionalAuth(
 	req: AuthenticatedRequest,
-	res: Response,
+	_res: Response,
 	next: NextFunction,
 ): Promise<void> {
 	try {

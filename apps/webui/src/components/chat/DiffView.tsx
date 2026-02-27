@@ -126,7 +126,7 @@ const trimTrailingEmptyTokens = (tokens: Token[][], code: string) => {
 		return tokens;
 	}
 	const lastLine = tokens[tokens.length - 1];
-	if (lastLine && lastLine.every((token) => token.content === "")) {
+	if (lastLine?.every((token) => token.content === "")) {
 		return tokens.slice(0, -1);
 	}
 	return tokens;

@@ -43,11 +43,12 @@ describe("CliCryptoService", () => {
 		const wrapped = service.getWrappedDek("session-set");
 		expect(wrapped).not.toBeNull();
 		expect(typeof wrapped).toBe("string");
+		if (!wrapped) throw new Error("wrapped should not be null");
 
 		// Verify it can be unwrapped
 		const contentKp = deriveContentKeyPair(masterSecret);
 		const unwrapped = unwrapDEK(
-			wrapped!,
+			wrapped,
 			contentKp.publicKey,
 			contentKp.secretKey,
 		);

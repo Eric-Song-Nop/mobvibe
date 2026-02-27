@@ -796,8 +796,7 @@ export function App() {
 											);
 											const returnUrl = params.get("returnUrl");
 											if (
-												returnUrl &&
-												returnUrl.startsWith("/") &&
+												returnUrl?.startsWith("/") &&
 												!returnUrl.startsWith("//")
 											) {
 												navigate(returnUrl);

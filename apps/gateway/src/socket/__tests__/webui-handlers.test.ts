@@ -25,17 +25,17 @@ vi.mock("../../lib/logger.js", () => ({
 }));
 
 describe("webui-handlers auth middleware", () => {
-	let authMiddleware: (socket: any, next: any) => Promise<void>;
+	let authMiddleware: (socket: unknown, next: unknown) => Promise<void>;
 
 	beforeEach(() => {
 		vi.clearAllMocks();
 
 		let capturedMiddleware:
-			| ((socket: any, next: any) => Promise<void>)
+			| ((socket: unknown, next: unknown) => Promise<void>)
 			| undefined;
 
 		const namespace = {
-			use: vi.fn((mw: (socket: any, next: any) => Promise<void>) => {
+			use: vi.fn((mw: (socket: unknown, next: unknown) => Promise<void>) => {
 				capturedMiddleware = mw;
 			}),
 			on: vi.fn(),
@@ -54,7 +54,10 @@ describe("webui-handlers auth middleware", () => {
 
 		setupWebuiHandlers(io, mockCliRegistry);
 
-		authMiddleware = capturedMiddleware!;
+		if (!capturedMiddleware) {
+			throw new Error("Middleware was not captured during setup");
+		}
+		authMiddleware = capturedMiddleware;
 	});
 
 	it("authenticates with valid Bearer token", async () => {
