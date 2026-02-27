@@ -75,6 +75,7 @@ pnpm -C apps/webui ios:dev
 
 mobvibe-cli（`apps/mobvibe-cli`）
 ```bash
+pnpm -C apps/mobvibe-cli dev # same as pnpm -C apps/mobvibe-cli start start --foreground
 pnpm -C apps/mobvibe-cli build
 pnpm -C apps/mobvibe-cli build:bin
 pnpm -C apps/mobvibe-cli start
