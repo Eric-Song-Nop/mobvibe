@@ -1,6 +1,8 @@
 import {
 	ComputerIcon,
+	GithubIcon,
 	LanguageSkillIcon,
+	Mail01Icon,
 	Moon02Icon,
 	PaintBoardIcon,
 	Sun03Icon,
@@ -8,6 +10,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "@/components/theme-provider";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
@@ -183,6 +186,54 @@ export function DemoSidebar({
 							))}
 						</DropdownMenuContent>
 					</DropdownMenu>
+				</div>
+
+				<Separator />
+
+				{/* Profile card */}
+				<div className="flex flex-col gap-1.5 p-2">
+					<Badge
+						variant="outline"
+						className="border-emerald-500/40 text-emerald-600 dark:text-emerald-400 text-[10px]"
+					>
+						<span className="mr-0.5 inline-block size-1.5 rounded-full bg-emerald-500" />
+						{t("profile.openToWork")}
+					</Badge>
+					<p className="px-0.5 text-[11px] leading-snug text-muted-foreground">
+						{t("profile.description")}
+					</p>
+					<div className="flex gap-0.5">
+						<a
+							href="mailto:Ericoolen@yeah.net"
+							target="_blank"
+							rel="noopener noreferrer"
+						>
+							<Button variant="ghost" size="icon-xs">
+								<HugeiconsIcon
+									icon={Mail01Icon}
+									strokeWidth={2}
+									className="size-3"
+									aria-hidden="true"
+								/>
+								<span className="sr-only">{t("profile.email")}</span>
+							</Button>
+						</a>
+						<a
+							href="https://github.com/Eric-Song-Nop"
+							target="_blank"
+							rel="noopener noreferrer"
+						>
+							<Button variant="ghost" size="icon-xs">
+								<HugeiconsIcon
+									icon={GithubIcon}
+									strokeWidth={2}
+									className="size-3"
+									aria-hidden="true"
+								/>
+								<span className="sr-only">{t("profile.github")}</span>
+							</Button>
+						</a>
+					</div>
 				</div>
 			</aside>
 		</>
