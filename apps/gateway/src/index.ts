@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./env.js";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { toNodeHandler } from "better-auth/node";
