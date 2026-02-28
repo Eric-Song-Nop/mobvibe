@@ -1,6 +1,8 @@
 * Mobvibe
 
-/在任何设备上与本地 AI 编程 Agent 对话。/
+/Chat with your local AI coding agents from any device, from anywhere. No network config, just one command./
+
+/在任何设备上与本地 AI 编程 Agent 对话。无需设置，一行命令。/
 
 Mobvibe 是一个分布式 ACP（Agent Client Protocol）WebUI，用于本地 Agent 工作流。它连接 ACP 兼容的 CLI（opencode、gemini-cli、claude-code），管理多会话对话，并在桌面和移动端提供快速、触控友好的体验。
 
@@ -14,76 +16,15 @@ Mobvibe 是一个分布式 ACP（Agent Client Protocol）WebUI，用于本地 Ag
 - 通过 Tauri v2 支持桌面和移动应用
 - 浅色/深色/跟随系统主题，中英双语
 
-** 架构
-
-#+begin_src
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│  Cloudflare (CDN + WAF + DNS)                                                   │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐              │
-│  │ mobvibe.net       │  │ app.mobvibe.net   │  │ api.mobvibe.net   │              │
-│  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘              │
-└───────────┼──────────────────────┼──────────────────────┼───────────────────────┘
-            │                      │                      │
-┌───────────┼──────────────────────┼──────────────────────┼───────────────────────┐
-│  Render (Oregon)                 │                      │                       │
-│  ┌────────▼─────────┐  ┌────────▼─────────┐  ┌────────▼─────────┐             │
-│  │   Website        │  │     WebUI        │  │    Gateway       │◄──Socket.io──┐│
-│  │ (Static Site)    │  │  (Static Site)   │  │ (Docker/Express) │             ││
-│  └──────────────────┘  └──────────────────┘  └────────┬─────────┘             ││
-│                                                       │                       ││
-│                                              ┌────────▼─────────┐             ││
-│                                              │   PostgreSQL     │             ││
-│                                              └──────────────────┘             ││
-└───────────────────────────────────────────────────────────────────────────────┘│
-                                                                                 │
-                                                                   ┌─────────────▼─┐
-                                                                   │  mobvibe-cli   │
-                                                                   │   (Bun CLI)    │
-                                                                   └───────┬────────┘
-                                                                           │ stdin/stdout
-                                                                   ┌───────▼────────┐
-                                                                   │   ACP Agent    │
-                                                                   │ (claude-code)  │
-                                                                   └────────────────┘
-#+end_src
-
-** 前置要求
-
-- Node.js 18+（用于 gateway/webui）
-- Bun 1.0+（用于 mobvibe-cli）
-- pnpm（包管理器）
-- ACP CLI 工具：=opencode=（默认）、=claude-code=、=codex=、=gemini-cli=，或其他 ACP 兼容 agent
-
 ** 快速开始
 
 #+begin_src bash
-# 克隆仓库
-git clone https://github.com/anthropics/mobvibe.git
-cd mobvibe
-
-# 安装依赖
-pnpm install
-
-# 启动所有服务
-pnpm dev
+npx @mobvibe/cli start
 #+end_src
 
-服务地址：
-- Gateway: http://localhost:3005
-- WebUI: http://localhost:5173
+然后在浏览器中打开 [[https://app.mobvibe.net][app.mobvibe.net]]。首次运行时，Mobvibe 会扫描系统中已安装的 ACP Agent，并让你选择要启用的 Agent。
 
-** CLI 使用
-
-*** 安装
-
-#+begin_src bash
-# 从仓库运行
-cd apps/mobvibe-cli
-pnpm build
-./bin/mobvibe.mjs start
-#+end_src
-
-*** 命令列表
+** CLI 命令
 
 | 命令                              | 说明                                 |
 |-----------------------------------+--------------------------------------|
@@ -97,92 +38,46 @@ pnpm build
 | =mobvibe e2ee show=                | 显示主密钥（用于 WebUI 配对）       |
 | =mobvibe e2ee status=              | 查看 E2EE 密钥状态                  |
 
-*** 配置
+** 配置
 
-| 变量                    | 说明                                     |
-|-------------------------+------------------------------------------|
-| =MOBVIBE_GATEWAY_URL=    | Gateway URL（默认: http://localhost:3005）|
-| =MOBVIBE_HOME=           | CLI 家目录（默认: ~/.mobvibe）           |
+| 变量                        | 说明                                                 |
+|-----------------------------+------------------------------------------------------|
+| =MOBVIBE_GATEWAY_URL=        | Gateway URL（默认：=https://api.mobvibe.net=）        |
+| =MOBVIBE_HOME=               | CLI 家目录（默认：=~/.mobvibe=）                      |
+| =MOBVIBE_ENABLED_AGENTS=     | 逗号分隔的 Agent ID 列表（覆盖配置文件）             |
 
-*** ACP Agents
+高级配置存储在 =~/.mobvibe/.config.json=：
 
-Mobvibe 从 =${MOBVIBE_HOME:-~/.mobvibe}/.config.json= 加载 agent 定义。
+| 字段              | 说明                                             |
+|-------------------+--------------------------------------------------|
+| =enabledAgents=    | 已启用的 Agent ID 数组（如 =["claude-code"]=）    |
+| =worktreeBaseDir=  | Git worktree 根目录（默认：=~/.mobvibe/worktrees=）|
 
-- =agents=：对外暴露的 agent 列表。每项支持 =id=（必填）、=command=（必填）、=label=、=args=、=env=。
-- =defaultAgentId=：可选，默认 agent 的 id。
+** ACP Agents
 
-行为：
-- 未配置或 =agents= 为空时，使用内置 =opencode= 后端。
-- 若配置了 =agents= 但没有 =opencode= 项，内置 =opencode= 会被自动添加到列表最前。
-- 若配置了 =id: "opencode"=，则使用你的列表并覆盖内置默认。
-- =defaultAgentId= 必须匹配现有 agent id。
+Mobvibe 通过 [[https://agentclientprotocol.com][ACP Registry]] 自动检测已安装的 ACP Agent。首次运行时，会扫描系统并显示检测到的 Agent 列表供你选择。
 
-#+begin_src json
-{
-  "agents": [
-    {
-      "id": "opencode",
-      "label": "OpenCode",
-      "command": "opencode",
-      "args": ["acp"]
-    }
-  ],
-  "defaultAgentId": "opencode"
-}
-#+end_src
+每个 Agent 的检测优先级：
+1. *Binary* — PATH 中找到原生二进制（最快）
+2. *npx* — Node.js 包，通过 =npx= 按需下载
+3. *uvx* — Python 包，通过 =uvx= 按需下载
 
-**** OpenCode（默认）
+常用 Agent 安装方式：
 
-- 安装 OpenCode 并确保 =opencode= 在 PATH：[[https://github.com/sst/opencode][https://github.com/sst/opencode]]
-- 默认执行 =opencode acp=。只有需要自定义参数或环境变量时才需要显式添加 =opencode=。
+- *OpenCode* — =curl -fsSL https://opencode.ai/install | bash= ([[https://github.com/sst/opencode][仓库]])
+- *Claude Code* — =npm install -g @anthropic-ai/claude-code=（需要 =ANTHROPIC_API_KEY=）([[https://docs.anthropic.com/en/docs/claude-code/overview][文档]])
+- *Gemini CLI* — =npm install -g @anthropic-ai/gemini-cli= ([[https://github.com/google-gemini/gemini-cli][仓库]])
+- *Codex CLI* — =npm install -g @openai/codex=（需要 =OPENAI_API_KEY=）([[https://developers.openai.com/codex/cli][文档]])
+- *Goose* — 参见 [[https://block.github.io/goose/docs/guides/acp-clients][安装指南]]
+- *Aider* — =pip install aider-chat= ([[https://aider.chat][文档]])
 
-**** Claude Code（通过 Zed 适配器）
-
-- 安装：=pnpm add -g @zed-industries/claude-code-acp=
-- 确保提供 =ANTHROPIC_API_KEY=（或在 =env= 中注入）。
-
-#+begin_src json
-{
-  "agents": [
-    {
-      "id": "claude-code",
-      "label": "Claude Code",
-      "command": "claude-code-acp",
-      "env": {
-        "ANTHROPIC_API_KEY": "<your-key>"
-      }
-    }
-  ],
-  "defaultAgentId": "claude-code"
-}
-#+end_src
-
-**** Codex（通过 Zed 适配器）
-
-- 从 releases 安装或 =pnpm dlx @zed-industries/codex-acp=，并确保 =codex-acp= 在 PATH：[[https://github.com/zed-industries/codex-acp][https://github.com/zed-industries/codex-acp]]
-- 提供 =OPENAI_API_KEY=（或 =CODEX_API_KEY=）。
-
-#+begin_src json
-{
-  "agents": [
-    {
-      "id": "codex",
-      "label": "Codex",
-      "command": "codex-acp",
-      "env": {
-        "OPENAI_API_KEY": "<your-key>"
-      }
-    }
-  ],
-  "defaultAgentId": "codex"
-}
-#+end_src
+安装新 Agent 后重启 Mobvibe，即可自动检测。如需更改启用的 Agent，设置 =MOBVIBE_ENABLED_AGENTS= 环境变量或编辑 =~/.mobvibe/.config.json=。
 
 ** 支持的 ACP Agents
 
 文档索引：https://agentclientprotocol.com/llms.txt
 
-以下 agent 可用于 ACP Client：
+以下 Agent 可用于 ACP Client：
 
 - [[https://phil65.github.io/agentpool/advanced/acp-integration/][AgentPool]]
 - [[https://docs.augmentcode.com/cli/acp][Augment Code]]
@@ -230,93 +125,9 @@ mobvibe start
 
 所有会话内容现已端到端加密。Gateway 只负责路由，无法读取内容。
 
-** WebUI 使用
+** 自托管
 
-*** Web 模式
-
-#+begin_src bash
-cd apps/webui
-pnpm dev
-#+end_src
-
-访问地址：http://localhost:5173
-
-*** 桌面模式 (Tauri)
-
-#+begin_src bash
-cd apps/webui
-pnpm dev:tauri    # 开发
-pnpm build:tauri  # 生产构建
-#+end_src
-
-输出：=.msi=、=.exe=（Windows），=.app=、=.dmg=（macOS），=.deb=、=.AppImage=（Linux）
-
-*** 移动端模式 (Tauri)
-
-#+begin_src bash
-# Android（需要 Android SDK）
-cd apps/webui
-pnpm android:init   # 首次运行
-pnpm android:dev    # 开发
-
-# iOS（仅 macOS，需要 Xcode）
-pnpm ios:init       # 首次运行
-pnpm ios:dev        # 开发
-#+end_src
-
-*** 环境变量
-
-| 变量                | 说明                                 |
-|---------------------+--------------------------------------|
-| =VITE_GATEWAY_URL=   | Gateway URL（未设置时自动检测）       |
-
-** 开发
-
-*** 脚本
-
-| 命令          | 说明               |
-|---------------+--------------------|
-| =pnpm dev=     | 启动所有包         |
-| =pnpm build=   | 构建所有包         |
-| =pnpm lint=    | Biome lint         |
-| =pnpm format=  | Biome 格式化       |
-| =pnpm test=    | 运行测试（Vitest） |
-
-*** 代码风格
-
-- 格式化：Biome（Tab 缩进，双引号）
-- TypeScript：严格模式
-
-** 部署
-
-Mobvibe 部署在 [[https://render.com][Render]] 上，使用 [[https://cloudflare.com][Cloudflare]] 提供 DNS 和 CDN 加速。
-
-*** 生产环境
-
-| 服务        | 类型         | 域名              |
-|-------------+--------------+-------------------|
-| Gateway     | Docker       | =api.mobvibe.net=  |
-| WebUI       | 静态站点     | =app.mobvibe.net=  |
-| Website     | 静态站点     | =mobvibe.net=      |
-| PostgreSQL  | 数据库       | 内部访问           |
-
-所有服务运行在 Render Oregon 区域。Cloudflare 提供 CDN 缓存、DDoS 防护和 TLS 终端。
-
-配置定义在 =render.yaml=（Render Blueprint）中。
-
-*** 预览环境
-
-每个 Pull Request 会自动创建完整的预览环境（Gateway + WebUI + Website + PostgreSQL）。预览环境在 PR 合并或关闭后 3 天自动清理。
-
-*** Cloudflare DNS 配置
-
-| 记录              | 类型  | 值                                 | 代理   |
-|-------------------+-------+------------------------------------+--------|
-| =api.mobvibe.net=  | CNAME | =mobvibe-gateway.onrender.com=     | 代理   |
-| =app.mobvibe.net=  | CNAME | =mobvibe-webui.onrender.com=       | 代理   |
-| =mobvibe.net=      | CNAME | =mobvibe-website.onrender.com=     | 代理   |
-
-SSL/TLS 模式：Full (Strict)。初次配置先设为 DNS Only，等 Render 签发 TLS 证书后再切换为 Proxied。
+Mobvibe 支持自托管。基础设施配置定义在仓库根目录的 =render.yaml= 中。详见[[https://github.com/anthropics/mobvibe][源码仓库]]。
 
 ** 文档
 

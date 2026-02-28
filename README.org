@@ -1,6 +1,7 @@
 * Mobvibe
 
 /Chat with your local AI coding agents from any device, from anywhere. No network config, just one command./
+
 /在任何设备，任何地点与本机 AI 编程 Agent 对话。无需设置，一行命令。/
 
 Mobvibe is a distributed ACP (Agent Client Protocol) WebUI for local agent workflows. It connects to ACP-compatible CLIs (opencode, gemini-cli, claude-code), manages multi-session chat, and delivers a fast, touch-friendly experience across desktop and mobile.
@@ -15,76 +16,16 @@ Mobvibe is a distributed ACP (Agent Client Protocol) WebUI for local agent workf
 - Desktop and mobile apps via Tauri v2
 - Light/dark/system themes, i18n (Chinese/English)
 
-** Architecture
-
-#+begin_src
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│  Cloudflare (CDN + WAF + DNS)                                                   │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐              │
-│  │ mobvibe.net       │  │ app.mobvibe.net   │  │ api.mobvibe.net   │              │
-│  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘              │
-└───────────┼──────────────────────┼──────────────────────┼───────────────────────┘
-            │                      │                      │
-┌───────────┼──────────────────────┼──────────────────────┼───────────────────────┐
-│  Render (Oregon)                 │                      │                       │
-│  ┌────────▼─────────┐  ┌────────▼─────────┐  ┌────────▼─────────┐             │
-│  │   Website        │  │     WebUI        │  │    Gateway       │◄──Socket.io──┐│
-│  │ (Static Site)    │  │  (Static Site)   │  │ (Docker/Express) │             ││
-│  └──────────────────┘  └──────────────────┘  └────────┬─────────┘             ││
-│                                                       │                       ││
-│                                              ┌────────▼─────────┐             ││
-│                                              │   PostgreSQL     │             ││
-│                                              └──────────────────┘             ││
-└───────────────────────────────────────────────────────────────────────────────┘│
-                                                                                 │
-                                                                   ┌─────────────▼─┐
-                                                                   │  mobvibe-cli   │
-                                                                   │   (Bun CLI)    │
-                                                                   └───────┬────────┘
-                                                                           │ stdin/stdout
-                                                                   ┌───────▼────────┐
-                                                                   │   ACP Agent    │
-                                                                   │ (claude-code)  │
-                                                                   └────────────────┘
-#+end_src
-
-** Prerequisites
-
-- Node.js 18+ (for gateway/webui)
-- Bun 1.0+ (for mobvibe-cli)
-- pnpm (package manager)
-- ACP CLI tools: =opencode= (default), =claude-code=, =codex=, =gemini-cli=, or any ACP-compatible agent
-
 ** Quick Start
 
 #+begin_src bash
-# Clone repository
-git clone https://github.com/anthropics/mobvibe.git
-cd mobvibe
-
-# Install dependencies
-pnpm install
-
-# Start all services
-pnpm dev
+npx @mobvibe/cli login
+npx @mobvibe/cli start
 #+end_src
 
-Services will be available at:
-- Gateway: http://localhost:3005
-- WebUI: http://localhost:5173
+Then open [[https://app.mobvibe.net][app.mobvibe.net]] in your browser. On first run, Mobvibe will scan your system for installed ACP agents and ask you to choose which ones to enable.
 
-** CLI Usage
-
-*** Installation
-
-#+begin_src bash
-# Run from repository
-cd apps/mobvibe-cli
-pnpm build
-./bin/mobvibe.mjs start
-#+end_src
-
-*** Commands
+** CLI Commands
 
 | Command                          | Description                                  |
 |----------------------------------+----------------------------------------------|
@@ -98,86 +39,40 @@ pnpm build
 | =mobvibe e2ee show=               | Display master secret for WebUI pairing      |
 | =mobvibe e2ee status=             | Show E2EE key status                         |
 
-*** Configuration
+** Configuration
 
-| Variable                | Description                              |
-|-------------------------+------------------------------------------|
-| =MOBVIBE_GATEWAY_URL=    | Gateway URL (default: http://localhost:3005) |
-| =MOBVIBE_HOME=           | CLI home directory (default: ~/.mobvibe) |
+| Variable                   | Description                                          |
+|----------------------------+------------------------------------------------------|
+| =MOBVIBE_GATEWAY_URL=       | Gateway URL (default: =https://api.mobvibe.net=)      |
+| =MOBVIBE_HOME=              | CLI home directory (default: =~/.mobvibe=)            |
+| =MOBVIBE_ENABLED_AGENTS=    | Comma-separated agent IDs to enable (overrides config)|
 
-*** ACP Agents
+Advanced configuration is stored in =~/.mobvibe/.config.json=:
 
-Mobvibe loads agent definitions from =${MOBVIBE_HOME:-~/.mobvibe}/.config.json=.
+| Field             | Description                                       |
+|-------------------+---------------------------------------------------|
+| =enabledAgents=    | Array of enabled agent IDs (e.g. =["claude-code"]=) |
+| =worktreeBaseDir=  | Git worktree root (default: =~/.mobvibe/worktrees=) |
 
-- =agents=: list of agents to expose. Each entry supports =id= (required), =command= (required), =label=, =args=, =env=.
-- =defaultAgentId=: optional default agent id.
+** ACP Agents
 
-Behavior:
-- If the config is missing or =agents= is empty, Mobvibe uses the built-in =opencode= backend.
-- If you define =agents= without an =opencode= entry, the built-in =opencode= backend is prepended.
-- If you define an agent with =id: "opencode"=, your list replaces the built-in default.
-- =defaultAgentId= must match an existing agent id.
+Mobvibe automatically detects installed ACP agents via the [[https://agentclientprotocol.com][ACP Registry]]. On first run, it scans your system and presents a list of detected agents for you to choose from.
 
-#+begin_src json
-{
-  "agents": [
-    {
-      "id": "opencode",
-      "label": "OpenCode",
-      "command": "opencode",
-      "args": ["acp"]
-    }
-  ],
-  "defaultAgentId": "opencode"
-}
-#+end_src
+Detection priority per agent:
+1. *Binary* — native binary found on PATH (fastest)
+2. *npx* — Node.js package, downloaded on demand via =npx=
+3. *uvx* — Python package, downloaded on demand via =uvx=
 
-**** OpenCode (default)
+Common agents and how to install them:
 
-- Install OpenCode and ensure =opencode= is on your PATH: [[https://github.com/sst/opencode][https://github.com/sst/opencode]]
-- Mobvibe runs =opencode acp= by default. Add an explicit =opencode= entry only if you need custom args or env.
+- *OpenCode* — =curl -fsSL https://opencode.ai/install | bash= ([[https://github.com/sst/opencode][repo]])
+- *Claude Code* — =npm install -g @anthropic-ai/claude-code= (requires =ANTHROPIC_API_KEY=) ([[https://docs.anthropic.com/en/docs/claude-code/overview][docs]])
+- *Gemini CLI* — =npm install -g @anthropic-ai/gemini-cli= ([[https://github.com/google-gemini/gemini-cli][repo]])
+- *Codex CLI* — =npm install -g @openai/codex= (requires =OPENAI_API_KEY=) ([[https://developers.openai.com/codex/cli][docs]])
+- *Goose* — see [[https://block.github.io/goose/docs/guides/acp-clients][installation guide]]
+- *Aider* — =pip install aider-chat= ([[https://aider.chat][docs]])
 
-**** Claude Code (via Zed adapter)
-
-- Install: =pnpm add -g @zed-industries/claude-code-acp=
-- Ensure =ANTHROPIC_API_KEY= is available (or set it via =env=).
-
-#+begin_src json
-{
-  "agents": [
-    {
-      "id": "claude-code",
-      "label": "Claude Code",
-      "command": "claude-code-acp",
-      "env": {
-        "ANTHROPIC_API_KEY": "<your-key>"
-      }
-    }
-  ],
-  "defaultAgentId": "claude-code"
-}
-#+end_src
-
-**** Codex (via Zed adapter)
-
-- Install from releases or =pnpm dlx @zed-industries/codex-acp= and ensure =codex-acp= is on your PATH: [[https://github.com/zed-industries/codex-acp][https://github.com/zed-industries/codex-acp]]
-- Ensure =OPENAI_API_KEY= (or =CODEX_API_KEY=) is available.
-
-#+begin_src json
-{
-  "agents": [
-    {
-      "id": "codex",
-      "label": "Codex",
-      "command": "codex-acp",
-      "env": {
-        "OPENAI_API_KEY": "<your-key>"
-      }
-    }
-  ],
-  "defaultAgentId": "codex"
-}
-#+end_src
+After installing a new agent, restart Mobvibe and it will be detected automatically. To change which agents are enabled, set =MOBVIBE_ENABLED_AGENTS= or edit =~/.mobvibe/.config.json=.
 
 ** Supported ACP Agents
 
@@ -231,93 +126,9 @@ mobvibe start
 
 All session content is now encrypted end-to-end. The gateway routes events but cannot read their content.
 
-** WebUI Usage
+** Self-Hosting
 
-*** Web Mode
-
-#+begin_src bash
-cd apps/webui
-pnpm dev
-#+end_src
-
-Access at http://localhost:5173
-
-*** Desktop Mode (Tauri)
-
-#+begin_src bash
-cd apps/webui
-pnpm dev:tauri    # Development
-pnpm build:tauri  # Production build
-#+end_src
-
-Outputs: =.msi=, =.exe= (Windows), =.app=, =.dmg= (macOS), =.deb=, =.AppImage= (Linux)
-
-*** Mobile Mode (Tauri)
-
-#+begin_src bash
-# Android (requires Android SDK)
-cd apps/webui
-pnpm android:init   # First time only
-pnpm android:dev    # Development
-
-# iOS (macOS only, requires Xcode)
-pnpm ios:init       # First time only
-pnpm ios:dev        # Development
-#+end_src
-
-*** Environment
-
-| Variable           | Description                                |
-|--------------------+--------------------------------------------|
-| =VITE_GATEWAY_URL=  | Gateway URL (auto-detected if not set)     |
-
-** Development
-
-*** Scripts
-
-| Command       | Description            |
-|---------------+------------------------|
-| =pnpm dev=     | Start all packages     |
-| =pnpm build=   | Build all packages     |
-| =pnpm lint=    | Lint with Biome        |
-| =pnpm format=  | Format with Biome      |
-| =pnpm test=    | Run tests with Vitest  |
-
-*** Code Style
-
-- Formatter: Biome (tab indentation, double quotes)
-- TypeScript: Strict mode
-
-** Deployment
-
-Mobvibe is deployed on [[https://render.com][Render]] with [[https://cloudflare.com][Cloudflare]] for DNS and CDN.
-
-*** Production
-
-| Service     | Type         | Domain            |
-|-------------+--------------+-------------------|
-| Gateway     | Docker       | =api.mobvibe.net=  |
-| WebUI       | Static Site  | =app.mobvibe.net=  |
-| Website     | Static Site  | =mobvibe.net=      |
-| PostgreSQL  | Database     | Internal           |
-
-All services run in Render's Oregon region. Cloudflare provides CDN caching, DDoS protection, and TLS termination.
-
-Configuration is defined in =render.yaml= (Render Blueprint).
-
-*** Preview Environments
-
-Every pull request automatically creates a full preview environment (Gateway + WebUI + Website + PostgreSQL). Preview environments expire 3 days after the PR is merged or closed.
-
-*** Cloudflare DNS Setup
-
-| Record            | Type  | Value                              | Proxy  |
-|-------------------+-------+------------------------------------+--------|
-| =api.mobvibe.net=  | CNAME | =mobvibe-gateway.onrender.com=     | Proxied |
-| =app.mobvibe.net=  | CNAME | =mobvibe-webui.onrender.com=       | Proxied |
-| =mobvibe.net=      | CNAME | =mobvibe-website.onrender.com=     | Proxied |
-
-SSL/TLS mode: Full (Strict). Set DNS Only first, switch to Proxied after Render issues TLS certificates.
+Mobvibe can be self-hosted. The infrastructure is defined in =render.yaml= at the repository root. See the [[https://github.com/anthropics/mobvibe][source repository]] for details.
 
 ** Documentation
 
