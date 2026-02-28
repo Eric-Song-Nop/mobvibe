@@ -521,16 +521,6 @@ export class WalStore {
 		});
 	}
 
-	/**
-	 * Stub multiple event payloads in batch (replace with `{"_c":true}`).
-	 */
-	stubEventPayloads(eventIds: number[]): void {
-		const stubJson = JSON.stringify({ _c: true });
-		for (const id of eventIds) {
-			this.stmtUpdatePayload.run({ $id: id, $payload: stubJson });
-		}
-	}
-
 	// ========== Discovered Sessions Methods ==========
 
 	/**
