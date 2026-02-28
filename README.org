@@ -1,5 +1,8 @@
 * Mobvibe
 
+/Chat with your local AI coding agents from any device, from anywhere. No network config, just one command./
+/在任何设备，任何地点与本机 AI 编程 Agent 对话。无需设置，一行命令。/
+
 Mobvibe is a distributed ACP (Agent Client Protocol) WebUI for local agent workflows. It connects to ACP-compatible CLIs (opencode, gemini-cli, claude-code), manages multi-session chat, and delivers a fast, touch-friendly experience across desktop and mobile.
 
 ** Key Features
