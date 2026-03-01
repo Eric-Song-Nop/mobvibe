@@ -1,0 +1,33 @@
+<svg viewBox="0 0 1200 300" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="rg" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#fdc700"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <style>
+    .m-letter { stroke: #18181b; }
+    .brand-text { fill: #18181b; }
+    .tagline-text { fill: #71717a; }
+    @media (prefers-color-scheme: dark) {
+      .m-letter { stroke: #ffffff; }
+      .brand-text { fill: #ffffff; }
+      .tagline-text { fill: #a1a1aa; }
+    }
+  </style>
+
+  <!-- Centered group: Logo + Brand Name -->
+  <!-- Logo (200x200 after scale, centered vertically) -->
+  <g transform="translate(310, 30) scale(0.78)">
+    <circle cx="128" cy="128" r="112" fill="none" stroke="url(#rg)" stroke-width="14"/>
+    <path class="m-letter"
+          d="M 76,186 V 70 C 86,70 106,200 128,128 C 150,56 170,70 180,70 V 186"
+          fill="none" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- Brand name (to the right of logo) -->
+  <text x="545" y="155" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="84" font-weight="700" class="brand-text" letter-spacing="-2">Mobvibe</text>
+
+  <!-- Tagline -->
+  <text x="548" y="200" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="21" font-weight="400" class="tagline-text">Chat with your AI coding agents from anywhere</text>
+</svg>
