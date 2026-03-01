@@ -1,0 +1,29 @@
+app = "mobvibe-gateway"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "apps/gateway/Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3005"
+  LOG_LEVEL = "info"
+
+[http_service]
+  internal_port = 3005
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 1000
+    soft_limit = 800
+
+  [[http_service.checks]]
+    interval = "10s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/health"
