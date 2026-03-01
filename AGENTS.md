@@ -160,7 +160,7 @@ React/UI（webui）
 - Gateway: Fly.io (`fly.toml`，仓库根目录)
 - WebUI: Netlify (`apps/webui/netlify.toml`) → app.mobvibe.net
 - Website: Netlify (`apps/website/netlify.toml`) → mobvibe.net
-- 数据库: Fly Postgres (sjc region)
+- 数据库: Neon PostgreSQL (us-west-2)
 - DNS: Cloudflare (静态站点使用 DNS Only 模式)
 - Gateway 域名: api.mobvibe.net
 - CI/CD: `.github/workflows/deploy-fly.yml` (Gateway 自动部署)

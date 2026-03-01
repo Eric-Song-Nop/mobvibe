@@ -25,9 +25,7 @@ services:
       - key: PORT
         value: "3005"
       - key: DATABASE_URL
-        fromDatabase:
-          name: mobvibe-postgres
-          property: connectionString
+        sync: false
       - key: BETTER_AUTH_SECRET
         sync: false
         previewValue: preview-secret-not-for-production
@@ -45,12 +43,3 @@ services:
         value: "Mobvibe <noreply@mobvibe.net>"
       - key: LOG_LEVEL
         value: info
-
-databases:
-  - name: mobvibe-postgres
-    plan: basic-256mb
-    previewPlan: basic-256mb
-    diskSizeGB: 1
-    databaseName: mobvibe
-    user: mobvibe
-    region: oregon
