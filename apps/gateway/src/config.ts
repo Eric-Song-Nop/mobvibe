@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 export type GatewayConfig = {
 	port: number;
 	corsOrigins: string[];
@@ -7,6 +9,10 @@ export type GatewayConfig = {
 	emailFrom: string;
 	skipEmailVerification: boolean;
 	isPreview: boolean;
+	/** Unique identifier for this gateway instance (FLY_ALLOC_ID or random). */
+	instanceId: string;
+	/** Fly.io region identifier, if running on Fly.io. */
+	flyRegion: string | undefined;
 };
 
 const parsePort = (value: string) => {
@@ -43,11 +49,16 @@ export const getGatewayConfig = (): GatewayConfig => {
 		corsOrigins: parseOrigins(env.GATEWAY_CORS_ORIGINS),
 		siteUrl: isPreview
 			? env.RENDER_EXTERNAL_URL
-			: (env.SITE_URL ?? env.RENDER_EXTERNAL_URL),
+			: (env.SITE_URL ??
+				(env.FLY_APP_NAME
+					? `https://${env.FLY_APP_NAME}.fly.dev`
+					: env.RENDER_EXTERNAL_URL)),
 		databaseUrl: env.DATABASE_URL,
 		resendApiKey: env.RESEND_API_KEY,
 		emailFrom: env.EMAIL_FROM ?? "Mobvibe <noreply@example.com>",
 		skipEmailVerification: env.SKIP_EMAIL_VERIFICATION === "true",
 		isPreview,
+		instanceId: env.FLY_ALLOC_ID ?? randomUUID().slice(0, 8),
+		flyRegion: env.FLY_REGION,
 	};
 };
