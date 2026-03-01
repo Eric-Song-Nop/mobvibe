@@ -36,7 +36,7 @@ const isAllowedOrigin = (origin: string): boolean => {
 const app: Express = express();
 const httpServer = createServer(app);
 
-// Trust Cloudflare and Render reverse proxy for correct client IP
+// Trust reverse proxy (Cloudflare, Render, Fly.io) for correct client IP
 app.set("trust proxy", 1);
 
 // Socket.io server
@@ -164,10 +164,10 @@ logger.info("better_auth_enabled");
 
 app.use(express.json());
 
-// Health check — mounted before auth-guarded routers so Render's
+// Health check — mounted before auth-guarded routers so the
 // health probe (unauthenticated GET /health) is never blocked.
 const healthRouter = express.Router();
-setupHealthRoutes(healthRouter);
+setupHealthRoutes(healthRouter, config);
 app.use("/", healthRouter);
 
 // Machine routes (for CLI registration)
@@ -223,7 +223,14 @@ const shutdown = async (signal: string) => {
 
 if (shouldStartServer) {
 	server = httpServer.listen(config.port, () => {
-		logger.info({ port: config.port }, "gateway_listening");
+		logger.info(
+			{
+				port: config.port,
+				instanceId: config.instanceId,
+				region: config.flyRegion,
+			},
+			"gateway_listening",
+		);
 	});
 
 	process.on("SIGINT", () => {

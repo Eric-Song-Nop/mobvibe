@@ -1,7 +1,7 @@
 [build]
   publish = "dist"
-  command = "cd ../.. && pnpm install --frozen-lockfile && pnpm --filter @mobvibe/shared build && pnpm --filter webui build"
-  ignore = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- apps/webui/ packages/shared/ brand/"
+  command = "cd ../.. && pnpm install --frozen-lockfile && pnpm --filter website build"
+  ignore = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- apps/website/ brand/"
 
 [build.environment]
   NODE_VERSION = "22"
@@ -22,12 +22,6 @@
   for = "/assets/*"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
-
-[[headers]]
-  for = "/*.wasm"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-    Content-Type = "application/wasm"
 
 [[redirects]]
   from = "/*"

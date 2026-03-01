@@ -157,10 +157,14 @@ React/UI（webui）
 
 ## 部署
 
-- 平台：Render (Blueprint) + Cloudflare (DNS/CDN)
-- 配置文件：`render.yaml`（仓库根目录）
-- 域名：`api.mobvibe.net`（Gateway）、`app.mobvibe.net`（WebUI）、`mobvibe.net`（Website）
-- Preview 环境：每个 PR 自动创建，3 天后过期
+- Gateway: Fly.io (`fly.toml`，仓库根目录)
+- WebUI: Netlify (`apps/webui/netlify.toml`) → app.mobvibe.net
+- Website: Netlify (`apps/website/netlify.toml`) → mobvibe.net
+- 数据库: Fly Postgres (sjc region)
+- DNS: Cloudflare (静态站点使用 DNS Only 模式)
+- Gateway 域名: api.mobvibe.net
+- CI/CD: `.github/workflows/deploy-fly.yml` (Gateway 自动部署)
+- 遗留: `render.yaml` 仍保留 Gateway 和数据库配置（迁移过渡期）
 
 ## 其他说明
 
