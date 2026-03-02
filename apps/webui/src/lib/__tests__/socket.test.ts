@@ -93,6 +93,7 @@ describe("gatewaySocket connect() auth branches", () => {
 		expect(mockIo).toHaveBeenCalledWith(
 			expect.any(String),
 			expect.objectContaining({
+				transports: ["websocket"],
 				withCredentials: true,
 			}),
 		);
@@ -112,6 +113,7 @@ describe("gatewaySocket connect() auth branches", () => {
 		expect(mockIo).toHaveBeenCalledWith(
 			expect.any(String),
 			expect.objectContaining({
+				transports: ["websocket"],
 				auth: { token: "tauri-test-token" },
 			}),
 		);

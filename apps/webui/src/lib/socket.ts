@@ -39,8 +39,9 @@ class GatewaySocket {
 			reconnectionDelay: 1000,
 			reconnectionDelayMax: 10000,
 			autoConnect: true,
+			transports: ["websocket"],
 			...(tauriEnv
-				? { auth: { token: getAuthToken() }, transports: ["websocket"] }
+				? { auth: { token: getAuthToken() } }
 				: { withCredentials: true }),
 		});
 
