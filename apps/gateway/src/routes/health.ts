@@ -3,7 +3,7 @@ import type { GatewayConfig } from "../config.js";
 import type { UserAffinityManager } from "../services/user-affinity.js";
 
 type HealthDeps = {
-	userAffinity: UserAffinityManager | null;
+	getUserAffinity: () => UserAffinityManager | null;
 };
 
 export function setupHealthRoutes(
@@ -16,7 +16,7 @@ export function setupHealthRoutes(
 			ok: true,
 			instanceId: config.instanceId,
 			region: config.flyRegion,
-			affinityEnabled: deps?.userAffinity !== null,
+			affinityEnabled: deps?.getUserAffinity() != null,
 			uptime: process.uptime(),
 		});
 	});

@@ -292,7 +292,7 @@ app.use(express.json());
 // Health check — mounted before auth-guarded routers so the
 // health probe (unauthenticated GET /health) is never blocked.
 const healthRouter = express.Router();
-setupHealthRoutes(healthRouter, config, { userAffinity });
+setupHealthRoutes(healthRouter, config, { getUserAffinity: () => userAffinity });
 app.use("/", healthRouter);
 
 // Machine routes (for CLI registration)
