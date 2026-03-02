@@ -428,4 +428,9 @@ export class CliRegistry extends EventEmitter {
 	private emitCliStatus(payload: CliStatusPayload) {
 		this.emit("cli:status", payload);
 	}
+
+	/** Get all user IDs with active CLI connections. */
+	getConnectedUserIds(): string[] {
+		return Array.from(this.clisByUserId.keys());
+	}
 }

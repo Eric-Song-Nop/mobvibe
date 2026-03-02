@@ -13,6 +13,7 @@ import type {
 } from "@mobvibe/shared";
 import { initCrypto, verifySignedToken } from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
+import type { GatewayConfig } from "../config.js";
 import { logger } from "../lib/logger.js";
 import type { CliRegistry } from "../services/cli-registry.js";
 import {
@@ -20,6 +21,7 @@ import {
 	upsertMachine,
 } from "../services/db-service.js";
 import type { SessionRouter } from "../services/session-router.js";
+import type { UserAffinityManager } from "../services/user-affinity.js";
 
 /**
  * Extended socket data with auth info.
@@ -29,11 +31,22 @@ interface SocketData {
 	deviceId?: string;
 }
 
+export type CliHandlersDeps = {
+	io: Server;
+	cliRegistry: CliRegistry;
+	sessionRouter: SessionRouter;
+	emitToWebui: (event: string, payload: unknown, userId?: string) => void;
+	userAffinity: UserAffinityManager | null;
+	config: GatewayConfig;
+};
+
 export function setupCliHandlers(
 	io: Server,
 	cliRegistry: CliRegistry,
 	sessionRouter: SessionRouter,
 	emitToWebui: (event: string, payload: unknown, userId?: string) => void,
+	userAffinity: UserAffinityManager | null = null,
+	config?: GatewayConfig,
 ) {
 	const cliNamespace = io.of("/cli");
 
@@ -79,6 +92,23 @@ export function setupCliHandlers(
 				{ userId: device.userId, deviceId: device.id },
 				"cli_authenticated",
 			);
+
+			// Check user affinity — redirect to correct instance if needed
+			if (userAffinity && config) {
+				const target = await userAffinity.getUserInstance(device.userId);
+				if (target && target.instanceId !== config.instanceId) {
+					logger.info(
+						{
+							userId: device.userId,
+							targetInstance: target.instanceId,
+							thisInstance: config.instanceId,
+						},
+						"cli_affinity_wrong_instance",
+					);
+					return next(new Error(`WRONG_INSTANCE:${target.instanceId}`));
+				}
+			}
+
 			return next();
 		} catch (error) {
 			logger.error({ err: error }, "cli_signed_token_verification_error");
@@ -143,6 +173,11 @@ export function setupCliHandlers(
 					deviceId,
 				},
 			);
+
+			// Claim user affinity for this instance
+			if (userAffinity) {
+				await userAffinity.claimUser(userId);
+			}
 
 			socket.emit("cli:registered", {
 				machineId: record.machineId,
@@ -404,10 +439,21 @@ export function setupCliHandlers(
 					);
 				}
 
-				// Note: We no longer update machine status or close sessions in DB
-				// Real-time status is managed by CliRegistry (in-memory)
-				// Sessions continue running in CLI process; they should be
-				// explicitly closed by CLI when they actually end
+				// Release user affinity if no more connections for this user
+				if (userAffinity && cachedUserId) {
+					const hasCliConnections =
+						cliRegistry.getClisForUser(cachedUserId).length > 0;
+					const hasWebuiConnections =
+						io.of("/webui").sockets.size > 0 &&
+						Array.from(io.of("/webui").sockets.values()).some(
+							(s) =>
+								(s as Socket & { data: { userId?: string } }).data.userId ===
+								cachedUserId,
+						);
+					if (!hasCliConnections && !hasWebuiConnections) {
+						await userAffinity.releaseUser(cachedUserId);
+					}
+				}
 			}
 		});
 	});

@@ -204,6 +204,19 @@ export class SocketClient extends EventEmitter {
 
 		this.socket.on("connect_error", (error) => {
 			this.reconnectAttempts++;
+
+			// Handle affinity redirect — Fly.io routes to the correct instance
+			if (error.message.startsWith("WRONG_INSTANCE:")) {
+				const targetId = error.message.split(":")[1];
+				logger.info({ targetInstance: targetId }, "gateway_affinity_redirect");
+				this.socket.io.opts.extraHeaders = {
+					...this.socket.io.opts.extraHeaders,
+					"fly-force-instance-id": targetId,
+				};
+				// Socket.io auto-reconnect will carry the new header
+				return;
+			}
+
 			if (this.reconnectAttempts <= 3 || this.reconnectAttempts % 10 === 0) {
 				logger.error(
 					{ attempt: this.reconnectAttempts, err: error },

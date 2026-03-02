@@ -13,6 +13,8 @@ export type GatewayConfig = {
 	instanceId: string;
 	/** Fly.io region identifier, if running on Fly.io. */
 	flyRegion: string | undefined;
+	/** Upstash Redis URL for multi-instance affinity. Undefined = single-instance mode. */
+	redisUrl: string | undefined;
 };
 
 const parsePort = (value: string) => {
@@ -57,5 +59,6 @@ export const getGatewayConfig = (): GatewayConfig => {
 		isPreview,
 		instanceId: env.FLY_ALLOC_ID ?? randomUUID().slice(0, 8),
 		flyRegion: env.FLY_REGION,
+		redisUrl: env.REDIS_URL,
 	};
 };

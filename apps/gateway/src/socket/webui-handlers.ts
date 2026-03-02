@@ -9,6 +9,7 @@ import type { Server, Socket } from "socket.io";
 import { auth } from "../lib/auth.js";
 import { logger } from "../lib/logger.js";
 import type { CliRegistry } from "../services/cli-registry.js";
+import type { UserAffinityManager } from "../services/user-affinity.js";
 
 /**
  * Extended Socket with user context.
@@ -20,7 +21,11 @@ interface AuthenticatedSocket extends Socket {
 	};
 }
 
-export function setupWebuiHandlers(io: Server, cliRegistry: CliRegistry) {
+export function setupWebuiHandlers(
+	io: Server,
+	cliRegistry: CliRegistry,
+	userAffinity: UserAffinityManager | null = null,
+) {
 	const webuiNamespace = io.of("/webui");
 
 	// Track session subscriptions with user context
@@ -126,6 +131,13 @@ export function setupWebuiHandlers(io: Server, cliRegistry: CliRegistry) {
 		}
 		socketUserMap.set(socket.id, userId);
 
+		// Claim user affinity for this instance
+		if (userAffinity) {
+			userAffinity.claimUser(userId).catch((err) => {
+				logger.warn({ err, userId }, "webui_claim_user_failed");
+			});
+		}
+
 		logger.info({ socketId: socket.id, userId }, "webui_authenticated");
 
 		// Send current CLI status for this user (auth middleware guarantees userId)
@@ -184,6 +196,23 @@ export function setupWebuiHandlers(io: Server, cliRegistry: CliRegistry) {
 			}
 			socketUserMap.delete(socket.id);
 			logger.info({ socketId: socket.id }, "webui_disconnected");
+
+			// Release user affinity if no more connections for this user
+			if (userAffinity && userId) {
+				const hasCliConnections = cliRegistry.getClisForUser(userId).length > 0;
+				const hasOtherWebuiConnections = Array.from(
+					webuiNamespace.sockets.values(),
+				).some(
+					(s) =>
+						s.id !== socket.id &&
+						(s as AuthenticatedSocket).data.userId === userId,
+				);
+				if (!hasCliConnections && !hasOtherWebuiConnections) {
+					userAffinity.releaseUser(userId).catch((err) => {
+						logger.warn({ err, userId }, "webui_release_user_failed");
+					});
+				}
+			}
 		});
 	});
 
