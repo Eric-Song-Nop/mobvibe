@@ -62,3 +62,11 @@ All session content is encrypted on the CLI before sending to the gateway. The g
 | `MOBVIBE_GATEWAY_URL` | Gateway server URL (default: production) |
 | `MOBVIBE_HOME` | CLI home directory (default: `~/.mobvibe`) |
 | `MOBVIBE_MASTER_SECRET` | Override master secret (base64, instead of credentials file) |
+| `MOBVIBE_MACHINE_ID` | Machine identifier (default: auto-generated) |
+| `MOBVIBE_SHELL` | Shell for command execution (default: `$SHELL` or `/bin/sh`) |
+| `MOBVIBE_ENABLED_AGENTS` | Comma-separated list of enabled agents |
+| `MOBVIBE_COMPACTION_ENABLED` | Enable automatic WAL event compaction (default: `false`) |
+| `MOBVIBE_CONSOLIDATION_ENABLED` | Enable WAL event consolidation (default: `true`) |
+| `LOG_LEVEL` | Log level: `debug` / `info` / `warn` / `error` (default: `info`) |
+
+See `.env.example` for a fully commented template.

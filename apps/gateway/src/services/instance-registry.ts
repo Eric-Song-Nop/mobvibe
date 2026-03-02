@@ -1,5 +1,5 @@
-import type { Redis } from "./redis.js";
 import { logger } from "../lib/logger.js";
+import type { Redis } from "./redis.js";
 
 const INSTANCE_KEY_PREFIX = "gw:inst:";
 const INSTANCE_TTL_SECONDS = 30;

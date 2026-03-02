@@ -44,7 +44,7 @@ pnpm db:push       # Direct schema sync (development only)
 pnpm db:studio     # Open Drizzle Studio GUI
 ```
 
-**Production deployments** (Railway/Docker) automatically run migrations at startup before starting the server.
+**Production deployments** (Fly.io) automatically run migrations at startup before starting the server.
 
 ## Configuration
 
@@ -52,12 +52,22 @@ Environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GATEWAY_PORT` | `3005` | Server port |
-| `GATEWAY_CORS_ORIGINS` | (empty) | Additional CORS origins (comma-separated) |
+| `PORT` / `GATEWAY_PORT` | `3005` | Server port |
+| `LOG_LEVEL` | `info` | Log level: `debug` / `info` / `warn` / `error` |
 | `DATABASE_URL` | (required) | PostgreSQL connection string |
 | `BETTER_AUTH_SECRET` | (required) | Secret for Better Auth sessions |
+| `SITE_URL` | `http://localhost:3005` | Auth callback URL (auto-derived on Fly.io) |
+| `GATEWAY_CORS_ORIGINS` | (empty) | Additional CORS origins (comma-separated) |
+| `RESEND_API_KEY` | (empty) | Resend API key; unset = log to console |
+| `EMAIL_FROM` | (empty) | Sender address for emails |
+| `SKIP_EMAIL_VERIFICATION` | `false` | Skip email verification (dev only) |
+| `GITHUB_CLIENT_ID` | (empty) | GitHub OAuth client ID |
+| `GITHUB_CLIENT_SECRET` | (empty) | GitHub OAuth client secret |
+| `REDIS_URL` | (empty) | Upstash Redis URL; enables multi-instance user affinity routing |
 
 Private IPs (10.x.x.x, 192.168.x.x, 172.16-31.x.x) and localhost are always allowed.
+
+See `.env.example` for a fully commented template.
 
 ## REST API Endpoints
 
@@ -161,6 +171,21 @@ Events to webui:
   - Routes requests to appropriate CLI
   - Manages RPC request/response correlation
   - Handles timeout for pending RPCs
+
+- **InstanceRegistry** (`services/instance-registry.ts`)
+  - Registers/deregisters Gateway instances in Redis
+  - Periodic heartbeat to maintain instance liveness
+  - Only active when `REDIS_URL` is configured
+
+- **UserAffinityManager** (`services/user-affinity.ts`)
+  - Maps users to Gateway instances via Redis
+  - Maintains affinity during CLI/WebUI connection lifecycle
+  - Enables multi-instance routing with Fly.io `fly-replay`
+
+- **FlyReplayMiddleware** (`middleware/fly-replay.ts`)
+  - Inspects incoming requests and checks user affinity
+  - Returns `fly-replay` header to redirect requests to the correct instance
+  - Transparent pass-through in single-instance mode
 
 ### Socket Handlers
 

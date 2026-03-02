@@ -1,5 +1,5 @@
-import type { Redis } from "./redis.js";
 import { logger } from "../lib/logger.js";
+import type { Redis } from "./redis.js";
 
 const USER_KEY_PREFIX = "gw:user:";
 const USER_TTL_SECONDS = 300;

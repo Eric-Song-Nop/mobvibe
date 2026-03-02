@@ -1,6 +1,6 @@
 # Gateway 横向扩展设计
 
-> **状态**: 📋 设计阶段
+> **状态**: ✅ 已实现（Phase 1）
 >
 > **目标**: 让 Gateway 具备多实例横向扩展能力
 
@@ -312,10 +312,10 @@ instanceIndex = consistentHash(userId) % instanceCount
 
 ### 3.8 新增基础设施
 
-| 组件 | 用途 | 规格建议 |
+| 组件 | 用途 | 当前方案 |
 |------|------|----------|
-| **Redis** | 路由表 + 实例注册 | 单节点即可，数据量极小（每用户一个 key，每实例一个 key）。Render Redis Starter $10/月 / Upstash 免费计划 / Fly.io Redis |
-| **路由层** | 用户亲和性分发 | 轻量 Nginx/Envoy 或内置到 platform 的路由能力 |
+| **Redis** | 路由表 + 实例注册 | Upstash Redis on Fly.io（免费计划，数据量极小） |
+| **路由层** | 用户亲和性分发 | Fly.io `fly-replay` header（无需独立路由服务） |
 
 Redis 中存储的数据量极小，不需要持久化——所有数据都可以在实例重连时重建。
 
@@ -392,11 +392,12 @@ Phase 2 核心变更:
 
 在 CLI/WebUI 连接生命周期中维护 `gateway:user:{userId} → instanceId` 映射。
 
-### Step 4：实现路由层
+### Step 4：实现路由层 ✅
 
-根据部署平台选择路由方案：
+已选择 **Fly.io `fly-replay`** 方案。Gateway 通过 `middleware/fly-replay.ts` 中间件检查用户亲和性，对不属于当前实例的请求返回 `fly-replay` header，由 Fly.io 平台自动重放到正确实例。无需独立路由层。
+
+可选方案（留作参考）：
 - Render：通过 Private Service + 自定义路由实例
-- Fly.io：通过 `fly-replay` header（Fly.io 原生支持基于 header 的请求重放到指定实例）
 - 自部署：Nginx + Lua 脚本 / Envoy + ext_authz
 
 ### Step 5：端到端测试
