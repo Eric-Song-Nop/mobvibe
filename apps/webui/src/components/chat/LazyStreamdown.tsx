@@ -1,12 +1,16 @@
 import { type ComponentType, lazy, Suspense } from "react";
-
-type StreamdownProps = {
-	children?: string;
-};
+import type { StreamdownProps } from "streamdown";
 
 const StreamdownLazy = lazy(async () => {
 	const mod = await import("streamdown");
-	return { default: mod.Streamdown as ComponentType<StreamdownProps> };
+	const Original = mod.Streamdown as ComponentType<StreamdownProps>;
+	const Themed = (props: StreamdownProps) => (
+		<Original
+			{...props}
+			shikiTheme={["gruvbox-light-medium", "gruvbox-dark-medium"]}
+		/>
+	);
+	return { default: Themed };
 });
 
 function StreamdownFallback({ children }: StreamdownProps) {
