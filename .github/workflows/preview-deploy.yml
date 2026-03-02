@@ -110,7 +110,7 @@ jobs:
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_WEBUI_SITE_ID }}
         run: |
           OUTPUT=$(netlify deploy \
-            --filter=webui \
+            --no-build \
             --site="$NETLIFY_SITE_ID" \
             --dir=apps/webui/dist \
             --alias="pr-${PR_NUMBER}" \
