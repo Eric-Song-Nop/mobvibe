@@ -26,3 +26,6 @@ apps/website/public/logo.svg
 .env.production
 
 .claude
+
+# Local Netlify folder
+.netlify

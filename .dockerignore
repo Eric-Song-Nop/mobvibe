@@ -1,0 +1,30 @@
+# Local env files (secrets managed by Fly.io)
+**/.env
+**/.env.local
+**/.env.development
+**/.env.production
+
+# Dependencies (rebuilt in Docker)
+**/node_modules
+
+# Git
+.git
+
+# IDE / OS
+.vscode
+.idea
+**/.DS_Store
+
+# Apps not needed for gateway build
+apps/webui
+apps/website
+apps/mobvibe-cli
+
+# Docs and config not needed in image
+docs
+*.md
+.github
+.gitignore
+biome.json
+turbo.json
+render.yaml
