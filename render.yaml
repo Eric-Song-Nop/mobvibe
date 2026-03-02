@@ -1,6 +1,6 @@
-previews:
-  generation: manual
-  expireAfterDays: 3
+# LEGACY: This file is retained for reference during migration to Fly.io + Netlify.
+# Production deployment now uses fly.toml (gateway) and netlify.toml (static sites).
+# PR previews are handled by .github/workflows/preview-deploy.yml.
 
 services:
   # --- Gateway ---
@@ -15,28 +15,21 @@ services:
     healthCheckPath: /health
     domains:
       - api.mobvibe.net
-    previews:
-      plan: starter
-      numInstances: 1
     envVars:
       - key: NODE_ENV
         value: production
-        previewValue: production
       - key: PORT
         value: "3005"
       - key: DATABASE_URL
         sync: false
       - key: BETTER_AUTH_SECRET
         sync: false
-        previewValue: preview-secret-not-for-production
       - key: SITE_URL
         value: https://api.mobvibe.net
       - key: GATEWAY_CORS_ORIGINS
         value: https://app.mobvibe.net,https://mobvibe.net
-        previewValue: "*"
       - key: SKIP_EMAIL_VERIFICATION
         value: "false"
-        previewValue: "true"
       - key: RESEND_API_KEY
         sync: false
       - key: EMAIL_FROM

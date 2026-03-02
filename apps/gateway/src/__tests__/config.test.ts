@@ -13,6 +13,10 @@ describe("getGatewayConfig", () => {
 		delete process.env.DATABASE_URL;
 		delete process.env.RESEND_API_KEY;
 		delete process.env.EMAIL_FROM;
+		delete process.env.IS_PREVIEW;
+		delete process.env.FLY_APP_NAME;
+		delete process.env.FLY_ALLOC_ID;
+		delete process.env.FLY_REGION;
 	});
 
 	afterEach(() => {
@@ -106,5 +110,39 @@ describe("getGatewayConfig", () => {
 		const { getGatewayConfig } = await import("../config.js");
 		const config = getGatewayConfig();
 		expect(config.emailFrom).toBe("Custom <custom@example.com>");
+	});
+
+	it("detects preview mode via IS_PREVIEW", async () => {
+		process.env.IS_PREVIEW = "true";
+		const { getGatewayConfig } = await import("../config.js");
+		const config = getGatewayConfig();
+		expect(config.isPreview).toBe(true);
+	});
+
+	it("isPreview defaults to false when IS_PREVIEW is not set", async () => {
+		const { getGatewayConfig } = await import("../config.js");
+		const config = getGatewayConfig();
+		expect(config.isPreview).toBe(false);
+	});
+
+	it("SITE_URL takes priority over FLY_APP_NAME for siteUrl", async () => {
+		process.env.SITE_URL = "https://custom.example.com";
+		process.env.FLY_APP_NAME = "my-fly-app";
+		const { getGatewayConfig } = await import("../config.js");
+		const config = getGatewayConfig();
+		expect(config.siteUrl).toBe("https://custom.example.com");
+	});
+
+	it("derives siteUrl from FLY_APP_NAME when SITE_URL is not set", async () => {
+		process.env.FLY_APP_NAME = "mobvibe-gw-pr-42";
+		const { getGatewayConfig } = await import("../config.js");
+		const config = getGatewayConfig();
+		expect(config.siteUrl).toBe("https://mobvibe-gw-pr-42.fly.dev");
+	});
+
+	it("siteUrl is undefined when neither SITE_URL nor FLY_APP_NAME is set", async () => {
+		const { getGatewayConfig } = await import("../config.js");
+		const config = getGatewayConfig();
+		expect(config.siteUrl).toBeUndefined();
 	});
 });

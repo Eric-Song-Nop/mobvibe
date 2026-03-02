@@ -33,3 +33,9 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# Deploy previews are handled by GitHub Actions (preview-deploy.yml)
+# using netlify-cli deploy --alias pr-{number}
+# VITE_GATEWAY_URL is injected at build time from the workflow
+[context.deploy-preview.environment]
+  NODE_ENV = "production"

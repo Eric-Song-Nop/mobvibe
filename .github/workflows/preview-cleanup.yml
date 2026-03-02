@@ -1,0 +1,33 @@
+name: PR Preview Cleanup
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  cleanup:
+    name: Cleanup PR Preview
+    runs-on: ubuntu-latest
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Install Neon CLI
+        run: npm install -g neonctl
+
+      - name: Destroy Fly.io preview app
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          APP_NAME="mobvibe-gw-pr-${PR_NUMBER}"
+          echo "Destroying Fly app: $APP_NAME"
+          flyctl apps destroy "$APP_NAME" --yes || echo "App '$APP_NAME' not found, skipping"
+
+      - name: Delete Neon database branch
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          BRANCH_NAME="pr-${PR_NUMBER}"
+          echo "Deleting Neon branch: $BRANCH_NAME"
+          neonctl branches delete "$BRANCH_NAME" --project-id "${{ secrets.NEON_PROJECT_ID }}" || echo "Branch '$BRANCH_NAME' not found, skipping"

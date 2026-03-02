@@ -1,0 +1,164 @@
+name: PR Preview Deploy
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: pr-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    name: Deploy PR Preview
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      FLY_APP_NAME: mobvibe-gw-pr-${{ github.event.pull_request.number }}
+      NEON_BRANCH_NAME: pr-${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Setup tools ──
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Install Neon CLI
+        run: pnpm add -g neonctl
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Install Netlify CLI
+        run: pnpm add -g netlify-cli
+
+      # ── Neon database branch ──
+      - name: Create or reuse Neon branch
+        id: neon
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          # Check if branch already exists
+          if neonctl branches get "$NEON_BRANCH_NAME" --project-id "${{ secrets.NEON_PROJECT_ID }}" --output json 2>/dev/null; then
+            echo "Neon branch '$NEON_BRANCH_NAME' already exists, reusing"
+          else
+            echo "Creating Neon branch '$NEON_BRANCH_NAME'"
+            neonctl branches create --name "$NEON_BRANCH_NAME" --project-id "${{ secrets.NEON_PROJECT_ID }}"
+          fi
+
+          # Get connection string
+          DATABASE_URL=$(neonctl connection-string "$NEON_BRANCH_NAME" --project-id "${{ secrets.NEON_PROJECT_ID }}" --pooled)
+          echo "::add-mask::$DATABASE_URL"
+          echo "database_url=$DATABASE_URL" >> "$GITHUB_OUTPUT"
+
+      # ── Fly.io gateway preview ──
+      - name: Create or reuse Fly.io app
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if flyctl apps list --json | grep -q "\"$FLY_APP_NAME\""; then
+            echo "Fly app '$FLY_APP_NAME' already exists, reusing"
+          else
+            echo "Creating Fly app '$FLY_APP_NAME'"
+            flyctl apps create "$FLY_APP_NAME" --org personal
+          fi
+
+      - name: Set Fly.io secrets
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl secrets set \
+            --app "$FLY_APP_NAME" \
+            DATABASE_URL="${{ steps.neon.outputs.database_url }}" \
+            BETTER_AUTH_SECRET="preview-secret-not-for-production" \
+            GATEWAY_CORS_ORIGINS="*" \
+            SITE_URL="https://${FLY_APP_NAME}.fly.dev" \
+            SKIP_EMAIL_VERIFICATION="true" \
+            IS_PREVIEW="true"
+
+      - name: Deploy gateway to Fly.io
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl deploy \
+            --app "$FLY_APP_NAME" \
+            --ha=false \
+            --vm-size shared-cpu-1x \
+            --vm-memory 256 \
+            --remote-only
+
+      # ── Webui preview via Netlify CLI ──
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared packages
+        run: pnpm --filter @mobvibe/shared build
+
+      - name: Build webui
+        env:
+          VITE_GATEWAY_URL: https://${{ env.FLY_APP_NAME }}.fly.dev
+        run: pnpm --filter webui build
+
+      - name: Deploy webui to Netlify
+        id: netlify
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_WEBUI_SITE_ID }}
+        run: |
+          OUTPUT=$(netlify deploy \
+            --dir=apps/webui/dist \
+            --alias="pr-${PR_NUMBER}" \
+            --json)
+          DEPLOY_URL=$(echo "$OUTPUT" | jq -r '.deploy_url')
+          echo "deploy_url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+
+      # ── Post PR comment ──
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const gatewayUrl = `https://${process.env.FLY_APP_NAME}.fly.dev`;
+            const webuiUrl = `${{ steps.netlify.outputs.deploy_url }}`;
+            const body = [
+              '## Preview Environment',
+              '',
+              `| Service | URL |`,
+              `|---------|-----|`,
+              `| Gateway | ${gatewayUrl} |`,
+              `| WebUI   | ${webuiUrl} |`,
+              '',
+              `Gateway health: ${gatewayUrl}/health`,
+              '',
+              '_This preview will be automatically cleaned up when the PR is closed._',
+            ].join('\n');
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('## Preview Environment')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+            }

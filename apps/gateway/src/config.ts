@@ -43,16 +43,13 @@ export const tauriOrigins = [
 
 export const getGatewayConfig = (): GatewayConfig => {
 	const env = process.env;
-	const isPreview = env.IS_PULL_REQUEST === "true";
+	const isPreview = env.IS_PREVIEW === "true";
 	return {
 		port: parsePort(env.PORT ?? env.GATEWAY_PORT ?? "3005"),
 		corsOrigins: parseOrigins(env.GATEWAY_CORS_ORIGINS),
-		siteUrl: isPreview
-			? env.RENDER_EXTERNAL_URL
-			: (env.SITE_URL ??
-				(env.FLY_APP_NAME
-					? `https://${env.FLY_APP_NAME}.fly.dev`
-					: env.RENDER_EXTERNAL_URL)),
+		siteUrl:
+			env.SITE_URL ??
+			(env.FLY_APP_NAME ? `https://${env.FLY_APP_NAME}.fly.dev` : undefined),
 		databaseUrl: env.DATABASE_URL,
 		resendApiKey: env.RESEND_API_KEY,
 		emailFrom: env.EMAIL_FROM ?? "Mobvibe <noreply@example.com>",
