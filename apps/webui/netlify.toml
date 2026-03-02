@@ -36,6 +36,10 @@
 
 # Deploy previews are handled by GitHub Actions (preview-deploy.yml)
 # using netlify-cli deploy --alias pr-{number}
-# VITE_GATEWAY_URL is injected at build time from the workflow
+# Disable Netlify's built-in deploy preview to avoid building with production env vars
+# (VITE_GATEWAY_URL on Netlify dashboard points to production gateway)
+[context.deploy-preview]
+  ignore = "exit 0"
+
 [context.deploy-preview.environment]
   NODE_ENV = "production"
