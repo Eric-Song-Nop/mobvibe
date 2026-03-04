@@ -111,6 +111,7 @@ jobs:
         run: |
           OUTPUT=$(netlify deploy \
             --no-build \
+            --filter=webui \
             --site="$NETLIFY_SITE_ID" \
             --dir=apps/webui/dist \
             --alias="pr-${PR_NUMBER}" \
