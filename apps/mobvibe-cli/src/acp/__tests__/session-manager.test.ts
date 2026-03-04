@@ -108,6 +108,7 @@ const createMockConfig = (): CliConfig => ({
 			args: [],
 		},
 	],
+	registryAgents: [],
 	homePath: "/tmp/mobvibe-test",
 	logPath: "/tmp/mobvibe-test/logs",
 	pidFile: "/tmp/mobvibe-test/daemon.pid",

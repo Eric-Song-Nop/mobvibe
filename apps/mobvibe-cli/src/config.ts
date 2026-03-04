@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import type { AcpBackendId } from "@mobvibe/shared";
+import type { AcpBackendId, RegistryAgent } from "@mobvibe/shared";
 import { getGatewayUrl } from "./auth/credentials.js";
 import { loadUserConfig } from "./config-loader.js";
 import { logger } from "./lib/logger.js";
@@ -71,6 +71,8 @@ export type CliConfig = {
 	consolidation: ConsolidationConfig;
 	/** Base directory for git worktrees (default: ~/.mobvibe/worktrees) */
 	worktreeBaseDir: string;
+	/** Full registry agent list (for first-run selection UI) */
+	registryAgents: RegistryAgent[];
 	/** undefined = not yet configured (first run); string[] = user's selection */
 	enabledAgents?: string[];
 };
@@ -99,10 +101,12 @@ export const getCliConfig = async (): Promise<CliConfig> => {
 
 	const userConfig = userConfigResult.config;
 
-	// Detect backends from registry
+	// Load registry and detect backends
 	let backends: AcpBackendConfig[] = [];
+	let registryAgents: RegistryAgent[] = [];
 	const registry = await getRegistry({ homePath });
 	if (registry) {
+		registryAgents = registry.agents;
 		backends = await detectAgents(registry);
 	}
 
@@ -122,6 +126,7 @@ export const getCliConfig = async (): Promise<CliConfig> => {
 	return {
 		gatewayUrl,
 		acpBackends: backends,
+		registryAgents,
 		enabledAgents,
 		clientName: env.MOBVIBE_ACP_CLIENT_NAME ?? "mobvibe-cli",
 		clientVersion: env.MOBVIBE_ACP_CLIENT_VERSION ?? "0.0.0",
