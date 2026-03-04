@@ -61,8 +61,6 @@ Environment variables:
 | `RESEND_API_KEY` | (empty) | Resend API key; unset = log to console |
 | `EMAIL_FROM` | (empty) | Sender address for emails |
 | `SKIP_EMAIL_VERIFICATION` | `false` | Skip email verification (dev only) |
-| `GITHUB_CLIENT_ID` | (empty) | GitHub OAuth client ID |
-| `GITHUB_CLIENT_SECRET` | (empty) | GitHub OAuth client secret |
 | `REDIS_URL` | (empty) | Upstash Redis URL; enables multi-instance user affinity routing |
 
 Private IPs (10.x.x.x, 192.168.x.x, 172.16-31.x.x) and localhost are always allowed.
