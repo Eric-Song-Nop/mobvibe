@@ -3,7 +3,6 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { MachineWorkspaces } from "@/components/machines/MachineWorkspaces";
 import { RegisterMachineDialog } from "@/components/machines/RegisterMachineDialog";
 import { Button } from "@/components/ui/button";
 import { ResizeHandle } from "@/components/ui/ResizeHandle";
@@ -38,8 +37,6 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 	} = useMachinesStore();
 	const {
 		selectedWorkspaceByMachine,
-		expandedMachines,
-		toggleMachineExpanded,
 		machineSidebarWidth,
 		setMachineSidebarWidth,
 	} = useUiStore();
@@ -128,29 +125,14 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 						</div>
 					) : null}
 
-					{machineList.map((machine) => {
-						const isExpanded = Boolean(expandedMachines[machine.machineId]);
-						return (
-							<div
-								key={machine.machineId}
-								className="flex flex-col items-center gap-1"
-							>
-								<MachineIcon
-									machine={machine}
-									isSelected={machine.machineId === selectedMachineId}
-									isExpanded={isExpanded}
-									onSelect={() => {
-										setSelectedMachineId(machine.machineId);
-										toggleMachineExpanded(machine.machineId);
-									}}
-								/>
-								<MachineWorkspaces
-									machineId={machine.machineId}
-									isExpanded={isExpanded}
-								/>
-							</div>
-						);
-					})}
+					{machineList.map((machine) => (
+						<MachineIcon
+							key={machine.machineId}
+							machine={machine}
+							isSelected={machine.machineId === selectedMachineId}
+							onSelect={() => setSelectedMachineId(machine.machineId)}
+						/>
+					))}
 				</div>
 
 				<Tooltip>
@@ -185,16 +167,10 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 type MachineIconProps = {
 	machine: Machine;
 	isSelected: boolean;
-	isExpanded?: boolean;
 	onSelect: () => void;
 };
 
-function MachineIcon({
-	machine,
-	isSelected,
-	isExpanded,
-	onSelect,
-}: MachineIconProps) {
+function MachineIcon({ machine, isSelected, onSelect }: MachineIconProps) {
 	const { t } = useTranslation();
 	const displayName = machine.hostname ?? machine.machineId.slice(0, 8);
 	const initials = displayName.slice(0, 2).toUpperCase();
@@ -206,13 +182,11 @@ function MachineIcon({
 					<button
 						type="button"
 						onClick={onSelect}
-						aria-expanded={isExpanded}
 						className={cn(
 							"relative flex h-10 w-10 items-center justify-center rounded-sm border transition-colors",
 							isSelected
 								? "border-primary bg-primary/10 text-primary"
 								: "border-border bg-background hover:bg-muted text-foreground",
-							isExpanded && !isSelected && "border-primary/40",
 							!machine.connected && "opacity-50",
 						)}
 					>

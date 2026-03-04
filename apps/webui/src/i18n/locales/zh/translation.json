@@ -340,6 +340,10 @@
 		"refreshAriaLabel": "刷新",
 		"addMachineAriaLabel": "添加设备"
 	},
+	"workspace": {
+		"title": "工作区",
+		"empty": "暂无工作区"
+	},
 	"commandPalette": {
 		"openCommandPalette": "命令面板",
 		"searchPlaceholder": "输入命令或搜索...",
