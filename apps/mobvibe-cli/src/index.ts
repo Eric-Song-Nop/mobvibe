@@ -1,5 +1,12 @@
 import { Database } from "bun:sqlite";
-import { cancel, intro, isCancel, multiselect, outro } from "@clack/prompts";
+import {
+	cancel,
+	intro,
+	isCancel,
+	log,
+	multiselect,
+	outro,
+} from "@clack/prompts";
 import { Command } from "commander";
 import { loadCredentials } from "./auth/credentials.js";
 import { login, loginStatus, logout } from "./auth/login.js";
@@ -7,6 +14,7 @@ import { getCliConfig } from "./config.js";
 import { saveUserConfig } from "./config-loader.js";
 import { DaemonManager } from "./daemon/daemon.js";
 import { logger } from "./lib/logger.js";
+import { resolveSelectedAgents } from "./registry/agent-detector.js";
 import { WalCompactor, WalStore } from "./wal/index.js";
 
 const program = new Command();
@@ -29,14 +37,14 @@ program
 
 		// First run with interactive terminal → prompt user to select agents
 		if (config.enabledAgents === undefined && process.stdout.isTTY) {
-			if (config.acpBackends.length > 0) {
+			if (config.registryAgents.length > 0) {
 				intro("Welcome to Mobvibe!");
 				const selected = await multiselect({
 					message: "Which agents do you want to enable?",
-					options: config.acpBackends.map((b) => ({
-						value: b.id,
-						label: b.label,
-						hint: b.description,
+					options: config.registryAgents.map((a) => ({
+						value: a.id,
+						label: a.name,
+						hint: a.description,
 					})),
 					required: false,
 				});
@@ -44,17 +52,30 @@ program
 					cancel("Setup cancelled.");
 					process.exit(0);
 				}
-				await saveUserConfig(config.homePath, {
-					enabledAgents: selected as string[],
-				});
-				// Apply filtering in-place without reloading config
-				const enabled = new Set(selected as string[]);
-				config.acpBackends = config.acpBackends.filter((b) =>
-					enabled.has(b.id),
+
+				// Resolve selected agents — check PATH/npx/uvx availability
+				const { resolved, failed } = resolveSelectedAgents(
+					config.registryAgents,
+					selected as string[],
 				);
-				config.enabledAgents = selected as string[];
+
+				if (failed.length > 0) {
+					for (const agent of failed) {
+						log.warn(
+							`Agent "${agent.name}" cannot be resolved — binary not in PATH, or npx/uvx unavailable. Skipping.`,
+						);
+					}
+				}
+
+				// Only save successfully resolved agent IDs
+				const enabledIds = resolved.map((b) => b.id);
+				await saveUserConfig(config.homePath, {
+					enabledAgents: enabledIds,
+				});
+				config.acpBackends = resolved;
+				config.enabledAgents = enabledIds;
 				outro(
-					`Enabled ${(selected as string[]).length} agent(s). Config saved to ${config.homePath}/.config.json`,
+					`Enabled ${resolved.length} agent(s). Config saved to ${config.homePath}/.config.json`,
 				);
 			}
 		}
