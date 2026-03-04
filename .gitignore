@@ -7,6 +7,7 @@ node_modules/
 # Build outputs
 dist/
 dist-bin/
+dist-ssr/
 
 # Platform binary build artifacts
 apps/mobvibe-cli/npm/*/bin/
