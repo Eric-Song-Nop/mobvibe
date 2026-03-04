@@ -121,6 +121,7 @@ describe("useSessionHandlers — handleOpenCreateDialog", () => {
 				} as Machine,
 			},
 			defaultBackendId: "backend-1",
+			effectiveWorkspaceCwd: undefined,
 			chatActions,
 			uiActions,
 			mutations,
@@ -232,5 +233,52 @@ describe("useSessionHandlers — handleOpenCreateDialog", () => {
 		result.current.handleOpenCreateDialog();
 
 		expect(uiActions.setDraftCwd).toHaveBeenCalledWith(undefined);
+	});
+
+	it('mode "workspace" uses fallback logic (same as no mode)', () => {
+		const activeSession = createBaseSession({ cwd: "/projects/bar" });
+
+		const { result } = renderHandlers({
+			activeSessionId: "session-1",
+			activeSession,
+			lastCreatedCwd: { "machine-1": "/projects/foo" },
+			effectiveWorkspaceCwd: "/projects/workspace-a",
+		});
+
+		result.current.handleOpenCreateDialog("workspace");
+
+		// workspace mode ignores effectiveWorkspaceCwd, uses lastCreatedCwd
+		expect(uiActions.setDraftCwd).toHaveBeenCalledWith("/projects/foo");
+	});
+
+	it('mode "session" uses effectiveWorkspaceCwd when available', () => {
+		const { result } = renderHandlers({
+			lastCreatedCwd: { "machine-1": "/projects/foo" },
+			effectiveWorkspaceCwd: "/projects/workspace-a",
+		});
+
+		result.current.handleOpenCreateDialog("session");
+
+		// session mode prefers effectiveWorkspaceCwd over lastCreatedCwd
+		expect(uiActions.setDraftCwd).toHaveBeenCalledWith("/projects/workspace-a");
+	});
+
+	it('mode "session" falls back when no effectiveWorkspaceCwd', () => {
+		const activeSession = createBaseSession({
+			machineId: "machine-1",
+			cwd: "/projects/bar",
+		});
+
+		const { result } = renderHandlers({
+			activeSessionId: "session-1",
+			activeSession,
+			lastCreatedCwd: {},
+			effectiveWorkspaceCwd: undefined,
+		});
+
+		result.current.handleOpenCreateDialog("session");
+
+		// No workspace → falls back to activeSession cwd
+		expect(uiActions.setDraftCwd).toHaveBeenCalledWith("/projects/bar");
 	});
 });

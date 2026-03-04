@@ -106,6 +106,8 @@ export type UseSessionHandlersParams = {
 	lastCreatedCwd: Record<string, string>;
 	machines: Record<string, Machine>;
 	defaultBackendId: string | undefined;
+	/** CWD of the effective workspace (selected or auto-fallback first workspace) */
+	effectiveWorkspaceCwd: string | undefined;
 	chatActions: ChatActions;
 	uiActions: UiActions;
 	mutations: Mutations;
@@ -125,6 +127,7 @@ export function useSessionHandlers({
 	lastCreatedCwd,
 	machines,
 	defaultBackendId,
+	effectiveWorkspaceCwd,
 	chatActions,
 	uiActions,
 	mutations,
@@ -137,20 +140,28 @@ export function useSessionHandlers({
 	const activeSessionRef = useRef(activeSession);
 	activeSessionRef.current = activeSession;
 
-	const handleOpenCreateDialog = () => {
+	const handleOpenCreateDialog = (mode?: "workspace" | "session") => {
 		uiActions.setDraftTitle(buildSessionTitle(sessionList, t));
 		uiActions.setDraftBackendId(defaultBackendId);
 
-		// CWD priority: lastCreatedCwd > activeSession cwd (same machine) > undefined (fallback to homePath in dialog)
 		let initialCwd: string | undefined;
-		if (selectedMachineId) {
+
+		// "session" mode: prefer the effective workspace CWD so the new session
+		// is pre-filled with the currently visible workspace path.
+		if (mode === "session" && effectiveWorkspaceCwd) {
+			initialCwd = effectiveWorkspaceCwd;
+		}
+
+		// Fallback (workspace mode, no mode, or session mode without workspace):
+		// lastCreatedCwd > activeSession cwd (same machine) > undefined (homePath in dialog)
+		if (!initialCwd && selectedMachineId) {
 			initialCwd = lastCreatedCwd[selectedMachineId];
 			if (!initialCwd && activeSession?.machineId === selectedMachineId) {
 				initialCwd = activeSession.worktreeSourceCwd || activeSession.cwd;
 			}
 		}
-		uiActions.setDraftCwd(initialCwd);
 
+		uiActions.setDraftCwd(initialCwd);
 		uiActions.resetDraftWorktree();
 		uiActions.setCreateDialogOpen(true);
 	};

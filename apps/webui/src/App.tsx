@@ -206,13 +206,18 @@ function MainApp() {
 
 	// --- Extracted hooks ---
 
-	const { workspaceList, activeSession, selectedWorkspaceCwd, sessionList } =
-		useSessionList({
-			sessions,
-			activeSessionId,
-			selectedMachineId,
-			selectedWorkspaceByMachine,
-		});
+	const {
+		workspaceList,
+		activeSession,
+		selectedWorkspaceCwd,
+		effectiveWorkspaceCwd,
+		sessionList,
+	} = useSessionList({
+		sessions,
+		activeSessionId,
+		selectedMachineId,
+		selectedWorkspaceByMachine,
+	});
 
 	useMachineDiscovery({
 		machines,
@@ -245,6 +250,7 @@ function MainApp() {
 		lastCreatedCwd,
 		machines,
 		defaultBackendId,
+		effectiveWorkspaceCwd,
 		chatActions,
 		uiActions,
 		mutations,
