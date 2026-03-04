@@ -7,9 +7,57 @@
     <meta name="theme-color" content="#09090b" />
     <title>Mobvibe - AI Agent Management</title>
     <meta name="description" content="Manage AI coding agents across multiple machines with real-time streaming, end-to-end encryption, and cross-platform support." />
+
+    <!-- Canonical -->
+    <link rel="canonical" href="https://mobvibe.net/" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://mobvibe.net/" />
+    <meta property="og:title" content="Mobvibe - AI Agent Management" />
+    <meta property="og:description" content="Manage AI coding agents across multiple machines with real-time streaming, end-to-end encryption, and cross-platform support." />
+    <meta property="og:image" content="https://mobvibe.net/og-image.png" />
+    <meta property="og:site_name" content="Mobvibe" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Mobvibe - AI Agent Management" />
+    <meta name="twitter:description" content="Manage AI coding agents across multiple machines with real-time streaming, end-to-end encryption, and cross-platform support." />
+    <meta name="twitter:image" content="https://mobvibe.net/og-image.png" />
+
+    <!-- JSON-LD Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Mobvibe",
+      "description": "Manage AI coding agents across multiple machines with real-time streaming, end-to-end encryption, and cross-platform support.",
+      "url": "https://mobvibe.net/",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Windows, macOS, Linux, Android, iOS",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      }
+    }
+    </script>
+
+    <!-- Theme flash prevention: apply stored theme before paint -->
+    <script>
+      (() => {
+        var theme = localStorage.getItem('mobvibe-theme');
+        var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (theme === 'light' || theme === 'dark') {
+          document.documentElement.classList.add(theme);
+        } else {
+          document.documentElement.classList.add(prefersDark ? 'dark' : 'light');
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="/src/entry-client.tsx"></script>
   </body>
 </html>
