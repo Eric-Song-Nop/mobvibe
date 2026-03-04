@@ -13,6 +13,7 @@ export type WalSession = {
 	currentRevision: number;
 	cwd?: string;
 	title?: string;
+	isTitlePinned?: boolean;
 	createdAt: string;
 	updatedAt: string;
 };
@@ -48,6 +49,7 @@ export type EnsureSessionParams = {
 	backendId: string;
 	cwd?: string;
 	title?: string;
+	isTitlePinned?: boolean;
 };
 
 export type DiscoveredSession = {
@@ -108,20 +110,21 @@ export class WalStore {
 
 		// Prepare statements
 		this.stmtGetSession = this.db.query(`
-      SELECT session_id, machine_id, backend_id, current_revision, cwd, title, created_at, updated_at
+      SELECT session_id, machine_id, backend_id, current_revision, cwd, title, is_title_pinned, created_at, updated_at
       FROM sessions
       WHERE session_id = $sessionId
     `);
 
 		this.stmtInsertSession = this.db.query(`
-      INSERT INTO sessions (session_id, machine_id, backend_id, current_revision, cwd, title, created_at, updated_at)
-      VALUES ($sessionId, $machineId, $backendId, 1, $cwd, $title, $createdAt, $updatedAt)
+      INSERT INTO sessions (session_id, machine_id, backend_id, current_revision, cwd, title, is_title_pinned, created_at, updated_at)
+      VALUES ($sessionId, $machineId, $backendId, 1, $cwd, $title, $isTitlePinned, $createdAt, $updatedAt)
     `);
 
 		this.stmtUpdateSession = this.db.query(`
       UPDATE sessions
       SET cwd = COALESCE($cwd, cwd),
           title = COALESCE($title, title),
+          is_title_pinned = COALESCE($isTitlePinned, is_title_pinned),
           updated_at = $updatedAt
       WHERE session_id = $sessionId
     `);
@@ -277,6 +280,12 @@ export class WalStore {
 				$sessionId: params.sessionId,
 				$cwd: params.cwd ?? null,
 				$title: params.title ?? null,
+				$isTitlePinned:
+					params.isTitlePinned !== undefined
+						? params.isTitlePinned
+							? 1
+							: 0
+						: null,
 				$updatedAt: now,
 			});
 
@@ -310,6 +319,7 @@ export class WalStore {
 			$backendId: params.backendId,
 			$cwd: params.cwd ?? null,
 			$title: params.title ?? null,
+			$isTitlePinned: params.isTitlePinned ? 1 : 0,
 			$createdAt: now,
 			$updatedAt: now,
 		});
@@ -643,6 +653,7 @@ export class WalStore {
 			currentRevision: row.current_revision,
 			cwd: row.cwd ?? undefined,
 			title: row.title ?? undefined,
+			isTitlePinned: row.is_title_pinned === 1 ? true : undefined,
 			createdAt: row.created_at,
 			updatedAt: row.updated_at,
 		};
@@ -683,6 +694,7 @@ type WalSessionRow = {
 	current_revision: number;
 	cwd: string | null;
 	title: string | null;
+	is_title_pinned: number | null;
 	created_at: string;
 	updated_at: string;
 };

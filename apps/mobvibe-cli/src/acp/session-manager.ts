@@ -67,6 +67,8 @@ type SessionRecord = {
 	revision: number;
 	/** Agent-defined metadata from session_info_update RFD */
 	_meta?: Record<string, unknown> | null;
+	/** Whether the title was manually set by the user (immune to agent auto-update) */
+	isTitlePinned?: boolean;
 	/** Original repo cwd (only for worktree sessions) */
 	worktreeSourceCwd?: string;
 	/** Branch name of the worktree (only for worktree sessions) */
@@ -722,13 +724,19 @@ export class SessionManager {
 				session.modes,
 			);
 
+			// Pin title when explicitly provided by the user
+			const hasExplicitTitle = !!options?.title;
+			const sessionTitle =
+				options?.title ?? `Session ${this.sessions.size + 1}`;
+
 			// Initialize WAL session
 			const { revision } = this.walStore.ensureSession({
 				sessionId: session.sessionId,
 				machineId: this.config.machineId,
 				backendId: backend.id,
 				cwd: effectiveCwd,
-				title: options?.title ?? `Session ${this.sessions.size + 1}`,
+				title: sessionTitle,
+				isTitlePinned: hasExplicitTitle,
 			});
 
 			// Initialize DEK for E2EE
@@ -738,7 +746,7 @@ export class SessionManager {
 
 			const record: SessionRecord = {
 				sessionId: session.sessionId,
-				title: options?.title ?? `Session ${this.sessions.size + 1}`,
+				title: sessionTitle,
 				backendId: backend.id,
 				backendLabel: backend.label,
 				connection,
@@ -756,6 +764,7 @@ export class SessionManager {
 				availableModels,
 				availableCommands: undefined,
 				revision,
+				isTitlePinned: hasExplicitTitle,
 			};
 			record.unsubscribe = connection.onSessionUpdate(
 				(notification: SessionNotification) => {
@@ -905,6 +914,7 @@ export class SessionManager {
 			);
 		}
 		record.title = title;
+		record.isTitlePinned = true;
 		record.updatedAt = new Date();
 
 		// Persist to WAL
@@ -914,6 +924,7 @@ export class SessionManager {
 			backendId: record.backendId,
 			cwd: record.cwd,
 			title,
+			isTitlePinned: true,
 		});
 
 		const summary = this.buildSummary(record);
@@ -1345,9 +1356,15 @@ export class SessionManager {
 			);
 			const discovered = this.discoveredSessions.get(sessionId);
 
+			// Restore pinned title from WAL if applicable
+			const walPinned = existingWalSession?.isTitlePinned;
+			const walTitle = existingWalSession?.title;
+			const resolvedTitle =
+				walPinned && walTitle ? walTitle : (discovered?.title ?? sessionId);
+
 			const record: SessionRecord = {
 				sessionId,
-				title: discovered?.title ?? sessionId,
+				title: resolvedTitle,
 				backendId: backend.id,
 				backendLabel: backend.label,
 				connection,
@@ -1363,6 +1380,7 @@ export class SessionManager {
 				availableModels,
 				availableCommands: undefined,
 				revision,
+				isTitlePinned: walPinned,
 			};
 
 			recordRef = record;
@@ -1484,7 +1502,7 @@ export class SessionManager {
 			return;
 		}
 		if (update.sessionUpdate === "session_info_update") {
-			if (typeof update.title === "string") {
+			if (typeof update.title === "string" && !record.isTitlePinned) {
 				record.title = update.title;
 			}
 			if (typeof update.updatedAt === "string") {
@@ -1680,6 +1698,7 @@ export class SessionManager {
 			wrappedDek:
 				this.cryptoService?.getWrappedDek(record.sessionId) ?? undefined,
 			_meta: record._meta,
+			isTitlePinned: record.isTitlePinned,
 			worktreeSourceCwd: record.worktreeSourceCwd,
 			worktreeBranch: record.worktreeBranch,
 			isAttached: true,
