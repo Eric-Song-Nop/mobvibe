@@ -211,7 +211,15 @@ export function useSocket({
 				}
 				const infoUpdate = extractSessionInfoUpdate(notification);
 				if (infoUpdate) {
-					updateSessionMeta(event.sessionId, infoUpdate);
+					// Protect pinned titles from agent auto-update
+					if (session?.isTitlePinned && infoUpdate.title !== undefined) {
+						const { title: _ignored, ...rest } = infoUpdate;
+						if (Object.keys(rest).length > 0) {
+							updateSessionMeta(event.sessionId, rest);
+						}
+					} else {
+						updateSessionMeta(event.sessionId, infoUpdate);
+					}
 				}
 				const availableCommands = extractAvailableCommandsUpdate(notification);
 				if (availableCommands !== null) {

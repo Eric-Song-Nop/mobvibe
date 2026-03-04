@@ -165,6 +165,8 @@ export type ChatSession = {
 	worktreeBranch?: string;
 	/** Agent execution plan entries (replaced in full on each update) */
 	plan?: PlanEntry[];
+	/** Whether the title was manually set by the user (immune to agent auto-update) */
+	isTitlePinned?: boolean;
 };
 
 type ChatState = {
@@ -242,6 +244,7 @@ type ChatState = {
 				| "usage"
 				| "_meta"
 				| "plan"
+				| "isTitlePinned"
 			>
 		>,
 	) => void;
@@ -541,6 +544,7 @@ const mergeSessionFromSummary = (
 		worktreeSourceCwd?: string | null;
 		worktreeBranch?: string | null;
 		isAttached?: boolean;
+		isTitlePinned?: boolean;
 	},
 ): ChatSession => {
 	const isAttached = summary.isAttached === true;
@@ -571,6 +575,7 @@ const mergeSessionFromSummary = (
 		availableModels: summary.availableModels ?? existing.availableModels,
 		availableCommands: summary.availableCommands ?? existing.availableCommands,
 		machineId: summary.machineId ?? existing.machineId,
+		isTitlePinned: summary.isTitlePinned ?? existing.isTitlePinned,
 		worktreeSourceCwd: summary.worktreeSourceCwd ?? existing.worktreeSourceCwd,
 		worktreeBranch: summary.worktreeBranch ?? existing.worktreeBranch,
 		...attachedFields,
@@ -1025,6 +1030,9 @@ export const useChatStore = create<ChatState>()(
 					}
 					if (payload.plan !== undefined) {
 						nextSession.plan = payload.plan;
+					}
+					if (payload.isTitlePinned !== undefined) {
+						nextSession.isTitlePinned = payload.isTitlePinned;
 					}
 					return {
 						sessions: {

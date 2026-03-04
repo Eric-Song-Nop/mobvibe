@@ -60,6 +60,8 @@ export type SessionSummary = {
 	worktreeBranch?: string;
 	/** Whether this session is currently attached (agent running) on the CLI */
 	isAttached?: boolean;
+	/** Whether the title was manually set by the user (immune to agent auto-update) */
+	isTitlePinned?: boolean;
 };
 
 /** Sessions changed event payload for incremental sync */

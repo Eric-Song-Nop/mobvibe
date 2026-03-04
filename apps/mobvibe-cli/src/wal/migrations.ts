@@ -103,6 +103,13 @@ const MIGRATIONS = [
       );
     `,
 	},
+	{
+		version: 5,
+		up: `
+      -- Track whether a session title was manually set (pinned) by the user
+      ALTER TABLE sessions ADD COLUMN is_title_pinned INTEGER DEFAULT 0;
+    `,
+	},
 ];
 
 export function runMigrations(db: Database): void {
