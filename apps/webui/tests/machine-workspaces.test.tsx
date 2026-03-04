@@ -4,7 +4,7 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "@/lib/chat-store";
-import { MachineWorkspaces } from "../src/components/machines/MachineWorkspaces";
+import { WorkspaceList } from "../src/components/workspace/WorkspaceList";
 import { useMachinesStore } from "../src/lib/machines-store";
 import { useUiStore } from "../src/lib/ui-store";
 
@@ -61,7 +61,7 @@ beforeEach(() => {
 		},
 	});
 
-	// Set up machine as connected and expanded
+	// Set up machine as connected
 	useMachinesStore.setState({
 		machines: {
 			[MACHINE_ID]: {
@@ -76,7 +76,7 @@ beforeEach(() => {
 	// Clear UI store
 	useUiStore.setState({
 		selectedWorkspaceByMachine: {},
-		expandedMachines: { [MACHINE_ID]: true },
+		sidebarTab: "workspaces",
 	});
 });
 
@@ -93,11 +93,11 @@ afterEach(() => {
 	});
 	useUiStore.setState({
 		selectedWorkspaceByMachine: {},
-		expandedMachines: {},
+		sidebarTab: "sessions",
 	});
 });
 
-describe("MachineWorkspaces validation effect", () => {
+describe("WorkspaceList validation effect", () => {
 	it("selects valid fallback when selected workspace CWD becomes invalid", async () => {
 		const validCwd = "/home/user/valid-project";
 		const invalidCwd = "/home/user/deleted-project";
@@ -125,7 +125,7 @@ describe("MachineWorkspaces validation effect", () => {
 
 		render(
 			<Wrapper>
-				<MachineWorkspaces machineId={MACHINE_ID} isExpanded />
+				<WorkspaceList machineId={MACHINE_ID} />
 			</Wrapper>,
 		);
 
@@ -157,7 +157,7 @@ describe("MachineWorkspaces validation effect", () => {
 
 		render(
 			<Wrapper>
-				<MachineWorkspaces machineId={MACHINE_ID} isExpanded />
+				<WorkspaceList machineId={MACHINE_ID} />
 			</Wrapper>,
 		);
 
@@ -189,7 +189,7 @@ describe("MachineWorkspaces validation effect", () => {
 
 		render(
 			<Wrapper>
-				<MachineWorkspaces machineId={MACHINE_ID} isExpanded />
+				<WorkspaceList machineId={MACHINE_ID} />
 			</Wrapper>,
 		);
 
@@ -204,20 +204,17 @@ describe("MachineWorkspaces validation effect", () => {
 		expect(state.selectedWorkspaceByMachine[MACHINE_ID]).toBe(validCwd);
 	});
 
-	it("renders nothing when not expanded", () => {
-		useChatStore.setState({
-			sessions: {
-				"s-1": buildSession("s-1", "/home/user/project"),
-			},
-		});
+	it("shows empty state when no sessions for machine", () => {
+		useChatStore.setState({ sessions: {} });
 
 		const { container } = render(
 			<Wrapper>
-				<MachineWorkspaces machineId={MACHINE_ID} isExpanded={false} />
+				<WorkspaceList machineId={MACHINE_ID} />
 			</Wrapper>,
 		);
 
-		expect(container.innerHTML).toBe("");
+		// Should show the empty button
+		expect(container.querySelector("button")).toBeTruthy();
 	});
 
 	it("selects fallback when workspace is removed from session list", async () => {
@@ -240,7 +237,7 @@ describe("MachineWorkspaces validation effect", () => {
 
 		render(
 			<Wrapper>
-				<MachineWorkspaces machineId={MACHINE_ID} isExpanded />
+				<WorkspaceList machineId={MACHINE_ID} />
 			</Wrapper>,
 		);
 

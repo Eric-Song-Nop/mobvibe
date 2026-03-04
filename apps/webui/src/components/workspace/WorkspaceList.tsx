@@ -9,25 +9,11 @@ import { useUiStore } from "@/lib/ui-store";
 import { cn } from "@/lib/utils";
 import { collectWorkspaces } from "@/lib/workspace-utils";
 
-const getWorkspaceInitials = (label: string) => {
-	const trimmed = label.trim();
-	if (trimmed.length === 0) {
-		return "--";
-	}
-	return trimmed.slice(0, 2).toUpperCase();
-};
-
-type MachineWorkspacesProps = {
+type WorkspaceListProps = {
 	machineId: string;
-	isExpanded: boolean;
-	className?: string;
 };
 
-export function MachineWorkspaces({
-	machineId,
-	isExpanded,
-	className,
-}: MachineWorkspacesProps) {
+export function WorkspaceList({ machineId }: WorkspaceListProps) {
 	const { t } = useTranslation();
 	const { sessions } = useChatStore();
 	const { machines, setSelectedMachineId, updateBackendCapabilities } =
@@ -36,6 +22,7 @@ export function MachineWorkspaces({
 		selectedWorkspaceByMachine,
 		setSelectedWorkspace,
 		setCreateDialogOpen,
+		setSidebarTab,
 	} = useUiStore();
 	const discoverSessionsMutation = useDiscoverSessionsMutation();
 
@@ -43,10 +30,12 @@ export function MachineWorkspaces({
 		() => collectWorkspaces(sessions, machineId),
 		[sessions, machineId],
 	);
+
 	const machine = machines[machineId];
-	const canValidateWorkspaces = Boolean(isExpanded && machine?.connected);
+	const canValidate = Boolean(machine?.connected);
+
 	const workspaceValidityQueries = useQueries({
-		queries: canValidateWorkspaces
+		queries: canValidate
 			? workspaceList.map((workspace) => ({
 					queryKey: ["fs-entries", machineId, workspace.cwd],
 					queryFn: () => fetchFsEntries({ path: workspace.cwd, machineId }),
@@ -55,22 +44,22 @@ export function MachineWorkspaces({
 				}))
 			: [],
 	});
+
 	const validWorkspaces = useMemo(() => {
-		if (!canValidateWorkspaces) {
-			return [];
-		}
+		if (!canValidate) return [];
 		return workspaceList.filter(
 			(_, index) => workspaceValidityQueries[index]?.isSuccess,
 		);
-	}, [canValidateWorkspaces, workspaceList, workspaceValidityQueries]);
-	const isValidating =
-		canValidateWorkspaces &&
-		workspaceValidityQueries.some((query) => query.isFetching);
-	const selectedWorkspaceCwd = selectedWorkspaceByMachine[machineId];
-	const effectiveWorkspaceCwd = selectedWorkspaceCwd;
+	}, [canValidate, workspaceList, workspaceValidityQueries]);
 
+	const isValidating =
+		canValidate && workspaceValidityQueries.some((query) => query.isFetching);
+
+	const selectedWorkspaceCwd = selectedWorkspaceByMachine[machineId];
+
+	// Fallback when selected workspace becomes invalid
 	const selectedWorkspaceQueryState = useMemo(() => {
-		if (!canValidateWorkspaces || !selectedWorkspaceCwd) return undefined;
+		if (!canValidate || !selectedWorkspaceCwd) return undefined;
 		const index = workspaceList.findIndex(
 			(w) => w.cwd === selectedWorkspaceCwd,
 		);
@@ -80,14 +69,14 @@ export function MachineWorkspaces({
 		if (q.isError) return "error" as const;
 		return "success" as const;
 	}, [
-		canValidateWorkspaces,
+		canValidate,
 		selectedWorkspaceCwd,
 		workspaceList,
 		workspaceValidityQueries,
 	]);
 
 	useEffect(() => {
-		if (!canValidateWorkspaces || !selectedWorkspaceCwd) return;
+		if (!canValidate || !selectedWorkspaceCwd) return;
 		if (
 			selectedWorkspaceQueryState === "not-found" ||
 			selectedWorkspaceQueryState === "error"
@@ -100,7 +89,7 @@ export function MachineWorkspaces({
 			}
 		}
 	}, [
-		canValidateWorkspaces,
+		canValidate,
 		machineId,
 		selectedWorkspaceCwd,
 		selectedWorkspaceQueryState,
@@ -108,13 +97,10 @@ export function MachineWorkspaces({
 		validWorkspaces,
 	]);
 
-	if (!isExpanded) {
-		return null;
-	}
-
 	const handleSelectWorkspace = (cwd: string) => {
 		setSelectedMachineId(machineId);
 		setSelectedWorkspace(machineId, cwd);
+		setSidebarTab("sessions");
 		discoverSessionsMutation.mutate(
 			{ machineId, cwd },
 			{
@@ -123,7 +109,6 @@ export function MachineWorkspaces({
 				},
 			},
 		);
-		// 不自动选中 session，由 App.tsx 验证 effect 处理无效状态
 	};
 
 	const handleEmptyClick = () => {
@@ -131,52 +116,49 @@ export function MachineWorkspaces({
 		setCreateDialogOpen(true);
 	};
 
+	if (isValidating && validWorkspaces.length === 0) {
+		return (
+			<div className="text-muted-foreground text-xs p-2">
+				{t("common.loading")}
+			</div>
+		);
+	}
+
+	if (validWorkspaces.length === 0) {
+		return (
+			<button
+				type="button"
+				onClick={handleEmptyClick}
+				className="text-xs text-muted-foreground hover:text-foreground p-2"
+			>
+				{t("workspace.empty")}
+			</button>
+		);
+	}
+
 	return (
-		<div className={cn("flex flex-col items-center gap-1", className)}>
-			{isValidating && validWorkspaces.length === 0 ? (
-				<div className="text-muted-foreground text-[10px] text-center px-1">
-					{t("common.loading")}
-				</div>
-			) : validWorkspaces.length === 0 ? (
-				<button
-					type="button"
-					onClick={handleEmptyClick}
-					className="text-[10px] text-muted-foreground hover:text-foreground"
-				>
-					{t("workspace.empty")}
-				</button>
-			) : (
-				validWorkspaces.map((workspace) => {
-					const isActive = workspace.cwd === effectiveWorkspaceCwd;
-					const initials = getWorkspaceInitials(workspace.label);
-					return (
-						<button
-							key={`${workspace.machineId}:${workspace.cwd}`}
-							type="button"
-							onClick={() => handleSelectWorkspace(workspace.cwd)}
-							className={cn(
-								"flex flex-col items-center gap-0.5 text-[9px]",
-								isActive
-									? "text-primary"
-									: "text-muted-foreground hover:text-foreground",
-							)}
-							title={`${workspace.label} - ${workspace.cwd}`}
-						>
-							<span
-								className={cn(
-									"flex h-7 w-7 items-center justify-center rounded-sm border transition-colors",
-									isActive
-										? "border-primary bg-primary/10"
-										: "border-border bg-background hover:bg-muted",
-								)}
-							>
-								<span className="text-[10px] font-semibold">{initials}</span>
-							</span>
-							<span className="w-10 truncate">{workspace.label}</span>
-						</button>
-					);
-				})
-			)}
+		<div className="flex flex-col gap-0.5">
+			{validWorkspaces.map((workspace) => {
+				const isActive = workspace.cwd === selectedWorkspaceCwd;
+				return (
+					<button
+						key={`${workspace.machineId}:${workspace.cwd}`}
+						type="button"
+						onClick={() => handleSelectWorkspace(workspace.cwd)}
+						className={cn(
+							"flex flex-col gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors",
+							isActive
+								? "bg-accent border-l-primary border-l-2 font-semibold"
+								: "hover:bg-muted/50",
+						)}
+					>
+						<span className="truncate text-sm">{workspace.label}</span>
+						<span className="text-muted-foreground truncate text-xs">
+							{workspace.cwd}
+						</span>
+					</button>
+				);
+			})}
 		</div>
 	);
 }

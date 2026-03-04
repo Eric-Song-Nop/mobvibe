@@ -16,13 +16,17 @@ const defaultMutations: SessionMutationsSnapshot = {
 	reloadSessionVariables: undefined,
 };
 
+// --- mocks ---
+
 vi.mock("../src/components/ui/alert-dialog", () => ({
-	AlertDialog: ({ children }: { children: React.ReactNode }) => (
-		<div>{children}</div>
-	),
-	AlertDialogTrigger: ({ children }: { children: React.ReactNode }) => (
-		<div>{children}</div>
-	),
+	AlertDialog: ({
+		children,
+		open,
+	}: {
+		children: React.ReactNode;
+		open?: boolean;
+		onOpenChange?: (v: boolean) => void;
+	}) => (open ? <div>{children}</div> : null),
 	AlertDialogContent: ({ children }: { children: React.ReactNode }) => (
 		<div>{children}</div>
 	),
@@ -54,26 +58,6 @@ vi.mock("../src/components/ui/alert-dialog", () => ({
 	}) => <button {...props}>{children}</button>,
 }));
 
-vi.mock("../src/components/ui/select", () => ({
-	Select: ({ children }: { children: React.ReactNode }) => (
-		<div>{children}</div>
-	),
-	SelectTrigger: ({ children, ...props }: { children: React.ReactNode }) => (
-		<button type="button" {...props}>
-			{children}
-		</button>
-	),
-	SelectValue: ({ placeholder }: { placeholder?: string }) => (
-		<span>{placeholder}</span>
-	),
-	SelectContent: ({ children }: { children: React.ReactNode }) => (
-		<div>{children}</div>
-	),
-	SelectItem: ({ children }: { children: React.ReactNode }) => (
-		<div>{children}</div>
-	),
-}));
-
 vi.mock("../src/components/ui/dropdown-menu", () => ({
 	DropdownMenu: ({ children }: { children: React.ReactNode }) => (
 		<div>{children}</div>
@@ -84,16 +68,49 @@ vi.mock("../src/components/ui/dropdown-menu", () => ({
 	DropdownMenuContent: ({ children }: { children: React.ReactNode }) => (
 		<div>{children}</div>
 	),
-	DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => (
+	DropdownMenuItem: ({
+		children,
+		onClick,
+	}: {
+		children: React.ReactNode;
+		onClick?: () => void;
+		variant?: string;
+	}) => (
+		<button type="button" onClick={onClick}>
+			{children}
+		</button>
+	),
+}));
+
+vi.mock("../src/components/ui/tooltip", () => ({
+	Tooltip: ({ children }: { children: React.ReactNode }) => (
 		<div>{children}</div>
 	),
-	DropdownMenuRadioGroup: ({ children }: { children: React.ReactNode }) => (
+	TooltipTrigger: ({ children }: { children: React.ReactNode }) => (
 		<div>{children}</div>
 	),
-	DropdownMenuRadioItem: ({ children }: { children: React.ReactNode }) => (
+	TooltipContent: ({ children }: { children: React.ReactNode }) => (
+		<div>{children}</div>
+	),
+	TooltipProvider: ({ children }: { children: React.ReactNode }) => (
 		<div>{children}</div>
 	),
 }));
+
+vi.mock("../src/lib/machines-store", () => ({
+	useMachinesStore: vi.fn(() => ({
+		selectedMachineId: "machine-1",
+		machines: {},
+		setSelectedMachineId: vi.fn(),
+		updateBackendCapabilities: vi.fn(),
+	})),
+}));
+
+vi.mock("../src/components/workspace/WorkspaceList", () => ({
+	WorkspaceList: () => <div data-testid="workspace-list">WorkspaceList</div>,
+}));
+
+// --- helpers ---
 
 const buildSession = (overrides?: Partial<ChatSession>): ChatSession => ({
 	sessionId: "session-1",
@@ -130,6 +147,8 @@ const renderSidebar = (
 		</MemoryRouter>,
 	);
 
+// --- tests ---
+
 describe("SessionSidebar", () => {
 	beforeEach(() => {
 		useUiStore.setState({
@@ -143,7 +162,7 @@ describe("SessionSidebar", () => {
 			draftBackendId: undefined,
 			draftCwd: undefined,
 			selectedWorkspaceByMachine: {},
-			expandedMachines: {},
+			sidebarTab: "sessions",
 			machineSidebarWidth: 56,
 			sessionSidebarWidth: 256,
 		});
@@ -171,7 +190,7 @@ describe("SessionSidebar", () => {
 			editingSessionId: "session-1",
 			editingTitle: "Updated title",
 			selectedWorkspaceByMachine: {},
-			expandedMachines: {},
+			sidebarTab: "sessions",
 			machineSidebarWidth: 56,
 			sessionSidebarWidth: 256,
 		});
@@ -179,7 +198,46 @@ describe("SessionSidebar", () => {
 
 		const input = screen.getByDisplayValue("Updated title");
 		expect(input).toBeInTheDocument();
-		expect(screen.getByText(i18n.t("common.save"))).toBeInTheDocument();
+	});
+
+	it("submits rename on Enter key", async () => {
+		const onEditSubmit = vi.fn();
+		const user = userEvent.setup();
+		useUiStore.setState({
+			editingSessionId: "session-1",
+			editingTitle: "New name",
+			selectedWorkspaceByMachine: {},
+			sidebarTab: "sessions",
+			machineSidebarWidth: 56,
+			sessionSidebarWidth: 256,
+		});
+		renderSidebar([buildSession()], { onEditSubmit });
+
+		const input = screen.getByDisplayValue("New name");
+		await user.click(input);
+		await user.keyboard("{Enter}");
+
+		expect(onEditSubmit).toHaveBeenCalled();
+	});
+
+	it("cancels rename on Escape key", async () => {
+		const user = userEvent.setup();
+		useUiStore.setState({
+			editingSessionId: "session-1",
+			editingTitle: "New name",
+			selectedWorkspaceByMachine: {},
+			sidebarTab: "sessions",
+			machineSidebarWidth: 56,
+			sessionSidebarWidth: 256,
+		});
+		renderSidebar([buildSession()]);
+
+		const input = screen.getByDisplayValue("New name");
+		await user.click(input);
+		await user.keyboard("{Escape}");
+
+		// After escape, editing should be cleared — title text should show again
+		expect(screen.queryByDisplayValue("New name")).not.toBeInTheDocument();
 	});
 
 	it("groups sessions by backend and sorts by recent use", () => {
@@ -222,19 +280,20 @@ describe("SessionSidebar", () => {
 		expect(alphaSessions[1]).toHaveTextContent("Alpha 1");
 	});
 
-	it("shows the last directory name for cwd", () => {
+	it("shows relative time in metadata row", () => {
+		const oneHourAgo = new Date(Date.now() - 3600_000).toISOString();
 		renderSidebar([
 			buildSession({
-				sessionId: "session-cwd",
-				title: "Session With Path",
-				cwd: "/home/user/projects/mobvibe/",
+				sessionId: "session-time",
+				title: "Session With Time",
+				updatedAt: oneHourAgo,
 			}),
 		]);
 
-		expect(screen.getByText("mobvibe")).toBeInTheDocument();
+		expect(screen.getByText(/1h ago/)).toBeInTheDocument();
 	});
 
-	it("shows loading badge when session is loading", () => {
+	it("shows status tooltip for loading session", () => {
 		renderSidebar([
 			buildSession({
 				sessionId: "session-loading",
@@ -248,7 +307,7 @@ describe("SessionSidebar", () => {
 		).toBeInTheDocument();
 	});
 
-	it("shows detached reason when present", () => {
+	it("shows detached reason in tooltip", () => {
 		renderSidebar([
 			buildSession({
 				sessionId: "session-detached",
@@ -258,7 +317,23 @@ describe("SessionSidebar", () => {
 		]);
 
 		expect(
-			screen.getByText(`${i18n.t("status.error")}: gateway_disconnect`),
+			screen.getByText(
+				`${i18n.t("session.status.detached")}: gateway_disconnect`,
+			),
+		).toBeInTheDocument();
+	});
+
+	it("shows error message in tooltip", () => {
+		renderSidebar([
+			buildSession({
+				sessionId: "session-err",
+				title: "Error Session",
+				error: { message: "connection lost", code: "ERR" },
+			}),
+		]);
+
+		expect(
+			screen.getByText(`${i18n.t("session.status.error")}: connection lost`),
 		).toBeInTheDocument();
 	});
 
@@ -273,46 +348,169 @@ describe("SessionSidebar", () => {
 			}),
 		]);
 
-		await user.click(screen.getByText("Backend Toggle"));
+		// Group header includes label + count
+		await user.click(screen.getByText(/Backend Toggle/));
 		expect(screen.queryByText("Toggle Session")).not.toBeInTheDocument();
-		await user.click(screen.getByText("Backend Toggle"));
+		await user.click(screen.getByText(/Backend Toggle/));
 		expect(screen.getByText("Toggle Session")).toBeInTheDocument();
 	});
 
+	it("shows rename and archive in dropdown menu", () => {
+		renderSidebar([buildSession({ title: "My Session" })]);
+
+		expect(screen.getByText(i18n.t("common.rename"))).toBeInTheDocument();
+		expect(screen.getByText(i18n.t("common.archive"))).toBeInTheDocument();
+	});
+
+	it("triggers edit mode from dropdown rename", async () => {
+		const user = userEvent.setup();
+		renderSidebar([buildSession({ title: "My Session" })]);
+
+		await user.click(screen.getByText(i18n.t("common.rename")));
+
+		// Should now be in editing mode with an input
+		const input = screen.getByRole("textbox", { name: "Session title" });
+		expect(input).toBeInTheDocument();
+	});
+
+	it("applies active indicator to the current session", () => {
+		renderSidebar(
+			[buildSession({ sessionId: "active-1", title: "Active Session" })],
+			{ activeSessionId: "active-1" },
+		);
+
+		// The outer card div has the border-l-primary class
+		const card = screen
+			.getByText("Active Session")
+			.closest(".border-l-primary");
+		expect(card).toBeInTheDocument();
+	});
+
+	describe("Tab switching", () => {
+		it("shows sessions tab by default", () => {
+			renderSidebar([buildSession({ title: "My Session" })]);
+			expect(screen.getByText("My Session")).toBeInTheDocument();
+		});
+
+		it("switches to workspaces tab when clicked", async () => {
+			const user = userEvent.setup();
+			renderSidebar([buildSession({ title: "My Session" })]);
+
+			await user.click(screen.getByText(i18n.t("workspace.title")));
+
+			// WorkspaceList mock should be rendered
+			expect(screen.getByTestId("workspace-list")).toBeInTheDocument();
+			// Session items should not be visible
+			expect(screen.queryByText("My Session")).not.toBeInTheDocument();
+		});
+
+		it("switches back to sessions tab", async () => {
+			const user = userEvent.setup();
+			useUiStore.setState({ sidebarTab: "workspaces" });
+			renderSidebar([buildSession({ title: "My Session" })]);
+
+			await user.click(screen.getByText(i18n.t("session.title")));
+
+			expect(screen.getByText("My Session")).toBeInTheDocument();
+		});
+	});
+
 	describe("Archive All", () => {
-		it("is hidden when sessions list is empty", () => {
-			renderSidebar([]);
+		it("is hidden when group has only one session", () => {
+			renderSidebar([buildSession()]);
 			expect(
 				screen.queryByText(i18n.t("session.archiveAll")),
 			).not.toBeInTheDocument();
 		});
 
-		it("is visible when sessions exist", () => {
-			renderSidebar([buildSession()]);
+		it("is visible when group has multiple sessions", () => {
+			renderSidebar([
+				buildSession({
+					sessionId: "s1",
+					title: "Session 1",
+					backendId: "b1",
+					backendLabel: "Backend",
+				}),
+				buildSession({
+					sessionId: "s2",
+					title: "Session 2",
+					backendId: "b1",
+					backendLabel: "Backend",
+				}),
+			]);
 			expect(
 				screen.getByText(i18n.t("session.archiveAll")),
 			).toBeInTheDocument();
 		});
 
-		it("calls onArchiveAllSessions with all session IDs on confirm", async () => {
+		it("opens confirm dialog and calls onArchiveAllSessions on confirm", async () => {
 			const onArchiveAllSessions = vi.fn();
 			const user = userEvent.setup();
 			renderSidebar(
 				[
-					buildSession({ sessionId: "s1", title: "Session 1" }),
-					buildSession({ sessionId: "s2", title: "Session 2" }),
+					buildSession({
+						sessionId: "s1",
+						title: "Session 1",
+						backendId: "b1",
+						backendLabel: "Backend",
+					}),
+					buildSession({
+						sessionId: "s2",
+						title: "Session 2",
+						backendId: "b1",
+						backendLabel: "Backend",
+					}),
 				],
 				{ onArchiveAllSessions },
 			);
 
+			// Click Archive All to open dialog
+			await user.click(screen.getByText(i18n.t("session.archiveAll")));
+			// Dialog should now be open — click confirm
 			await user.click(screen.getByText(i18n.t("session.archiveAllConfirm")));
+
 			expect(onArchiveAllSessions).toHaveBeenCalledWith(["s1", "s2"]);
 		});
 
 		it("is disabled when isBulkArchiving is true", () => {
-			renderSidebar([buildSession()], { isBulkArchiving: true });
-			const button = screen.getByText(i18n.t("session.archiveAll"));
-			expect(button.closest("button")).toBeDisabled();
+			renderSidebar(
+				[
+					buildSession({
+						sessionId: "s1",
+						title: "Session 1",
+						backendId: "b1",
+						backendLabel: "Backend",
+					}),
+					buildSession({
+						sessionId: "s2",
+						title: "Session 2",
+						backendId: "b1",
+						backendLabel: "Backend",
+					}),
+				],
+				{ isBulkArchiving: true },
+			);
+			const button = screen
+				.getByText(i18n.t("session.archiveAll"))
+				.closest("button");
+			expect(button).toBeDisabled();
+		});
+	});
+
+	describe("Archive single session", () => {
+		it("opens confirm dialog via dropdown and calls onArchiveSession", async () => {
+			const onArchiveSession = vi.fn();
+			const user = userEvent.setup();
+			renderSidebar([buildSession({ sessionId: "s1", title: "My Session" })], {
+				onArchiveSession,
+			});
+
+			// Click archive in dropdown
+			await user.click(screen.getByText(i18n.t("common.archive")));
+			// Dialog should be open — click confirm
+			await user.click(screen.getByText(i18n.t("session.archiveConfirm")));
+
+			expect(onArchiveSession).toHaveBeenCalledWith("s1");
 		});
 	});
 });

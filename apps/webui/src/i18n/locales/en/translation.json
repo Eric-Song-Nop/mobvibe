@@ -340,6 +340,10 @@
 		"refreshAriaLabel": "Refresh",
 		"addMachineAriaLabel": "Add machine"
 	},
+	"workspace": {
+		"title": "Workspaces",
+		"empty": "No workspaces"
+	},
 	"commandPalette": {
 		"openCommandPalette": "Command Palette",
 		"searchPlaceholder": "Type a command or search...",

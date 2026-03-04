@@ -49,7 +49,7 @@ type UiState = {
 	draftWorktreeBranch: string;
 	draftWorktreeBaseBranch?: string;
 	selectedWorkspaceByMachine: Record<string, string>;
-	expandedMachines: Record<string, boolean>;
+	sidebarTab: "workspaces" | "sessions";
 	machineSidebarWidth: number;
 	sessionSidebarWidth: number;
 	setMobileMenuOpen: (open: boolean) => void;
@@ -69,7 +69,7 @@ type UiState = {
 	setDraftWorktreeBaseBranch: (value?: string) => void;
 	resetDraftWorktree: () => void;
 	setSelectedWorkspace: (machineId: string, cwd?: string) => void;
-	toggleMachineExpanded: (machineId: string) => void;
+	setSidebarTab: (tab: "workspaces" | "sessions") => void;
 	setMachineSidebarWidth: (width: number) => void;
 	setSessionSidebarWidth: (width: number) => void;
 };
@@ -90,7 +90,7 @@ export const useUiStore = create<UiState>((set) => ({
 	draftWorktreeBranch: "",
 	draftWorktreeBaseBranch: undefined,
 	selectedWorkspaceByMachine: {},
-	expandedMachines: {},
+	sidebarTab: "sessions",
 	machineSidebarWidth: loadStoredWidth(
 		MACHINE_SIDEBAR_WIDTH_KEY,
 		MACHINE_WIDTH_DEFAULT,
@@ -136,13 +136,7 @@ export const useUiStore = create<UiState>((set) => ({
 			}
 			return { selectedWorkspaceByMachine: next };
 		}),
-	toggleMachineExpanded: (machineId) =>
-		set((state) => ({
-			expandedMachines: {
-				...state.expandedMachines,
-				[machineId]: !state.expandedMachines[machineId],
-			},
-		})),
+	setSidebarTab: (tab) => set({ sidebarTab: tab }),
 	setMachineSidebarWidth: (width) =>
 		set(() => {
 			const next = clamp(width, MACHINE_WIDTH_MIN, MACHINE_WIDTH_MAX);
