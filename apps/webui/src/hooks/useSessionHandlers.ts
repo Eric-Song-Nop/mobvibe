@@ -183,6 +183,8 @@ export function useSessionHandlers({
 			return;
 		}
 		const title = draftTitle.trim();
+		const defaultTitle = buildSessionTitle(sessionList, t);
+		const isUserCustomTitle = title.length > 0 && title !== defaultTitle;
 		chatActions.setAppError(undefined);
 
 		// Build worktree options if enabled
@@ -199,7 +201,7 @@ export function useSessionHandlers({
 			await mutations.createSessionMutation.mutateAsync({
 				backendId: draftBackendId,
 				cwd: draftCwd,
-				title: title.length > 0 ? title : undefined,
+				title: isUserCustomTitle ? title : undefined,
 				machineId: selectedMachineId,
 				worktree,
 			});
