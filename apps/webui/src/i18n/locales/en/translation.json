@@ -54,6 +54,7 @@
 	},
 	"session": {
 		"title": "Sessions",
+		"new": "New session",
 		"newTitle": "Session {{count}}",
 		"defaultTitle": "New session",
 		"empty": "No sessions",
@@ -342,7 +343,8 @@
 	},
 	"workspace": {
 		"title": "Workspaces",
-		"empty": "No workspaces"
+		"empty": "No workspaces",
+		"new": "New workspace"
 	},
 	"commandPalette": {
 		"openCommandPalette": "Command Palette",

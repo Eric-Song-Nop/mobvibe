@@ -73,7 +73,7 @@ function getStatusTooltip(
 type SessionSidebarProps = {
 	sessions: ChatSession[];
 	activeSessionId?: string;
-	onCreateSession: () => void;
+	onCreateSession: (mode: "workspace" | "session") => void;
 	onSelectSession: (sessionId: string) => void;
 	onEditSubmit: () => void;
 	onArchiveSession: (sessionId: string) => void;
@@ -221,10 +221,18 @@ export const SessionSidebar = ({
 						{t("session.title")}
 					</button>
 					<Button
-						onClick={onCreateSession}
+						onClick={() =>
+							onCreateSession(
+								sidebarTab === "workspaces" ? "workspace" : "session",
+							)
+						}
 						size="icon-sm"
 						disabled={isCreating}
-						aria-label={t("common.new")}
+						aria-label={
+							sidebarTab === "workspaces"
+								? t("workspace.new")
+								: t("session.new")
+						}
 						className="ml-auto"
 					>
 						<HugeiconsIcon icon={Add01Icon} strokeWidth={2} />

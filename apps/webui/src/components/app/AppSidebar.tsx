@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 export type AppSidebarProps = {
 	sessions: ChatSession[];
 	activeSessionId: string | undefined;
-	onCreateSession: () => void;
+	onCreateSession: (mode: "workspace" | "session") => void;
 	onSelectSession: (sessionId: string) => void;
 	onEditSubmit: () => void;
 	onArchiveSession: (sessionId: string) => void;

@@ -54,6 +54,7 @@
 	},
 	"session": {
 		"title": "对话",
+		"new": "新建对话",
 		"newTitle": "对话 {{count}}",
 		"defaultTitle": "新对话",
 		"empty": "暂无对话",
@@ -342,7 +343,8 @@
 	},
 	"workspace": {
 		"title": "工作区",
-		"empty": "暂无工作区"
+		"empty": "暂无工作区",
+		"new": "新建工作区"
 	},
 	"commandPalette": {
 		"openCommandPalette": "命令面板",
