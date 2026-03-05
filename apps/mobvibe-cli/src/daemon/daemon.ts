@@ -10,6 +10,7 @@ import { CliCryptoService } from "../e2ee/crypto-service.js";
 import { logger } from "../lib/logger.js";
 import { WalCompactor, WalStore } from "../wal/index.js";
 import { SocketClient } from "./socket-client.js";
+import { buildForegroundSpawnArgs } from "./spawn-utils.js";
 
 type DaemonStatus = {
 	running: boolean;
@@ -144,13 +145,9 @@ export class DaemonManager {
 			`${new Date().toISOString().replace(/[:.]/g, "-")}-daemon.log`,
 		);
 
-		// Filter out --foreground if already present, then add it
-		const args = process.argv
-			.slice(1)
-			.filter((arg) => arg !== "--foreground" && arg !== "-f");
-		args.push("--foreground");
+		const args = buildForegroundSpawnArgs(process.argv);
 
-		const child = spawn(process.argv[0], args, {
+		const child = spawn(process.execPath, args, {
 			detached: true,
 			stdio: ["ignore", "pipe", "pipe"],
 			env: {
