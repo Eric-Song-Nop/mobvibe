@@ -77,10 +77,10 @@ export function AppHeader({
 				</Button>
 				<Button
 					variant="outline"
-					size="icon"
-					className="md:hidden"
+					size="icon-sm"
 					onClick={() => onOpenCommandPalette?.()}
 					aria-label={t("commandPalette.openCommandPalette")}
+					title={t("commandPalette.openCommandPalette")}
 				>
 					<HugeiconsIcon
 						icon={Search01Icon}

@@ -373,15 +373,6 @@ function MainApp() {
 				handler: () => uiActions.setCommandPaletteOpen(true),
 			},
 			{
-				key: "p",
-				mod: true,
-				handler: () => {
-					uiActions.setCommandPaletteOpen(true);
-					// Mode will be set to "@" by CommandPalette when it detects this
-					// via initialMode prop
-				},
-			},
-			{
 				key: "f",
 				mod: true,
 				handler: () => {
