@@ -133,11 +133,13 @@ vi.mock("@/lib/api", async (importOriginal) => {
 });
 
 // Mock react-virtual
+const mockMeasure = vi.fn();
 vi.mock("@tanstack/react-virtual", () => ({
 	useVirtualizer: () => ({
 		getVirtualItems: () => [],
 		getTotalSize: () => 0,
 		scrollToIndex: vi.fn(),
+		measure: mockMeasure,
 	}),
 }));
 
@@ -382,6 +384,28 @@ describe("CommandPalette", () => {
 			await user.type(input, "{Backspace}");
 
 			expect(input).toHaveValue("");
+		});
+	});
+
+	describe("Initial Render Fix", () => {
+		it("calls virtualizer.measure when palette opens", async () => {
+			const { rerender } = renderCommandPalette({ open: false });
+
+			// Ensure measure was not called initially when closed
+			expect(mockMeasure).not.toHaveBeenCalled();
+
+			// Re-render with open=true
+			rerender(
+				<QueryClientProvider client={queryClient}>
+					<CommandPalette open={true} onOpenChange={mockOnOpenChange} />
+				</QueryClientProvider>,
+			);
+
+			// Wait for requestAnimationFrame
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+
+			// measure should have been called to fix empty initial render
+			expect(mockMeasure).toHaveBeenCalled();
 		});
 	});
 });
