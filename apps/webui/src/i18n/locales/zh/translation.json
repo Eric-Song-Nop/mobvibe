@@ -351,10 +351,18 @@
 		"openCommandPalette": "命令面板",
 		"searchPlaceholder": "输入命令或搜索...",
 		"newSession": "新建对话",
+		"archiveSession": "归档会话",
+		"clearChat": "清空聊天记录",
+		"cancelGeneration": "取消生成",
 		"openFileExplorer": "打开文件浏览器",
 		"openChanges": "打开变更视图",
 		"searchInChat": "搜索聊天记录",
 		"searchFiles": "搜索文件",
+		"toggleSidebar": "切换侧边栏",
+		"openSettings": "打开设置",
+		"signOut": "退出登录",
+		"toggleTheme": "切换主题",
+		"switchLanguage": "切换语言",
 		"noResults": "没有匹配的命令"
 	},
 	"chatSearch": {

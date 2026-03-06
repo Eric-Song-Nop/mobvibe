@@ -351,10 +351,18 @@
 		"openCommandPalette": "Command Palette",
 		"searchPlaceholder": "Type a command or search...",
 		"newSession": "New Session",
+		"archiveSession": "Archive Session",
+		"clearChat": "Clear Chat Messages",
+		"cancelGeneration": "Cancel Generation",
 		"openFileExplorer": "Open File Explorer",
 		"openChanges": "Open Changes",
 		"searchInChat": "Search in Chat",
 		"searchFiles": "Search Files",
+		"toggleSidebar": "Toggle Sidebar",
+		"openSettings": "Open Settings",
+		"signOut": "Sign Out",
+		"toggleTheme": "Toggle Theme",
+		"switchLanguage": "Switch Language",
 		"noResults": "No matching commands"
 	},
 	"chatSearch": {

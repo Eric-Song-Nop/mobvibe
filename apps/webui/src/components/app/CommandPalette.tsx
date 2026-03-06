@@ -1,19 +1,32 @@
 import {
 	Add01Icon,
+	ArchiveIcon,
 	Cancel01Icon,
+	CancelCircleIcon,
+	Delete01Icon,
 	File01Icon,
 	FolderOpenIcon,
 	GitCompareIcon,
+	Logout01Icon,
+	Moon02Icon,
+	PaintBoardIcon,
 	Search01Icon,
+	Settings02Icon,
+	Sun02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
+import { useShallow } from "zustand/react/shallow";
 import { GitStatusIndicator } from "@/components/app/git-status-indicator";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { ThemeProvider, useTheme } from "@/components/theme-provider";
 import { AlertDialog, AlertDialogContent } from "@/components/ui/alert-dialog";
 import { fetchSessionFsResources, fetchSessionGitStatus } from "@/lib/api";
+import { useChatStore } from "@/lib/chat-store";
 import { createFallbackError } from "@/lib/error-utils";
 import { FuzzyHighlight, fuzzySearch } from "@/lib/fuzzy-search";
 import { useUiStore } from "@/lib/ui-store";
@@ -22,17 +35,17 @@ import { cn } from "@/lib/utils";
 export type CommandPaletteProps = {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	onOpenFileExplorer?: () => void;
-	onCreateSession?: () => void;
-	onOpenChatSearch?: () => void;
-	activeSessionId?: string;
 };
+
+type CommandGroup = "session" | "app" | "preferences";
 
 type CommandItem = {
 	id: string;
 	name: string;
 	shortcut?: string;
 	icon: typeof Search01Icon;
+	group: CommandGroup;
+	enabled: boolean;
 	action: () => void;
 };
 
@@ -43,19 +56,41 @@ type FileSearchResult = {
 	gitStatus?: string;
 };
 
-export function CommandPalette({
-	open,
-	onOpenChange,
-	onOpenFileExplorer,
-	onCreateSession,
-	onOpenChatSearch,
-	activeSessionId,
-}: CommandPaletteProps) {
-	const { t } = useTranslation();
+function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
+	const { t, i18n } = useTranslation();
+	const navigate = useNavigate();
+	const { theme, setTheme } = useTheme();
+	const { user, signOut } = useAuth();
 	const [query, setQuery] = useState("");
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const inputRef = useRef<HTMLInputElement>(null);
 	const listRef = useRef<HTMLDivElement>(null);
+
+	// Get state from stores
+	const { sessions, activeSessionId } = useChatStore(
+		useShallow((s) => ({
+			sessions: s.sessions,
+			activeSessionId: s.activeSessionId,
+		})),
+	);
+
+	const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
+	const isGenerating = activeSession?.sending ?? false;
+	const hasMessages = (activeSession?.messages?.length ?? 0) > 0;
+
+	const {
+		setFileExplorerOpen,
+		setChatSearchOpen,
+		setCreateDialogOpen,
+		setMobileMenuOpen,
+	} = useUiStore(
+		useShallow((s) => ({
+			setFileExplorerOpen: s.setFileExplorerOpen,
+			setChatSearchOpen: s.setChatSearchOpen,
+			setCreateDialogOpen: s.setCreateDialogOpen,
+			setMobileMenuOpen: s.setMobileMenuOpen,
+		})),
+	);
 
 	const isFileMode = query.startsWith("@");
 	const searchQuery = isFileMode ? query.slice(1) : query;
@@ -63,24 +98,72 @@ export function CommandPalette({
 	// Built-in commands
 	const builtinCommands = useMemo((): CommandItem[] => {
 		const commands: CommandItem[] = [
+			// Session group
 			{
 				id: "new-session",
 				name: t("commandPalette.newSession"),
 				shortcut: "Mod+N",
 				icon: Add01Icon,
+				group: "session",
+				enabled: true,
 				action: () => {
 					onOpenChange(false);
-					onCreateSession?.();
+					setCreateDialogOpen(true);
 				},
 			},
+			{
+				id: "archive-session",
+				name: t("commandPalette.archiveSession"),
+				icon: ArchiveIcon,
+				group: "session",
+				enabled: !!activeSessionId,
+				action: () => {
+					onOpenChange(false);
+					// Archive is handled by SessionSidebar - user can use the sidebar to archive
+					// This command navigates focus to the sidebar
+					if (activeSessionId) {
+						useChatStore.getState().setActiveSessionId(activeSessionId);
+					}
+				},
+			},
+			{
+				id: "clear-chat",
+				name: t("commandPalette.clearChat"),
+				icon: Delete01Icon,
+				group: "session",
+				enabled: !!activeSessionId && hasMessages,
+				action: () => {
+					onOpenChange(false);
+					if (activeSessionId) {
+						useChatStore.getState().clearSessionMessages(activeSessionId);
+					}
+				},
+			},
+			{
+				id: "cancel-generation",
+				name: t("commandPalette.cancelGeneration"),
+				icon: CancelCircleIcon,
+				group: "session",
+				enabled: isGenerating,
+				action: () => {
+					onOpenChange(false);
+					// Cancel is handled by ChatFooter, we'll trigger it via store
+					if (activeSessionId) {
+						useChatStore.getState().setCanceling(activeSessionId, true);
+					}
+				},
+			},
+			// App group
 			{
 				id: "file-explorer",
 				name: t("commandPalette.openFileExplorer"),
 				shortcut: "Mod+B",
 				icon: FolderOpenIcon,
+				group: "app",
+				enabled: !!activeSessionId,
 				action: () => {
 					onOpenChange(false);
-					onOpenFileExplorer?.();
+					setFileExplorerOpen(true);
 				},
 			},
 			{
@@ -88,9 +171,11 @@ export function CommandPalette({
 				name: t("commandPalette.searchInChat"),
 				shortcut: "Mod+F",
 				icon: Search01Icon,
+				group: "app",
+				enabled: !!activeSessionId,
 				action: () => {
 					onOpenChange(false);
-					onOpenChatSearch?.();
+					setChatSearchOpen(true);
 				},
 			},
 			{
@@ -98,20 +183,98 @@ export function CommandPalette({
 				name: t("commandPalette.searchFiles"),
 				shortcut: "Mod+P",
 				icon: File01Icon,
+				group: "app",
+				enabled: !!activeSessionId,
 				action: () => setQuery("@"),
 			},
 			{
 				id: "open-changes",
 				name: t("commandPalette.openChanges"),
 				icon: GitCompareIcon,
+				group: "app",
+				enabled: !!activeSessionId,
 				action: () => {
 					onOpenChange(false);
-					onOpenFileExplorer?.();
+					setFileExplorerOpen(true);
+				},
+			},
+			{
+				id: "toggle-sidebar",
+				name: t("commandPalette.toggleSidebar"),
+				icon: FolderOpenIcon,
+				group: "app",
+				enabled: true,
+				action: () => {
+					onOpenChange(false);
+					setMobileMenuOpen(true);
+				},
+			},
+			{
+				id: "open-settings",
+				name: t("commandPalette.openSettings"),
+				icon: Settings02Icon,
+				group: "app",
+				enabled: true,
+				action: () => {
+					onOpenChange(false);
+					navigate("/settings");
+				},
+			},
+			{
+				id: "sign-out",
+				name: t("commandPalette.signOut"),
+				icon: Logout01Icon,
+				group: "app",
+				enabled: !!user,
+				action: () => {
+					onOpenChange(false);
+					signOut();
+				},
+			},
+			// Preferences group
+			{
+				id: "toggle-theme",
+				name: t("commandPalette.toggleTheme"),
+				icon: theme === "dark" ? Sun02Icon : Moon02Icon,
+				group: "preferences",
+				enabled: true,
+				action: () => {
+					onOpenChange(false);
+					const nextTheme = theme === "dark" ? "light" : "dark";
+					setTheme(nextTheme);
+				},
+			},
+			{
+				id: "switch-language",
+				name: t("commandPalette.switchLanguage"),
+				icon: PaintBoardIcon,
+				group: "preferences",
+				enabled: true,
+				action: () => {
+					onOpenChange(false);
+					const nextLang = i18n.language === "zh" ? "en" : "zh";
+					i18n.changeLanguage(nextLang);
 				},
 			},
 		];
 		return commands;
-	}, [t, onOpenChange, onCreateSession, onOpenFileExplorer, onOpenChatSearch]);
+	}, [
+		t,
+		i18n,
+		onOpenChange,
+		setFileExplorerOpen,
+		setChatSearchOpen,
+		setCreateDialogOpen,
+		setMobileMenuOpen,
+		activeSessionId,
+		hasMessages,
+		isGenerating,
+		navigate,
+		theme,
+		setTheme,
+		user,
+		signOut,
+	]);
 
 	// Filter commands by query
 	const filteredCommands = useMemo(() => {
@@ -222,7 +385,7 @@ export function CommandPalette({
 				const result = fileResults[index];
 				if (result) {
 					onOpenChange(false);
-					useUiStore.getState().setFileExplorerOpen(true);
+					setFileExplorerOpen(true);
 					useUiStore.getState().setFilePreviewPath(result.item.path);
 				}
 			} else {
@@ -233,7 +396,13 @@ export function CommandPalette({
 				}
 			}
 		},
-		[isFileMode, fileResults, filteredCommands, onOpenChange],
+		[
+			isFileMode,
+			fileResults,
+			filteredCommands,
+			onOpenChange,
+			setFileExplorerOpen,
+		],
 	);
 
 	// Keyboard navigation
@@ -422,12 +591,14 @@ export function CommandPalette({
 											isSelected
 												? "bg-accent text-accent-foreground"
 												: "hover:bg-muted",
+											!command.enabled && "opacity-50 cursor-not-allowed",
 										)}
 										style={{
 											transform: `translateY(${virtualItem.start}px)`,
 										}}
-										onClick={() => executeItem(index)}
+										onClick={() => command.enabled && executeItem(index)}
 										onMouseEnter={() => setSelectedIndex(index)}
+										disabled={!command.enabled}
 									>
 										<HugeiconsIcon
 											icon={command.icon}
@@ -455,5 +626,14 @@ export function CommandPalette({
 				</div>
 			</AlertDialogContent>
 		</AlertDialog>
+	);
+}
+
+// Wrap with ThemeProvider to ensure useTheme works
+export function CommandPalette(props: CommandPaletteProps) {
+	return (
+		<ThemeProvider>
+			<CommandPaletteContent {...props} />
+		</ThemeProvider>
 	);
 }

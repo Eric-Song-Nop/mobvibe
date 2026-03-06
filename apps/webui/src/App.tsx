@@ -565,16 +565,10 @@ function MainApp() {
 					initialFilePath={filePreviewPath}
 				/>
 				<Suspense fallback={null}>
-					{commandPaletteOpen ? (
-						<CommandPalette
-							open={commandPaletteOpen}
-							onOpenChange={uiActions.setCommandPaletteOpen}
-							onOpenFileExplorer={() => uiActions.setFileExplorerOpen(true)}
-							onCreateSession={handleOpenCreateDialog}
-							onOpenChatSearch={() => uiActions.setChatSearchOpen(true)}
-							activeSessionId={activeSessionId}
-						/>
-					) : null}
+					<CommandPalette
+						open={commandPaletteOpen}
+						onOpenChange={uiActions.setCommandPaletteOpen}
+					/>
 				</Suspense>
 
 				<MachinesSidebar />
