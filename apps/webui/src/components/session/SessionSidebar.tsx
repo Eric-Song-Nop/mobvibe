@@ -2,6 +2,7 @@ import {
 	Add01Icon,
 	ArrowDown01Icon,
 	ArrowRight01Icon,
+	Loading03Icon,
 	MoreHorizontalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -53,6 +54,7 @@ const statusDotClass: Record<SessionDisplayPhase, string> = {
 	error: "bg-red-500",
 	detached: "bg-yellow-500",
 	history: "bg-muted-foreground/40",
+	creating: "bg-purple-500 animate-pulse",
 };
 
 /** Return a human-readable tooltip for statuses that carry extra info */
@@ -227,7 +229,6 @@ export const SessionSidebar = ({
 							)
 						}
 						size="icon-sm"
-						disabled={isCreating}
 						aria-label={
 							sidebarTab === "workspaces"
 								? t("workspace.new")
@@ -235,7 +236,11 @@ export const SessionSidebar = ({
 						}
 						className="ml-auto"
 					>
-						<HugeiconsIcon icon={Add01Icon} strokeWidth={2} />
+						<HugeiconsIcon
+							icon={isCreating ? Loading03Icon : Add01Icon}
+							strokeWidth={2}
+							className={cn(isCreating && "animate-spin")}
+						/>
 					</Button>
 				</div>
 
@@ -442,6 +447,8 @@ const SessionListItem = ({
 		}
 	};
 
+	const isCreating = displayStatus === "creating";
+
 	return (
 		<div
 			className={cn(
@@ -449,6 +456,7 @@ const SessionListItem = ({
 				isActive
 					? "bg-accent border-l-primary border-l-2"
 					: "hover:bg-muted/50",
+				isCreating && "bg-muted/30",
 			)}
 		>
 			{/* Status dot */}
@@ -473,7 +481,8 @@ const SessionListItem = ({
 			<button
 				type="button"
 				onClick={handleSelect}
-				className="flex min-w-0 flex-1 flex-col gap-0.5 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
+				disabled={isCreating}
+				className="flex min-w-0 flex-1 flex-col gap-0.5 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed"
 			>
 				{/* Title row */}
 				{isEditing ? (
@@ -514,7 +523,7 @@ const SessionListItem = ({
 			</button>
 
 			{/* Three-dot menu — visible on mobile, hover on desktop */}
-			{!isEditing ? (
+			{!isEditing && !isCreating ? (
 				<DropdownMenu>
 					<DropdownMenuTrigger asChild>
 						<Button

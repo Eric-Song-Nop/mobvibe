@@ -5,7 +5,8 @@ export type SessionDisplayPhase =
 	| "loading"
 	| "history"
 	| "error"
-	| "detached";
+	| "detached"
+	| "creating";
 
 export type SessionMutationsSnapshot = {
 	loadSessionPending: boolean;
@@ -18,6 +19,11 @@ export function getSessionDisplayStatus(
 	session: ChatSession,
 	mutations: SessionMutationsSnapshot,
 ): SessionDisplayPhase {
+	// Creating status has highest priority
+	if (session.isCreating) {
+		return "creating";
+	}
+
 	if (session.error) {
 		return "error";
 	}

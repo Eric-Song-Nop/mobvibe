@@ -100,7 +100,8 @@
 			"loading": "Loading",
 			"history": "History",
 			"error": "Error",
-			"detached": "Detached"
+			"detached": "Detached",
+			"creating": "Creating"
 		}
 	},
 	"errors": {

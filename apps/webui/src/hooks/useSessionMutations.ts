@@ -49,6 +49,8 @@ type SessionMetadata = Partial<
 		| "availableCommands"
 		| "worktreeSourceCwd"
 		| "worktreeBranch"
+		| "isCreating"
+		| "machineId"
 	>
 >;
 
@@ -202,7 +204,33 @@ export function useSessionMutations(store: ChatStoreActions) {
 	const { t } = useTranslation();
 	const createSessionMutation = useMutation({
 		mutationFn: createSession,
-		onSuccess: (data) => {
+		onMutate: async (variables) => {
+			if (!variables) return {};
+
+			// Generate optimistic session ID
+			const optimisticSessionId = `creating-${Date.now()}`;
+
+			// Create optimistic session immediately
+			store.createLocalSession(optimisticSessionId, {
+				title: variables.title || t("session.creating"),
+				backendId: variables.backendId,
+				cwd: variables.cwd,
+				isCreating: true,
+				machineId: variables.machineId,
+			});
+
+			// Activate the optimistic session
+			store.setActiveSessionId(optimisticSessionId);
+
+			return { optimisticSessionId };
+		},
+		onSuccess: (data, _variables, context) => {
+			// Remove optimistic session
+			if (context?.optimisticSessionId) {
+				store.removeSession(context.optimisticSessionId);
+			}
+
+			// Create real session
 			store.createLocalSession(data.sessionId, {
 				title: data.title,
 				backendId: data.backendId,
@@ -218,9 +246,12 @@ export function useSessionMutations(store: ChatStoreActions) {
 				availableCommands: data.availableCommands,
 				worktreeSourceCwd: data.worktreeSourceCwd,
 				worktreeBranch: data.worktreeBranch,
+				machineId: data.machineId,
 			});
 
+			// Switch to real session
 			store.setActiveSessionId(data.sessionId);
+
 			// Use original repo cwd for lastCreatedCwd so reopening the dialog
 			// pre-fills the source repo path, not the worktree path
 			const lastCwd = data.worktreeSourceCwd ?? data.cwd;
@@ -230,7 +261,15 @@ export function useSessionMutations(store: ChatStoreActions) {
 			store.setAppError(undefined);
 		},
 
-		onError: (mutationError: unknown) => {
+		onError: (mutationError: unknown, _variables, context) => {
+			// Mark optimistic session as failed
+			if (context?.optimisticSessionId) {
+				store.setError(
+					context.optimisticSessionId,
+					createFallbackError(t("errors.createSessionFailed"), "service"),
+				);
+			}
+
 			store.setAppError(
 				normalizeError(
 					mutationError,
