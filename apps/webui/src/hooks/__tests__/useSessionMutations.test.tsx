@@ -364,6 +364,7 @@ describe("useSessionMutations", () => {
 			// Both optimistic and real sessions should be created
 			expect(mockStore.createLocalSession).toHaveBeenCalledTimes(2);
 			expect(mockStore.setActiveSessionId).toHaveBeenCalledTimes(2);
+			expect(apiCallStarted).toBe(true);
 
 			// Verify first activation is optimistic session
 			const calls = vi.mocked(mockStore.setActiveSessionId).mock.calls;
