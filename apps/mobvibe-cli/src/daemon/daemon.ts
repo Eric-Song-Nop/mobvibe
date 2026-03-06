@@ -147,9 +147,12 @@ export class DaemonManager {
 
 		const args = buildForegroundSpawnArgs(process.argv);
 
+		// Open log file for direct stdio redirection (no pipe, parent can exit immediately)
+		const logFd = await fs.open(logFile, "a");
+
 		const child = spawn(process.execPath, args, {
 			detached: true,
-			stdio: ["ignore", "pipe", "pipe"],
+			stdio: ["ignore", logFd.fd, logFd.fd],
 			env: {
 				...process.env,
 				MOBVIBE_GATEWAY_URL: this.config.gatewayUrl,
@@ -161,27 +164,10 @@ export class DaemonManager {
 			throw new Error("Failed to spawn daemon process");
 		}
 
-		// Create log file stream before writing PID
-		const logStream = await fs.open(logFile, "a");
-		const fileHandle = logStream;
+		// Close parent's fd reference (child has duplicated it)
+		await logFd.close();
 
-		child.stdout?.on("data", (data: Buffer) => {
-			fileHandle.write(`[stdout] ${data.toString()}`).catch(() => {});
-		});
-
-		child.stderr?.on("data", (data: Buffer) => {
-			fileHandle.write(`[stderr] ${data.toString()}`).catch(() => {});
-		});
-
-		// Handle child exit to clean up
-		child.on("exit", (code, signal) => {
-			fileHandle
-				.write(`[exit] Process exited with code ${code}, signal ${signal}\n`)
-				.catch(() => {});
-			fileHandle.close().catch(() => {});
-		});
-
-		// Detach from parent
+		// Detach from parent - no event listeners needed since stdio is directly redirected
 		// Note: The child process writes its own PID file in runForeground()
 		child.unref();
 
