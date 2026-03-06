@@ -95,13 +95,9 @@ vi.mock("@/components/ui/alert-dialog", () => ({
 			{children}
 		</button>
 	),
-	AlertDialogTrigger: ({
-		children,
-		asChild,
-	}: {
-		children: React.ReactNode;
-		asChild?: boolean;
-	}) => <div data-testid="alert-dialog-trigger">{children}</div>,
+	AlertDialogTrigger: ({ children }: { children: React.ReactNode }) => (
+		<div data-testid="alert-dialog-trigger">{children}</div>
+	),
 }));
 
 // Mock Badge
@@ -246,7 +242,9 @@ describe("AppHeader", () => {
 		});
 
 		it("shows plan indicator when plan is provided", () => {
-			renderAppHeader({ plan: [{ name: "test-step" }] });
+			renderAppHeader({
+				plan: [{ content: "test-step", priority: "medium", status: "pending" }],
+			});
 			expect(screen.getByTestId("plan-indicator")).toBeInTheDocument();
 		});
 
@@ -273,7 +271,12 @@ describe("AppHeader", () => {
 		});
 
 		it("displays stream error when provided", () => {
-			const streamError = { message: "Connection lost", code: "ERR" };
+			const streamError = {
+				message: "Connection lost",
+				code: "STREAM_DISCONNECTED" as const,
+				retryable: true,
+				scope: "stream" as const,
+			};
 			renderAppHeader({ streamError });
 			expect(screen.getByText("Connection lost")).toBeInTheDocument();
 		});
