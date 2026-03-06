@@ -378,14 +378,14 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 		}
 	}, [open]);
 
-	// Force virtualizer to remeasure when palette opens (fixes empty initial render)
+	// File mode keeps virtualization for large result sets
 	useEffect(() => {
-		if (open && listRef.current) {
+		if (open && isFileMode && listRef.current) {
 			requestAnimationFrame(() => {
 				virtualizer.measure();
 			});
 		}
-	}, [open, virtualizer]);
+	}, [open, isFileMode, virtualizer]);
 
 	// Execute selected item
 	const executeItem = useCallback(
@@ -451,10 +451,10 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 
 	// Scroll selected item into view
 	useEffect(() => {
-		if (totalItems > 0) {
+		if (isFileMode && totalItems > 0) {
 			virtualizer.scrollToIndex(selectedIndex, { align: "auto" });
 		}
-	}, [selectedIndex, totalItems, virtualizer]);
+	}, [isFileMode, selectedIndex, totalItems, virtualizer]);
 
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -519,7 +519,7 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 						<div className="text-muted-foreground flex items-center justify-center px-4 py-8 text-sm">
 							{t("commandPalette.noResults")}
 						</div>
-					) : (
+					) : isFileMode ? (
 						<div
 							style={{
 								height: `${virtualizer.getTotalSize()}px`,
@@ -529,66 +529,13 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 							{virtualizer.getVirtualItems().map((virtualItem) => {
 								const index = virtualItem.index;
 								const isSelected = index === selectedIndex;
-
-								if (isFileMode) {
-									const result = fileResults[index];
-									if (!result) return null;
-									const { item, highlightRanges } = result;
-									return (
-										<button
-											key={item.relativePath}
-											id={`command-palette-item-${index}`}
-											type="button"
-											role="option"
-											aria-selected={isSelected}
-											ref={virtualizer.measureElement}
-											data-index={index}
-											className={cn(
-												"absolute top-0 left-0 flex min-h-12 w-full items-center gap-3 px-4 py-2 text-left text-sm",
-												isSelected
-													? "bg-accent text-accent-foreground"
-													: "hover:bg-muted",
-											)}
-											style={{
-												transform: `translateY(${virtualItem.start}px)`,
-											}}
-											onClick={() => executeItem(index)}
-											onMouseEnter={() => setSelectedIndex(index)}
-										>
-											<HugeiconsIcon
-												icon={File01Icon}
-												strokeWidth={2}
-												className="text-muted-foreground h-4 w-4 shrink-0"
-												aria-hidden="true"
-											/>
-											<div className="min-w-0 flex-1">
-												<FuzzyHighlight
-													text={item.relativePath}
-													ranges={highlightRanges}
-													className="truncate block text-sm"
-												/>
-											</div>
-											{item.gitStatus ? (
-												<GitStatusIndicator
-													status={
-														item.gitStatus as import("@/lib/api").GitFileStatus
-													}
-												/>
-											) : null}
-										</button>
-									);
-								}
-
-								const result = filteredCommands[index];
+								const result = fileResults[index];
 								if (!result) return null;
-								const cmd = "item" in result ? result.item : result;
-								const ranges =
-									"highlightRanges" in result ? result.highlightRanges : [];
-								const command = cmd as CommandItem;
+								const { item, highlightRanges } = result;
 
 								return (
 									<button
-										key={command.id}
+										key={item.relativePath}
 										id={`command-palette-item-${index}`}
 										type="button"
 										role="option"
@@ -600,37 +547,84 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 											isSelected
 												? "bg-accent text-accent-foreground"
 												: "hover:bg-muted",
-											!command.enabled && "opacity-50 cursor-not-allowed",
 										)}
 										style={{
 											transform: `translateY(${virtualItem.start}px)`,
 										}}
-										onClick={() => command.enabled && executeItem(index)}
+										onClick={() => executeItem(index)}
 										onMouseEnter={() => setSelectedIndex(index)}
-										disabled={!command.enabled}
 									>
 										<HugeiconsIcon
-											icon={command.icon}
+											icon={File01Icon}
 											strokeWidth={2}
 											className="text-muted-foreground h-4 w-4 shrink-0"
 											aria-hidden="true"
 										/>
 										<div className="min-w-0 flex-1">
 											<FuzzyHighlight
-												text={command.name}
-												ranges={ranges}
-												className="text-sm"
+												text={item.relativePath}
+												ranges={highlightRanges}
+												className="truncate block text-sm"
 											/>
 										</div>
-										{command.shortcut ? (
-											<span className="text-muted-foreground shrink-0 text-xs">
-												{command.shortcut}
-											</span>
+										{item.gitStatus ? (
+											<GitStatusIndicator
+												status={
+													item.gitStatus as import("@/lib/api").GitFileStatus
+												}
+											/>
 										) : null}
 									</button>
 								);
 							})}
 						</div>
+					) : (
+						filteredCommands.map((result, index) => {
+							const isSelected = index === selectedIndex;
+							const cmd = "item" in result ? result.item : result;
+							const ranges =
+								"highlightRanges" in result ? result.highlightRanges : [];
+							const command = cmd as CommandItem;
+
+							return (
+								<button
+									key={command.id}
+									id={`command-palette-item-${index}`}
+									type="button"
+									role="option"
+									aria-selected={isSelected}
+									className={cn(
+										"flex min-h-12 w-full items-center gap-3 px-4 py-2 text-left text-sm",
+										isSelected
+											? "bg-accent text-accent-foreground"
+											: "hover:bg-muted",
+										!command.enabled && "opacity-50 cursor-not-allowed",
+									)}
+									onClick={() => command.enabled && executeItem(index)}
+									onMouseEnter={() => setSelectedIndex(index)}
+									disabled={!command.enabled}
+								>
+									<HugeiconsIcon
+										icon={command.icon}
+										strokeWidth={2}
+										className="text-muted-foreground h-4 w-4 shrink-0"
+										aria-hidden="true"
+									/>
+									<div className="min-w-0 flex-1">
+										<FuzzyHighlight
+											text={command.name}
+											ranges={ranges}
+											className="text-sm"
+										/>
+									</div>
+									{command.shortcut ? (
+										<span className="text-muted-foreground shrink-0 text-xs">
+											{command.shortcut}
+										</span>
+									) : null}
+								</button>
+							);
+						})
 					)}
 				</div>
 			</AlertDialogContent>
