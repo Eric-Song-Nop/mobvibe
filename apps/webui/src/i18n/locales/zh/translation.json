@@ -100,7 +100,8 @@
 			"loading": "加载中",
 			"history": "历史",
 			"error": "错误",
-			"detached": "已断开"
+			"detached": "已断开",
+			"creating": "创建中"
 		}
 	},
 	"errors": {

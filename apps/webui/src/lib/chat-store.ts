@@ -146,6 +146,8 @@ export type ChatSession = {
 		| "gateway_disconnect"
 		| "unknown";
 	isLoading?: boolean;
+	/** Indicates this session is being created optimistically (before server confirmation) */
+	isCreating?: boolean;
 	/** Usage tracking from ACP agent */
 	usage?: {
 		used: number;

@@ -104,7 +104,7 @@ describe("useSessionMutations", () => {
 	});
 
 	describe("createSessionMutation", () => {
-		it("should create session successfully", async () => {
+		it("should create session successfully with optimistic UI", async () => {
 			const mockSession: apiModule.CreateSessionResponse = {
 				sessionId: "new-session",
 				title: "New Session",
@@ -134,7 +134,13 @@ describe("useSessionMutations", () => {
 				title: "New Session",
 			});
 
-			expect(mockStore.createLocalSession).toHaveBeenCalledWith("new-session", {
+			// Should be called twice: first for optimistic session, then for real session
+			expect(mockStore.createLocalSession).toHaveBeenCalledTimes(2);
+
+			// Check the second call (real session)
+			const realCall = vi.mocked(mockStore.createLocalSession).mock.calls[1];
+			expect(realCall[0]).toBe("new-session");
+			expect(realCall[1]).toMatchObject({
 				title: "New Session",
 				backendId: "backend-1",
 				backendLabel: "Backend 1",
@@ -149,7 +155,14 @@ describe("useSessionMutations", () => {
 				availableCommands: mockSession.availableCommands,
 			});
 
-			expect(mockStore.setActiveSessionId).toHaveBeenCalledWith("new-session");
+			// Optimistic session should be removed
+			expect(mockStore.removeSession).toHaveBeenCalled();
+
+			// Should activate both optimistic and real sessions
+			expect(mockStore.setActiveSessionId).toHaveBeenCalledTimes(2);
+			expect(mockStore.setActiveSessionId).toHaveBeenLastCalledWith(
+				"new-session",
+			);
 			expect(mockStore.setLastCreatedCwd).toHaveBeenCalledWith(
 				"machine-1",
 				mockSession.cwd,
@@ -177,6 +190,185 @@ describe("useSessionMutations", () => {
 			expect(mockStore.setAppError).toHaveBeenCalled();
 			const errorCall = vi.mocked(mockStore.setAppError).mock.calls[0];
 			expect(errorCall[0]?.message).toBe("Failed to create session");
+		});
+
+		it("should create optimistic session with correct properties", async () => {
+			const mockSession: apiModule.CreateSessionResponse = {
+				sessionId: "real-session",
+				title: "Real Session",
+				backendId: "backend-1",
+				backendLabel: "Backend 1",
+				createdAt: "2025-01-01T00:00:00Z",
+				updatedAt: "2025-01-01T00:00:00Z",
+				cwd: "/home/user/project",
+				agentName: "Agent",
+				modelId: "model-1",
+				modelName: "Model 1",
+				modeId: "mode-1",
+				modeName: "Mode 1",
+				availableModes: [],
+				availableModels: [],
+				availableCommands: [],
+				machineId: "machine-1",
+			};
+			vi.mocked(apiModule.createSession).mockResolvedValue(mockSession);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.createSessionMutation.mutateAsync({
+				backendId: "backend-1",
+				title: "Custom Title",
+				cwd: "/custom/path",
+				machineId: "machine-2",
+			});
+
+			// Check optimistic session was created first
+			const optimisticCall = vi.mocked(mockStore.createLocalSession).mock
+				.calls[0];
+			expect(optimisticCall[0]).toMatch(/^creating-\d+$/);
+			expect(optimisticCall[1]).toMatchObject({
+				title: "Custom Title",
+				backendId: "backend-1",
+				cwd: "/custom/path",
+				isCreating: true,
+				machineId: "machine-2",
+			});
+		});
+
+		it("should handle concurrent session creation", async () => {
+			let sessionCounter = 0;
+			vi.mocked(apiModule.createSession).mockImplementation(async () => {
+				sessionCounter++;
+				return {
+					sessionId: `session-${sessionCounter}`,
+					title: `Session ${sessionCounter}`,
+					backendId: "backend-1",
+					backendLabel: "Backend 1",
+					createdAt: "2025-01-01T00:00:00Z",
+					updatedAt: "2025-01-01T00:00:00Z",
+					cwd: "/home/user/project",
+					machineId: "machine-1",
+				};
+			});
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			// Create two sessions concurrently
+			await Promise.all([
+				result.current.createSessionMutation.mutateAsync({
+					backendId: "backend-1",
+					title: "Session 1",
+				}),
+				result.current.createSessionMutation.mutateAsync({
+					backendId: "backend-1",
+					title: "Session 2",
+				}),
+			]);
+
+			// Should have 4 calls: 2 optimistic + 2 real
+			expect(mockStore.createLocalSession).toHaveBeenCalledTimes(4);
+			expect(mockStore.removeSession).toHaveBeenCalledTimes(2);
+		});
+
+		it("should mark optimistic session with error on failure", async () => {
+			vi.mocked(apiModule.createSession).mockRejectedValue(
+				new Error("Network error"),
+			);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			try {
+				await result.current.createSessionMutation.mutateAsync({
+					backendId: "backend-1",
+					title: "Failed Session",
+				});
+			} catch {
+				// Expected error
+			}
+
+			// Optimistic session should be marked with error
+			expect(mockStore.setError).toHaveBeenCalled();
+			const errorCall = vi.mocked(mockStore.setError).mock.calls[0];
+			expect(errorCall[0]).toMatch(/^creating-\d+$/);
+			// Should have error with proper scope
+			expect(errorCall[1]).toMatchObject({
+				code: "INTERNAL_ERROR",
+				scope: "service",
+				retryable: true,
+			});
+			expect(errorCall[1]?.message).toBeTruthy();
+		});
+
+		it("should use default title when no title provided", async () => {
+			const mockSession: apiModule.CreateSessionResponse = {
+				sessionId: "session-1",
+				title: "Session 1",
+				backendId: "backend-1",
+				backendLabel: "Backend 1",
+				createdAt: "2025-01-01T00:00:00Z",
+				updatedAt: "2025-01-01T00:00:00Z",
+				cwd: "/home/user/project",
+				machineId: "machine-1",
+			};
+			vi.mocked(apiModule.createSession).mockResolvedValue(mockSession);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.createSessionMutation.mutateAsync({
+				backendId: "backend-1",
+			});
+
+			// Check optimistic session uses translation key for default title
+			const optimisticCall = vi.mocked(mockStore.createLocalSession).mock
+				.calls[0];
+			expect(optimisticCall[1].title).toBe("session.creating");
+		});
+
+		it("should activate optimistic session before API call completes", async () => {
+			const mockSession: apiModule.CreateSessionResponse = {
+				sessionId: "real-session",
+				title: "Real Session",
+				backendId: "backend-1",
+				backendLabel: "Backend 1",
+				createdAt: "2025-01-01T00:00:00Z",
+				updatedAt: "2025-01-01T00:00:00Z",
+				cwd: "/home/user/project",
+				machineId: "machine-1",
+			};
+
+			// Use a delayed mock to verify order of operations
+			let apiCallStarted = false;
+			vi.mocked(apiModule.createSession).mockImplementation(async () => {
+				apiCallStarted = true;
+				await new Promise((resolve) => setTimeout(resolve, 10));
+				return mockSession;
+			});
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.createSessionMutation.mutateAsync({
+				backendId: "backend-1",
+				title: "Test Session",
+			});
+
+			// Both optimistic and real sessions should be created
+			expect(mockStore.createLocalSession).toHaveBeenCalledTimes(2);
+			expect(mockStore.setActiveSessionId).toHaveBeenCalledTimes(2);
+
+			// Verify first activation is optimistic session
+			const calls = vi.mocked(mockStore.setActiveSessionId).mock.calls;
+			expect(calls[0][0]).toMatch(/^creating-\d+$/);
+			expect(calls[1][0]).toBe("real-session");
 		});
 	});
 
