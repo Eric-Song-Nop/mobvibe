@@ -378,6 +378,15 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 		}
 	}, [open]);
 
+	// Force virtualizer to remeasure when palette opens (fixes empty initial render)
+	useEffect(() => {
+		if (open && listRef.current) {
+			requestAnimationFrame(() => {
+				virtualizer.measure();
+			});
+		}
+	}, [open, virtualizer]);
+
 	// Execute selected item
 	const executeItem = useCallback(
 		(index: number) => {
