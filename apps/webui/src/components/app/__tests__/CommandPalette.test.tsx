@@ -59,12 +59,10 @@ const mockChatStore = vi.hoisted(() => ({
 	},
 }));
 
-vi.mock("@/lib/chat-store", async (importOriginal) => {
-	const original = await importOriginal<typeof import("@/lib/chat-store")>();
+vi.mock("@/lib/chat-store", () => {
 	const hook = () => mockChatStore.value;
 	hook.getState = () => mockChatStore.value;
 	return {
-		...original,
 		useChatStore: hook,
 	};
 });
@@ -80,12 +78,10 @@ const mockUiStore = vi.hoisted(() => ({
 	},
 }));
 
-vi.mock("@/lib/ui-store", async (importOriginal) => {
-	const original = await importOriginal<typeof import("@/lib/ui-store")>();
+vi.mock("@/lib/ui-store", () => {
 	const hook = () => mockUiStore.value;
 	hook.getState = () => mockUiStore.value;
 	return {
-		...original,
 		useUiStore: hook,
 	};
 });
@@ -211,6 +207,11 @@ describe("CommandPalette", () => {
 			expect(
 				screen.getByPlaceholderText("Type a command or search..."),
 			).toBeInTheDocument();
+		});
+
+		it("shows builtin commands immediately when opened", () => {
+			renderCommandPalette();
+			expect(screen.getByText("New Session")).toBeInTheDocument();
 		});
 	});
 
@@ -387,8 +388,8 @@ describe("CommandPalette", () => {
 		});
 	});
 
-	describe("Initial Render Fix", () => {
-		it("calls virtualizer.measure when palette opens", async () => {
+	describe("Virtualizer Behavior", () => {
+		it("does not call virtualizer.measure in command mode", async () => {
 			const { rerender } = renderCommandPalette({ open: false });
 
 			// Ensure measure was not called initially when closed
@@ -404,7 +405,18 @@ describe("CommandPalette", () => {
 			// Wait for requestAnimationFrame
 			await new Promise((resolve) => requestAnimationFrame(resolve));
 
-			// measure should have been called to fix empty initial render
+			// command mode renders without virtualization
+			expect(mockMeasure).not.toHaveBeenCalled();
+		});
+
+		it("calls virtualizer.measure when entering file mode", async () => {
+			renderCommandPalette();
+			const user = userEvent.setup();
+			const input = screen.getByPlaceholderText("Type a command or search...");
+
+			await user.type(input, "@");
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+
 			expect(mockMeasure).toHaveBeenCalled();
 		});
 	});
