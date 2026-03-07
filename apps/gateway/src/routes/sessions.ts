@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import type { SessionSummary } from "@mobvibe/shared";
 import {
 	createErrorDetail,
@@ -46,6 +47,37 @@ const buildAuthorizationError = (message = "Not authorized") =>
 		retryable: false,
 		scope: "request",
 	});
+
+const normalizeRelativeCwd = (value: unknown): string | undefined => {
+	if (typeof value !== "string") {
+		return undefined;
+	}
+	const trimmed = value.trim();
+	if (!trimmed) {
+		return undefined;
+	}
+	if (path.posix.isAbsolute(trimmed) || path.win32.isAbsolute(trimmed)) {
+		throw new AppError(
+			buildRequestValidationError(
+				"worktree.relativeCwd must be a relative subdirectory",
+			),
+			400,
+		);
+	}
+	const segments = trimmed.split(/[/\\]+/).filter(Boolean);
+	if (
+		segments.length === 0 ||
+		segments.some((segment) => segment === "." || segment === "..")
+	) {
+		throw new AppError(
+			buildRequestValidationError(
+				"worktree.relativeCwd must be a normalized subdirectory path",
+			),
+			400,
+		);
+	}
+	return segments.join("/");
+};
 
 export function setupSessionRoutes(
 	router: Router,
@@ -116,11 +148,7 @@ export function setupSessionRoutes(
 									? worktree.baseBranch.trim()
 									: undefined,
 							sourceCwd: worktree.sourceCwd.trim(),
-							relativeCwd:
-								typeof worktree.relativeCwd === "string" &&
-								worktree.relativeCwd.trim().length > 0
-									? worktree.relativeCwd.trim()
-									: undefined,
+							relativeCwd: normalizeRelativeCwd(worktree.relativeCwd),
 						}
 					: undefined;
 
