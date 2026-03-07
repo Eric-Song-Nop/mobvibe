@@ -24,7 +24,13 @@ import { useShallow } from "zustand/react/shallow";
 import { GitStatusIndicator } from "@/components/app/git-status-indicator";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { ThemeProvider, useTheme } from "@/components/theme-provider";
-import { AlertDialog, AlertDialogContent } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogClose,
+	DialogContent,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { fetchSessionFsResources, fetchSessionGitStatus } from "@/lib/api";
 import { useChatStore } from "@/lib/chat-store";
 import { createFallbackError } from "@/lib/error-utils";
@@ -374,7 +380,9 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 		if (open) {
 			setQuery("");
 			setSelectedIndex(0);
-			requestAnimationFrame(() => inputRef.current?.focus());
+			if (window.matchMedia?.("(min-width: 640px)")?.matches) {
+				requestAnimationFrame(() => inputRef.current?.focus());
+			}
 		}
 	}, [open]);
 
@@ -457,10 +465,13 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 	}, [isFileMode, selectedIndex, totalItems, virtualizer]);
 
 	return (
-		<AlertDialog open={open} onOpenChange={onOpenChange}>
-			<AlertDialogContent className="flex h-[100svh] w-[100vw] !max-w-none flex-col overflow-hidden translate-x-0 translate-y-0 rounded-none p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] sm:pt-0 sm:pb-0 top-0 left-0 sm:h-auto sm:max-h-[28rem] sm:!w-[36rem] sm:!max-w-[36rem] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg sm:top-1/2 sm:left-1/2">
+		<Dialog open={open} onOpenChange={onOpenChange}>
+			<DialogContent className="top-[calc(env(safe-area-inset-top)+0.5rem)] left-1/2 flex h-[min(32rem,calc(100svh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-1rem))] !max-h-[calc(100svh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-1rem)] w-[calc(100vw-1rem)] !max-w-[calc(100vw-1rem)] min-h-0 -translate-x-1/2 translate-y-0 flex-col overflow-hidden rounded-xl p-0 sm:top-1/2 sm:h-auto sm:max-h-[28rem] sm:w-[36rem] sm:!max-w-[36rem] sm:-translate-y-1/2 sm:rounded-lg">
+				<DialogTitle className="sr-only">
+					{t("commandPalette.openCommandPalette")}
+				</DialogTitle>
 				{/* Search input */}
-				<div className="border-b px-4 py-3">
+				<div className="border-b px-3 py-3 sm:px-4">
 					<div className="flex items-center gap-2">
 						<HugeiconsIcon
 							icon={Search01Icon}
@@ -490,6 +501,8 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 							<button
 								type="button"
 								className="text-muted-foreground hover:text-foreground"
+								aria-label={t("common.clear")}
+								title={t("common.clear")}
 								onClick={() => setQuery("")}
 							>
 								<HugeiconsIcon
@@ -500,6 +513,22 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 								/>
 							</button>
 						) : null}
+						<DialogClose asChild>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon-sm"
+								aria-label={t("common.close")}
+								title={t("common.close")}
+							>
+								<HugeiconsIcon
+									icon={Cancel01Icon}
+									strokeWidth={2}
+									className="h-4 w-4"
+									aria-hidden="true"
+								/>
+							</Button>
+						</DialogClose>
 					</div>
 					{isFileMode ? (
 						<div className="text-muted-foreground mt-1 text-xs">
@@ -513,7 +542,7 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 					ref={listRef}
 					id="command-palette-list"
 					role="listbox"
-					className="flex-1 overflow-y-auto"
+					className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
 				>
 					{totalItems === 0 ? (
 						<div className="text-muted-foreground flex items-center justify-center px-4 py-8 text-sm">
@@ -627,8 +656,8 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 						})
 					)}
 				</div>
-			</AlertDialogContent>
-		</AlertDialog>
+			</DialogContent>
+		</Dialog>
 	);
 }
 

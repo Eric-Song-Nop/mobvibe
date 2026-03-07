@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type React from "react";
+import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CommandPalette } from "../CommandPalette";
 
@@ -10,6 +10,8 @@ vi.mock("react-i18next", () => ({
 	useTranslation: () => ({
 		t: (key: string) => {
 			const translations: Record<string, string> = {
+				"common.clear": "Clear",
+				"common.close": "Close",
 				"commandPalette.searchPlaceholder": "Type a command or search...",
 				"commandPalette.newSession": "New Session",
 				"commandPalette.archiveSession": "Archive Session",
@@ -41,6 +43,10 @@ vi.mock("react-i18next", () => ({
 
 // Mock react-router-dom
 const mockNavigate = vi.fn();
+const mockDialogOnOpenChange = vi.hoisted(() => ({
+	value: undefined as undefined | ((open: boolean) => void),
+}));
+
 vi.mock("react-router-dom", () => ({
 	useNavigate: () => mockNavigate,
 	MemoryRouter: ({ children }: { children: React.ReactNode }) => (
@@ -139,18 +145,38 @@ vi.mock("@tanstack/react-virtual", () => ({
 	}),
 }));
 
-// Mock AlertDialog
-vi.mock("@/components/ui/alert-dialog", () => ({
-	AlertDialog: ({
+// Mock Dialog
+vi.mock("@/components/ui/dialog", () => ({
+	Dialog: ({
 		children,
 		open,
+		onOpenChange,
 	}: {
 		children: React.ReactNode;
 		open?: boolean;
-	}) => (open ? <div data-testid="alert-dialog">{children}</div> : null),
-	AlertDialogContent: ({ children }: { children: React.ReactNode }) => (
-		<div data-testid="alert-dialog-content">{children}</div>
+		onOpenChange?: (open: boolean) => void;
+	}) => {
+		mockDialogOnOpenChange.value = onOpenChange;
+		return open ? <div data-testid="dialog">{children}</div> : null;
+	},
+	DialogContent: ({ children }: { children: React.ReactNode }) => (
+		<div data-testid="dialog-content">{children}</div>
 	),
+	DialogClose: ({
+		children,
+	}: {
+		children: React.ReactNode;
+		asChild?: boolean;
+	}) =>
+		React.isValidElement<{ onClick?: () => void }>(children)
+			? React.cloneElement(children, {
+					onClick: () => {
+						children.props.onClick?.();
+						mockDialogOnOpenChange.value?.(false);
+					},
+				})
+			: children,
+	DialogTitle: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
 describe("CommandPalette", () => {
@@ -178,6 +204,7 @@ describe("CommandPalette", () => {
 			},
 		});
 		vi.clearAllMocks();
+		mockDialogOnOpenChange.value = undefined;
 		// Reset store mocks
 		mockChatStore.value.sessions = {};
 		mockChatStore.value.activeSessionId = undefined;
@@ -186,12 +213,12 @@ describe("CommandPalette", () => {
 	describe("Rendering", () => {
 		it("renders when open is true", () => {
 			renderCommandPalette({ open: true });
-			expect(screen.getByTestId("alert-dialog")).toBeInTheDocument();
+			expect(screen.getByTestId("dialog")).toBeInTheDocument();
 		});
 
 		it("does not render when open is false", () => {
 			renderCommandPalette({ open: false });
-			expect(screen.queryByTestId("alert-dialog")).not.toBeInTheDocument();
+			expect(screen.queryByTestId("dialog")).not.toBeInTheDocument();
 		});
 
 		it("shows search placeholder", () => {
@@ -245,10 +272,19 @@ describe("CommandPalette", () => {
 			expect(input).toHaveValue("test");
 
 			// Find and click clear button
-			const clearButton = screen.getByRole("button", { name: "" });
+			const clearButton = screen.getByRole("button", { name: "Clear" });
 			await user.click(clearButton);
 
 			expect(input).toHaveValue("");
+		});
+
+		it("closes when the close button is clicked", async () => {
+			renderCommandPalette();
+			const user = userEvent.setup();
+
+			await user.click(screen.getByLabelText("Close"));
+
+			expect(mockOnOpenChange).toHaveBeenCalledWith(false);
 		});
 	});
 
