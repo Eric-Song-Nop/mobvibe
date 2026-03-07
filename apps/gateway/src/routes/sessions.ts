@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { SessionSummary } from "@mobvibe/shared";
 import {
+	AppError,
 	createErrorDetail,
 	createInternalError,
 	type ErrorDetail,
