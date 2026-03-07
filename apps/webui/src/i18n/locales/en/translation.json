@@ -321,6 +321,7 @@
 		"pairSuccess": "E2EE pairing successful.",
 		"invalidQrCode": "Invalid QR code. Please scan the code from `mobvibe e2ee show`.",
 		"cameraPermissionDenied": "Camera permission is required to scan QR codes. Please grant camera access in your device settings.",
+		"cameraPolicyBlocked": "Camera access is blocked by this site's browser policy. Please refresh after the site is updated, or paste the secret manually.",
 		"paired": "E2EE Paired ({{count}} device(s))",
 		"notPaired": "E2EE Not Paired",
 		"pairedDevices": "Paired devices:",

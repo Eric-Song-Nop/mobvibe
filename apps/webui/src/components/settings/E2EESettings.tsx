@@ -20,6 +20,7 @@ import type { SessionsResponse } from "@/lib/api";
 import { isInTauri } from "@/lib/auth";
 import { useChatStore } from "@/lib/chat-store";
 import { e2ee } from "@/lib/e2ee";
+import { getQrScanErrorCode } from "@/lib/qr-scan-errors";
 
 interface PairedDevice {
 	secret: string;
@@ -203,9 +204,14 @@ export function E2EESettings() {
 			unwrapAfterPairing();
 		} catch (err) {
 			const errMsg = err instanceof Error ? err.message : String(err);
+			const errorCode = getQrScanErrorCode(err);
 			if (errMsg.toLowerCase().includes("cancel")) return;
-			if (errMsg === "camera_permission_denied") {
+			if (errorCode === "camera_permission_denied") {
 				setError(t("e2ee.cameraPermissionDenied"));
+				return;
+			}
+			if (errorCode === "camera_policy_blocked") {
+				setError(t("e2ee.cameraPolicyBlocked"));
 				return;
 			}
 			console.error("QR scan error:", err);

@@ -321,6 +321,7 @@
 		"pairSuccess": "E2EE 配对成功。",
 		"invalidQrCode": "无效的二维码，请扫描 `mobvibe e2ee show` 生成的二维码。",
 		"cameraPermissionDenied": "扫描二维码需要相机权限，请在设备设置中授予相机访问权限。",
+		"cameraPolicyBlocked": "当前站点的浏览器策略阻止了相机访问。请在站点配置更新后刷新页面，或手动粘贴密钥。",
 		"paired": "E2EE 已配对（{{count}} 台设备）",
 		"notPaired": "E2EE 未配对",
 		"pairedDevices": "已配对的设备：",

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isMobilePlatform } from "@/lib/platform";
+import { getQrScanErrorCode } from "@/lib/qr-scan-errors";
 
 interface UseQrScannerReturn {
 	/** Whether camera scanning is supported (browser has mediaDevices or Tauri mobile) */
@@ -48,7 +49,10 @@ export function useQrScanner(): UseQrScannerReturn {
 			}
 
 			// Web: check for camera support
-			if (typeof navigator !== "undefined" && navigator.mediaDevices) {
+			if (
+				typeof navigator !== "undefined" &&
+				typeof navigator.mediaDevices?.getUserMedia === "function"
+			) {
 				try {
 					const { default: QrScanner } = await import("qr-scanner");
 					const has = await QrScanner.hasCamera();
@@ -72,6 +76,15 @@ export function useQrScanner(): UseQrScannerReturn {
 				return await startTauriScan(cancelRef);
 			}
 			return await startWebScan(videoRef, cancelRef, cleanupRef);
+		} catch (err) {
+			const errorCode = getQrScanErrorCode(err);
+			if (
+				errorCode === "camera_policy_blocked" ||
+				errorCode === "camera_unavailable"
+			) {
+				setCanScan(false);
+			}
+			throw err;
 		} finally {
 			cleanupRef.current?.();
 			cleanupRef.current = null;
