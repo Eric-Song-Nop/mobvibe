@@ -89,6 +89,69 @@ type PermissionRequestRecord = {
 	resolve: (response: RequestPermissionResponse) => void;
 };
 
+const isAbsolutePathInput = (value: string) =>
+	path.posix.isAbsolute(value) || path.win32.isAbsolute(value);
+
+const normalizeRelativeWorktreePath = (value: string): string => {
+	const trimmed = value.trim();
+	if (!trimmed || isAbsolutePathInput(trimmed)) {
+		throw new AppError(
+			createErrorDetail({
+				code: "REQUEST_VALIDATION_FAILED",
+				message: "worktree relative path must be a relative subdirectory",
+				retryable: false,
+				scope: "request",
+			}),
+			400,
+		);
+	}
+	const segments = trimmed.split(/[/\\]+/).filter(Boolean);
+	if (
+		segments.length === 0 ||
+		segments.some((segment) => segment === "." || segment === "..")
+	) {
+		throw new AppError(
+			createErrorDetail({
+				code: "REQUEST_VALIDATION_FAILED",
+				message: "worktree relative path must be normalized",
+				retryable: false,
+				scope: "request",
+			}),
+			400,
+		);
+	}
+	return segments.join(path.sep);
+};
+
+const resolveWorktreeExecutionCwd = (
+	worktreeRoot: string,
+	relativeCwd?: string,
+): string => {
+	if (!relativeCwd) {
+		return worktreeRoot;
+	}
+	const normalized = normalizeRelativeWorktreePath(relativeCwd);
+	const resolved = path.resolve(worktreeRoot, normalized);
+	const relativeToRoot = path.relative(worktreeRoot, resolved);
+	if (
+		!relativeToRoot ||
+		relativeToRoot === ".." ||
+		relativeToRoot.startsWith(`..${path.sep}`) ||
+		isAbsolutePathInput(relativeToRoot)
+	) {
+		throw new AppError(
+			createErrorDetail({
+				code: "REQUEST_VALIDATION_FAILED",
+				message: "worktree relative path must stay within the worktree root",
+				retryable: false,
+				scope: "request",
+			}),
+			400,
+		);
+	}
+	return resolved;
+};
+
 const buildPermissionKey = (sessionId: string, requestId: string) =>
 	`${sessionId}:${requestId}`;
 
@@ -751,10 +814,14 @@ export class SessionManager {
 					targetPath,
 					baseBranch: options.worktree.baseBranch,
 				});
-				effectiveCwd = options.worktree.relativeCwd
-					? path.join(result.path, options.worktree.relativeCwd)
-					: result.path;
+				effectiveCwd = resolveWorktreeExecutionCwd(
+					result.path,
+					options.worktree.relativeCwd,
+				);
 			} catch (error) {
+				if (error instanceof AppError) {
+					throw error;
+				}
 				const message = error instanceof Error ? error.message : String(error);
 				throw new AppError(
 					createErrorDetail({

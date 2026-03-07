@@ -376,6 +376,46 @@ describe("SessionManager", () => {
 			expect(created.worktreeBranch).toBe("feat-branch");
 		});
 
+		it("rejects worktree relative paths that escape the worktree root", async () => {
+			await expect(
+				sessionManager.createSession({
+					cwd: "/home/user/project/apps/webui",
+					backendId: "backend-1",
+					worktree: {
+						branch: "feat-branch",
+						sourceCwd: "/home/user/project",
+						relativeCwd: "../secrets",
+					},
+				}),
+			).rejects.toMatchObject({
+				status: 400,
+				detail: expect.objectContaining({
+					code: "REQUEST_VALIDATION_FAILED",
+				}),
+			});
+			expect(mockConnection.createSession).not.toHaveBeenCalled();
+		});
+
+		it("rejects absolute worktree relative paths", async () => {
+			await expect(
+				sessionManager.createSession({
+					cwd: "/home/user/project/apps/webui",
+					backendId: "backend-1",
+					worktree: {
+						branch: "feat-branch",
+						sourceCwd: "/home/user/project",
+						relativeCwd: "/tmp/outside",
+					},
+				}),
+			).rejects.toMatchObject({
+				status: 400,
+				detail: expect.objectContaining({
+					code: "REQUEST_VALIDATION_FAILED",
+				}),
+			});
+			expect(mockConnection.createSession).not.toHaveBeenCalled();
+		});
+
 		it("includes persisted workspaceRootCwd for discovered sessions from WAL", () => {
 			(
 				sessionManager as unknown as {
