@@ -55,9 +55,8 @@ function MainApp() {
 	const { t } = useTranslation();
 
 	// Reactive state — re-renders only when these values change
-	const { sessions, activeSessionId, appError, lastCreatedCwd } = useChatStore(
+	const { activeSessionId, appError, lastCreatedCwd } = useChatStore(
 		useShallow((s) => ({
-			sessions: s.sessions,
 			activeSessionId: s.activeSessionId,
 			appError: s.appError,
 			lastCreatedCwd: s.lastCreatedCwd,
@@ -153,20 +152,14 @@ function MainApp() {
 	const defaultBackendId = availableBackends[0]?.backendId;
 	useMachinesQuery();
 
-	const mutations = useSessionMutations({
-		sessions,
-		...chatActions,
-	});
+	const mutations = useSessionMutations(chatActions);
 
-	const { activateSession, activationState } = useSessionActivation({
-		sessions,
-		...chatActions,
-	});
+	const { activateSession, activationState } =
+		useSessionActivation(chatActions);
 
 	const isActivating = activationState.phase !== "idle";
 
 	const { syncSessionHistory, isBackfilling } = useSocket({
-		sessions,
 		setSending: chatActions.setSending,
 		setCanceling: chatActions.setCanceling,
 		finalizeAssistantMessage: chatActions.finalizeAssistantMessage,
@@ -214,7 +207,6 @@ function MainApp() {
 		effectiveWorkspaceCwd,
 		sessionList,
 	} = useSessionList({
-		sessions,
 		activeSessionId,
 		selectedMachineId,
 		selectedWorkspaceByMachine,
@@ -243,7 +235,6 @@ function MainApp() {
 		handleSyncHistory,
 		handleSend,
 	} = useSessionHandlers({
-		sessions,
 		activeSessionId,
 		activeSession,
 		sessionList,
@@ -587,7 +578,7 @@ function MainApp() {
 					activeSessionId={activeSessionId}
 					onCreateSession={handleOpenCreateDialog}
 					onSelectSession={(sessionId) => {
-						const session = sessions[sessionId];
+						const session = useChatStore.getState().sessions[sessionId];
 						if (session) {
 							void activateSession(session);
 						} else {

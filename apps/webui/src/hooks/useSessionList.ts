@@ -1,12 +1,17 @@
 import { useMemo } from "react";
-import type { ChatSession } from "@/lib/chat-store";
+import { useShallow } from "zustand/react/shallow";
+import {
+	type ChatSession,
+	type SessionListEntry,
+	toSessionListEntry,
+	useChatStore,
+} from "@/lib/chat-store";
 import {
 	collectWorkspaces,
 	type WorkspaceSummary,
 } from "@/lib/workspace-utils";
 
 export type UseSessionListParams = {
-	sessions: Record<string, ChatSession>;
 	activeSessionId: string | undefined;
 	selectedMachineId: string | null;
 	selectedWorkspaceByMachine: Record<string, string>;
@@ -17,25 +22,42 @@ export type UseSessionListReturn = {
 	activeSession: ChatSession | undefined;
 	selectedWorkspaceCwd: string | undefined;
 	effectiveWorkspaceCwd: string | undefined;
-	sessionList: ChatSession[];
+	sessionList: SessionListEntry[];
 };
 
 /** Get the workspace group key for a session (worktree sessions group under the source repo) */
 const getSessionGroupCwd = (session: ChatSession): string | undefined =>
 	session.workspaceRootCwd || session.worktreeSourceCwd || session.cwd;
 
+const serializeWorkspaceSummary = (workspace: WorkspaceSummary) =>
+	JSON.stringify(workspace);
+
+const serializeSessionEntry = (session: SessionListEntry) =>
+	JSON.stringify(session);
+
+const parseJson = <T>(value: string): T => JSON.parse(value) as T;
+
 export function useSessionList({
-	sessions,
 	activeSessionId,
 	selectedMachineId,
 	selectedWorkspaceByMachine,
 }: UseSessionListParams): UseSessionListReturn {
+	const workspaceSignatures = useChatStore(
+		useShallow((state) =>
+			collectWorkspaces(state.sessions, selectedMachineId).map(
+				serializeWorkspaceSummary,
+			),
+		),
+	);
 	const workspaceList = useMemo(
-		() => collectWorkspaces(sessions, selectedMachineId),
-		[sessions, selectedMachineId],
+		() =>
+			workspaceSignatures.map((value) => parseJson<WorkspaceSummary>(value)),
+		[workspaceSignatures],
 	);
 
-	const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
+	const activeSession = useChatStore((state) =>
+		activeSessionId ? state.sessions[activeSessionId] : undefined,
+	);
 
 	const selectedWorkspaceCwd = selectedMachineId
 		? selectedWorkspaceByMachine[selectedMachineId]
@@ -43,25 +65,33 @@ export function useSessionList({
 
 	const effectiveWorkspaceCwd = selectedWorkspaceCwd ?? workspaceList[0]?.cwd;
 
-	const sessionList = useMemo(() => {
-		const allSessions = Object.values(sessions);
-		const filtered = selectedMachineId
-			? allSessions.filter((s) => {
-					if (s.machineId !== selectedMachineId) {
-						return false;
-					}
-					if (effectiveWorkspaceCwd) {
-						return getSessionGroupCwd(s) === effectiveWorkspaceCwd;
-					}
-					return true;
+	const sessionSignatures = useChatStore(
+		useShallow((state) => {
+			if (!selectedMachineId) {
+				return [];
+			}
+			const filtered = Object.values(state.sessions).filter((session) => {
+				if (session.machineId !== selectedMachineId) {
+					return false;
+				}
+				if (effectiveWorkspaceCwd) {
+					return getSessionGroupCwd(session) === effectiveWorkspaceCwd;
+				}
+				return true;
+			});
+			return filtered
+				.sort((left, right) => {
+					const leftStamp = left.updatedAt ?? left.createdAt ?? "";
+					const rightStamp = right.updatedAt ?? right.createdAt ?? "";
+					return rightStamp.localeCompare(leftStamp);
 				})
-			: [];
-		return filtered.sort((left, right) => {
-			const leftStamp = left.updatedAt ?? left.createdAt ?? "";
-			const rightStamp = right.updatedAt ?? right.createdAt ?? "";
-			return rightStamp.localeCompare(leftStamp);
-		});
-	}, [effectiveWorkspaceCwd, sessions, selectedMachineId]);
+				.map((session) => serializeSessionEntry(toSessionListEntry(session)));
+		}),
+	);
+	const sessionList = useMemo(
+		() => sessionSignatures.map((value) => parseJson<SessionListEntry>(value)),
+		[sessionSignatures],
+	);
 
 	return {
 		workspaceList,

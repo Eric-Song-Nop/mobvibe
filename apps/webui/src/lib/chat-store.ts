@@ -173,6 +173,45 @@ export type ChatSession = {
 	isTitlePinned?: boolean;
 };
 
+export type SessionListEntry = Pick<
+	ChatSession,
+	| "sessionId"
+	| "title"
+	| "createdAt"
+	| "updatedAt"
+	| "backendId"
+	| "backendLabel"
+	| "error"
+	| "detachedReason"
+	| "isLoading"
+	| "isAttached"
+	| "isCreating"
+	| "worktreeBranch"
+	| "e2eeStatus"
+	| "machineId"
+	| "cwd"
+	| "worktreeSourceCwd"
+>;
+
+export const toSessionListEntry = (session: ChatSession): SessionListEntry => ({
+	sessionId: session.sessionId,
+	title: session.title,
+	createdAt: session.createdAt,
+	updatedAt: session.updatedAt,
+	backendId: session.backendId,
+	backendLabel: session.backendLabel,
+	error: session.error,
+	detachedReason: session.detachedReason,
+	isLoading: session.isLoading,
+	isAttached: session.isAttached,
+	isCreating: session.isCreating,
+	worktreeBranch: session.worktreeBranch,
+	e2eeStatus: session.e2eeStatus,
+	machineId: session.machineId,
+	cwd: session.cwd,
+	worktreeSourceCwd: session.worktreeSourceCwd,
+});
+
 type ChatState = {
 	sessions: Record<string, ChatSession>;
 	activeSessionId?: string;
@@ -320,6 +359,17 @@ type ChatState = {
 		sessionId: string,
 		status: ChatSession["e2eeStatus"],
 	) => void;
+};
+
+export const selectTerminalOutputSnapshot = (
+	state: Pick<ChatState, "sessions">,
+	sessionId: string | undefined,
+	terminalId: string,
+): TerminalOutputSnapshot | undefined => {
+	if (!sessionId) {
+		return undefined;
+	}
+	return state.sessions[sessionId]?.terminalOutputs[terminalId];
 };
 
 type PersistedChatState = Pick<

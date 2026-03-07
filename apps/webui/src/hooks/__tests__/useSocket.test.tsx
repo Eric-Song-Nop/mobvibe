@@ -16,6 +16,17 @@ const mockStoreState = vi.hoisted(
 		}) as { sessions: Record<string, ChatSession> },
 );
 
+const storeListeners = vi.hoisted(
+	() => new Set<(state: typeof mockStoreState) => void>(),
+);
+
+const setMockSessions = (sessions: Record<string, ChatSession>) => {
+	mockStoreState.sessions = sessions;
+	for (const listener of storeListeners) {
+		listener(mockStoreState);
+	}
+};
+
 // Mock useChatStore.getState() to return our controlled state
 vi.mock("@/lib/chat-store", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/lib/chat-store")>();
@@ -23,6 +34,12 @@ vi.mock("@/lib/chat-store", async (importOriginal) => {
 		...actual,
 		useChatStore: {
 			getState: () => mockStoreState,
+			subscribe: (listener: (state: typeof mockStoreState) => void) => {
+				storeListeners.add(listener);
+				return () => {
+					storeListeners.delete(listener);
+				};
+			},
 		},
 	};
 });
@@ -169,7 +186,7 @@ const buildSession = (overrides: Partial<ChatSession> = {}): ChatSession => ({
 describe("useSocket (webui)", () => {
 	beforeEach(() => {
 		// Reset mock store state
-		mockStoreState.sessions = {};
+		setMockSessions({});
 
 		for (const key of Object.keys(handlers)) {
 			delete handlers[key];
@@ -255,6 +272,7 @@ describe("useSocket (webui)", () => {
 			"session-1": buildSession({ sessionId: "session-1", isAttached: true }),
 			"session-2": buildSession({ sessionId: "session-2", isLoading: true }),
 		};
+		setMockSessions(sessions);
 
 		const { rerender } = renderHook(
 			(props: { sessions: Record<string, ChatSession> }) =>
@@ -290,6 +308,7 @@ describe("useSocket (webui)", () => {
 			);
 		});
 
+		setMockSessions({});
 		rerender({ sessions: {} });
 
 		await waitFor(() => {
@@ -350,6 +369,7 @@ describe("useSocket (webui)", () => {
 				machineId: "machine-1",
 			}),
 		};
+		setMockSessions(sessions);
 
 		renderHook(() =>
 			useSocket({
@@ -396,7 +416,7 @@ describe("useSocket (webui)", () => {
 			}),
 		};
 		// Set up mock store state so getCursor returns correct values
-		mockStoreState.sessions = { ...sessions };
+		setMockSessions({ ...sessions });
 
 		renderHook(() =>
 			useSocket({

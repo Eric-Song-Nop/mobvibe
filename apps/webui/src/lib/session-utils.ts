@@ -1,4 +1,4 @@
-import type { ChatSession } from "@/lib/chat-store";
+import type { SessionListEntry } from "@/lib/chat-store";
 
 export type SessionDisplayPhase =
 	| "active"
@@ -16,7 +16,7 @@ export type SessionMutationsSnapshot = {
 };
 
 export function getSessionDisplayStatus(
-	session: ChatSession,
+	session: SessionListEntry,
 	mutations: SessionMutationsSnapshot,
 ): SessionDisplayPhase {
 	// Creating status has highest priority

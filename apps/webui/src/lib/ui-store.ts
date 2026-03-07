@@ -7,11 +7,27 @@ import {
 const clamp = (value: number, min: number, max: number) =>
 	Math.min(Math.max(value, min), max);
 
-const loadStoredWidth = (key: string, fallback: number) => {
+const getBrowserStorage = (): Storage | undefined => {
 	if (typeof window === "undefined") {
+		return undefined;
+	}
+	const storage = window.localStorage;
+	if (
+		!storage ||
+		typeof storage.getItem !== "function" ||
+		typeof storage.setItem !== "function"
+	) {
+		return undefined;
+	}
+	return storage;
+};
+
+const loadStoredWidth = (key: string, fallback: number) => {
+	const storage = getBrowserStorage();
+	if (!storage) {
 		return fallback;
 	}
-	const raw = window.localStorage.getItem(key);
+	const raw = storage.getItem(key);
 	if (!raw) {
 		return fallback;
 	}
@@ -20,10 +36,11 @@ const loadStoredWidth = (key: string, fallback: number) => {
 };
 
 const persistWidth = (key: string, value: number) => {
-	if (typeof window === "undefined") {
+	const storage = getBrowserStorage();
+	if (!storage) {
 		return;
 	}
-	window.localStorage.setItem(key, String(value));
+	storage.setItem(key, String(value));
 };
 
 const MACHINE_WIDTH_DEFAULT = 56;

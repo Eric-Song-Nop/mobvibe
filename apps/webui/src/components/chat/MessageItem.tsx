@@ -21,7 +21,11 @@ import type {
 	ToolCallContentPayload,
 	ToolCallStatus,
 } from "@/lib/acp";
-import { type ChatMessage, useChatStore } from "@/lib/chat-store";
+import {
+	type ChatMessage,
+	selectTerminalOutputSnapshot,
+	useChatStore,
+} from "@/lib/chat-store";
 import { cn } from "@/lib/utils";
 
 type PermissionDecisionPayload = {
@@ -76,6 +80,31 @@ const TerminalOutputBlock = ({
 		) : null}
 	</div>
 );
+
+type TerminalOutputPanelProps = {
+	sessionId: string;
+	terminalId: string;
+	getLabel: (key: string, options?: Record<string, unknown>) => string;
+};
+
+const TerminalOutputPanel = memo(function TerminalOutputPanel({
+	sessionId,
+	terminalId,
+	getLabel,
+}: TerminalOutputPanelProps) {
+	const output = useChatStore((state) =>
+		selectTerminalOutputSnapshot(state, sessionId, terminalId),
+	);
+	return (
+		<TerminalOutputBlock
+			terminalId={terminalId}
+			output={output?.output}
+			truncated={output?.truncated}
+			exitStatus={output?.exitStatus}
+			getLabel={getLabel}
+		/>
+	);
+});
 
 import { resolveFileNameFromPath } from "@/lib/file-preview-utils";
 
@@ -589,13 +618,11 @@ export const ToolCallItemContent = ({
 	onOpenFilePreview,
 }: ToolCallItemContentProps) => {
 	const { t } = useTranslation();
-	const getLabel = (key: string, options?: Record<string, unknown>) =>
-		t(key, { defaultValue: key, ...options });
-
-	const terminalOutputMap = useChatStore((state) => {
-		if (!message.sessionId) return undefined;
-		return state.sessions[message.sessionId]?.terminalOutputs;
-	});
+	const getLabel = useCallback(
+		(key: string, options?: Record<string, unknown>) =>
+			t(key, { defaultValue: key, ...options }),
+		[t],
+	);
 
 	const label = message.title ?? message.name ?? getLabel("toolCall.toolCall");
 	const statusLabel = resolveStatusLabel(message.status, getLabel);
@@ -638,6 +665,7 @@ export const ToolCallItemContent = ({
 			message.rawOutput,
 	);
 	const isTaskTool = message.name === "Task" || message.name === "task";
+	const sessionId = message.sessionId;
 
 	return (
 		<div className="flex flex-col gap-0.5 items-start">
@@ -698,19 +726,16 @@ export const ToolCallItemContent = ({
 								{hasOutputs ? (
 									<div className="flex flex-col gap-2">
 										{outputBlocks?.filter(Boolean)}
-										{terminalIds?.map((terminalId) => {
-											const output = terminalOutputMap?.[terminalId];
-											return (
-												<TerminalOutputBlock
-													key={`${message.toolCallId}-${terminalId}`}
-													terminalId={terminalId}
-													output={output?.output}
-													truncated={output?.truncated}
-													exitStatus={output?.exitStatus}
-													getLabel={getLabel}
-												/>
-											);
-										})}
+										{sessionId
+											? terminalIds?.map((terminalId) => (
+													<TerminalOutputPanel
+														key={`${message.toolCallId}-${terminalId}`}
+														sessionId={sessionId}
+														terminalId={terminalId}
+														getLabel={getLabel}
+													/>
+												))
+											: null}
 										{unifiedDiff ? (
 											<UnifiedDiffView
 												diff={unifiedDiff}

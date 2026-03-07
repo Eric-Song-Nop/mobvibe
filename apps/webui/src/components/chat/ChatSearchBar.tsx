@@ -4,7 +4,7 @@ import {
 	Cancel01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import type { ChatSession } from "@/lib/chat-store";
@@ -31,7 +31,7 @@ function getMessageText(message: Message): string {
 	return "";
 }
 
-export function ChatSearchBar({
+function ChatSearchBarInner({
 	open,
 	onOpenChange,
 	messages,
@@ -174,3 +174,21 @@ export function ChatSearchBar({
 		</div>
 	);
 }
+
+export const ChatSearchBar = memo(
+	ChatSearchBarInner,
+	(prevProps, nextProps) => {
+		if (!prevProps.open && !nextProps.open) {
+			return (
+				prevProps.onOpenChange === nextProps.onOpenChange &&
+				prevProps.onScrollToMessage === nextProps.onScrollToMessage
+			);
+		}
+		return (
+			prevProps.open === nextProps.open &&
+			prevProps.onOpenChange === nextProps.onOpenChange &&
+			prevProps.onScrollToMessage === nextProps.onScrollToMessage &&
+			prevProps.messages === nextProps.messages
+		);
+	},
+);
