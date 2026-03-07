@@ -16,6 +16,14 @@ import type {
 const execFileAsync = promisify(execFile);
 const MAX_BUFFER = 10 * 1024 * 1024; // 10MB buffer for large repos
 
+export type GitProjectContext = {
+	isGitRepo: boolean;
+	repoRoot?: string;
+	repoName?: string;
+	relativeCwd?: string;
+	isRepoRoot: boolean;
+};
+
 /**
  * Check if a directory is a git repository.
  */
@@ -29,6 +37,79 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * Resolve the canonical Git repo root for a cwd.
+ */
+export async function getGitRepoRoot(cwd: string): Promise<string | undefined> {
+	try {
+		const { stdout } = await execFileAsync(
+			"git",
+			["rev-parse", "--show-toplevel"],
+			{
+				cwd,
+				maxBuffer: MAX_BUFFER,
+			},
+		);
+		const repoRoot = stdout.trim();
+		return repoRoot || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+const getPrimaryWorktreeRoot = async (
+	cwd: string,
+): Promise<string | undefined> => {
+	try {
+		const { stdout } = await execFileAsync(
+			"git",
+			["worktree", "list", "--porcelain"],
+			{
+				cwd,
+				maxBuffer: MAX_BUFFER,
+			},
+		);
+		const firstWorktreeLine = stdout
+			.split("\n")
+			.find((line) => line.startsWith("worktree "));
+		if (!firstWorktreeLine) {
+			return undefined;
+		}
+		const worktreeRoot = firstWorktreeLine.slice("worktree ".length).trim();
+		return worktreeRoot || undefined;
+	} catch {
+		return undefined;
+	}
+};
+
+/**
+ * Resolve project-level Git context for a cwd.
+ */
+export async function resolveGitProjectContext(
+	cwd: string,
+): Promise<GitProjectContext> {
+	const currentWorktreeRoot = await getGitRepoRoot(cwd);
+	if (!currentWorktreeRoot) {
+		return {
+			isGitRepo: false,
+			isRepoRoot: false,
+		};
+	}
+	const repoRoot = (await getPrimaryWorktreeRoot(cwd)) ?? currentWorktreeRoot;
+
+	const relativePath = path.relative(currentWorktreeRoot, cwd);
+	const relativeCwd =
+		relativePath.length > 0 && relativePath !== "." ? relativePath : undefined;
+
+	return {
+		isGitRepo: true,
+		repoRoot,
+		repoName: path.basename(repoRoot),
+		relativeCwd,
+		isRepoRoot: relativeCwd === undefined,
+	};
 }
 
 /**

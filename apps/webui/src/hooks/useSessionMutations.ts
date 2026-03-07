@@ -39,6 +39,7 @@ type SessionMetadata = Partial<
 		| "backendId"
 		| "backendLabel"
 		| "cwd"
+		| "workspaceRootCwd"
 		| "agentName"
 		| "modelId"
 		| "modelName"
@@ -106,6 +107,7 @@ export interface ChatStoreActions {
 				| "title"
 				| "updatedAt"
 				| "cwd"
+				| "workspaceRootCwd"
 				| "agentName"
 				| "modelId"
 				| "modelName"
@@ -114,6 +116,8 @@ export interface ChatStoreActions {
 				| "availableModes"
 				| "availableModels"
 				| "availableCommands"
+				| "worktreeSourceCwd"
+				| "worktreeBranch"
 				| "usage"
 				| "_meta"
 				| "plan"
@@ -184,6 +188,7 @@ const applySessionSummary = (
 		title: summary.title,
 		updatedAt: summary.updatedAt,
 		cwd: summary.cwd,
+		workspaceRootCwd: summary.workspaceRootCwd,
 		agentName: summary.agentName,
 		modelId: summary.modelId,
 		modelName: summary.modelName,
@@ -192,6 +197,8 @@ const applySessionSummary = (
 		availableModes: summary.availableModes,
 		availableModels: summary.availableModels,
 		availableCommands: summary.availableCommands,
+		worktreeSourceCwd: summary.worktreeSourceCwd,
+		worktreeBranch: summary.worktreeBranch,
 	});
 };
 
@@ -236,6 +243,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 				backendId: data.backendId,
 				backendLabel: data.backendLabel,
 				cwd: data.cwd,
+				workspaceRootCwd: data.workspaceRootCwd,
 				agentName: data.agentName,
 				modelId: data.modelId,
 				modelName: data.modelName,
@@ -254,7 +262,8 @@ export function useSessionMutations(store: ChatStoreActions) {
 
 			// Use original repo cwd for lastCreatedCwd so reopening the dialog
 			// pre-fills the source repo path, not the worktree path
-			const lastCwd = data.worktreeSourceCwd ?? data.cwd;
+			const lastCwd =
+				data.workspaceRootCwd ?? data.worktreeSourceCwd ?? data.cwd;
 			if (data.machineId && lastCwd) {
 				store.setLastCreatedCwd(data.machineId, lastCwd);
 			}
@@ -466,6 +475,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 			store.updateSessionMeta(data.sessionId, {
 				updatedAt: data.updatedAt,
 				cwd: data.cwd,
+				workspaceRootCwd: data.workspaceRootCwd,
 				agentName: data.agentName,
 				modelId: data.modelId,
 				modelName: data.modelName,
@@ -474,6 +484,8 @@ export function useSessionMutations(store: ChatStoreActions) {
 				availableModes: data.availableModes,
 				availableModels: data.availableModels,
 				availableCommands: data.availableCommands,
+				worktreeSourceCwd: data.worktreeSourceCwd,
+				worktreeBranch: data.worktreeBranch,
 			});
 			store.setActiveSessionId(data.sessionId);
 			store.setAppError(undefined);

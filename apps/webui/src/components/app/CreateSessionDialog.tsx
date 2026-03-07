@@ -46,7 +46,10 @@ export type CreateSessionDialogProps = {
 	onOpenChange: (open: boolean) => void;
 	availableBackends: AcpBackendSummary[];
 	isCreating: boolean;
-	onCreate: () => void;
+	onCreate: (projectContext?: {
+		repoRoot?: string;
+		relativeCwd?: string;
+	}) => void;
 };
 
 /** Sanitize branch name for worktree path preview */
@@ -107,15 +110,24 @@ export function CreateSessionDialog({
 	const isGitRepo = branchesQuery.data?.isGitRepo ?? false;
 	const branches = branchesQuery.data?.branches ?? [];
 	const worktreeBaseDir = branchesQuery.data?.worktreeBaseDir;
+	const repoRoot = branchesQuery.data?.repoRoot;
+	const repoName =
+		branchesQuery.data?.repoName ?? getPathBasename(repoRoot ?? draftCwd);
+	const relativeCwd = branchesQuery.data?.relativeCwd;
 
 	// Worktree path preview using CLI-configured base dir
 	const worktreePathPreview = useMemo(() => {
-		if (!draftCwd || !draftWorktreeBranch) return "";
-		const repoName = getPathBasename(draftCwd) ?? draftCwd;
+		if (!repoName || !draftWorktreeBranch) return "";
 		const sanitized = sanitizeBranch(draftWorktreeBranch);
 		const base = worktreeBaseDir ?? "~/.mobvibe/worktrees";
 		return `${base}/${repoName}/${sanitized}`;
-	}, [draftCwd, draftWorktreeBranch, worktreeBaseDir]);
+	}, [draftWorktreeBranch, repoName, worktreeBaseDir]);
+
+	const worktreeExecutionPathPreview = useMemo(() => {
+		if (!worktreePathPreview) return "";
+		if (!relativeCwd) return worktreePathPreview;
+		return `${worktreePathPreview}/${relativeCwd}`;
+	}, [relativeCwd, worktreePathPreview]);
 
 	useEffect(() => {
 		if (!open) {
@@ -255,6 +267,35 @@ export function CreateSessionDialog({
 						</div>
 					) : null}
 
+					{branchesQuery.isFetched && draftCwd ? (
+						<div className="border-border bg-muted/20 flex flex-col gap-1 rounded-md border px-3 py-2 text-xs">
+							<div className="font-medium">
+								{isGitRepo
+									? t("session.projectDetection.gitRepo", {
+											name: repoName ?? draftCwd,
+										})
+									: t("session.projectDetection.folder")}
+							</div>
+							{isGitRepo && repoRoot ? (
+								<div className="text-muted-foreground">
+									{t("session.projectDetection.repoRoot")}:{" "}
+									<code className="bg-muted rounded px-1">{repoRoot}</code>
+								</div>
+							) : null}
+							{isGitRepo && relativeCwd ? (
+								<div className="text-muted-foreground">
+									{t("session.projectDetection.relativeCwd")}:{" "}
+									<code className="bg-muted rounded px-1">{relativeCwd}</code>
+								</div>
+							) : null}
+							{!isGitRepo ? (
+								<div className="text-muted-foreground">
+									{t("session.projectDetection.nonGitHint")}
+								</div>
+							) : null}
+						</div>
+					) : null}
+
 					{/* Worktree option — only shown after query completes and cwd is a git repo */}
 					{branchesQuery.isFetched && isGitRepo ? (
 						<div className="flex flex-col gap-2">
@@ -317,11 +358,21 @@ export function CreateSessionDialog({
 										</Select>
 									</div>
 									{worktreePathPreview ? (
-										<div className="text-muted-foreground text-xs">
-											{t("session.worktree.pathLabel")}:{" "}
-											<code className="bg-muted rounded px-1">
-												{worktreePathPreview}
-											</code>
+										<div className="flex flex-col gap-1 text-xs">
+											<div className="text-muted-foreground">
+												{t("session.worktree.pathLabel")}:{" "}
+												<code className="bg-muted rounded px-1">
+													{worktreePathPreview}
+												</code>
+											</div>
+											{worktreeExecutionPathPreview !== worktreePathPreview ? (
+												<div className="text-muted-foreground">
+													{t("session.worktree.executionPathLabel")}:{" "}
+													<code className="bg-muted rounded px-1">
+														{worktreeExecutionPathPreview}
+													</code>
+												</div>
+											) : null}
 										</div>
 									) : null}
 								</div>
@@ -349,7 +400,14 @@ export function CreateSessionDialog({
 						}
 						onClick={(event) => {
 							event.preventDefault();
-							onCreate();
+							onCreate(
+								isGitRepo
+									? {
+											repoRoot,
+											relativeCwd,
+										}
+									: undefined,
+							);
 						}}
 					>
 						{isCreating ? t("common.creating") : t("common.create")}

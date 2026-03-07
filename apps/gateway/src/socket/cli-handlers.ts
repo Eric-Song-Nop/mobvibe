@@ -247,6 +247,7 @@ export function setupCliHandlers(
 				sessionId: s.sessionId,
 				title: s.title ?? `Session ${s.sessionId.slice(0, 8)}`,
 				cwd: s.cwd,
+				workspaceRootCwd: s.workspaceRootCwd,
 				updatedAt: s.updatedAt ?? new Date().toISOString(),
 				createdAt: s.updatedAt ?? new Date().toISOString(),
 				backendId: payload.backendId,

@@ -22,6 +22,7 @@ type Mutations = {
 				branch: string;
 				baseBranch?: string;
 				sourceCwd: string;
+				relativeCwd?: string;
 			};
 		}) => Promise<unknown>;
 		isPending: boolean;
@@ -157,7 +158,10 @@ export function useSessionHandlers({
 		if (!initialCwd && selectedMachineId) {
 			initialCwd = lastCreatedCwd[selectedMachineId];
 			if (!initialCwd && activeSession?.machineId === selectedMachineId) {
-				initialCwd = activeSession.worktreeSourceCwd || activeSession.cwd;
+				initialCwd =
+					activeSession.workspaceRootCwd ||
+					activeSession.worktreeSourceCwd ||
+					activeSession.cwd;
 			}
 		}
 
@@ -166,7 +170,10 @@ export function useSessionHandlers({
 		uiActions.setCreateDialogOpen(true);
 	};
 
-	const handleCreateSession = async () => {
+	const handleCreateSession = async (projectContext?: {
+		repoRoot?: string;
+		relativeCwd?: string;
+	}) => {
 		const {
 			draftTitle,
 			draftBackendId,
@@ -204,7 +211,8 @@ export function useSessionHandlers({
 				? {
 						branch: draftWorktreeBranch.trim(),
 						baseBranch: draftWorktreeBaseBranch || undefined,
-						sourceCwd: draftCwd,
+						sourceCwd: projectContext?.repoRoot ?? draftCwd,
+						relativeCwd: projectContext?.relativeCwd,
 					}
 				: undefined;
 

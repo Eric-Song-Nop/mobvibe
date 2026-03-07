@@ -22,6 +22,35 @@ mock.module("../../lib/logger.js", () => ({
 	},
 }));
 
+const mockIsGitRepo = mock(() => Promise.resolve(true));
+const mockCreateGitWorktree = mock(() =>
+	Promise.resolve({
+		path: "/tmp/mobvibe-test/worktrees/project/feat-branch",
+		branch: "feat-branch",
+	}),
+);
+const mockResolveGitProjectContext = mock((cwd: string) =>
+	Promise.resolve({
+		isGitRepo: true,
+		repoRoot: cwd.startsWith("/home/user/project")
+			? "/home/user/project"
+			: cwd.startsWith("/home/user/project1")
+				? "/home/user/project1"
+				: cwd.startsWith("/home/user/project2")
+					? "/home/user/project2"
+					: cwd,
+		repoName: cwd.split("/").filter(Boolean).at(-1) ?? "project",
+		relativeCwd: undefined as string | undefined,
+		isRepoRoot: true,
+	}),
+);
+
+mock.module("../../lib/git-utils.js", () => ({
+	createGitWorktree: mockCreateGitWorktree,
+	isGitRepo: mockIsGitRepo,
+	resolveGitProjectContext: mockResolveGitProjectContext,
+}));
+
 // Dynamic import so that mock.module calls above are registered first
 const { SessionManager } = await import("../session-manager.js");
 
@@ -140,6 +169,9 @@ describe("SessionManager", () => {
 		sessionManager = new SessionManager(mockConfig);
 		mockConnection = createMockConnection();
 		sessionUpdateCallback = undefined;
+		mockIsGitRepo.mockClear();
+		mockCreateGitWorktree.mockClear();
+		mockResolveGitProjectContext.mockClear();
 		sessionManager.createConnection = () =>
 			mockConnection as unknown as AcpConnection;
 	});
@@ -296,6 +328,49 @@ describe("SessionManager", () => {
 			const sessions = sessionManager.listSessions();
 			expect(sessions).toHaveLength(1);
 			expect(sessions[0].sessionId).toBeDefined();
+		});
+
+		it("sets workspaceRootCwd for subdirectory sessions", async () => {
+			mockResolveGitProjectContext.mockResolvedValueOnce({
+				isGitRepo: true,
+				repoRoot: "/home/user/project",
+				repoName: "project",
+				relativeCwd: "apps/webui",
+				isRepoRoot: false,
+			});
+
+			await sessionManager.createSession({
+				cwd: "/home/user/project/apps/webui",
+				backendId: "backend-1",
+			});
+
+			const sessions = sessionManager.listSessions();
+			expect(sessions[0].cwd).toBe("/home/user/project/apps/webui");
+			expect(sessions[0].workspaceRootCwd).toBe("/home/user/project");
+		});
+
+		it("preserves relative cwd when creating a worktree session", async () => {
+			mockCreateGitWorktree.mockResolvedValueOnce({
+				path: "/tmp/mobvibe-test/worktrees/project/feat-branch",
+				branch: "feat-branch",
+			});
+
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project/apps/webui",
+				backendId: "backend-1",
+				worktree: {
+					branch: "feat-branch",
+					sourceCwd: "/home/user/project",
+					relativeCwd: "apps/webui",
+				},
+			});
+
+			expect(created.cwd).toBe(
+				"/tmp/mobvibe-test/worktrees/project/feat-branch/apps/webui",
+			);
+			expect(created.workspaceRootCwd).toBe("/home/user/project");
+			expect(created.worktreeSourceCwd).toBe("/home/user/project");
+			expect(created.worktreeBranch).toBe("feat-branch");
 		});
 	});
 

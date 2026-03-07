@@ -38,6 +38,8 @@ export type SessionSummary = {
 	createdAt: string;
 	updatedAt: string;
 	cwd?: string;
+	/** Stable workspace/project root for grouping and navigation */
+	workspaceRootCwd?: string;
 	agentName?: string;
 	modelId?: string;
 	modelName?: string;
@@ -109,6 +111,8 @@ export type SessionFsResourceEntry = {
 export type AcpSessionInfo = {
 	sessionId: string;
 	cwd: string;
+	/** Stable workspace/project root for grouping and navigation */
+	workspaceRootCwd?: string;
 	title?: string;
 	updatedAt?: string;
 	/** Agent-defined metadata from session_info_update RFD */

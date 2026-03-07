@@ -116,6 +116,11 @@ export function setupSessionRoutes(
 									? worktree.baseBranch.trim()
 									: undefined,
 							sourceCwd: worktree.sourceCwd.trim(),
+							relativeCwd:
+								typeof worktree.relativeCwd === "string" &&
+								worktree.relativeCwd.trim().length > 0
+									? worktree.relativeCwd.trim()
+									: undefined,
 						}
 					: undefined;
 

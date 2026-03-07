@@ -35,6 +35,7 @@ import {
 	getGitStatus,
 	getGitStatusExtended,
 	isGitRepo,
+	resolveGitProjectContext,
 	searchFileContents,
 	searchGitLog,
 } from "../lib/git-utils.js";
@@ -1156,8 +1157,8 @@ export class SocketClient extends EventEmitter {
 					{ requestId: request.requestId, cwd },
 					"rpc_git_branches_for_cwd",
 				);
-				const isRepo = await isGitRepo(cwd);
-				if (!isRepo) {
+				const projectContext = await resolveGitProjectContext(cwd);
+				if (!projectContext.isGitRepo) {
 					const result: GitBranchesForCwdResponse = {
 						isGitRepo: false,
 						branches: [],
@@ -1170,6 +1171,10 @@ export class SocketClient extends EventEmitter {
 					isGitRepo: true,
 					branches,
 					worktreeBaseDir: this.options.config.worktreeBaseDir,
+					repoRoot: projectContext.repoRoot,
+					repoName: projectContext.repoName,
+					relativeCwd: projectContext.relativeCwd,
+					isRepoRoot: projectContext.isRepoRoot,
 				};
 				this.sendRpcResponse(request.requestId, result);
 			} catch (error) {

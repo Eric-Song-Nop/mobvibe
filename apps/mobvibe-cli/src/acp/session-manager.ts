@@ -29,7 +29,11 @@ import {
 } from "@mobvibe/shared";
 import type { AcpBackendConfig, CliConfig } from "../config.js";
 import type { CliCryptoService } from "../e2ee/crypto-service.js";
-import { createGitWorktree, isGitRepo } from "../lib/git-utils.js";
+import {
+	createGitWorktree,
+	isGitRepo,
+	resolveGitProjectContext,
+} from "../lib/git-utils.js";
 import { logger } from "../lib/logger.js";
 import {
 	consolidateEventsForRead,
@@ -73,6 +77,8 @@ type SessionRecord = {
 	worktreeSourceCwd?: string;
 	/** Branch name of the worktree (only for worktree sessions) */
 	worktreeBranch?: string;
+	/** Stable workspace/project root for grouping and navigation */
+	workspaceRootCwd?: string;
 };
 
 type PermissionRequestRecord = {
@@ -652,6 +658,7 @@ export class SessionManager {
 		let effectiveCwd = options.cwd;
 		let worktreeSourceCwd: string | undefined;
 		let worktreeBranch: string | undefined;
+		let workspaceRootCwd: string | undefined;
 
 		if (options.worktree) {
 			const repoDir = options.worktree.sourceCwd;
@@ -691,7 +698,9 @@ export class SessionManager {
 					targetPath,
 					baseBranch: options.worktree.baseBranch,
 				});
-				effectiveCwd = result.path;
+				effectiveCwd = options.worktree.relativeCwd
+					? path.join(result.path, options.worktree.relativeCwd)
+					: result.path;
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				throw new AppError(
@@ -707,6 +716,10 @@ export class SessionManager {
 
 			worktreeSourceCwd = repoDir;
 			worktreeBranch = options.worktree.branch;
+			workspaceRootCwd = repoDir;
+		} else if (options.cwd) {
+			const projectContext = await resolveGitProjectContext(options.cwd);
+			workspaceRootCwd = projectContext.repoRoot ?? options.cwd;
 		}
 
 		const connection = await this.acquireConnection(backend);
@@ -753,6 +766,7 @@ export class SessionManager {
 				createdAt: now,
 				updatedAt: now,
 				cwd: effectiveCwd,
+				workspaceRootCwd,
 				worktreeSourceCwd,
 				worktreeBranch,
 				agentName: agentInfo?.title ?? agentInfo?.name,
@@ -1167,6 +1181,9 @@ export class SessionManager {
 						isValid: session.cwd
 							? await isValidWorkspacePath(session.cwd)
 							: false,
+						projectContext: session.cwd
+							? await resolveGitProjectContext(session.cwd)
+							: undefined,
 					})),
 				);
 
@@ -1181,7 +1198,7 @@ export class SessionManager {
 					isStale: boolean;
 				}> = [];
 
-				for (const { session, isValid } of validity) {
+				for (const { session, isValid, projectContext } of validity) {
 					if (!isValid) {
 						this.discoveredSessions.delete(session.sessionId);
 						// Mark as stale in WAL
@@ -1197,12 +1214,14 @@ export class SessionManager {
 					this.discoveredSessions.set(session.sessionId, {
 						sessionId: session.sessionId,
 						cwd: session.cwd,
+						workspaceRootCwd: projectContext?.repoRoot ?? session.cwd,
 						title: session.title ?? undefined,
 						updatedAt: session.updatedAt ?? undefined,
 					});
 					sessions.push({
 						sessionId: session.sessionId,
 						cwd: session.cwd,
+						workspaceRootCwd: projectContext?.repoRoot ?? session.cwd,
 						title: session.title ?? undefined,
 						updatedAt: session.updatedAt ?? undefined,
 					});
@@ -1355,6 +1374,7 @@ export class SessionManager {
 				response.modes,
 			);
 			const discovered = this.discoveredSessions.get(sessionId);
+			const projectContext = await resolveGitProjectContext(cwd);
 
 			// Restore pinned title from WAL if applicable
 			const walPinned = existingWalSession?.isTitlePinned;
@@ -1371,6 +1391,7 @@ export class SessionManager {
 				createdAt: now,
 				updatedAt: now,
 				cwd,
+				workspaceRootCwd: projectContext.repoRoot ?? cwd,
 				agentName: agentInfo?.title ?? agentInfo?.name,
 				modelId,
 				modelName,
@@ -1463,6 +1484,8 @@ export class SessionManager {
 		const agentInfo = existing.connection.getAgentInfo();
 
 		existing.cwd = cwd;
+		existing.workspaceRootCwd =
+			(await resolveGitProjectContext(cwd)).repoRoot ?? cwd;
 		existing.agentName =
 			agentInfo?.title ?? agentInfo?.name ?? existing.agentName;
 		existing.modelId = modelId;
@@ -1686,6 +1709,7 @@ export class SessionManager {
 			createdAt: record.createdAt.toISOString(),
 			updatedAt: record.updatedAt.toISOString(),
 			cwd: record.cwd,
+			workspaceRootCwd: record.workspaceRootCwd,
 			agentName: record.agentName,
 			modelId: record.modelId,
 			modelName: record.modelName,

@@ -67,6 +67,25 @@ describe("collectWorkspaces", () => {
 		expect(cwds).toContain("/home/user/project-b");
 	});
 
+	it("groups git subdirectory sessions by workspaceRootCwd", () => {
+		const sessions: Record<string, ChatSession> = {
+			s1: makeSession("s1", {
+				cwd: "/home/user/project/apps/webui",
+				workspaceRootCwd: "/home/user/project",
+			}),
+			s2: makeSession("s2", {
+				cwd: "/home/user/project/packages/core",
+				workspaceRootCwd: "/home/user/project",
+			}),
+		};
+
+		const workspaces = collectWorkspaces(sessions);
+
+		expect(workspaces).toHaveLength(1);
+		expect(workspaces[0].cwd).toBe("/home/user/project");
+		expect(workspaces[0].label).toBe("project");
+	});
+
 	it("filters by machineId when provided", () => {
 		const sessions: Record<string, ChatSession> = {
 			s1: makeSession("s1", {

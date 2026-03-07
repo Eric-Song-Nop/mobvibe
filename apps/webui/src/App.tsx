@@ -34,6 +34,7 @@ import { isInputFocused, registerHotkeys } from "@/lib/hotkeys";
 import { getBackendCapability, useMachinesStore } from "@/lib/machines-store";
 import { ensureNotificationPermission } from "@/lib/notifications";
 import { useUiStore } from "@/lib/ui-store";
+import { getPathBasename } from "@/lib/ui-utils";
 
 const CommandPalette = lazy(async () => {
 	const module = await import("@/components/app/CommandPalette");
@@ -322,11 +323,15 @@ function MainApp() {
 		if (!activeSession?.machineId || !activeSession.cwd) {
 			return;
 		}
-		const workspaceCwd = activeSession.worktreeSourceCwd || activeSession.cwd;
+		const workspaceCwd =
+			activeSession.workspaceRootCwd ||
+			activeSession.worktreeSourceCwd ||
+			activeSession.cwd;
 		uiActions.setSelectedWorkspace(activeSession.machineId, workspaceCwd);
 	}, [
 		activeSession?.cwd,
 		activeSession?.machineId,
+		activeSession?.workspaceRootCwd,
 		activeSession?.worktreeSourceCwd,
 		uiActions.setSelectedWorkspace,
 	]);
@@ -526,6 +531,19 @@ function MainApp() {
 
 	const streamError = activeSession?.streamError;
 	const backendLabel = activeSession?.backendLabel ?? activeSession?.backendId;
+	const workspaceRootCwd =
+		activeSession?.workspaceRootCwd ??
+		activeSession?.worktreeSourceCwd ??
+		activeSession?.cwd;
+	const workspaceLabel = getPathBasename(workspaceRootCwd) ?? workspaceRootCwd;
+	const subdirectoryLabel =
+		workspaceRootCwd && activeSession?.cwd
+			? activeSession.cwd.startsWith(`${workspaceRootCwd}/`) ||
+				activeSession.cwd.startsWith(`${workspaceRootCwd}\\`)
+				? activeSession.cwd.slice(workspaceRootCwd.length + 1)
+				: undefined
+			: undefined;
+	const executionMode = activeSession?.worktreeBranch ? "worktree" : "local";
 	const isModeSwitching =
 		mutations.setSessionModeMutation.isPending &&
 		mutations.setSessionModeMutation.variables?.sessionId === activeSessionId;
@@ -591,6 +609,11 @@ function MainApp() {
 				<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
 					<AppHeader
 						backendLabel={backendLabel}
+						workspaceLabel={workspaceLabel}
+						workspacePath={workspaceRootCwd}
+						executionMode={activeSession ? executionMode : undefined}
+						branchLabel={activeSession?.worktreeBranch}
+						subdirectoryLabel={subdirectoryLabel}
 						statusMessage={statusMessage}
 						streamError={streamError}
 						loadingMessage={loadingMessage}

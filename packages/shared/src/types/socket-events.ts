@@ -140,6 +140,8 @@ export type CreateSessionWorktreeOptions = {
 	baseBranch?: string;
 	/** Original repo directory */
 	sourceCwd: string;
+	/** Original subdirectory inside the repo, preserved inside the worktree */
+	relativeCwd?: string;
 };
 
 // Create session RPC params
@@ -506,6 +508,14 @@ export type GitBranchesForCwdResponse = {
 	branches: GitBranch[];
 	/** CLI-configured worktree base directory */
 	worktreeBaseDir?: string;
+	/** Canonical Git repo root if cwd is inside a Git work tree */
+	repoRoot?: string;
+	/** Basename of the detected repo root */
+	repoName?: string;
+	/** Path from repo root to cwd, if cwd is a subdirectory */
+	relativeCwd?: string;
+	/** Whether cwd is already the repo root */
+	isRepoRoot?: boolean;
 };
 
 export type GitStashListParams = { sessionId: string };

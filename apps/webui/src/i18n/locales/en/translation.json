@@ -82,6 +82,13 @@
 		"cwdPlaceholder": "Enter or paste a Home path",
 		"browse": "Browse",
 		"targetMachine": "Target: {{name}}",
+		"projectDetection": {
+			"folder": "Folder detected",
+			"gitRepo": "Git repo detected: {{name}}",
+			"repoRoot": "Project root",
+			"relativeCwd": "Selected subdirectory",
+			"nonGitHint": "This folder is valid, but worktree and branch features are unavailable until a Git repo is selected."
+		},
 		"archiveAll": "Archive All",
 		"archiveAllTitle": "Archive all sessions?",
 		"archiveAllDescription": "This will archive {{count}} session(s), ending their backend processes and hiding them from the list.",
@@ -93,7 +100,13 @@
 			"baseBranchLabel": "Based on",
 			"baseBranchPlaceholder": "Select base branch (default: HEAD)",
 			"pathLabel": "Worktree path",
+			"executionPathLabel": "Execution directory",
 			"queryError": "Failed to check git repository status"
+		},
+		"context": {
+			"local": "Local",
+			"worktree": "Worktree",
+			"subdir": "Subdir: {{path}}"
 		},
 		"status": {
 			"active": "Active",

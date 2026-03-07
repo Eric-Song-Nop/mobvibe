@@ -268,6 +268,7 @@ export const createSession = async (payload?: {
 		branch: string;
 		baseBranch?: string;
 		sourceCwd: string;
+		relativeCwd?: string;
 	};
 }): Promise<CreateSessionResponse> =>
 	requestJson<CreateSessionResponse>("/acp/session", {
