@@ -110,6 +110,16 @@ const MIGRATIONS = [
       ALTER TABLE sessions ADD COLUMN is_title_pinned INTEGER DEFAULT 0;
     `,
 	},
+	{
+		version: 6,
+		up: `
+      ALTER TABLE discovered_sessions ADD COLUMN workspace_root_cwd TEXT;
+
+      UPDATE discovered_sessions
+      SET workspace_root_cwd = cwd
+      WHERE workspace_root_cwd IS NULL;
+    `,
+	},
 ];
 
 export function runMigrations(db: Database): void {

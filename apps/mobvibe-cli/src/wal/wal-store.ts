@@ -56,6 +56,7 @@ export type DiscoveredSession = {
 	sessionId: string;
 	backendId: string;
 	cwd?: string;
+	workspaceRootCwd?: string;
 	title?: string;
 	agentUpdatedAt?: string;
 	discoveredAt: string;
@@ -192,15 +193,16 @@ export class WalStore {
 		// Discovered sessions statements
 		this.stmtUpsertDiscoveredSession = this.db.query(`
       INSERT INTO discovered_sessions (
-        session_id, backend_id, cwd, title, agent_updated_at,
+        session_id, backend_id, cwd, workspace_root_cwd, title, agent_updated_at,
         discovered_at, last_verified_at, is_stale
       ) VALUES (
-        $sessionId, $backendId, $cwd, $title, $agentUpdatedAt,
+        $sessionId, $backendId, $cwd, $workspaceRootCwd, $title, $agentUpdatedAt,
         $discoveredAt, $lastVerifiedAt, 0
       )
       ON CONFLICT (session_id) DO UPDATE SET
         backend_id = $backendId,
         cwd = COALESCE($cwd, discovered_sessions.cwd),
+        workspace_root_cwd = COALESCE($workspaceRootCwd, discovered_sessions.workspace_root_cwd),
         title = COALESCE($title, discovered_sessions.title),
         agent_updated_at = COALESCE($agentUpdatedAt, discovered_sessions.agent_updated_at),
         last_verified_at = $lastVerifiedAt,
@@ -208,7 +210,7 @@ export class WalStore {
     `);
 
 		this.stmtGetDiscoveredSessions = this.db.query(`
-      SELECT d.session_id, d.backend_id, d.cwd, d.title, d.agent_updated_at,
+      SELECT d.session_id, d.backend_id, d.cwd, d.workspace_root_cwd, d.title, d.agent_updated_at,
              d.discovered_at, d.last_verified_at, d.is_stale
       FROM discovered_sessions d
       LEFT JOIN archived_session_ids a ON d.session_id = a.session_id
@@ -217,7 +219,7 @@ export class WalStore {
     `);
 
 		this.stmtGetDiscoveredSessionsByBackend = this.db.query(`
-      SELECT d.session_id, d.backend_id, d.cwd, d.title, d.agent_updated_at,
+      SELECT d.session_id, d.backend_id, d.cwd, d.workspace_root_cwd, d.title, d.agent_updated_at,
              d.discovered_at, d.last_verified_at, d.is_stale
       FROM discovered_sessions d
       LEFT JOIN archived_session_ids a ON d.session_id = a.session_id
@@ -544,6 +546,7 @@ export class WalStore {
 				$sessionId: session.sessionId,
 				$backendId: session.backendId,
 				$cwd: session.cwd ?? null,
+				$workspaceRootCwd: session.workspaceRootCwd ?? null,
 				$title: session.title ?? null,
 				$agentUpdatedAt: session.agentUpdatedAt ?? null,
 				$discoveredAt: session.discoveredAt,
@@ -677,6 +680,7 @@ export class WalStore {
 			sessionId: row.session_id,
 			backendId: row.backend_id,
 			cwd: row.cwd ?? undefined,
+			workspaceRootCwd: row.workspace_root_cwd ?? undefined,
 			title: row.title ?? undefined,
 			agentUpdatedAt: row.agent_updated_at ?? undefined,
 			discoveredAt: row.discovered_at,
@@ -714,6 +718,7 @@ type DiscoveredSessionRow = {
 	session_id: string;
 	backend_id: string;
 	cwd: string | null;
+	workspace_root_cwd: string | null;
 	title: string | null;
 	agent_updated_at: string | null;
 	discovered_at: string;

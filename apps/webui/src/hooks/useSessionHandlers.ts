@@ -1,11 +1,13 @@
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PermissionResultNotification } from "@/lib/acp";
+import { fetchGitBranchesForCwd } from "@/lib/api";
 import type { ChatSession } from "@/lib/chat-store";
 import { useChatStore } from "@/lib/chat-store";
 import {
 	buildSessionNotReadyError,
 	createFallbackError,
+	normalizeError,
 } from "@/lib/error-utils";
 import { getBackendCapability, type Machine } from "@/lib/machines-store";
 import { useUiStore } from "@/lib/ui-store";
@@ -158,10 +160,7 @@ export function useSessionHandlers({
 		if (!initialCwd && selectedMachineId) {
 			initialCwd = lastCreatedCwd[selectedMachineId];
 			if (!initialCwd && activeSession?.machineId === selectedMachineId) {
-				initialCwd =
-					activeSession.workspaceRootCwd ||
-					activeSession.worktreeSourceCwd ||
-					activeSession.cwd;
+				initialCwd = activeSession.worktreeSourceCwd || activeSession.cwd;
 			}
 		}
 
@@ -170,10 +169,7 @@ export function useSessionHandlers({
 		uiActions.setCreateDialogOpen(true);
 	};
 
-	const handleCreateSession = async (projectContext?: {
-		repoRoot?: string;
-		relativeCwd?: string;
-	}) => {
+	const handleCreateSession = async () => {
 		const {
 			draftTitle,
 			draftBackendId,
@@ -205,16 +201,48 @@ export function useSessionHandlers({
 		const isUserCustomTitle = title.length > 0 && title !== defaultTitle;
 		chatActions.setAppError(undefined);
 
-		// Build worktree options if enabled
-		const worktree =
-			draftWorktreeEnabled && draftWorktreeBranch.trim().length > 0
-				? {
-						branch: draftWorktreeBranch.trim(),
-						baseBranch: draftWorktreeBaseBranch || undefined,
-						sourceCwd: projectContext?.repoRoot ?? draftCwd,
-						relativeCwd: projectContext?.relativeCwd,
-					}
-				: undefined;
+		let worktree:
+			| {
+					branch: string;
+					baseBranch?: string;
+					sourceCwd: string;
+					relativeCwd?: string;
+			  }
+			| undefined;
+
+		if (draftWorktreeEnabled) {
+			const branch = draftWorktreeBranch.trim();
+			if (!branch) {
+				return;
+			}
+
+			try {
+				const projectContext = await fetchGitBranchesForCwd({
+					machineId: selectedMachineId,
+					cwd: draftCwd,
+				});
+				if (!projectContext.isGitRepo) {
+					chatActions.setAppError(
+						createFallbackError(t("errors.worktreeRequiresGitRepo"), "request"),
+					);
+					return;
+				}
+				worktree = {
+					branch,
+					baseBranch: draftWorktreeBaseBranch || undefined,
+					sourceCwd: projectContext.repoRoot ?? draftCwd,
+					relativeCwd: projectContext.relativeCwd,
+				};
+			} catch (error) {
+				chatActions.setAppError(
+					normalizeError(
+						error,
+						createFallbackError(t("session.worktree.queryError"), "request"),
+					),
+				);
+				return;
+			}
+		}
 
 		try {
 			await mutations.createSessionMutation.mutateAsync({

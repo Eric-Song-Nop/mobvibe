@@ -170,6 +170,73 @@ describe("useSessionMutations", () => {
 			expect(mockStore.setAppError).toHaveBeenCalledWith(undefined);
 		});
 
+		it("uses the original variables.cwd for lastCreatedCwd on plain subdirectory sessions", async () => {
+			const mockSession: apiModule.CreateSessionResponse = {
+				sessionId: "subdir-session",
+				title: "Subdir Session",
+				backendId: "backend-1",
+				backendLabel: "Backend 1",
+				createdAt: "2025-01-01T00:00:00Z",
+				updatedAt: "2025-01-01T00:00:00Z",
+				cwd: "/repo/apps/webui",
+				workspaceRootCwd: "/repo",
+				machineId: "machine-1",
+			};
+			vi.mocked(apiModule.createSession).mockResolvedValue(mockSession);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.createSessionMutation.mutateAsync({
+				backendId: "backend-1",
+				cwd: "/repo/apps/webui",
+				machineId: "machine-1",
+			});
+
+			expect(mockStore.setLastCreatedCwd).toHaveBeenCalledWith(
+				"machine-1",
+				"/repo/apps/webui",
+			);
+		});
+
+		it("uses the original variables.cwd for lastCreatedCwd on worktree sessions", async () => {
+			const mockSession: apiModule.CreateSessionResponse = {
+				sessionId: "worktree-session",
+				title: "Worktree Session",
+				backendId: "backend-1",
+				backendLabel: "Backend 1",
+				createdAt: "2025-01-01T00:00:00Z",
+				updatedAt: "2025-01-01T00:00:00Z",
+				cwd: "/tmp/worktrees/repo/feat/live-cwd/apps/webui",
+				workspaceRootCwd: "/repo",
+				worktreeSourceCwd: "/repo",
+				worktreeBranch: "feat/live-cwd",
+				machineId: "machine-1",
+			};
+			vi.mocked(apiModule.createSession).mockResolvedValue(mockSession);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.createSessionMutation.mutateAsync({
+				backendId: "backend-1",
+				cwd: "/repo/apps/webui",
+				machineId: "machine-1",
+				worktree: {
+					branch: "feat/live-cwd",
+					sourceCwd: "/repo",
+					relativeCwd: "apps/webui",
+				},
+			});
+
+			expect(mockStore.setLastCreatedCwd).toHaveBeenCalledWith(
+				"machine-1",
+				"/repo/apps/webui",
+			);
+		});
+
 		it("should handle create session errors", async () => {
 			vi.mocked(apiModule.createSession).mockRejectedValue(
 				new Error("Failed to create session"),

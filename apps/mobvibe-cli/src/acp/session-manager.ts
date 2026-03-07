@@ -273,6 +273,8 @@ export class SessionManager {
 					merged.set(s.sessionId, {
 						...existing,
 						updatedAt: discoveredUpdatedAt,
+						workspaceRootCwd:
+							existing.workspaceRootCwd ?? s.workspaceRootCwd ?? s.cwd,
 					});
 				}
 			} else {
@@ -282,6 +284,7 @@ export class SessionManager {
 					backendId: s.backendId,
 					backendLabel: s.backendId,
 					cwd: s.cwd as string,
+					workspaceRootCwd: s.workspaceRootCwd ?? s.cwd,
 					createdAt: s.discoveredAt,
 					updatedAt: s.agentUpdatedAt ?? s.discoveredAt,
 				} satisfies SessionSummary);
@@ -289,6 +292,56 @@ export class SessionManager {
 		}
 
 		return Array.from(merged.values());
+	}
+
+	async backfillDiscoveredWorkspaceRoots(): Promise<void> {
+		const discoveredSessions = this.walStore.getDiscoveredSessions();
+		let checked = 0;
+		let updated = 0;
+		let skippedMissingCwd = 0;
+		let failed = 0;
+
+		for (const session of discoveredSessions) {
+			if (!session.cwd) {
+				skippedMissingCwd++;
+				continue;
+			}
+			if (
+				session.workspaceRootCwd &&
+				session.workspaceRootCwd !== session.cwd
+			) {
+				continue;
+			}
+
+			checked++;
+
+			try {
+				const projectContext = await resolveGitProjectContext(session.cwd);
+				const workspaceRootCwd = projectContext.repoRoot ?? session.cwd;
+				this.walStore.saveDiscoveredSessions([
+					{
+						...session,
+						workspaceRootCwd,
+					},
+				]);
+				updated++;
+			} catch (error) {
+				failed++;
+				logger.warn(
+					{
+						sessionId: session.sessionId,
+						cwd: session.cwd,
+						err: error,
+					},
+					"discovered_workspace_root_backfill_failed",
+				);
+			}
+		}
+
+		logger.info(
+			{ checked, updated, skippedMissingCwd, failed },
+			"discovered_workspace_root_backfill_complete",
+		);
 	}
 
 	getSession(sessionId: string): SessionRecord | undefined {
@@ -1192,6 +1245,7 @@ export class SessionManager {
 					sessionId: string;
 					backendId: string;
 					cwd?: string;
+					workspaceRootCwd?: string;
 					title?: string;
 					agentUpdatedAt?: string;
 					discoveredAt: string;
@@ -1231,6 +1285,7 @@ export class SessionManager {
 						sessionId: session.sessionId,
 						backendId: backend.id,
 						cwd: session.cwd,
+						workspaceRootCwd: projectContext?.repoRoot ?? session.cwd,
 						title: session.title ?? undefined,
 						agentUpdatedAt: session.updatedAt ?? undefined,
 						discoveredAt: now,
