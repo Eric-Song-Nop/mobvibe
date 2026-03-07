@@ -166,6 +166,9 @@ describe("SessionManager", () => {
 
 	beforeEach(() => {
 		mockConfig = createMockConfig();
+		mockConfig.walDbPath = `/tmp/mobvibe-test/events-${Date.now()}-${Math.random()
+			.toString(36)
+			.slice(2)}.db`;
 		sessionManager = new SessionManager(mockConfig);
 		mockConnection = createMockConnection();
 		sessionUpdateCallback = undefined;
@@ -371,6 +374,143 @@ describe("SessionManager", () => {
 			expect(created.workspaceRootCwd).toBe("/home/user/project");
 			expect(created.worktreeSourceCwd).toBe("/home/user/project");
 			expect(created.worktreeBranch).toBe("feat-branch");
+		});
+
+		it("includes persisted workspaceRootCwd for discovered sessions from WAL", () => {
+			(
+				sessionManager as unknown as {
+					walStore: {
+						saveDiscoveredSessions: (
+							sessions: Array<{
+								sessionId: string;
+								backendId: string;
+								cwd?: string;
+								workspaceRootCwd?: string;
+								discoveredAt: string;
+								isStale: boolean;
+							}>,
+						) => void;
+					};
+				}
+			).walStore.saveDiscoveredSessions([
+				{
+					sessionId: "historical-1",
+					backendId: "backend-1",
+					cwd: "/home/user/project/apps/webui",
+					workspaceRootCwd: "/home/user/project",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+
+			const sessions = sessionManager.listAllSessions();
+			expect(sessions).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						sessionId: "historical-1",
+						cwd: "/home/user/project/apps/webui",
+						workspaceRootCwd: "/home/user/project",
+					}),
+				]),
+			);
+		});
+	});
+
+	describe("backfillDiscoveredWorkspaceRoots", () => {
+		it("upgrades legacy discovered sessions using repoRoot for git subdirectories", async () => {
+			const walStore = (
+				sessionManager as unknown as {
+					walStore: {
+						saveDiscoveredSessions: (
+							sessions: Array<{
+								sessionId: string;
+								backendId: string;
+								cwd?: string;
+								workspaceRootCwd?: string;
+								discoveredAt: string;
+								isStale: boolean;
+							}>,
+						) => void;
+						getDiscoveredSessions: () => Array<{
+							sessionId: string;
+							cwd?: string;
+							workspaceRootCwd?: string;
+						}>;
+					};
+				}
+			).walStore;
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: "legacy-subdir",
+					backendId: "backend-1",
+					cwd: "/home/user/project/apps/webui",
+					workspaceRootCwd: "/home/user/project/apps/webui",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+
+			mockResolveGitProjectContext.mockResolvedValueOnce({
+				isGitRepo: true,
+				repoRoot: "/home/user/project",
+				repoName: "project",
+				relativeCwd: "apps/webui",
+				isRepoRoot: false,
+			});
+
+			await sessionManager.backfillDiscoveredWorkspaceRoots();
+
+			const [session] = walStore.getDiscoveredSessions();
+			expect(session.workspaceRootCwd).toBe("/home/user/project");
+		});
+
+		it("falls back to cwd for non-git discovered sessions", async () => {
+			const walStore = (
+				sessionManager as unknown as {
+					walStore: {
+						saveDiscoveredSessions: (
+							sessions: Array<{
+								sessionId: string;
+								backendId: string;
+								cwd?: string;
+								workspaceRootCwd?: string;
+								discoveredAt: string;
+								isStale: boolean;
+							}>,
+						) => void;
+						getDiscoveredSessions: () => Array<{
+							sessionId: string;
+							cwd?: string;
+							workspaceRootCwd?: string;
+						}>;
+					};
+				}
+			).walStore;
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: "legacy-folder",
+					backendId: "backend-1",
+					cwd: "/home/user/folder",
+					workspaceRootCwd: "/home/user/folder",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+
+			mockResolveGitProjectContext.mockResolvedValueOnce({
+				isGitRepo: false,
+				repoRoot: "/home/user/folder",
+				repoName: "folder",
+				relativeCwd: undefined,
+				isRepoRoot: false,
+			});
+
+			await sessionManager.backfillDiscoveredWorkspaceRoots();
+
+			const [session] = walStore
+				.getDiscoveredSessions()
+				.filter((item) => item.sessionId === "legacy-folder");
+			expect(session.workspaceRootCwd).toBe("/home/user/folder");
 		});
 	});
 

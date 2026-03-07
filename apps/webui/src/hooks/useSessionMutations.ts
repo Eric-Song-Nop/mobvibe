@@ -260,10 +260,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 			// Switch to real session
 			store.setActiveSessionId(data.sessionId);
 
-			// Use original repo cwd for lastCreatedCwd so reopening the dialog
-			// pre-fills the source repo path, not the worktree path
-			const lastCwd =
-				data.workspaceRootCwd ?? data.worktreeSourceCwd ?? data.cwd;
+			const lastCwd = _variables?.cwd ?? data.worktreeSourceCwd ?? data.cwd;
 			if (data.machineId && lastCwd) {
 				store.setLastCreatedCwd(data.machineId, lastCwd);
 			}

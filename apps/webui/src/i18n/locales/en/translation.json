@@ -83,6 +83,7 @@
 		"browse": "Browse",
 		"targetMachine": "Target: {{name}}",
 		"projectDetection": {
+			"checking": "Checking project…",
 			"folder": "Folder detected",
 			"gitRepo": "Git repo detected: {{name}}",
 			"repoRoot": "Project root",
@@ -147,7 +148,8 @@
 		"previewLoadFailed": "Failed to load preview",
 		"pathLoadFailed": "Failed to load path",
 		"reloadSessionFailed": "Failed to reload session",
-		"bulkArchiveSessionsFailed": "Failed to archive sessions"
+		"bulkArchiveSessionsFailed": "Failed to archive sessions",
+		"worktreeRequiresGitRepo": "Select a Git repository before creating a worktree session"
 	},
 	"workingDirectory": {
 		"dialogTitle": "Select working directory",

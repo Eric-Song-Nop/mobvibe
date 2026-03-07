@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
@@ -440,6 +441,67 @@ describe("WalStore", () => {
 			const discovered = walStore.getDiscoveredSessions("backend-1");
 			expect(discovered.length).toBe(1);
 			expect(discovered[0].sessionId).toBe("session-2");
+		});
+	});
+
+	describe("discovered session workspace roots", () => {
+		it("round-trips workspaceRootCwd for discovered sessions", () => {
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: "session-1",
+					backendId: "backend-1",
+					cwd: "/home/user/project/apps/webui",
+					workspaceRootCwd: "/home/user/project",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+
+			const discovered = walStore.getDiscoveredSessions();
+			expect(discovered).toHaveLength(1);
+			expect(discovered[0].workspaceRootCwd).toBe("/home/user/project");
+		});
+
+		it("migrates legacy discovered sessions with a non-null fallback workspace root", () => {
+			walStore.close();
+
+			const db = new Database(dbPath);
+			db.exec(`
+				DROP TABLE IF EXISTS schema_version;
+				CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+				INSERT INTO schema_version (version) VALUES (5);
+				DROP TABLE IF EXISTS discovered_sessions;
+				CREATE TABLE discovered_sessions (
+					session_id TEXT PRIMARY KEY,
+					backend_id TEXT NOT NULL,
+					cwd TEXT,
+					title TEXT,
+					agent_updated_at TEXT,
+					discovered_at TEXT NOT NULL,
+					last_verified_at TEXT,
+					is_stale INTEGER DEFAULT 0
+				);
+				INSERT INTO discovered_sessions (
+					session_id,
+					backend_id,
+					cwd,
+					discovered_at,
+					is_stale
+				) VALUES (
+					'legacy-session',
+					'backend-1',
+					'/home/user/legacy',
+					'2025-01-01T00:00:00.000Z',
+					0
+				);
+			`);
+			db.close();
+
+			walStore = new WalStore(dbPath);
+
+			const discovered = walStore.getDiscoveredSessions();
+			expect(discovered).toHaveLength(1);
+			expect(discovered[0].workspaceRootCwd).toBe("/home/user/legacy");
 		});
 	});
 

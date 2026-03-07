@@ -46,10 +46,7 @@ export type CreateSessionDialogProps = {
 	onOpenChange: (open: boolean) => void;
 	availableBackends: AcpBackendSummary[];
 	isCreating: boolean;
-	onCreate: (projectContext?: {
-		repoRoot?: string;
-		relativeCwd?: string;
-	}) => void;
+	onCreate: () => void;
 };
 
 /** Sanitize branch name for worktree path preview */
@@ -114,6 +111,22 @@ export function CreateSessionDialog({
 	const repoName =
 		branchesQuery.data?.repoName ?? getPathBasename(repoRoot ?? draftCwd);
 	const relativeCwd = branchesQuery.data?.relativeCwd;
+	const isGitContextStale = draftCwd !== debouncedCwd;
+	const isResolvingGitContext =
+		Boolean(draftCwd) &&
+		Boolean(selectedMachineId) &&
+		(isGitContextStale || branchesQuery.isFetching);
+	const hasResolvedGitContext =
+		Boolean(draftCwd) &&
+		Boolean(selectedMachineId) &&
+		!isGitContextStale &&
+		branchesQuery.isFetched;
+	const isWorktreeCreateDisabled =
+		draftWorktreeEnabled &&
+		(isGitContextStale ||
+			branchesQuery.isFetching ||
+			branchesQuery.isError ||
+			!draftWorktreeBranch.trim());
 
 	// Worktree path preview using CLI-configured base dir
 	const worktreePathPreview = useMemo(() => {
@@ -153,10 +166,16 @@ export function CreateSessionDialog({
 
 	// Reset worktree when query completes and cwd is not a git repo
 	useEffect(() => {
-		if (branchesQuery.isFetched && !isGitRepo && draftWorktreeEnabled) {
+		if (
+			!isGitContextStale &&
+			branchesQuery.isFetched &&
+			!isGitRepo &&
+			draftWorktreeEnabled
+		) {
 			setDraftWorktreeEnabled(false);
 		}
 	}, [
+		isGitContextStale,
 		branchesQuery.isFetched,
 		isGitRepo,
 		draftWorktreeEnabled,
@@ -252,11 +271,12 @@ export function CreateSessionDialog({
 						) : null}
 					</div>
 
-					{/* Loading skeleton while checking git repo */}
-					{branchesQuery.isFetching && !branchesQuery.data ? (
-						<div className="flex items-center gap-2 px-1">
+					{/* Loading state while resolving the current cwd */}
+					{isResolvingGitContext ? (
+						<div className="text-muted-foreground flex items-center gap-2 px-1 text-xs">
 							<Skeleton className="h-4 w-4" />
 							<Skeleton className="h-4 w-32" />
+							<span>{t("session.projectDetection.checking")}</span>
 						</div>
 					) : null}
 
@@ -267,7 +287,7 @@ export function CreateSessionDialog({
 						</div>
 					) : null}
 
-					{branchesQuery.isFetched && draftCwd ? (
+					{hasResolvedGitContext && draftCwd ? (
 						<div className="border-border bg-muted/20 flex flex-col gap-1 rounded-md border px-3 py-2 text-xs">
 							<div className="font-medium">
 								{isGitRepo
@@ -296,8 +316,8 @@ export function CreateSessionDialog({
 						</div>
 					) : null}
 
-					{/* Worktree option — only shown after query completes and cwd is a git repo */}
-					{branchesQuery.isFetched && isGitRepo ? (
+					{/* Worktree option — only shown after the current cwd resolves to a git repo */}
+					{hasResolvedGitContext && isGitRepo ? (
 						<div className="flex flex-col gap-2">
 							<label
 								htmlFor="worktree-enable"
@@ -396,18 +416,11 @@ export function CreateSessionDialog({
 							!draftBackendId ||
 							!draftCwd ||
 							!selectedMachineId ||
-							(draftWorktreeEnabled && !draftWorktreeBranch.trim())
+							isWorktreeCreateDisabled
 						}
 						onClick={(event) => {
 							event.preventDefault();
-							onCreate(
-								isGitRepo
-									? {
-											repoRoot,
-											relativeCwd,
-										}
-									: undefined,
-							);
+							onCreate();
 						}}
 					>
 						{isCreating ? t("common.creating") : t("common.create")}

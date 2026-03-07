@@ -83,6 +83,7 @@
 		"browse": "浏览",
 		"targetMachine": "目标机器：{{name}}",
 		"projectDetection": {
+			"checking": "正在检查项目…",
 			"folder": "已检测为普通目录",
 			"gitRepo": "已检测到 Git 仓库：{{name}}",
 			"repoRoot": "项目根目录",
@@ -147,7 +148,8 @@
 		"previewLoadFailed": "预览加载失败",
 		"pathLoadFailed": "路径加载失败",
 		"reloadSessionFailed": "重载会话失败",
-		"bulkArchiveSessionsFailed": "批量归档对话失败"
+		"bulkArchiveSessionsFailed": "批量归档对话失败",
+		"worktreeRequiresGitRepo": "创建 worktree 对话前，请先选择一个 Git 仓库"
 	},
 	"workingDirectory": {
 		"dialogTitle": "选择工作目录",

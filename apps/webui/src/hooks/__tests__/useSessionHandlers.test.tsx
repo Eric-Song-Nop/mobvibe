@@ -2,12 +2,32 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as apiModule from "@/lib/api";
 import type { ChatSession } from "@/lib/chat-store";
 import type { Machine } from "@/lib/machines-store";
 import {
 	type UseSessionHandlersParams,
 	useSessionHandlers,
 } from "../useSessionHandlers";
+
+vi.mock("@/lib/api", async () => {
+	const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+	return {
+		...actual,
+		fetchGitBranchesForCwd: vi.fn(),
+	};
+});
+
+const mockUiStoreState = vi.hoisted(() => ({
+	draftTitle: "",
+	draftBackendId: undefined as string | undefined,
+	draftCwd: undefined as string | undefined,
+	draftWorktreeEnabled: false,
+	draftWorktreeBranch: "",
+	draftWorktreeBaseBranch: undefined as string | undefined,
+	editingSessionId: undefined as string | undefined,
+	editingTitle: "",
+}));
 
 vi.mock("@/lib/chat-store", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/lib/chat-store")>();
@@ -24,16 +44,7 @@ vi.mock("@/lib/ui-store", async (importOriginal) => {
 	return {
 		...actual,
 		useUiStore: {
-			getState: () => ({
-				draftTitle: "",
-				draftBackendId: undefined,
-				draftCwd: undefined,
-				draftWorktreeEnabled: false,
-				draftWorktreeBranch: "",
-				draftWorktreeBaseBranch: undefined,
-				editingSessionId: undefined,
-				editingTitle: "",
-			}),
+			getState: () => mockUiStoreState,
 		},
 	};
 });
@@ -142,6 +153,14 @@ describe("useSessionHandlers — handleOpenCreateDialog", () => {
 		uiActions = createMockUiActions();
 		chatActions = createMockChatActions();
 		mutations = createMockMutations();
+		mockUiStoreState.draftTitle = "";
+		mockUiStoreState.draftBackendId = undefined;
+		mockUiStoreState.draftCwd = undefined;
+		mockUiStoreState.draftWorktreeEnabled = false;
+		mockUiStoreState.draftWorktreeBranch = "";
+		mockUiStoreState.draftWorktreeBaseBranch = undefined;
+		mockUiStoreState.editingSessionId = undefined;
+		mockUiStoreState.editingTitle = "";
 		vi.clearAllMocks();
 	});
 
@@ -163,6 +182,7 @@ describe("useSessionHandlers — handleOpenCreateDialog", () => {
 		const activeSession = createBaseSession({
 			machineId: "machine-1",
 			cwd: "/projects/bar",
+			workspaceRootCwd: "/projects",
 		});
 
 		const { result } = renderHandlers({
@@ -280,5 +300,138 @@ describe("useSessionHandlers — handleOpenCreateDialog", () => {
 
 		// No workspace → falls back to activeSession cwd
 		expect(uiActions.setDraftCwd).toHaveBeenCalledWith("/projects/bar");
+	});
+
+	it("prefills the active session cwd for non-worktree subdirectory sessions", () => {
+		const activeSession = createBaseSession({
+			machineId: "machine-1",
+			cwd: "/projects/repo/apps/webui",
+			workspaceRootCwd: "/projects/repo",
+		});
+
+		const { result } = renderHandlers({
+			activeSessionId: "session-1",
+			activeSession,
+			lastCreatedCwd: {},
+		});
+
+		result.current.handleOpenCreateDialog();
+
+		expect(uiActions.setDraftCwd).toHaveBeenCalledWith(
+			"/projects/repo/apps/webui",
+		);
+	});
+});
+
+describe("useSessionHandlers — handleCreateSession", () => {
+	let queryClient: QueryClient;
+	let uiActions: ReturnType<typeof createMockUiActions>;
+	let chatActions: ReturnType<typeof createMockChatActions>;
+	let mutations: ReturnType<typeof createMockMutations>;
+
+	const wrapper = ({ children }: { children: ReactNode }) => (
+		<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+	);
+
+	const renderHandlers = (
+		overrides: Partial<UseSessionHandlersParams> = {},
+	) => {
+		const defaults: UseSessionHandlersParams = {
+			sessions: {},
+			activeSessionId: undefined,
+			activeSession: undefined,
+			sessionList: [],
+			selectedMachineId: "machine-1",
+			lastCreatedCwd: {},
+			machines: {
+				"machine-1": {
+					machineId: "machine-1",
+					hostname: "dev-box",
+					connected: true,
+				} as Machine,
+			},
+			defaultBackendId: "backend-1",
+			effectiveWorkspaceCwd: undefined,
+			chatActions,
+			uiActions,
+			mutations,
+			activateSession: vi.fn(),
+			isActivating: false,
+			syncSessionHistory: vi.fn(),
+		};
+
+		return renderHook(() => useSessionHandlers({ ...defaults, ...overrides }), {
+			wrapper,
+		});
+	};
+
+	beforeEach(() => {
+		queryClient = new QueryClient({
+			defaultOptions: { mutations: { retry: false } },
+		});
+		uiActions = createMockUiActions();
+		chatActions = createMockChatActions();
+		mutations = createMockMutations();
+		mockUiStoreState.draftTitle = "Feature Session";
+		mockUiStoreState.draftBackendId = "backend-1";
+		mockUiStoreState.draftCwd = "/projects/repo/apps/webui";
+		mockUiStoreState.draftWorktreeEnabled = true;
+		mockUiStoreState.draftWorktreeBranch = "feat/live-cwd";
+		mockUiStoreState.draftWorktreeBaseBranch = "main";
+		vi.clearAllMocks();
+	});
+
+	it("refetches git metadata for the live draft cwd when worktree creation is enabled", async () => {
+		vi.mocked(apiModule.fetchGitBranchesForCwd).mockResolvedValue({
+			isGitRepo: true,
+			branches: [],
+			repoRoot: "/projects/repo",
+			relativeCwd: "apps/webui",
+			repoName: "repo",
+			isRepoRoot: false,
+		});
+		vi.mocked(mutations.createSessionMutation.mutateAsync).mockResolvedValue(
+			{},
+		);
+
+		const { result } = renderHandlers();
+
+		await result.current.handleCreateSession();
+
+		expect(apiModule.fetchGitBranchesForCwd).toHaveBeenCalledWith({
+			machineId: "machine-1",
+			cwd: "/projects/repo/apps/webui",
+		});
+		expect(mutations.createSessionMutation.mutateAsync).toHaveBeenCalledWith({
+			backendId: "backend-1",
+			cwd: "/projects/repo/apps/webui",
+			title: "Feature Session",
+			machineId: "machine-1",
+			worktree: {
+				branch: "feat/live-cwd",
+				baseBranch: "main",
+				sourceCwd: "/projects/repo",
+				relativeCwd: "apps/webui",
+			},
+		});
+	});
+
+	it("aborts worktree creation when the live cwd is not a git repository", async () => {
+		vi.mocked(apiModule.fetchGitBranchesForCwd).mockResolvedValue({
+			isGitRepo: false,
+			branches: [],
+		});
+
+		const { result } = renderHandlers();
+
+		await result.current.handleCreateSession();
+
+		expect(mutations.createSessionMutation.mutateAsync).not.toHaveBeenCalled();
+		expect(chatActions.setAppError).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				message: "Select a Git repository before creating a worktree session",
+				scope: "request",
+			}),
+		);
 	});
 });

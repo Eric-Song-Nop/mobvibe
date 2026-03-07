@@ -174,26 +174,7 @@ export class SocketClient extends EventEmitter {
 
 	private setupEventHandlers() {
 		this.socket.on("connect", () => {
-			const wasReconnect = this.reconnectAttempts > 0;
-			logger.info(
-				{
-					gatewayUrl: this.options.config.gatewayUrl,
-					wasReconnect,
-				},
-				"gateway_connected",
-			);
-			this.connected = true;
-			this.reconnectAttempts = 0;
-			logger.info("gateway_register_start");
-			this.register();
-			this.startHeartbeat();
-
-			// On reconnect, replay unacked events for all active sessions
-			if (wasReconnect) {
-				this.replayUnackedEvents();
-			}
-
-			this.emit("connected");
+			void this.handleConnect();
 		});
 
 		this.socket.on("disconnect", (reason) => {
@@ -1470,7 +1451,7 @@ export class SocketClient extends EventEmitter {
 	}
 
 	private register() {
-		const { config, sessionManager } = this.options;
+		const { config } = this.options;
 		logger.info({ machineId: config.machineId }, "cli_register_emit");
 		this.socket.emit("cli:register", {
 			machineId: config.machineId,
@@ -1483,9 +1464,36 @@ export class SocketClient extends EventEmitter {
 				description: backend.description,
 			})),
 		});
+	}
+
+	private async handleConnect() {
+		const { config, sessionManager } = this.options;
+		const wasReconnect = this.reconnectAttempts > 0;
+		logger.info(
+			{
+				gatewayUrl: config.gatewayUrl,
+				wasReconnect,
+			},
+			"gateway_connected",
+		);
+		this.connected = true;
+		this.reconnectAttempts = 0;
+		logger.info("gateway_register_start");
+		this.register();
+		try {
+			await sessionManager.backfillDiscoveredWorkspaceRoots();
+		} catch (error) {
+			logger.error({ err: error }, "cli_register_backfill_failed");
+		}
 		logger.info({ machineId: config.machineId }, "cli_register_sessions_list");
-		// Send current sessions list (active + discovered)
 		this.socket.emit("sessions:list", sessionManager.listAllSessions());
+		this.startHeartbeat();
+
+		if (wasReconnect) {
+			this.replayUnackedEvents();
+		}
+
+		this.emit("connected");
 	}
 
 	private startHeartbeat() {
