@@ -108,11 +108,13 @@ vi.mock("@/components/ui/badge", () => ({
 	Badge: ({
 		children,
 		variant,
+		...props
 	}: {
 		children: React.ReactNode;
 		variant?: string;
+		[key: string]: unknown;
 	}) => (
-		<span data-testid="badge" data-variant={variant}>
+		<span data-testid="badge" data-variant={variant} {...props}>
 			{children}
 		</span>
 	),
@@ -270,7 +272,7 @@ describe("AppHeader", () => {
 			});
 
 			expect(screen.getByText("mobvibe")).toBeInTheDocument();
-			expect(screen.getByText("Worktree")).toBeInTheDocument();
+			expect(screen.getByTitle("Worktree")).toBeInTheDocument();
 			expect(screen.getByText("feat/detection-fix")).toBeInTheDocument();
 			expect(screen.getByText("Subdir: apps/webui")).toBeInTheDocument();
 		});
