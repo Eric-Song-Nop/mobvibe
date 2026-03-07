@@ -22,7 +22,7 @@ export type UseSessionListReturn = {
 
 /** Get the workspace group key for a session (worktree sessions group under the source repo) */
 const getSessionGroupCwd = (session: ChatSession): string | undefined =>
-	session.worktreeSourceCwd || session.cwd;
+	session.workspaceRootCwd || session.worktreeSourceCwd || session.cwd;
 
 export function useSessionList({
 	sessions,

@@ -8,7 +8,7 @@ import { AppHeader } from "../AppHeader";
 // Mock i18n
 vi.mock("react-i18next", () => ({
 	useTranslation: () => ({
-		t: (key: string) => {
+		t: (key: string, options?: Record<string, string>) => {
 			const translations: Record<string, string> = {
 				"commandPalette.openCommandPalette": "Open Command Palette",
 				"common.toggleMenu": "Toggle menu",
@@ -16,6 +16,9 @@ vi.mock("react-i18next", () => ({
 				"session.forceReloadTitle": "Force Reload",
 				"session.forceReloadDescription": "This will force reload the session.",
 				"session.forceReloadConfirm": "Reload",
+				"session.context.local": "Local",
+				"session.context.worktree": "Worktree",
+				"session.context.subdir": `Subdir: ${options?.path ?? ""}`,
 				"common.cancel": "Cancel",
 				"fileExplorer.openFileExplorer": "Open File Explorer",
 			};
@@ -256,6 +259,20 @@ describe("AppHeader", () => {
 		it("shows file explorer button when enabled", () => {
 			renderAppHeader({ showFileExplorer: true });
 			expect(screen.getByLabelText("Open File Explorer")).toBeInTheDocument();
+		});
+
+		it("shows workspace context badges when provided", () => {
+			renderAppHeader({
+				workspaceLabel: "mobvibe",
+				executionMode: "worktree",
+				branchLabel: "feat/detection-fix",
+				subdirectoryLabel: "apps/webui",
+			});
+
+			expect(screen.getByText("mobvibe")).toBeInTheDocument();
+			expect(screen.getByText("Worktree")).toBeInTheDocument();
+			expect(screen.getByText("feat/detection-fix")).toBeInTheDocument();
+			expect(screen.getByText("Subdir: apps/webui")).toBeInTheDocument();
 		});
 	});
 

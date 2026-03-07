@@ -26,6 +26,11 @@ import type { ChatSession } from "@/lib/chat-store";
 
 export type AppHeaderProps = {
 	backendLabel?: string;
+	workspaceLabel?: string;
+	workspacePath?: string;
+	executionMode?: "local" | "worktree";
+	branchLabel?: string;
+	subdirectoryLabel?: string;
 	statusMessage?: string;
 	streamError?: ChatSession["streamError"];
 	loadingMessage?: string;
@@ -45,6 +50,11 @@ export type AppHeaderProps = {
 
 export function AppHeader({
 	backendLabel,
+	workspaceLabel,
+	workspacePath,
+	executionMode,
+	branchLabel,
+	subdirectoryLabel,
 	statusMessage,
 	streamError,
 	loadingMessage,
@@ -92,6 +102,26 @@ export function AppHeader({
 					{backendLabel ? (
 						<Badge variant="outline" className="shrink-0">
 							{backendLabel}
+						</Badge>
+					) : null}
+					{workspaceLabel ? (
+						<Badge
+							variant="secondary"
+							className="max-w-full truncate"
+							title={workspacePath}
+						>
+							{workspaceLabel}
+						</Badge>
+					) : null}
+					{executionMode ? (
+						<Badge variant="outline">
+							{t(`session.context.${executionMode}`)}
+						</Badge>
+					) : null}
+					{branchLabel ? <Badge variant="outline">{branchLabel}</Badge> : null}
+					{subdirectoryLabel ? (
+						<Badge variant="outline" title={subdirectoryLabel}>
+							{t("session.context.subdir", { path: subdirectoryLabel })}
 						</Badge>
 					) : null}
 					{plan && plan.length > 0 ? <PlanIndicator plan={plan} /> : null}

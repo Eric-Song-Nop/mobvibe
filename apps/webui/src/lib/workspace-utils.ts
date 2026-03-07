@@ -16,8 +16,9 @@ const compareWorkspaceUpdatedAt = (left?: string, right?: string) => {
 
 /**
  * Collect unique workspaces from sessions.
- * Groups sessions by `worktreeSourceCwd || cwd` so that worktree sessions
- * and their parent repo sessions appear under one workspace entry.
+ * Groups sessions by `workspaceRootCwd || worktreeSourceCwd || cwd` so that
+ * worktree sessions, subdirectory sessions, and their parent repo sessions
+ * appear under one workspace entry.
  */
 export const collectWorkspaces = (
 	sessions: Record<string, ChatSession>,
@@ -33,8 +34,8 @@ export const collectWorkspaces = (
 			continue;
 		}
 
-		// Group by original repo cwd for worktree sessions
-		const groupKey = session.worktreeSourceCwd || session.cwd;
+		const groupKey =
+			session.workspaceRootCwd || session.worktreeSourceCwd || session.cwd;
 		const updatedAt = session.updatedAt ?? session.createdAt;
 		const existing = byCwd.get(groupKey);
 

@@ -165,6 +165,8 @@ export type ChatSession = {
 	worktreeSourceCwd?: string;
 	/** Branch name of the worktree (only for worktree sessions) */
 	worktreeBranch?: string;
+	/** Stable workspace/project root for grouping and navigation */
+	workspaceRootCwd?: string;
 	/** Agent execution plan entries (replaced in full on each update) */
 	plan?: PlanEntry[];
 	/** Whether the title was manually set by the user (immune to agent auto-update) */
@@ -235,6 +237,7 @@ type ChatState = {
 				| "title"
 				| "updatedAt"
 				| "cwd"
+				| "workspaceRootCwd"
 				| "agentName"
 				| "modelId"
 				| "modelName"
@@ -243,6 +246,8 @@ type ChatState = {
 				| "availableModes"
 				| "availableModels"
 				| "availableCommands"
+				| "worktreeSourceCwd"
+				| "worktreeBranch"
 				| "usage"
 				| "_meta"
 				| "plan"
@@ -482,6 +487,7 @@ const createSessionState = (
 		machineId?: string;
 		worktreeSourceCwd?: string;
 		worktreeBranch?: string;
+		workspaceRootCwd?: string;
 	},
 ): ChatSession => ({
 	sessionId,
@@ -518,6 +524,7 @@ const createSessionState = (
 	isLoading: false,
 	worktreeSourceCwd: options?.worktreeSourceCwd,
 	worktreeBranch: options?.worktreeBranch,
+	workspaceRootCwd: options?.workspaceRootCwd,
 });
 
 /**
@@ -545,6 +552,7 @@ const mergeSessionFromSummary = (
 		machineId?: string;
 		worktreeSourceCwd?: string | null;
 		worktreeBranch?: string | null;
+		workspaceRootCwd?: string | null;
 		isAttached?: boolean;
 		isTitlePinned?: boolean;
 	},
@@ -568,6 +576,7 @@ const mergeSessionFromSummary = (
 		backendId: summary.backendId ?? existing.backendId,
 		backendLabel: summary.backendLabel ?? existing.backendLabel,
 		cwd: summary.cwd ?? existing.cwd,
+		workspaceRootCwd: summary.workspaceRootCwd ?? existing.workspaceRootCwd,
 		agentName: summary.agentName ?? existing.agentName,
 		modelId: summary.modelId ?? existing.modelId,
 		modelName: summary.modelName ?? existing.modelName,
@@ -771,6 +780,7 @@ export const useChatStore = create<ChatState>()(
 									machineId: added.machineId,
 									worktreeSourceCwd: added.worktreeSourceCwd,
 									worktreeBranch: added.worktreeBranch,
+									workspaceRootCwd: added.workspaceRootCwd,
 								},
 							);
 						}
@@ -868,6 +878,7 @@ export const useChatStore = create<ChatState>()(
 								machineId: summary.machineId,
 								worktreeSourceCwd: summary.worktreeSourceCwd,
 								worktreeBranch: summary.worktreeBranch,
+								workspaceRootCwd: summary.workspaceRootCwd,
 							});
 
 						nextSessions[summary.sessionId] = mergeSessionFromSummary(
@@ -1000,6 +1011,12 @@ export const useChatStore = create<ChatState>()(
 					if (payload.updatedAt !== undefined) {
 						nextSession.updatedAt = payload.updatedAt;
 					}
+					if (payload.cwd !== undefined) {
+						nextSession.cwd = payload.cwd;
+					}
+					if (payload.workspaceRootCwd !== undefined) {
+						nextSession.workspaceRootCwd = payload.workspaceRootCwd;
+					}
 					if (payload.agentName !== undefined) {
 						nextSession.agentName = payload.agentName;
 					}
@@ -1023,6 +1040,12 @@ export const useChatStore = create<ChatState>()(
 					}
 					if (payload.availableCommands !== undefined) {
 						nextSession.availableCommands = payload.availableCommands;
+					}
+					if (payload.worktreeSourceCwd !== undefined) {
+						nextSession.worktreeSourceCwd = payload.worktreeSourceCwd;
+					}
+					if (payload.worktreeBranch !== undefined) {
+						nextSession.worktreeBranch = payload.worktreeBranch;
 					}
 					if (payload.usage !== undefined) {
 						nextSession.usage = payload.usage;
