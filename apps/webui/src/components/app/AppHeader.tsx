@@ -5,6 +5,7 @@ import {
 	Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import { UserMenu } from "@/components/auth/UserMenu";
 import PlanIndicator from "@/components/plan/plan-indicator";
@@ -48,7 +49,7 @@ export type AppHeaderProps = {
 	forceReloadDisabled?: boolean;
 };
 
-export function AppHeader({
+export const AppHeader = memo(function AppHeader({
 	backendLabel,
 	workspaceLabel,
 	workspacePath,
@@ -215,4 +216,4 @@ export function AppHeader({
 			) : null}
 		</header>
 	);
-}
+});

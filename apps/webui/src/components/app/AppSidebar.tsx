@@ -1,7 +1,7 @@
 import { AddCircleIcon, Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RegisterMachineDialog } from "@/components/machines/RegisterMachineDialog";
 import { SessionSidebar } from "@/components/session/SessionSidebar";
@@ -15,14 +15,14 @@ import {
 } from "@/components/ui/tooltip";
 import { useMachinesQuery } from "@/hooks/useMachinesQuery";
 import { useDiscoverSessionsMutation } from "@/hooks/useSessionQueries";
-import type { ChatSession } from "@/lib/chat-store";
+import type { SessionListEntry } from "@/lib/chat-store";
 import { type Machine, useMachinesStore } from "@/lib/machines-store";
 import type { SessionMutationsSnapshot } from "@/lib/session-utils";
 import { useUiStore } from "@/lib/ui-store";
 import { cn } from "@/lib/utils";
 
 export type AppSidebarProps = {
-	sessions: ChatSession[];
+	sessions: SessionListEntry[];
 	activeSessionId: string | undefined;
 	onCreateSession: (mode: "workspace" | "session") => void;
 	onSelectSession: (sessionId: string) => void;
@@ -34,7 +34,7 @@ export type AppSidebarProps = {
 	mutations: SessionMutationsSnapshot;
 };
 
-export function AppSidebar({
+export const AppSidebar = memo(function AppSidebar({
 	sessions,
 	activeSessionId,
 	onCreateSession,
@@ -110,7 +110,7 @@ export function AppSidebar({
 			) : null}
 		</>
 	);
-}
+});
 
 function MobileMachineColumn() {
 	const { t } = useTranslation();

@@ -55,6 +55,7 @@ vi.mock("@/lib/chat-store", async (importOriginal) => {
 	const original = await importOriginal<typeof import("@/lib/chat-store")>();
 	const hook = () => mockChatStore.value;
 	hook.getState = () => mockChatStore.value;
+	hook.subscribe = () => () => {};
 	return {
 		...original,
 		useChatStore: hook,

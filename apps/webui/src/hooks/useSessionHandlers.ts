@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PermissionResultNotification } from "@/lib/acp";
 import { fetchGitBranchesForCwd } from "@/lib/api";
-import type { ChatSession } from "@/lib/chat-store";
+import type { ChatSession, SessionListEntry } from "@/lib/chat-store";
 import { useChatStore } from "@/lib/chat-store";
 import {
 	buildSessionNotReadyError,
@@ -101,10 +101,10 @@ type UiActions = {
 };
 
 export type UseSessionHandlersParams = {
-	sessions: Record<string, ChatSession>;
+	sessions?: Record<string, ChatSession>;
 	activeSessionId: string | undefined;
 	activeSession: ChatSession | undefined;
-	sessionList: ChatSession[];
+	sessionList: SessionListEntry[];
 	selectedMachineId: string | null;
 	lastCreatedCwd: Record<string, string>;
 	machines: Record<string, Machine>;

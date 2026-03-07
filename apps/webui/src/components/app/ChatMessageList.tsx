@@ -53,6 +53,8 @@ export const ChatMessageList = forwardRef<
 	const { t } = useTranslation();
 	const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 	const isPinnedRef = useRef(true);
+	const followFrameRef = useRef<number | null>(null);
+	const lastMeasuredTotalSizeRef = useRef(0);
 	const messages = activeSession?.messages ?? [];
 	const showIndicator = !!activeSession?.sending;
 	const isThinking = showIndicator && !activeSession?.streamingMessageId;
@@ -78,12 +80,23 @@ export const ChatMessageList = forwardRef<
 		},
 	});
 	const virtualItems = virtualizer.getVirtualItems();
+	const totalSize = virtualizer.getTotalSize();
 
 	// Pre-computed O(1) lookup map for message → display index
 	const msgIndexMap = useMemo(
 		() => buildMessageIndexMap(displayItems),
 		[displayItems],
 	);
+
+	const queueScrollToBottom = useCallback(() => {
+		if (totalItems === 0 || followFrameRef.current !== null) {
+			return;
+		}
+		followFrameRef.current = requestAnimationFrame(() => {
+			followFrameRef.current = null;
+			virtualizer.scrollToIndex(totalItems - 1, { align: "end" });
+		});
+	}, [totalItems, virtualizer]);
 
 	useImperativeHandle(ref, () => ({
 		scrollToIndex: (msgIndex: number) => {
@@ -109,6 +122,8 @@ export const ChatMessageList = forwardRef<
 	// biome-ignore lint/correctness/useExhaustiveDependencies: sessionId triggers reset on session switch
 	useEffect(() => {
 		isPinnedRef.current = true;
+		lastMeasuredTotalSizeRef.current = 0;
+		queueScrollToBottom();
 		const el = scrollContainerRef.current;
 		if (!el) return;
 		const onScroll = () => {
@@ -116,30 +131,37 @@ export const ChatMessageList = forwardRef<
 				el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_THRESHOLD;
 		};
 		el.addEventListener("scroll", onScroll, { passive: true });
-		return () => el.removeEventListener("scroll", onScroll);
-	}, [activeSession?.sessionId]);
+		return () => {
+			el.removeEventListener("scroll", onScroll);
+			if (followFrameRef.current !== null) {
+				cancelAnimationFrame(followFrameRef.current);
+				followFrameRef.current = null;
+			}
+		};
+	}, [activeSession?.sessionId, queueScrollToBottom]);
 
 	// Effect B — scroll to bottom on new items (non-streaming)
 	useEffect(() => {
-		if (totalItems === 0 || !isPinnedRef.current || showIndicator) return;
-		virtualizer.scrollToIndex(totalItems - 1, { align: "end" });
-	}, [totalItems, showIndicator, virtualizer]);
+		if (totalItems === 0 || !isPinnedRef.current) {
+			return;
+		}
+		queueScrollToBottom();
+	}, [queueScrollToBottom, totalItems]);
 
-	// Effect C — RAF loop to follow streaming content
+	// Effect C — follow streaming growth when the last item remeasures
 	useEffect(() => {
-		if (!showIndicator) return;
-		const el = scrollContainerRef.current;
-		if (!el) return;
-		let rafId: number;
-		const tick = () => {
-			if (isPinnedRef.current) {
-				el.scrollTop = el.scrollHeight - el.clientHeight;
-			}
-			rafId = requestAnimationFrame(tick);
-		};
-		rafId = requestAnimationFrame(tick);
-		return () => cancelAnimationFrame(rafId);
-	}, [showIndicator]);
+		const previousTotalSize = lastMeasuredTotalSizeRef.current;
+		lastMeasuredTotalSizeRef.current = totalSize;
+		if (
+			!showIndicator ||
+			totalItems === 0 ||
+			!isPinnedRef.current ||
+			totalSize === previousTotalSize
+		) {
+			return;
+		}
+		queueScrollToBottom();
+	}, [queueScrollToBottom, showIndicator, totalItems, totalSize]);
 
 	return (
 		<main className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -199,7 +221,7 @@ export const ChatMessageList = forwardRef<
 					>
 						<div
 							className="relative w-full"
-							style={{ height: `${virtualizer.getTotalSize()}px` }}
+							style={{ height: `${totalSize}px` }}
 						>
 							{virtualItems.map((item) => {
 								if (showIndicator && item.index === displayItems.length) {

@@ -72,7 +72,6 @@ type PermissionRequestPayload = {
 };
 
 export interface ChatStoreActions {
-	sessions: Record<string, ChatSession>;
 	setActiveSessionId: (id: string | undefined) => void;
 	setLastCreatedCwd: (machineId: string, cwd: string) => void;
 	setSessionLoading: (sessionId: string, value: boolean) => void;
@@ -410,7 +409,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 			}
 			notifyResponseCompleted(
 				{ sessionId: variables.sessionId },
-				{ sessions: store.sessions },
+				{ sessions: useChatStore.getState().sessions },
 			);
 		},
 		onError: (mutationError: unknown) => {

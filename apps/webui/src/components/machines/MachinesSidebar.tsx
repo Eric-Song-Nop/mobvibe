@@ -1,7 +1,7 @@
 import { AddCircleIcon, Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RegisterMachineDialog } from "@/components/machines/RegisterMachineDialog";
 import { Button } from "@/components/ui/button";
@@ -27,7 +27,9 @@ type MachinesSidebarProps = {
 	onAddMachine?: () => void;
 };
 
-export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
+export const MachinesSidebar = memo(function MachinesSidebar({
+	onAddMachine,
+}: MachinesSidebarProps) {
 	const { t } = useTranslation();
 	const {
 		machines,
@@ -162,7 +164,7 @@ export function MachinesSidebar({ onAddMachine }: MachinesSidebarProps) {
 			/>
 		</TooltipProvider>
 	);
-}
+});
 
 type MachineIconProps = {
 	machine: Machine;

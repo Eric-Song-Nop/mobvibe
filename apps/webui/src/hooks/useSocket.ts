@@ -31,7 +31,8 @@ import {
 import { gatewaySocket } from "@/lib/socket";
 
 type UseSocketOptions = {
-	sessions: Record<string, ChatSession>;
+	// Legacy compatibility for older tests; the hook now reads sessions from the store.
+	sessions?: Record<string, ChatSession>;
 	setSending?: ChatStoreActions["setSending"];
 	setCanceling?: ChatStoreActions["setCanceling"];
 	finalizeAssistantMessage?: ChatStoreActions["finalizeAssistantMessage"];
@@ -89,7 +90,6 @@ function processPermissionRequest(
 }
 
 export function useSocket({
-	sessions,
 	setSending,
 	setCanceling,
 	finalizeAssistantMessage,
@@ -113,8 +113,15 @@ export function useSocket({
 	onReconnect,
 }: UseSocketOptions) {
 	const subscribedSessionsRef = useRef<Set<string>>(new Set());
-	const sessionsRef = useRef(sessions);
-	sessionsRef.current = sessions;
+	const sessionsRef = useRef(useChatStore.getState().sessions);
+
+	useEffect(
+		() =>
+			useChatStore.subscribe((state) => {
+				sessionsRef.current = state.sessions;
+			}),
+		[],
+	);
 
 	// Pending events buffer for out-of-order events (local to hook)
 	const pendingEventsRef = useRef<Map<string, SessionEvent[]>>(new Map());
@@ -711,29 +718,71 @@ export function useSocket({
 		};
 	}, []);
 
-	// Subscribe to sessions while attached or loading
+	// Subscribe to sessions while attached or loading without re-rendering the app shell
 	useEffect(() => {
-		for (const sessionId of gatewaySocket.getSubscribedSessions()) {
-			if (!subscribedSessionsRef.current.has(sessionId)) {
-				subscribedSessionsRef.current.add(sessionId);
+		const syncSubscribedSessions = (sessions: Record<string, ChatSession>) => {
+			for (const sessionId of gatewaySocket.getSubscribedSessions()) {
+				if (!subscribedSessionsRef.current.has(sessionId)) {
+					subscribedSessionsRef.current.add(sessionId);
+				}
 			}
-		}
 
-		const subscribableSessions = Object.values(sessions).filter(
-			(session) => session.isAttached || session.isLoading,
-		);
-		const subscribableIds = new Set(
-			subscribableSessions.map((s) => s.sessionId),
-		);
+			const subscribableSessions = Object.values(sessions).filter(
+				(session) => session.isAttached || session.isLoading,
+			);
+			const subscribableIds = new Set(
+				subscribableSessions.map((s) => s.sessionId),
+			);
 
-		// Subscribe to new sessions
-		for (const sessionId of subscribableIds) {
-			if (!subscribedSessionsRef.current.has(sessionId)) {
-				gatewaySocket.subscribeToSession(sessionId);
-				subscribedSessionsRef.current.add(sessionId);
-				setStreamError(sessionId, undefined);
+			// Subscribe to new sessions
+			for (const sessionId of subscribableIds) {
+				if (!subscribedSessionsRef.current.has(sessionId)) {
+					gatewaySocket.subscribeToSession(sessionId);
+					subscribedSessionsRef.current.add(sessionId);
+					setStreamError(sessionId, undefined);
 
-				// Trigger initial backfill on subscription (skip if still loading)
+					// Trigger initial backfill on subscription (skip if still loading)
+					const session = sessions[sessionId];
+					if (
+						session &&
+						!session.isLoading &&
+						!initialBackfillTriggeredRef.current.has(sessionId)
+					) {
+						initialBackfillTriggeredRef.current.add(sessionId);
+						const cursor = getCursor(sessionId);
+						const revision = cursor.revision ?? 1;
+						triggerBackfillRef.current?.(
+							sessionId,
+							revision,
+							cursor.lastAppliedSeq,
+						);
+					}
+				}
+			}
+
+			// Cancel backfill for sessions that entered loading state (re-activation)
+			for (const sessionId of subscribedSessionsRef.current) {
+				const session = sessions[sessionId];
+				if (session?.isLoading) {
+					cancelBackfill(sessionId);
+					initialBackfillTriggeredRef.current.delete(sessionId);
+				}
+			}
+
+			// Unsubscribe from sessions no longer streaming
+			for (const sessionId of subscribedSessionsRef.current) {
+				if (!subscribableIds.has(sessionId)) {
+					gatewaySocket.unsubscribeFromSession(sessionId);
+					subscribedSessionsRef.current.delete(sessionId);
+					cancelBackfill(sessionId);
+					initialBackfillTriggeredRef.current.delete(sessionId);
+				}
+			}
+
+			// Compensate: trigger backfill for subscribed sessions that finished loading
+			// but haven't had their initial backfill yet (were skipped due to isLoading)
+			for (const sessionId of subscribedSessionsRef.current) {
+				if (!subscribableIds.has(sessionId)) continue;
 				const session = sessions[sessionId];
 				if (
 					session &&
@@ -750,48 +799,14 @@ export function useSocket({
 					);
 				}
 			}
-		}
+		};
 
-		// Cancel backfill for sessions that entered loading state (re-activation)
-		for (const sessionId of subscribedSessionsRef.current) {
-			const session = sessions[sessionId];
-			if (session?.isLoading) {
-				cancelBackfill(sessionId);
-				initialBackfillTriggeredRef.current.delete(sessionId);
-			}
-		}
-
-		// Unsubscribe from sessions no longer streaming
-		for (const sessionId of subscribedSessionsRef.current) {
-			if (!subscribableIds.has(sessionId)) {
-				gatewaySocket.unsubscribeFromSession(sessionId);
-				subscribedSessionsRef.current.delete(sessionId);
-				cancelBackfill(sessionId);
-				initialBackfillTriggeredRef.current.delete(sessionId);
-			}
-		}
-
-		// Compensate: trigger backfill for subscribed sessions that finished loading
-		// but haven't had their initial backfill yet (were skipped due to isLoading)
-		for (const sessionId of subscribedSessionsRef.current) {
-			if (!subscribableIds.has(sessionId)) continue;
-			const session = sessions[sessionId];
-			if (
-				session &&
-				!session.isLoading &&
-				!initialBackfillTriggeredRef.current.has(sessionId)
-			) {
-				initialBackfillTriggeredRef.current.add(sessionId);
-				const cursor = getCursor(sessionId);
-				const revision = cursor.revision ?? 1;
-				triggerBackfillRef.current?.(
-					sessionId,
-					revision,
-					cursor.lastAppliedSeq,
-				);
-			}
-		}
-	}, [sessions, setStreamError, cancelBackfill]);
+		syncSubscribedSessions(sessionsRef.current);
+		return useChatStore.subscribe((state) => {
+			sessionsRef.current = state.sessions;
+			syncSubscribedSessions(state.sessions);
+		});
+	}, [setStreamError, cancelBackfill]);
 
 	// Stable ref for onReconnect callback
 	const onReconnectRef = useRef(onReconnect);

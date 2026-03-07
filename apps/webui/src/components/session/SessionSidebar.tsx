@@ -33,7 +33,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { WorkspaceList } from "@/components/workspace/WorkspaceList";
-import { type ChatSession } from "@/lib/chat-store";
+import { type SessionListEntry } from "@/lib/chat-store";
 import { useMachinesStore } from "@/lib/machines-store";
 import {
 	getSessionDisplayStatus,
@@ -44,7 +44,7 @@ import { useUiStore } from "@/lib/ui-store";
 import { formatRelativeTime, getPathBasename } from "@/lib/ui-utils";
 import { cn } from "@/lib/utils";
 
-const getSessionStamp = (session: ChatSession) =>
+const getSessionStamp = (session: SessionListEntry) =>
 	session.updatedAt ?? session.createdAt ?? "";
 
 /** Map display status to a colored dot style */
@@ -59,7 +59,7 @@ const statusDotClass: Record<SessionDisplayPhase, string> = {
 
 /** Return a human-readable tooltip for statuses that carry extra info */
 function getStatusTooltip(
-	session: ChatSession,
+	session: SessionListEntry,
 	status: SessionDisplayPhase,
 	t: (key: string) => string,
 ): string | null {
@@ -73,7 +73,7 @@ function getStatusTooltip(
 }
 
 type SessionSidebarProps = {
-	sessions: ChatSession[];
+	sessions: SessionListEntry[];
 	activeSessionId?: string;
 	onCreateSession: (mode: "workspace" | "session") => void;
 	onSelectSession: (sessionId: string) => void;
@@ -150,7 +150,7 @@ export const SessionSidebar = ({
 			{
 				id: string;
 				label: string;
-				sessions: ChatSession[];
+				sessions: SessionListEntry[];
 				latestStamp: string;
 			}
 		>();
@@ -176,7 +176,7 @@ export const SessionSidebar = ({
 			}
 		}
 
-		const compareSession = (left: ChatSession, right: ChatSession) =>
+		const compareSession = (left: SessionListEntry, right: SessionListEntry) =>
 			getSessionStamp(right).localeCompare(getSessionStamp(left));
 
 		const grouped = Array.from(groups.values());
@@ -402,7 +402,7 @@ export const SessionSidebar = ({
 };
 
 type SessionListItemProps = {
-	session: ChatSession;
+	session: SessionListEntry;
 	isActive: boolean;
 	isEditing: boolean;
 	editingTitle: string;
