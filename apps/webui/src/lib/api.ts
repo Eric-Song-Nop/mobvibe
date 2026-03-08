@@ -108,6 +108,10 @@ const requestJson = async <ResponseType>(
 		throw new ApiError(createFallbackError(fallbackMessage, "request"));
 	}
 
+	if (response.status === 204 || response.status === 205) {
+		return undefined as ResponseType;
+	}
+
 	return (await response.json()) as ResponseType;
 };
 
@@ -154,6 +158,31 @@ export const fetchSessions = async (): Promise<SessionsResponse> =>
 
 export const fetchMachines = async (): Promise<MachinesResponse> =>
 	requestJson<MachinesResponse>("/api/machines");
+
+export const fetchNotificationVapidPublicKey = async (): Promise<{
+	enabled: boolean;
+	publicKey: string | null;
+}> => requestJson("/api/notifications/vapid-public-key");
+
+export const registerWebPushSubscription = async (payload: {
+	subscription: PushSubscriptionJSON;
+	userAgent?: string;
+	locale?: string;
+}): Promise<void> => {
+	await requestJson("/api/notifications/web-subscription", {
+		method: "PUT",
+		body: JSON.stringify(payload),
+	});
+};
+
+export const unregisterWebPushSubscription = async (payload: {
+	endpoint: string;
+}): Promise<void> => {
+	await requestJson("/api/notifications/web-subscription", {
+		method: "DELETE",
+		body: JSON.stringify(payload),
+	});
+};
 
 const buildSessionsDiscoverPath = (payload: {
 	machineId?: string;

@@ -26,6 +26,7 @@ import { isErrorDetail } from "@/lib/error-utils";
 import { useMachinesStore } from "@/lib/machines-store";
 import {
 	notifyPermissionRequest,
+	notifyResponseCompleted,
 	notifySessionError,
 } from "@/lib/notifications";
 import { gatewaySocket } from "@/lib/socket";
@@ -66,6 +67,14 @@ const getCursor = (sessionId: string) => {
 		revision: session?.revision,
 		lastAppliedSeq: session?.lastAppliedSeq ?? 0,
 	};
+};
+
+const shouldNotifyResponseCompleted = (sessionId: string) => {
+	const activeSessionId = useChatStore.getState().activeSessionId;
+	if (typeof document === "undefined") {
+		return activeSessionId !== sessionId;
+	}
+	return document.hidden || activeSessionId !== sessionId;
 };
 
 /** Dedup-aware permission request handler — shared by WAL backfill and live socket paths. */
@@ -299,6 +308,12 @@ export function useSocket({
 				break;
 			}
 			case "turn_end": {
+				if (shouldNotifyResponseCompleted(event.sessionId)) {
+					notifyResponseCompleted(
+						{ sessionId: event.sessionId },
+						{ sessions: sessionsRef.current },
+					);
+				}
 				finalizeAssistantMessage?.(event.sessionId);
 				setSending?.(event.sessionId, false);
 				setCanceling?.(event.sessionId, false);
@@ -728,7 +743,7 @@ export function useSocket({
 			}
 
 			const subscribableSessions = Object.values(sessions).filter(
-				(session) => session.isAttached || session.isLoading,
+				(session) => session.isAttached || session.isLoading || session.sending,
 			);
 			const subscribableIds = new Set(
 				subscribableSessions.map((s) => s.sessionId),

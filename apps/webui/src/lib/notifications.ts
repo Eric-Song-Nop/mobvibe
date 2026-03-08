@@ -1,7 +1,12 @@
 import type { ToastVariant } from "@/components/ui/toast";
 import i18n from "@/i18n";
 import type { PermissionToolCall } from "@/lib/acp";
-import type { ErrorDetail } from "@/lib/api";
+import {
+	type ErrorDetail,
+	fetchNotificationVapidPublicKey,
+	registerWebPushSubscription,
+	unregisterWebPushSubscription,
+} from "@/lib/api";
 import { isInTauri } from "@/lib/auth";
 import { useNotificationStore } from "@/lib/notification-store";
 
@@ -28,6 +33,75 @@ const canUseWebNotification = () => {
 		return false;
 	}
 	return true;
+};
+
+const canUseWebPush = () =>
+	typeof window !== "undefined" &&
+	"serviceWorker" in navigator &&
+	"PushManager" in window;
+
+const base64UrlToUint8Array = (value: string): Uint8Array => {
+	const padding = "=".repeat((4 - (value.length % 4)) % 4);
+	const normalized = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+	const raw = window.atob(normalized);
+	const output = new Uint8Array(raw.length);
+	for (let i = 0; i < raw.length; i++) {
+		output[i] = raw.charCodeAt(i);
+	}
+	return output;
+};
+
+const ensureNotificationServiceWorker = async () => {
+	if (!canUseWebPush()) {
+		return null;
+	}
+	try {
+		return await navigator.serviceWorker.register("/notification-sw.js", {
+			scope: "/",
+		});
+	} catch {
+		return null;
+	}
+};
+
+const syncWebPushSubscription = async () => {
+	if (!canUseWebNotification() || !canUseWebPush()) {
+		return;
+	}
+	const registration = await ensureNotificationServiceWorker();
+	if (!registration) {
+		return;
+	}
+	const existingSubscription = await registration.pushManager.getSubscription();
+	if (Notification.permission !== "granted") {
+		if (existingSubscription) {
+			await unregisterWebPushSubscription({
+				endpoint: existingSubscription.endpoint,
+			}).catch(() => undefined);
+			await existingSubscription.unsubscribe().catch(() => undefined);
+		}
+		return;
+	}
+
+	const vapid = await fetchNotificationVapidPublicKey().catch(() => null);
+	if (!vapid?.enabled || !vapid.publicKey) {
+		return;
+	}
+
+	const subscription =
+		existingSubscription ??
+		(await registration.pushManager.subscribe({
+			userVisibleOnly: true,
+			applicationServerKey: base64UrlToUint8Array(
+				vapid.publicKey,
+			) as BufferSource,
+		}));
+
+	await registerWebPushSubscription({
+		subscription: subscription.toJSON(),
+		userAgent: navigator.userAgent,
+		locale: navigator.language,
+	}).catch(() => undefined);
 };
 
 const resolveSessionTitle = (
@@ -131,7 +205,9 @@ export const pushNotification = (
 	emitWebNotification(payload, context);
 };
 
-export const ensureNotificationPermission = () => {
+export const ensureNotificationPermission = async (options?: {
+	isAuthenticated?: boolean;
+}) => {
 	// For Tauri, permissions are requested when sending notifications
 	if (isInTauri()) {
 		return;
@@ -140,12 +216,19 @@ export const ensureNotificationPermission = () => {
 	if (!canUseWebNotification()) {
 		return;
 	}
-	if (Notification.permission === "default") {
+	if (options?.isAuthenticated !== true) {
+		return;
+	}
+	let permission = Notification.permission;
+	if (permission === "default") {
 		try {
-			void Notification.requestPermission();
+			permission = await Notification.requestPermission();
 		} catch {
 			return;
 		}
+	}
+	if (permission === "granted") {
+		await syncWebPushSubscription();
 	}
 };
 

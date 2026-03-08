@@ -15,6 +15,12 @@ export type GatewayConfig = {
 	flyRegion: string | undefined;
 	/** Upstash Redis URL for multi-instance affinity. Undefined = single-instance mode. */
 	redisUrl: string | undefined;
+	/** VAPID public key for browser Web Push subscriptions. */
+	webPushPublicKey: string | undefined;
+	/** VAPID private key for browser Web Push delivery. */
+	webPushPrivateKey: string | undefined;
+	/** Contact URL/mailto used for VAPID metadata. */
+	webPushSubject: string | undefined;
 };
 
 const parsePort = (value: string) => {
@@ -60,5 +66,8 @@ export const getGatewayConfig = (): GatewayConfig => {
 		instanceId: env.FLY_ALLOC_ID ?? randomUUID().slice(0, 8),
 		flyRegion: env.FLY_REGION,
 		redisUrl: env.REDIS_URL,
+		webPushPublicKey: env.WEB_PUSH_PUBLIC_KEY,
+		webPushPrivateKey: env.WEB_PUSH_PRIVATE_KEY,
+		webPushSubject: env.WEB_PUSH_SUBJECT,
 	};
 };

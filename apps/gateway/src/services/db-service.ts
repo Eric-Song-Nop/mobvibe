@@ -1,11 +1,7 @@
-/**
- * Database service for Gateway server.
- * Provides methods to validate tokens and manage machine/session data.
- */
-
+import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { deviceKeys, machines } from "../db/schema.js";
+import { deviceKeys, machines, webPushSubscriptions } from "../db/schema.js";
 import { logger } from "../lib/logger.js";
 
 /**
@@ -120,5 +116,111 @@ export async function upsertMachine(params: {
 	} catch (error) {
 		logger.error({ err: error }, "db_upsert_machine_error");
 		return null;
+	}
+}
+
+export type UpsertWebPushSubscriptionParams = {
+	userId: string;
+	endpoint: string;
+	p256dh: string;
+	auth: string;
+	userAgent?: string;
+	locale?: string;
+};
+
+export async function upsertWebPushSubscription(
+	params: UpsertWebPushSubscriptionParams,
+): Promise<void> {
+	try {
+		const now = new Date();
+		await db
+			.insert(webPushSubscriptions)
+			.values({
+				id: randomUUID(),
+				userId: params.userId,
+				endpoint: params.endpoint,
+				p256dh: params.p256dh,
+				auth: params.auth,
+				userAgent: params.userAgent ?? null,
+				locale: params.locale ?? null,
+				createdAt: now,
+				updatedAt: now,
+				lastSeenAt: now,
+			})
+			.onConflictDoUpdate({
+				target: webPushSubscriptions.endpoint,
+				set: {
+					userId: params.userId,
+					p256dh: params.p256dh,
+					auth: params.auth,
+					userAgent: params.userAgent ?? null,
+					locale: params.locale ?? null,
+					updatedAt: now,
+					lastSeenAt: now,
+				},
+			});
+	} catch (error) {
+		logger.error({ err: error }, "db_upsert_web_push_subscription_error");
+		throw error;
+	}
+}
+
+export async function listWebPushSubscriptionsForUser(userId: string): Promise<
+	Array<{
+		id: string;
+		endpoint: string;
+		p256dh: string;
+		auth: string;
+		locale: string | null;
+	}>
+> {
+	try {
+		return await db
+			.select({
+				id: webPushSubscriptions.id,
+				endpoint: webPushSubscriptions.endpoint,
+				p256dh: webPushSubscriptions.p256dh,
+				auth: webPushSubscriptions.auth,
+				locale: webPushSubscriptions.locale,
+			})
+			.from(webPushSubscriptions)
+			.where(eq(webPushSubscriptions.userId, userId));
+	} catch (error) {
+		logger.error({ err: error }, "db_list_web_push_subscriptions_error");
+		return [];
+	}
+}
+
+export async function deleteWebPushSubscription(
+	userId: string,
+	endpoint: string,
+): Promise<void> {
+	try {
+		await db
+			.delete(webPushSubscriptions)
+			.where(
+				and(
+					eq(webPushSubscriptions.userId, userId),
+					eq(webPushSubscriptions.endpoint, endpoint),
+				),
+			);
+	} catch (error) {
+		logger.error({ err: error }, "db_delete_web_push_subscription_error");
+		throw error;
+	}
+}
+
+export async function deleteWebPushSubscriptionByEndpoint(
+	endpoint: string,
+): Promise<void> {
+	try {
+		await db
+			.delete(webPushSubscriptions)
+			.where(eq(webPushSubscriptions.endpoint, endpoint));
+	} catch (error) {
+		logger.error(
+			{ err: error },
+			"db_delete_web_push_subscription_by_endpoint_error",
+		);
 	}
 }

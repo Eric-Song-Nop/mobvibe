@@ -20,6 +20,7 @@ import {
 	findDeviceByPublicKey,
 	upsertMachine,
 } from "../services/db-service.js";
+import type { NotificationService } from "../services/notification-service.js";
 import type { SessionRouter } from "../services/session-router.js";
 import type { UserAffinityManager } from "../services/user-affinity.js";
 
@@ -38,6 +39,7 @@ export type CliHandlersDeps = {
 	emitToWebui: (event: string, payload: unknown, userId?: string) => void;
 	userAffinity: UserAffinityManager | null;
 	config: GatewayConfig;
+	notificationService?: NotificationService;
 };
 
 export function setupCliHandlers(
@@ -47,6 +49,7 @@ export function setupCliHandlers(
 	emitToWebui: (event: string, payload: unknown, userId?: string) => void,
 	userAffinity: UserAffinityManager | null = null,
 	config?: GatewayConfig,
+	notificationService?: NotificationService,
 ) {
 	const cliNamespace = io.of("/cli");
 
@@ -351,6 +354,12 @@ export function setupCliHandlers(
 				"permission_request_received",
 			);
 			emitToWebui("permission:request", payload, record.userId);
+			if (record.userId && notificationService) {
+				void notificationService.notifyPermissionRequest(
+					record.userId,
+					payload,
+				);
+			}
 		});
 
 		// Permission result from CLI
@@ -390,6 +399,9 @@ export function setupCliHandlers(
 				"session_event_received",
 			);
 			emitToWebui("session:event", event, record.userId);
+			if (record.userId && notificationService) {
+				void notificationService.notifySessionEvent(record.userId, event);
+			}
 
 			// Send acknowledgment back to CLI
 			socket.emit("events:ack", {

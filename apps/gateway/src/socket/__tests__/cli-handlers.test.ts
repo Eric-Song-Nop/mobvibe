@@ -2,6 +2,7 @@ import type { CliRegistrationInfo, SessionSummary } from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CliRegistry } from "../../services/cli-registry.js";
+import type { NotificationService } from "../../services/notification-service.js";
 import type { SessionRouter } from "../../services/session-router.js";
 import { setupCliHandlers } from "../cli-handlers.js";
 
@@ -49,6 +50,10 @@ const createMockRegistrationInfo = (
 describe("setupCliHandlers", () => {
 	let registry: CliRegistry;
 	let emitToWebui: ReturnType<typeof vi.fn>;
+	let notificationService: {
+		notifyPermissionRequest: ReturnType<typeof vi.fn>;
+		notifySessionEvent: ReturnType<typeof vi.fn>;
+	};
 	let connectionHandler: ((socket: Socket) => void) | undefined;
 	let socketHandlers: Record<string, (payload?: unknown) => void>;
 	let socket: Socket;
@@ -56,6 +61,10 @@ describe("setupCliHandlers", () => {
 	beforeEach(() => {
 		registry = new CliRegistry();
 		emitToWebui = vi.fn();
+		notificationService = {
+			notifyPermissionRequest: vi.fn(),
+			notifySessionEvent: vi.fn(),
+		};
 		socketHandlers = {};
 		socket = {
 			id: "socket-1",
@@ -86,6 +95,9 @@ describe("setupCliHandlers", () => {
 			registry,
 			{ handleRpcResponse: vi.fn() } as unknown as SessionRouter,
 			emitToWebui,
+			null,
+			undefined,
+			notificationService as unknown as NotificationService,
 		);
 
 		connectionHandler?.(socket);
@@ -140,6 +152,53 @@ describe("setupCliHandlers", () => {
 				reason: "agent_exit",
 			},
 			"user-1",
+		);
+	});
+
+	it("dispatches permission request notifications", () => {
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+
+		socketHandlers["permission:request"]?.({
+			sessionId: "session-1",
+			requestId: "request-1",
+			options: [],
+		});
+
+		expect(notificationService.notifyPermissionRequest).toHaveBeenCalledWith(
+			"user-1",
+			expect.objectContaining({
+				sessionId: "session-1",
+				requestId: "request-1",
+			}),
+		);
+	});
+
+	it("dispatches session event notifications", () => {
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+
+		socketHandlers["session:event"]?.({
+			sessionId: "session-1",
+			revision: 1,
+			seq: 9,
+			kind: "turn_end",
+			createdAt: new Date().toISOString(),
+			payload: {},
+		});
+
+		expect(notificationService.notifySessionEvent).toHaveBeenCalledWith(
+			"user-1",
+			expect.objectContaining({
+				sessionId: "session-1",
+				kind: "turn_end",
+			}),
 		);
 	});
 

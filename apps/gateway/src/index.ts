@@ -16,9 +16,11 @@ import { setupDeviceRoutes } from "./routes/device.js";
 import { setupFsRoutes } from "./routes/fs.js";
 import { setupHealthRoutes } from "./routes/health.js";
 import { setupMachineRoutes } from "./routes/machines.js";
+import { setupNotificationRoutes } from "./routes/notifications.js";
 import { setupSessionRoutes } from "./routes/sessions.js";
 import { CliRegistry } from "./services/cli-registry.js";
 import { InstanceRegistry } from "./services/instance-registry.js";
+import { NotificationService } from "./services/notification-service.js";
 import { closeRedis, initRedis } from "./services/redis.js";
 import { SessionRouter } from "./services/session-router.js";
 import { UserAffinityManager } from "./services/user-affinity.js";
@@ -180,6 +182,17 @@ const sessionRouter = new SessionRouter(cliRegistry);
 
 // Setup webui handlers first to get the emitter function
 const webuiEmitter = setupWebuiHandlers(io, cliRegistry, userAffinity);
+const notificationService = new NotificationService({
+	config,
+	presence: {
+		hasUserConnections: webuiEmitter.hasUserConnections,
+		hasSessionSubscribers: webuiEmitter.hasSessionSubscribers,
+	},
+	resolveSessionTitle: (userId, sessionId) =>
+		cliRegistry
+			.getSessionsForUser(userId)
+			.find((session) => session.sessionId === sessionId)?.title,
+});
 
 // Setup CLI handlers with webui emitter
 // Note: session:update, session:error, and terminal:output are deprecated
@@ -233,6 +246,7 @@ setupCliHandlers(
 	},
 	userAffinity,
 	config,
+	notificationService,
 );
 
 app.use((request, response, next) => {
@@ -306,6 +320,10 @@ app.use("/", machineRouter);
 const deviceRouter = express.Router();
 setupDeviceRoutes(deviceRouter);
 app.use("/", deviceRouter);
+
+const notificationRouter = express.Router();
+setupNotificationRoutes(notificationRouter, notificationService);
+app.use("/api/notifications", notificationRouter);
 
 // Fly-replay middleware for stateful routes (when affinity is enabled)
 if (userAffinity) {

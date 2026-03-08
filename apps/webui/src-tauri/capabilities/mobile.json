@@ -4,6 +4,32 @@
 	"windows": ["main"],
 	"platforms": ["android", "iOS"],
 	"permissions": [
+		"core:default",
+		"store:default",
+		"store:allow-get",
+		"store:allow-set",
+		"store:allow-delete",
+		"store:allow-save",
+		"store:allow-load",
+		"notification:default",
+		"notification:allow-notify",
+		"notification:allow-request-permission",
+		"notification:allow-is-permission-granted",
+		"deep-link:default",
+		"http:default",
+		{
+			"identifier": "http:allow-fetch",
+			"allow": [
+				{
+					"url": "http://localhost:*/*"
+				},
+				{
+					"url": "https://*"
+				}
+			]
+		},
+		"os:default",
+		"os:allow-platform",
 		"barcode-scanner:allow-scan",
 		"barcode-scanner:allow-cancel",
 		"barcode-scanner:allow-check-permissions",

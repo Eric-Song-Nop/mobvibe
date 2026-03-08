@@ -121,6 +121,7 @@ vi.mock("@/lib/e2ee", () => ({
 
 vi.mock("@/lib/notifications", () => ({
 	notifyPermissionRequest: vi.fn(),
+	notifyResponseCompleted: vi.fn(),
 	notifySessionError: vi.fn(),
 }));
 
