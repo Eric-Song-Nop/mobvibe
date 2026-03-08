@@ -730,7 +730,7 @@ export async function getGitBranches(cwd: string): Promise<GitBranch[]> {
 			[
 				"branch",
 				"-a",
-				"--format=%(refname:short)%(HEAD)%(upstream:short)%(upstream:track)",
+				"--format=%(refname)%x09%(refname:short)%x09%(HEAD)%x09%(upstream:short)%x09%(upstream:track)",
 			],
 			{ cwd, maxBuffer: MAX_BUFFER },
 		);
@@ -738,34 +738,34 @@ export async function getGitBranches(cwd: string): Promise<GitBranch[]> {
 		const branches: GitBranch[] = [];
 
 		for (const line of stdout.split("\n").filter(Boolean)) {
-			// Parse the format: name*upstream[ahead N, behind M]
-			const current = line.includes("*");
-			const cleanLine = line.replace("*", "");
-
-			// Simple parsing: first part is name, rest is upstream/tracking
-			const parts = cleanLine.split(/(?=\[)/);
-			const nameAndUpstream = parts[0].trim();
-			const tracking = parts[1]?.trim() || "";
-
-			// Check if remote branch
-			const isRemote = nameAndUpstream.startsWith("origin/");
+			const [
+				fullRef = "",
+				shortRef = "",
+				headMarker = "",
+				upstreamRef = "",
+				tracking = "",
+			] = line.split("\t");
+			const name = shortRef.trim();
+			if (!name) {
+				continue;
+			}
+			const current = headMarker.trim() === "*";
+			const upstream = upstreamRef.trim() || undefined;
+			const isRemote = fullRef.trim().startsWith("refs/remotes/");
 
 			// Parse ahead/behind
-			let ahead = 0;
-			let behind = 0;
-			const trackMatch = tracking.match(
-				/\[ahead (\d+)(?:, behind (\d+))?\]|\[behind (\d+)\]/,
-			);
-			if (trackMatch) {
-				ahead = Number.parseInt(trackMatch[1] || "0", 10);
-				behind = Number.parseInt(trackMatch[2] || trackMatch[3] || "0", 10);
-			}
+			const aheadMatch = tracking.match(/ahead (\d+)/);
+			const behindMatch = tracking.match(/behind (\d+)/);
+			const ahead = aheadMatch ? Number.parseInt(aheadMatch[1], 10) : 0;
+			const behind = behindMatch ? Number.parseInt(behindMatch[1], 10) : 0;
 
 			branches.push({
-				name: nameAndUpstream,
+				name,
+				displayName: current ? `${name} (HEAD)` : name,
 				current,
-				remote: isRemote ? "origin" : undefined,
-				aheadBehind: trackMatch ? { ahead, behind } : undefined,
+				remote: isRemote ? name.split("/")[0] : undefined,
+				upstream,
+				aheadBehind: ahead > 0 || behind > 0 ? { ahead, behind } : undefined,
 			});
 		}
 

@@ -51,6 +51,11 @@ export type CreateSessionDialogProps = {
 
 /** Sanitize branch name for worktree path preview */
 const sanitizeBranch = (branch: string) => branch.replace(/[/\\]/g, "-");
+const getBranchOptionLabel = (branch: {
+	name: string;
+	displayName?: string;
+	current: boolean;
+}) => branch.displayName ?? `${branch.name}${branch.current ? " (HEAD)" : ""}`;
 
 export function CreateSessionDialog({
 	open,
@@ -370,8 +375,7 @@ export function CreateSessionDialog({
 											<SelectContent>
 												{branches.map((b) => (
 													<SelectItem key={b.name} value={b.name}>
-														{b.name}
-														{b.current ? " (HEAD)" : ""}
+														{getBranchOptionLabel(b)}
 													</SelectItem>
 												))}
 											</SelectContent>
