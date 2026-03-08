@@ -29,7 +29,7 @@ After login, copy the displayed master secret and paste it into WebUI Settings >
 | `mobvibe login` | Authenticate with email/password, generate master secret, register device |
 | `mobvibe logout` | Remove stored credentials |
 | `mobvibe auth-status` | Show authentication and key status |
-| `mobvibe start [--gateway <url>]` | Start daemon |
+| `mobvibe start [--gateway <url>] [--no-e2ee]` | Start daemon |
 | `mobvibe stop` | Stop daemon |
 | `mobvibe status` | Show daemon status |
 | `mobvibe logs [-f] [-n <lines>]` | View daemon logs |
@@ -40,6 +40,8 @@ After login, copy the displayed master secret and paste it into WebUI Settings >
 ## E2EE
 
 All session content is encrypted on the CLI before sending to the gateway. The gateway routes events but cannot read their content.
+
+Need a plaintext session for debugging or local testing? Start with `mobvibe start --no-e2ee`. This keeps CLI authentication enabled for that run, but skips session DEK generation and content encryption.
 
 **Login flow:**
 1. `mobvibe login` prompts for email and password (password masked)

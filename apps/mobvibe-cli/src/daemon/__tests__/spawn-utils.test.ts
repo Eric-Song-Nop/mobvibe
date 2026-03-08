@@ -47,4 +47,10 @@ describe("buildForegroundSpawnArgs", () => {
 			"--foreground",
 		]);
 	});
+
+	test("preserves no-e2ee flag when respawning in foreground", () => {
+		expect(
+			buildForegroundSpawnArgs(["/private/tmp/mobvibe", "start", "--no-e2ee"]),
+		).toEqual(["start", "--no-e2ee", "--foreground"]);
+	});
 });

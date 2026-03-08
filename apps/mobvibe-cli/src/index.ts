@@ -29,6 +29,7 @@ program
 	.description("Start the mobvibe daemon")
 	.option("--gateway <url>", "Gateway URL", process.env.MOBVIBE_GATEWAY_URL)
 	.option("--foreground", "Run in foreground instead of detaching")
+	.option("--no-e2ee", "Disable end-to-end encryption for this daemon run")
 	.action(async (options) => {
 		if (options.gateway) {
 			process.env.MOBVIBE_GATEWAY_URL = options.gateway;
@@ -82,7 +83,10 @@ program
 		// Non-TTY + not configured → use all backends (backwards-compatible for CI/scripts)
 
 		const daemon = new DaemonManager(config);
-		await daemon.start({ foreground: options.foreground });
+		await daemon.start({
+			foreground: options.foreground,
+			noE2ee: options.noE2ee,
+		});
 	});
 
 program

@@ -26,6 +26,7 @@ describe("CliCryptoService", () => {
 		const { dek, wrappedDek } = service.initSessionDek("session-1");
 		expect(dek).toBeInstanceOf(Uint8Array);
 		expect(dek.length).toBe(32);
+		if (!wrappedDek) throw new Error("wrappedDek should not be null");
 		expect(typeof wrappedDek).toBe("string");
 		expect(wrappedDek.length).toBeGreaterThan(0);
 	});
@@ -80,6 +81,7 @@ describe("CliCryptoService", () => {
 
 	test("encrypt event round-trip: unwrap DEK + decrypt on WebUI side", () => {
 		const { wrappedDek } = service.initSessionDek("session-rt");
+		if (!wrappedDek) throw new Error("wrappedDek should not be null");
 		const originalPayload = { text: "round trip test", count: 42 };
 		const event = {
 			sessionId: "session-rt",
@@ -137,6 +139,53 @@ describe("CliCryptoService", () => {
 		expect(service.getDek("unknown-session")).toBeNull();
 	});
 
+	test("passes through events and omits DEKs when content encryption is disabled", () => {
+		const disabledService = new CliCryptoService(masterSecret, {
+			contentEncryptionEnabled: false,
+		});
+		const event = {
+			sessionId: "session-disabled",
+			machineId: "machine-1",
+			revision: 1,
+			seq: 1,
+			kind: "user_message" as const,
+			createdAt: new Date().toISOString(),
+			payload: { text: "plain" },
+		};
+
+		const initialized = disabledService.initSessionDek("session-disabled");
+		expect(initialized.wrappedDek).toBeNull();
+		expect(initialized.dek).toEqual(new Uint8Array());
+		expect(disabledService.getWrappedDek("session-disabled")).toBeNull();
+		expect(disabledService.getDek("session-disabled")).toBeNull();
+		expect(disabledService.encryptEvent(event)).toBe(event);
+	});
+
+	test("ignores setSessionDek when content encryption is disabled", () => {
+		const disabledService = new CliCryptoService(masterSecret, {
+			contentEncryptionEnabled: false,
+		});
+		const dek = generateDEK();
+
+		disabledService.setSessionDek("session-disabled", dek);
+
+		expect(disabledService.getDek("session-disabled")).toBeNull();
+		expect(disabledService.getWrappedDek("session-disabled")).toBeNull();
+	});
+
+	test("still derives auth public key when content encryption is disabled", () => {
+		const disabledService = new CliCryptoService(masterSecret, {
+			contentEncryptionEnabled: false,
+		});
+
+		const pubKey = disabledService.getAuthPublicKeyBase64();
+		const decoded = base64ToUint8(pubKey);
+
+		expect(typeof pubKey).toBe("string");
+		expect(decoded).toBeInstanceOf(Uint8Array);
+		expect(decoded.length).toBeGreaterThan(0);
+	});
+
 	describe("bidirectional encryption", () => {
 		test("decryptPayloadForSession decrypts encrypted data", () => {
 			const { dek } = service.initSessionDek("session-decrypt");
@@ -158,6 +207,19 @@ describe("CliCryptoService", () => {
 			expect(() =>
 				service.decryptPayloadForSession(encrypted, "unknown-session"),
 			).toThrow("No DEK for session");
+		});
+
+		test("decryptPayloadForSession passes through encrypted payload when content encryption is disabled", () => {
+			const disabledService = new CliCryptoService(masterSecret, {
+				contentEncryptionEnabled: false,
+			});
+			const encrypted = { t: "encrypted" as const, c: "some-data" };
+
+			const result = disabledService.decryptPayloadForSession(
+				encrypted,
+				"session-disabled",
+			);
+			expect(result).toBe(encrypted);
 		});
 
 		test("decryptRpcPayload returns original when not encrypted", () => {
@@ -187,6 +249,7 @@ describe("CliCryptoService", () => {
 
 		test("round-trip: encrypt from WebUI, decrypt on CLI", () => {
 			const { dek, wrappedDek } = service.initSessionDek("session-bidi");
+			if (!wrappedDek) throw new Error("wrappedDek should not be null");
 
 			// Simulate WebUI: unwrap DEK then encrypt prompt
 			const contentKp = deriveContentKeyPair(masterSecret);
@@ -206,6 +269,19 @@ describe("CliCryptoService", () => {
 				encrypted,
 			);
 			expect(decrypted).toEqual(originalPrompt);
+		});
+
+		test("decryptRpcPayload passes through encrypted payload when content encryption is disabled", () => {
+			const disabledService = new CliCryptoService(masterSecret, {
+				contentEncryptionEnabled: false,
+			});
+			const encrypted = { t: "encrypted" as const, c: "some-data" };
+
+			const result = disabledService.decryptRpcPayload(
+				"session-disabled",
+				encrypted,
+			);
+			expect(result).toBe(encrypted);
 		});
 	});
 });
