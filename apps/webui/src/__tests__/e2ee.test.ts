@@ -60,7 +60,7 @@ function makeEvent(sessionId: string, payload: unknown): SessionEvent {
 	};
 }
 
-const { e2ee } = await import("@/lib/e2ee");
+const { bootstrapSessionE2EE, e2ee } = await import("@/lib/e2ee");
 
 describe("E2EEManager", () => {
 	beforeEach(() => {
@@ -112,6 +112,27 @@ describe("E2EEManager", () => {
 			"wrapped-dek-base64",
 			expect.any(Uint8Array),
 			expect.any(Uint8Array),
+		);
+	});
+
+	it("bootstrapSessionE2EE returns none without wrappedDek", () => {
+		expect(bootstrapSessionE2EE("session-none")).toBe("none");
+		expect(mockUnwrapDEK).not.toHaveBeenCalled();
+	});
+
+	it("bootstrapSessionE2EE returns ok when unwrap succeeds", async () => {
+		await e2ee.addPairedSecret(btoa("test-secret"));
+		expect(bootstrapSessionE2EE("session-ok", "wrapped-dek")).toBe("ok");
+		expect(mockUnwrapDEK).toHaveBeenCalledWith(
+			"wrapped-dek",
+			expect.any(Uint8Array),
+			expect.any(Uint8Array),
+		);
+	});
+
+	it("bootstrapSessionE2EE returns missing_key when unwrap fails", () => {
+		expect(bootstrapSessionE2EE("session-missing", "wrapped-dek")).toBe(
+			"missing_key",
 		);
 	});
 

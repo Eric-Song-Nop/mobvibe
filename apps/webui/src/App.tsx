@@ -42,7 +42,7 @@ import { useSocket } from "@/hooks/useSocket";
 import type { SessionsResponse } from "@/lib/api";
 import { getAuthClient, isInTauri } from "@/lib/auth";
 import { useChatStore } from "@/lib/chat-store";
-import { e2ee } from "@/lib/e2ee";
+import { bootstrapSessionE2EE, e2ee } from "@/lib/e2ee";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { isInputFocused, registerHotkeys } from "@/lib/hotkeys";
 import { getBackendCapability, useMachinesStore } from "@/lib/machines-store";
@@ -99,6 +99,7 @@ function MainApp() {
 			setInputContents: s.setInputContents,
 			setSending: s.setSending,
 			setCanceling: s.setCanceling,
+			setSessionE2EEStatus: s.setSessionE2EEStatus,
 			setStreamError: s.setStreamError,
 			updateSessionMeta: s.updateSessionMeta,
 			addUserMessage: s.addUserMessage,
@@ -273,26 +274,14 @@ function MainApp() {
 
 	useEffect(() => {
 		if (sessionsQuery.data?.sessions) {
-			// Always attempt DEK unwrap — no-op when no paired secrets exist.
-			// Removing the isEnabled() gate ensures that DEKs are unwrapped
-			// immediately after pairing (when the sessions query re-fires),
-			// and triggers onDekReady to flush any buffered encrypted events.
-			for (const session of sessionsQuery.data.sessions) {
-				if (session.wrappedDek) {
-					e2ee.unwrapSessionDek(session.sessionId, session.wrappedDek);
-				}
-			}
 			chatActions.syncSessions(sessionsQuery.data.sessions);
 
-			// Set E2EE status for all sessions
+			// Bootstrap session DEKs and keep runtime E2EE status in sync.
 			const { setSessionE2EEStatus } = useChatStore.getState();
 			for (const session of sessionsQuery.data.sessions) {
 				setSessionE2EEStatus(
 					session.sessionId,
-					e2ee.getSessionE2EEStatus(
-						session.sessionId,
-						Boolean(session.wrappedDek),
-					),
+					bootstrapSessionE2EE(session.sessionId, session.wrappedDek),
 				);
 			}
 		}

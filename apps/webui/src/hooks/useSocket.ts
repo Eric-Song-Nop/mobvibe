@@ -26,7 +26,7 @@ import {
 	type SessionRestoreSnapshot,
 	useChatStore,
 } from "@/lib/chat-store";
-import { e2ee } from "@/lib/e2ee";
+import { bootstrapSessionE2EE, e2ee } from "@/lib/e2ee";
 import { isErrorDetail } from "@/lib/error-utils";
 import { useMachinesStore } from "@/lib/machines-store";
 import {
@@ -565,25 +565,14 @@ export function useSocket({
 
 	handleSessionsChangedRef.current = (payload: SessionsChangedPayload) => {
 		const addedOrUpdated = [...payload.added, ...payload.updated];
-
-		// Unwrap DEKs from new/updated sessions (always attempt — no-op when
-		// no paired secrets exist; triggers onDekReady to flush buffered events)
-		for (const session of addedOrUpdated) {
-			if (session.wrappedDek) {
-				e2ee.unwrapSessionDek(session.sessionId, session.wrappedDek);
-			}
-		}
 		handleSessionsChanged(payload);
 
-		// Set E2EE status for added/updated sessions
+		// Bootstrap session DEKs and keep runtime E2EE status in sync.
 		const { setSessionE2EEStatus } = useChatStore.getState();
 		for (const session of addedOrUpdated) {
 			setSessionE2EEStatus(
 				session.sessionId,
-				e2ee.getSessionE2EEStatus(
-					session.sessionId,
-					Boolean(session.wrappedDek),
-				),
+				bootstrapSessionE2EE(session.sessionId, session.wrappedDek),
 			);
 		}
 
