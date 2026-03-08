@@ -24,6 +24,11 @@ const buildCorsHeaders = (req) => ({
 	"access-control-allow-credentials": "true",
 });
 
+const delay = (ms) =>
+	new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
+
 const json = (req, res, statusCode, payload) => {
 	res.writeHead(statusCode, {
 		"content-type": "application/json",
@@ -59,6 +64,36 @@ const baseSession = (overrides = {}) => ({
 	...overrides,
 });
 
+const buildEvent = ({
+	sessionId = "session-1",
+	revision = 1,
+	seq = 1,
+	text = "event",
+	encrypted = false,
+	sessionDeks = state.sessionDeks,
+}) => {
+	const payload = {
+		sessionId,
+		update: {
+			sessionUpdate: "agent_message_chunk",
+			content: { type: "text", text },
+		},
+	};
+	return {
+		sessionId,
+		machineId: MACHINE_ID,
+		revision,
+		seq,
+		kind: "agent_message_chunk",
+		createdAt: new Date().toISOString(),
+		eventId: randomUUID(),
+		payload:
+			encrypted && sessionDeks.get(sessionId)
+				? encryptPayload(payload, sessionDeks.get(sessionId))
+				: payload,
+	};
+};
+
 const createEncryptedSessionState = (sessionId, overrides = {}) => {
 	const dek = generateDEK();
 	return {
@@ -73,49 +108,470 @@ const createEncryptedSessionState = (sessionId, overrides = {}) => {
 	};
 };
 
+const createScenarioState = ({
+	sessions,
+	events,
+	loadResponses = [],
+	reloadResponses = [],
+	eventFetchScripts = [],
+	sessionDeks = [],
+}) => ({
+	sessions,
+	events: new Map(events),
+	loadResponses: new Map(loadResponses),
+	reloadResponses: new Map(reloadResponses),
+	eventFetchScripts: new Map(eventFetchScripts),
+	sessionDeks: new Map(sessionDeks),
+});
+
+const buildActionScript = (summary, overrides = {}) => ({
+	summary,
+	statusCode: 200,
+	body: summary,
+	delayMs: 0,
+	...overrides,
+});
+
+const buildFailureScript = ({
+	statusCode = 500,
+	body = { error: "test_failure" },
+	delayMs = 0,
+}) => ({
+	statusCode,
+	body,
+	delayMs,
+});
+
+const buildEventFetchScript = ({
+	delayMs = 0,
+	statusCode = 200,
+	body,
+} = {}) => ({
+	delayMs,
+	statusCode,
+	body,
+});
+
+const normalizeActionScript = (value) => {
+	if (!value) {
+		return undefined;
+	}
+	if ("summary" in value || "statusCode" in value) {
+		return value;
+	}
+	return buildActionScript(value);
+};
+
+const buildEventFetchKey = (sessionId, revision, afterSeq) =>
+	`${sessionId}:${revision}:${afterSeq}`;
+
+const findEventFetchScript = (sessionId, revision, afterSeq) =>
+	state.eventFetchScripts.get(
+		buildEventFetchKey(sessionId, revision, afterSeq),
+	) ??
+	state.eventFetchScripts.get(buildEventFetchKey(sessionId, revision, "*")) ??
+	state.eventFetchScripts.get(buildEventFetchKey(sessionId, "*", "*"));
+
+const respondWithActionScript = async (
+	req,
+	res,
+	scriptValue,
+	{ onSuccess, notFoundPayload } = {
+		onSuccess: undefined,
+		notFoundPayload: { error: "action_not_supported_for_test" },
+	},
+) => {
+	const script = normalizeActionScript(scriptValue);
+	if (!script) {
+		json(req, res, 404, notFoundPayload);
+		return;
+	}
+	if (script.delayMs > 0) {
+		await delay(script.delayMs);
+	}
+	if (script.statusCode >= 400) {
+		json(req, res, script.statusCode, script.body);
+		return;
+	}
+	onSuccess?.(script.summary);
+	json(req, res, script.statusCode, script.body);
+};
+
 const scenarios = {
-	"refresh-restore": () => ({
-		sessions: [baseSession({ title: "Restore Session", revision: 2 })],
-		sessionDeks: new Map(),
-		events: new Map([
-			[
-				"session-1",
+	"refresh-restore": () =>
+		createScenarioState({
+			sessions: [baseSession({ title: "Restore Session", revision: 2 })],
+			events: [
 				[
-					{
-						sessionId: "session-1",
-						machineId: MACHINE_ID,
-						revision: 2,
-						seq: 1,
-						kind: "agent_message_chunk",
-						createdAt: "2024-01-01T00:00:00Z",
-						payload: {
+					"session-1",
+					[
+						buildEvent({
 							sessionId: "session-1",
-							update: {
-								sessionUpdate: "agent_message_chunk",
-								content: { type: "text", text: "Recovered after refresh" },
-							},
-						},
-					},
+							revision: 2,
+							seq: 1,
+							text: "Recovered after refresh",
+							sessionDeks: new Map(),
+						}),
+					],
 				],
 			],
-		]),
-	}),
-	"reconnect-gap": () => ({
-		sessions: [baseSession({ title: "Reconnect Session", revision: 1 })],
-		sessionDeks: new Map(),
-		events: new Map([["session-1", []]]),
-	}),
+		}),
+	"reconnect-gap": () =>
+		createScenarioState({
+			sessions: [baseSession({ title: "Reconnect Session", revision: 1 })],
+			events: [["session-1", []]],
+		}),
 	"encrypted-revision": () => {
 		const encrypted = createEncryptedSessionState("session-1");
-		return {
+		return createScenarioState({
 			sessions: [encrypted.session],
-			sessionDeks: new Map([["session-1", encrypted.dek]]),
-			events: new Map([["session-1", []]]),
-		};
+			events: [["session-1", []]],
+			sessionDeks: [["session-1", encrypted.dek]],
+		});
 	},
+	"sync-history": () =>
+		createScenarioState({
+			sessions: [baseSession({ title: "Sync Session", revision: 1 })],
+			events: [
+				[
+					"session-1",
+					[
+						buildEvent({
+							sessionId: "session-1",
+							revision: 1,
+							seq: 1,
+							text: "Synced alpha line",
+							sessionDeks: new Map(),
+						}),
+						buildEvent({
+							sessionId: "session-1",
+							revision: 1,
+							seq: 2,
+							text: "Synced omega line",
+							sessionDeks: new Map(),
+						}),
+					],
+				],
+			],
+		}),
+	"sync-history-interleaved": () =>
+		createScenarioState({
+			sessions: [baseSession({ title: "Sync Session", revision: 1 })],
+			events: [
+				[
+					"session-1",
+					[
+						buildEvent({
+							sessionId: "session-1",
+							revision: 1,
+							seq: 1,
+							text: "Interleaved alpha line",
+							sessionDeks: new Map(),
+						}),
+						buildEvent({
+							sessionId: "session-1",
+							revision: 1,
+							seq: 2,
+							text: "Interleaved beta line",
+							sessionDeks: new Map(),
+						}),
+					],
+				],
+			],
+			eventFetchScripts: [
+				[
+					buildEventFetchKey("session-1", 1, "*"),
+					buildEventFetchScript({ delayMs: 250 }),
+				],
+			],
+		}),
+	"force-reload": () =>
+		createScenarioState({
+			sessions: [baseSession({ title: "Reload Session", revision: 1 })],
+			events: [
+				[
+					"session-1",
+					[
+						buildEvent({
+							sessionId: "session-1",
+							revision: 1,
+							seq: 1,
+							text: "Old revision transcript",
+							sessionDeks: new Map(),
+						}),
+						buildEvent({
+							sessionId: "session-1",
+							revision: 2,
+							seq: 1,
+							text: "Reloaded alpha line",
+							sessionDeks: new Map(),
+						}),
+						buildEvent({
+							sessionId: "session-1",
+							revision: 2,
+							seq: 2,
+							text: "Reloaded omega line",
+							sessionDeks: new Map(),
+						}),
+					],
+				],
+			],
+			reloadResponses: [
+				[
+					"session-1",
+					buildActionScript(
+						baseSession({
+							title: "Reload Session",
+							revision: 2,
+							isAttached: true,
+						}),
+					),
+				],
+			],
+		}),
+	"force-reload-failure": () =>
+		createScenarioState({
+			sessions: [baseSession({ title: "Reload Failure Session", revision: 1 })],
+			events: [
+				[
+					"session-1",
+					[
+						buildEvent({
+							sessionId: "session-1",
+							revision: 1,
+							seq: 1,
+							text: "Reload failure baseline",
+							sessionDeks: new Map(),
+						}),
+					],
+				],
+			],
+			reloadResponses: [
+				[
+					"session-1",
+					buildFailureScript({
+						statusCode: 500,
+						body: { error: "reload_failed_for_test" },
+					}),
+				],
+			],
+		}),
+	"sidebar-load": () =>
+		createScenarioState({
+			sessions: [
+				baseSession({
+					sessionId: "session-1",
+					title: "Session Alpha",
+					revision: 1,
+					isAttached: true,
+				}),
+				baseSession({
+					sessionId: "session-2",
+					title: "Session Beta",
+					revision: 1,
+					isAttached: false,
+				}),
+			],
+			events: [
+				[
+					"session-1",
+					[
+						buildEvent({
+							sessionId: "session-1",
+							revision: 1,
+							seq: 1,
+							text: "Alpha final transcript",
+							sessionDeks: new Map(),
+						}),
+					],
+				],
+				[
+					"session-2",
+					[
+						buildEvent({
+							sessionId: "session-2",
+							revision: 1,
+							seq: 1,
+							text: "Beta first line",
+							sessionDeks: new Map(),
+						}),
+						buildEvent({
+							sessionId: "session-2",
+							revision: 1,
+							seq: 2,
+							text: "Beta second line",
+							sessionDeks: new Map(),
+						}),
+					],
+				],
+			],
+			loadResponses: [
+				[
+					"session-2",
+					buildActionScript(
+						baseSession({
+							sessionId: "session-2",
+							title: "Session Beta",
+							revision: 1,
+							isAttached: true,
+						}),
+					),
+				],
+			],
+		}),
+	"sidebar-load-failure": () =>
+		createScenarioState({
+			sessions: [
+				baseSession({
+					sessionId: "session-1",
+					title: "Session Alpha",
+					revision: 1,
+					isAttached: true,
+				}),
+				baseSession({
+					sessionId: "session-2",
+					title: "Session Beta",
+					revision: 1,
+					isAttached: false,
+				}),
+			],
+			events: [
+				[
+					"session-1",
+					[
+						buildEvent({
+							sessionId: "session-1",
+							revision: 1,
+							seq: 1,
+							text: "Alpha survives load failure",
+							sessionDeks: new Map(),
+						}),
+					],
+				],
+				[
+					"session-2",
+					[
+						buildEvent({
+							sessionId: "session-2",
+							revision: 1,
+							seq: 1,
+							text: "Beta should never appear",
+							sessionDeks: new Map(),
+						}),
+					],
+				],
+			],
+			loadResponses: [
+				[
+					"session-2",
+					buildFailureScript({
+						statusCode: 500,
+						body: { error: "load_failed_for_test" },
+					}),
+				],
+			],
+		}),
+	"sidebar-load-race": () =>
+		createScenarioState({
+			sessions: [
+				baseSession({
+					sessionId: "session-1",
+					title: "Session Alpha",
+					revision: 1,
+					isAttached: true,
+				}),
+				baseSession({
+					sessionId: "session-2",
+					title: "Session Beta",
+					revision: 1,
+					isAttached: false,
+				}),
+				baseSession({
+					sessionId: "session-3",
+					title: "Session Gamma",
+					revision: 1,
+					isAttached: true,
+				}),
+			],
+			events: [
+				[
+					"session-1",
+					[
+						buildEvent({
+							sessionId: "session-1",
+							revision: 1,
+							seq: 1,
+							text: "Alpha baseline transcript",
+							sessionDeks: new Map(),
+						}),
+					],
+				],
+				[
+					"session-2",
+					[
+						buildEvent({
+							sessionId: "session-2",
+							revision: 1,
+							seq: 1,
+							text: "Beta delayed transcript",
+							sessionDeks: new Map(),
+						}),
+					],
+				],
+				[
+					"session-3",
+					[
+						buildEvent({
+							sessionId: "session-3",
+							revision: 1,
+							seq: 1,
+							text: "Gamma final transcript",
+							sessionDeks: new Map(),
+						}),
+					],
+				],
+			],
+			loadResponses: [
+				[
+					"session-2",
+					buildActionScript(
+						baseSession({
+							sessionId: "session-2",
+							title: "Session Beta",
+							revision: 1,
+							isAttached: true,
+						}),
+						{ delayMs: 300 },
+					),
+				],
+			],
+		}),
 };
 
 let state = scenarios["refresh-restore"]();
+
+const upsertSession = (summary) => {
+	const index = state.sessions.findIndex(
+		(session) => session.sessionId === summary.sessionId,
+	);
+	if (index === -1) {
+		state.sessions.push(summary);
+		return;
+	}
+	state.sessions[index] = {
+		...state.sessions[index],
+		...summary,
+	};
+};
+
+const emitSessionAttached = (sessionId, revision) => {
+	io.of("/webui").emit("session:attached", {
+		sessionId,
+		machineId: MACHINE_ID,
+		attachedAt: new Date().toISOString(),
+		revision,
+	});
+};
 
 const server = http.createServer(async (req, res) => {
 	if (!req.url) {
@@ -151,9 +607,9 @@ const server = http.createServer(async (req, res) => {
 		json(req, res, 200, {
 			machines: [
 				{
-					machineId: MACHINE_ID,
+					id: MACHINE_ID,
 					hostname: "fake-gateway",
-					connected: true,
+					isOnline: true,
 				},
 			],
 		});
@@ -182,21 +638,73 @@ const server = http.createServer(async (req, res) => {
 			return;
 		}
 
+		const fetchScript = findEventFetchScript(sessionId, revision, afterSeq);
+		if (fetchScript?.delayMs > 0) {
+			await delay(fetchScript.delayMs);
+		}
+		if (fetchScript && fetchScript.statusCode >= 400) {
+			json(
+				req,
+				res,
+				fetchScript.statusCode,
+				fetchScript.body ?? {
+					error: "event_fetch_failed_for_test",
+				},
+			);
+			return;
+		}
+
 		const allEvents = state.events.get(sessionId) ?? [];
-		const events = allEvents
-			.filter((event) => event.revision === revision && event.seq > afterSeq)
-			.slice(0, limit);
+		const matching = allEvents.filter(
+			(event) => event.revision === revision && event.seq > afterSeq,
+		);
+		const events = matching.slice(0, limit);
 		json(req, res, 200, {
 			sessionId,
 			machineId: MACHINE_ID,
 			revision,
 			events,
 			nextAfterSeq: events.at(-1)?.seq,
-			hasMore:
-				allEvents.filter(
-					(event) => event.revision === revision && event.seq > afterSeq,
-				).length > events.length,
+			hasMore: matching.length > events.length,
 		});
+		return;
+	}
+
+	if (req.method === "POST" && url.pathname === "/acp/session/load") {
+		const body = await parseBody(req);
+		await respondWithActionScript(
+			req,
+			res,
+			state.loadResponses.get(body.sessionId),
+			{
+				notFoundPayload: { error: "load_not_supported_for_test" },
+				onSuccess: (summary) => {
+					upsertSession(summary);
+					emitSessionAttached(summary.sessionId, summary.revision);
+				},
+			},
+		);
+		return;
+	}
+
+	if (req.method === "POST" && url.pathname === "/acp/session/reload") {
+		const body = await parseBody(req);
+		await respondWithActionScript(
+			req,
+			res,
+			state.reloadResponses.get(body.sessionId),
+			{
+				notFoundPayload: { error: "reload_not_supported_for_test" },
+				onSuccess: (summary) => {
+					upsertSession(summary);
+				},
+			},
+		);
+		return;
+	}
+
+	if (req.method === "POST" && url.pathname === "/acp/session/cancel") {
+		json(req, res, 200, { ok: true });
 		return;
 	}
 
@@ -265,35 +773,6 @@ io.of("/webui").on("connection", (socket) => {
 	});
 	socket.on("disconnect", () => {});
 });
-
-const buildEvent = ({
-	sessionId = "session-1",
-	revision = 1,
-	seq = 1,
-	text = "event",
-	encrypted = false,
-}) => {
-	const payload = {
-		sessionId,
-		update: {
-			sessionUpdate: "agent_message_chunk",
-			content: { type: "text", text },
-		},
-	};
-	return {
-		sessionId,
-		machineId: MACHINE_ID,
-		revision,
-		seq,
-		kind: "agent_message_chunk",
-		createdAt: new Date().toISOString(),
-		payload:
-			encrypted && state.sessionDeks.get(sessionId)
-				? encryptPayload(payload, state.sessionDeks.get(sessionId))
-				: payload,
-		eventId: randomUUID(),
-	};
-};
 
 server.listen(PORT, "127.0.0.1", () => {
 	console.log(`fake gateway listening on ${PORT}`);
