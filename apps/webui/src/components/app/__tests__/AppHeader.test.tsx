@@ -1,9 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import * as React from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AppHeader } from "../AppHeader";
+
+const mockUseIsMobile = vi.fn(() => false);
 
 // Mock i18n
 vi.mock("react-i18next", () => ({
@@ -16,6 +19,11 @@ vi.mock("react-i18next", () => ({
 				"session.forceReloadTitle": "Force Reload",
 				"session.forceReloadDescription": "This will force reload the session.",
 				"session.forceReloadConfirm": "Reload",
+				"session.context.details": "Session Details",
+				"session.context.workspacePathLabel": "Workspace Path",
+				"session.context.executionModeLabel": "Execution Mode",
+				"session.context.branchLabel": "Branch",
+				"session.context.subdirectoryLabel": "Subdirectory",
 				"session.context.local": "Local",
 				"session.context.worktree": "Worktree",
 				"session.context.subdir": `Subdir: ${options?.path ?? ""}`,
@@ -50,6 +58,107 @@ vi.mock("@/components/auth/UserMenu", () => ({
 // Mock PlanIndicator
 vi.mock("@/components/plan/plan-indicator", () => ({
 	default: () => <div data-testid="plan-indicator">PlanIndicator</div>,
+}));
+
+vi.mock("@/hooks/use-mobile", () => ({
+	useIsMobile: () => mockUseIsMobile(),
+}));
+
+const PopoverContext = React.createContext<{
+	open: boolean;
+	setOpen: React.Dispatch<React.SetStateAction<boolean>>;
+} | null>(null);
+
+vi.mock("@/components/ui/popover", () => ({
+	Popover: ({
+		children,
+		open,
+		onOpenChange,
+	}: {
+		children: React.ReactNode;
+		open?: boolean;
+		onOpenChange?: (open: boolean) => void;
+	}) => {
+		const [internalOpen, setInternalOpen] = React.useState(false);
+		const resolvedOpen = open ?? internalOpen;
+		const setOpen = (value: React.SetStateAction<boolean>) => {
+			const nextOpen =
+				typeof value === "function" ? value(resolvedOpen) : value;
+			onOpenChange?.(nextOpen);
+			if (open === undefined) {
+				setInternalOpen(nextOpen);
+			}
+		};
+
+		return (
+			<PopoverContext.Provider value={{ open: resolvedOpen, setOpen }}>
+				{children}
+			</PopoverContext.Provider>
+		);
+	},
+	PopoverTrigger: ({
+		children,
+		asChild,
+	}: {
+		children: React.ReactNode;
+		asChild?: boolean;
+	}) => {
+		const context = React.useContext(PopoverContext);
+		if (!context) {
+			return null;
+		}
+		if (asChild && React.isValidElement(children)) {
+			return React.cloneElement(
+				children as React.ReactElement<{ onClick?: () => void }>,
+				{
+					onClick: () => context.setOpen((current) => !current),
+				},
+			);
+		}
+		return (
+			<button
+				type="button"
+				onClick={() => context.setOpen((current) => !current)}
+			>
+				{children}
+			</button>
+		);
+	},
+	PopoverContent: ({ children }: { children: React.ReactNode }) => {
+		const context = React.useContext(PopoverContext);
+		if (!context?.open) {
+			return null;
+		}
+		return <div data-testid="popover-content">{children}</div>;
+	},
+}));
+
+const SheetContext = React.createContext<{ open: boolean } | null>(null);
+
+vi.mock("@/components/ui/sheet", () => ({
+	Sheet: ({
+		children,
+		open = false,
+	}: {
+		children: React.ReactNode;
+		open?: boolean;
+		onOpenChange?: (open: boolean) => void;
+	}) => (
+		<SheetContext.Provider value={{ open }}>{children}</SheetContext.Provider>
+	),
+	SheetContent: ({ children }: { children: React.ReactNode }) => {
+		const context = React.useContext(SheetContext);
+		if (!context?.open) {
+			return null;
+		}
+		return <div data-testid="sheet-content">{children}</div>;
+	},
+	SheetHeader: ({ children }: { children: React.ReactNode }) => (
+		<div data-testid="sheet-header">{children}</div>
+	),
+	SheetTitle: ({ children }: { children: React.ReactNode }) => (
+		<div data-testid="sheet-title">{children}</div>
+	),
 }));
 
 // Mock AlertDialog
@@ -166,6 +275,7 @@ const renderAppHeader = (
 describe("AppHeader", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		mockUseIsMobile.mockReturnValue(false);
 	});
 
 	describe("Command Palette Button", () => {
@@ -242,7 +352,9 @@ describe("AppHeader", () => {
 	describe("Optional Features", () => {
 		it("shows backend label when provided", () => {
 			renderAppHeader({ backendLabel: "Test Backend" });
-			expect(screen.getByTestId("badge")).toHaveTextContent("Test Backend");
+			expect(screen.getByTestId("session-header-summary")).toHaveTextContent(
+				"Test Backend",
+			);
 		});
 
 		it("shows plan indicator when plan is provided", () => {
@@ -307,18 +419,89 @@ describe("AppHeader", () => {
 			expect(screen.getByLabelText("Open File Explorer")).toBeInTheDocument();
 		});
 
-		it("shows workspace context badges when provided", () => {
+		it("keeps only the summary pill inline and hides other session details by default", () => {
 			renderAppHeader({
+				backendLabel: "Claude Agent",
 				workspaceLabel: "mobvibe",
+				workspacePath: "/Users/eric/src/mobvibe",
 				executionMode: "worktree",
 				branchLabel: "feat/detection-fix",
 				subdirectoryLabel: "apps/webui",
 			});
 
 			expect(screen.getByText("mobvibe")).toBeInTheDocument();
-			expect(screen.getByTitle("Worktree")).toBeInTheDocument();
+			expect(
+				screen.getByRole("button", { name: "Session Details" }),
+			).toBeInTheDocument();
+			expect(screen.queryByText("Claude Agent")).not.toBeInTheDocument();
+			expect(screen.queryByText("feat/detection-fix")).not.toBeInTheDocument();
+			expect(screen.queryByText("apps/webui")).not.toBeInTheDocument();
+		});
+
+		it("hides the details trigger when no extra metadata exists", () => {
+			renderAppHeader({ backendLabel: "Claude Agent" });
+			expect(
+				screen.queryByRole("button", { name: "Session Details" }),
+			).not.toBeInTheDocument();
+		});
+
+		it("opens a desktop popover with session details", async () => {
+			const user = userEvent.setup();
+			renderAppHeader({
+				backendLabel: "Claude Agent",
+				workspaceLabel: "mobvibe",
+				workspacePath: "/Users/eric/src/mobvibe",
+				executionMode: "worktree",
+				branchLabel: "feat/detection-fix",
+				subdirectoryLabel: "apps/webui",
+			});
+
+			await user.click(screen.getByRole("button", { name: "Session Details" }));
+
+			expect(screen.getByTestId("popover-content")).toBeInTheDocument();
+			expect(screen.getByText("Workspace Path")).toBeInTheDocument();
+			expect(screen.getByText("/Users/eric/src/mobvibe")).toBeInTheDocument();
+			expect(screen.getByText("Execution Mode")).toBeInTheDocument();
+			expect(screen.getByText("Worktree")).toBeInTheDocument();
+			expect(screen.getByText("Branch")).toBeInTheDocument();
 			expect(screen.getByText("feat/detection-fix")).toBeInTheDocument();
-			expect(screen.getByText("Subdir: apps/webui")).toBeInTheDocument();
+			expect(screen.getByText("Subdirectory")).toBeInTheDocument();
+			expect(screen.getByText("apps/webui")).toBeInTheDocument();
+		});
+
+		it("opens a mobile sheet with session details", async () => {
+			mockUseIsMobile.mockReturnValue(true);
+			const user = userEvent.setup();
+			renderAppHeader({
+				backendLabel: "Claude Agent",
+				workspaceLabel: "mobvibe",
+				workspacePath: "/Users/eric/src/mobvibe",
+				executionMode: "worktree",
+				branchLabel: "feat/detection-fix",
+				subdirectoryLabel: "apps/webui",
+			});
+
+			await user.click(screen.getByRole("button", { name: "Session Details" }));
+
+			expect(screen.getByTestId("sheet-content")).toBeInTheDocument();
+			expect(screen.getByTestId("sheet-title")).toHaveTextContent(
+				"Session Details",
+			);
+			expect(screen.queryByTestId("popover-content")).not.toBeInTheDocument();
+		});
+
+		it("uses a single-line truncating metadata strip", () => {
+			renderAppHeader({
+				workspaceLabel: "mobvibe",
+				workspacePath: "/Users/eric/src/mobvibe",
+			});
+
+			expect(screen.getByTestId("session-header-meta")).toHaveClass(
+				"overflow-hidden",
+			);
+			expect(screen.getByTestId("session-header-summary")).toHaveClass(
+				"truncate",
+			);
 		});
 	});
 

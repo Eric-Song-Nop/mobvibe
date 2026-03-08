@@ -1,12 +1,11 @@
 import {
 	FolderOpenIcon,
-	GitBranchIcon,
 	Refresh01Icon,
 	Refresh03Icon,
 	Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { memo } from "react";
+import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { UserMenu } from "@/components/auth/UserMenu";
 import PlanIndicator from "@/components/plan/plan-indicator";
@@ -23,6 +22,18 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+	Sheet,
+	SheetContent,
+	SheetHeader,
+	SheetTitle,
+} from "@/components/ui/sheet";
+import { useIsMobile } from "@/hooks/use-mobile";
 import type { PlanEntry } from "@/lib/acp";
 import type { ChatSession } from "@/lib/chat-store";
 
@@ -50,6 +61,27 @@ export type AppHeaderProps = {
 	forceReloadDisabled?: boolean;
 };
 
+type SessionDetailItem = {
+	key: string;
+	label: string;
+	value: string;
+};
+
+function SessionDetailsContent({ items }: { items: SessionDetailItem[] }) {
+	return (
+		<dl className="space-y-3">
+			{items.map((item) => (
+				<div key={item.key} className="space-y-1">
+					<dt className="text-muted-foreground text-[11px] font-medium">
+						{item.label}
+					</dt>
+					<dd className="text-sm break-words">{item.value}</dd>
+				</div>
+			))}
+		</dl>
+	);
+}
+
 export const AppHeader = memo(function AppHeader({
 	backendLabel,
 	workspaceLabel,
@@ -74,8 +106,65 @@ export const AppHeader = memo(function AppHeader({
 	forceReloadDisabled = false,
 }: AppHeaderProps) {
 	const { t } = useTranslation();
-	const executionModeIcon =
-		executionMode === "worktree" ? GitBranchIcon : FolderOpenIcon;
+	const isMobile = useIsMobile();
+	const [detailsOpen, setDetailsOpen] = useState(false);
+	const summaryLabel = workspaceLabel ?? backendLabel;
+	const detailItems: SessionDetailItem[] = [
+		backendLabel
+			? {
+					key: "backend",
+					label: t("session.backendLabel"),
+					value: backendLabel,
+				}
+			: null,
+		workspacePath
+			? {
+					key: "workspacePath",
+					label: t("session.context.workspacePathLabel"),
+					value: workspacePath,
+				}
+			: null,
+		executionMode
+			? {
+					key: "executionMode",
+					label: t("session.context.executionModeLabel"),
+					value: t(`session.context.${executionMode}`),
+				}
+			: null,
+		branchLabel
+			? {
+					key: "branch",
+					label: t("session.context.branchLabel"),
+					value: branchLabel,
+				}
+			: null,
+		subdirectoryLabel
+			? {
+					key: "subdirectory",
+					label: t("session.context.subdirectoryLabel"),
+					value: subdirectoryLabel,
+				}
+			: null,
+	].filter((item): item is SessionDetailItem => item !== null);
+	const showDetailsTrigger = Boolean(
+		(backendLabel && backendLabel !== summaryLabel) ||
+			workspacePath ||
+			executionMode ||
+			branchLabel ||
+			subdirectoryLabel,
+	);
+	const detailsTitle = t("session.context.details");
+	const detailsTrigger = showDetailsTrigger ? (
+		<Button
+			variant="ghost"
+			size="xs"
+			className="shrink-0"
+			aria-label={detailsTitle}
+			title={detailsTitle}
+		>
+			{detailsTitle}
+		</Button>
+	) : null;
 
 	return (
 		<header className="bg-background/80 border-b px-3 pb-2.5 pt-[calc(0.625rem+env(safe-area-inset-top))] backdrop-blur shrink-0 sm:px-4 sm:pb-3 sm:pt-[calc(0.75rem+env(safe-area-inset-top))]">
@@ -178,53 +267,59 @@ export const AppHeader = memo(function AppHeader({
 						<UserMenu />
 					</div>
 				</div>
-				<div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:gap-2">
-					{backendLabel ? (
-						<Badge variant="outline" className="shrink-0">
-							{backendLabel}
-						</Badge>
-					) : null}
-					{workspaceLabel ? (
+				<div
+					data-testid="session-header-meta"
+					className="flex min-w-0 items-center gap-1.5 overflow-hidden sm:gap-2"
+				>
+					{summaryLabel ? (
 						<Badge
+							data-testid="session-header-summary"
 							variant="secondary"
-							className="max-w-full truncate"
+							className="min-w-0 max-w-full truncate"
 							title={workspacePath}
 						>
-							{workspaceLabel}
-						</Badge>
-					) : null}
-					{executionMode ? (
-						<Badge
-							variant="outline"
-							className="px-1.5"
-							title={t(`session.context.${executionMode}`)}
-						>
-							<HugeiconsIcon
-								icon={executionModeIcon}
-								strokeWidth={2}
-								aria-hidden="true"
-							/>
-						</Badge>
-					) : null}
-					{branchLabel ? (
-						<Badge
-							variant="outline"
-							className="max-w-full truncate"
-							title={branchLabel}
-						>
-							{branchLabel}
-						</Badge>
-					) : null}
-					{subdirectoryLabel ? (
-						<Badge
-							variant="outline"
-							className="max-w-full truncate"
-							title={subdirectoryLabel}
-						>
-							{t("session.context.subdir", { path: subdirectoryLabel })}
+							{summaryLabel}
 						</Badge>
 					) : null}
 					{plan && plan.length > 0 ? <PlanIndicator plan={plan} /> : null}
+					<div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
+						{showDetailsTrigger ? (
+							isMobile ? (
+								<>
+									<Button
+										variant="ghost"
+										size="xs"
+										className="shrink-0"
+										aria-label={detailsTitle}
+										title={detailsTitle}
+										onClick={() => setDetailsOpen(true)}
+									>
+										{detailsTitle}
+									</Button>
+									<Sheet open={detailsOpen} onOpenChange={setDetailsOpen}>
+										<SheetContent side="bottom" className="max-h-[50vh]">
+											<SheetHeader>
+												<SheetTitle>{detailsTitle}</SheetTitle>
+											</SheetHeader>
+											<div className="px-4 pb-4">
+												<SessionDetailsContent items={detailItems} />
+											</div>
+										</SheetContent>
+									</Sheet>
+								</>
+							) : (
+								<Popover open={detailsOpen} onOpenChange={setDetailsOpen}>
+									<PopoverTrigger asChild>{detailsTrigger}</PopoverTrigger>
+									<PopoverContent align="end" className="w-80">
+										<div className="space-y-3">
+											<h2 className="text-sm font-medium">{detailsTitle}</h2>
+											<SessionDetailsContent items={detailItems} />
+										</div>
+									</PopoverContent>
+								</Popover>
+							)
+						) : null}
+					</div>
 				</div>
 			</div>
 
