@@ -1,10 +1,20 @@
 import { AddCircleIcon, Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { memo, useState } from "react";
+import { memo, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RegisterMachineDialog } from "@/components/machines/RegisterMachineDialog";
 import { SessionSidebar } from "@/components/session/SessionSidebar";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { ResizeHandle } from "@/components/ui/ResizeHandle";
 import {
@@ -34,6 +44,17 @@ export type AppSidebarProps = {
 	mutations: SessionMutationsSnapshot;
 };
 
+type ArchiveTarget =
+	| {
+			type: "single";
+			sessionId: string;
+	  }
+	| {
+			type: "bulk";
+			sessionIds: string[];
+	  }
+	| null;
+
 export const AppSidebar = memo(function AppSidebar({
 	sessions,
 	activeSessionId,
@@ -53,8 +74,89 @@ export const AppSidebar = memo(function AppSidebar({
 		sessionSidebarWidth,
 		setSessionSidebarWidth,
 	} = useUiStore();
+	const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
+	const [archiveTarget, setArchiveTarget] = useState<ArchiveTarget>(null);
+
+	const handleCreateSessionRequest = useCallback(
+		(mode: "workspace" | "session") => {
+			setMobileMenuOpen(false);
+			onCreateSession(mode);
+		},
+		[onCreateSession, setMobileMenuOpen],
+	);
+
+	const handleArchiveSessionRequest = useCallback(
+		(sessionId: string) => {
+			setMobileMenuOpen(false);
+			setArchiveTarget({ type: "single", sessionId });
+		},
+		[setMobileMenuOpen],
+	);
+
+	const handleArchiveAllSessionsRequest = useCallback(
+		(sessionIds: string[]) => {
+			setMobileMenuOpen(false);
+			setArchiveTarget({ type: "bulk", sessionIds });
+		},
+		[setMobileMenuOpen],
+	);
+
+	const handleArchiveConfirm = useCallback(() => {
+		if (!archiveTarget) {
+			return;
+		}
+		if (archiveTarget.type === "single") {
+			onArchiveSession(archiveTarget.sessionId);
+		} else {
+			onArchiveAllSessions(archiveTarget.sessionIds);
+		}
+		setArchiveTarget(null);
+	}, [archiveTarget, onArchiveAllSessions, onArchiveSession]);
+
+	const handleOpenRegisterMachineDialog = useCallback(() => {
+		setMobileMenuOpen(false);
+		setRegisterDialogOpen(true);
+	}, [setMobileMenuOpen]);
+
 	return (
 		<>
+			<RegisterMachineDialog
+				open={registerDialogOpen}
+				onOpenChange={setRegisterDialogOpen}
+			/>
+			<AlertDialog
+				open={archiveTarget !== null}
+				onOpenChange={(open) => {
+					if (!open) {
+						setArchiveTarget(null);
+					}
+				}}
+			>
+				<AlertDialogContent size="sm">
+					<AlertDialogHeader>
+						<AlertDialogTitle>
+							{archiveTarget?.type === "bulk"
+								? t("session.archiveAllTitle")
+								: t("session.archiveTitle")}
+						</AlertDialogTitle>
+						<AlertDialogDescription>
+							{archiveTarget?.type === "bulk"
+								? t("session.archiveAllDescription", {
+										count: archiveTarget.sessionIds.length,
+									})
+								: t("session.archiveDescription")}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+						<AlertDialogAction onClick={handleArchiveConfirm}>
+							{archiveTarget?.type === "bulk"
+								? t("session.archiveAllConfirm")
+								: t("session.archiveConfirm")}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 			<aside
 				className="bg-background/80 border-r hidden flex-col px-4 py-4 md:flex min-h-0 overflow-hidden"
 				style={{ width: sessionSidebarWidth }}
@@ -62,11 +164,11 @@ export const AppSidebar = memo(function AppSidebar({
 				<SessionSidebar
 					sessions={sessions}
 					activeSessionId={activeSessionId}
-					onCreateSession={onCreateSession}
+					onCreateSession={handleCreateSessionRequest}
 					onSelectSession={onSelectSession}
 					onEditSubmit={onEditSubmit}
-					onArchiveSession={onArchiveSession}
-					onArchiveAllSessions={onArchiveAllSessions}
+					onArchiveSessionRequest={handleArchiveSessionRequest}
+					onArchiveAllSessionsRequest={handleArchiveAllSessionsRequest}
 					isBulkArchiving={isBulkArchiving}
 					isCreating={isCreating}
 					mutations={mutations}
@@ -81,19 +183,21 @@ export const AppSidebar = memo(function AppSidebar({
 			{mobileMenuOpen ? (
 				<div className="fixed inset-0 z-[60] flex md:hidden pt-[env(safe-area-inset-top)]">
 					<div className="bg-background/90 border-r w-80 p-0 flex h-full overflow-hidden">
-						<MobileMachineColumn />
+						<MobileMachineColumn
+							onAddMachine={handleOpenRegisterMachineDialog}
+						/>
 						<div className="flex-1 p-4 overflow-hidden flex flex-col min-w-0">
 							<SessionSidebar
 								sessions={sessions}
 								activeSessionId={activeSessionId}
-								onCreateSession={onCreateSession}
+								onCreateSession={handleCreateSessionRequest}
 								onSelectSession={(sessionId) => {
 									onSelectSession(sessionId);
 									setMobileMenuOpen(false);
 								}}
 								onEditSubmit={onEditSubmit}
-								onArchiveSession={onArchiveSession}
-								onArchiveAllSessions={onArchiveAllSessions}
+								onArchiveSessionRequest={handleArchiveSessionRequest}
+								onArchiveAllSessionsRequest={handleArchiveAllSessionsRequest}
 								isBulkArchiving={isBulkArchiving}
 								isCreating={isCreating}
 								mutations={mutations}
@@ -112,7 +216,7 @@ export const AppSidebar = memo(function AppSidebar({
 	);
 });
 
-function MobileMachineColumn() {
+function MobileMachineColumn({ onAddMachine }: { onAddMachine: () => void }) {
 	const { t } = useTranslation();
 	const {
 		machines,
@@ -123,7 +227,6 @@ function MobileMachineColumn() {
 	const machinesQuery = useMachinesQuery();
 	const queryClient = useQueryClient();
 	const discoverSessionsMutation = useDiscoverSessionsMutation();
-	const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
 	const { selectedWorkspaceByMachine } = useUiStore();
 
 	const machineList = Object.values(machines).sort((a, b) => {
@@ -158,10 +261,6 @@ function MobileMachineColumn() {
 
 	return (
 		<TooltipProvider delayDuration={300}>
-			<RegisterMachineDialog
-				open={registerDialogOpen}
-				onOpenChange={setRegisterDialogOpen}
-			/>
 			<div className="w-14 flex-shrink-0 flex flex-col items-center gap-2 py-3 border-r bg-background/50">
 				<div className="flex flex-col items-center gap-1 text-xs font-semibold text-muted-foreground mb-1">
 					<span>{t("machines.title")}</span>
@@ -208,7 +307,7 @@ function MobileMachineColumn() {
 						<Button
 							variant="ghost"
 							size="icon-sm"
-							onClick={() => setRegisterDialogOpen(true)}
+							onClick={onAddMachine}
 							className="mt-auto"
 							aria-label={t("machines.register")}
 						>

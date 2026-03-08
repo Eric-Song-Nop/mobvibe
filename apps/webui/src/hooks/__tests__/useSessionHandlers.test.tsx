@@ -183,6 +183,15 @@ describe("useSessionHandlers — handleOpenCreateDialog", () => {
 		expect(uiActions.setDraftCwd).toHaveBeenCalledWith("/projects/foo");
 	});
 
+	it("closes the mobile menu before opening the create dialog", () => {
+		const { result } = renderHandlers();
+
+		result.current.handleOpenCreateDialog();
+
+		expect(uiActions.setMobileMenuOpen).toHaveBeenCalledWith(false);
+		expect(uiActions.setCreateDialogOpen).toHaveBeenCalledWith(true);
+	});
+
 	it("falls back to active session cwd when on same machine", () => {
 		const activeSession = createBaseSession({
 			machineId: "machine-1",

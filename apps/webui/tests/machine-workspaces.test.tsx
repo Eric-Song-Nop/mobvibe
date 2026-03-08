@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "@/lib/chat-store";
@@ -9,9 +10,8 @@ import { useMachinesStore } from "../src/lib/machines-store";
 import { useUiStore } from "../src/lib/ui-store";
 
 // Mock the API module so useQueries calls resolve/reject as we control
-vi.mock("../src/lib/api", async () => {
-	const actual =
-		await vi.importActual<typeof import("../src/lib/api")>("../src/lib/api");
+vi.mock("@/lib/api", async () => {
+	const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
 	return {
 		...actual,
 		fetchFsEntries: vi.fn(),
@@ -23,7 +23,7 @@ vi.mock("../src/hooks/useSessionQueries", () => ({
 	useDiscoverSessionsMutation: () => ({ mutate: vi.fn() }),
 }));
 
-import { fetchFsEntries } from "../src/lib/api";
+import { fetchFsEntries } from "@/lib/api";
 
 const MACHINE_ID = "machine-1";
 
@@ -49,6 +49,7 @@ const buildSession = (
 });
 
 let queryClient: QueryClient;
+let onEmptyCreateSession: ReturnType<typeof vi.fn>;
 
 const Wrapper = ({ children }: { children: ReactNode }) => (
 	<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
@@ -60,6 +61,7 @@ beforeEach(() => {
 			queries: { retry: false },
 		},
 	});
+	onEmptyCreateSession = vi.fn();
 
 	// Set up machine as connected
 	useMachinesStore.setState({
@@ -125,7 +127,10 @@ describe("WorkspaceList validation effect", () => {
 
 		render(
 			<Wrapper>
-				<WorkspaceList machineId={MACHINE_ID} />
+				<WorkspaceList
+					machineId={MACHINE_ID}
+					onEmptyCreateSession={onEmptyCreateSession}
+				/>
 			</Wrapper>,
 		);
 
@@ -157,7 +162,10 @@ describe("WorkspaceList validation effect", () => {
 
 		render(
 			<Wrapper>
-				<WorkspaceList machineId={MACHINE_ID} />
+				<WorkspaceList
+					machineId={MACHINE_ID}
+					onEmptyCreateSession={onEmptyCreateSession}
+				/>
 			</Wrapper>,
 		);
 
@@ -189,7 +197,10 @@ describe("WorkspaceList validation effect", () => {
 
 		render(
 			<Wrapper>
-				<WorkspaceList machineId={MACHINE_ID} />
+				<WorkspaceList
+					machineId={MACHINE_ID}
+					onEmptyCreateSession={onEmptyCreateSession}
+				/>
 			</Wrapper>,
 		);
 
@@ -209,7 +220,10 @@ describe("WorkspaceList validation effect", () => {
 
 		const { container } = render(
 			<Wrapper>
-				<WorkspaceList machineId={MACHINE_ID} />
+				<WorkspaceList
+					machineId={MACHINE_ID}
+					onEmptyCreateSession={onEmptyCreateSession}
+				/>
 			</Wrapper>,
 		);
 
@@ -237,7 +251,10 @@ describe("WorkspaceList validation effect", () => {
 
 		render(
 			<Wrapper>
-				<WorkspaceList machineId={MACHINE_ID} />
+				<WorkspaceList
+					machineId={MACHINE_ID}
+					onEmptyCreateSession={onEmptyCreateSession}
+				/>
 			</Wrapper>,
 		);
 
@@ -247,5 +264,24 @@ describe("WorkspaceList validation effect", () => {
 			const state = useUiStore.getState();
 			expect(state.selectedWorkspaceByMachine[MACHINE_ID]).toBe(cwdA);
 		});
+	});
+
+	it("routes empty-state create actions through the callback", async () => {
+		useChatStore.setState({ sessions: {} });
+		const user = userEvent.setup();
+
+		render(
+			<Wrapper>
+				<WorkspaceList
+					machineId={MACHINE_ID}
+					onEmptyCreateSession={onEmptyCreateSession}
+				/>
+			</Wrapper>,
+		);
+
+		await user.click(document.querySelector("button")!);
+
+		expect(onEmptyCreateSession).toHaveBeenCalledTimes(1);
+		expect(useMachinesStore.getState().selectedMachineId).toBe(MACHINE_ID);
 	});
 });

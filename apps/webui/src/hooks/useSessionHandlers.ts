@@ -167,6 +167,7 @@ export function useSessionHandlers({
 
 		uiActions.setDraftCwd(initialCwd);
 		uiActions.resetDraftWorktree();
+		uiActions.setMobileMenuOpen(false);
 		uiActions.setCreateDialogOpen(true);
 	};
 
