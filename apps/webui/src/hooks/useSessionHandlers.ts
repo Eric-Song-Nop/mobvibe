@@ -1,3 +1,4 @@
+import { resolveWorktreeBranchName } from "@mobvibe/shared";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PermissionResultNotification } from "@/lib/acp";
@@ -22,7 +23,7 @@ type Mutations = {
 			title?: string;
 			machineId: string;
 			worktree?: {
-				branch: string;
+				branch?: string;
 				baseBranch?: string;
 				sourceCwd: string;
 				relativeCwd?: string;
@@ -173,6 +174,7 @@ export function useSessionHandlers({
 			draftCwd,
 			draftWorktreeEnabled,
 			draftWorktreeBranch,
+			draftWorktreeSuggestedBranch,
 			draftWorktreeBaseBranch,
 		} = useUiStore.getState();
 		if (!selectedMachineId) {
@@ -200,7 +202,7 @@ export function useSessionHandlers({
 
 		let worktree:
 			| {
-					branch: string;
+					branch?: string;
 					baseBranch?: string;
 					sourceCwd: string;
 					relativeCwd?: string;
@@ -208,10 +210,9 @@ export function useSessionHandlers({
 			| undefined;
 
 		if (draftWorktreeEnabled) {
-			const branch = draftWorktreeBranch.trim();
-			if (!branch) {
-				return;
-			}
+			const branch = resolveWorktreeBranchName(
+				draftWorktreeBranch.trim() || draftWorktreeSuggestedBranch,
+			);
 
 			try {
 				const projectContext = await fetchGitBranchesForCwd({

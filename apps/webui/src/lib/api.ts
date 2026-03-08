@@ -294,7 +294,7 @@ export const createSession = async (payload?: {
 	backendId?: string;
 	machineId?: string;
 	worktree?: {
-		branch: string;
+		branch?: string;
 		baseBranch?: string;
 		sourceCwd: string;
 		relativeCwd?: string;

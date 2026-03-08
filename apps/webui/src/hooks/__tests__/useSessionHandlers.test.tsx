@@ -25,6 +25,7 @@ const mockUiStoreState = vi.hoisted(() => ({
 	draftCwd: undefined as string | undefined,
 	draftWorktreeEnabled: false,
 	draftWorktreeBranch: "",
+	draftWorktreeSuggestedBranch: undefined as string | undefined,
 	draftWorktreeBaseBranch: undefined as string | undefined,
 	chatDrafts: {} as Record<
 		string,
@@ -169,6 +170,7 @@ describe("useSessionHandlers — handleOpenCreateDialog", () => {
 		mockUiStoreState.draftCwd = undefined;
 		mockUiStoreState.draftWorktreeEnabled = false;
 		mockUiStoreState.draftWorktreeBranch = "";
+		mockUiStoreState.draftWorktreeSuggestedBranch = undefined;
 		mockUiStoreState.draftWorktreeBaseBranch = undefined;
 		mockUiStoreState.chatDrafts = {};
 		mockUiStoreState.clearChatDraft.mockReset();
@@ -400,6 +402,7 @@ describe("useSessionHandlers — handleCreateSession", () => {
 		mockUiStoreState.draftCwd = "/projects/repo/apps/webui";
 		mockUiStoreState.draftWorktreeEnabled = true;
 		mockUiStoreState.draftWorktreeBranch = "feat/live-cwd";
+		mockUiStoreState.draftWorktreeSuggestedBranch = undefined;
 		mockUiStoreState.draftWorktreeBaseBranch = "main";
 		vi.clearAllMocks();
 	});
@@ -456,6 +459,39 @@ describe("useSessionHandlers — handleCreateSession", () => {
 				scope: "request",
 			}),
 		);
+	});
+
+	it("uses the suggested worktree branch when the input is blank", async () => {
+		mockUiStoreState.draftWorktreeBranch = "";
+		mockUiStoreState.draftWorktreeSuggestedBranch = "brisk-comet-x7";
+		vi.mocked(apiModule.fetchGitBranchesForCwd).mockResolvedValue({
+			isGitRepo: true,
+			branches: [],
+			repoRoot: "/projects/repo",
+			relativeCwd: "apps/webui",
+			repoName: "repo",
+			isRepoRoot: false,
+		});
+		vi.mocked(mutations.createSessionMutation.mutateAsync).mockResolvedValue(
+			{},
+		);
+
+		const { result } = renderHandlers();
+
+		await result.current.handleCreateSession();
+
+		expect(mutations.createSessionMutation.mutateAsync).toHaveBeenCalledWith({
+			backendId: "backend-1",
+			cwd: "/projects/repo/apps/webui",
+			title: "Feature Session",
+			machineId: "machine-1",
+			worktree: {
+				branch: "brisk-comet-x7",
+				baseBranch: "main",
+				sourceCwd: "/projects/repo",
+				relativeCwd: "apps/webui",
+			},
+		});
 	});
 });
 

@@ -23,11 +23,15 @@ mock.module("../../lib/logger.js", () => ({
 }));
 
 const mockIsGitRepo = mock(() => Promise.resolve(true));
-const mockCreateGitWorktree = mock(() =>
-	Promise.resolve({
-		path: "/tmp/mobvibe-test/worktrees/project/feat-branch",
-		branch: "feat-branch",
-	}),
+const mockCreateGitWorktree = mock(
+	(
+		_cwd: string,
+		opts: { branch: string; targetPath: string; baseBranch?: string },
+	) =>
+		Promise.resolve({
+			path: opts.targetPath,
+			branch: opts.branch,
+		}),
 );
 const mockResolveGitProjectContext = mock((cwd: string) =>
 	Promise.resolve({
@@ -374,6 +378,40 @@ describe("SessionManager", () => {
 			expect(created.workspaceRootCwd).toBe("/home/user/project");
 			expect(created.worktreeSourceCwd).toBe("/home/user/project");
 			expect(created.worktreeBranch).toBe("feat-branch");
+		});
+
+		it("generates a default branch name when a worktree branch is omitted", async () => {
+			mockCreateGitWorktree.mockImplementationOnce((_cwd, opts) =>
+				Promise.resolve({
+					path: opts.targetPath,
+					branch: opts.branch,
+				}),
+			);
+
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project/apps/webui",
+				backendId: "backend-1",
+				worktree: {
+					sourceCwd: "/home/user/project",
+					relativeCwd: "apps/webui",
+				},
+			});
+
+			expect(mockCreateGitWorktree).toHaveBeenCalledTimes(1);
+			const worktreeOptions = mockCreateGitWorktree.mock.calls[0]?.[1] as
+				| { branch: string; targetPath: string; baseBranch?: string }
+				| undefined;
+			expect(worktreeOptions).toBeDefined();
+			if (!worktreeOptions) {
+				throw new Error("Expected createGitWorktree to be called");
+			}
+			expect(worktreeOptions.branch).toMatch(/^[a-z]+-[a-z]+-[a-z0-9]{2}$/);
+			expect(worktreeOptions.targetPath).toBe(
+				`/tmp/mobvibe-test/worktrees/project/${worktreeOptions.branch}`,
+			);
+			expect(created.cwd).toBe(`${worktreeOptions.targetPath}/apps/webui`);
+			expect(created.worktreeBranch).toBe(worktreeOptions.branch);
+			expect(created.worktreeSourceCwd).toBe("/home/user/project");
 		});
 
 		it("rejects worktree relative paths that escape the worktree root", async () => {
