@@ -126,6 +126,7 @@
 		"backendsFetchFailed": "Failed to load backends",
 		"sessionsFetchFailed": "Failed to load sessions",
 		"sessionNotReady": "Session not ready. Please create a new conversation.",
+		"sessionE2EEKeyMissing": "E2EE key missing. Pair this device before sending messages.",
 		"streamDisconnected": "SSE connection lost",
 		"createSessionFailed": "Failed to create session",
 		"renameSessionFailed": "Failed to rename",

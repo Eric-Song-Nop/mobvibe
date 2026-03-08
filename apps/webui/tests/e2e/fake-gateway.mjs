@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import http from "node:http";
 import {
+	decryptPayload,
 	deriveContentKeyPair,
 	encryptPayload,
 	generateDEK,
 	initCrypto,
+	isEncryptedPayload,
 	uint8ToBase64,
 	wrapDEK,
 } from "@mobvibe/shared";
@@ -12,12 +14,30 @@ import { Server as SocketIOServer } from "socket.io";
 
 const PORT = 3005;
 const MACHINE_ID = "machine-1";
-const MASTER_SECRET_BYTES = new Uint8Array(
+const PRIMARY_MASTER_SECRET_BYTES = new Uint8Array(
 	Array.from({ length: 32 }, (_, index) => index + 1),
 );
-const MASTER_SECRET_BASE64 = uint8ToBase64(MASTER_SECRET_BYTES);
+const SECONDARY_MASTER_SECRET_BYTES = new Uint8Array(
+	Array.from({ length: 32 }, (_, index) => index + 65),
+);
 await initCrypto();
-const CONTENT_KEY_PAIR = deriveContentKeyPair(MASTER_SECRET_BYTES);
+
+const SECRET_RECORDS = {
+	primary: {
+		base64: uint8ToBase64(PRIMARY_MASTER_SECRET_BYTES),
+		contentKeyPair: deriveContentKeyPair(PRIMARY_MASTER_SECRET_BYTES),
+	},
+	secondary: {
+		base64: uint8ToBase64(SECONDARY_MASTER_SECRET_BYTES),
+		contentKeyPair: deriveContentKeyPair(SECONDARY_MASTER_SECRET_BYTES),
+	},
+};
+
+const MASTER_SECRET_BASE64 = SECRET_RECORDS.primary.base64;
+const SECONDARY_MASTER_SECRET_BASE64 = SECRET_RECORDS.secondary.base64;
+
+const getSecretRecord = (secretId = "primary") =>
+	SECRET_RECORDS[secretId] ?? SECRET_RECORDS.primary;
 
 const buildCorsHeaders = (req) => ({
 	"access-control-allow-origin": req.headers.origin ?? "http://127.0.0.1:4173",
@@ -64,49 +84,78 @@ const baseSession = (overrides = {}) => ({
 	...overrides,
 });
 
+const buildTextPayload = ({ sessionId, text, kind }) => ({
+	sessionId,
+	update: {
+		sessionUpdate:
+			kind === "user_message" ? "user_message_chunk" : "agent_message_chunk",
+		content: { type: "text", text },
+	},
+});
+
 const buildEvent = ({
 	sessionId = "session-1",
 	revision = 1,
 	seq = 1,
+	kind = "agent_message_chunk",
 	text = "event",
+	payload,
 	encrypted = false,
 	sessionDeks = state.sessionDeks,
 }) => {
-	const payload = {
-		sessionId,
-		update: {
-			sessionUpdate: "agent_message_chunk",
-			content: { type: "text", text },
-		},
-	};
+	const eventPayload =
+		payload ??
+		(kind === "turn_end"
+			? { stopReason: "end_turn" }
+			: buildTextPayload({ sessionId, text, kind }));
 	return {
 		sessionId,
 		machineId: MACHINE_ID,
 		revision,
 		seq,
-		kind: "agent_message_chunk",
+		kind,
 		createdAt: new Date().toISOString(),
 		eventId: randomUUID(),
 		payload:
 			encrypted && sessionDeks.get(sessionId)
-				? encryptPayload(payload, sessionDeks.get(sessionId))
-				: payload,
+				? encryptPayload(eventPayload, sessionDeks.get(sessionId))
+				: eventPayload,
 	};
 };
 
-const createEncryptedSessionState = (sessionId, overrides = {}) => {
+const createEncryptedSessionState = (
+	sessionId,
+	{ secretId = "primary", ...overrides } = {},
+) => {
 	const dek = generateDEK();
+	const secret = getSecretRecord(secretId);
 	return {
 		dek,
 		session: baseSession({
 			sessionId,
 			title: "Encrypted Revision Session",
 			revision: 2,
-			wrappedDek: wrapDEK(dek, CONTENT_KEY_PAIR.publicKey),
+			wrappedDek: wrapDEK(dek, secret.contentKeyPair.publicKey),
 			...overrides,
 		}),
 	};
 };
+
+const buildMessageScript = ({
+	assistantText = "Encrypted assistant reply",
+	stopReason = "end_turn",
+	delayMs = 0,
+	statusCode = 200,
+	body,
+	encryptResponse = true,
+} = {}) => ({
+	assistantText,
+	stopReason,
+	delayMs,
+	statusCode,
+	body: body ?? { stopReason },
+	encryptResponse,
+});
 
 const createScenarioState = ({
 	sessions,
@@ -115,6 +164,7 @@ const createScenarioState = ({
 	reloadResponses = [],
 	eventFetchScripts = [],
 	sessionDeks = [],
+	messageScripts = [],
 }) => ({
 	sessions,
 	events: new Map(events),
@@ -122,6 +172,8 @@ const createScenarioState = ({
 	reloadResponses: new Map(reloadResponses),
 	eventFetchScripts: new Map(eventFetchScripts),
 	sessionDeks: new Map(sessionDeks),
+	messageScripts: new Map(messageScripts),
+	messageRequests: [],
 });
 
 const buildActionScript = (summary, overrides = {}) => ({
@@ -227,6 +279,78 @@ const scenarios = {
 			sessions: [encrypted.session],
 			events: [["session-1", []]],
 			sessionDeks: [["session-1", encrypted.dek]],
+		});
+	},
+	"encrypted-buffered": () => {
+		const encrypted = createEncryptedSessionState("session-1", {
+			title: "Encrypted Buffer Session",
+			revision: 1,
+		});
+		const sessionDeks = new Map([["session-1", encrypted.dek]]);
+		return createScenarioState({
+			sessions: [encrypted.session],
+			events: [
+				[
+					"session-1",
+					[
+						buildEvent({
+							sessionId: "session-1",
+							revision: 1,
+							seq: 1,
+							text: "Buffered history line",
+							encrypted: true,
+							sessionDeks,
+						}),
+					],
+				],
+			],
+			sessionDeks: [["session-1", encrypted.dek]],
+		});
+	},
+	"encrypted-secondary-key": () => {
+		const encrypted = createEncryptedSessionState("session-1", {
+			title: "Secondary Key Session",
+			revision: 1,
+			secretId: "secondary",
+		});
+		const sessionDeks = new Map([["session-1", encrypted.dek]]);
+		return createScenarioState({
+			sessions: [encrypted.session],
+			events: [
+				[
+					"session-1",
+					[
+						buildEvent({
+							sessionId: "session-1",
+							revision: 1,
+							seq: 1,
+							text: "Secondary key history line",
+							encrypted: true,
+							sessionDeks,
+						}),
+					],
+				],
+			],
+			sessionDeks: [["session-1", encrypted.dek]],
+		});
+	},
+	"encrypted-send": () => {
+		const encrypted = createEncryptedSessionState("session-1", {
+			title: "Encrypted Send Session",
+			revision: 1,
+		});
+		return createScenarioState({
+			sessions: [encrypted.session],
+			events: [["session-1", []]],
+			sessionDeks: [["session-1", encrypted.dek]],
+			messageScripts: [
+				[
+					"session-1",
+					buildMessageScript({
+						assistantText: "Encrypted assistant reply",
+					}),
+				],
+			],
 		});
 	},
 	"sync-history": () =>
@@ -550,6 +674,36 @@ const scenarios = {
 
 let state = scenarios["refresh-restore"]();
 
+const appendEvent = (event) => {
+	const existing = state.events.get(event.sessionId) ?? [];
+	existing.push(event);
+	state.events.set(event.sessionId, existing);
+};
+
+const nextSeqForSession = (sessionId, revision) => {
+	const events = state.events.get(sessionId) ?? [];
+	return (
+		events
+			.filter((event) => event.revision === revision)
+			.reduce((maxSeq, event) => Math.max(maxSeq, event.seq), 0) + 1
+	);
+};
+
+const decodePrompt = (sessionId, prompt) => {
+	if (!isEncryptedPayload(prompt)) {
+		return null;
+	}
+	const dek = state.sessionDeks.get(sessionId);
+	if (!dek) {
+		return null;
+	}
+	try {
+		return decryptPayload(prompt, dek);
+	} catch {
+		return null;
+	}
+};
+
 const upsertSession = (summary) => {
 	const index = state.sessions.findIndex(
 		(session) => session.sessionId === summary.sessionId,
@@ -708,6 +862,58 @@ const server = http.createServer(async (req, res) => {
 		return;
 	}
 
+	if (req.method === "POST" && url.pathname === "/acp/message") {
+		const body = await parseBody(req);
+		const { sessionId, prompt } = body ?? {};
+		const session = state.sessions.find((item) => item.sessionId === sessionId);
+		if (!sessionId || !session || !isEncryptedPayload(prompt)) {
+			json(req, res, 400, { error: "sessionId and encrypted prompt required" });
+			return;
+		}
+
+		const decryptedPrompt = decodePrompt(sessionId, prompt);
+		state.messageRequests.push({
+			sessionId,
+			prompt,
+			decryptedPrompt,
+		});
+
+		const script = state.messageScripts.get(sessionId);
+		if (script?.delayMs > 0) {
+			await delay(script.delayMs);
+		}
+		if (script?.statusCode && script.statusCode >= 400) {
+			json(req, res, script.statusCode, script.body);
+			return;
+		}
+
+		if (script?.assistantText) {
+			const assistantEvent = buildEvent({
+				sessionId,
+				revision: session.revision,
+				seq: nextSeqForSession(sessionId, session.revision),
+				text: script.assistantText,
+				encrypted: script.encryptResponse,
+			});
+			appendEvent(assistantEvent);
+			io.of("/webui").to(sessionId).emit("session:event", assistantEvent);
+
+			const turnEndEvent = buildEvent({
+				sessionId,
+				revision: session.revision,
+				seq: nextSeqForSession(sessionId, session.revision),
+				kind: "turn_end",
+				payload: { stopReason: script.stopReason },
+				encrypted: false,
+			});
+			appendEvent(turnEndEvent);
+			io.of("/webui").to(sessionId).emit("session:event", turnEndEvent);
+		}
+
+		json(req, res, 200, script?.body ?? { stopReason: "end_turn" });
+		return;
+	}
+
 	if (req.method === "POST" && url.pathname === "/__test__/reset") {
 		const body = await parseBody(req);
 		const scenarioName = body.scenario;
@@ -719,17 +925,32 @@ const server = http.createServer(async (req, res) => {
 		json(req, res, 200, {
 			ok: true,
 			masterSecret: MASTER_SECRET_BASE64,
+			secrets: {
+				primary: MASTER_SECRET_BASE64,
+				secondary: SECONDARY_MASTER_SECRET_BASE64,
+			},
 			sessions: state.sessions,
 		});
+		return;
+	}
+
+	if (req.method === "GET" && url.pathname === "/__test__/messages") {
+		json(req, res, 200, {
+			messages: state.messageRequests,
+		});
+		return;
+	}
+
+	if (req.method === "POST" && url.pathname === "/__test__/clear-messages") {
+		state.messageRequests = [];
+		json(req, res, 200, { ok: true });
 		return;
 	}
 
 	if (req.method === "POST" && url.pathname === "/__test__/append-event") {
 		const body = await parseBody(req);
 		const event = buildEvent(body);
-		const existing = state.events.get(event.sessionId) ?? [];
-		existing.push(event);
-		state.events.set(event.sessionId, existing);
+		appendEvent(event);
 		json(req, res, 200, { ok: true, event });
 		return;
 	}
@@ -737,9 +958,7 @@ const server = http.createServer(async (req, res) => {
 	if (req.method === "POST" && url.pathname === "/__test__/emit-event") {
 		const body = await parseBody(req);
 		const event = buildEvent(body);
-		const existing = state.events.get(event.sessionId) ?? [];
-		existing.push(event);
-		state.events.set(event.sessionId, existing);
+		appendEvent(event);
 		io.of("/webui").to(event.sessionId).emit("session:event", event);
 		json(req, res, 200, { ok: true, event });
 		return;

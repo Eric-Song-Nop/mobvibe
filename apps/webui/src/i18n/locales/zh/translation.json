@@ -126,6 +126,7 @@
 		"backendsFetchFailed": "后端列表获取失败",
 		"sessionsFetchFailed": "会话列表获取失败",
 		"sessionNotReady": "会话未就绪，请重新创建对话",
+		"sessionE2EEKeyMissing": "E2EE 密钥缺失，请先配对此设备后再发送消息。",
 		"streamDisconnected": "SSE 连接异常",
 		"createSessionFailed": "创建会话失败",
 		"renameSessionFailed": "重命名失败",

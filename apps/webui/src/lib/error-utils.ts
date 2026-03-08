@@ -55,3 +55,14 @@ export const buildSessionNotReadyError = (): ErrorDetail => ({
 	retryable: true,
 	scope: "session",
 });
+
+/**
+ * Creates an ErrorDetail for when a session is encrypted but this device
+ * does not have a matching decryption key.
+ */
+export const buildSessionE2EEKeyMissingError = (): ErrorDetail => ({
+	code: "INTERNAL_ERROR",
+	message: i18n.t("errors.sessionE2EEKeyMissing"),
+	retryable: true,
+	scope: "session",
+});
