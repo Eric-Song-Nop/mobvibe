@@ -219,6 +219,22 @@ export function setupWebuiHandlers(
 	// Return emitter functions for CLI handlers to use
 	return {
 		emitToUser,
+		hasUserConnections: (userId: string) =>
+			Array.from(webuiNamespace.sockets.values()).some(
+				(socket) => (socket as AuthenticatedSocket).data.userId === userId,
+			),
+		hasSessionSubscribers: (sessionId: string, userId?: string) => {
+			const subscribers = sessionSubscriptions.get(sessionId);
+			if (!subscribers || subscribers.size === 0) {
+				return false;
+			}
+			if (!userId) {
+				return subscribers.size > 0;
+			}
+			return Array.from(subscribers.values()).some(
+				(subscriberUserId) => subscriberUserId === userId,
+			);
+		},
 		emitSessionEvent: (event: SessionEvent) => {
 			emitToSubscribers(event.sessionId, "session:event", event);
 		},

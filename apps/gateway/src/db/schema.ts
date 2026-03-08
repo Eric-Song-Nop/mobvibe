@@ -123,6 +123,31 @@ export const deviceKeys = pgTable(
 	],
 );
 
+export const webPushSubscriptions = pgTable(
+	"web_push_subscriptions",
+	{
+		id: text("id").primaryKey(),
+		userId: text("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		endpoint: text("endpoint").notNull().unique(),
+		p256dh: text("p256dh").notNull(),
+		auth: text("auth").notNull(),
+		userAgent: text("user_agent"),
+		locale: varchar("locale", { length: 32 }),
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		updatedAt: timestamp("updated_at")
+			.defaultNow()
+			.$onUpdate(() => /* @__PURE__ */ new Date())
+			.notNull(),
+		lastSeenAt: timestamp("last_seen_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("web_push_subscriptions_user_id_idx").on(table.userId),
+		index("web_push_subscriptions_endpoint_idx").on(table.endpoint),
+	],
+);
+
 // ============================================
 // Relations
 // ============================================
@@ -131,6 +156,7 @@ export const userRelations = relations(user, ({ many }) => ({
 	sessions: many(session),
 	accounts: many(account),
 	deviceKeys: many(deviceKeys),
+	webPushSubscriptions: many(webPushSubscriptions),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -154,6 +180,16 @@ export const deviceKeyRelations = relations(deviceKeys, ({ one }) => ({
 	}),
 }));
 
+export const webPushSubscriptionRelations = relations(
+	webPushSubscriptions,
+	({ one }) => ({
+		user: one(user, {
+			fields: [webPushSubscriptions.userId],
+			references: [user.id],
+		}),
+	}),
+);
+
 // Type exports
 export type User = typeof user.$inferSelect;
 export type NewUser = typeof user.$inferInsert;
@@ -167,3 +203,5 @@ export type Machine = typeof machines.$inferSelect;
 export type NewMachine = typeof machines.$inferInsert;
 export type DeviceKey = typeof deviceKeys.$inferSelect;
 export type NewDeviceKey = typeof deviceKeys.$inferInsert;
+export type WebPushSubscription = typeof webPushSubscriptions.$inferSelect;
+export type NewWebPushSubscription = typeof webPushSubscriptions.$inferInsert;

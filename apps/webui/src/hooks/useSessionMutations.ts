@@ -31,7 +31,6 @@ import type {
 } from "@/lib/chat-store";
 import { useChatStore } from "@/lib/chat-store";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
-import { notifyResponseCompleted } from "@/lib/notifications";
 
 type SessionMetadata = Partial<
 	Pick<
@@ -397,22 +396,6 @@ export function useSessionMutations(store: ChatStoreActions) {
 
 	const sendMessageMutation = useMutation({
 		mutationFn: sendMessage,
-		onSuccess: (data, variables) => {
-			if (!variables) {
-				return;
-			}
-			const shouldNotify =
-				data.stopReason === "end_turn" ||
-				data.stopReason === "max_tokens" ||
-				data.stopReason === "max_turn_requests";
-			if (!shouldNotify) {
-				return;
-			}
-			notifyResponseCompleted(
-				{ sessionId: variables.sessionId },
-				{ sessions: useChatStore.getState().sessions },
-			);
-		},
 		onError: (mutationError: unknown) => {
 			store.setAppError(
 				normalizeError(

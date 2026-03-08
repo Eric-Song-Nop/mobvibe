@@ -62,6 +62,9 @@ Environment variables:
 | `EMAIL_FROM` | (empty) | Sender address for emails |
 | `SKIP_EMAIL_VERIFICATION` | `false` | Skip email verification (dev only) |
 | `REDIS_URL` | (empty) | Upstash Redis URL; enables multi-instance user affinity routing |
+| `WEB_PUSH_PUBLIC_KEY` | (empty) | Browser Web Push VAPID public key |
+| `WEB_PUSH_PRIVATE_KEY` | (empty) | Browser Web Push VAPID private key |
+| `WEB_PUSH_SUBJECT` | (empty) | VAPID contact, e.g. `mailto:ops@example.com` |
 
 Private IPs (10.x.x.x, 192.168.x.x, 172.16-31.x.x) and localhost are always allowed.
 

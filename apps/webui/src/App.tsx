@@ -1,8 +1,22 @@
 import { useBetterAuthTauri } from "@daveyplate/better-auth-tauri/react";
 import { useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from "react";
+import {
+	lazy,
+	Suspense,
+	startTransition,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+} from "react";
 import { useTranslation } from "react-i18next";
-import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import {
+	Navigate,
+	Route,
+	Routes,
+	useNavigate,
+	useSearchParams,
+} from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
 import { AppHeader } from "@/components/app/AppHeader";
 import { AppSidebar } from "@/components/app/AppSidebar";
@@ -53,6 +67,10 @@ const LoginPage = lazy(async () => {
 
 function MainApp() {
 	const { t } = useTranslation();
+	const { isAuthenticated } = useAuth();
+	const [searchParams, setSearchParams] = useSearchParams();
+	const notificationSessionId = searchParams.get("sessionId");
+	const handlingNotificationSessionIdRef = useRef<string | null>(null);
 
 	// Reactive state — re-renders only when these values change
 	const { activeSessionId, appError, lastCreatedCwd } = useChatStore(
@@ -281,8 +299,8 @@ function MainApp() {
 	}, [sessionsQuery.data?.sessions, chatActions.syncSessions]);
 
 	useEffect(() => {
-		ensureNotificationPermission();
-	}, []);
+		void ensureNotificationPermission({ isAuthenticated });
+	}, [isAuthenticated]);
 
 	// 启动时从持久化的 activeSession 恢复 selectedMachineId
 	useEffect(() => {
@@ -352,6 +370,32 @@ function MainApp() {
 		uiActions.setSelectedWorkspace,
 		workspaceList,
 	]);
+
+	useEffect(() => {
+		if (!notificationSessionId) {
+			handlingNotificationSessionIdRef.current = null;
+			return;
+		}
+		if (handlingNotificationSessionIdRef.current === notificationSessionId) {
+			return;
+		}
+
+		const targetSession =
+			useChatStore.getState().sessions[notificationSessionId];
+		if (!targetSession) {
+			return;
+		}
+
+		handlingNotificationSessionIdRef.current = notificationSessionId;
+		startTransition(() => {
+			void activateSession(targetSession).finally(() => {
+				const nextParams = new URLSearchParams(searchParams);
+				nextParams.delete("sessionId");
+				setSearchParams(nextParams, { replace: true });
+				handlingNotificationSessionIdRef.current = null;
+			});
+		});
+	}, [activateSession, notificationSessionId, searchParams, setSearchParams]);
 
 	useEffect(() => {
 		if (!createDialogOpen) {
