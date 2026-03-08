@@ -1,7 +1,9 @@
 import { Buffer } from "node:buffer";
 import { expect, type Page } from "@playwright/test";
 
-export const gatewayUrl = "http://127.0.0.1:3005";
+const gatewayPort = process.env.PLAYWRIGHT_GATEWAY_PORT ?? "33005";
+
+export const gatewayUrl = `http://127.0.0.1:${gatewayPort}`;
 
 export const wrongMasterSecret = Buffer.from(
 	new Uint8Array(Array.from({ length: 32 }, (_, index) => 255 - index)),

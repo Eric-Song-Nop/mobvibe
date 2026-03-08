@@ -13,12 +13,23 @@ const mockStoreState = vi.hoisted(
 	() =>
 		({
 			sessions: {} as Record<string, ChatSession>,
-		}) as { sessions: Record<string, ChatSession> },
+			restoreSessionMessages: vi.fn(),
+		}) as {
+			sessions: Record<string, ChatSession>;
+			restoreSessionMessages: ChatStoreActions["restoreSessionMessages"];
+		},
 );
 
 const storeListeners = vi.hoisted(
 	() => new Set<(state: typeof mockStoreState) => void>(),
 );
+const backfillOptionsRef = vi.hoisted(() => ({
+	current: undefined as
+		| Parameters<
+				typeof import("@/hooks/use-session-backfill")["useSessionBackfill"]
+		  >[0]
+		| undefined,
+}));
 
 const setMockSessions = (sessions: Record<string, ChatSession>) => {
 	mockStoreState.sessions = sessions;
@@ -51,7 +62,14 @@ vi.mock("@/lib/chat-store", async (importOriginal) => {
 });
 
 vi.mock("@/hooks/use-session-backfill", () => ({
-	useSessionBackfill: () => mockBackfill,
+	useSessionBackfill: (
+		options: Parameters<
+			typeof import("@/hooks/use-session-backfill")["useSessionBackfill"]
+		>[0],
+	) => {
+		backfillOptionsRef.current = options;
+		return mockBackfill;
+	},
 }));
 
 const mockBackfill = vi.hoisted(() => ({
@@ -175,6 +193,9 @@ const createStore = (): ChatStoreActions => {
 		},
 	);
 
+	const restoreSessionMessages = vi.fn();
+	mockStoreState.restoreSessionMessages = restoreSessionMessages;
+
 	return {
 		sessions: {},
 		setActiveSessionId: vi.fn(),
@@ -208,7 +229,7 @@ const createStore = (): ChatStoreActions => {
 		appendTerminalOutput: vi.fn(),
 		handleSessionsChanged: vi.fn(),
 		clearSessionMessages: vi.fn(),
-		restoreSessionMessages: vi.fn(),
+		restoreSessionMessages,
 		updateSessionCursor,
 		resetSessionForRevision,
 	} as unknown as ChatStoreActions;
@@ -232,6 +253,7 @@ describe("useSocket (webui)", () => {
 	beforeEach(() => {
 		// Reset mock store state
 		setMockSessions({});
+		mockStoreState.restoreSessionMessages = vi.fn();
 		dekReadyListeners.clear();
 		decryptedPayloads.clear();
 
@@ -246,6 +268,7 @@ describe("useSocket (webui)", () => {
 		mockBackfill.cancelBackfill.mockReset();
 		mockBackfill.isBackfilling.mockReset();
 		mockBackfill.isBackfilling.mockReturnValue(false);
+		backfillOptionsRef.current = undefined;
 		mockE2EE.hasSessionDek.mockReset();
 		mockE2EE.hasSessionDek.mockReturnValue(true);
 		mockE2EE.decryptEvent.mockClear();
@@ -459,6 +482,83 @@ describe("useSocket (webui)", () => {
 				sessionId: "session-1",
 				machineId: "machine-1",
 				reason: "gateway_disconnect",
+			}),
+		);
+	});
+
+	it("restores the previous transcript when a manual sync backfill fails before replay", async () => {
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				revision: 1,
+				lastAppliedSeq: 2,
+				messages: [
+					{
+						id: "msg-1",
+						role: "assistant",
+						kind: "text",
+						content: "stale transcript",
+						contentBlocks: [{ type: "text", text: "stale transcript" }],
+						createdAt: "2024-01-01T00:00:00Z",
+						isStreaming: false,
+					},
+				],
+			}),
+		};
+		setMockSessions({ ...sessions });
+
+		const { result } = renderHook(() =>
+			useSocket({
+				sessions,
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		act(() => {
+			result.current.syncSessionHistory("session-1");
+		});
+
+		setMockSessions({
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				revision: 1,
+				lastAppliedSeq: 0,
+				messages: [],
+			}),
+		});
+
+		act(() => {
+			backfillOptionsRef.current?.onError?.(
+				"session-1",
+				new Error("backfill failed"),
+			);
+		});
+
+		expect(store.restoreSessionMessages).toHaveBeenCalledWith(
+			"session-1",
+			sessions["session-1"].messages,
+			expect.objectContaining({
+				revision: 1,
+				lastAppliedSeq: 2,
 			}),
 		);
 	});

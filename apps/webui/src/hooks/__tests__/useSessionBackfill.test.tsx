@@ -2,13 +2,29 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSessionBackfill } from "@/hooks/use-session-backfill";
 
-// Mock fetch globally
-const mockFetch = vi.fn();
-global.fetch = mockFetch;
+const mockFetch = vi.hoisted(() => vi.fn());
+const envState = vi.hoisted(() => ({
+	isTauri: false,
+	authToken: null as string | null,
+}));
+
+vi.mock("@/lib/auth", () => ({
+	isInTauri: () => envState.isTauri,
+}));
+
+vi.mock("@/lib/auth-token", () => ({
+	getAuthToken: () => envState.authToken,
+}));
+
+vi.mock("@/lib/tauri-fetch", () => ({
+	platformFetch: mockFetch,
+}));
 
 describe("useSessionBackfill", () => {
 	beforeEach(() => {
 		mockFetch.mockReset();
+		envState.isTauri = false;
+		envState.authToken = null;
 	});
 
 	it("P0-3: does not call onComplete when revision mismatch occurs", async () => {
@@ -263,8 +279,10 @@ describe("useSessionBackfill", () => {
 		);
 
 		// Start first backfill (revision 1)
-		const firstBackfill = act(async () => {
-			await result.current.startBackfill("session-1", 1, 0);
+		let firstBackfill: Promise<void>;
+		await act(async () => {
+			firstBackfill = result.current.startBackfill("session-1", 1, 0);
+			await Promise.resolve();
 		});
 
 		// Immediately start second backfill (revision 2) - should cancel first
@@ -293,7 +311,7 @@ describe("useSessionBackfill", () => {
 				}),
 		});
 
-		await firstBackfill;
+		await firstBackfill!;
 
 		// Only the second backfill's onComplete should be called
 		// (first is cancelled due to abort or generation mismatch)
@@ -342,5 +360,43 @@ describe("useSessionBackfill", () => {
 		expect(onEvents).not.toHaveBeenCalled();
 		expect(onError).not.toHaveBeenCalled();
 		expect(onComplete).not.toHaveBeenCalled();
+	});
+
+	it("uses the stored Tauri auth token for backfill requests", async () => {
+		envState.isTauri = true;
+		envState.authToken = "tauri-test-token";
+
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					sessionId: "session-1",
+					machineId: "machine-1",
+					revision: 1,
+					events: [],
+					hasMore: false,
+				}),
+		});
+
+		const { result } = renderHook(() =>
+			useSessionBackfill({
+				gatewayUrl: "http://localhost:3005",
+				onEvents: vi.fn(),
+			}),
+		);
+
+		await act(async () => {
+			await result.current.startBackfill("session-1", 1, 0);
+		});
+
+		expect(mockFetch).toHaveBeenCalledWith(
+			"http://localhost:3005/acp/session/events?sessionId=session-1&revision=1&afterSeq=0&limit=100",
+			expect.objectContaining({
+				credentials: "omit",
+				headers: expect.objectContaining({
+					Authorization: "Bearer tauri-test-token",
+				}),
+			}),
+		);
 	});
 });

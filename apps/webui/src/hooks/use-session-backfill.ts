@@ -1,6 +1,8 @@
 import type { SessionEvent, SessionEventsResponse } from "@mobvibe/shared";
 import { useCallback, useRef } from "react";
 import { isInTauri } from "@/lib/auth";
+import { getAuthToken } from "@/lib/auth-token";
+import { platformFetch } from "@/lib/tauri-fetch";
 
 type BackfillState = {
 	sessionId: string;
@@ -60,15 +62,17 @@ export function useSessionBackfill({
 			const headers: Record<string, string> = {
 				"Content-Type": "application/json",
 			};
-			if (authToken) {
-				headers.Authorization = `Bearer ${authToken}`;
+			const tauriEnv = isInTauri();
+			const token = authToken ?? (tauriEnv ? getAuthToken() : null);
+			if (token) {
+				headers.Authorization = `Bearer ${token}`;
 			}
 
-			const response = await fetch(url.toString(), {
+			const response = await platformFetch(url.toString(), {
 				method: "GET",
 				headers,
 				signal,
-				credentials: isInTauri() ? "omit" : "include",
+				credentials: tauriEnv ? "omit" : "include",
 			});
 
 			if (!response.ok) {

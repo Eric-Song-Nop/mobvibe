@@ -12,7 +12,7 @@ import {
 } from "@mobvibe/shared";
 import { Server as SocketIOServer } from "socket.io";
 
-const PORT = 3005;
+const PORT = Number(process.env.PLAYWRIGHT_GATEWAY_PORT ?? "33005");
 const MACHINE_ID = "machine-1";
 const PRIMARY_MASTER_SECRET_BYTES = new Uint8Array(
 	Array.from({ length: 32 }, (_, index) => index + 1),
