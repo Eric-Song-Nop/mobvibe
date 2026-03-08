@@ -1,5 +1,9 @@
 import { ComputerIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import {
+	generateDefaultWorktreeBranchName,
+	sanitizeWorktreeBranchForPath,
+} from "@mobvibe/shared";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -49,8 +53,6 @@ export type CreateSessionDialogProps = {
 	onCreate: () => void;
 };
 
-/** Sanitize branch name for worktree path preview */
-const sanitizeBranch = (branch: string) => branch.replace(/[/\\]/g, "-");
 const getBranchOptionLabel = (branch: {
 	name: string;
 	displayName?: string;
@@ -66,18 +68,22 @@ export function CreateSessionDialog({
 }: CreateSessionDialogProps) {
 	const { t } = useTranslation();
 	const [directoryDialogOpen, setDirectoryDialogOpen] = useState(false);
+	const [hasUserEditedWorktreeBranch, setHasUserEditedWorktreeBranch] =
+		useState(false);
 	const {
 		draftTitle,
 		draftBackendId,
 		draftCwd,
 		draftWorktreeEnabled,
 		draftWorktreeBranch,
+		draftWorktreeSuggestedBranch,
 		draftWorktreeBaseBranch,
 		setDraftTitle,
 		setDraftBackendId,
 		setDraftCwd,
 		setDraftWorktreeEnabled,
 		setDraftWorktreeBranch,
+		setDraftWorktreeSuggestedBranch,
 		setDraftWorktreeBaseBranch,
 	} = useUiStore();
 	const { selectedMachineId, machines } = useMachinesStore();
@@ -128,18 +134,17 @@ export function CreateSessionDialog({
 		branchesQuery.isFetched;
 	const isWorktreeCreateDisabled =
 		draftWorktreeEnabled &&
-		(isGitContextStale ||
-			branchesQuery.isFetching ||
-			branchesQuery.isError ||
-			!draftWorktreeBranch.trim());
+		(isGitContextStale || branchesQuery.isFetching || branchesQuery.isError);
+	const effectiveWorktreeBranch =
+		draftWorktreeBranch.trim() || draftWorktreeSuggestedBranch?.trim() || "";
 
 	// Worktree path preview using CLI-configured base dir
 	const worktreePathPreview = useMemo(() => {
-		if (!repoName || !draftWorktreeBranch) return "";
-		const sanitized = sanitizeBranch(draftWorktreeBranch);
+		if (!repoName || !effectiveWorktreeBranch) return "";
+		const sanitized = sanitizeWorktreeBranchForPath(effectiveWorktreeBranch);
 		const base = worktreeBaseDir ?? "~/.mobvibe/worktrees";
 		return `${base}/${repoName}/${sanitized}`;
-	}, [draftWorktreeBranch, repoName, worktreeBaseDir]);
+	}, [effectiveWorktreeBranch, repoName, worktreeBaseDir]);
 
 	const worktreeExecutionPathPreview = useMemo(() => {
 		if (!worktreePathPreview) return "";
@@ -150,8 +155,15 @@ export function CreateSessionDialog({
 	useEffect(() => {
 		if (!open) {
 			setDirectoryDialogOpen(false);
+			setHasUserEditedWorktreeBranch(false);
 		}
 	}, [open]);
+
+	useEffect(() => {
+		if (!draftWorktreeEnabled) {
+			setHasUserEditedWorktreeBranch(false);
+		}
+	}, [draftWorktreeEnabled]);
 
 	useEffect(() => {
 		if (!open || draftCwd || !selectedMachineId) {
@@ -185,6 +197,34 @@ export function CreateSessionDialog({
 		isGitRepo,
 		draftWorktreeEnabled,
 		setDraftWorktreeEnabled,
+	]);
+
+	useEffect(() => {
+		if (
+			!open ||
+			!draftWorktreeEnabled ||
+			!hasResolvedGitContext ||
+			!isGitRepo
+		) {
+			return;
+		}
+		if (!draftWorktreeSuggestedBranch) {
+			setDraftWorktreeSuggestedBranch(generateDefaultWorktreeBranchName());
+			return;
+		}
+		if (!draftWorktreeBranch.trim() && !hasUserEditedWorktreeBranch) {
+			setDraftWorktreeBranch(draftWorktreeSuggestedBranch);
+		}
+	}, [
+		draftWorktreeBranch,
+		draftWorktreeEnabled,
+		draftWorktreeSuggestedBranch,
+		hasResolvedGitContext,
+		hasUserEditedWorktreeBranch,
+		isGitRepo,
+		open,
+		setDraftWorktreeBranch,
+		setDraftWorktreeSuggestedBranch,
 	]);
 
 	return (
@@ -351,9 +391,15 @@ export function CreateSessionDialog({
 											name="worktree-branch"
 											autoComplete="off"
 											value={draftWorktreeBranch}
-											onChange={(e) => setDraftWorktreeBranch(e.target.value)}
+											onChange={(event) => {
+												setHasUserEditedWorktreeBranch(true);
+												setDraftWorktreeBranch(event.target.value);
+											}}
 											placeholder={t("session.worktree.branchPlaceholder")}
 										/>
+										<p className="text-muted-foreground text-xs">
+											{t("session.worktree.branchHint")}
+										</p>
 									</div>
 									<div className="flex flex-col gap-1">
 										<Label htmlFor="worktree-base-branch">

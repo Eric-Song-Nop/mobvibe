@@ -19,6 +19,7 @@ import {
 	type DiscoverSessionsRpcResult,
 	type PermissionDecisionPayload,
 	type PermissionRequestPayload,
+	resolveWorktreeBranchName,
 	type SessionEvent,
 	type SessionEventKind,
 	type SessionEventsParams,
@@ -26,6 +27,7 @@ import {
 	type SessionSummary,
 	type SessionsChangedPayload,
 	type StopReason,
+	sanitizeWorktreeBranchForPath,
 } from "@mobvibe/shared";
 import type { AcpBackendConfig, CliConfig } from "../config.js";
 import type { CliCryptoService } from "../e2ee/crypto-service.js";
@@ -790,7 +792,8 @@ export class SessionManager {
 				);
 			}
 
-			const sanitizedBranch = options.worktree.branch.replace(/[/\\]/g, "-");
+			const branch = resolveWorktreeBranchName(options.worktree.branch);
+			const sanitizedBranch = sanitizeWorktreeBranchForPath(branch);
 			const repoName = path.basename(repoDir);
 			const targetPath = path.join(
 				this.config.worktreeBaseDir,
@@ -801,7 +804,7 @@ export class SessionManager {
 			logger.info(
 				{
 					repoDir,
-					branch: options.worktree.branch,
+					branch,
 					baseBranch: options.worktree.baseBranch,
 					targetPath,
 				},
@@ -810,7 +813,7 @@ export class SessionManager {
 
 			try {
 				const result = await createGitWorktree(repoDir, {
-					branch: options.worktree.branch,
+					branch,
 					targetPath,
 					baseBranch: options.worktree.baseBranch,
 				});
@@ -835,7 +838,7 @@ export class SessionManager {
 			}
 
 			worktreeSourceCwd = repoDir;
-			worktreeBranch = options.worktree.branch;
+			worktreeBranch = branch;
 			workspaceRootCwd = repoDir;
 		} else if (options.cwd) {
 			const projectContext = await resolveGitProjectContext(options.cwd);

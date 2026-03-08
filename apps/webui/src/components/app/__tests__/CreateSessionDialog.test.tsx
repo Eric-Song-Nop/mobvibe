@@ -14,12 +14,14 @@ const mockUiState = vi.hoisted(() => ({
 	draftCwd: "/repo/apps/webui",
 	draftWorktreeEnabled: true,
 	draftWorktreeBranch: "feat/live-cwd",
+	draftWorktreeSuggestedBranch: "brisk-comet-x7",
 	draftWorktreeBaseBranch: "main",
 	setDraftTitle: vi.fn(),
 	setDraftBackendId: vi.fn(),
 	setDraftCwd: vi.fn(),
 	setDraftWorktreeEnabled: vi.fn(),
 	setDraftWorktreeBranch: vi.fn(),
+	setDraftWorktreeSuggestedBranch: vi.fn(),
 	setDraftWorktreeBaseBranch: vi.fn(),
 }));
 
@@ -85,7 +87,10 @@ vi.mock("react-i18next", () => ({
 				"session.projectDetection.nonGitHint": "Non-git folder",
 				"session.worktree.enable": "Create in new worktree",
 				"session.worktree.branchLabel": "New branch",
-				"session.worktree.branchPlaceholder": "feat/example",
+				"session.worktree.branchPlaceholder":
+					"Leave blank for a random name, or enter feat/my-feature…",
+				"session.worktree.branchHint":
+					"A random branch name is suggested automatically. Edit it only if you want something specific.",
 				"session.worktree.baseBranchLabel": "Based on",
 				"session.worktree.baseBranchPlaceholder": "Select base branch",
 				"session.worktree.pathLabel": "Worktree path",
@@ -121,6 +126,17 @@ vi.mock("@tanstack/react-query", async () => {
 vi.mock("@/hooks/useDebouncedValue", () => ({
 	useDebouncedValue: () => mockDebouncedValue.cwd,
 }));
+
+vi.mock("@mobvibe/shared", async () => {
+	const actual =
+		await vi.importActual<typeof import("@mobvibe/shared")>("@mobvibe/shared");
+	return {
+		...actual,
+		generateDefaultWorktreeBranchName: () => "brisk-comet-x7",
+		sanitizeWorktreeBranchForPath: (branch: string) =>
+			branch.replace(/[/\\]/g, "-"),
+	};
+});
 
 vi.mock("@/components/app/WorkingDirectoryDialog", () => ({
 	WorkingDirectoryDialog: () => null,
@@ -246,6 +262,7 @@ describe("CreateSessionDialog", () => {
 		mockUiState.draftCwd = "/repo/apps/webui";
 		mockUiState.draftWorktreeEnabled = true;
 		mockUiState.draftWorktreeBranch = "feat/live-cwd";
+		mockUiState.draftWorktreeSuggestedBranch = "brisk-comet-x7";
 		mockUiState.draftWorktreeBaseBranch = "main";
 		mockDebouncedValue.cwd = "/repo/apps/webui";
 		mockQueryState.branches = {
@@ -306,6 +323,52 @@ describe("CreateSessionDialog", () => {
 
 		expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
 		expect(screen.getByText("Checking project...")).toBeInTheDocument();
+	});
+
+	it("keeps create enabled and shows the suggested path when the branch input is blank", () => {
+		mockUiState.draftWorktreeBranch = "";
+
+		render(
+			<CreateSessionDialog
+				open
+				onOpenChange={vi.fn()}
+				availableBackends={[
+					{ backendId: "backend-1", backendLabel: "Backend 1" },
+				]}
+				isCreating={false}
+				onCreate={vi.fn()}
+			/>,
+		);
+
+		expect(screen.getByRole("button", { name: "Create" })).toBeEnabled();
+		expect(
+			screen.getByText("/tmp/worktrees/repo/brisk-comet-x7"),
+		).toBeInTheDocument();
+		expect(
+			screen.getByText(
+				"A random branch name is suggested automatically. Edit it only if you want something specific.",
+			),
+		).toBeInTheDocument();
+	});
+
+	it("autofills the suggested branch when worktree mode starts with an empty branch", () => {
+		mockUiState.draftWorktreeBranch = "";
+
+		render(
+			<CreateSessionDialog
+				open
+				onOpenChange={vi.fn()}
+				availableBackends={[
+					{ backendId: "backend-1", backendLabel: "Backend 1" },
+				]}
+				isCreating={false}
+				onCreate={vi.fn()}
+			/>,
+		);
+
+		expect(mockUiState.setDraftWorktreeBranch).toHaveBeenCalledWith(
+			"brisk-comet-x7",
+		);
 	});
 
 	it("renders branch display labels while keeping the raw branch name as the option value", () => {

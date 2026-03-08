@@ -207,6 +207,10 @@ export type {
 	StreamErrorPayload,
 	WebuiToGatewayEvents,
 } from "./types/socket-events.js";
-
 // Validation utilities (Zod schemas from SDK)
 export { parseSessionNotification } from "./validation/acp-schemas.js";
+export {
+	generateDefaultWorktreeBranchName,
+	resolveWorktreeBranchName,
+	sanitizeWorktreeBranchForPath,
+} from "./worktree-names.js";

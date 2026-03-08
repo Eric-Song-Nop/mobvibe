@@ -137,12 +137,14 @@ export function setupSessionRoutes(
 			const worktreeOptions =
 				worktree &&
 				typeof worktree === "object" &&
-				typeof worktree.branch === "string" &&
-				worktree.branch.trim().length > 0 &&
 				typeof worktree.sourceCwd === "string" &&
 				worktree.sourceCwd.trim().length > 0
 					? {
-							branch: worktree.branch.trim(),
+							branch:
+								typeof worktree.branch === "string" &&
+								worktree.branch.trim().length > 0
+									? worktree.branch.trim()
+									: undefined,
 							baseBranch:
 								typeof worktree.baseBranch === "string" &&
 								worktree.baseBranch.trim().length > 0

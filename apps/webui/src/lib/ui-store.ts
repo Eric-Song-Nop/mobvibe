@@ -76,6 +76,7 @@ type UiState = {
 	draftCwd?: string;
 	draftWorktreeEnabled: boolean;
 	draftWorktreeBranch: string;
+	draftWorktreeSuggestedBranch?: string;
 	draftWorktreeBaseBranch?: string;
 	chatDrafts: Record<string, ChatDraft>;
 	selectedWorkspaceByMachine: Record<string, string>;
@@ -96,6 +97,7 @@ type UiState = {
 	setDraftCwd: (value?: string) => void;
 	setDraftWorktreeEnabled: (value: boolean) => void;
 	setDraftWorktreeBranch: (value: string) => void;
+	setDraftWorktreeSuggestedBranch: (value?: string) => void;
 	setDraftWorktreeBaseBranch: (value?: string) => void;
 	resetDraftWorktree: () => void;
 	setChatDraft: (sessionId: string, draft: ChatDraft) => void;
@@ -120,6 +122,7 @@ export const useUiStore = create<UiState>((set) => ({
 	draftCwd: undefined,
 	draftWorktreeEnabled: false,
 	draftWorktreeBranch: "",
+	draftWorktreeSuggestedBranch: undefined,
 	draftWorktreeBaseBranch: undefined,
 	chatDrafts: {},
 	selectedWorkspaceByMachine: {},
@@ -151,12 +154,15 @@ export const useUiStore = create<UiState>((set) => ({
 	setDraftCwd: (value) => set({ draftCwd: value }),
 	setDraftWorktreeEnabled: (value) => set({ draftWorktreeEnabled: value }),
 	setDraftWorktreeBranch: (value) => set({ draftWorktreeBranch: value }),
+	setDraftWorktreeSuggestedBranch: (value) =>
+		set({ draftWorktreeSuggestedBranch: value }),
 	setDraftWorktreeBaseBranch: (value) =>
 		set({ draftWorktreeBaseBranch: value }),
 	resetDraftWorktree: () =>
 		set({
 			draftWorktreeEnabled: false,
 			draftWorktreeBranch: "",
+			draftWorktreeSuggestedBranch: undefined,
 			draftWorktreeBaseBranch: undefined,
 		}),
 	setChatDraft: (sessionId, draft) =>

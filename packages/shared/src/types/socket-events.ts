@@ -134,8 +134,8 @@ export type RpcResponse<TResult> = {
 
 // Worktree options for session creation
 export type CreateSessionWorktreeOptions = {
-	/** New branch name to create */
-	branch: string;
+	/** New branch name to create; auto-generated if omitted */
+	branch?: string;
 	/** Base branch to create from (defaults to current HEAD) */
 	baseBranch?: string;
 	/** Original repo directory */
