@@ -456,6 +456,90 @@ describe("SessionManager", () => {
 		});
 	});
 
+	describe("E2EE session summaries", () => {
+		it("includes wrappedDek and initializes a DEK when creating a session", async () => {
+			const cryptoService = {
+				initSessionDek: mock(() => ({
+					dek: new Uint8Array([1, 2, 3]),
+					wrappedDek: "wrapped-dek-1",
+				})),
+				getWrappedDek: mock(() => "wrapped-dek-1"),
+			};
+			const managerWithCrypto = new SessionManager(
+				mockConfig,
+				cryptoService as never,
+			);
+			managerWithCrypto.createConnection = () =>
+				mockConnection as unknown as AcpConnection;
+
+			const created = await managerWithCrypto.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			expect(cryptoService.initSessionDek).toHaveBeenCalledWith(
+				created.sessionId,
+			);
+			expect(cryptoService.getWrappedDek).toHaveBeenCalledWith(
+				created.sessionId,
+			);
+			expect(created.wrappedDek).toBe("wrapped-dek-1");
+		});
+
+		it("omits wrappedDek when crypto service returns null", async () => {
+			const cryptoService = {
+				initSessionDek: mock(() => ({
+					dek: new Uint8Array(),
+					wrappedDek: null,
+				})),
+				getWrappedDek: mock(() => null),
+			};
+			const managerWithCrypto = new SessionManager(
+				mockConfig,
+				cryptoService as never,
+			);
+			managerWithCrypto.createConnection = () =>
+				mockConnection as unknown as AcpConnection;
+
+			const created = await managerWithCrypto.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			expect(cryptoService.initSessionDek).toHaveBeenCalledWith(
+				created.sessionId,
+			);
+			expect(created.wrappedDek).toBeUndefined();
+		});
+
+		it("initializes a fresh DEK when loading an existing session", async () => {
+			const cryptoService = {
+				initSessionDek: mock(() => ({
+					dek: new Uint8Array([4, 5, 6]),
+					wrappedDek: "wrapped-load",
+				})),
+				getWrappedDek: mock(() => "wrapped-load"),
+			};
+			const managerWithCrypto = new SessionManager(
+				mockConfig,
+				cryptoService as never,
+			);
+			managerWithCrypto.createConnection = () =>
+				mockConnection as unknown as AcpConnection;
+
+			const loaded = await managerWithCrypto.loadSession(
+				"session-to-load",
+				"/home/user/project",
+				"backend-1",
+			);
+
+			expect(cryptoService.initSessionDek).toHaveBeenCalledWith(
+				"session-to-load",
+			);
+			expect(loaded.wrappedDek).toBe("wrapped-load");
+		});
+	});
+
 	describe("backfillDiscoveredWorkspaceRoots", () => {
 		it("upgrades legacy discovered sessions using repoRoot for git subdirectories", async () => {
 			const walStore = (

@@ -14,15 +14,23 @@ import {
 	wrapDEK,
 } from "@mobvibe/shared";
 
+type CliCryptoServiceOptions = {
+	contentEncryptionEnabled?: boolean;
+};
+
 export class CliCryptoService {
 	readonly authKeyPair: CryptoKeyPair;
-	private contentKeyPair: CryptoKeyPair;
+	readonly contentEncryptionEnabled: boolean;
+	private contentKeyPair?: CryptoKeyPair;
 	private sessionDeks = new Map<string, Uint8Array>();
 	private wrappedDekCache = new Map<string, string>();
 
-	constructor(masterSecret: Uint8Array) {
+	constructor(masterSecret: Uint8Array, options?: CliCryptoServiceOptions) {
 		this.authKeyPair = deriveAuthKeyPair(masterSecret);
-		this.contentKeyPair = deriveContentKeyPair(masterSecret);
+		this.contentEncryptionEnabled = options?.contentEncryptionEnabled !== false;
+		if (this.contentEncryptionEnabled) {
+			this.contentKeyPair = deriveContentKeyPair(masterSecret);
+		}
 	}
 
 	/**
@@ -31,8 +39,12 @@ export class CliCryptoService {
 	 */
 	initSessionDek(sessionId: string): {
 		dek: Uint8Array;
-		wrappedDek: string;
+		wrappedDek: string | null;
 	} {
+		if (!this.contentEncryptionEnabled || !this.contentKeyPair) {
+			return { dek: new Uint8Array(), wrappedDek: null };
+		}
+
 		const dek = generateDEK();
 		const wrappedDek = wrapDEK(dek, this.contentKeyPair.publicKey);
 		this.sessionDeks.set(sessionId, dek);
@@ -44,6 +56,9 @@ export class CliCryptoService {
 	 * Set an existing DEK for a session (e.g., loaded from WAL).
 	 */
 	setSessionDek(sessionId: string, dek: Uint8Array): void {
+		if (!this.contentEncryptionEnabled || !this.contentKeyPair) {
+			return;
+		}
 		this.sessionDeks.set(sessionId, dek);
 		this.wrappedDekCache.set(
 			sessionId,
@@ -56,6 +71,9 @@ export class CliCryptoService {
 	 * Returns a new event with the payload replaced by an EncryptedPayload.
 	 */
 	encryptEvent(event: SessionEvent): SessionEvent {
+		if (!this.contentEncryptionEnabled) {
+			return event;
+		}
 		const dek = this.sessionDeks.get(event.sessionId);
 		if (!dek) {
 			// No DEK for this session — pass through unencrypted
@@ -96,6 +114,9 @@ export class CliCryptoService {
 		encrypted: EncryptedPayload,
 		sessionId: string,
 	): unknown {
+		if (!this.contentEncryptionEnabled) {
+			return encrypted;
+		}
 		const dek = this.sessionDeks.get(sessionId);
 		if (!dek) throw new Error("No DEK for session");
 		return decryptPayload(encrypted, dek);
@@ -106,6 +127,7 @@ export class CliCryptoService {
 	 * or no DEK available.
 	 */
 	decryptRpcPayload<T>(sessionId: string, data: unknown): T {
+		if (!this.contentEncryptionEnabled) return data as T;
 		if (!isEncryptedPayload(data)) return data as T;
 		const dek = this.sessionDeks.get(sessionId);
 		if (!dek) return data as T;

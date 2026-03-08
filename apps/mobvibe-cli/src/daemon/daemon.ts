@@ -68,7 +68,10 @@ export class DaemonManager {
 		return { running: true, pid };
 	}
 
-	async start(options?: { foreground?: boolean }): Promise<void> {
+	async start(options?: {
+		foreground?: boolean;
+		noE2ee?: boolean;
+	}): Promise<void> {
 		const existingPid = await this.getPid();
 		if (existingPid) {
 			logger.info({ pid: existingPid }, "daemon_already_running");
@@ -78,9 +81,9 @@ export class DaemonManager {
 		await this.ensureHomeDirectory();
 
 		if (options?.foreground) {
-			await this.runForeground();
+			await this.runForeground({ noE2ee: options.noE2ee });
 		} else {
-			await this.spawnBackground();
+			await this.spawnBackground({ noE2ee: options?.noE2ee });
 		}
 	}
 
@@ -139,13 +142,16 @@ export class DaemonManager {
 		}
 	}
 
-	private async spawnBackground(): Promise<void> {
+	private async spawnBackground(options?: { noE2ee?: boolean }): Promise<void> {
 		const logFile = path.join(
 			this.config.logPath,
 			`${new Date().toISOString().replace(/[:.]/g, "-")}-daemon.log`,
 		);
 
 		const args = buildForegroundSpawnArgs(process.argv);
+		if (options?.noE2ee && !args.includes("--no-e2ee")) {
+			args.splice(args.length - 1, 0, "--no-e2ee");
+		}
 
 		// Open log file for direct stdio redirection (no pipe, parent can exit immediately)
 		const logFd = await fs.open(logFile, "a");
@@ -176,15 +182,16 @@ export class DaemonManager {
 		logger.info({ logFile }, "daemon_log_path");
 	}
 
-	async runForeground(): Promise<void> {
+	async runForeground(options?: { noE2ee?: boolean }): Promise<void> {
 		const pid = process.pid;
 		await this.writePidFile(pid);
 
 		logger.info({ pid }, "daemon_starting");
 		logger.info({ gatewayUrl: this.config.gatewayUrl }, "daemon_gateway_url");
 		logger.info({ machineId: this.config.machineId }, "daemon_machine_id");
+		logger.info({ noE2ee: options?.noE2ee === true }, "daemon_e2ee_mode");
 
-		// Initialize crypto and load master secret
+		// Initialize crypto and load master secret for gateway auth.
 		await initCrypto();
 		const masterSecretBase64 = await getMasterSecret();
 		if (!masterSecretBase64) {
@@ -196,7 +203,9 @@ export class DaemonManager {
 			process.exit(1);
 		}
 		const masterSecret = base64ToUint8(masterSecretBase64);
-		const cryptoService = new CliCryptoService(masterSecret);
+		const cryptoService = new CliCryptoService(masterSecret, {
+			contentEncryptionEnabled: !options?.noE2ee,
+		});
 		logger.info("daemon_crypto_initialized");
 
 		const sessionManager = new SessionManager(this.config, cryptoService);

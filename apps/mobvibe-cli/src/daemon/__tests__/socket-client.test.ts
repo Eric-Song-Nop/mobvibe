@@ -88,6 +88,10 @@ const createSessionEvent = (
 
 describe("SocketClient restore semantics", () => {
 	let client: InstanceType<typeof SocketClient>;
+	let sessionEventListener: ((event: SessionEvent) => void) | undefined;
+	let promptConnection: {
+		prompt: ReturnType<typeof mock>;
+	};
 	let sessionManager: {
 		backfillDiscoveredWorkspaceRoots: ReturnType<typeof mock>;
 		listAllSessions: ReturnType<typeof mock>;
@@ -95,6 +99,9 @@ describe("SocketClient restore semantics", () => {
 		getSessionRevision: ReturnType<typeof mock>;
 		getUnackedEvents: ReturnType<typeof mock>;
 		ackEvents: ReturnType<typeof mock>;
+		getSession: ReturnType<typeof mock>;
+		touchSession: ReturnType<typeof mock>;
+		recordTurnEnd: ReturnType<typeof mock>;
 		onSessionsChanged: ReturnType<typeof mock>;
 		onSessionAttached: ReturnType<typeof mock>;
 		onSessionDetached: ReturnType<typeof mock>;
@@ -116,6 +123,10 @@ describe("SocketClient restore semantics", () => {
 		socketMock.connect.mockClear();
 		socketMock.disconnect.mockClear();
 		socketMock.io.opts.extraHeaders = {};
+		sessionEventListener = undefined;
+		promptConnection = {
+			prompt: mock(() => Promise.resolve({ stopReason: "end_turn" })),
+		};
 
 		sessionManager = {
 			backfillDiscoveredWorkspaceRoots: mock(() => Promise.resolve()),
@@ -124,12 +135,23 @@ describe("SocketClient restore semantics", () => {
 			getSessionRevision: mock(() => 2),
 			getUnackedEvents: mock(() => [createSessionEvent()]),
 			ackEvents: mock(() => {}),
+			getSession: mock(() => ({
+				connection: promptConnection,
+				cwd: "/tmp/project",
+			})),
+			touchSession: mock(() => {}),
+			recordTurnEnd: mock(() => {}),
 			onSessionsChanged: mock(() => () => {}),
 			onSessionAttached: mock(() => () => {}),
 			onSessionDetached: mock(() => () => {}),
 			onPermissionRequest: mock(() => () => {}),
 			onPermissionResult: mock(() => () => {}),
-			onSessionEvent: mock(() => () => {}),
+			onSessionEvent: mock((listener: (event: SessionEvent) => void) => {
+				sessionEventListener = listener;
+				return () => {
+					sessionEventListener = undefined;
+				};
+			}),
 		};
 
 		cryptoService = {
@@ -233,5 +255,54 @@ describe("SocketClient restore semantics", () => {
 			"session-1",
 			2,
 		);
+	});
+
+	test("forwards plaintext prompts through rpc:message:send", async () => {
+		const prompt = [{ type: "text", text: "plain prompt" }] as const;
+		const handler = socketHandlers.get("rpc:message:send");
+		if (!handler) {
+			throw new Error("rpc:message:send handler not registered");
+		}
+
+		await handler({
+			requestId: "req-1",
+			params: {
+				sessionId: "session-1",
+				prompt,
+			},
+		});
+
+		expect(cryptoService.decryptRpcPayload).toHaveBeenCalledWith(
+			"session-1",
+			prompt,
+		);
+		expect(promptConnection.prompt).toHaveBeenCalledWith("session-1", prompt);
+		expect(sessionManager.touchSession).toHaveBeenCalledTimes(2);
+		expect(sessionManager.recordTurnEnd).toHaveBeenCalledWith(
+			"session-1",
+			"end_turn",
+		);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-1",
+			result: { stopReason: "end_turn" },
+		});
+	});
+
+	test("emits plaintext session events when crypto service is pass-through", async () => {
+		const event = createSessionEvent({
+			payload: { text: "plain event" },
+		});
+		cryptoService.encryptEvent.mockImplementation(
+			(input: SessionEvent) => input,
+		);
+		(client as unknown as { connected: boolean }).connected = true;
+		if (!sessionEventListener) {
+			throw new Error("session event listener not registered");
+		}
+
+		sessionEventListener(event);
+
+		expect(cryptoService.encryptEvent).toHaveBeenCalledWith(event);
+		expect(socketMock.emit).toHaveBeenCalledWith("session:event", event);
 	});
 });
