@@ -25,3 +25,7 @@ dist-ssr
 
 # Vite temp files
 vite.config.ts.timestamp-*.mjs
+
+# Playwright artifacts
+test-results/
+playwright-report/

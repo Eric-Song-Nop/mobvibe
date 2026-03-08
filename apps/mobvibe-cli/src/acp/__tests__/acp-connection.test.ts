@@ -7,8 +7,8 @@ mock.module("@agentclientprotocol/sdk", () => ({
 	PROTOCOL_VERSION: "0.1.0",
 }));
 
-// Mock child_process
-mock.module("node:child_process", () => ({
+// Mock child_process wrapper so other tests can safely mock node:child_process
+mock.module("../../lib/child-process.js", () => ({
 	spawn: mock(() => ({
 		stdin: { pipe: mock(() => {}) },
 		stdout: { pipe: mock(() => {}) },

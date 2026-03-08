@@ -26,6 +26,7 @@ import type {
 	ChatMessage,
 	ChatSession,
 	PermissionDecisionState,
+	SessionRestoreSnapshot,
 	StatusVariant,
 } from "@/lib/chat-store";
 import { useChatStore } from "@/lib/chat-store";
@@ -168,7 +169,7 @@ export interface ChatStoreActions {
 	restoreSessionMessages: (
 		sessionId: string,
 		messages: ChatMessage[],
-		cursor?: { lastAppliedSeq?: number; revision?: number },
+		snapshot?: SessionRestoreSnapshot,
 	) => void;
 	// Session cursor tracking for backfill
 	updateSessionCursor: (

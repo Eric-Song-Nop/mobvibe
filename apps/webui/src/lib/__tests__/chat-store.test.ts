@@ -114,6 +114,37 @@ describe("chat-store", () => {
 			expect(session.revision).toBe(3);
 		});
 
+		it("restores terminal outputs and streaming markers from snapshot", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.clearSessionMessages("s1");
+
+			store.restoreSessionMessages("s1", [], {
+				terminalOutputs: {
+					term1: {
+						terminalId: "term1",
+						output: "restored",
+						truncated: false,
+					},
+				},
+				streamingMessageId: "assistant-1",
+				streamingMessageRole: "assistant",
+				streamingThoughtId: "thought-1",
+			});
+
+			const session = useChatStore.getState().sessions.s1;
+			expect(session.terminalOutputs).toEqual({
+				term1: {
+					terminalId: "term1",
+					output: "restored",
+					truncated: false,
+				},
+			});
+			expect(session.streamingMessageId).toBe("assistant-1");
+			expect(session.streamingMessageRole).toBe("assistant");
+			expect(session.streamingThoughtId).toBe("thought-1");
+		});
+
 		it("restores without cursor (backward compat)", () => {
 			const { createLocalSession, restoreSessionMessages } =
 				useChatStore.getState();

@@ -24,6 +24,10 @@
 		"test:run": {
 			"dependsOn": ["^test:run"]
 		},
+		"test:e2e": {
+			"dependsOn": ["^test:e2e"],
+			"cache": false
+		},
 		"format:check": {},
 		"lint:check": {}
 	}

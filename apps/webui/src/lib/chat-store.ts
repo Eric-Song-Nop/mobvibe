@@ -108,6 +108,15 @@ export type TerminalOutputSnapshot = {
 	exitStatus?: { exitCode?: number | null; signal?: string | null };
 };
 
+export type SessionRestoreSnapshot = {
+	lastAppliedSeq?: number;
+	revision?: number;
+	terminalOutputs?: Record<string, TerminalOutputSnapshot>;
+	streamingMessageId?: string;
+	streamingMessageRole?: ChatRole;
+	streamingThoughtId?: string;
+};
+
 export type ChatSession = {
 	sessionId: string;
 	title: string;
@@ -240,7 +249,7 @@ type ChatState = {
 	restoreSessionMessages: (
 		sessionId: string,
 		messages: ChatMessage[],
-		cursor?: { lastAppliedSeq?: number; revision?: number },
+		snapshot?: SessionRestoreSnapshot,
 	) => void;
 	createLocalSession: (
 		sessionId: string,
@@ -874,7 +883,7 @@ export const useChatStore = create<ChatState>()(
 			restoreSessionMessages: (
 				sessionId: string,
 				messages: ChatMessage[],
-				cursor?: { lastAppliedSeq?: number; revision?: number },
+				snapshot?: SessionRestoreSnapshot,
 			) =>
 				set((state: ChatState) => {
 					const session = state.sessions[sessionId];
@@ -885,11 +894,23 @@ export const useChatStore = create<ChatState>()(
 							[sessionId]: {
 								...session,
 								messages,
-								...(cursor?.lastAppliedSeq !== undefined
-									? { lastAppliedSeq: cursor.lastAppliedSeq }
+								...(snapshot?.lastAppliedSeq !== undefined
+									? { lastAppliedSeq: snapshot.lastAppliedSeq }
 									: {}),
-								...(cursor?.revision !== undefined
-									? { revision: cursor.revision }
+								...(snapshot?.revision !== undefined
+									? { revision: snapshot.revision }
+									: {}),
+								...(snapshot?.terminalOutputs !== undefined
+									? { terminalOutputs: snapshot.terminalOutputs }
+									: {}),
+								...(snapshot?.streamingMessageId !== undefined
+									? { streamingMessageId: snapshot.streamingMessageId }
+									: {}),
+								...(snapshot?.streamingMessageRole !== undefined
+									? { streamingMessageRole: snapshot.streamingMessageRole }
+									: {}),
+								...(snapshot?.streamingThoughtId !== undefined
+									? { streamingThoughtId: snapshot.streamingThoughtId }
 									: {}),
 							},
 						},
