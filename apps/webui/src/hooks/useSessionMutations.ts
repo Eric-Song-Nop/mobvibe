@@ -94,8 +94,6 @@ export interface ChatStoreActions {
 	renameSession: (sessionId: string, title: string) => void;
 	setError: (sessionId: string, error?: SessionError) => void;
 	setAppError: (error?: SessionError) => void;
-	setInput: (sessionId: string, input: string) => void;
-	setInputContents: (sessionId: string, contents: ContentBlock[]) => void;
 	setSending: (sessionId: string, sending: boolean) => void;
 	setCanceling: (sessionId: string, canceling: boolean) => void;
 	setStreamError: (sessionId: string, error?: StreamError) => void;
