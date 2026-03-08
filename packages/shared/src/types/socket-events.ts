@@ -443,6 +443,8 @@ export type GitBlameLine = {
 
 export type GitBranch = {
 	name: string;
+	/** Optional UI label; when omitted, render `name`. */
+	displayName?: string;
 	current: boolean;
 	remote?: string;
 	upstream?: string;

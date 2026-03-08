@@ -21,6 +21,7 @@ const {
 	isGitRepo,
 	getGitRepoRoot,
 	getGitBranch,
+	getGitBranches,
 	getGitStatus,
 	getFileDiff,
 	aggregateDirStatus,
@@ -186,6 +187,48 @@ describe("git-utils", () => {
 			const result = await getGitBranch("/home/user/project");
 
 			expect(result).toBeUndefined();
+		});
+	});
+
+	describe("getGitBranches", () => {
+		it("keeps the real branch name separate from upstream and tracking info", async () => {
+			execFileQueue.push({
+				stdout: [
+					"refs/heads/main\tmain\t*\torigin/main\t[ahead 2, behind 1]",
+					"refs/heads/feature/worktree-fix\tfeature/worktree-fix\t\torigin/feature/worktree-fix\t",
+					"refs/remotes/origin/main\torigin/main\t\t\t",
+				].join("\n"),
+				stderr: "",
+			});
+
+			const result = await getGitBranches("/home/user/project");
+
+			expect(result).toEqual([
+				{
+					name: "main",
+					displayName: "main (HEAD)",
+					current: true,
+					remote: undefined,
+					upstream: "origin/main",
+					aheadBehind: { ahead: 2, behind: 1 },
+				},
+				{
+					name: "feature/worktree-fix",
+					displayName: "feature/worktree-fix",
+					current: false,
+					remote: undefined,
+					upstream: "origin/feature/worktree-fix",
+					aheadBehind: undefined,
+				},
+				{
+					name: "origin/main",
+					displayName: "origin/main",
+					current: false,
+					remote: "origin",
+					upstream: undefined,
+					aheadBehind: undefined,
+				},
+			]);
 		});
 	});
 

@@ -28,6 +28,12 @@ type BranchSelectorProps = {
 	onOpenChange: (open: boolean) => void;
 };
 
+const getBranchLabel = (branch: {
+	name: string;
+	displayName?: string;
+	current: boolean;
+}) => branch.displayName ?? `${branch.name}${branch.current ? " (HEAD)" : ""}`;
+
 export function BranchSelector({
 	sessionId,
 	currentBranch,
@@ -51,7 +57,7 @@ export function BranchSelector({
 			() =>
 				fuzzySearch({
 					items: branches,
-					getText: (b) => b.name,
+					getText: (b) => getBranchLabel(b),
 					query: searchQuery,
 				}),
 			[branches, searchQuery],
@@ -139,7 +145,7 @@ export function BranchSelector({
 									/>
 									<div className="flex min-w-0 flex-1 flex-col gap-0.5">
 										<FuzzyHighlight
-											text={branch.name}
+											text={getBranchLabel(branch)}
 											ranges={result.highlightRanges}
 											className="truncate font-medium"
 										/>

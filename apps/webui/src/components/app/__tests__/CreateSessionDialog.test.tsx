@@ -45,7 +45,11 @@ const mockQueryState = vi.hoisted(() => ({
 		data: undefined as
 			| {
 					isGitRepo: boolean;
-					branches: Array<{ name: string; current?: boolean }>;
+					branches: Array<{
+						name: string;
+						displayName?: string;
+						current?: boolean;
+					}>;
 					repoRoot?: string;
 					repoName?: string;
 					relativeCwd?: string;
@@ -302,5 +306,44 @@ describe("CreateSessionDialog", () => {
 
 		expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
 		expect(screen.getByText("Checking project...")).toBeInTheDocument();
+	});
+
+	it("renders branch display labels while keeping the raw branch name as the option value", () => {
+		mockQueryState.branches = {
+			data: {
+				isGitRepo: true,
+				branches: [
+					{
+						name: "main",
+						displayName: "main (HEAD)",
+						current: true,
+					},
+				],
+				repoRoot: "/repo",
+				repoName: "repo",
+				relativeCwd: "apps/webui",
+				worktreeBaseDir: "/tmp/worktrees",
+			},
+			isFetching: false,
+			isFetched: true,
+			isError: false,
+		};
+
+		render(
+			<CreateSessionDialog
+				open
+				onOpenChange={vi.fn()}
+				availableBackends={[
+					{ backendId: "backend-1", backendLabel: "Backend 1" },
+				]}
+				isCreating={false}
+				onCreate={vi.fn()}
+			/>,
+		);
+
+		expect(screen.getByText("main (HEAD)")).toBeInTheDocument();
+		expect(
+			screen.getByText("main (HEAD)").closest("[data-value]"),
+		).toHaveAttribute("data-value", "main");
 	});
 });
