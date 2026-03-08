@@ -984,7 +984,7 @@ export function ChatFooter({
 			style={isMobile ? { bottom: "var(--kb-height, 0px)" } : undefined}
 			className={cn(
 				"bg-background/90 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shrink-0",
-				isMobile && "fixed inset-x-0 bottom-0 z-50",
+				isMobile && "fixed inset-x-0 bottom-0 z-40",
 			)}
 		>
 			<div className="mx-auto w-full max-w-5xl">
