@@ -47,6 +47,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm -C apps/webui exec playwright install --with-deps chromium
       - run: pnpm build
       - run: pnpm test:run
 
