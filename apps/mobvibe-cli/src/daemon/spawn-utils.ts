@@ -24,3 +24,14 @@ export const buildForegroundSpawnArgs = (execArgv: string[]): string[] => {
 
 	return args;
 };
+
+export const buildBackgroundSpawnArgs = (
+	execArgv: string[],
+	options?: { noE2ee?: boolean },
+): string[] => {
+	const args = buildForegroundSpawnArgs(execArgv);
+	if (options?.noE2ee && !args.includes("--no-e2ee")) {
+		args.splice(args.length - 1, 0, "--no-e2ee");
+	}
+	return args;
+};

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { buildForegroundSpawnArgs } from "../spawn-utils.js";
+import {
+	buildBackgroundSpawnArgs,
+	buildForegroundSpawnArgs,
+} from "../spawn-utils.js";
 
 describe("buildForegroundSpawnArgs", () => {
 	test("keeps script path for interpreted runtime", () => {
@@ -52,5 +55,23 @@ describe("buildForegroundSpawnArgs", () => {
 		expect(
 			buildForegroundSpawnArgs(["/private/tmp/mobvibe", "start", "--no-e2ee"]),
 		).toEqual(["start", "--no-e2ee", "--foreground"]);
+	});
+
+	test("adds no-e2ee before foreground for background daemon spawn", () => {
+		expect(
+			buildBackgroundSpawnArgs(
+				["/private/tmp/mobvibe", "dist/index.js", "start"],
+				{ noE2ee: true },
+			),
+		).toEqual(["dist/index.js", "start", "--no-e2ee", "--foreground"]);
+	});
+
+	test("does not duplicate no-e2ee for background daemon spawn", () => {
+		expect(
+			buildBackgroundSpawnArgs(
+				["/private/tmp/mobvibe", "dist/index.js", "start", "--no-e2ee"],
+				{ noE2ee: true },
+			),
+		).toEqual(["dist/index.js", "start", "--no-e2ee", "--foreground"]);
 	});
 });

@@ -10,7 +10,7 @@ import { CliCryptoService } from "../e2ee/crypto-service.js";
 import { logger } from "../lib/logger.js";
 import { WalCompactor, WalStore } from "../wal/index.js";
 import { SocketClient } from "./socket-client.js";
-import { buildForegroundSpawnArgs } from "./spawn-utils.js";
+import { buildBackgroundSpawnArgs } from "./spawn-utils.js";
 
 type DaemonStatus = {
 	running: boolean;
@@ -142,16 +142,15 @@ export class DaemonManager {
 		}
 	}
 
-	private async spawnBackground(options?: { noE2ee?: boolean }): Promise<void> {
+	protected async spawnBackground(options?: {
+		noE2ee?: boolean;
+	}): Promise<void> {
 		const logFile = path.join(
 			this.config.logPath,
 			`${new Date().toISOString().replace(/[:.]/g, "-")}-daemon.log`,
 		);
 
-		const args = buildForegroundSpawnArgs(process.argv);
-		if (options?.noE2ee && !args.includes("--no-e2ee")) {
-			args.splice(args.length - 1, 0, "--no-e2ee");
-		}
+		const args = buildBackgroundSpawnArgs(process.argv, options);
 
 		// Open log file for direct stdio redirection (no pipe, parent can exit immediately)
 		const logFd = await fs.open(logFile, "a");
@@ -191,29 +190,11 @@ export class DaemonManager {
 		logger.info({ machineId: this.config.machineId }, "daemon_machine_id");
 		logger.info({ noE2ee: options?.noE2ee === true }, "daemon_e2ee_mode");
 
-		// Initialize crypto and load master secret for gateway auth.
-		await initCrypto();
-		const masterSecretBase64 = await getMasterSecret();
-		if (!masterSecretBase64) {
-			logger.error("daemon_master_secret_missing");
-			console.error(
-				`[mobvibe-cli] No credentials found. Run 'mobvibe login' to authenticate.`,
-			);
-			logger.warn("daemon_exit_missing_master_secret");
-			process.exit(1);
-		}
-		const masterSecret = base64ToUint8(masterSecretBase64);
-		const cryptoService = new CliCryptoService(masterSecret, {
-			contentEncryptionEnabled: !options?.noE2ee,
-		});
+		const cryptoService = await this.createRuntimeCryptoService(options);
 		logger.info("daemon_crypto_initialized");
 
-		const sessionManager = new SessionManager(this.config, cryptoService);
-		const socketClient = new SocketClient({
-			config: this.config,
-			sessionManager,
-			cryptoService,
-		});
+		const sessionManager = this.createSessionManager(cryptoService);
+		const socketClient = this.createSocketClient(sessionManager, cryptoService);
 
 		// Initialize compactor if enabled
 		let compactor: WalCompactor | undefined;
@@ -304,6 +285,42 @@ export class DaemonManager {
 
 		// Keep process alive
 		await new Promise(() => {});
+	}
+
+	protected async createRuntimeCryptoService(options?: {
+		noE2ee?: boolean;
+	}): Promise<CliCryptoService> {
+		await initCrypto();
+		const masterSecretBase64 = await getMasterSecret();
+		if (!masterSecretBase64) {
+			logger.error("daemon_master_secret_missing");
+			console.error(
+				`[mobvibe-cli] No credentials found. Run 'mobvibe login' to authenticate.`,
+			);
+			logger.warn("daemon_exit_missing_master_secret");
+			process.exit(1);
+		}
+		const masterSecret = base64ToUint8(masterSecretBase64);
+		return new CliCryptoService(masterSecret, {
+			contentEncryptionEnabled: !options?.noE2ee,
+		});
+	}
+
+	protected createSessionManager(
+		cryptoService: CliCryptoService,
+	): SessionManager {
+		return new SessionManager(this.config, cryptoService);
+	}
+
+	protected createSocketClient(
+		sessionManager: SessionManager,
+		cryptoService: CliCryptoService,
+	): SocketClient {
+		return new SocketClient({
+			config: this.config,
+			sessionManager,
+			cryptoService,
+		});
 	}
 
 	async logs(options?: { follow?: boolean; lines?: number }): Promise<void> {
