@@ -95,8 +95,6 @@ function MainApp() {
 			removeSession: s.removeSession,
 			renameSession: s.renameSession,
 			setError: s.setError,
-			setInput: s.setInput,
-			setInputContents: s.setInputContents,
 			setSending: s.setSending,
 			setCanceling: s.setCanceling,
 			setSessionE2EEStatus: s.setSessionE2EEStatus,

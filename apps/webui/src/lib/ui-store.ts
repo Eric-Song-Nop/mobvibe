@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import type { ContentBlock } from "@/lib/acp";
+import { createDefaultContentBlocks } from "@/lib/content-block-utils";
 import {
 	MACHINE_SIDEBAR_WIDTH_KEY,
 	SESSION_SIDEBAR_WIDTH_KEY,
@@ -50,6 +52,16 @@ const SESSION_WIDTH_DEFAULT = 256;
 const SESSION_WIDTH_MIN = 200;
 const SESSION_WIDTH_MAX = 520;
 
+export type ChatDraft = {
+	input: string;
+	inputContents: ContentBlock[];
+};
+
+export const createEmptyChatDraft = (): ChatDraft => ({
+	input: "",
+	inputContents: createDefaultContentBlocks(""),
+});
+
 type UiState = {
 	mobileMenuOpen: boolean;
 	createDialogOpen: boolean;
@@ -65,6 +77,7 @@ type UiState = {
 	draftWorktreeEnabled: boolean;
 	draftWorktreeBranch: string;
 	draftWorktreeBaseBranch?: string;
+	chatDrafts: Record<string, ChatDraft>;
 	selectedWorkspaceByMachine: Record<string, string>;
 	sidebarTab: "workspaces" | "sessions";
 	machineSidebarWidth: number;
@@ -85,6 +98,8 @@ type UiState = {
 	setDraftWorktreeBranch: (value: string) => void;
 	setDraftWorktreeBaseBranch: (value?: string) => void;
 	resetDraftWorktree: () => void;
+	setChatDraft: (sessionId: string, draft: ChatDraft) => void;
+	clearChatDraft: (sessionId: string) => void;
 	setSelectedWorkspace: (machineId: string, cwd?: string) => void;
 	setSidebarTab: (tab: "workspaces" | "sessions") => void;
 	setMachineSidebarWidth: (width: number) => void;
@@ -106,6 +121,7 @@ export const useUiStore = create<UiState>((set) => ({
 	draftWorktreeEnabled: false,
 	draftWorktreeBranch: "",
 	draftWorktreeBaseBranch: undefined,
+	chatDrafts: {},
 	selectedWorkspaceByMachine: {},
 	sidebarTab: "sessions",
 	machineSidebarWidth: loadStoredWidth(
@@ -142,6 +158,22 @@ export const useUiStore = create<UiState>((set) => ({
 			draftWorktreeEnabled: false,
 			draftWorktreeBranch: "",
 			draftWorktreeBaseBranch: undefined,
+		}),
+	setChatDraft: (sessionId, draft) =>
+		set((state) => ({
+			chatDrafts: {
+				...state.chatDrafts,
+				[sessionId]: draft,
+			},
+		})),
+	clearChatDraft: (sessionId) =>
+		set((state) => {
+			if (!(sessionId in state.chatDrafts)) {
+				return state;
+			}
+			const chatDrafts = { ...state.chatDrafts };
+			delete chatDrafts[sessionId];
+			return { chatDrafts };
 		}),
 	setSelectedWorkspace: (machineId, cwd) =>
 		set((state) => {

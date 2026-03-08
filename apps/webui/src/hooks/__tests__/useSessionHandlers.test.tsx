@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as apiModule from "@/lib/api";
 import type { ChatSession } from "@/lib/chat-store";
+import { createDefaultContentBlocks } from "@/lib/content-block-utils";
 import type { Machine } from "@/lib/machines-store";
 import {
 	type UseSessionHandlersParams,
@@ -25,6 +26,14 @@ const mockUiStoreState = vi.hoisted(() => ({
 	draftWorktreeEnabled: false,
 	draftWorktreeBranch: "",
 	draftWorktreeBaseBranch: undefined as string | undefined,
+	chatDrafts: {} as Record<
+		string,
+		{
+			input: string;
+			inputContents: ReturnType<typeof createDefaultContentBlocks>;
+		}
+	>,
+	clearChatDraft: vi.fn<(sessionId: string) => void>(),
 	editingSessionId: undefined as string | undefined,
 	editingTitle: "",
 }));
@@ -69,8 +78,6 @@ const createMockChatActions = (): UseSessionHandlersParams["chatActions"] => ({
 	setError: vi.fn(),
 	setSending: vi.fn(),
 	setCanceling: vi.fn(),
-	setInput: vi.fn(),
-	setInputContents: vi.fn(),
 	addUserMessage: vi.fn(),
 });
 
@@ -163,6 +170,8 @@ describe("useSessionHandlers — handleOpenCreateDialog", () => {
 		mockUiStoreState.draftWorktreeEnabled = false;
 		mockUiStoreState.draftWorktreeBranch = "";
 		mockUiStoreState.draftWorktreeBaseBranch = undefined;
+		mockUiStoreState.chatDrafts = {};
+		mockUiStoreState.clearChatDraft.mockReset();
 		mockUiStoreState.editingSessionId = undefined;
 		mockUiStoreState.editingTitle = "";
 		mockChatStoreState.sessions = {};
@@ -447,6 +456,153 @@ describe("useSessionHandlers — handleCreateSession", () => {
 				scope: "request",
 			}),
 		);
+	});
+});
+
+describe("useSessionHandlers — handleSend", () => {
+	let queryClient: QueryClient;
+	let uiActions: ReturnType<typeof createMockUiActions>;
+	let chatActions: ReturnType<typeof createMockChatActions>;
+	let mutations: ReturnType<typeof createMockMutations>;
+
+	const wrapper = ({ children }: { children: ReactNode }) => (
+		<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+	);
+
+	const renderHandlers = (
+		overrides: Partial<UseSessionHandlersParams> = {},
+	) => {
+		const defaults: UseSessionHandlersParams = {
+			sessions: {},
+			activeSessionId: "session-1",
+			activeSession: createBaseSession(),
+			sessionList: [],
+			selectedMachineId: "machine-1",
+			lastCreatedCwd: {},
+			machines: {
+				"machine-1": {
+					machineId: "machine-1",
+					hostname: "dev-box",
+					connected: true,
+				} as Machine,
+			},
+			defaultBackendId: "backend-1",
+			effectiveWorkspaceCwd: undefined,
+			chatActions,
+			uiActions,
+			mutations,
+			activateSession: vi.fn(),
+			isActivating: false,
+			syncSessionHistory: vi.fn(),
+		};
+
+		return renderHook(() => useSessionHandlers({ ...defaults, ...overrides }), {
+			wrapper,
+		});
+	};
+
+	beforeEach(() => {
+		queryClient = new QueryClient({
+			defaultOptions: { mutations: { retry: false } },
+		});
+		uiActions = createMockUiActions();
+		chatActions = createMockChatActions();
+		mutations = createMockMutations();
+		mockUiStoreState.chatDrafts = {};
+		mockUiStoreState.clearChatDraft.mockReset();
+		vi.clearAllMocks();
+	});
+
+	it("sends the latest prompt from the draft store and clears the draft", () => {
+		const promptContents = createDefaultContentBlocks("Ship it");
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Ship it",
+			inputContents: promptContents,
+		};
+
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({
+				input: "",
+				inputContents: createDefaultContentBlocks("stale"),
+			}),
+		});
+
+		act(() => {
+			result.current.handleSend();
+		});
+
+		expect(chatActions.setSending).toHaveBeenCalledWith("session-1", true);
+		expect(chatActions.setCanceling).toHaveBeenCalledWith("session-1", false);
+		expect(chatActions.setError).toHaveBeenCalledWith("session-1", undefined);
+		expect(mockUiStoreState.clearChatDraft).toHaveBeenCalledWith("session-1");
+		expect(chatActions.addUserMessage).toHaveBeenCalledWith(
+			"session-1",
+			"Ship it",
+			expect.objectContaining({
+				contentBlocks: promptContents,
+				provisional: true,
+			}),
+		);
+		expect(mutations.sendMessageMutation.mutate).toHaveBeenCalledWith({
+			sessionId: "session-1",
+			prompt: promptContents,
+		});
+	});
+
+	it("does not send when the draft contains only whitespace", () => {
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "   ",
+			inputContents: createDefaultContentBlocks("   "),
+		};
+
+		const { result } = renderHandlers();
+
+		act(() => {
+			result.current.handleSend();
+		});
+
+		expect(chatActions.setSending).not.toHaveBeenCalled();
+		expect(mutations.sendMessageMutation.mutate).not.toHaveBeenCalled();
+		expect(mockUiStoreState.clearChatDraft).not.toHaveBeenCalled();
+	});
+
+	it("sends resource-only prompts from the draft store", () => {
+		const promptContents: ChatSession["inputContents"] = [
+			{
+				type: "resource_link",
+				uri: "file:///repo/README.md",
+				name: "README.md",
+			},
+		];
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "",
+			inputContents: promptContents,
+		};
+
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({
+				input: "",
+				inputContents: createDefaultContentBlocks("stale"),
+			}),
+		});
+
+		act(() => {
+			result.current.handleSend();
+		});
+
+		expect(mockUiStoreState.clearChatDraft).toHaveBeenCalledWith("session-1");
+		expect(chatActions.addUserMessage).toHaveBeenCalledWith(
+			"session-1",
+			"",
+			expect.objectContaining({
+				contentBlocks: promptContents,
+				provisional: true,
+			}),
+		);
+		expect(mutations.sendMessageMutation.mutate).toHaveBeenCalledWith({
+			sessionId: "session-1",
+			prompt: promptContents,
+		});
 	});
 });
 

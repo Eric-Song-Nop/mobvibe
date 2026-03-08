@@ -28,12 +28,12 @@ import {
 	fetchSessionFsResources,
 	type SessionFsResourceEntry,
 } from "@/lib/api";
-import { type ChatSession, useChatStore } from "@/lib/chat-store";
+import type { ChatSession } from "@/lib/chat-store";
 import { filterCommandItems } from "@/lib/command-utils";
 import { createDefaultContentBlocks } from "@/lib/content-block-utils";
 import type { FuzzySearchResult } from "@/lib/fuzzy-search";
 import { filterResourceItems } from "@/lib/resource-utils";
-import { useUiStore } from "@/lib/ui-store";
+import { createEmptyChatDraft, useUiStore } from "@/lib/ui-store";
 import { cn } from "@/lib/utils";
 
 export type ChatFooterProps = {
@@ -391,9 +391,14 @@ export function ChatFooter({
 	onSend,
 	onCancel,
 }: ChatFooterProps) {
-	const { setInput, setInputContents } = useChatStore();
 	const { t } = useTranslation();
 	const isMobile = useIsMobile();
+	const emptyDraft = useRef(createEmptyChatDraft()).current;
+	const storedDraft = useUiStore((state) =>
+		activeSessionId ? state.chatDrafts[activeSessionId] : undefined,
+	);
+	const setChatDraft = useUiStore((state) => state.setChatDraft);
+	const clearChatDraft = useUiStore((state) => state.clearChatDraft);
 	const availableModels = activeSession?.availableModels ?? [];
 	const availableModes = activeSession?.availableModes ?? [];
 	const availableCommands = activeSession?.availableCommands ?? [];
@@ -403,10 +408,13 @@ export function ChatFooter({
 		activeSession?.isAttached && !activeSession?.isLoading,
 	);
 	const contentBlocks =
-		activeSession?.inputContents ?? createDefaultContentBlocks("");
+		storedDraft?.inputContents ??
+		activeSession?.inputContents ??
+		emptyDraft.inputContents;
+	const draftInput = storedDraft?.input;
 	const rawInput = useMemo(
-		() => buildInputValueFromContents(contentBlocks),
-		[contentBlocks],
+		() => draftInput ?? buildInputValueFromContents(contentBlocks),
+		[draftInput, contentBlocks],
 	);
 	const hasSlashPrefix = rawInput.startsWith("/");
 	const slashInput = hasSlashPrefix ? rawInput.slice(1) : "";
@@ -527,8 +535,10 @@ export function ChatFooter({
 			const nextValue = `/${result.item.name}`;
 			if (activeSessionId) {
 				const nextBlocks = createDefaultContentBlocks(nextValue);
-				setInput(activeSessionId, nextValue);
-				setInputContents(activeSessionId, nextBlocks);
+				setChatDraft(activeSessionId, {
+					input: nextValue,
+					inputContents: nextBlocks,
+				});
 				setInputCursor(nextValue.length);
 				// 程序化变更——浏览器 DOM 不会自动反映，需显式重建
 				syncEditorDOM(nextBlocks, nextValue.length);
@@ -536,7 +546,7 @@ export function ChatFooter({
 			setCommandHighlight(0);
 			setCommandPickerSuppressed(true);
 		},
-		[activeSessionId, setInput, setInputContents, syncEditorDOM],
+		[activeSessionId, setChatDraft, syncEditorDOM],
 	);
 
 	const handleResourceNavigate = useCallback(
@@ -563,11 +573,13 @@ export function ChatFooter({
 			if (!activeSessionId) {
 				return;
 			}
-			setInput(activeSessionId, buildInputValueFromContents(nextContents));
-			setInputContents(activeSessionId, nextContents);
+			setChatDraft(activeSessionId, {
+				input: buildInputValueFromContents(nextContents),
+				inputContents: nextContents,
+			});
 			setInputCursor(nextCursor);
 		},
-		[activeSessionId, setInput, setInputContents],
+		[activeSessionId, setChatDraft],
 	);
 
 	const applyResourceSelection = useCallback(
@@ -845,8 +857,7 @@ export function ChatFooter({
 				if (event.key === "Escape") {
 					event.preventDefault();
 					if (activeSessionId) {
-						setInput(activeSessionId, "");
-						setInputContents(activeSessionId, createDefaultContentBlocks(""));
+						clearChatDraft(activeSessionId);
 						setInputCursor(0);
 					}
 					setCommandPickerSuppressed(false);
@@ -864,13 +875,12 @@ export function ChatFooter({
 		},
 		[
 			activeSessionId,
+			clearChatDraft,
 			handleCommandNavigate,
 			handleCommandSelect,
 			handleResourceNavigate,
 			handleResourceSelect,
 			onSend,
-			setInput,
-			setInputContents,
 			shouldShowCommandPicker,
 			shouldShowResourcePicker,
 		],
@@ -977,6 +987,8 @@ export function ChatFooter({
 		vv.addEventListener("resize", update);
 		return () => vv.removeEventListener("resize", update);
 	}, [isMobile]);
+
+	const canSend = rawInput.trim().length > 0 || resourceTokens.length > 0;
 
 	const footerContent = (
 		<footer
@@ -1101,7 +1113,7 @@ export function ChatFooter({
 								!activeSessionId ||
 								!isReady ||
 								activeSession?.canceling ||
-								(!activeSession?.sending && !activeSession?.input.trim())
+								(!activeSession?.sending && !canSend)
 							}
 						>
 							<HugeiconsIcon

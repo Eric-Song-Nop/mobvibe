@@ -75,11 +75,6 @@ type ChatActions = {
 	setError: (sessionId: string, error: ChatSession["error"]) => void;
 	setSending: (sessionId: string, sending: boolean) => void;
 	setCanceling: (sessionId: string, canceling: boolean) => void;
-	setInput: (sessionId: string, input: string) => void;
-	setInputContents: (
-		sessionId: string,
-		contents: ChatSession["inputContents"],
-	) => void;
 	addUserMessage: (
 		sessionId: string,
 		content: string,
@@ -417,8 +412,15 @@ export function useSessionHandlers({
 		if (!activeSessionId || !activeSession) {
 			return;
 		}
-		const promptContents = activeSession.inputContents;
-		if (!promptContents.length || activeSession.sending) {
+		const draft = useUiStore.getState().chatDrafts[activeSessionId];
+		const promptContents = draft?.inputContents ?? activeSession.inputContents;
+		const promptText = draft?.input ?? activeSession.input ?? "";
+		const hasPromptContent = promptContents.some(
+			(block) =>
+				block.type === "resource_link" ||
+				(block.type === "text" && block.text.trim().length > 0),
+		);
+		if (!hasPromptContent || activeSession.sending) {
 			return;
 		}
 		if (!activeSession.isAttached) {
@@ -435,10 +437,9 @@ export function useSessionHandlers({
 		chatActions.setSending(activeSessionId, true);
 		chatActions.setCanceling(activeSessionId, false);
 		chatActions.setError(activeSessionId, undefined);
-		chatActions.setInput(activeSessionId, "");
-		chatActions.setInputContents(activeSessionId, [{ type: "text", text: "" }]);
+		useUiStore.getState().clearChatDraft(activeSessionId);
 
-		chatActions.addUserMessage(activeSessionId, activeSession.input ?? "", {
+		chatActions.addUserMessage(activeSessionId, promptText, {
 			messageId,
 			contentBlocks: promptContents,
 			provisional: true,
