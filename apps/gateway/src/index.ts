@@ -208,10 +208,6 @@ const sessionRouter = new SessionRouter(cliRegistry);
 const webuiEmitter = setupWebuiHandlers(io, cliRegistry, userAffinity);
 const notificationService = new NotificationService({
 	config,
-	presence: {
-		hasUserConnections: webuiEmitter.hasUserConnections,
-		hasSessionSubscribers: webuiEmitter.hasSessionSubscribers,
-	},
 	resolveSessionTitle: (userId, sessionId) =>
 		cliRegistry
 			.getSessionsForUser(userId)
