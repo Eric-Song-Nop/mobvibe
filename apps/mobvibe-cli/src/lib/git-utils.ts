@@ -10,6 +10,7 @@ import type {
 	GrepResult,
 } from "@mobvibe/shared";
 import { execFileAsync, readFileText } from "./git-io.js";
+
 const MAX_BUFFER = 10 * 1024 * 1024; // 10MB buffer for large repos
 
 export type GitProjectContext = {

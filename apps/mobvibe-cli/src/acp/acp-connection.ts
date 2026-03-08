@@ -38,7 +38,10 @@ import {
 	type TerminalOutputEvent,
 } from "@mobvibe/shared";
 import type { AcpBackendConfig } from "../config.js";
-import { type ChildProcessWithoutNullStreams, spawn } from "../lib/child-process.js";
+import {
+	type ChildProcessWithoutNullStreams,
+	spawn,
+} from "../lib/child-process.js";
 import { logger } from "../lib/logger.js";
 import { buildShellCommand, resolveShell } from "../lib/shell.js";
 
