@@ -77,6 +77,9 @@ jobs:
             BETTER_AUTH_SECRET="preview-secret-not-for-production" \
             GATEWAY_CORS_ORIGINS="*" \
             SITE_URL="https://${FLY_APP_NAME}.fly.dev" \
+            WEB_PUSH_PUBLIC_KEY="${{ secrets.WEB_PUSH_PUBLIC_KEY }}" \
+            WEB_PUSH_PRIVATE_KEY="${{ secrets.WEB_PUSH_PRIVATE_KEY }}" \
+            WEB_PUSH_SUBJECT="${{ secrets.WEB_PUSH_SUBJECT }}" \
             SKIP_EMAIL_VERIFICATION="true" \
             IS_PREVIEW="true"
 
