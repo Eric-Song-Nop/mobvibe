@@ -53,6 +53,19 @@ export function setupCliHandlers(
 ) {
 	const cliNamespace = io.of("/cli");
 
+	const isActiveCliSession = (
+		record: ReturnType<CliRegistry["getCliBySocketId"]>,
+		sessionId: string,
+	): boolean => {
+		if (!record) {
+			return false;
+		}
+		const session = record.sessions.find(
+			(candidate) => candidate.sessionId === sessionId,
+		);
+		return session ? session.isAttached !== false : true;
+	};
+
 	// Ensure crypto is ready for signature verification
 	const cryptoReady = initCrypto();
 
@@ -354,7 +367,11 @@ export function setupCliHandlers(
 				"permission_request_received",
 			);
 			emitToWebui("permission:request", payload, record.userId);
-			if (record.userId && notificationService) {
+			if (
+				record.userId &&
+				notificationService &&
+				isActiveCliSession(record, payload.sessionId)
+			) {
 				void notificationService.notifyPermissionRequest(
 					record.userId,
 					payload,
@@ -399,7 +416,11 @@ export function setupCliHandlers(
 				"session_event_received",
 			);
 			emitToWebui("session:event", event, record.userId);
-			if (record.userId && notificationService) {
+			if (
+				record.userId &&
+				notificationService &&
+				isActiveCliSession(record, event.sessionId)
+			) {
 				void notificationService.notifySessionEvent(record.userId, event);
 			}
 

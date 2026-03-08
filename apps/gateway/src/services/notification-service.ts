@@ -10,14 +10,8 @@ import {
 	upsertWebPushSubscription,
 } from "./db-service.js";
 
-type PresenceResolver = {
-	hasUserConnections: (userId: string) => boolean;
-	hasSessionSubscribers: (sessionId: string, userId?: string) => boolean;
-};
-
 type NotificationServiceOptions = {
 	config: GatewayConfig;
-	presence: PresenceResolver;
 	resolveSessionTitle: (
 		userId: string,
 		sessionId: string,
@@ -89,38 +83,30 @@ export class NotificationService {
 			payload.toolCall?.title ??
 			(payload.toolCall?._meta?.name as string | undefined) ??
 			"Action required";
-		await this.sendBrowserPush(
-			userId,
-			{
-				title: sessionTitle
-					? `${sessionTitle}: Permission required`
-					: "Permission required",
-				body: toolLabel,
-				tag: `permission:${payload.requestId}`,
-				url: this.buildSessionUrl(payload.sessionId),
-				sessionId: payload.sessionId,
-			},
-			payload.sessionId,
-		);
+		await this.sendBrowserPush(userId, {
+			title: sessionTitle
+				? `${sessionTitle}: Permission required`
+				: "Permission required",
+			body: toolLabel,
+			tag: `permission:${payload.requestId}`,
+			url: this.buildSessionUrl(payload.sessionId),
+			sessionId: payload.sessionId,
+		});
 	}
 
 	async notifySessionEvent(userId: string, event: SessionEvent): Promise<void> {
 		switch (event.kind) {
 			case "turn_end":
-				await this.sendBrowserPush(
-					userId,
-					{
-						title: this.withSessionTitle(
-							userId,
-							event.sessionId,
-							"Response completed",
-						),
-						tag: `turn-end:${event.sessionId}:${event.revision}:${event.seq}`,
-						url: this.buildSessionUrl(event.sessionId),
-						sessionId: event.sessionId,
-					},
-					event.sessionId,
-				);
+				await this.sendBrowserPush(userId, {
+					title: this.withSessionTitle(
+						userId,
+						event.sessionId,
+						"Response completed",
+					),
+					tag: `turn-end:${event.sessionId}:${event.revision}:${event.seq}`,
+					url: this.buildSessionUrl(event.sessionId),
+					sessionId: event.sessionId,
+				});
 				return;
 			case "session_error": {
 				const payload =
@@ -131,21 +117,17 @@ export class NotificationService {
 								error?: { message?: string };
 							})
 						: undefined;
-				await this.sendBrowserPush(
-					userId,
-					{
-						title: this.withSessionTitle(
-							userId,
-							event.sessionId,
-							"Session error",
-						),
-						body: payload?.error?.message,
-						tag: `session-error:${event.sessionId}`,
-						url: this.buildSessionUrl(event.sessionId),
-						sessionId: event.sessionId,
-					},
-					event.sessionId,
-				);
+				await this.sendBrowserPush(userId, {
+					title: this.withSessionTitle(
+						userId,
+						event.sessionId,
+						"Session error",
+					),
+					body: payload?.error?.message,
+					tag: `session-error:${event.sessionId}`,
+					url: this.buildSessionUrl(event.sessionId),
+					sessionId: event.sessionId,
+				});
 				return;
 			}
 			default:
@@ -176,16 +158,8 @@ export class NotificationService {
 	private async sendBrowserPush(
 		userId: string,
 		payload: BrowserPushPayload,
-		sessionId?: string,
 	): Promise<void> {
 		if (!this.webPushEnabled) {
-			return;
-		}
-		if (
-			sessionId
-				? this.options.presence.hasSessionSubscribers(sessionId, userId)
-				: this.options.presence.hasUserConnections(userId)
-		) {
 			return;
 		}
 
@@ -225,7 +199,7 @@ export class NotificationService {
 		for (const result of deliveries) {
 			if (result.status === "rejected") {
 				logger.warn(
-					{ err: result.reason, userId, sessionId },
+					{ err: result.reason, userId, sessionId: payload.sessionId },
 					"browser_push_delivery_failed",
 				);
 			}

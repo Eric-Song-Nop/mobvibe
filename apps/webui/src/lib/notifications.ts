@@ -208,8 +208,21 @@ export const pushNotification = (
 export const ensureNotificationPermission = async (options?: {
 	isAuthenticated?: boolean;
 }) => {
-	// For Tauri, permissions are requested when sending notifications
 	if (isInTauri()) {
+		if (options?.isAuthenticated !== true) {
+			return;
+		}
+		try {
+			const { isPermissionGranted, requestPermission } = await import(
+				"@tauri-apps/plugin-notification"
+			);
+			const permissionGranted = await isPermissionGranted();
+			if (!permissionGranted) {
+				await requestPermission();
+			}
+		} catch {
+			return;
+		}
 		return;
 	}
 

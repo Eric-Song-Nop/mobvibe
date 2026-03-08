@@ -177,6 +177,28 @@ describe("setupCliHandlers", () => {
 		);
 	});
 
+	it("does not dispatch permission notifications for inactive sessions", () => {
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+		registry.updateSessions("socket-1", [
+			createMockSessionSummary({
+				sessionId: "session-1",
+				isAttached: false,
+			}),
+		]);
+
+		socketHandlers["permission:request"]?.({
+			sessionId: "session-1",
+			requestId: "request-1",
+			options: [],
+		});
+
+		expect(notificationService.notifyPermissionRequest).not.toHaveBeenCalled();
+	});
+
 	it("dispatches session event notifications", () => {
 		const info = createMockRegistrationInfo({ machineId: "machine-1" });
 		registry.register(socket, info, {
@@ -200,6 +222,31 @@ describe("setupCliHandlers", () => {
 				kind: "turn_end",
 			}),
 		);
+	});
+
+	it("does not dispatch session notifications for inactive sessions", () => {
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+		registry.updateSessions("socket-1", [
+			createMockSessionSummary({
+				sessionId: "session-1",
+				isAttached: false,
+			}),
+		]);
+
+		socketHandlers["session:event"]?.({
+			sessionId: "session-1",
+			revision: 1,
+			seq: 9,
+			kind: "turn_end",
+			createdAt: new Date().toISOString(),
+			payload: {},
+		});
+
+		expect(notificationService.notifySessionEvent).not.toHaveBeenCalled();
 	});
 
 	it("does NOT emit detached for discovered (non-attached) sessions on disconnect", async () => {
