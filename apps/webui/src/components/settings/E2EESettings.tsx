@@ -135,8 +135,10 @@ export function E2EESettings() {
 	const { canScan, isScanning, startScan, cancelScan, videoRef } =
 		useQrScanner();
 
-	/** After pairing, unwrap DEKs for all known sessions and update E2EE status. */
-	const unwrapAfterPairing = useCallback(() => {
+	/**
+	 * Recompute session DEKs and runtime E2EE status after any pairing change.
+	 */
+	const refreshSessionE2EE = useCallback(() => {
 		const cached = queryClient.getQueryData<SessionsResponse>(["sessions"]);
 		if (!cached?.sessions) return;
 
@@ -181,7 +183,7 @@ export function E2EESettings() {
 			await e2ee.addPairedSecret(secret.trim());
 			setSecret("");
 			refreshDevices();
-			unwrapAfterPairing();
+			refreshSessionE2EE();
 		} catch {
 			setError(t("e2ee.invalidSecret"));
 		} finally {
@@ -201,7 +203,7 @@ export function E2EESettings() {
 			}
 			await e2ee.addPairedSecret(base64Secret);
 			refreshDevices();
-			unwrapAfterPairing();
+			refreshSessionE2EE();
 		} catch (err) {
 			const errMsg = err instanceof Error ? err.message : String(err);
 			const errorCode = getQrScanErrorCode(err);
@@ -223,11 +225,13 @@ export function E2EESettings() {
 		await e2ee.removePairedSecret(device.secret);
 		setRemoveTarget(null);
 		refreshDevices();
+		refreshSessionE2EE();
 	};
 
 	const handleRemoveAll = async () => {
 		await e2ee.clearSecret();
 		refreshDevices();
+		refreshSessionE2EE();
 	};
 
 	return (

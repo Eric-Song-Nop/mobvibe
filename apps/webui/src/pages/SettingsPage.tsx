@@ -39,7 +39,7 @@ import {
 	SidebarProvider,
 } from "@/components/ui/sidebar";
 import i18n, { supportedLanguages } from "@/i18n";
-import { changePassword } from "@/lib/auth";
+import { changePassword, isAuthEnabled } from "@/lib/auth";
 import { toThemePreference } from "@/lib/ui-config";
 
 /* ------------------------------------------------------------------ */
@@ -92,6 +92,7 @@ function useSettingsSection() {
 export function SettingsPage() {
 	const { t } = useTranslation();
 	const { isAuthenticated, isLoading: authLoading } = useAuth();
+	const authEnabled = isAuthEnabled();
 
 	if (authLoading) {
 		return (
@@ -103,7 +104,7 @@ export function SettingsPage() {
 		);
 	}
 
-	if (!isAuthenticated) {
+	if (authEnabled && !isAuthenticated) {
 		return <Navigate to="/login" replace />;
 	}
 

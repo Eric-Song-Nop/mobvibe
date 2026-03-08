@@ -5,6 +5,7 @@ import { fetchGitBranchesForCwd } from "@/lib/api";
 import type { ChatSession, SessionListEntry } from "@/lib/chat-store";
 import { useChatStore } from "@/lib/chat-store";
 import {
+	buildSessionE2EEKeyMissingError,
 	buildSessionNotReadyError,
 	createFallbackError,
 	normalizeError,
@@ -421,6 +422,10 @@ export function useSessionHandlers({
 		}
 		if (!activeSession.isAttached) {
 			chatActions.setError(activeSessionId, buildSessionNotReadyError());
+			return;
+		}
+		if (activeSession.e2eeStatus === "missing_key") {
+			chatActions.setError(activeSessionId, buildSessionE2EEKeyMissingError());
 			return;
 		}
 
