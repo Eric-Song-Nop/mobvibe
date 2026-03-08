@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getQrScanErrorCode } from "../qr-scan-errors";
+import { getQrScanErrorCode, isIgnorableQrScanError } from "../qr-scan-errors";
 
 describe("getQrScanErrorCode", () => {
 	it("classifies permissions policy camera violations", () => {
@@ -26,5 +26,16 @@ describe("getQrScanErrorCode", () => {
 		);
 
 		expect(getQrScanErrorCode(error)).toBe("camera_unavailable");
+	});
+
+	it("treats missing QR results as ignorable scan noise", () => {
+		expect(isIgnorableQrScanError("No QR code found")).toBe(true);
+		expect(isIgnorableQrScanError("Scanner error: No QR code found")).toBe(
+			true,
+		);
+	});
+
+	it("does not ignore real QR scan failures", () => {
+		expect(isIgnorableQrScanError("Scanner error: timeout")).toBe(false);
 	});
 });

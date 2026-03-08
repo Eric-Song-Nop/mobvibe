@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isMobilePlatform } from "@/lib/platform";
-import { getQrScanErrorCode } from "@/lib/qr-scan-errors";
+import {
+	getQrScanErrorCode,
+	isIgnorableQrScanError,
+} from "@/lib/qr-scan-errors";
 
 interface UseQrScannerReturn {
 	/** Whether camera scanning is supported (browser has mediaDevices or Tauri mobile) */
@@ -182,6 +185,7 @@ async function startWebScan(
 	cleanupRef: React.MutableRefObject<(() => void) | null>,
 ): Promise<string | null> {
 	const { default: QrScanner } = await import("qr-scanner");
+	Reflect.set(QrScanner as object, "_disableBarcodeDetector", true);
 
 	const videoEl = videoRef.current;
 	if (!videoEl) {
@@ -201,12 +205,19 @@ async function startWebScan(
 				resolve(result.data);
 			},
 			{
+				onDecodeError: (error) => {
+					if (isIgnorableQrScanError(error)) {
+						return;
+					}
+					console.warn("QR decode error:", error);
+				},
 				preferredCamera: "environment",
 				highlightScanRegion: false,
 				highlightCodeOutline: false,
 				returnDetailedScanResult: true,
 			},
 		);
+		scanner.setInversionMode("both");
 
 		const cleanup = () => {
 			if (!resolved) {

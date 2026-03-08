@@ -3,6 +3,11 @@ export type QrScanErrorCode =
 	| "camera_policy_blocked"
 	| "camera_unavailable";
 
+const ignorablePatterns = [
+	"no qr code found",
+	"scanner error: no qr code found",
+];
+
 const policyBlockedPatterns = [
 	"permissions policy",
 	"camera is not allowed in this document",
@@ -33,6 +38,11 @@ function getErrorText(error: unknown): string {
 		return `${error.name}: ${error.message}`;
 	}
 	return String(error);
+}
+
+export function isIgnorableQrScanError(error: unknown): boolean {
+	const message = getErrorText(error).toLowerCase();
+	return ignorablePatterns.some((pattern) => message.includes(pattern));
 }
 
 export function getQrScanErrorCode(error: unknown): QrScanErrorCode | null {
