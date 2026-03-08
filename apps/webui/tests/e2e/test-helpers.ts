@@ -164,11 +164,12 @@ export const expectTranscript = async (
 		singles?: string[];
 	},
 ) => {
-	const transcript = await page.locator("main").textContent();
-	expect(transcript).toBeTruthy();
+	const transcriptLocator = page.locator("main");
 	for (const text of present) {
-		expect(transcript).toContain(text);
+		await expect(transcriptLocator).toContainText(text);
 	}
+	const transcript = await transcriptLocator.textContent();
+	expect(transcript).toBeTruthy();
 	for (const text of absent) {
 		expect(transcript).not.toContain(text);
 	}
