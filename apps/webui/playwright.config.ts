@@ -10,6 +10,7 @@ const gatewayPort = Number(
 const webPort = Number(
 	process.env.PLAYWRIGHT_WEB_PORT ?? String(34173 + runOffset),
 );
+const gatewayUrl = `http://127.0.0.1:${gatewayPort}`;
 
 process.env.PLAYWRIGHT_GATEWAY_PORT = String(gatewayPort);
 process.env.PLAYWRIGHT_WEB_PORT = String(webPort);
@@ -33,7 +34,7 @@ export default defineConfig({
 			cwd: dirname,
 		},
 		{
-			command: `VITE_GATEWAY_URL= VITE_API_GATEWAY_URL=http://127.0.0.1:${gatewayPort} pnpm exec vite --host 127.0.0.1 --port ${webPort}`,
+			command: `VITE_GATEWAY_URL=${gatewayUrl} VITE_API_GATEWAY_URL=${gatewayUrl} pnpm exec vite --host 127.0.0.1 --port ${webPort}`,
 			port: webPort,
 			reuseExistingServer: false,
 			cwd: dirname,

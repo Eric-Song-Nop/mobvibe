@@ -35,6 +35,23 @@ const SECRET_RECORDS = {
 
 const MASTER_SECRET_BASE64 = SECRET_RECORDS.primary.base64;
 const SECONDARY_MASTER_SECRET_BASE64 = SECRET_RECORDS.secondary.base64;
+const E2E_USER = {
+	id: "user-1",
+	email: "e2e@mobvibe.test",
+	name: "E2E User",
+	image: null,
+	emailVerified: true,
+	createdAt: "2024-01-01T00:00:00.000Z",
+	updatedAt: "2024-01-01T00:00:00.000Z",
+};
+const E2E_SESSION = {
+	id: "session-token-1",
+	userId: E2E_USER.id,
+	token: "e2e-session-token",
+	expiresAt: "2099-01-01T00:00:00.000Z",
+	createdAt: "2024-01-01T00:00:00.000Z",
+	updatedAt: "2024-01-01T00:00:00.000Z",
+};
 
 const getSecretRecord = (secretId = "primary") =>
 	SECRET_RECORDS[secretId] ?? SECRET_RECORDS.primary;
@@ -754,6 +771,14 @@ const server = http.createServer(async (req, res) => {
 
 	if (req.method === "GET" && url.pathname === "/acp/sessions") {
 		json(req, res, 200, { sessions: state.sessions });
+		return;
+	}
+
+	if (req.method === "GET" && url.pathname === "/api/auth/get-session") {
+		json(req, res, 200, {
+			user: E2E_USER,
+			session: E2E_SESSION,
+		});
 		return;
 	}
 
