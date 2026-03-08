@@ -296,3 +296,14 @@ class E2EEManager {
 }
 
 export const e2ee = new E2EEManager();
+
+export const bootstrapSessionE2EE = (
+	sessionId: string,
+	wrappedDek?: string,
+): E2EEStatus => {
+	if (!wrappedDek) {
+		return "none";
+	}
+	e2ee.unwrapSessionDek(sessionId, wrappedDek);
+	return e2ee.getSessionE2EEStatus(sessionId, true);
+};

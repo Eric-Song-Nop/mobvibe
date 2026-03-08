@@ -302,12 +302,20 @@ const mockE2EE = vi.hoisted(() => ({
 	}),
 	unwrapSessionDek: vi.fn(),
 	unwrapAllSessionDeks: vi.fn(),
-	getSessionE2EEStatus: vi.fn(() => "ready"),
+	getSessionE2EEStatus: vi.fn(
+		(_sessionId: string, _hasWrappedDek: boolean) => "ready",
+	),
 	setPairedSecret: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/lib/e2ee", () => ({
 	e2ee: mockE2EE,
+	bootstrapSessionE2EE: vi.fn((sessionId: string, wrappedDek?: string) => {
+		if (wrappedDek) {
+			mockE2EE.unwrapSessionDek(sessionId, wrappedDek);
+		}
+		return mockE2EE.getSessionE2EEStatus(sessionId, Boolean(wrappedDek));
+	}),
 }));
 
 vi.mock("@/lib/notifications", () => ({

@@ -25,6 +25,12 @@ vi.mock("@/lib/chat-store", async (importOriginal) => {
 	};
 });
 
+const mockBootstrapSessionE2EE = vi.hoisted(() => vi.fn(() => "ok"));
+
+vi.mock("@/lib/e2ee", () => ({
+	bootstrapSessionE2EE: mockBootstrapSessionE2EE,
+}));
+
 // Mock the API module
 vi.mock("@/lib/api", async () => {
 	const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -84,6 +90,7 @@ describe("useSessionMutations", () => {
 		updateSessionCursor: vi.fn(),
 		setSessionBackfilling: vi.fn(),
 		resetSessionForRevision: vi.fn(),
+		setSessionE2EEStatus: vi.fn(),
 	});
 
 	const wrapper = ({ children }: { children: ReactNode }) => (
@@ -122,6 +129,7 @@ describe("useSessionMutations", () => {
 				availableModels: [],
 				availableCommands: [],
 				machineId: "machine-1",
+				wrappedDek: "wrapped-dek-1",
 			};
 			vi.mocked(apiModule.createSession).mockResolvedValue(mockSession);
 
@@ -163,11 +171,84 @@ describe("useSessionMutations", () => {
 			expect(mockStore.setActiveSessionId).toHaveBeenLastCalledWith(
 				"new-session",
 			);
+			expect(mockBootstrapSessionE2EE).toHaveBeenCalledWith(
+				"new-session",
+				"wrapped-dek-1",
+			);
+			expect(mockStore.setSessionE2EEStatus).toHaveBeenCalledWith(
+				"new-session",
+				"ok",
+			);
 			expect(mockStore.setLastCreatedCwd).toHaveBeenCalledWith(
 				"machine-1",
 				mockSession.cwd,
 			);
 			expect(mockStore.setAppError).toHaveBeenCalledWith(undefined);
+		});
+
+		it("sets missing_key when wrappedDek exists but bootstrap cannot unwrap", async () => {
+			const mockSession: apiModule.CreateSessionResponse = {
+				sessionId: "encrypted-session",
+				title: "Encrypted Session",
+				backendId: "backend-1",
+				backendLabel: "Backend 1",
+				createdAt: "2025-01-01T00:00:00Z",
+				updatedAt: "2025-01-01T00:00:00Z",
+				cwd: "/repo",
+				machineId: "machine-1",
+				wrappedDek: "wrapped-dek-missing",
+			};
+			mockBootstrapSessionE2EE.mockReturnValueOnce("missing_key");
+			vi.mocked(apiModule.createSession).mockResolvedValue(mockSession);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.createSessionMutation.mutateAsync({
+				backendId: "backend-1",
+				machineId: "machine-1",
+				cwd: "/repo",
+			});
+
+			expect(mockStore.setSessionE2EEStatus).toHaveBeenCalledWith(
+				"encrypted-session",
+				"missing_key",
+			);
+		});
+
+		it("sets none when createSession response has no wrappedDek", async () => {
+			const mockSession: apiModule.CreateSessionResponse = {
+				sessionId: "plain-session",
+				title: "Plain Session",
+				backendId: "backend-1",
+				backendLabel: "Backend 1",
+				createdAt: "2025-01-01T00:00:00Z",
+				updatedAt: "2025-01-01T00:00:00Z",
+				cwd: "/repo",
+				machineId: "machine-1",
+			};
+			mockBootstrapSessionE2EE.mockReturnValueOnce("none");
+			vi.mocked(apiModule.createSession).mockResolvedValue(mockSession);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.createSessionMutation.mutateAsync({
+				backendId: "backend-1",
+				machineId: "machine-1",
+				cwd: "/repo",
+			});
+
+			expect(mockBootstrapSessionE2EE).toHaveBeenCalledWith(
+				"plain-session",
+				undefined,
+			);
+			expect(mockStore.setSessionE2EEStatus).toHaveBeenCalledWith(
+				"plain-session",
+				"none",
+			);
 		});
 
 		it("uses the original variables.cwd for lastCreatedCwd on plain subdirectory sessions", async () => {

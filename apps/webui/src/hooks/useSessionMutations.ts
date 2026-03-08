@@ -30,6 +30,7 @@ import type {
 	StatusVariant,
 } from "@/lib/chat-store";
 import { useChatStore } from "@/lib/chat-store";
+import { bootstrapSessionE2EE } from "@/lib/e2ee";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 
 type SessionMetadata = Partial<
@@ -177,6 +178,10 @@ export interface ChatStoreActions {
 		lastAppliedSeq: number,
 	) => void;
 	resetSessionForRevision: (sessionId: string, newRevision: number) => void;
+	setSessionE2EEStatus: (
+		sessionId: string,
+		status: ChatSession["e2eeStatus"],
+	) => void;
 }
 
 const applySessionSummary = (
@@ -255,6 +260,11 @@ export function useSessionMutations(store: ChatStoreActions) {
 				worktreeBranch: data.worktreeBranch,
 				machineId: data.machineId,
 			});
+
+			store.setSessionE2EEStatus(
+				data.sessionId,
+				bootstrapSessionE2EE(data.sessionId, data.wrappedDek),
+			);
 
 			// Switch to real session
 			store.setActiveSessionId(data.sessionId);
