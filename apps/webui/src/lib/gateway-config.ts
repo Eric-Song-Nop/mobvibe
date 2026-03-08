@@ -5,13 +5,16 @@ import { tauriStoreGet, tauriStoreSet } from "./tauri-store";
  * Get the gateway URL based on the current environment.
  *
  * Priority:
- * 1. VITE_GATEWAY_URL environment variable
+ * 1. VITE_API_GATEWAY_URL environment variable
+ * 2. VITE_GATEWAY_URL environment variable
  * 2. Stored URL from Tauri Store (for desktop/mobile apps)
  * 3. Default based on current window location (for web)
  */
 export const getGatewayUrl = async (): Promise<string> => {
-	// Check environment variable first
-	const envUrl = import.meta.env.VITE_GATEWAY_URL as string | undefined;
+	// Check environment variables first
+	const envUrl =
+		(import.meta.env.VITE_API_GATEWAY_URL as string | undefined) ??
+		(import.meta.env.VITE_GATEWAY_URL as string | undefined);
 	if (envUrl) {
 		return envUrl;
 	}
@@ -59,7 +62,9 @@ export const setGatewayUrl = async (url: string): Promise<void> => {
  * Useful for synchronous operations where async is not possible.
  */
 export const getDefaultGatewayUrl = (): string => {
-	const envUrl = import.meta.env.VITE_GATEWAY_URL as string | undefined;
+	const envUrl =
+		(import.meta.env.VITE_API_GATEWAY_URL as string | undefined) ??
+		(import.meta.env.VITE_GATEWAY_URL as string | undefined);
 	if (envUrl) {
 		return envUrl;
 	}

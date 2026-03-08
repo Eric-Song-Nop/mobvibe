@@ -20,7 +20,12 @@ import {
 	type SessionsChangedPayload,
 	type TerminalOutputEvent,
 } from "@/lib/acp";
-import { type ChatSession, useChatStore } from "@/lib/chat-store";
+import {
+	type ChatMessage,
+	type ChatSession,
+	type SessionRestoreSnapshot,
+	useChatStore,
+} from "@/lib/chat-store";
 import { e2ee } from "@/lib/e2ee";
 import { isErrorDetail } from "@/lib/error-utils";
 import { useMachinesStore } from "@/lib/machines-store";
@@ -137,6 +142,15 @@ export function useSocket({
 
 	// Buffer for encrypted events received before DEK is ready
 	const encryptedBufferRef = useRef<Map<string, SessionEvent[]>>(new Map());
+	const syncBackupsRef = useRef<
+		Map<
+			string,
+			{
+				messages: ChatMessage[];
+				snapshot: SessionRestoreSnapshot;
+			}
+		>
+	>(new Map());
 
 	// Track which sessions have triggered initial backfill
 	const initialBackfillTriggeredRef = useRef<Set<string>>(new Set());
@@ -410,35 +424,55 @@ export function useSocket({
 			flushPendingEventsRef.current?.(sessionId);
 		},
 		onComplete: (_sessionId) => {
-			// Backfill complete - nothing special needed
+			syncBackupsRef.current.delete(_sessionId);
 		},
 		onError: (sessionId, error) => {
 			console.error(`[backfill] Error for session ${sessionId}:`, error);
 			// Fall back to applying pending events best effort
 			const pending = pendingEventsRef.current.get(sessionId);
-			if (!pending || pending.length === 0) return;
+			if (pending && pending.length > 0) {
+				const cursor = getCursor(sessionId);
+				const sorted = pending
+					.filter((e) =>
+						cursor.revision === undefined
+							? true
+							: e.revision === cursor.revision,
+					)
+					.sort((a, b) => a.seq - b.seq);
 
-			const cursor = getCursor(sessionId);
-			const sorted = pending
-				.filter((e) =>
-					cursor.revision === undefined ? true : e.revision === cursor.revision,
-				)
-				.sort((a, b) => a.seq - b.seq);
-
-			let lastSeq = cursor.lastAppliedSeq;
-			for (const event of sorted) {
-				if (event.seq <= lastSeq) continue;
-				if (event.seq !== lastSeq + 1) break;
-				applySessionEventRef.current?.(event);
-				lastSeq = event.seq;
-				updateSessionCursor(sessionId, event.revision, event.seq);
+				let lastSeq = cursor.lastAppliedSeq;
+				for (const event of sorted) {
+					if (event.seq <= lastSeq) continue;
+					if (event.seq !== lastSeq + 1) break;
+					applySessionEventRef.current?.(event);
+					lastSeq = event.seq;
+					updateSessionCursor(sessionId, event.revision, event.seq);
+				}
+				pendingEventsRef.current.delete(sessionId);
 			}
-			pendingEventsRef.current.delete(sessionId);
+
+			const backup = syncBackupsRef.current.get(sessionId);
+			if (!backup) {
+				return;
+			}
+
+			const failedSession = useChatStore.getState().sessions[sessionId];
+			if (
+				failedSession &&
+				failedSession.messages.length === 0 &&
+				(failedSession.lastAppliedSeq ?? 0) === 0
+			) {
+				useChatStore
+					.getState()
+					.restoreSessionMessages(sessionId, backup.messages, backup.snapshot);
+			}
+			syncBackupsRef.current.delete(sessionId);
 		},
 		onRevisionMismatch: (sessionId, newRevision) => {
 			console.log(
 				`[backfill] Revision mismatch for ${sessionId}, resetting to revision ${newRevision}`,
 			);
+			syncBackupsRef.current.delete(sessionId);
 			resetSessionForRevision(sessionId, newRevision);
 			pendingEventsRef.current.delete(sessionId);
 
@@ -455,6 +489,17 @@ export function useSocket({
 			if (!session || session.sending) return;
 
 			const revision = session.revision ?? 1;
+			syncBackupsRef.current.set(sessionId, {
+				messages: [...session.messages],
+				snapshot: {
+					lastAppliedSeq: session.lastAppliedSeq,
+					revision: session.revision,
+					terminalOutputs: { ...session.terminalOutputs },
+					streamingMessageId: session.streamingMessageId,
+					streamingMessageRole: session.streamingMessageRole,
+					streamingThoughtId: session.streamingThoughtId,
+				},
+			});
 
 			// Full re-sync: clear all buffers, reset messages, replay from seq 0
 			pendingEventsRef.current.delete(sessionId);
