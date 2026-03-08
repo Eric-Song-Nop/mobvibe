@@ -18,46 +18,6 @@ const defaultMutations: SessionMutationsSnapshot = {
 
 // --- mocks ---
 
-vi.mock("../src/components/ui/alert-dialog", () => ({
-	AlertDialog: ({
-		children,
-		open,
-	}: {
-		children: React.ReactNode;
-		open?: boolean;
-		onOpenChange?: (v: boolean) => void;
-	}) => (open ? <div>{children}</div> : null),
-	AlertDialogContent: ({ children }: { children: React.ReactNode }) => (
-		<div>{children}</div>
-	),
-	AlertDialogHeader: ({ children }: { children: React.ReactNode }) => (
-		<div>{children}</div>
-	),
-	AlertDialogTitle: ({ children }: { children: React.ReactNode }) => (
-		<div>{children}</div>
-	),
-	AlertDialogDescription: ({ children }: { children: React.ReactNode }) => (
-		<div>{children}</div>
-	),
-	AlertDialogFooter: ({ children }: { children: React.ReactNode }) => (
-		<div>{children}</div>
-	),
-	AlertDialogAction: ({
-		children,
-		...props
-	}: {
-		children: React.ReactNode;
-		[key: string]: unknown;
-	}) => <button {...props}>{children}</button>,
-	AlertDialogCancel: ({
-		children,
-		...props
-	}: {
-		children: React.ReactNode;
-		[key: string]: unknown;
-	}) => <button {...props}>{children}</button>,
-}));
-
 vi.mock("../src/components/ui/dropdown-menu", () => ({
 	DropdownMenu: ({ children }: { children: React.ReactNode }) => (
 		<div>{children}</div>
@@ -137,8 +97,12 @@ const renderSidebar = (
 					onCreateSession={options?.onCreateSession ?? (() => {})}
 					onSelectSession={options?.onSelectSession ?? (() => {})}
 					onEditSubmit={options?.onEditSubmit ?? (() => {})}
-					onArchiveSession={options?.onArchiveSession ?? (() => {})}
-					onArchiveAllSessions={options?.onArchiveAllSessions ?? (() => {})}
+					onArchiveSessionRequest={
+						options?.onArchiveSessionRequest ?? (() => {})
+					}
+					onArchiveAllSessionsRequest={
+						options?.onArchiveAllSessionsRequest ?? (() => {})
+					}
 					isBulkArchiving={options?.isBulkArchiving ?? false}
 					isCreating={options?.isCreating ?? false}
 					mutations={options?.mutations ?? defaultMutations}
@@ -474,8 +438,8 @@ describe("SessionSidebar", () => {
 			).toBeInTheDocument();
 		});
 
-		it("opens confirm dialog and calls onArchiveAllSessions on confirm", async () => {
-			const onArchiveAllSessions = vi.fn();
+		it("emits archive-all intent immediately", async () => {
+			const onArchiveAllSessionsRequest = vi.fn();
 			const user = userEvent.setup();
 			renderSidebar(
 				[
@@ -492,15 +456,12 @@ describe("SessionSidebar", () => {
 						backendLabel: "Backend",
 					}),
 				],
-				{ onArchiveAllSessions },
+				{ onArchiveAllSessionsRequest },
 			);
 
-			// Click Archive All to open dialog
 			await user.click(screen.getByText(i18n.t("session.archiveAll")));
-			// Dialog should now be open — click confirm
-			await user.click(screen.getByText(i18n.t("session.archiveAllConfirm")));
 
-			expect(onArchiveAllSessions).toHaveBeenCalledWith(["s1", "s2"]);
+			expect(onArchiveAllSessionsRequest).toHaveBeenCalledWith(["s1", "s2"]);
 		});
 
 		it("is disabled when isBulkArchiving is true", () => {
@@ -529,19 +490,16 @@ describe("SessionSidebar", () => {
 	});
 
 	describe("Archive single session", () => {
-		it("opens confirm dialog via dropdown and calls onArchiveSession", async () => {
-			const onArchiveSession = vi.fn();
+		it("emits archive intent via dropdown", async () => {
+			const onArchiveSessionRequest = vi.fn();
 			const user = userEvent.setup();
 			renderSidebar([buildSession({ sessionId: "s1", title: "My Session" })], {
-				onArchiveSession,
+				onArchiveSessionRequest,
 			});
 
-			// Click archive in dropdown
 			await user.click(screen.getByText(i18n.t("common.archive")));
-			// Dialog should be open — click confirm
-			await user.click(screen.getByText(i18n.t("session.archiveConfirm")));
 
-			expect(onArchiveSession).toHaveBeenCalledWith("s1");
+			expect(onArchiveSessionRequest).toHaveBeenCalledWith("s1");
 		});
 	});
 });

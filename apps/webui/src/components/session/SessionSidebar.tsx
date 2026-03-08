@@ -6,18 +6,8 @@ import {
 	MoreHorizontalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
@@ -78,8 +68,8 @@ type SessionSidebarProps = {
 	onCreateSession: (mode: "workspace" | "session") => void;
 	onSelectSession: (sessionId: string) => void;
 	onEditSubmit: () => void;
-	onArchiveSession: (sessionId: string) => void;
-	onArchiveAllSessions: (sessionIds: string[]) => void;
+	onArchiveSessionRequest: (sessionId: string) => void;
+	onArchiveAllSessionsRequest: (sessionIds: string[]) => void;
 	isBulkArchiving?: boolean;
 	isCreating: boolean;
 	mutations: SessionMutationsSnapshot;
@@ -91,8 +81,8 @@ export const SessionSidebar = ({
 	onCreateSession,
 	onSelectSession,
 	onEditSubmit,
-	onArchiveSession,
-	onArchiveAllSessions,
+	onArchiveSessionRequest,
+	onArchiveAllSessionsRequest,
 	isBulkArchiving,
 	isCreating,
 	mutations,
@@ -112,29 +102,6 @@ export const SessionSidebar = ({
 		selectedWorkspaceByMachine,
 	} = useUiStore();
 	const { selectedMachineId } = useMachinesStore();
-
-	// Shared archive confirmation dialog state
-	const [archiveTarget, setArchiveTarget] = useState<
-		| {
-				type: "single";
-				sessionId: string;
-		  }
-		| {
-				type: "bulk";
-				sessionIds: string[];
-		  }
-		| null
-	>(null);
-
-	const handleArchiveConfirm = useCallback(() => {
-		if (!archiveTarget) return;
-		if (archiveTarget.type === "single") {
-			onArchiveSession(archiveTarget.sessionId);
-		} else {
-			onArchiveAllSessions(archiveTarget.sessionIds);
-		}
-		setArchiveTarget(null);
-	}, [archiveTarget, onArchiveSession, onArchiveAllSessions]);
 
 	// Current workspace label for header display
 	const currentWorkspace = useMemo(() => {
@@ -248,7 +215,10 @@ export const SessionSidebar = ({
 				{sidebarTab === "workspaces" ? (
 					<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain">
 						{selectedMachineId ? (
-							<WorkspaceList machineId={selectedMachineId} />
+							<WorkspaceList
+								machineId={selectedMachineId}
+								onEmptyCreateSession={() => onCreateSession("workspace")}
+							/>
 						) : (
 							<div className="text-muted-foreground text-xs">
 								{t("workspace.empty")}
@@ -312,12 +282,9 @@ export const SessionSidebar = ({
 													className="text-muted-foreground h-5 px-1.5 text-[10px]"
 													disabled={isBulkArchiving}
 													onClick={() =>
-														setArchiveTarget({
-															type: "bulk",
-															sessionIds: group.sessions.map(
-																(s) => s.sessionId,
-															),
-														})
+														onArchiveAllSessionsRequest(
+															group.sessions.map((s) => s.sessionId),
+														)
 													}
 												>
 													{t("session.archiveAll")}
@@ -348,10 +315,7 @@ export const SessionSidebar = ({
 														onEditSubmit={onEditSubmit}
 														onEditingTitleChange={setEditingTitle}
 														onArchive={() =>
-															setArchiveTarget({
-																type: "single",
-																sessionId: session.sessionId,
-															})
+															onArchiveSessionRequest(session.sessionId)
 														}
 													/>
 												))}
@@ -363,39 +327,6 @@ export const SessionSidebar = ({
 						</div>
 					</>
 				) : null}
-
-				{/* Shared archive confirmation dialog */}
-				<AlertDialog
-					open={archiveTarget !== null}
-					onOpenChange={(open) => {
-						if (!open) setArchiveTarget(null);
-					}}
-				>
-					<AlertDialogContent size="sm">
-						<AlertDialogHeader>
-							<AlertDialogTitle>
-								{archiveTarget?.type === "bulk"
-									? t("session.archiveAllTitle")
-									: t("session.archiveTitle")}
-							</AlertDialogTitle>
-							<AlertDialogDescription>
-								{archiveTarget?.type === "bulk"
-									? t("session.archiveAllDescription", {
-											count: archiveTarget.sessionIds.length,
-										})
-									: t("session.archiveDescription")}
-							</AlertDialogDescription>
-						</AlertDialogHeader>
-						<AlertDialogFooter>
-							<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-							<AlertDialogAction onClick={handleArchiveConfirm}>
-								{archiveTarget?.type === "bulk"
-									? t("session.archiveAllConfirm")
-									: t("session.archiveConfirm")}
-							</AlertDialogAction>
-						</AlertDialogFooter>
-					</AlertDialogContent>
-				</AlertDialog>
 			</div>
 		</TooltipProvider>
 	);
@@ -467,7 +398,8 @@ const SessionListItem = ({
 							"mt-1.5 h-2 w-2 shrink-0 rounded-full",
 							statusDotClass[displayStatus],
 						)}
-						aria-label={statusTooltip ?? undefined}
+						aria-hidden="true"
+						title={statusTooltip ?? undefined}
 					/>
 				</TooltipTrigger>
 				{statusTooltip ? (

@@ -11,19 +11,19 @@ import { collectWorkspaces } from "@/lib/workspace-utils";
 
 type WorkspaceListProps = {
 	machineId: string;
+	onEmptyCreateSession: () => void;
 };
 
-export function WorkspaceList({ machineId }: WorkspaceListProps) {
+export function WorkspaceList({
+	machineId,
+	onEmptyCreateSession,
+}: WorkspaceListProps) {
 	const { t } = useTranslation();
 	const { sessions } = useChatStore();
 	const { machines, setSelectedMachineId, updateBackendCapabilities } =
 		useMachinesStore();
-	const {
-		selectedWorkspaceByMachine,
-		setSelectedWorkspace,
-		setCreateDialogOpen,
-		setSidebarTab,
-	} = useUiStore();
+	const { selectedWorkspaceByMachine, setSelectedWorkspace, setSidebarTab } =
+		useUiStore();
 	const discoverSessionsMutation = useDiscoverSessionsMutation();
 
 	const workspaceList = useMemo(
@@ -113,7 +113,7 @@ export function WorkspaceList({ machineId }: WorkspaceListProps) {
 
 	const handleEmptyClick = () => {
 		setSelectedMachineId(machineId);
-		setCreateDialogOpen(true);
+		onEmptyCreateSession();
 	};
 
 	if (isValidating && validWorkspaces.length === 0) {
