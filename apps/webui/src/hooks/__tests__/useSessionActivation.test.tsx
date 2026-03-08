@@ -331,6 +331,18 @@ describe("useSessionActivation", () => {
 			cwd: "/home/user/project",
 			machineId: "machine-1",
 			backendId: "backend-1",
+			revision: 4,
+			lastAppliedSeq: 9,
+			streamingMessageId: "stream-1",
+			streamingMessageRole: "assistant",
+			streamingThoughtId: "thought-1",
+			terminalOutputs: {
+				"term-1": {
+					terminalId: "term-1",
+					output: "stdout",
+					truncated: false,
+				},
+			},
 			messages: [
 				{
 					id: "msg-1",
@@ -367,7 +379,17 @@ describe("useSessionActivation", () => {
 		expect(store.restoreSessionMessages).toHaveBeenCalledWith(
 			"session-1",
 			session.messages,
-			{ lastAppliedSeq: session.lastAppliedSeq },
+			{
+				lastAppliedSeq: session.lastAppliedSeq,
+				revision: session.revision,
+				terminalOutputs: session.terminalOutputs,
+				streamingMessageId: session.streamingMessageId,
+				streamingMessageRole: session.streamingMessageRole,
+				streamingThoughtId: session.streamingThoughtId,
+			},
+		);
+		expect(mockGatewaySocket.unsubscribeFromSession).toHaveBeenCalledWith(
+			"session-1",
 		);
 		expect(store.setSessionLoading).toHaveBeenCalledWith("session-1", false);
 	});

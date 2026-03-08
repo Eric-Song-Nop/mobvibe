@@ -84,8 +84,14 @@ export function useSessionActivation(store: ChatStoreActions) {
 
 			store.setSessionLoading(fresh.sessionId, true);
 			const backupMessages: ChatMessage[] = [...fresh.messages];
-			const backupLastAppliedSeq = fresh.lastAppliedSeq;
-			const backupRevision = fresh.revision;
+			const backupSnapshot = {
+				lastAppliedSeq: fresh.lastAppliedSeq,
+				revision: fresh.revision,
+				terminalOutputs: { ...fresh.terminalOutputs },
+				streamingMessageId: fresh.streamingMessageId,
+				streamingMessageRole: fresh.streamingMessageRole,
+				streamingThoughtId: fresh.streamingThoughtId,
+			};
 			store.clearSessionMessages(fresh.sessionId);
 			gatewaySocket.subscribeToSession(fresh.sessionId);
 
@@ -94,10 +100,11 @@ export function useSessionActivation(store: ChatStoreActions) {
 				await mutation.mutateAsync(params);
 				store.setActiveSessionId(fresh.sessionId);
 			} catch {
-				store.restoreSessionMessages(fresh.sessionId, backupMessages, {
-					lastAppliedSeq: backupLastAppliedSeq,
-					revision: backupRevision,
-				});
+				store.restoreSessionMessages(
+					fresh.sessionId,
+					backupMessages,
+					backupSnapshot,
+				);
 				gatewaySocket.unsubscribeFromSession(fresh.sessionId);
 			} finally {
 				store.setSessionLoading(fresh.sessionId, false);

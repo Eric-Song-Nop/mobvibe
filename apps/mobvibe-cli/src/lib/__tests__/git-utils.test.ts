@@ -1,23 +1,22 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 
-// Mock child_process
-const mockExecFileAsync = mock(() =>
-	Promise.resolve({ stdout: "", stderr: "" }),
-);
-mock.module("node:util", () => ({
-	promisify: () => mockExecFileAsync,
-}));
+type ExecFileResult = { stdout: string; stderr: string };
 
-// Mock fs/promises for readFile
+const execFileQueue: Array<ExecFileResult | Error> = [];
 const mockReadFile = mock(() => Promise.resolve(""));
-const actualFsPromises = await import("node:fs/promises");
-mock.module("node:fs/promises", () => ({
-	...actualFsPromises,
-	default: { ...actualFsPromises, readFile: mockReadFile },
-	readFile: mockReadFile,
+const mockExecFileAsync = mock(() => {
+	const next = execFileQueue.shift() ?? { stdout: "", stderr: "" };
+	if (next instanceof Error) {
+		return Promise.reject(next);
+	}
+	return Promise.resolve(next);
+});
+
+mock.module("../git-io.js", () => ({
+	execFileAsync: mockExecFileAsync,
+	readFileText: mockReadFile,
 }));
 
-// Import after mocking
 const {
 	isGitRepo,
 	getGitRepoRoot,
@@ -31,13 +30,14 @@ const {
 
 describe("git-utils", () => {
 	beforeEach(() => {
-		mockExecFileAsync.mockReset();
-		mockReadFile.mockReset();
+		mockExecFileAsync.mockClear();
+		execFileQueue.length = 0;
+		mockReadFile.mockClear();
 	});
 
 	describe("isGitRepo", () => {
 		it("returns true when directory is a git repo", async () => {
-			mockExecFileAsync.mockResolvedValueOnce({ stdout: "true\n", stderr: "" });
+			execFileQueue.push({ stdout: "true\n", stderr: "" });
 
 			const result = await isGitRepo("/home/user/project");
 
@@ -50,9 +50,7 @@ describe("git-utils", () => {
 		});
 
 		it("returns false when directory is not a git repo", async () => {
-			mockExecFileAsync.mockRejectedValueOnce(
-				new Error("Not a git repository"),
-			);
+			execFileQueue.push(new Error("Not a git repository"));
 
 			const result = await isGitRepo("/home/user/not-a-repo");
 
@@ -62,7 +60,7 @@ describe("git-utils", () => {
 
 	describe("getGitRepoRoot", () => {
 		it("returns repo root for directories inside a git repo", async () => {
-			mockExecFileAsync.mockResolvedValueOnce({
+			execFileQueue.push({
 				stdout: "/home/user/project\n",
 				stderr: "",
 			});
@@ -73,7 +71,7 @@ describe("git-utils", () => {
 		});
 
 		it("returns undefined when cwd is not inside a git repo", async () => {
-			mockExecFileAsync.mockRejectedValueOnce(new Error("not a git repo"));
+			execFileQueue.push(new Error("not a git repo"));
 
 			const result = await getGitRepoRoot("/home/user/not-a-repo");
 
@@ -83,15 +81,16 @@ describe("git-utils", () => {
 
 	describe("resolveGitProjectContext", () => {
 		it("resolves repo root and relative cwd for subdirectories", async () => {
-			mockExecFileAsync
-				.mockResolvedValueOnce({
+			execFileQueue.push(
+				{
 					stdout: "/home/user/project\n",
 					stderr: "",
-				})
-				.mockResolvedValueOnce({
+				},
+				{
 					stdout: "worktree /home/user/project\n",
 					stderr: "",
-				});
+				},
+			);
 
 			const result = await resolveGitProjectContext(
 				"/home/user/project/apps/webui",
@@ -107,15 +106,16 @@ describe("git-utils", () => {
 		});
 
 		it("marks repo root directories correctly", async () => {
-			mockExecFileAsync
-				.mockResolvedValueOnce({
+			execFileQueue.push(
+				{
 					stdout: "/home/user/project\n",
 					stderr: "",
-				})
-				.mockResolvedValueOnce({
+				},
+				{
 					stdout: "worktree /home/user/project\n",
 					stderr: "",
-				});
+				},
+			);
 
 			const result = await resolveGitProjectContext("/home/user/project");
 
@@ -129,16 +129,17 @@ describe("git-utils", () => {
 		});
 
 		it("normalizes linked worktrees back to the primary project root", async () => {
-			mockExecFileAsync
-				.mockResolvedValueOnce({
+			execFileQueue.push(
+				{
 					stdout: "/tmp/worktrees/project/feat-branch\n",
 					stderr: "",
-				})
-				.mockResolvedValueOnce({
+				},
+				{
 					stdout:
 						"worktree /home/user/project\nHEAD abc123\nbranch refs/heads/main\n\nworktree /tmp/worktrees/project/feat-branch\nHEAD def456\nbranch refs/heads/feat-branch\n",
 					stderr: "",
-				});
+				},
+			);
 
 			const result = await resolveGitProjectContext(
 				"/tmp/worktrees/project/feat-branch/apps/webui",
@@ -156,7 +157,7 @@ describe("git-utils", () => {
 
 	describe("getGitBranch", () => {
 		it("returns branch name when on a branch", async () => {
-			mockExecFileAsync.mockResolvedValueOnce({ stdout: "main\n", stderr: "" });
+			execFileQueue.push({ stdout: "main\n", stderr: "" });
 
 			const result = await getGitBranch("/home/user/project");
 
@@ -169,9 +170,10 @@ describe("git-utils", () => {
 		});
 
 		it("returns short commit hash when in detached HEAD state", async () => {
-			mockExecFileAsync
-				.mockResolvedValueOnce({ stdout: "\n", stderr: "" }) // branch --show-current returns empty
-				.mockResolvedValueOnce({ stdout: "abc1234\n", stderr: "" }); // rev-parse --short HEAD
+			execFileQueue.push(
+				{ stdout: "\n", stderr: "" },
+				{ stdout: "abc1234\n", stderr: "" },
+			);
 
 			const result = await getGitBranch("/home/user/project");
 
@@ -179,7 +181,7 @@ describe("git-utils", () => {
 		});
 
 		it("returns undefined when git command fails", async () => {
-			mockExecFileAsync.mockRejectedValueOnce(new Error("Git error"));
+			execFileQueue.push(new Error("Git error"));
 
 			const result = await getGitBranch("/home/user/project");
 
@@ -189,7 +191,7 @@ describe("git-utils", () => {
 
 	describe("getGitStatus", () => {
 		it("parses modified files correctly", async () => {
-			mockExecFileAsync.mockResolvedValueOnce({
+			execFileQueue.push({
 				stdout: " M src/file1.ts\nM  src/file2.ts\nMM src/file3.ts\n",
 				stderr: "",
 			});
@@ -204,7 +206,7 @@ describe("git-utils", () => {
 		});
 
 		it("parses added files correctly", async () => {
-			mockExecFileAsync.mockResolvedValueOnce({
+			execFileQueue.push({
 				stdout: "A  src/new-file.ts\n",
 				stderr: "",
 			});
@@ -215,7 +217,7 @@ describe("git-utils", () => {
 		});
 
 		it("parses deleted files correctly", async () => {
-			mockExecFileAsync.mockResolvedValueOnce({
+			execFileQueue.push({
 				stdout: " D src/deleted.ts\nD  src/staged-delete.ts\n",
 				stderr: "",
 			});
@@ -229,7 +231,7 @@ describe("git-utils", () => {
 		});
 
 		it("parses untracked files correctly", async () => {
-			mockExecFileAsync.mockResolvedValueOnce({
+			execFileQueue.push({
 				stdout: "?? src/untracked.ts\n?? docs/\n",
 				stderr: "",
 			});
@@ -243,7 +245,7 @@ describe("git-utils", () => {
 		});
 
 		it("parses renamed files correctly", async () => {
-			mockExecFileAsync.mockResolvedValueOnce({
+			execFileQueue.push({
 				stdout: "R  old-name.ts -> new-name.ts\n",
 				stderr: "",
 			});
@@ -254,7 +256,7 @@ describe("git-utils", () => {
 		});
 
 		it("returns empty array when git command fails", async () => {
-			mockExecFileAsync.mockRejectedValueOnce(new Error("Git error"));
+			execFileQueue.push(new Error("Git error"));
 
 			const result = await getGitStatus("/home/user/project");
 
@@ -262,7 +264,7 @@ describe("git-utils", () => {
 		});
 
 		it("handles mixed status output", async () => {
-			mockExecFileAsync.mockResolvedValueOnce({
+			execFileQueue.push({
 				stdout:
 					" M src/modified.ts\nA  src/added.ts\n D src/deleted.ts\n?? src/untracked.ts\n",
 				stderr: "",
@@ -290,7 +292,7 @@ describe("git-utils", () => {
 			const result = aggregateDirStatus(files);
 
 			expect(result).toEqual({
-				src: "A", // A has higher priority than M
+				src: "A",
 				"src/components": "A",
 				"src/utils": "M",
 			});
@@ -305,7 +307,6 @@ describe("git-utils", () => {
 
 			const result = aggregateDirStatus(files);
 
-			// Priority: A > D > M > R > C > U > ? > !
 			expect(result.src).toBe("D");
 		});
 
@@ -404,7 +405,7 @@ index abc123..def456 100644
 +const c = 3;
  const d = 4;
 `;
-			mockExecFileAsync.mockResolvedValueOnce({
+			execFileQueue.push({
 				stdout: diffOutput,
 				stderr: "",
 			});
@@ -426,7 +427,7 @@ index abc123..def456 100644
 -const c = 3;
  const d = 4;
 `;
-			mockExecFileAsync.mockResolvedValueOnce({
+			execFileQueue.push({
 				stdout: diffOutput,
 				stderr: "",
 			});
@@ -450,7 +451,7 @@ index abc123..def456 100644
 -another removed line
  line12
 `;
-			mockExecFileAsync.mockResolvedValueOnce({
+			execFileQueue.push({
 				stdout: diffOutput,
 				stderr: "",
 			});
@@ -461,14 +462,13 @@ index abc123..def456 100644
 		});
 
 		it("handles untracked files by marking all lines as added", async () => {
-			// First call: git diff HEAD returns empty (no diff)
-			mockExecFileAsync.mockResolvedValueOnce({ stdout: "", stderr: "" });
-			// Second call: git status shows untracked
-			mockExecFileAsync.mockResolvedValueOnce({
-				stdout: "?? src/new.ts",
-				stderr: "",
-			});
-			// readFile returns file content with 10 lines
+			execFileQueue.push(
+				{ stdout: "", stderr: "" },
+				{
+					stdout: "?? src/new.ts",
+					stderr: "",
+				},
+			);
 			mockReadFile.mockResolvedValueOnce(
 				"line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n",
 			);
@@ -481,10 +481,10 @@ index abc123..def456 100644
 		});
 
 		it("returns empty arrays when file has no changes", async () => {
-			// First call: git diff HEAD returns empty
-			mockExecFileAsync.mockResolvedValueOnce({ stdout: "", stderr: "" });
-			// Second call: git status shows no changes
-			mockExecFileAsync.mockResolvedValueOnce({ stdout: "", stderr: "" });
+			execFileQueue.push(
+				{ stdout: "", stderr: "" },
+				{ stdout: "", stderr: "" },
+			);
 
 			const result = await getFileDiff(
 				"/home/user/project",
@@ -497,7 +497,7 @@ index abc123..def456 100644
 		});
 
 		it("returns empty arrays when git command fails", async () => {
-			mockExecFileAsync.mockRejectedValueOnce(new Error("Git error"));
+			execFileQueue.push(new Error("Git error"));
 
 			const result = await getFileDiff("/home/user/project", "src/file.ts");
 
@@ -519,7 +519,7 @@ index abc123..def456 100644
 +newline11
  line12
 `;
-			mockExecFileAsync.mockResolvedValueOnce({
+			execFileQueue.push({
 				stdout: diffOutput,
 				stderr: "",
 			});

@@ -148,6 +148,78 @@ describe("useSessionBackfill", () => {
 		expect(onComplete).not.toHaveBeenCalled();
 	});
 
+	it("fetches multiple pages until hasMore is false", async () => {
+		const onEvents = vi.fn();
+		const onComplete = vi.fn();
+
+		mockFetch
+			.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						sessionId: "session-1",
+						machineId: "machine-1",
+						revision: 1,
+						events: [
+							{
+								sessionId: "session-1",
+								revision: 1,
+								seq: 1,
+								kind: "user_message",
+								payload: {},
+							},
+						],
+						nextAfterSeq: 1,
+						hasMore: true,
+					}),
+			})
+			.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						sessionId: "session-1",
+						machineId: "machine-1",
+						revision: 1,
+						events: [
+							{
+								sessionId: "session-1",
+								revision: 1,
+								seq: 2,
+								kind: "agent_message_chunk",
+								payload: {},
+							},
+						],
+						nextAfterSeq: 2,
+						hasMore: false,
+					}),
+			});
+
+		const { result } = renderHook(() =>
+			useSessionBackfill({
+				gatewayUrl: "http://localhost:3005",
+				onEvents,
+				onComplete,
+			}),
+		);
+
+		await act(async () => {
+			await result.current.startBackfill("session-1", 1, 0);
+		});
+
+		expect(onEvents).toHaveBeenNthCalledWith(
+			1,
+			"session-1",
+			expect.arrayContaining([expect.objectContaining({ seq: 1 })]),
+		);
+		expect(onEvents).toHaveBeenNthCalledWith(
+			2,
+			"session-1",
+			expect.arrayContaining([expect.objectContaining({ seq: 2 })]),
+		);
+		expect(onComplete).toHaveBeenCalledWith("session-1", 2);
+		expect(mockFetch).toHaveBeenCalledTimes(2);
+	});
+
 	it("P0-3: starting new backfill cancels previous one (generation check)", async () => {
 		const onEvents = vi.fn();
 		const onComplete = vi.fn();
@@ -229,5 +301,46 @@ describe("useSessionBackfill", () => {
 			expect(onComplete).toHaveBeenCalledTimes(1);
 			expect(onComplete).toHaveBeenCalledWith("session-1", 1);
 		});
+	});
+
+	it("does not call onError or onComplete when a backfill is aborted", async () => {
+		const onEvents = vi.fn();
+		const onComplete = vi.fn();
+		const onError = vi.fn();
+
+		let abortSignal: AbortSignal | undefined;
+		mockFetch.mockImplementationOnce(
+			(_input: RequestInfo | URL, init?: RequestInit) => {
+				abortSignal = init?.signal as AbortSignal | undefined;
+				return new Promise((_resolve, reject) => {
+					abortSignal?.addEventListener("abort", () => {
+						const abortError = new Error("Aborted");
+						abortError.name = "AbortError";
+						reject(abortError);
+					});
+				});
+			},
+		);
+
+		const { result } = renderHook(() =>
+			useSessionBackfill({
+				gatewayUrl: "http://localhost:3005",
+				onEvents,
+				onComplete,
+				onError,
+			}),
+		);
+
+		void result.current.startBackfill("session-1", 1, 0);
+
+		await act(async () => {
+			result.current.cancelBackfill("session-1");
+			await Promise.resolve();
+		});
+
+		expect(abortSignal?.aborted).toBe(true);
+		expect(onEvents).not.toHaveBeenCalled();
+		expect(onError).not.toHaveBeenCalled();
+		expect(onComplete).not.toHaveBeenCalled();
 	});
 });

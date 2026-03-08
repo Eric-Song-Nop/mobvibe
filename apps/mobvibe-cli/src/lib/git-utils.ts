@@ -1,7 +1,4 @@
-import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
 import type {
 	GitBlameLine,
 	GitBranch,
@@ -12,8 +9,7 @@ import type {
 	GitStatusExtended,
 	GrepResult,
 } from "@mobvibe/shared";
-
-const execFileAsync = promisify(execFile);
+import { execFileAsync, readFileText } from "./git-io.js";
 const MAX_BUFFER = 10 * 1024 * 1024; // 10MB buffer for large repos
 
 export type GitProjectContext = {
@@ -395,7 +391,7 @@ export async function getFileDiff(
 				const absPath = path.isAbsolute(filePath)
 					? filePath
 					: path.resolve(cwd, relativePath);
-				const content = await readFile(absPath, "utf-8");
+				const content = await readFileText(absPath, "utf-8");
 				const lines = content.split("\n").filter((l) => l.length > 0);
 				const lineCount = lines.length;
 				// Build synthetic unified diff for new/untracked files

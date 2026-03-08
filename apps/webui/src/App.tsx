@@ -302,13 +302,24 @@ function MainApp() {
 	// 清除无效的 activeSessionId（不自动选中）
 	useEffect(() => {
 		if (!activeSessionId) return;
+		if (activeSession && !selectedMachineId) {
+			// Delay invalidation until machine context is restored; otherwise a
+			// persisted active session can be cleared before machine selection syncs.
+			return;
+		}
 		const isActiveInList = sessionList.some(
 			(session) => session.sessionId === activeSessionId,
 		);
 		if (!isActiveInList) {
 			chatActions.setActiveSessionId(undefined);
 		}
-	}, [activeSessionId, sessionList, chatActions.setActiveSessionId]);
+	}, [
+		activeSession,
+		activeSessionId,
+		selectedMachineId,
+		sessionList,
+		chatActions.setActiveSessionId,
+	]);
 
 	useEffect(() => {
 		if (!activeSession?.machineId || !activeSession.cwd) {

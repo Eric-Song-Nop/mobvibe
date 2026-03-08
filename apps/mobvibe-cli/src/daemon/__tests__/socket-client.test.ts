@@ -1,0 +1,237 @@
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import type { SessionEvent } from "@mobvibe/shared";
+import type { CliConfig } from "../../config.js";
+
+const socketHandlers = new Map<string, (...args: Array<unknown>) => void>();
+
+const socketMock = {
+	on: mock((event: string, handler: (...args: Array<unknown>) => void) => {
+		socketHandlers.set(event, handler);
+	}),
+	emit: mock(() => {}),
+	connect: mock(() => {}),
+	disconnect: mock(() => {}),
+	io: {
+		opts: {
+			extraHeaders: {},
+		},
+	},
+};
+
+mock.module("socket.io-client", () => ({
+	io: mock((_url: string, _options: unknown) => socketMock),
+}));
+
+mock.module("../../lib/logger.js", () => ({
+	logger: {
+		info: mock(() => {}),
+		debug: mock(() => {}),
+		warn: mock(() => {}),
+		error: mock(() => {}),
+	},
+}));
+
+const { SocketClient } = await import("../socket-client.js");
+
+const createConfig = (): CliConfig => ({
+	gatewayUrl: "http://localhost:3005",
+	clientName: "test-client",
+	clientVersion: "1.0.0",
+	acpBackends: [
+		{
+			id: "backend-1",
+			label: "Claude",
+			command: "claude",
+			args: [],
+		},
+	],
+	registryAgents: [],
+	homePath: "/tmp/mobvibe-test",
+	logPath: "/tmp/mobvibe-test/logs",
+	pidFile: "/tmp/mobvibe-test/daemon.pid",
+	walDbPath: "/tmp/mobvibe-test/events.db",
+	machineId: "machine-1",
+	hostname: "host-1",
+	platform: "darwin",
+	compaction: {
+		enabled: false,
+		ackedEventRetentionDays: 7,
+		keepLatestRevisionsCount: 2,
+		runOnStartup: false,
+		runIntervalHours: 24,
+		minEventsToKeep: 1000,
+	},
+	consolidation: {
+		enabled: false,
+	},
+	worktreeBaseDir: "/tmp/mobvibe-test/worktrees",
+});
+
+const createSessionEvent = (
+	overrides: Partial<SessionEvent> = {},
+): SessionEvent => ({
+	sessionId: "session-1",
+	machineId: "machine-1",
+	revision: 2,
+	seq: 4,
+	kind: "agent_message_chunk",
+	createdAt: new Date().toISOString(),
+	payload: {
+		sessionId: "session-1",
+		update: {
+			sessionUpdate: "agent_message_chunk",
+			content: { type: "text", text: "replayed" },
+		},
+	},
+	...overrides,
+});
+
+describe("SocketClient restore semantics", () => {
+	let client: InstanceType<typeof SocketClient>;
+	let sessionManager: {
+		backfillDiscoveredWorkspaceRoots: ReturnType<typeof mock>;
+		listAllSessions: ReturnType<typeof mock>;
+		listSessions: ReturnType<typeof mock>;
+		getSessionRevision: ReturnType<typeof mock>;
+		getUnackedEvents: ReturnType<typeof mock>;
+		ackEvents: ReturnType<typeof mock>;
+		onSessionsChanged: ReturnType<typeof mock>;
+		onSessionAttached: ReturnType<typeof mock>;
+		onSessionDetached: ReturnType<typeof mock>;
+		onPermissionRequest: ReturnType<typeof mock>;
+		onPermissionResult: ReturnType<typeof mock>;
+		onSessionEvent: ReturnType<typeof mock>;
+	};
+	let cryptoService: {
+		authKeyPair: { publicKey: Uint8Array; secretKey: Uint8Array };
+		encryptEvent: ReturnType<typeof mock>;
+		decryptRpcPayload: ReturnType<typeof mock>;
+		getWrappedDek: ReturnType<typeof mock>;
+	};
+
+	beforeEach(() => {
+		socketHandlers.clear();
+		socketMock.on.mockClear();
+		socketMock.emit.mockClear();
+		socketMock.connect.mockClear();
+		socketMock.disconnect.mockClear();
+		socketMock.io.opts.extraHeaders = {};
+
+		sessionManager = {
+			backfillDiscoveredWorkspaceRoots: mock(() => Promise.resolve()),
+			listAllSessions: mock(() => [{ sessionId: "session-1" }]),
+			listSessions: mock(() => [{ sessionId: "session-1" }]),
+			getSessionRevision: mock(() => 2),
+			getUnackedEvents: mock(() => [createSessionEvent()]),
+			ackEvents: mock(() => {}),
+			onSessionsChanged: mock(() => () => {}),
+			onSessionAttached: mock(() => () => {}),
+			onSessionDetached: mock(() => () => {}),
+			onPermissionRequest: mock(() => () => {}),
+			onPermissionResult: mock(() => () => {}),
+			onSessionEvent: mock(() => () => {}),
+		};
+
+		cryptoService = {
+			authKeyPair: {
+				publicKey: new Uint8Array(32),
+				secretKey: new Uint8Array(64),
+			},
+			encryptEvent: mock((event: SessionEvent) => ({
+				...event,
+				payload: { encrypted: true, originalSeq: event.seq },
+			})),
+			decryptRpcPayload: mock((_sessionId: string, data: unknown) => data),
+			getWrappedDek: mock(() => null),
+		};
+
+		client = new SocketClient({
+			config: createConfig(),
+			sessionManager: sessionManager as never,
+			cryptoService: cryptoService as never,
+		});
+	});
+
+	afterEach(() => {
+		client.disconnect();
+	});
+
+	test("replays unacked events after reconnect using the active revision", async () => {
+		(client as unknown as { reconnectAttempts: number }).reconnectAttempts = 1;
+
+		await (
+			socketHandlers.get("connect") as (() => Promise<void>) | undefined
+		)?.();
+
+		expect(sessionManager.getSessionRevision).toHaveBeenCalledWith("session-1");
+		expect(sessionManager.getUnackedEvents).toHaveBeenCalledWith(
+			"session-1",
+			2,
+		);
+		expect(cryptoService.encryptEvent).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: "session-1",
+				revision: 2,
+				seq: 4,
+			}),
+		);
+		expect(socketMock.emit).toHaveBeenCalledWith(
+			"session:event",
+			expect.objectContaining({
+				sessionId: "session-1",
+				revision: 2,
+				payload: { encrypted: true, originalSeq: 4 },
+			}),
+		);
+	});
+
+	test("does not replay events on the first successful connect", async () => {
+		(client as unknown as { reconnectAttempts: number }).reconnectAttempts = 0;
+
+		await (
+			socketHandlers.get("connect") as (() => Promise<void>) | undefined
+		)?.();
+
+		expect(sessionManager.getUnackedEvents).not.toHaveBeenCalled();
+		expect(socketMock.emit).not.toHaveBeenCalledWith(
+			"session:event",
+			expect.anything(),
+		);
+	});
+
+	test("acks replayed events through the session manager", () => {
+		const ackHandler = socketHandlers.get("events:ack");
+		if (!ackHandler) {
+			throw new Error("events:ack handler not registered");
+		}
+
+		ackHandler({
+			sessionId: "session-1",
+			revision: 2,
+			upToSeq: 4,
+		});
+
+		expect(sessionManager.ackEvents).toHaveBeenCalledWith("session-1", 2, 4);
+	});
+
+	test("skips replay for sessions without a current revision", async () => {
+		sessionManager.listSessions.mockReturnValue([
+			{ sessionId: "session-1" },
+			{ sessionId: "session-2" },
+		]);
+		sessionManager.getSessionRevision.mockImplementation((sessionId: string) =>
+			sessionId === "session-1" ? 2 : undefined,
+		);
+
+		(client as unknown as { reconnectAttempts: number }).reconnectAttempts = 1;
+		await (
+			socketHandlers.get("connect") as (() => Promise<void>) | undefined
+		)?.();
+
+		expect(sessionManager.getUnackedEvents).toHaveBeenCalledTimes(1);
+		expect(sessionManager.getUnackedEvents).toHaveBeenCalledWith(
+			"session-1",
+			2,
+		);
+	});
+});

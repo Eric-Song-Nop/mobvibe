@@ -1424,10 +1424,50 @@ describe("useChatStore", () => {
 
 				store.restoreSessionMessages("session-1", [], {
 					lastAppliedSeq: 25,
+					revision: 3,
 				});
 
 				const session = useChatStore.getState().sessions["session-1"];
 				expect(session.lastAppliedSeq).toBe(25);
+				expect(session.revision).toBe(3);
+			});
+
+			it("restores terminal output and streaming state from snapshot", () => {
+				const store = useChatStore.getState();
+				store.createLocalSession("session-1", { title: "Test" });
+				store.appendAssistantChunk("session-1", "partial");
+				store.appendThoughtChunk("session-1", "thinking");
+				store.appendTerminalOutput("session-1", {
+					terminalId: "term-1",
+					delta: "stdout",
+					truncated: false,
+				});
+
+				store.clearSessionMessages("session-1");
+				store.restoreSessionMessages("session-1", [], {
+					terminalOutputs: {
+						"term-1": {
+							terminalId: "term-1",
+							output: "stdout",
+							truncated: false,
+						},
+					},
+					streamingMessageId: "msg-stream",
+					streamingMessageRole: "assistant",
+					streamingThoughtId: "thought-stream",
+				});
+
+				const session = useChatStore.getState().sessions["session-1"];
+				expect(session.terminalOutputs).toEqual({
+					"term-1": {
+						terminalId: "term-1",
+						output: "stdout",
+						truncated: false,
+					},
+				});
+				expect(session.streamingMessageId).toBe("msg-stream");
+				expect(session.streamingMessageRole).toBe("assistant");
+				expect(session.streamingThoughtId).toBe("thought-stream");
 			});
 
 			it("preserves other session fields", () => {
