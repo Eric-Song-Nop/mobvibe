@@ -238,16 +238,16 @@ describe("ChatFooter", () => {
 		const onSend = vi.fn();
 		const session = buildSession();
 
-			useUiStore.getState().setChatDraft(session.sessionId, {
-				input: "",
-				inputContents: [
-					{
-						type: "resource_link",
-						uri: "file:///repo/README.md",
-						name: "README.md",
-					},
-				],
-			});
+		useUiStore.getState().setChatDraft(session.sessionId, {
+			input: "",
+			inputContents: [
+				{
+					type: "resource_link",
+					uri: "file:///repo/README.md",
+					name: "README.md",
+				},
+			],
+		});
 
 		renderFooter(session, { onSend });
 
