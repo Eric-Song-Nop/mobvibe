@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as apiModule from "@/lib/api";
@@ -29,12 +29,16 @@ const mockUiStoreState = vi.hoisted(() => ({
 	editingTitle: "",
 }));
 
+const mockChatStoreState = vi.hoisted(() => ({
+	sessions: {} as Record<string, ChatSession>,
+}));
+
 vi.mock("@/lib/chat-store", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/lib/chat-store")>();
 	return {
 		...actual,
 		useChatStore: {
-			getState: () => ({ sessions: {} }),
+			getState: () => mockChatStoreState,
 		},
 	};
 });
@@ -161,6 +165,7 @@ describe("useSessionHandlers — handleOpenCreateDialog", () => {
 		mockUiStoreState.draftWorktreeBaseBranch = undefined;
 		mockUiStoreState.editingSessionId = undefined;
 		mockUiStoreState.editingTitle = "";
+		mockChatStoreState.sessions = {};
 		vi.clearAllMocks();
 	});
 
@@ -433,5 +438,185 @@ describe("useSessionHandlers — handleCreateSession", () => {
 				scope: "request",
 			}),
 		);
+	});
+});
+
+describe("useSessionHandlers — sync and force reload", () => {
+	let queryClient: QueryClient;
+	let uiActions: ReturnType<typeof createMockUiActions>;
+	let chatActions: ReturnType<typeof createMockChatActions>;
+	let mutations: ReturnType<typeof createMockMutations>;
+
+	const wrapper = ({ children }: { children: ReactNode }) => (
+		<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+	);
+
+	const renderHandlers = (
+		overrides: Partial<UseSessionHandlersParams> = {},
+	) => {
+		const defaults: UseSessionHandlersParams = {
+			sessions: {},
+			activeSessionId: "session-1",
+			activeSession: createBaseSession(),
+			sessionList: [],
+			selectedMachineId: "machine-1",
+			lastCreatedCwd: {},
+			machines: {
+				"machine-1": {
+					machineId: "machine-1",
+					hostname: "dev-box",
+					connected: true,
+					backendCapabilities: {
+						"backend-1": {
+							list: true,
+							load: true,
+						},
+					},
+				} as Machine,
+			},
+			defaultBackendId: "backend-1",
+			effectiveWorkspaceCwd: undefined,
+			chatActions,
+			uiActions,
+			mutations,
+			activateSession: vi.fn(async () => undefined),
+			isActivating: false,
+			syncSessionHistory: vi.fn(),
+		};
+
+		return renderHook(() => useSessionHandlers({ ...defaults, ...overrides }), {
+			wrapper,
+		});
+	};
+
+	beforeEach(() => {
+		queryClient = new QueryClient({
+			defaultOptions: { mutations: { retry: false } },
+		});
+		uiActions = createMockUiActions();
+		chatActions = createMockChatActions();
+		mutations = createMockMutations();
+		mockChatStoreState.sessions = {};
+		vi.clearAllMocks();
+	});
+
+	it("syncs history for the active session", () => {
+		const syncSessionHistory = vi.fn();
+		const { result } = renderHandlers({ syncSessionHistory });
+
+		result.current.handleSyncHistory();
+
+		expect(syncSessionHistory).toHaveBeenCalledWith("session-1");
+	});
+
+	it("does not sync history when there is no active session", () => {
+		const syncSessionHistory = vi.fn();
+		const { result } = renderHandlers({
+			activeSessionId: undefined,
+			activeSession: undefined,
+			syncSessionHistory,
+		});
+
+		result.current.handleSyncHistory();
+
+		expect(syncSessionHistory).not.toHaveBeenCalled();
+	});
+
+	it("force reloads the latest session snapshot", async () => {
+		const activeSession = createBaseSession({
+			title: "Stale title",
+			sending: false,
+		});
+		const latestSession = createBaseSession({
+			title: "Latest title",
+			sending: false,
+		});
+		mockChatStoreState.sessions = {
+			"session-1": latestSession,
+		};
+		const activateSession = vi.fn(async () => undefined);
+		const { result } = renderHandlers({
+			activeSession,
+			activateSession,
+		});
+
+		await act(async () => {
+			await result.current.handleForceReload();
+		});
+
+		expect(activateSession).toHaveBeenCalledWith(latestSession, {
+			force: true,
+		});
+		expect(mutations.cancelSessionMutation.mutateAsync).not.toHaveBeenCalled();
+	});
+
+	it("cancels an active send before force reload", async () => {
+		const activeSession = createBaseSession({
+			sending: true,
+			canceling: false,
+			isAttached: true,
+		});
+		mockChatStoreState.sessions = {
+			"session-1": activeSession,
+		};
+		const activateSession = vi.fn(async () => undefined);
+		vi.mocked(mutations.cancelSessionMutation.mutateAsync).mockResolvedValue({
+			sessionId: "session-1",
+		});
+		const { result } = renderHandlers({
+			activeSession,
+			activateSession,
+		});
+
+		await act(async () => {
+			await result.current.handleForceReload();
+		});
+
+		expect(mutations.cancelSessionMutation.mutateAsync).toHaveBeenCalledWith({
+			sessionId: "session-1",
+		});
+		expect(activateSession).toHaveBeenCalledWith(activeSession, {
+			force: true,
+		});
+	});
+
+	it("does not force reload while already loading", async () => {
+		const activateSession = vi.fn(async () => undefined);
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({ isLoading: true }),
+			activateSession,
+		});
+
+		await act(async () => {
+			await result.current.handleForceReload();
+		});
+
+		expect(activateSession).not.toHaveBeenCalled();
+	});
+
+	it("does not force reload when backend load is unsupported", async () => {
+		const activateSession = vi.fn(async () => undefined);
+		const { result } = renderHandlers({
+			machines: {
+				"machine-1": {
+					machineId: "machine-1",
+					hostname: "dev-box",
+					connected: true,
+					backendCapabilities: {
+						"backend-1": {
+							list: true,
+							load: false,
+						},
+					},
+				} as Machine,
+			},
+			activateSession,
+		});
+
+		await act(async () => {
+			await result.current.handleForceReload();
+		});
+
+		expect(activateSession).not.toHaveBeenCalled();
 	});
 });

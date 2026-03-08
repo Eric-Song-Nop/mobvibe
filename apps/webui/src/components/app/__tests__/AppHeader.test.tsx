@@ -56,11 +56,10 @@ vi.mock("@/components/plan/plan-indicator", () => ({
 vi.mock("@/components/ui/alert-dialog", () => ({
 	AlertDialog: ({
 		children,
-		open,
 	}: {
 		children: React.ReactNode;
 		open?: boolean;
-	}) => (open ? <div data-testid="alert-dialog">{children}</div> : null),
+	}) => <div data-testid="alert-dialog">{children}</div>,
 	AlertDialogContent: ({ children }: { children: React.ReactNode }) => (
 		<div data-testid="alert-dialog-content">{children}</div>
 	),
@@ -256,6 +255,51 @@ describe("AppHeader", () => {
 		it("shows sync history button when enabled", () => {
 			renderAppHeader({ showSyncHistory: true });
 			expect(screen.getByLabelText("Sync History")).toBeInTheDocument();
+		});
+
+		it("calls onSyncHistory when sync history is clicked", async () => {
+			const onSyncHistory = vi.fn();
+			const user = userEvent.setup();
+			renderAppHeader({ showSyncHistory: true, onSyncHistory });
+
+			await user.click(screen.getByLabelText("Sync History"));
+
+			expect(onSyncHistory).toHaveBeenCalledTimes(1);
+		});
+
+		it("disables sync history button when requested", () => {
+			renderAppHeader({ showSyncHistory: true, syncHistoryDisabled: true });
+			expect(screen.getByLabelText("Sync History")).toBeDisabled();
+		});
+
+		it("shows force reload button when enabled", () => {
+			renderAppHeader({ showForceReload: true });
+			expect(screen.getByLabelText("Force Reload")).toBeInTheDocument();
+		});
+
+		it("calls onForceReload only when confirm is clicked", async () => {
+			const onForceReload = vi.fn();
+			const user = userEvent.setup();
+			renderAppHeader({ showForceReload: true, onForceReload });
+
+			await user.click(screen.getByTestId("alert-dialog-action"));
+
+			expect(onForceReload).toHaveBeenCalledTimes(1);
+		});
+
+		it("does not call onForceReload when cancel is clicked", async () => {
+			const onForceReload = vi.fn();
+			const user = userEvent.setup();
+			renderAppHeader({ showForceReload: true, onForceReload });
+
+			await user.click(screen.getByTestId("alert-dialog-cancel"));
+
+			expect(onForceReload).not.toHaveBeenCalled();
+		});
+
+		it("disables force reload button when requested", () => {
+			renderAppHeader({ showForceReload: true, forceReloadDisabled: true });
+			expect(screen.getByLabelText("Force Reload")).toBeDisabled();
 		});
 
 		it("shows file explorer button when enabled", () => {

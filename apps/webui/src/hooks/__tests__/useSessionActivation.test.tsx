@@ -285,6 +285,51 @@ describe("useSessionActivation", () => {
 		expect(store.setSessionLoading).toHaveBeenCalledWith("session-1", false);
 	});
 
+	it("does not switch active session before a detached session finishes loading", async () => {
+		const store = createStore();
+		const session = buildSession({
+			sessionId: "session-2",
+			title: "Session 2",
+			cwd: "/home/user/project",
+			machineId: "machine-1",
+			backendId: "backend-1",
+		});
+		mockChatStoreState.sessions[session.sessionId] = session;
+
+		machinesState = {
+			machines: {
+				"machine-1": {
+					connected: true,
+					backendCapabilities: {
+						"backend-1": { list: true, load: true },
+					},
+				},
+			},
+			updateBackendCapabilities: vi.fn(),
+		};
+
+		let resolveLoad: (() => void) | undefined;
+		loadSessionMutation.mutateAsync.mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					resolveLoad = () => resolve({ sessionId: "session-2" });
+				}),
+		);
+
+		const { result } = renderHook(() => useSessionActivation(store));
+
+		const pending = act(async () => {
+			await result.current.activateSession(session);
+		});
+
+		expect(store.setActiveSessionId).not.toHaveBeenCalled();
+
+		resolveLoad?.();
+		await pending;
+
+		expect(store.setActiveSessionId).toHaveBeenCalledWith("session-2");
+	});
+
 	it("uses reload when forcing activation", async () => {
 		const store = createStore();
 		const session = buildSession({

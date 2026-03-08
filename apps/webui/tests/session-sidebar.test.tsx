@@ -307,6 +307,37 @@ describe("SessionSidebar", () => {
 		).toBeInTheDocument();
 	});
 
+	it("shows loading status for the session targeted by load mutation", () => {
+		renderSidebar(
+			[
+				buildSession({
+					sessionId: "session-a",
+					title: "Session A",
+					isAttached: true,
+				}),
+				buildSession({
+					sessionId: "session-b",
+					title: "Session B",
+					isAttached: false,
+				}),
+			],
+			{
+				mutations: {
+					loadSessionPending: true,
+					loadSessionVariables: { sessionId: "session-b" },
+					reloadSessionPending: false,
+					reloadSessionVariables: undefined,
+				},
+			},
+		);
+
+		expect(
+			screen.getByText(i18n.t("session.status.loading")),
+		).toBeInTheDocument();
+		expect(screen.getByText("Session A")).toBeInTheDocument();
+		expect(screen.getByText("Session B")).toBeInTheDocument();
+	});
+
 	it("shows detached reason in tooltip", () => {
 		renderSidebar([
 			buildSession({
