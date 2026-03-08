@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { createServer } from "node:http";
 import type { Duplex } from "node:stream";
+import { URL } from "node:url";
 import { toNodeHandler } from "better-auth/node";
 import cors from "cors";
 import express, { type Express } from "express";
@@ -29,6 +30,23 @@ import { setupWebuiHandlers } from "./socket/webui-handlers.js";
 
 const config = getGatewayConfig();
 const allowedOrigins = [...config.corsOrigins, ...tauriOrigins];
+
+const extractUpgradeBearerToken = (
+	request: IncomingMessage,
+): string | undefined => {
+	const authHeader = request.headers.authorization;
+	if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+		return authHeader.slice("Bearer ".length);
+	}
+
+	if (!request.url) {
+		return undefined;
+	}
+
+	const url = new URL(request.url, "http://localhost");
+	const token = url.searchParams.get("bearerToken");
+	return token ?? undefined;
+};
 
 const isAllowedOrigin = (origin: string): boolean => {
 	if (allowedOrigins.includes("*")) {
@@ -137,9 +155,15 @@ httpServer.on(
 		if (userAffinity) {
 			try {
 				const cookies = req.headers.cookie;
-				if (cookies) {
+				const bearerToken = extractUpgradeBearerToken(req);
+				if (cookies || bearerToken) {
 					const headers = new Headers();
-					headers.set("cookie", cookies);
+					if (bearerToken) {
+						headers.set("authorization", `Bearer ${bearerToken}`);
+					} else if (cookies) {
+						headers.set("cookie", cookies);
+					}
+
 					const session = await auth.api.getSession({ headers });
 					const userId = session?.user?.id;
 					if (userId) {
@@ -149,7 +173,7 @@ httpServer.on(
 								{
 									userId,
 									targetInstance: target.instanceId,
-									path: req.url,
+									path: "/socket.io",
 								},
 								"ws_upgrade_fly_replay",
 							);
@@ -331,6 +355,7 @@ if (userAffinity) {
 		userAffinity,
 		config.instanceId,
 	);
+	app.use("/api/machines", replayMiddleware);
 	app.use("/acp", replayMiddleware);
 	app.use("/fs", replayMiddleware);
 }

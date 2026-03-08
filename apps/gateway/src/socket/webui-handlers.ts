@@ -92,7 +92,11 @@ export function setupWebuiHandlers(
 	// Authenticate WebSocket connections before allowing them
 	webuiNamespace.use(async (socket, next) => {
 		try {
-			const token = socket.handshake.auth?.token as string | undefined;
+			const token =
+				(socket.handshake.auth?.token as string | undefined) ??
+				(typeof socket.handshake.query.bearerToken === "string"
+					? socket.handshake.query.bearerToken
+					: undefined);
 			const cookies = socket.handshake.headers.cookie;
 
 			if (!token && !cookies) {

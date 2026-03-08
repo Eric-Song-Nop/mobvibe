@@ -115,6 +115,7 @@ describe("gatewaySocket connect() auth branches", () => {
 			expect.objectContaining({
 				transports: ["websocket"],
 				auth: { token: "tauri-test-token" },
+				query: { bearerToken: "tauri-test-token" },
 			}),
 		);
 		const callOpts = mockIo.mock.calls[0][1];

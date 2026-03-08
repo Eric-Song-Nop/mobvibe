@@ -68,6 +68,7 @@ describe("webui-handlers auth middleware", () => {
 			id: "socket-1",
 			handshake: {
 				auth: { token: "valid-bearer-token" },
+				query: {},
 				headers: {},
 			},
 			data: {} as Record<string, unknown>,
@@ -95,6 +96,7 @@ describe("webui-handlers auth middleware", () => {
 			id: "socket-2",
 			handshake: {
 				auth: {},
+				query: {},
 				headers: { cookie: "session=abc123" },
 			},
 			data: {} as Record<string, unknown>,
@@ -118,6 +120,7 @@ describe("webui-handlers auth middleware", () => {
 			id: "socket-3",
 			handshake: {
 				auth: { token: "bearer-token" },
+				query: {},
 				headers: { cookie: "session=abc123" },
 			},
 			data: {} as Record<string, unknown>,
@@ -133,11 +136,35 @@ describe("webui-handlers auth middleware", () => {
 		expect(next).toHaveBeenCalledWith();
 	});
 
+	it("authenticates with bearer token from query when auth payload is unavailable", async () => {
+		mockGetSession.mockResolvedValue({
+			user: { id: "user-4", email: "query@example.com" },
+		});
+		const socket = {
+			id: "socket-query",
+			handshake: {
+				auth: {},
+				query: { bearerToken: "query-token" },
+				headers: {},
+			},
+			data: {} as Record<string, unknown>,
+		};
+		const next = vi.fn();
+
+		await authMiddleware(socket, next);
+
+		const callHeaders = mockGetSession.mock.calls[0][0].headers as Headers;
+		expect(callHeaders.get("authorization")).toBe("Bearer query-token");
+		expect(socket.data.userId).toBe("user-4");
+		expect(next).toHaveBeenCalledWith();
+	});
+
 	it("rejects when no token and no cookie", async () => {
 		const socket = {
 			id: "socket-4",
 			handshake: {
 				auth: {},
+				query: {},
 				headers: {},
 			},
 			data: {} as Record<string, unknown>,
@@ -157,6 +184,7 @@ describe("webui-handlers auth middleware", () => {
 			id: "socket-5",
 			handshake: {
 				auth: { token: "expired-token" },
+				query: {},
 				headers: {},
 			},
 			data: {} as Record<string, unknown>,
@@ -175,6 +203,7 @@ describe("webui-handlers auth middleware", () => {
 			id: "socket-6",
 			handshake: {
 				auth: { token: "bad-token" },
+				query: {},
 				headers: {},
 			},
 			data: {} as Record<string, unknown>,
@@ -193,6 +222,7 @@ describe("webui-handlers auth middleware", () => {
 			id: "socket-7",
 			handshake: {
 				auth: { token: "some-token" },
+				query: {},
 				headers: {},
 			},
 			data: {} as Record<string, unknown>,

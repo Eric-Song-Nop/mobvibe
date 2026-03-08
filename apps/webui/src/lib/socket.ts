@@ -32,6 +32,7 @@ class GatewaySocket {
 
 		this.isConnecting = true;
 		const tauriEnv = isInTauri();
+		const authToken = tauriEnv ? getAuthToken() : null;
 		this.socket = io(`${GATEWAY_URL}/webui`, {
 			path: "/socket.io",
 			reconnection: true,
@@ -41,7 +42,12 @@ class GatewaySocket {
 			autoConnect: true,
 			transports: ["websocket"],
 			...(tauriEnv
-				? { auth: { token: getAuthToken() } }
+				? {
+						auth: { token: authToken },
+						// Mirror the bearer token into the Engine.IO query so the gateway
+						// can apply Fly affinity before the WebSocket upgrade completes.
+						query: authToken ? { bearerToken: authToken } : undefined,
+					}
 				: { withCredentials: true }),
 		});
 
