@@ -37,6 +37,59 @@ export const normalizeCode = (code: string) => {
 export const getGruvboxTheme = (mode: "light" | "dark") =>
 	mode === "dark" ? themes.gruvboxMaterialDark : themes.gruvboxMaterialLight;
 
+export type CodeAccent =
+	| "red"
+	| "orange"
+	| "yellow"
+	| "green"
+	| "aqua"
+	| "blue"
+	| "purple"
+	| "muted";
+
+type ColorfulCodeAccent = Exclude<CodeAccent, "muted">;
+
+const codeAccentTextClassNames: Record<CodeAccent, string> = {
+	red: "text-code-red",
+	orange: "text-code-orange",
+	yellow: "text-code-yellow",
+	green: "text-code-green",
+	aqua: "text-code-aqua",
+	blue: "text-code-blue",
+	purple: "text-code-purple",
+	muted: "text-code-muted",
+};
+
+const codeAccentFillClassNames: Record<CodeAccent, string> = {
+	red: "bg-code-red",
+	orange: "bg-code-orange",
+	yellow: "bg-code-yellow",
+	green: "bg-code-green",
+	aqua: "bg-code-aqua",
+	blue: "bg-code-blue",
+	purple: "bg-code-purple",
+	muted: "bg-code-muted",
+};
+
+const codeAccentSoftBackgroundClassNames: Record<ColorfulCodeAccent, string> = {
+	red: "bg-code-red/10",
+	orange: "bg-code-orange/10",
+	yellow: "bg-code-yellow/10",
+	green: "bg-code-green/10",
+	aqua: "bg-code-aqua/10",
+	blue: "bg-code-blue/10",
+	purple: "bg-code-purple/10",
+};
+
+export const getCodeAccentTextClass = (accent: CodeAccent) =>
+	codeAccentTextClassNames[accent];
+
+export const getCodeAccentFillClass = (accent: CodeAccent) =>
+	codeAccentFillClassNames[accent];
+
+export const getCodeAccentSoftBackgroundClass = (accent: ColorfulCodeAccent) =>
+	codeAccentSoftBackgroundClassNames[accent];
+
 const prismLanguageFallbacks: Record<string, string[]> = {
 	astro: ["tsx", "jsx", "markup"],
 	bash: ["python"],

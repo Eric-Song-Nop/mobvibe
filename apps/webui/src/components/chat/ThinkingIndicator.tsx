@@ -1,5 +1,6 @@
 import { memo, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { getCodeAccentTextClass } from "@/lib/code-highlight";
 
 const THINKING_VERBS = [
 	"Pondering",
@@ -38,7 +39,7 @@ export const ThinkingIndicator = memo(function ThinkingIndicator({
 
 	return (
 		<output
-			className="flex items-center gap-1.5 px-0 py-2 text-amber-500"
+			className={`flex items-center gap-1.5 px-0 py-2 ${getCodeAccentTextClass("yellow")}`}
 			aria-label={
 				isThinking ? t("chat.agentThinking") : t("chat.agentResponding")
 			}

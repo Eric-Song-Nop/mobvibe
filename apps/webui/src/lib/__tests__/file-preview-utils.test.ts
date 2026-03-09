@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	resolveFileNameFromPath,
+	resolveFileTypeLabelColor,
 	resolveLanguageFromPath,
 } from "../file-preview-utils";
 
@@ -34,6 +35,22 @@ describe("file-preview-utils", () => {
 
 		it("returns original value when no separators exist", () => {
 			expect(resolveFileNameFromPath("demo.txt")).toBe("demo.txt");
+		});
+	});
+
+	describe("resolveFileTypeLabelColor", () => {
+		it("maps code file labels to shared gruvbox utility classes", () => {
+			expect(resolveFileTypeLabelColor("/tmp/file.ts")).toBe("text-code-blue");
+			expect(resolveFileTypeLabelColor("/tmp/file.js")).toBe(
+				"text-code-yellow",
+			);
+			expect(resolveFileTypeLabelColor("/tmp/file.py")).toBe("text-code-green");
+		});
+
+		it("falls back to the shared muted code tone when no mapping exists", () => {
+			expect(resolveFileTypeLabelColor("/tmp/file.toml")).toBe(
+				"text-code-muted",
+			);
 		});
 	});
 });

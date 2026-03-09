@@ -1,18 +1,19 @@
 import type { GitFileStatus } from "@/lib/api";
+import { type CodeAccent, getCodeAccentTextClass } from "@/lib/code-highlight";
 import { cn } from "@/lib/utils";
 
 export const GIT_STATUS_CONFIG: Record<
 	GitFileStatus,
-	{ label: string; className: string }
+	{ label: string; accent: CodeAccent }
 > = {
-	M: { label: "Modified", className: "text-amber-500" },
-	A: { label: "Added", className: "text-green-500" },
-	D: { label: "Deleted", className: "text-red-500" },
-	"?": { label: "Untracked", className: "text-blue-400" },
-	R: { label: "Renamed", className: "text-purple-500" },
-	C: { label: "Copied", className: "text-cyan-500" },
-	U: { label: "Unmerged", className: "text-orange-500" },
-	"!": { label: "Ignored", className: "text-gray-400" },
+	M: { label: "Modified", accent: "yellow" },
+	A: { label: "Added", accent: "green" },
+	D: { label: "Deleted", accent: "red" },
+	"?": { label: "Untracked", accent: "blue" },
+	R: { label: "Renamed", accent: "purple" },
+	C: { label: "Copied", accent: "aqua" },
+	U: { label: "Unmerged", accent: "orange" },
+	"!": { label: "Ignored", accent: "muted" },
 };
 
 export function GitStatusIndicator({ status }: { status: GitFileStatus }) {
@@ -21,7 +22,7 @@ export function GitStatusIndicator({ status }: { status: GitFileStatus }) {
 		<span
 			className={cn(
 				"ml-auto shrink-0 text-[0.65rem] font-medium",
-				config.className,
+				getCodeAccentTextClass(config.accent),
 			)}
 			title={config.label}
 		>

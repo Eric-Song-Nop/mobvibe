@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { resolvePrismLanguage } from "../code-highlight";
+import {
+	getCodeAccentFillClass,
+	getCodeAccentSoftBackgroundClass,
+	getCodeAccentTextClass,
+	resolvePrismLanguage,
+} from "../code-highlight";
 
 describe("code-highlight", () => {
 	describe("resolvePrismLanguage", () => {
@@ -19,6 +24,22 @@ describe("code-highlight", () => {
 
 		it("falls back to text for unknown input", () => {
 			expect(resolvePrismLanguage("not-a-real-language")).toBe("text");
+		});
+	});
+
+	describe("code accent helpers", () => {
+		it("returns shared gruvbox utility classes for text and fills", () => {
+			expect(getCodeAccentTextClass("blue")).toBe("text-code-blue");
+			expect(getCodeAccentTextClass("muted")).toBe("text-code-muted");
+			expect(getCodeAccentFillClass("green")).toBe("bg-code-green");
+			expect(getCodeAccentFillClass("red")).toBe("bg-code-red");
+		});
+
+		it("returns shared tinted background utilities for diff-style accents", () => {
+			expect(getCodeAccentSoftBackgroundClass("green")).toBe(
+				"bg-code-green/10",
+			);
+			expect(getCodeAccentSoftBackgroundClass("red")).toBe("bg-code-red/10");
 		});
 	});
 });

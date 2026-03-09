@@ -46,7 +46,7 @@ function resolveOverallStatus(
 	counts: StatusCounts,
 ): ToolCallStatus | undefined {
 	if (counts.failed > 0) return "failed";
-	if (counts.pending > 0) return undefined;
+	if (counts.pending > 0) return "in_progress";
 	return "completed";
 }
 
