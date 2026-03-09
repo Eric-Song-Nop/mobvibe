@@ -85,55 +85,55 @@ export function LegalDocumentPage({ documentId }: LegalDocumentPageProps) {
 					</div>
 				</header>
 
-				<div className="mb-8 grid gap-4 lg:grid-cols-[1.5fr_1fr]">
-					<section className="border border-border/70 bg-background/94 p-4 backdrop-blur">
-						<p className="mb-3 text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
-							{t("legal.otherPolicies")}
-						</p>
-						<div className="flex flex-wrap gap-2">
-							{legalDocuments.map((item) => (
-								<Button
-									key={item.id}
-									variant={item.id === document.id ? "default" : "outline"}
-									size="sm"
-									asChild
-								>
-									<a href={item.slug}>{t(`legal.links.${item.id}`)}</a>
-								</Button>
-							))}
-						</div>
-					</section>
-
-					<section className="grid gap-4 border border-border/70 bg-background/94 p-4 backdrop-blur sm:grid-cols-2 lg:grid-cols-1">
-						<TableOfContents
-							title={t("legal.english")}
+				<main id="legal-content" className="grid gap-6">
+					<div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start">
+						<LocaleArticle
+							localeLabel={t("legal.english")}
+							title={document.locales.en.title}
+							summary={document.locales.en.summary}
 							sections={document.locales.en.sections}
 							prefix="en"
 						/>
-						<TableOfContents
-							title={t("legal.chinese")}
+						<aside className="border border-border/70 bg-background/94 p-4 backdrop-blur lg:sticky lg:top-5">
+							<TableOfContents
+								title={t("legal.english")}
+								sections={document.locales.en.sections}
+								prefix="en"
+							/>
+						</aside>
+					</div>
+					<div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start">
+						<LocaleArticle
+							localeLabel={t("legal.chinese")}
+							title={document.locales.zh.title}
+							summary={document.locales.zh.summary}
 							sections={document.locales.zh.sections}
 							prefix="zh"
 						/>
-					</section>
-				</div>
-
-				<main id="legal-content" className="grid gap-6">
-					<LocaleArticle
-						localeLabel={t("legal.english")}
-						title={document.locales.en.title}
-						summary={document.locales.en.summary}
-						sections={document.locales.en.sections}
-						prefix="en"
-					/>
-					<LocaleArticle
-						localeLabel={t("legal.chinese")}
-						title={document.locales.zh.title}
-						summary={document.locales.zh.summary}
-						sections={document.locales.zh.sections}
-						prefix="zh"
-					/>
+						<aside className="border border-border/70 bg-background/94 p-4 backdrop-blur lg:sticky lg:top-5">
+							<TableOfContents
+								title={t("legal.chinese")}
+								sections={document.locales.zh.sections}
+								prefix="zh"
+							/>
+						</aside>
+					</div>
 				</main>
+
+				<footer className="mt-8 border border-border/70 bg-background/94 p-4 backdrop-blur">
+					<p className="mb-3 text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
+						{t("legal.otherPolicies")}
+					</p>
+					<div className="flex flex-wrap gap-2">
+						{legalDocuments
+							.filter((item) => item.id !== document.id)
+							.map((item) => (
+								<Button key={item.id} variant="outline" size="sm" asChild>
+									<a href={item.slug}>{t(`legal.links.${item.id}`)}</a>
+								</Button>
+							))}
+					</div>
+				</footer>
 			</div>
 		</div>
 	);

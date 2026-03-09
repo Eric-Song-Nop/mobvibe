@@ -9,6 +9,7 @@
 	"header": {
 		"toggleMenu": "切换菜单",
 		"github": "GitHub",
+		"pricing": "定价",
 		"getStarted": "开始使用"
 	},
 	"sidebar": {
@@ -47,7 +48,7 @@
 		"operator": "运营者",
 		"contact": "法律联系邮箱",
 		"otherPolicies": "其他政策",
-		"outline": "页面目录",
+		"outline": "提纲",
 		"english": "English",
 		"chinese": "中文",
 		"navigation": "法律链接",
@@ -68,6 +69,62 @@
 		"androidApk": "Android APK",
 		"close": "关闭",
 		"viewOnGitHub": "在 GitHub 上查看"
+	},
+	"pricing": {
+		"badge": "定价",
+		"title": "所有功能都可免费使用。Pro 只为无限活跃机器而设。",
+		"description": "Mobvibe 在免费层也提供完整产品能力。你可以继续使用 Free 并保留 1 台活跃机器；如果需要无限活跃机器，再以每月 {{price}} 升级到 Pro。",
+		"footnote": "最终税费和区域价格会在结账时显示。Mobvibe 订阅通过 Paddle 计费。",
+		"includedLabel": "包含内容",
+		"legalEyebrow": "公开政策",
+		"legalTitle": "计费与政策信息保持公开可见",
+		"legalDescription": "Mobvibe 的付费订阅通过 Paddle 处理。隐私、计费条款、自动续费和退款规则，都在下方公开政策中说明。",
+		"policyCta": "查看条款",
+		"facts": {
+			"provider": {
+				"label": "计费服务商",
+				"value": "Paddle 负责结账、收据、税费处理和订阅管理。"
+			},
+			"renewal": {
+				"label": "续费方式",
+				"value": "Pro 为按月订阅，若未在下一个账单日之前取消，将自动续费。"
+			},
+			"taxes": {
+				"label": "税费与退款",
+				"value": "最终金额可能因地区而异。退款规则以 Mobvibe 退款政策为准。"
+			}
+		},
+		"free": {
+			"name": "Free",
+			"tagline": "包含全部功能",
+			"price": "$0",
+			"interval": "永久免费",
+			"summary": "全部功能，1 台活跃机器",
+			"cta": "开始使用",
+			"features": [
+				"包含全部 Mobvibe 功能",
+				"1 台活跃机器",
+				"可从 Web、桌面端和移动端访问",
+				"实时流式、文件浏览和 Git 工具",
+				"支持端到端加密与自托管工作流"
+			]
+		},
+		"pro": {
+			"name": "Pro",
+			"tagline": "同样的产品，没有机器上限",
+			"highlight": "最实用",
+			"price": "{{price}}",
+			"interval": "每月",
+			"summary": "全部功能，无限活跃机器",
+			"cta": "打开应用",
+			"features": [
+				"包含全部 Mobvibe 功能",
+				"无限活跃机器",
+				"工作站、云端 VM 和备用机器可同时使用",
+				"在所有设备上获得同样安全的 Mobvibe 体验",
+				"通过 Paddle 计费"
+			]
+		}
 	},
 	"features": {
 		"what-is-mobvibe": {

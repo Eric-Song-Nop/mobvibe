@@ -1,4 +1,5 @@
 import { getLegalDocumentByPath, legalDocuments } from "@/lib/legal-data";
+import { PRO_MONTHLY_PRICE_DISPLAY } from "@/lib/pricing";
 
 const siteUrl = "https://mobvibe.net";
 
@@ -22,6 +23,11 @@ export type WebsitePage =
 			pathname: `/${string}`;
 			documentId: (typeof legalDocuments)[number]["id"];
 			meta: WebsitePageMeta;
+	  }
+	| {
+			kind: "pricing";
+			pathname: "/pricing";
+			meta: WebsitePageMeta;
 	  };
 
 const homeMeta: WebsitePageMeta = {
@@ -35,6 +41,15 @@ const homeMeta: WebsitePageMeta = {
 	ogUrl: `${siteUrl}/`,
 };
 
+const pricingMeta: WebsitePageMeta = {
+	title: "Mobvibe Pricing - Free and Pro Plans",
+	description: `All Mobvibe features are available on the free tier with 1 active machine. Upgrade to Pro for ${PRO_MONTHLY_PRICE_DISPLAY}/month if you need unlimited active machines. Billing is handled through Paddle.`,
+	canonicalUrl: `${siteUrl}/pricing`,
+	ogTitle: "Mobvibe Pricing - Free and Pro Plans",
+	ogDescription: `All features are included on Free with 1 active machine. Upgrade to Pro for ${PRO_MONTHLY_PRICE_DISPLAY}/month for unlimited active machines.`,
+	ogUrl: `${siteUrl}/pricing`,
+};
+
 const normalizePath = (pathname?: string) => {
 	if (!pathname || pathname === "/") {
 		return "/";
@@ -45,6 +60,15 @@ const normalizePath = (pathname?: string) => {
 
 export const resolveWebsitePage = (pathname?: string): WebsitePage => {
 	const normalizedPath = normalizePath(pathname);
+
+	if (normalizedPath === "/pricing") {
+		return {
+			kind: "pricing",
+			pathname: "/pricing",
+			meta: pricingMeta,
+		};
+	}
+
 	const legalDocument = getLegalDocumentByPath(normalizedPath);
 
 	if (!legalDocument) {
@@ -72,5 +96,6 @@ export const resolveWebsitePage = (pathname?: string): WebsitePage => {
 
 export const websitePrerenderPaths = [
 	"/",
+	"/pricing",
 	...legalDocuments.map((document) => document.slug),
 ];

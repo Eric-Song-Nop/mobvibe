@@ -9,6 +9,7 @@
 	"header": {
 		"toggleMenu": "Toggle menu",
 		"github": "GitHub",
+		"pricing": "Pricing",
 		"getStarted": "Get Started"
 	},
 	"sidebar": {
@@ -46,7 +47,7 @@
 		"operator": "Operator",
 		"contact": "Legal contact",
 		"otherPolicies": "Other policies",
-		"outline": "On this page",
+		"outline": "Outline",
 		"english": "English",
 		"chinese": "Chinese",
 		"navigation": "Legal links",
@@ -67,6 +68,62 @@
 		"androidApk": "Android APK",
 		"close": "Close",
 		"viewOnGitHub": "View on GitHub"
+	},
+	"pricing": {
+		"badge": "Pricing",
+		"title": "All features are free. Pro is only for unlimited active machines.",
+		"description": "Mobvibe keeps the full product available on the free tier. Stay on Free for 1 active machine, or upgrade to Pro for {{price}}/month when you want unlimited active machines.",
+		"footnote": "Taxes and region-specific totals may appear at checkout. Mobvibe subscriptions are billed through Paddle.",
+		"includedLabel": "Included",
+		"legalEyebrow": "Public policies",
+		"legalTitle": "Billing and policy details stay public",
+		"legalDescription": "Mobvibe subscriptions are billed through Paddle. Privacy, billing terms, auto-renewal, and refunds are described in the public policies below.",
+		"policyCta": "Review Terms",
+		"facts": {
+			"provider": {
+				"label": "Billing provider",
+				"value": "Paddle handles checkout, receipts, taxes, and subscription management."
+			},
+			"renewal": {
+				"label": "Renewal",
+				"value": "Pro renews monthly until canceled before the next billing date."
+			},
+			"taxes": {
+				"label": "Taxes and refunds",
+				"value": "Final totals may vary by region. Refunds follow the Mobvibe Refund Policy."
+			}
+		},
+		"free": {
+			"name": "Free",
+			"tagline": "All features included",
+			"price": "$0",
+			"interval": "Always free",
+			"summary": "All features, 1 active machine",
+			"cta": "Get Started",
+			"features": [
+				"All Mobvibe features included",
+				"1 active machine",
+				"Web, desktop, and mobile access",
+				"Real-time streaming, file explorer, and Git tools",
+				"End-to-end encryption and self-hosted workflow support"
+			]
+		},
+		"pro": {
+			"name": "Pro",
+			"tagline": "Same product, no machine cap",
+			"highlight": "Most practical",
+			"price": "{{price}}",
+			"interval": "per month",
+			"summary": "All features, unlimited active machines",
+			"cta": "Open App",
+			"features": [
+				"All Mobvibe features included",
+				"Unlimited active machines",
+				"Use your workstation, VM, and spare boxes together",
+				"Same secure Mobvibe experience across devices",
+				"Billing handled by Paddle"
+			]
+		}
 	},
 	"features": {
 		"what-is-mobvibe": {

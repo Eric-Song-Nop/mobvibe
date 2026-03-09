@@ -4,6 +4,7 @@ import { DemoHeader } from "@/components/DemoHeader";
 import { DemoMessageList } from "@/components/DemoMessageList";
 import { DemoSidebar } from "@/components/DemoSidebar";
 import { LegalDocumentPage } from "@/components/legal/LegalDocumentPage";
+import { PricingPage } from "@/components/PricingPage";
 import { useFeatureGroups, useFeatures } from "@/data/features";
 import { useStreamingDemo } from "@/hooks/use-streaming-demo";
 import { resolveWebsitePage } from "@/lib/page-info";
@@ -20,6 +21,10 @@ export default function App({ pathname }: AppProps) {
 
 	if (page.kind === "legal") {
 		return <LegalDocumentPage documentId={page.documentId} />;
+	}
+
+	if (page.kind === "pricing") {
+		return <PricingPage />;
 	}
 
 	return <MarketingHome />;
@@ -56,6 +61,7 @@ function MarketingHome() {
 			/>
 			<div className="flex min-w-0 flex-1 flex-col">
 				<DemoHeader
+					currentPathname="/"
 					activeFeatureTitle={activeFeatureTitle}
 					onMenuToggle={handleMenuToggle}
 				/>
