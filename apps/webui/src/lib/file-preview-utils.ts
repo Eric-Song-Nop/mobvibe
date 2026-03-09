@@ -1,3 +1,5 @@
+import { type CodeAccent, getCodeAccentTextClass } from "@/lib/code-highlight";
+
 const languageByExtension: Record<string, string> = {
 	".astro": "astro",
 	".c": "c",
@@ -95,28 +97,28 @@ const languageShortLabel: Record<string, string> = {
 	yaml: "YML",
 };
 
-const languageLabelColor: Record<string, string> = {
-	typescript: "text-blue-500",
-	tsx: "text-blue-400",
-	javascript: "text-yellow-500",
-	jsx: "text-yellow-400",
-	python: "text-emerald-500",
-	rust: "text-orange-500",
-	go: "text-cyan-500",
-	java: "text-red-400",
-	ruby: "text-red-500",
-	css: "text-purple-500",
-	scss: "text-pink-500",
-	html: "text-orange-400",
-	json: "text-amber-400",
-	markdown: "text-gray-400",
-	bash: "text-green-500",
-	sql: "text-indigo-400",
-	graphql: "text-pink-400",
-	vue: "text-emerald-400",
-	csharp: "text-violet-500",
-	cpp: "text-blue-600",
-	c: "text-blue-700",
+const languageLabelAccent: Partial<Record<string, CodeAccent>> = {
+	typescript: "blue",
+	tsx: "blue",
+	javascript: "yellow",
+	jsx: "yellow",
+	python: "green",
+	rust: "orange",
+	go: "aqua",
+	java: "red",
+	ruby: "red",
+	css: "purple",
+	scss: "purple",
+	html: "orange",
+	json: "yellow",
+	markdown: "muted",
+	bash: "green",
+	sql: "blue",
+	graphql: "purple",
+	vue: "green",
+	csharp: "purple",
+	cpp: "blue",
+	c: "blue",
 };
 
 export const resolveFileTypeLabel = (pathValue: string): string => {
@@ -126,5 +128,5 @@ export const resolveFileTypeLabel = (pathValue: string): string => {
 
 export const resolveFileTypeLabelColor = (pathValue: string): string => {
 	const language = resolveLanguageFromPath(pathValue);
-	return languageLabelColor[language] ?? "text-muted-foreground";
+	return getCodeAccentTextClass(languageLabelAccent[language] ?? "muted");
 };

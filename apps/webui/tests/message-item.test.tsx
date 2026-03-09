@@ -3,7 +3,10 @@ import { fireEvent, render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage, ChatSession } from "@/lib/chat-store";
 import { useChatStore } from "@/lib/chat-store";
-import { MessageItem } from "../src/components/chat/MessageItem";
+import {
+	getStatusDotColor,
+	MessageItem,
+} from "../src/components/chat/MessageItem";
 import i18n from "../src/i18n";
 import { createDefaultContentBlocks } from "../src/lib/content-block-utils";
 
@@ -239,5 +242,12 @@ describe("MessageItem", () => {
 		expect(onOpenFilePreview).toHaveBeenCalledWith("/tmp/alpha.txt");
 		expect(onOpenFilePreview).toHaveBeenCalledWith("/tmp/bravo.txt");
 		expect(onOpenFilePreview).toHaveBeenCalledWith("/tmp/charlie.txt");
+	});
+
+	it("maps tool call statuses to shared gruvbox dot classes", () => {
+		expect(getStatusDotColor("completed")).toBe("bg-code-green");
+		expect(getStatusDotColor("failed")).toBe("bg-code-red");
+		expect(getStatusDotColor("in_progress")).toBe("bg-code-yellow");
+		expect(getStatusDotColor(undefined)).toBe("bg-code-muted");
 	});
 });

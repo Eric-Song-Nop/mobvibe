@@ -3,6 +3,11 @@
  * Provides line-level diff computation and unified-diff parsing.
  */
 
+import {
+	getCodeAccentSoftBackgroundClass,
+	getCodeAccentTextClass,
+} from "@/lib/code-highlight";
+
 type DiffOp = {
 	type: "equal" | "insert" | "delete";
 	text: string;
@@ -193,9 +198,9 @@ export const parseUnifiedDiff = (diff: string): UnifiedDiffLine[] => {
 export const unifiedLineTone = (type: UnifiedDiffLine["type"]): string => {
 	switch (type) {
 		case "added":
-			return "bg-emerald-500/10";
+			return getCodeAccentSoftBackgroundClass("green");
 		case "removed":
-			return "bg-destructive/10";
+			return getCodeAccentSoftBackgroundClass("red");
 		case "hunk":
 			return "bg-muted/50";
 		default:
@@ -206,13 +211,13 @@ export const unifiedLineTone = (type: UnifiedDiffLine["type"]): string => {
 export const unifiedIndicatorTone = (type: UnifiedDiffLine["type"]): string => {
 	switch (type) {
 		case "added":
-			return "text-emerald-600";
+			return getCodeAccentTextClass("green");
 		case "removed":
-			return "text-destructive";
+			return getCodeAccentTextClass("red");
 		case "hunk":
-			return "text-muted-foreground";
+			return getCodeAccentTextClass("muted");
 		default:
-			return "text-muted-foreground";
+			return getCodeAccentTextClass("muted");
 	}
 };
 

@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import { FileTypeLabel } from "@/components/app/file-type-label";
 import { Button } from "@/components/ui/button";
 import { fetchSessionGitLog, fetchSessionGitShow } from "@/lib/api";
+import { getCodeAccentTextClass } from "@/lib/code-highlight";
 import { cn } from "@/lib/utils";
 
 type CommitHistoryPanelProps = {
@@ -256,10 +257,10 @@ function CommitRow({
 						<span>{formattedDate}</span>
 						{entry.insertions !== undefined || entry.deletions !== undefined ? (
 							<span>
-								<span className="text-emerald-600">
+								<span className={getCodeAccentTextClass("green")}>
 									+{entry.insertions ?? 0}
 								</span>{" "}
-								<span className="text-destructive">
+								<span className={getCodeAccentTextClass("red")}>
 									-{entry.deletions ?? 0}
 								</span>
 							</span>
@@ -349,8 +350,12 @@ function CommitDetail({
 							<FileTypeLabel path={file.path} />
 							<span className="min-w-0 flex-1 truncate">{file.path}</span>
 							<span className="text-muted-foreground shrink-0 text-[10px]">
-								<span className="text-emerald-600">+{file.insertions}</span>{" "}
-								<span className="text-destructive">-{file.deletions}</span>
+								<span className={getCodeAccentTextClass("green")}>
+									+{file.insertions}
+								</span>{" "}
+								<span className={getCodeAccentTextClass("red")}>
+									-{file.deletions}
+								</span>
 							</span>
 						</button>
 					</div>

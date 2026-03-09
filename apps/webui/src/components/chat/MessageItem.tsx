@@ -26,6 +26,7 @@ import {
 	selectTerminalOutputSnapshot,
 	useChatStore,
 } from "@/lib/chat-store";
+import { getCodeAccentFillClass } from "@/lib/code-highlight";
 import { cn } from "@/lib/utils";
 
 type PermissionDecisionPayload = {
@@ -588,11 +589,14 @@ const TOOL_CALL_PATH_SUMMARY_LIMIT = 3;
 const getStatusDotColor = (status: ToolCallStatus | undefined) => {
 	switch (status) {
 		case "completed":
-			return "bg-green-600";
+			return getCodeAccentFillClass("green");
 		case "failed":
-			return "bg-destructive";
+			return getCodeAccentFillClass("red");
+		case "pending":
+		case "in_progress":
+			return getCodeAccentFillClass("yellow");
 		default:
-			return "bg-muted-foreground";
+			return getCodeAccentFillClass("muted");
 	}
 };
 
