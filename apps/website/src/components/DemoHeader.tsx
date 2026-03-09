@@ -1,6 +1,7 @@
 import { GithubIcon, Menu01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
+import { BrandLogo } from "@/components/brand-logo";
 import { GetStartedDialog } from "@/components/GetStartedDialog";
 import { Button } from "@/components/ui/button";
 import { supportedLanguages } from "@/i18n";
@@ -42,7 +43,7 @@ export function DemoHeader({
 				) : null}
 
 				<a href="/" className="flex items-center gap-2">
-					<img src="/logo.svg" alt="" className="size-5" aria-hidden="true" />
+					<BrandLogo alt="" className="size-5" aria-hidden="true" />
 					<span className="text-sm font-medium">{t("common.appName")}</span>
 				</a>
 				{activeFeatureTitle && (
