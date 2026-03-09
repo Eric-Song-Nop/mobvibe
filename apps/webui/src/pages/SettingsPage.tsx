@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { UserMenu } from "@/components/auth/UserMenu";
+import { LegalLinks } from "@/components/legal/LegalLinks";
 import { E2EESettings } from "@/components/settings/E2EESettings";
 import { ThemeProvider, useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
@@ -413,6 +414,18 @@ function AccountSection() {
 					{isSubmitting ? t("common.loading") : t("settings.updatePassword")}
 				</Button>
 			</form>
+
+			<Separator />
+
+			<div className="space-y-3 border bg-background p-4">
+				<div>
+					<h3 className="text-sm font-semibold">{t("legal.settingsTitle")}</h3>
+					<p className="text-muted-foreground text-sm">
+						{t("legal.settingsDescription")}
+					</p>
+				</div>
+				<LegalLinks className="gap-x-4 gap-y-2" />
+			</div>
 		</section>
 	);
 }

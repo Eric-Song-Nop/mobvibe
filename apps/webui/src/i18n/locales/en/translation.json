@@ -299,6 +299,28 @@
 		"emailVerified": "Email verified successfully",
 		"userMenuAriaLabel": "User menu"
 	},
+	"legal": {
+		"pageBadge": "Legal",
+		"bilingual": "English + Chinese on one page",
+		"backApp": "Back to App",
+		"skipToContent": "Skip to legal content",
+		"effectiveDate": "Effective date",
+		"operator": "Operator",
+		"contact": "Legal contact",
+		"otherPolicies": "Other policies",
+		"outline": "On this page",
+		"english": "English",
+		"chinese": "Chinese",
+		"navigation": "Legal links",
+		"loginNote": "Privacy, billing terms, and refunds for Mobvibe subscriptions.",
+		"settingsTitle": "Legal",
+		"settingsDescription": "Review the public policies that apply to Mobvibe subscriptions and account use.",
+		"links": {
+			"privacy": "Privacy Policy",
+			"terms": "Terms of Service",
+			"refund": "Refund Policy"
+		}
+	},
 	"settings": {
 		"title": "Settings",
 		"description": "Manage your account settings",

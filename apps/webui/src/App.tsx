@@ -65,6 +65,11 @@ const LoginPage = lazy(async () => {
 	return { default: module.LoginPage };
 });
 
+const LegalPage = lazy(async () => {
+	const module = await import("@/pages/LegalPage");
+	return { default: module.LegalPage };
+});
+
 function MainApp() {
 	const { t } = useTranslation();
 	const { isAuthenticated } = useAuth();
@@ -814,6 +819,31 @@ export function App() {
 			{shouldSetupTauriAuth && <TauriAuthHandler authClient={authClient!} />}
 			{shouldSetupTauriPair && <TauriPairHandler />}
 			<Routes>
+				<Route
+					path="/privacy"
+					element={
+						<Suspense fallback={<RoutePending />}>
+							<LegalPage documentId="privacy" />
+						</Suspense>
+					}
+				/>
+				<Route
+					path="/terms"
+					element={
+						<Suspense fallback={<RoutePending />}>
+							<LegalPage documentId="terms" />
+						</Suspense>
+					}
+				/>
+				<Route
+					path="/refund"
+					element={
+						<Suspense fallback={<RoutePending />}>
+							<LegalPage documentId="refund" />
+						</Suspense>
+					}
+				/>
+
 				{/* Settings page */}
 				<Route
 					path="/settings"

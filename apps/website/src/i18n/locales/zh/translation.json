@@ -38,6 +38,25 @@
 		"demoMode": "演示模式",
 		"go": "发送"
 	},
+	"legal": {
+		"pageBadge": "法律文档",
+		"bilingual": "单页同时展示英文与中文",
+		"backHome": "返回首页",
+		"skipToContent": "跳转到法律正文",
+		"effectiveDate": "生效日期",
+		"operator": "运营者",
+		"contact": "法律联系邮箱",
+		"otherPolicies": "其他政策",
+		"outline": "页面目录",
+		"english": "English",
+		"chinese": "中文",
+		"navigation": "法律链接",
+		"links": {
+			"privacy": "隐私政策",
+			"terms": "服务条款",
+			"refund": "退款政策"
+		}
+	},
 	"getStarted": {
 		"title": "开始使用 Mobvibe",
 		"description": "两步即可开始远程管理你的 AI 编程代理。",

@@ -37,6 +37,25 @@
 		"placeholder": "Start your own session...",
 		"go": "Go"
 	},
+	"legal": {
+		"pageBadge": "Legal",
+		"bilingual": "English + Chinese on one page",
+		"backHome": "Back to Home",
+		"skipToContent": "Skip to legal content",
+		"effectiveDate": "Effective date",
+		"operator": "Operator",
+		"contact": "Legal contact",
+		"otherPolicies": "Other policies",
+		"outline": "On this page",
+		"english": "English",
+		"chinese": "Chinese",
+		"navigation": "Legal links",
+		"links": {
+			"privacy": "Privacy Policy",
+			"terms": "Terms of Service",
+			"refund": "Refund Policy"
+		}
+	},
 	"getStarted": {
 		"title": "Get Started with Mobvibe",
 		"description": "Two steps to start managing your AI coding agents remotely.",

@@ -299,6 +299,28 @@
 		"emailVerified": "邮箱验证成功",
 		"userMenuAriaLabel": "用户菜单"
 	},
+	"legal": {
+		"pageBadge": "法律文档",
+		"bilingual": "单页同时展示英文与中文",
+		"backApp": "返回应用",
+		"skipToContent": "跳转到法律正文",
+		"effectiveDate": "生效日期",
+		"operator": "运营者",
+		"contact": "法律联系邮箱",
+		"otherPolicies": "其他政策",
+		"outline": "页面目录",
+		"english": "English",
+		"chinese": "中文",
+		"navigation": "法律链接",
+		"loginNote": "这里公开说明 Mobvibe 订阅相关的隐私、计费条款和退款规则。",
+		"settingsTitle": "法律文档",
+		"settingsDescription": "查看适用于 Mobvibe 订阅和账户使用的公开政策。",
+		"links": {
+			"privacy": "隐私政策",
+			"terms": "服务条款",
+			"refund": "退款政策"
+		}
+	},
 	"settings": {
 		"title": "设置",
 		"description": "管理账号设置",

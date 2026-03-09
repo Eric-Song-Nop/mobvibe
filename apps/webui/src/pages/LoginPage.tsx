@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { LegalLinks } from "@/components/legal/LegalLinks";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -190,13 +191,12 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 						</div>
 
 						{emailVerifiedSuccess && (
-							<div
-								role="status"
+							<output
 								aria-live="polite"
 								className="rounded-sm bg-green-500/10 p-3 text-green-600 dark:text-green-400 text-xs"
 							>
 								{t("auth.emailVerified")}
-							</div>
+							</output>
 						)}
 
 						{error && (
@@ -209,8 +209,7 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 						)}
 
 						{showVerificationMessage && (
-							<div
-								role="status"
+							<output
 								aria-live="polite"
 								className="rounded-sm bg-primary/10 p-3 text-primary text-xs"
 							>
@@ -231,7 +230,7 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 											? t("auth.resendCooldown", { seconds: resendCooldown })
 											: t("auth.resendVerification")}
 								</Button>
-							</div>
+							</output>
 						)}
 
 						<Button type="submit" className="w-full" disabled={isLoading}>
@@ -243,8 +242,8 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 						</Button>
 					</form>
 				</CardContent>
-				<CardFooter className="justify-center">
-					<p className="text-xs text-muted-foreground">
+				<CardFooter className="flex-col items-center gap-3">
+					<p className="text-center text-xs text-muted-foreground">
 						{mode === "login" ? (
 							<>
 								{t("auth.noAccount")}{" "}
@@ -269,6 +268,12 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 							</>
 						)}
 					</p>
+					<div className="w-full border-t pt-3">
+						<p className="mb-2 text-center text-[11px] text-muted-foreground">
+							{t("legal.loginNote")}
+						</p>
+						<LegalLinks className="justify-center gap-x-4 gap-y-2" />
+					</div>
 				</CardFooter>
 			</Card>
 		</div>

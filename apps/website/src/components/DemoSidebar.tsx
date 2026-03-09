@@ -9,6 +9,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
+import { LegalLinks } from "@/components/legal/LegalLinks";
 import { useTheme } from "@/components/theme-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -233,6 +234,9 @@ export function DemoSidebar({
 								<span className="sr-only">{t("profile.github")}</span>
 							</Button>
 						</a>
+					</div>
+					<div className="pt-1">
+						<LegalLinks className="gap-x-3 gap-y-1" />
 					</div>
 				</div>
 			</aside>

@@ -3,10 +3,29 @@ import { DemoFooter } from "@/components/DemoFooter";
 import { DemoHeader } from "@/components/DemoHeader";
 import { DemoMessageList } from "@/components/DemoMessageList";
 import { DemoSidebar } from "@/components/DemoSidebar";
+import { LegalDocumentPage } from "@/components/legal/LegalDocumentPage";
 import { useFeatureGroups, useFeatures } from "@/data/features";
 import { useStreamingDemo } from "@/hooks/use-streaming-demo";
+import { resolveWebsitePage } from "@/lib/page-info";
 
-export default function App() {
+type AppProps = {
+	pathname?: string;
+};
+
+export default function App({ pathname }: AppProps) {
+	const page = resolveWebsitePage(
+		pathname ??
+			(typeof window === "undefined" ? "/" : window.location.pathname),
+	);
+
+	if (page.kind === "legal") {
+		return <LegalDocumentPage documentId={page.documentId} />;
+	}
+
+	return <MarketingHome />;
+}
+
+function MarketingHome() {
 	const featureGroups = useFeatureGroups();
 	const features = useFeatures();
 	const [sidebarOpen, setSidebarOpen] = useState(false);

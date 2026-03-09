@@ -23,6 +23,20 @@ export {
 	wrapDEK,
 } from "./crypto/index.js";
 export type {
+	LegalDocument,
+	LegalDocumentId,
+	LegalLocale,
+	LegalLocaleContent,
+	LegalSection,
+} from "./legal/index.js";
+export {
+	getLegalDocument,
+	getLegalDocumentByPath,
+	legalDocumentIds,
+	legalDocuments,
+	legalDocumentsById,
+} from "./legal/index.js";
+export type {
 	// SDK types (directly from SDK)
 	AgentCapabilities,
 	AudioContent,
