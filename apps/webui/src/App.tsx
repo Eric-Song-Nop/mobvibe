@@ -25,6 +25,7 @@ import { ChatMessageList } from "@/components/app/ChatMessageList";
 import { CreateSessionDialog } from "@/components/app/CreateSessionDialog";
 import { FileExplorerDialog } from "@/components/app/FileExplorerDialog";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { BrandLogo } from "@/components/brand-logo";
 import { ChatSearchBar } from "@/components/chat/ChatSearchBar";
 import { MachinesSidebar } from "@/components/machines/MachinesSidebar";
 import { parsePairingUrl } from "@/components/settings/E2EESettings";
@@ -783,7 +784,11 @@ function TauriPairHandler() {
 function RoutePending() {
 	return (
 		<div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-muted/40">
-			<img src="/logo.svg" alt="Mobvibe" className="size-10 animate-pulse" />
+			<BrandLogo
+				alt="Mobvibe"
+				className="size-10 animate-pulse"
+				fetchPriority="high"
+			/>
 			<span className="text-muted-foreground text-sm">Loading…</span>
 		</div>
 	);
@@ -803,10 +808,10 @@ export function App() {
 		return (
 			<ThemeProvider>
 				<div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-muted/40">
-					<img
-						src="/logo.svg"
+					<BrandLogo
 						alt="Mobvibe"
 						className="size-10 animate-pulse"
+						fetchPriority="high"
 					/>
 					<div className="text-muted-foreground text-sm">Loading…</div>
 				</div>

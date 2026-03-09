@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { E2EEMissingBanner } from "@/components/app/E2EEMissingBanner";
+import { BrandLogo } from "@/components/brand-logo";
 import { MessageItem } from "@/components/chat/MessageItem";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { ToolCallGroup } from "@/components/chat/tool-call-group";
@@ -207,8 +208,7 @@ export const ChatMessageList = forwardRef<
 							className="flex flex-1 items-center justify-center opacity-30"
 							aria-live="polite"
 						>
-							<img
-								src="/logo.svg"
+							<BrandLogo
 								alt={t("common.appName")}
 								className="h-20 w-20"
 								draggable={false}

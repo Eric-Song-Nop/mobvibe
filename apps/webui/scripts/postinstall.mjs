@@ -32,7 +32,9 @@ for (const mod of modules) {
 
 // 2) Copy brand assets from brand/
 const brandDir = path.resolve(process.cwd(), "..", "..", "brand");
-const logoSrc = path.join(brandDir, "logo.svg");
-if (fs.existsSync(logoSrc)) {
-	fs.copyFileSync(logoSrc, path.join(dest, "logo.svg"));
+for (const asset of ["logo.svg", "logo-light.svg", "logo-dark.svg"]) {
+	const assetSrc = path.join(brandDir, asset);
+	if (fs.existsSync(assetSrc)) {
+		fs.copyFileSync(assetSrc, path.join(dest, asset));
+	}
 }

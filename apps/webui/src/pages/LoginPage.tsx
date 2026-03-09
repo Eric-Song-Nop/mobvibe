@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { BrandLogo } from "@/components/brand-logo";
 import { LegalLinks } from "@/components/legal/LegalLinks";
 import { Button } from "@/components/ui/button";
 import {
@@ -120,10 +121,10 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 			<Card className="w-full max-w-md">
 				<CardHeader className="text-center">
 					<div className="flex justify-center mb-2">
-						<img
-							src="/logo.svg"
+						<BrandLogo
 							alt={t("common.appName")}
 							className="size-12"
+							fetchPriority="high"
 						/>
 					</div>
 					<CardTitle className="text-xl">

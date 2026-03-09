@@ -212,7 +212,9 @@ describe("ChatMessageList", () => {
 		const { container } = render(
 			<ChatMessageList activeSession={session} onPermissionDecision={noop} />,
 		);
-		const logo = container.querySelector('img[src="/logo.svg"]');
+		const logo = container.querySelector(
+			'img[data-slot="brand-logo"][src="/logo-light.svg"]',
+		);
 		expect(logo).toBeTruthy();
 	});
 
