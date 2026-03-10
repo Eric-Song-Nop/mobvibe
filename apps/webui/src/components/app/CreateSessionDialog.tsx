@@ -8,17 +8,14 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { WorkingDirectoryDialog } from "@/components/app/WorkingDirectoryDialog";
-import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
 	InputGroup,
@@ -228,17 +225,17 @@ export function CreateSessionDialog({
 	]);
 
 	return (
-		<AlertDialog open={open} onOpenChange={onOpenChange}>
-			<AlertDialogContent
+		<Dialog open={open} onOpenChange={onOpenChange}>
+			<DialogContent
 				size="default"
 				className="w-[100vw] max-w-none sm:w-[92vw] sm:max-w-[92vw] lg:max-w-4xl"
 			>
-				<AlertDialogHeader>
-					<AlertDialogTitle>{t("session.createTitle")}</AlertDialogTitle>
-					<AlertDialogDescription>
+				<div className="grid gap-1.5 text-center sm:text-left">
+					<DialogTitle>{t("session.createTitle")}</DialogTitle>
+					<DialogDescription>
 						{t("session.createDescription")}
-					</AlertDialogDescription>
-				</AlertDialogHeader>
+					</DialogDescription>
+				</div>
 				{machineDisplayName ? (
 					<div className="text-muted-foreground flex items-center gap-1.5 text-sm">
 						<HugeiconsIcon
@@ -397,9 +394,6 @@ export function CreateSessionDialog({
 											}}
 											placeholder={t("session.worktree.branchPlaceholder")}
 										/>
-										<p className="text-muted-foreground text-xs">
-											{t("session.worktree.branchHint")}
-										</p>
 									</div>
 									<div className="flex flex-col gap-1">
 										<Label htmlFor="worktree-base-branch">
@@ -458,9 +452,11 @@ export function CreateSessionDialog({
 						machineId={selectedMachineId ?? undefined}
 					/>
 				</div>
-				<AlertDialogFooter>
-					<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-					<AlertDialogAction
+				<div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+					<Button variant="outline" onClick={() => onOpenChange(false)}>
+						{t("common.cancel")}
+					</Button>
+					<Button
 						disabled={
 							isCreating ||
 							!draftBackendId ||
@@ -468,15 +464,12 @@ export function CreateSessionDialog({
 							!selectedMachineId ||
 							isWorktreeCreateDisabled
 						}
-						onClick={(event) => {
-							event.preventDefault();
-							onCreate();
-						}}
+						onClick={onCreate}
 					>
 						{isCreating ? t("common.creating") : t("common.create")}
-					</AlertDialogAction>
-				</AlertDialogFooter>
-			</AlertDialogContent>
-		</AlertDialog>
+					</Button>
+				</div>
+			</DialogContent>
+		</Dialog>
 	);
 }

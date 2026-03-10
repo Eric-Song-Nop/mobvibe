@@ -99,7 +99,6 @@
 			"enable": "Create in new worktree",
 			"branchLabel": "New branch",
 			"branchPlaceholder": "Leave blank for a random name, or enter feat/my-feature…",
-			"branchHint": "A random branch name is suggested automatically. Edit it only if you want something specific.",
 			"baseBranchLabel": "Based on",
 			"baseBranchPlaceholder": "Select base branch (default: HEAD)",
 			"pathLabel": "Worktree path",

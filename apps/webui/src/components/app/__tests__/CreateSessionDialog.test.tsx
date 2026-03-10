@@ -89,8 +89,6 @@ vi.mock("react-i18next", () => ({
 				"session.worktree.branchLabel": "New branch",
 				"session.worktree.branchPlaceholder":
 					"Leave blank for a random name, or enter feat/my-feature…",
-				"session.worktree.branchHint":
-					"A random branch name is suggested automatically. Edit it only if you want something specific.",
 				"session.worktree.baseBranchLabel": "Based on",
 				"session.worktree.baseBranchPlaceholder": "Select base branch",
 				"session.worktree.pathLabel": "Worktree path",
@@ -142,40 +140,28 @@ vi.mock("@/components/app/WorkingDirectoryDialog", () => ({
 	WorkingDirectoryDialog: () => null,
 }));
 
-vi.mock("@/components/ui/alert-dialog", () => ({
-	AlertDialog: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-	AlertDialogContent: ({ children }: { children: ReactNode }) => (
+vi.mock("@/components/ui/dialog", () => ({
+	Dialog: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+	DialogContent: ({ children }: { children: ReactNode }) => (
 		<div>{children}</div>
 	),
-	AlertDialogHeader: ({ children }: { children: ReactNode }) => (
+	DialogTitle: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+	DialogDescription: ({ children }: { children: ReactNode }) => (
 		<div>{children}</div>
 	),
-	AlertDialogTitle: ({ children }: { children: ReactNode }) => (
-		<div>{children}</div>
-	),
-	AlertDialogDescription: ({ children }: { children: ReactNode }) => (
-		<div>{children}</div>
-	),
-	AlertDialogFooter: ({ children }: { children: ReactNode }) => (
-		<div>{children}</div>
-	),
-	AlertDialogCancel: ({ children }: { children: ReactNode }) => (
-		<button type="button">{children}</button>
-	),
-	AlertDialogAction: ({
+}));
+
+vi.mock("@/components/ui/button", () => ({
+	Button: ({
 		children,
 		disabled,
 		onClick,
 	}: {
 		children: ReactNode;
 		disabled?: boolean;
-		onClick?: (event: { preventDefault: () => void }) => void;
+		onClick?: () => void;
 	}) => (
-		<button
-			type="button"
-			disabled={disabled}
-			onClick={() => onClick?.({ preventDefault() {} })}
-		>
+		<button type="button" disabled={disabled} onClick={onClick}>
 			{children}
 		</button>
 	),
@@ -343,11 +329,6 @@ describe("CreateSessionDialog", () => {
 		expect(screen.getByRole("button", { name: "Create" })).toBeEnabled();
 		expect(
 			screen.getByText("/tmp/worktrees/repo/brisk-comet-x7"),
-		).toBeInTheDocument();
-		expect(
-			screen.getByText(
-				"A random branch name is suggested automatically. Edit it only if you want something specific.",
-			),
 		).toBeInTheDocument();
 	});
 
