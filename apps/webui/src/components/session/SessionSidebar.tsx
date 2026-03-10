@@ -383,7 +383,7 @@ const SessionListItem = ({
 	return (
 		<div
 			className={cn(
-				"group/session relative flex items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
+				"group/session relative flex items-start gap-2 rounded-md px-2 py-1.5 pr-10 text-left transition-colors",
 				isActive
 					? "bg-accent border-l-primary border-l-2"
 					: "hover:bg-muted/50",
@@ -414,7 +414,7 @@ const SessionListItem = ({
 				type="button"
 				onClick={handleSelect}
 				disabled={isCreating}
-				className="flex min-w-0 flex-1 flex-col gap-0.5 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed"
+				className="flex min-w-0 flex-1 flex-col gap-0.5 pr-1 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed"
 			>
 				{/* Title row */}
 				{isEditing ? (
@@ -454,14 +454,18 @@ const SessionListItem = ({
 				</span>
 			</button>
 
-			{/* Three-dot menu — visible on mobile, hover on desktop */}
+			{/* Three-dot menu */}
 			{!isEditing && !isCreating ? (
 				<DropdownMenu>
 					<DropdownMenuTrigger asChild>
 						<Button
 							size="icon-sm"
 							variant="ghost"
-							className="h-6 w-6 shrink-0 opacity-100 md:opacity-0 transition-opacity md:group-hover/session:opacity-100 data-[state=open]:opacity-100"
+							className={cn(
+								"absolute top-1.5 right-1 h-7 w-7 shrink-0 rounded-none text-muted-foreground/80 opacity-100 transition-colors",
+								"hover:text-foreground focus-visible:text-foreground group-hover/session:text-foreground data-[state=open]:text-foreground",
+								isActive && "text-foreground",
+							)}
 							onClick={(event) => event.stopPropagation()}
 						>
 							<HugeiconsIcon
@@ -471,7 +475,7 @@ const SessionListItem = ({
 							/>
 						</Button>
 					</DropdownMenuTrigger>
-					<DropdownMenuContent align="end" className="w-36">
+					<DropdownMenuContent align="end" className="z-[70] w-36">
 						<DropdownMenuItem onClick={onEdit}>
 							{t("common.rename")}
 						</DropdownMenuItem>
