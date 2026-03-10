@@ -730,7 +730,7 @@ export async function getGitBranches(cwd: string): Promise<GitBranch[]> {
 			[
 				"branch",
 				"-a",
-				"--format=%(refname)%x09%(refname:short)%x09%(HEAD)%x09%(upstream:short)%x09%(upstream:track)",
+				"--format=%(refname)\t%(refname:short)\t%(HEAD)\t%(upstream:short)\t%(upstream:track)",
 			],
 			{ cwd, maxBuffer: MAX_BUFFER },
 		);
@@ -738,13 +738,14 @@ export async function getGitBranches(cwd: string): Promise<GitBranch[]> {
 		const branches: GitBranch[] = [];
 
 		for (const line of stdout.split("\n").filter(Boolean)) {
+			const delimiter = line.includes("\t") ? "\t" : "%x09";
 			const [
 				fullRef = "",
 				shortRef = "",
 				headMarker = "",
 				upstreamRef = "",
 				tracking = "",
-			] = line.split("\t");
+			] = line.split(delimiter);
 			const name = shortRef.trim();
 			if (!name) {
 				continue;
