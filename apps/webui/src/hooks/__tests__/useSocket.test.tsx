@@ -145,11 +145,13 @@ vi.mock("@/lib/e2ee", () => ({
 	}),
 }));
 
-vi.mock("@/lib/notifications", () => ({
+const notificationMocks = vi.hoisted(() => ({
 	notifyPermissionRequest: vi.fn(),
 	notifyResponseCompleted: vi.fn(),
 	notifySessionError: vi.fn(),
 }));
+
+vi.mock("@/lib/notifications", () => notificationMocks);
 
 vi.mock("@/lib/machines-store", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/lib/machines-store")>();
@@ -284,6 +286,9 @@ describe("useSocket (webui)", () => {
 		mockE2EE.unwrapSessionDek.mockReset();
 		mockE2EE.getSessionE2EEStatus.mockReset();
 		mockE2EE.getSessionE2EEStatus.mockReturnValue("ready");
+		notificationMocks.notifyPermissionRequest.mockReset();
+		notificationMocks.notifyResponseCompleted.mockReset();
+		notificationMocks.notifySessionError.mockReset();
 
 		mockGatewaySocket.onPermissionRequest.mockImplementation(
 			(handler: () => void) => {
@@ -1122,6 +1127,60 @@ describe("useSocket (webui)", () => {
 		expect(store.finalizeAssistantMessage).toHaveBeenCalledWith("session-1");
 		expect(store.setSending).toHaveBeenCalledWith("session-1", false);
 		expect(store.setCanceling).toHaveBeenCalledWith("session-1", false);
+	});
+
+	it("notifies on turn_end even when the current session is focused", async () => {
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				revision: 1,
+				lastAppliedSeq: 0,
+			}),
+		};
+		mockStoreState.sessions = { ...sessions };
+
+		renderHook(() =>
+			useSocket({
+				sessions,
+				setSending: store.setSending,
+				setCanceling: store.setCanceling,
+				finalizeAssistantMessage: store.finalizeAssistantMessage,
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		handlers.sessionEvent?.({
+			sessionId: "session-1",
+			revision: 1,
+			seq: 1,
+			kind: "turn_end",
+			payload: {
+				stopReason: "end_turn",
+			},
+		});
+
+		expect(notificationMocks.notifyResponseCompleted).toHaveBeenCalledWith(
+			{ sessionId: "session-1" },
+			{ sessions },
+		);
 	});
 
 	it("user_message event calls confirmOrAppendUserMessage regardless of sending state", async () => {

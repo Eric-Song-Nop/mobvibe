@@ -74,14 +74,6 @@ const getCursor = (sessionId: string) => {
 	};
 };
 
-const shouldNotifyResponseCompleted = (sessionId: string) => {
-	const activeSessionId = useChatStore.getState().activeSessionId;
-	if (typeof document === "undefined") {
-		return activeSessionId !== sessionId;
-	}
-	return document.hidden || activeSessionId !== sessionId;
-};
-
 /** Dedup-aware permission request handler — shared by WAL backfill and live socket paths. */
 function processPermissionRequest(
 	sessionId: string,
@@ -322,12 +314,10 @@ export function useSocket({
 				break;
 			}
 			case "turn_end": {
-				if (shouldNotifyResponseCompleted(event.sessionId)) {
-					notifyResponseCompleted(
-						{ sessionId: event.sessionId },
-						{ sessions: sessionsRef.current },
-					);
-				}
+				notifyResponseCompleted(
+					{ sessionId: event.sessionId },
+					{ sessions: sessionsRef.current },
+				);
 				finalizeAssistantMessage?.(event.sessionId);
 				setSending?.(event.sessionId, false);
 				setCanceling?.(event.sessionId, false);
