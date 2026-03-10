@@ -16,9 +16,9 @@
 </p>
 
 <p align="center">
+  <a href="#快速开始">快速开始</a> &middot;
   <a href="#功能特性">功能特性</a> &middot;
   <a href="#支持的-acp-agents">Agents</a> &middot;
-  <a href="#快速开始">快速开始</a> &middot;
   <a href="#e2ee-配置">E2EE</a> &middot;
   <a href="#自托管">自托管</a>
 </p>
@@ -30,6 +30,50 @@ Mobvibe 是一个分布式 [ACP](https://agentclientprotocol.com/)（Agent Clien
 <p align="center">
   <img src="docs/images/hero-desktop.png" alt="Mobvibe WebUI" width="720" />
 </p>
+
+## 快速开始
+
+```bash
+npx @mobvibe/cli login
+npx @mobvibe/cli start
+```
+
+然后在浏览器中打开 [app.mobvibe.net](https://app.mobvibe.net)。首次运行时，Mobvibe 会扫描系统中已安装的 ACP Agent，并让你选择要启用的 Agent。
+
+<details>
+<summary>CLI 命令</summary>
+
+| 命令 | 说明 |
+|------|------|
+| `mobvibe login` | 认证并生成 E2EE 主密钥 |
+| `mobvibe logout` | 清除认证凭据 |
+| `mobvibe auth-status` | 查看认证状态 |
+| `mobvibe start [--gateway <url>]` | 启动守护进程 |
+| `mobvibe stop` | 停止守护进程 |
+| `mobvibe status` | 查看守护进程状态 |
+| `mobvibe logs [-f] [-n <lines>]` | 查看守护进程日志 |
+| `mobvibe e2ee show` | 显示主密钥（用于 WebUI 配对） |
+| `mobvibe e2ee status` | 查看 E2EE 密钥状态 |
+
+</details>
+
+<details>
+<summary>配置</summary>
+
+| 变量 | 说明 |
+|------|------|
+| `MOBVIBE_GATEWAY_URL` | Gateway URL（默认：`https://api.mobvibe.net`） |
+| `MOBVIBE_HOME` | CLI 家目录（默认：`~/.mobvibe`） |
+| `MOBVIBE_ENABLED_AGENTS` | 逗号分隔的 Agent ID 列表（覆盖配置文件） |
+
+高级配置存储在 `~/.mobvibe/.config.json`：
+
+| 字段 | 说明 |
+|------|------|
+| `enabledAgents` | 已启用的 Agent ID 数组（如 `["claude-code"]`） |
+| `worktreeBaseDir` | Git worktree 根目录（默认：`~/.mobvibe/worktrees`） |
+
+</details>
 
 ## 功能特性
 
@@ -137,50 +181,6 @@ Mobvibe 是一个分布式 [ACP](https://agentclientprotocol.com/)（Agent Clien
 | [Aider](https://aider.chat) | `pip install aider-chat` |
 
 安装新 Agent 后重启 Mobvibe，即可自动检测。
-
-## 快速开始
-
-```bash
-npx @mobvibe/cli login
-npx @mobvibe/cli start
-```
-
-然后在浏览器中打开 [app.mobvibe.net](https://app.mobvibe.net)。首次运行时，Mobvibe 会扫描系统中已安装的 ACP Agent，并让你选择要启用的 Agent。
-
-<details>
-<summary>CLI 命令</summary>
-
-| 命令 | 说明 |
-|------|------|
-| `mobvibe login` | 认证并生成 E2EE 主密钥 |
-| `mobvibe logout` | 清除认证凭据 |
-| `mobvibe auth-status` | 查看认证状态 |
-| `mobvibe start [--gateway <url>]` | 启动守护进程 |
-| `mobvibe stop` | 停止守护进程 |
-| `mobvibe status` | 查看守护进程状态 |
-| `mobvibe logs [-f] [-n <lines>]` | 查看守护进程日志 |
-| `mobvibe e2ee show` | 显示主密钥（用于 WebUI 配对） |
-| `mobvibe e2ee status` | 查看 E2EE 密钥状态 |
-
-</details>
-
-<details>
-<summary>配置</summary>
-
-| 变量 | 说明 |
-|------|------|
-| `MOBVIBE_GATEWAY_URL` | Gateway URL（默认：`https://api.mobvibe.net`） |
-| `MOBVIBE_HOME` | CLI 家目录（默认：`~/.mobvibe`） |
-| `MOBVIBE_ENABLED_AGENTS` | 逗号分隔的 Agent ID 列表（覆盖配置文件） |
-
-高级配置存储在 `~/.mobvibe/.config.json`：
-
-| 字段 | 说明 |
-|------|------|
-| `enabledAgents` | 已启用的 Agent ID 数组（如 `["claude-code"]`） |
-| `worktreeBaseDir` | Git worktree 根目录（默认：`~/.mobvibe/worktrees`） |
-
-</details>
 
 ## E2EE 配置
 

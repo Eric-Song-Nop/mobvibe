@@ -17,9 +17,9 @@
 </p>
 
 <p align="center">
+  <a href="#quick-start">Quick Start</a> &middot;
   <a href="#features">Features</a> &middot;
   <a href="#supported-acp-agents">Agents</a> &middot;
-  <a href="#quick-start">Quick Start</a> &middot;
   <a href="#e2ee-setup">E2EE</a> &middot;
   <a href="#self-hosting">Self-Hosting</a>
 </p>
@@ -31,6 +31,50 @@ Mobvibe is a distributed [ACP](https://agentclientprotocol.com/) (Agent Client P
 <p align="center">
   <img src="docs/images/hero-desktop.png" alt="Mobvibe WebUI" width="720" />
 </p>
+
+## Quick Start
+
+```bash
+npx @mobvibe/cli login
+npx @mobvibe/cli start
+```
+
+Then open [app.mobvibe.net](https://app.mobvibe.net) in your browser. On first run, Mobvibe will scan your system for installed ACP agents and ask you to choose which ones to enable.
+
+<details>
+<summary>CLI Commands</summary>
+
+| Command | Description |
+|---------|-------------|
+| `mobvibe login` | Authenticate and generate E2EE master secret |
+| `mobvibe logout` | Remove stored credentials |
+| `mobvibe auth-status` | Show authentication status |
+| `mobvibe start [--gateway <url>]` | Start daemon |
+| `mobvibe stop` | Stop daemon |
+| `mobvibe status` | Show daemon status |
+| `mobvibe logs [-f] [-n <lines>]` | View daemon logs |
+| `mobvibe e2ee show` | Display master secret for WebUI pairing |
+| `mobvibe e2ee status` | Show E2EE key status |
+
+</details>
+
+<details>
+<summary>Configuration</summary>
+
+| Variable | Description |
+|----------|-------------|
+| `MOBVIBE_GATEWAY_URL` | Gateway URL (default: `https://api.mobvibe.net`) |
+| `MOBVIBE_HOME` | CLI home directory (default: `~/.mobvibe`) |
+| `MOBVIBE_ENABLED_AGENTS` | Comma-separated agent IDs to enable (overrides config) |
+
+Advanced configuration is stored in `~/.mobvibe/.config.json`:
+
+| Field | Description |
+|-------|-------------|
+| `enabledAgents` | Array of enabled agent IDs (e.g. `["claude-code"]`) |
+| `worktreeBaseDir` | Git worktree root (default: `~/.mobvibe/worktrees`) |
+
+</details>
 
 ## Features
 
@@ -138,50 +182,6 @@ Detection priority per agent: **Binary** (fastest) > **npx** (Node.js) > **uvx**
 | [Aider](https://aider.chat) | `pip install aider-chat` |
 
 After installing a new agent, restart Mobvibe and it will be detected automatically.
-
-## Quick Start
-
-```bash
-npx @mobvibe/cli login
-npx @mobvibe/cli start
-```
-
-Then open [app.mobvibe.net](https://app.mobvibe.net) in your browser. On first run, Mobvibe will scan your system for installed ACP agents and ask you to choose which ones to enable.
-
-<details>
-<summary>CLI Commands</summary>
-
-| Command | Description |
-|---------|-------------|
-| `mobvibe login` | Authenticate and generate E2EE master secret |
-| `mobvibe logout` | Remove stored credentials |
-| `mobvibe auth-status` | Show authentication status |
-| `mobvibe start [--gateway <url>]` | Start daemon |
-| `mobvibe stop` | Stop daemon |
-| `mobvibe status` | Show daemon status |
-| `mobvibe logs [-f] [-n <lines>]` | View daemon logs |
-| `mobvibe e2ee show` | Display master secret for WebUI pairing |
-| `mobvibe e2ee status` | Show E2EE key status |
-
-</details>
-
-<details>
-<summary>Configuration</summary>
-
-| Variable | Description |
-|----------|-------------|
-| `MOBVIBE_GATEWAY_URL` | Gateway URL (default: `https://api.mobvibe.net`) |
-| `MOBVIBE_HOME` | CLI home directory (default: `~/.mobvibe`) |
-| `MOBVIBE_ENABLED_AGENTS` | Comma-separated agent IDs to enable (overrides config) |
-
-Advanced configuration is stored in `~/.mobvibe/.config.json`:
-
-| Field | Description |
-|-------|-------------|
-| `enabledAgents` | Array of enabled agent IDs (e.g. `["claude-code"]`) |
-| `worktreeBaseDir` | Git worktree root (default: `~/.mobvibe/worktrees`) |
-
-</details>
 
 ## E2EE Setup
 
