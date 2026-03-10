@@ -229,6 +229,46 @@ describe("git-utils", () => {
 					aheadBehind: undefined,
 				},
 			]);
+			expect(mockExecFileAsync).toHaveBeenCalledWith(
+				"git",
+				[
+					"branch",
+					"-a",
+					"--format=%(refname)\t%(refname:short)\t%(HEAD)\t%(upstream:short)\t%(upstream:track)",
+				],
+				expect.objectContaining({ cwd: "/home/user/project" }),
+			);
+		});
+
+		it("accepts git output that contains literal %x09 separators", async () => {
+			execFileQueue.push({
+				stdout: [
+					"refs/heads/main%x09main%x09*%x09origin/main%x09[ahead 1]",
+					"refs/remotes/origin/main%x09origin/main%x09%x09%x09",
+				].join("\n"),
+				stderr: "",
+			});
+
+			const result = await getGitBranches("/home/user/project");
+
+			expect(result).toEqual([
+				{
+					name: "main",
+					displayName: "main (HEAD)",
+					current: true,
+					remote: undefined,
+					upstream: "origin/main",
+					aheadBehind: { ahead: 1, behind: 0 },
+				},
+				{
+					name: "origin/main",
+					displayName: "origin/main",
+					current: false,
+					remote: "origin",
+					upstream: undefined,
+					aheadBehind: undefined,
+				},
+			]);
 		});
 	});
 
