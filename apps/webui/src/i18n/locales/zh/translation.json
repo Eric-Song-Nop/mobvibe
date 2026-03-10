@@ -99,7 +99,6 @@
 			"enable": "在新 Worktree 中创建",
 			"branchLabel": "新分支",
 			"branchPlaceholder": "留空可自动生成，或输入例如 feat/my-feature…",
-			"branchHint": "会自动建议一个随机分支名；只有在你想自定义时才需要修改。",
 			"baseBranchLabel": "基于分支",
 			"baseBranchPlaceholder": "选择基准分支（默认：HEAD）",
 			"pathLabel": "Worktree 路径",
