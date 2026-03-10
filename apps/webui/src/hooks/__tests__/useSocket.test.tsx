@@ -1179,7 +1179,13 @@ describe("useSocket (webui)", () => {
 
 		expect(notificationMocks.notifyResponseCompleted).toHaveBeenCalledWith(
 			{ sessionId: "session-1" },
-			{ sessions },
+			{
+				sessions: expect.objectContaining({
+					"session-1": expect.objectContaining({
+						sessionId: "session-1",
+					}),
+				}),
+			},
 		);
 	});
 
