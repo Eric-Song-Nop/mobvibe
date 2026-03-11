@@ -266,6 +266,13 @@ type ChatState = {
 			availableModes?: SessionModeOption[];
 			availableModels?: SessionModelOption[];
 			availableCommands?: AvailableCommand[];
+			createdAt?: string;
+			updatedAt?: string;
+			machineId?: string;
+			isCreating?: boolean;
+			worktreeSourceCwd?: string;
+			worktreeBranch?: string;
+			workspaceRootCwd?: string;
 		},
 	) => void;
 	syncSessions: (summaries: SessionSummary[]) => void;
@@ -543,7 +550,10 @@ const createSessionState = (
 		availableModes?: SessionModeOption[];
 		availableModels?: SessionModelOption[];
 		availableCommands?: AvailableCommand[];
+		createdAt?: string;
+		updatedAt?: string;
 		machineId?: string;
+		isCreating?: boolean;
 		worktreeSourceCwd?: string;
 		worktreeBranch?: string;
 		workspaceRootCwd?: string;
@@ -562,8 +572,8 @@ const createSessionState = (
 	canceling: false,
 	error: undefined,
 	streamError: undefined,
-	createdAt: undefined,
-	updatedAt: undefined,
+	createdAt: options?.createdAt,
+	updatedAt: options?.updatedAt,
 	backendId: options?.backendId,
 	backendLabel: options?.backendLabel,
 	cwd: options?.cwd,
@@ -576,6 +586,7 @@ const createSessionState = (
 	availableModels: options?.availableModels,
 	availableCommands: options?.availableCommands,
 	machineId: options?.machineId,
+	isCreating: options?.isCreating,
 	isAttached: false,
 	attachedAt: undefined,
 	detachedAt: undefined,
@@ -645,6 +656,7 @@ const mergeSessionFromSummary = (
 		availableModels: summary.availableModels ?? existing.availableModels,
 		availableCommands: summary.availableCommands ?? existing.availableCommands,
 		machineId: summary.machineId ?? existing.machineId,
+		isCreating: false,
 		isTitlePinned: summary.isTitlePinned ?? existing.isTitlePinned,
 		worktreeSourceCwd: summary.worktreeSourceCwd ?? existing.worktreeSourceCwd,
 		worktreeBranch: summary.worktreeBranch ?? existing.worktreeBranch,
@@ -821,9 +833,8 @@ export const useChatStore = create<ChatState>()(
 								added,
 							);
 						} else {
-							nextSessions[added.sessionId] = createSessionState(
-								added.sessionId,
-								{
+							nextSessions[added.sessionId] = mergeSessionFromSummary(
+								createSessionState(added.sessionId, {
 									title: added.title,
 									backendId: added.backendId,
 									backendLabel: added.backendLabel,
@@ -836,11 +847,14 @@ export const useChatStore = create<ChatState>()(
 									availableModes: added.availableModes,
 									availableModels: added.availableModels,
 									availableCommands: added.availableCommands,
+									createdAt: added.createdAt,
+									updatedAt: added.updatedAt,
 									machineId: added.machineId,
 									worktreeSourceCwd: added.worktreeSourceCwd,
 									worktreeBranch: added.worktreeBranch,
 									workspaceRootCwd: added.workspaceRootCwd,
-								},
+								}),
+								added,
 							);
 						}
 					}

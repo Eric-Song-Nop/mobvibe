@@ -25,6 +25,7 @@ import {
 import { WorkspaceList } from "@/components/workspace/WorkspaceList";
 import { type SessionListEntry } from "@/lib/chat-store";
 import { useMachinesStore } from "@/lib/machines-store";
+import { compareSessionsByRecency } from "@/lib/session-order";
 import {
 	getSessionDisplayStatus,
 	type SessionDisplayPhase,
@@ -33,6 +34,8 @@ import {
 import { useUiStore } from "@/lib/ui-store";
 import { formatRelativeTime, getPathBasename } from "@/lib/ui-utils";
 import { cn } from "@/lib/utils";
+
+const DEFAULT_VISIBLE_SESSION_COUNT = 8;
 
 const getSessionStamp = (session: SessionListEntry) =>
 	session.updatedAt ?? session.createdAt ?? "";
@@ -91,6 +94,7 @@ export const SessionSidebar = ({
 	const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
 		{},
 	);
+	const [showAllSessions, setShowAllSessions] = useState(false);
 	const {
 		editingSessionId,
 		editingTitle,
@@ -118,7 +122,6 @@ export const SessionSidebar = ({
 				id: string;
 				label: string;
 				sessions: SessionListEntry[];
-				latestStamp: string;
 			}
 		>();
 
@@ -126,39 +129,46 @@ export const SessionSidebar = ({
 			const id = session.backendId?.trim() || "unknown";
 			const rawLabel = session.backendLabel ?? session.backendId ?? "";
 			const label = rawLabel.trim().length > 0 ? rawLabel : t("common.unknown");
-			const stamp = getSessionStamp(session);
 			const existing = groups.get(id);
 			if (!existing) {
 				groups.set(id, {
 					id,
 					label,
 					sessions: [session],
-					latestStamp: stamp,
 				});
 				continue;
 			}
 			existing.sessions.push(session);
-			if (stamp.localeCompare(existing.latestStamp) > 0) {
-				existing.latestStamp = stamp;
-			}
 		}
-
-		const compareSession = (left: SessionListEntry, right: SessionListEntry) =>
-			getSessionStamp(right).localeCompare(getSessionStamp(left));
 
 		const grouped = Array.from(groups.values());
 		for (const group of grouped) {
-			group.sessions.sort(compareSession);
+			group.sessions.sort(compareSessionsByRecency);
 		}
 
 		return grouped.sort((left, right) => {
-			const byRecent = right.latestStamp.localeCompare(left.latestStamp);
+			const byRecent = compareSessionsByRecency(
+				left.sessions[0],
+				right.sessions[0],
+			);
 			if (byRecent !== 0) {
 				return byRecent;
 			}
 			return left.label.localeCompare(right.label);
 		});
 	}, [sessions, t]);
+
+	const hiddenSessionCount = Math.max(
+		sessions.length - DEFAULT_VISIBLE_SESSION_COUNT,
+		0,
+	);
+
+	const handleToggleShowAllSessions = () => {
+		if (!showAllSessions) {
+			setExpandedGroups({});
+		}
+		setShowAllSessions((prev) => !prev);
+	};
 
 	return (
 		<TooltipProvider delayDuration={300}>
@@ -246,84 +256,116 @@ export const SessionSidebar = ({
 									{t("session.empty")}
 								</div>
 							) : null}
-							{groupedSessions.map((group) => {
-								const isExpanded = expandedGroups[group.id] ?? true;
-								return (
-									<div key={group.id} className="flex flex-col gap-1">
-										<div className="flex items-center justify-between">
-											<button
-												type="button"
-												className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-xs font-semibold"
-												aria-expanded={isExpanded}
-												onClick={() =>
-													setExpandedGroups((prev) => ({
-														...prev,
-														[group.id]: !(prev[group.id] ?? true),
-													}))
-												}
-											>
-												<HugeiconsIcon
-													icon={isExpanded ? ArrowDown01Icon : ArrowRight01Icon}
-													strokeWidth={2}
-													className="h-3.5 w-3.5 shrink-0"
-													aria-hidden="true"
-												/>
-												<span className="truncate">
-													{group.label}
-													<span className="ml-1 opacity-50">
-														({group.sessions.length})
-													</span>
-												</span>
-											</button>
-											{isExpanded && group.sessions.length > 1 ? (
-												<Button
-													size="xs"
-													variant="ghost"
-													className="text-muted-foreground h-5 px-1.5 text-[10px]"
-													disabled={isBulkArchiving}
+							{(() => {
+								let visibleSessionBudget = showAllSessions
+									? Number.POSITIVE_INFINITY
+									: DEFAULT_VISIBLE_SESSION_COUNT;
+
+								return groupedSessions.map((group) => {
+									const isExpanded = expandedGroups[group.id] ?? true;
+									const visibleSessions =
+										showAllSessions || !isExpanded
+											? group.sessions
+											: group.sessions.slice(0, visibleSessionBudget);
+									if (!showAllSessions && isExpanded) {
+										visibleSessionBudget -= visibleSessions.length;
+									}
+									if (visibleSessions.length === 0) {
+										return null;
+									}
+
+									return (
+										<div key={group.id} className="flex flex-col gap-1">
+											<div className="flex items-center justify-between">
+												<button
+													type="button"
+													className="text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-xs font-semibold"
+													aria-expanded={isExpanded}
 													onClick={() =>
-														onArchiveAllSessionsRequest(
-															group.sessions.map((s) => s.sessionId),
-														)
+														setExpandedGroups((prev) => ({
+															...prev,
+															[group.id]: !(prev[group.id] ?? true),
+														}))
 													}
 												>
-													{t("session.archiveAll")}
-												</Button>
-											) : null}
-										</div>
-										{isExpanded ? (
-											<div className="flex flex-col gap-0.5 pl-2">
-												{group.sessions.map((session) => (
-													<SessionListItem
-														key={session.sessionId}
-														session={session}
-														isActive={session.sessionId === activeSessionId}
-														isEditing={session.sessionId === editingSessionId}
-														editingTitle={editingTitle}
-														displayStatus={getSessionDisplayStatus(
-															session,
-															mutations,
-														)}
-														onSelect={onSelectSession}
-														onEdit={() =>
-															startEditingSession(
-																session.sessionId,
-																session.title,
+													<HugeiconsIcon
+														icon={
+															isExpanded ? ArrowDown01Icon : ArrowRight01Icon
+														}
+														strokeWidth={2}
+														className="h-3.5 w-3.5 shrink-0"
+														aria-hidden="true"
+													/>
+													<span className="truncate">
+														{group.label}
+														<span className="ml-1 opacity-50">
+															({group.sessions.length})
+														</span>
+													</span>
+												</button>
+												{isExpanded && group.sessions.length > 1 ? (
+													<Button
+														size="xs"
+														variant="ghost"
+														className="text-muted-foreground h-5 px-1.5 text-[10px]"
+														disabled={isBulkArchiving}
+														onClick={() =>
+															onArchiveAllSessionsRequest(
+																group.sessions.map((s) => s.sessionId),
 															)
 														}
-														onEditCancel={clearEditingSession}
-														onEditSubmit={onEditSubmit}
-														onEditingTitleChange={setEditingTitle}
-														onArchive={() =>
-															onArchiveSessionRequest(session.sessionId)
-														}
-													/>
-												))}
+													>
+														{t("session.archiveAll")}
+													</Button>
+												) : null}
 											</div>
-										) : null}
-									</div>
-								);
-							})}
+											{isExpanded ? (
+												<div className="flex flex-col gap-0.5 pl-2">
+													{visibleSessions.map((session) => (
+														<SessionListItem
+															key={session.sessionId}
+															session={session}
+															isActive={session.sessionId === activeSessionId}
+															isEditing={session.sessionId === editingSessionId}
+															editingTitle={editingTitle}
+															displayStatus={getSessionDisplayStatus(
+																session,
+																mutations,
+															)}
+															onSelect={onSelectSession}
+															onEdit={() =>
+																startEditingSession(
+																	session.sessionId,
+																	session.title,
+																)
+															}
+															onEditCancel={clearEditingSession}
+															onEditSubmit={onEditSubmit}
+															onEditingTitleChange={setEditingTitle}
+															onArchive={() =>
+																onArchiveSessionRequest(session.sessionId)
+															}
+														/>
+													))}
+												</div>
+											) : null}
+										</div>
+									);
+								});
+							})()}
+							{hiddenSessionCount > 0 ? (
+								<Button
+									type="button"
+									size="sm"
+									variant="ghost"
+									className="text-muted-foreground mt-1 justify-start px-2 text-xs"
+									onClick={handleToggleShowAllSessions}
+								>
+									{showAllSessions
+										? t("session.showLess")
+										: t("session.showMore", { count: hiddenSessionCount })}
+								</Button>
+							) : null}
 						</div>
 					</>
 				) : null}

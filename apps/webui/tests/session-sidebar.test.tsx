@@ -257,6 +257,61 @@ describe("SessionSidebar", () => {
 		expect(screen.getByText(/1h ago/)).toBeInTheDocument();
 	});
 
+	it("limits the default visible session count and expands on demand", async () => {
+		const user = userEvent.setup();
+		const sessions = Array.from({ length: 9 }, (_, index) =>
+			buildSession({
+				sessionId: `session-${index + 1}`,
+				title: `Session ${index + 1}`,
+				backendId: "backend-a",
+				backendLabel: "Backend Alpha",
+				createdAt: `2024-01-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+				updatedAt: `2024-01-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+			}),
+		);
+
+		renderSidebar(sessions);
+
+		expect(screen.getByText("Session 9")).toBeInTheDocument();
+		expect(screen.queryByText("Session 1")).not.toBeInTheDocument();
+
+		await user.click(
+			screen.getByRole("button", {
+				name: i18n.t("session.showMore", { count: 1 }),
+			}),
+		);
+
+		expect(screen.getByText("Session 1")).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", {
+				name: i18n.t("session.showLess"),
+			}),
+		).toBeInTheDocument();
+	});
+
+	it("does not render empty group headers beyond the default limit", () => {
+		const sessions = Array.from({ length: 9 }, (_, index) =>
+			buildSession({
+				sessionId: `session-group-${index + 1}`,
+				title: `Grouped Session ${index + 1}`,
+				backendId: `backend-${index + 1}`,
+				backendLabel: `Backend ${index + 1}`,
+				createdAt: `2024-02-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+				updatedAt: `2024-02-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+			}),
+		);
+
+		renderSidebar(sessions);
+
+		expect(screen.getByText("Backend 9")).toBeInTheDocument();
+		expect(screen.queryByText("Backend 1")).not.toBeInTheDocument();
+		expect(
+			screen.getByRole("button", {
+				name: i18n.t("session.showMore", { count: 1 }),
+			}),
+		).toBeInTheDocument();
+	});
+
 	it("shows status tooltip for loading session", () => {
 		renderSidebar([
 			buildSession({

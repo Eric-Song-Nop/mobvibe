@@ -35,13 +35,22 @@ describe("useChatStore", () => {
 	});
 
 	it("creates a local session when missing", () => {
+		const createdAt = "2025-01-01T00:00:00Z";
+		const updatedAt = "2025-01-01T00:00:00Z";
+
 		useChatStore.getState().createLocalSession("session-1", {
 			title: "Test conversation",
+			createdAt,
+			updatedAt,
+			isCreating: true,
 		});
 
 		const session = useChatStore.getState().sessions["session-1"];
 		expect(session).toBeTruthy();
 		expect(session.title).toBe("Test conversation");
+		expect(session.createdAt).toBe(createdAt);
+		expect(session.updatedAt).toBe(updatedAt);
+		expect(session.isCreating).toBe(true);
 		expect(session.isAttached).toBe(false);
 	});
 
@@ -125,9 +134,13 @@ describe("useChatStore", () => {
 
 	describe("handleSessionsChanged", () => {
 		it("adds new sessions from payload", () => {
+			const createdAt = "2025-02-01T00:00:00Z";
+			const updatedAt = "2025-02-01T01:00:00Z";
 			const newSession = createMockSessionSummary({
 				sessionId: "new-session-1",
 				title: "New Session",
+				createdAt,
+				updatedAt,
 				cwd: "/home/user/project",
 				machineId: "machine-1",
 			});
@@ -141,6 +154,9 @@ describe("useChatStore", () => {
 			const session = useChatStore.getState().sessions["new-session-1"];
 			expect(session).toBeTruthy();
 			expect(session.title).toBe("New Session");
+			expect(session.createdAt).toBe(createdAt);
+			expect(session.updatedAt).toBe(updatedAt);
+			expect(session.isCreating).toBe(false);
 			expect(session.cwd).toBe("/home/user/project");
 			expect(session.machineId).toBe("machine-1");
 		});

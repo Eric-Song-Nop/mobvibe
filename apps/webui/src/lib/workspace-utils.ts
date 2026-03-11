@@ -1,4 +1,5 @@
 import type { ChatSession } from "@/lib/chat-store";
+import { compareTimestampsByRecency } from "@/lib/session-order";
 import { getPathBasename } from "@/lib/ui-utils";
 
 export type WorkspaceSummary = {
@@ -6,12 +7,6 @@ export type WorkspaceSummary = {
 	cwd: string;
 	label: string;
 	updatedAt?: string;
-};
-
-const compareWorkspaceUpdatedAt = (left?: string, right?: string) => {
-	const leftStamp = left ?? "";
-	const rightStamp = right ?? "";
-	return rightStamp.localeCompare(leftStamp);
 };
 
 /**
@@ -49,7 +44,7 @@ export const collectWorkspaces = (
 			continue;
 		}
 
-		if (compareWorkspaceUpdatedAt(existing.updatedAt, updatedAt) > 0) {
+		if (compareTimestampsByRecency(existing.updatedAt, updatedAt) > 0) {
 			byCwd.set(groupKey, {
 				...existing,
 				updatedAt,
@@ -58,6 +53,6 @@ export const collectWorkspaces = (
 	}
 
 	return Array.from(byCwd.values()).sort((left, right) =>
-		compareWorkspaceUpdatedAt(left.updatedAt, right.updatedAt),
+		compareTimestampsByRecency(left.updatedAt, right.updatedAt),
 	);
 };
