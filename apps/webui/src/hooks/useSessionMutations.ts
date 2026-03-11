@@ -37,6 +37,8 @@ type SessionMetadata = Partial<
 	Pick<
 		ChatSession,
 		| "title"
+		| "createdAt"
+		| "updatedAt"
 		| "backendId"
 		| "backendLabel"
 		| "cwd"
@@ -224,6 +226,8 @@ export function useSessionMutations(store: ChatStoreActions) {
 				title: variables.title || t("session.creating"),
 				backendId: variables.backendId,
 				cwd: variables.cwd,
+				createdAt: new Date().toISOString(),
+				updatedAt: new Date().toISOString(),
 				isCreating: true,
 				machineId: variables.machineId,
 			});
@@ -254,6 +258,8 @@ export function useSessionMutations(store: ChatStoreActions) {
 				availableModes: data.availableModes,
 				availableModels: data.availableModels,
 				availableCommands: data.availableCommands,
+				createdAt: data.createdAt,
+				updatedAt: data.updatedAt,
 				worktreeSourceCwd: data.worktreeSourceCwd,
 				worktreeBranch: data.worktreeBranch,
 				machineId: data.machineId,

@@ -95,6 +95,8 @@
 		"archiveAllTitle": "归档所有对话？",
 		"archiveAllDescription": "将归档 {{count}} 个对话，结束后端进程并从列表中隐藏。",
 		"archiveAllConfirm": "确认全部归档",
+		"showMore": "展开剩余 {{count}} 个对话",
+		"showLess": "收起对话列表",
 		"worktree": {
 			"enable": "在新 Worktree 中创建",
 			"branchLabel": "新分支",

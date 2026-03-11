@@ -6,6 +6,7 @@ import {
 	toSessionListEntry,
 	useChatStore,
 } from "@/lib/chat-store";
+import { compareSessionsByRecency } from "@/lib/session-order";
 import {
 	collectWorkspaces,
 	type WorkspaceSummary,
@@ -80,11 +81,7 @@ export function useSessionList({
 				return true;
 			});
 			return filtered
-				.sort((left, right) => {
-					const leftStamp = left.updatedAt ?? left.createdAt ?? "";
-					const rightStamp = right.updatedAt ?? right.createdAt ?? "";
-					return rightStamp.localeCompare(leftStamp);
-				})
+				.sort(compareSessionsByRecency)
 				.map((session) => serializeSessionEntry(toSessionListEntry(session)));
 		}),
 	);

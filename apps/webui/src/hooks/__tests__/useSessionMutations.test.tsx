@@ -152,6 +152,8 @@ describe("useSessionMutations", () => {
 				title: "New Session",
 				backendId: "backend-1",
 				backendLabel: "Backend 1",
+				createdAt: mockSession.createdAt,
+				updatedAt: mockSession.updatedAt,
 				cwd: mockSession.cwd,
 				agentName: mockSession.agentName,
 				modelId: mockSession.modelId,
@@ -380,6 +382,8 @@ describe("useSessionMutations", () => {
 				title: "Custom Title",
 				backendId: "backend-1",
 				cwd: "/custom/path",
+				createdAt: expect.any(String),
+				updatedAt: expect.any(String),
 				isCreating: true,
 				machineId: "machine-2",
 			});
