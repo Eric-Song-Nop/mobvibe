@@ -119,6 +119,7 @@ export function useSocket({
 	onReconnect,
 }: UseSocketOptions) {
 	const subscribedSessionsRef = useRef<Set<string>>(new Set());
+	const recoverableSessionsRef = useRef<Set<string>>(new Set());
 	const sessionsRef = useRef(useChatStore.getState().sessions);
 
 	useEffect(
@@ -473,6 +474,20 @@ export function useSocket({
 		},
 	});
 
+	const clearTrackedSession = useCallback(
+		(sessionId: string, options?: { unsubscribe?: boolean }) => {
+			const { unsubscribe = true } = options ?? {};
+			if (unsubscribe) {
+				gatewaySocket.unsubscribeFromSession(sessionId);
+			}
+			subscribedSessionsRef.current.delete(sessionId);
+			recoverableSessionsRef.current.delete(sessionId);
+			cancelBackfill(sessionId);
+			initialBackfillTriggeredRef.current.delete(sessionId);
+		},
+		[cancelBackfill],
+	);
+
 	const syncSessionHistory = useCallback(
 		(sessionId: string) => {
 			const session = useChatStore.getState().sessions[sessionId];
@@ -512,6 +527,7 @@ export function useSocket({
 
 	// Update handler refs
 	handleSessionAttachedRef.current = (payload: SessionAttachedPayload) => {
+		recoverableSessionsRef.current.add(payload.sessionId);
 		markSessionAttached(payload);
 
 		// If revision is provided, trigger backfill (skip if still loading)
@@ -536,6 +552,11 @@ export function useSocket({
 	};
 
 	handleSessionDetachedRef.current = (payload: SessionDetachedPayload) => {
+		if (payload.reason === "gateway_disconnect") {
+			recoverableSessionsRef.current.add(payload.sessionId);
+		} else {
+			clearTrackedSession(payload.sessionId);
+		}
 		markSessionDetached(payload);
 	};
 
@@ -764,20 +785,44 @@ export function useSocket({
 				if (!subscribedSessionsRef.current.has(sessionId)) {
 					subscribedSessionsRef.current.add(sessionId);
 				}
+				if (sessions[sessionId]) {
+					recoverableSessionsRef.current.add(sessionId);
+				}
 			}
 
-			const subscribableSessions = Object.values(sessions).filter(
-				(session) => session.isAttached || session.isLoading || session.sending,
-			);
-			const subscribableIds = new Set(
-				subscribableSessions.map((s) => s.sessionId),
-			);
+			for (const sessionId of Array.from(recoverableSessionsRef.current)) {
+				if (!sessions[sessionId]) {
+					recoverableSessionsRef.current.delete(sessionId);
+				}
+			}
+
+			const subscribableIds = new Set<string>();
+			for (const [sessionId, session] of Object.entries(sessions)) {
+				const isLiveSession =
+					session.isAttached || session.isLoading || session.sending;
+				if (isLiveSession) {
+					recoverableSessionsRef.current.add(sessionId);
+					subscribableIds.add(sessionId);
+					continue;
+				}
+
+				if (
+					session.detachedReason === "gateway_disconnect" &&
+					recoverableSessionsRef.current.has(sessionId)
+				) {
+					subscribableIds.add(sessionId);
+					continue;
+				}
+
+				recoverableSessionsRef.current.delete(sessionId);
+			}
 
 			// Subscribe to new sessions
 			for (const sessionId of subscribableIds) {
 				if (!subscribedSessionsRef.current.has(sessionId)) {
 					gatewaySocket.subscribeToSession(sessionId);
 					subscribedSessionsRef.current.add(sessionId);
+					recoverableSessionsRef.current.add(sessionId);
 					setStreamError(sessionId, undefined);
 
 					// Trigger initial backfill on subscription (skip if still loading)
@@ -809,12 +854,9 @@ export function useSocket({
 			}
 
 			// Unsubscribe from sessions no longer streaming
-			for (const sessionId of subscribedSessionsRef.current) {
+			for (const sessionId of Array.from(subscribedSessionsRef.current)) {
 				if (!subscribableIds.has(sessionId)) {
-					gatewaySocket.unsubscribeFromSession(sessionId);
-					subscribedSessionsRef.current.delete(sessionId);
-					cancelBackfill(sessionId);
-					initialBackfillTriggeredRef.current.delete(sessionId);
+					clearTrackedSession(sessionId);
 				}
 			}
 
@@ -845,7 +887,7 @@ export function useSocket({
 			sessionsRef.current = state.sessions;
 			syncSubscribedSessions(state.sessions);
 		});
-	}, [setStreamError, cancelBackfill]);
+	}, [setStreamError, cancelBackfill, clearTrackedSession]);
 
 	// Stable ref for onReconnect callback
 	const onReconnectRef = useRef(onReconnect);
@@ -855,25 +897,35 @@ export function useSocket({
 	useEffect(() => {
 		let isFirstConnect = true;
 		const handleConnect = () => {
+			const reconnectSessionIds = new Set([
+				...subscribedSessionsRef.current,
+				...recoverableSessionsRef.current,
+			]);
+
 			// Reset backfill tracking — stale refs from previous connection
 			// would block session:attached from triggering fresh backfill
-			for (const sessionId of subscribedSessionsRef.current) {
+			for (const sessionId of reconnectSessionIds) {
 				initialBackfillTriggeredRef.current.delete(sessionId);
 			}
 
-			for (const sessionId of subscribedSessionsRef.current) {
+			for (const sessionId of reconnectSessionIds) {
+				const session = sessionsRef.current[sessionId];
+				if (!session) {
+					clearTrackedSession(sessionId, { unsubscribe: false });
+					continue;
+				}
+
+				subscribedSessionsRef.current.add(sessionId);
+				recoverableSessionsRef.current.add(sessionId);
 				gatewaySocket.subscribeToSession(sessionId);
 
 				// Trigger backfill on reconnect (skip sessions currently loading)
-				const session = sessionsRef.current[sessionId];
-				if (session) {
-					const isLoading =
-						useChatStore.getState().sessions[sessionId]?.isLoading;
-					if (!isLoading) {
-						const revision = session.revision ?? 1;
-						const afterSeq = session.lastAppliedSeq ?? 0;
-						triggerBackfillRef.current?.(sessionId, revision, afterSeq);
-					}
+				const isLoading =
+					useChatStore.getState().sessions[sessionId]?.isLoading;
+				if (!isLoading) {
+					const revision = session.revision ?? 1;
+					const afterSeq = session.lastAppliedSeq ?? 0;
+					triggerBackfillRef.current?.(sessionId, revision, afterSeq);
 				}
 			}
 
@@ -886,7 +938,7 @@ export function useSocket({
 
 		const unsubscribe = gatewaySocket.onConnect(handleConnect);
 		return unsubscribe;
-	}, []);
+	}, [clearTrackedSession]);
 
 	return {
 		syncSessionHistory,
