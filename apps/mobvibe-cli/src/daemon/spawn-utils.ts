@@ -1,7 +1,7 @@
 const FOREGROUND_FLAGS = new Set(["--foreground", "-f"]);
 
 const isBunVirtualEntrypoint = (arg: string): boolean =>
-	arg.startsWith("/$bunfs/");
+	arg.startsWith("/$bunfs/") || /^[A-Za-z]:\/~BUN\//.test(arg);
 
 export const buildForegroundSpawnArgs = (execArgv: string[]): string[] => {
 	const scriptOrCommandArg = execArgv[1];
