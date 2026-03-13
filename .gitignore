@@ -30,3 +30,4 @@ apps/website/public/logo.svg
 
 # Local Netlify folder
 .netlify
+.alma-snapshots
