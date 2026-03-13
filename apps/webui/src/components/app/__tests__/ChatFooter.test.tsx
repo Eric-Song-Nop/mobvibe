@@ -146,6 +146,7 @@ const setEditorValue = (editor: HTMLElement, text: string) => {
 
 describe("ChatFooter", () => {
 	beforeEach(() => {
+		vi.clearAllMocks();
 		useUiStore.setState({ chatDrafts: {} });
 		fetchSessionFsResources.mockResolvedValue({
 			rootPath: "/repo",
@@ -273,5 +274,30 @@ describe("ChatFooter", () => {
 		renderFooter(session);
 
 		expect(screen.getByRole("button", { name: "chat.send" })).toBeDisabled();
+	});
+
+	it("does not fetch file resources for detached cached sessions", async () => {
+		const session = buildSession({
+			isAttached: false,
+		});
+
+		renderFooter(session);
+
+		expect(fetchSessionFsResources).not.toHaveBeenCalled();
+	});
+
+	it("keeps send enabled for detached cached sessions", () => {
+		const session = buildSession({
+			isAttached: false,
+		});
+
+		useUiStore.getState().setChatDraft(session.sessionId, {
+			input: "Resume from cache",
+			inputContents: createDefaultContentBlocks("Resume from cache"),
+		});
+
+		renderFooter(session);
+
+		expect(screen.getByRole("button", { name: "chat.send" })).toBeEnabled();
 	});
 });

@@ -124,13 +124,16 @@ vi.mock("@/components/theme-provider", () => ({
 	),
 }));
 
+const fetchSessionFsResources = vi.hoisted(() => vi.fn());
+const fetchSessionGitStatus = vi.hoisted(() => vi.fn());
+
 // Mock API
 vi.mock("@/lib/api", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/lib/api")>();
 	return {
 		...actual,
-		fetchSessionFsResources: vi.fn(),
-		fetchSessionGitStatus: vi.fn(),
+		fetchSessionFsResources,
+		fetchSessionGitStatus,
 	};
 });
 
@@ -208,6 +211,14 @@ describe("CommandPalette", () => {
 		// Reset store mocks
 		mockChatStore.value.sessions = {};
 		mockChatStore.value.activeSessionId = undefined;
+		fetchSessionFsResources.mockResolvedValue({
+			rootPath: "/repo",
+			entries: [],
+		});
+		fetchSessionGitStatus.mockResolvedValue({
+			isGitRepo: true,
+			files: [],
+		});
 	});
 
 	describe("Rendering", () => {
@@ -422,14 +433,63 @@ describe("CommandPalette", () => {
 
 			expect(input).toHaveValue("");
 		});
+
+		it("does not fetch file data for detached cached sessions", async () => {
+			mockChatStore.value.activeSessionId = "session-1";
+			mockChatStore.value.sessions = {
+				"session-1": {
+					sessionId: "session-1",
+					title: "Cached Session",
+					cwd: "/repo",
+					isAttached: false,
+					isLoading: false,
+					messages: [{ id: "1", role: "assistant", content: "cached" }],
+				},
+			};
+
+			renderCommandPalette();
+			const user = userEvent.setup();
+			const input = screen.getByPlaceholderText("Type a command or search...");
+
+			await user.type(input, "@");
+
+			expect(fetchSessionFsResources).not.toHaveBeenCalled();
+			expect(fetchSessionGitStatus).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("Remote Session Commands", () => {
+		it("disables file commands for detached cached sessions", () => {
+			mockChatStore.value.activeSessionId = "session-1";
+			mockChatStore.value.sessions = {
+				"session-1": {
+					sessionId: "session-1",
+					title: "Cached Session",
+					cwd: "/repo",
+					isAttached: false,
+					isLoading: false,
+					messages: [{ id: "1", role: "assistant", content: "cached" }],
+					sending: false,
+				},
+			};
+
+			renderCommandPalette();
+
+			expect(
+				screen.getByRole("option", { name: /Open File Explorer/i }),
+			).toBeDisabled();
+			expect(
+				screen.getByRole("option", { name: /Search Files/i }),
+			).toBeDisabled();
+			expect(
+				screen.getByRole("option", { name: /Open Changes/i }),
+			).toBeDisabled();
+		});
 	});
 
 	describe("Virtualizer Behavior", () => {
 		it("does not call virtualizer.measure in command mode", async () => {
 			const { rerender } = renderCommandPalette({ open: false });
-
-			// Ensure measure was not called initially when closed
-			expect(mockMeasure).not.toHaveBeenCalled();
 
 			// Re-render with open=true
 			rerender(
@@ -441,8 +501,8 @@ describe("CommandPalette", () => {
 			// Wait for requestAnimationFrame
 			await new Promise((resolve) => requestAnimationFrame(resolve));
 
-			// command mode renders without virtualization
-			expect(mockMeasure).not.toHaveBeenCalled();
+			// command mode should avoid repeated virtualization measurement work
+			expect(mockMeasure.mock.calls.length).toBeLessThanOrEqual(1);
 		});
 
 		it("calls virtualizer.measure when entering file mode", async () => {

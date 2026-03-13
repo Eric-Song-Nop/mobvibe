@@ -48,6 +48,7 @@ import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { isInputFocused, registerHotkeys } from "@/lib/hotkeys";
 import { getBackendCapability, useMachinesStore } from "@/lib/machines-store";
 import { ensureNotificationPermission } from "@/lib/notifications";
+import { shouldActivateSessionOnSelect } from "@/lib/session-selection";
 import { useUiStore } from "@/lib/ui-store";
 import { getPathBasename } from "@/lib/ui-utils";
 
@@ -449,9 +450,32 @@ function MainApp() {
 		chatMessageListRef.current?.scrollToIndex(index);
 	}, []);
 
+	const handleSelectSession = useCallback(
+		(sessionId: string) => {
+			const session = useChatStore.getState().sessions[sessionId];
+			if (!session) {
+				chatActions.setActiveSessionId(sessionId);
+				return;
+			}
+
+			if (shouldActivateSessionOnSelect(session)) {
+				void activateSession(session);
+				return;
+			}
+
+			chatActions.setActiveSessionId(sessionId);
+		},
+		[activateSession, chatActions.setActiveSessionId],
+	);
+
 	// --- Derived display state ---
 
-	const fileExplorerAvailable = Boolean(activeSessionId && activeSession?.cwd);
+	const fileExplorerAvailable = Boolean(
+		activeSessionId &&
+			activeSession?.cwd &&
+			activeSession?.isAttached &&
+			!activeSession?.isLoading,
+	);
 	const syncHistoryAvailable = Boolean(activeSessionId);
 	const syncHistoryDisabled =
 		!syncHistoryAvailable ||
@@ -644,14 +668,7 @@ function MainApp() {
 					sessions={sessionList}
 					activeSessionId={activeSessionId}
 					onCreateSession={handleOpenCreateDialog}
-					onSelectSession={(sessionId) => {
-						const session = useChatStore.getState().sessions[sessionId];
-						if (session) {
-							void activateSession(session);
-						} else {
-							chatActions.setActiveSessionId(sessionId);
-						}
-					}}
+					onSelectSession={handleSelectSession}
 					onEditSubmit={handleRenameSubmit}
 					onArchiveSession={(sessionId) => {
 						void handleArchiveSession(sessionId);

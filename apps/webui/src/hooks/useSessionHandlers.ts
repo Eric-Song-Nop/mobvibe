@@ -145,6 +145,32 @@ export function useSessionHandlers({
 	const activeSessionRef = useRef(activeSession);
 	activeSessionRef.current = activeSession;
 
+	const ensureSessionAttached = useCallback(async () => {
+		const session = activeSessionRef.current;
+		const sessionId = session?.sessionId;
+		if (!session || !sessionId) {
+			return undefined;
+		}
+
+		const latestSession =
+			useChatStore.getState().sessions[sessionId] ?? session;
+		if (latestSession.isAttached) {
+			return latestSession;
+		}
+		if (latestSession.isLoading) {
+			return undefined;
+		}
+
+		await activateSession(latestSession);
+
+		const attachedSession = useChatStore.getState().sessions[sessionId];
+		if (!attachedSession?.isAttached) {
+			return undefined;
+		}
+
+		return attachedSession;
+	}, [activateSession]);
+
 	const handleOpenCreateDialog = (mode?: "workspace" | "session") => {
 		uiActions.setDraftTitle(buildSessionTitle(sessionList, t));
 		uiActions.setDraftBackendId(defaultBackendId);
@@ -324,15 +350,15 @@ export function useSessionHandlers({
 		[mutations.permissionDecisionMutation, chatActions.setError],
 	);
 
-	const handleModeChange = (modeId: string) => {
-		if (!activeSessionId || !activeSession) {
+	const handleModeChange = async (modeId: string) => {
+		if (!activeSessionId || !activeSessionRef.current) {
 			return;
 		}
-		if (!activeSession.isAttached) {
-			chatActions.setError(activeSessionId, buildSessionNotReadyError());
+		const readySession = await ensureSessionAttached();
+		if (!readySession) {
 			return;
 		}
-		if (modeId === activeSession.modeId) {
+		if (modeId === readySession.modeId) {
 			return;
 		}
 		chatActions.setError(activeSessionId, undefined);
@@ -342,15 +368,15 @@ export function useSessionHandlers({
 		});
 	};
 
-	const handleModelChange = (modelId: string) => {
-		if (!activeSessionId || !activeSession) {
+	const handleModelChange = async (modelId: string) => {
+		if (!activeSessionId || !activeSessionRef.current) {
 			return;
 		}
-		if (!activeSession.isAttached) {
-			chatActions.setError(activeSessionId, buildSessionNotReadyError());
+		const readySession = await ensureSessionAttached();
+		if (!readySession) {
 			return;
 		}
-		if (modelId === activeSession.modelId) {
+		if (modelId === readySession.modelId) {
 			return;
 		}
 		chatActions.setError(activeSessionId, undefined);
@@ -414,30 +440,45 @@ export function useSessionHandlers({
 		syncSessionHistory(activeSessionId);
 	};
 
-	const handleSend = () => {
-		if (!activeSessionId || !activeSession) {
+	const handleSend = async () => {
+		if (!activeSessionId || !activeSessionRef.current) {
 			return;
 		}
+		const initialSession =
+			useChatStore.getState().sessions[activeSessionId] ??
+			activeSessionRef.current;
 		const draft = useUiStore.getState().chatDrafts[activeSessionId];
-		const promptContents = draft?.inputContents ?? activeSession.inputContents;
-		const promptText = draft?.input ?? activeSession.input ?? "";
+		const promptContents = draft?.inputContents ?? initialSession.inputContents;
 		const hasPromptContent = promptContents.some(
 			(block) =>
 				block.type === "resource_link" ||
 				(block.type === "text" && block.text.trim().length > 0),
 		);
-		if (!hasPromptContent || activeSession.sending) {
+		if (!hasPromptContent || initialSession.sending) {
 			return;
 		}
-		if (!activeSession.isAttached) {
+
+		const readySession = await ensureSessionAttached();
+		if (!readySession) {
+			return;
+		}
+		const latestDraft = useUiStore.getState().chatDrafts[activeSessionId];
+		const latestPromptContents =
+			latestDraft?.inputContents ?? readySession.inputContents;
+		const latestPromptText = latestDraft?.input ?? readySession.input ?? "";
+		const hasLatestPromptContent = latestPromptContents.some(
+			(block) =>
+				block.type === "resource_link" ||
+				(block.type === "text" && block.text.trim().length > 0),
+		);
+		if (!hasLatestPromptContent || readySession.sending) {
+			return;
+		}
+		if (readySession.e2eeStatus === undefined) {
 			chatActions.setError(activeSessionId, buildSessionNotReadyError());
 			return;
 		}
-		if (activeSession.e2eeStatus === undefined) {
-			chatActions.setError(activeSessionId, buildSessionNotReadyError());
-			return;
-		}
-		if (activeSession.e2eeStatus === "missing_key") {
+		if (readySession.e2eeStatus === "missing_key") {
 			chatActions.setError(activeSessionId, buildSessionE2EEKeyMissingError());
 			return;
 		}
@@ -449,18 +490,18 @@ export function useSessionHandlers({
 		chatActions.setError(activeSessionId, undefined);
 		useUiStore.getState().clearChatDraft(activeSessionId);
 
-		chatActions.addUserMessage(activeSessionId, promptText, {
+		chatActions.addUserMessage(activeSessionId, latestPromptText, {
 			messageId,
-			contentBlocks: promptContents,
+			contentBlocks: latestPromptContents,
 			provisional: true,
 		});
 		mutations.sendMessageMutation.mutate({
 			sessionId: activeSessionId,
-			prompt: promptContents,
+			prompt: latestPromptContents,
 			messageId,
 			draft: {
-				input: promptText,
-				inputContents: promptContents,
+				input: latestPromptText,
+				inputContents: latestPromptContents,
 			},
 		});
 	};

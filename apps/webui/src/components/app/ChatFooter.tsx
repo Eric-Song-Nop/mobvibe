@@ -409,6 +409,11 @@ export function ChatFooter({
 			!activeSession?.isLoading &&
 			activeSession?.e2eeStatus !== undefined,
 	);
+	const canMutateSession = Boolean(
+		activeSessionId &&
+			!activeSession?.isLoading &&
+			(!activeSession?.isAttached || activeSession?.e2eeStatus !== undefined),
+	);
 	const contentBlocks =
 		storedDraft?.inputContents ??
 		activeSession?.inputContents ??
@@ -438,12 +443,12 @@ export function ChatFooter({
 	const resourcesQuery = useQuery({
 		queryKey: ["session-resources", activeSessionId],
 		queryFn: () => {
-			if (!activeSessionId) {
+			if (!activeSessionId || !isReady) {
 				return Promise.resolve({ rootPath: "", entries: [] });
 			}
 			return fetchSessionFsResources({ sessionId: activeSessionId });
 		},
-		enabled: Boolean(activeSessionId),
+		enabled: Boolean(activeSessionId && isReady),
 	});
 	const resourceEntries = resourcesQuery.data?.entries ?? [];
 	const resourceTokens = useMemo(
@@ -704,7 +709,9 @@ export function ChatFooter({
 
 	const editorRef = useRef<HTMLDivElement | null>(null);
 	const isComposingRef = useRef(false);
-	const fileExplorerAvailable = Boolean(activeSession?.cwd && activeSessionId);
+	const fileExplorerAvailable = Boolean(
+		activeSession?.cwd && activeSessionId && isReady,
+	);
 	const setFileExplorerOpen = useUiStore((state) => state.setFileExplorerOpen);
 	const setFilePreviewPath = useUiStore((state) => state.setFilePreviewPath);
 	const handleOpenResourcePreview = useCallback(
@@ -1057,7 +1064,7 @@ export function ChatFooter({
 							<Select
 								value={activeSession?.modelId ?? ""}
 								onValueChange={onModelChange}
-								disabled={!activeSessionId || !isReady || isModelSwitching}
+								disabled={!canMutateSession || isModelSwitching}
 							>
 								<SelectTrigger
 									size="sm"
@@ -1083,7 +1090,7 @@ export function ChatFooter({
 							<Select
 								value={activeSession?.modeId ?? ""}
 								onValueChange={onModeChange}
-								disabled={!activeSessionId || !isReady || isModeSwitching}
+								disabled={!canMutateSession || isModeSwitching}
 							>
 								<SelectTrigger
 									size="sm"
@@ -1112,10 +1119,9 @@ export function ChatFooter({
 							size="icon-sm"
 							onClick={activeSession?.sending ? onCancel : onSend}
 							disabled={
-								!activeSessionId ||
-								!isReady ||
+								!canMutateSession ||
 								activeSession?.canceling ||
-								(!activeSession?.sending && !canSend)
+								(activeSession?.sending ? !isReady : !canSend)
 							}
 						>
 							<HugeiconsIcon

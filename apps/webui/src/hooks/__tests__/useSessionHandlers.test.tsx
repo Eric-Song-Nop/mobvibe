@@ -551,7 +551,7 @@ describe("useSessionHandlers — handleSend", () => {
 		vi.clearAllMocks();
 	});
 
-	it("sends the latest prompt from the draft store and clears the draft", () => {
+	it("sends the latest prompt from the draft store and clears the draft", async () => {
 		const promptContents = createDefaultContentBlocks("Ship it");
 		mockUiStoreState.chatDrafts["session-1"] = {
 			input: "Ship it",
@@ -565,8 +565,8 @@ describe("useSessionHandlers — handleSend", () => {
 			}),
 		});
 
-		act(() => {
-			result.current.handleSend();
+		await act(async () => {
+			await result.current.handleSend();
 		});
 
 		expect(chatActions.setSending).toHaveBeenCalledWith("session-1", true);
@@ -592,7 +592,7 @@ describe("useSessionHandlers — handleSend", () => {
 		});
 	});
 
-	it("does not send when the draft contains only whitespace", () => {
+	it("does not send when the draft contains only whitespace", async () => {
 		mockUiStoreState.chatDrafts["session-1"] = {
 			input: "   ",
 			inputContents: createDefaultContentBlocks("   "),
@@ -600,8 +600,8 @@ describe("useSessionHandlers — handleSend", () => {
 
 		const { result } = renderHandlers();
 
-		act(() => {
-			result.current.handleSend();
+		await act(async () => {
+			await result.current.handleSend();
 		});
 
 		expect(chatActions.setSending).not.toHaveBeenCalled();
@@ -609,7 +609,7 @@ describe("useSessionHandlers — handleSend", () => {
 		expect(mockUiStoreState.clearChatDraft).not.toHaveBeenCalled();
 	});
 
-	it("does not send while the restored session E2EE status is unresolved", () => {
+	it("does not send while the restored session E2EE status is unresolved", async () => {
 		mockUiStoreState.chatDrafts["session-1"] = {
 			input: "Top secret prompt",
 			inputContents: createDefaultContentBlocks("Top secret prompt"),
@@ -621,8 +621,8 @@ describe("useSessionHandlers — handleSend", () => {
 			}),
 		});
 
-		act(() => {
-			result.current.handleSend();
+		await act(async () => {
+			await result.current.handleSend();
 		});
 
 		expect(chatActions.setError).toHaveBeenCalledWith(
@@ -633,7 +633,7 @@ describe("useSessionHandlers — handleSend", () => {
 		expect(mutations.sendMessageMutation.mutate).not.toHaveBeenCalled();
 	});
 
-	it("sends resource-only prompts from the draft store", () => {
+	it("sends resource-only prompts from the draft store", async () => {
 		const promptContents: ChatSession["inputContents"] = [
 			{
 				type: "resource_link",
@@ -653,8 +653,8 @@ describe("useSessionHandlers — handleSend", () => {
 			}),
 		});
 
-		act(() => {
-			result.current.handleSend();
+		await act(async () => {
+			await result.current.handleSend();
 		});
 
 		expect(mockUiStoreState.clearChatDraft).toHaveBeenCalledWith("session-1");
@@ -675,6 +675,213 @@ describe("useSessionHandlers — handleSend", () => {
 				inputContents: promptContents,
 			},
 		});
+	});
+
+	it("activates a detached session before sending", async () => {
+		const promptContents = createDefaultContentBlocks("Ship it");
+		const detachedSession = createBaseSession({
+			isAttached: false,
+			input: "",
+			inputContents: createDefaultContentBlocks("stale"),
+		});
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Ship it",
+			inputContents: promptContents,
+		};
+		mockChatStoreState.sessions = {
+			"session-1": detachedSession,
+		};
+		const activateSession = vi.fn(async () => {
+			mockChatStoreState.sessions["session-1"] = {
+				...detachedSession,
+				isAttached: true,
+			};
+		});
+
+		const { result } = renderHandlers({
+			activeSession: detachedSession,
+			activateSession,
+		});
+
+		await act(async () => {
+			await result.current.handleSend();
+		});
+
+		expect(activateSession).toHaveBeenCalledWith(detachedSession);
+		expect(mutations.sendMessageMutation.mutate).toHaveBeenCalledWith({
+			sessionId: "session-1",
+			prompt: promptContents,
+			messageId: expect.any(String),
+			draft: {
+				input: "Ship it",
+				inputContents: promptContents,
+			},
+		});
+	});
+
+	it("does not send when activation does not attach the session", async () => {
+		const detachedSession = createBaseSession({
+			isAttached: false,
+		});
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Ship it",
+			inputContents: createDefaultContentBlocks("Ship it"),
+		};
+		mockChatStoreState.sessions = {
+			"session-1": detachedSession,
+		};
+		const activateSession = vi.fn(async () => undefined);
+
+		const { result } = renderHandlers({
+			activeSession: detachedSession,
+			activateSession,
+		});
+
+		await act(async () => {
+			await result.current.handleSend();
+		});
+
+		expect(activateSession).toHaveBeenCalledWith(detachedSession);
+		expect(mutations.sendMessageMutation.mutate).not.toHaveBeenCalled();
+		expect(mockUiStoreState.clearChatDraft).not.toHaveBeenCalled();
+	});
+});
+
+describe("useSessionHandlers — mode and model switching", () => {
+	let queryClient: QueryClient;
+	let uiActions: ReturnType<typeof createMockUiActions>;
+	let chatActions: ReturnType<typeof createMockChatActions>;
+	let mutations: ReturnType<typeof createMockMutations>;
+
+	const wrapper = ({ children }: { children: ReactNode }) => (
+		<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+	);
+
+	const renderHandlers = (
+		overrides: Partial<UseSessionHandlersParams> = {},
+	) => {
+		const defaults: UseSessionHandlersParams = {
+			sessions: {},
+			activeSessionId: "session-1",
+			activeSession: createBaseSession(),
+			sessionList: [],
+			selectedMachineId: "machine-1",
+			lastCreatedCwd: {},
+			machines: {
+				"machine-1": {
+					machineId: "machine-1",
+					hostname: "dev-box",
+					connected: true,
+				} as Machine,
+			},
+			defaultBackendId: "backend-1",
+			effectiveWorkspaceCwd: undefined,
+			chatActions,
+			uiActions,
+			mutations,
+			activateSession: vi.fn(async () => undefined),
+			isActivating: false,
+			syncSessionHistory: vi.fn(),
+		};
+
+		return renderHook(() => useSessionHandlers({ ...defaults, ...overrides }), {
+			wrapper,
+		});
+	};
+
+	beforeEach(() => {
+		queryClient = new QueryClient({
+			defaultOptions: { mutations: { retry: false } },
+		});
+		uiActions = createMockUiActions();
+		chatActions = createMockChatActions();
+		mutations = createMockMutations();
+		mockChatStoreState.sessions = {};
+		vi.clearAllMocks();
+	});
+
+	it("activates a detached session before switching mode", async () => {
+		const detachedSession = createBaseSession({
+			isAttached: false,
+			modeId: "mode-old",
+		});
+		mockChatStoreState.sessions = {
+			"session-1": detachedSession,
+		};
+		const activateSession = vi.fn(async () => {
+			mockChatStoreState.sessions["session-1"] = {
+				...detachedSession,
+				isAttached: true,
+			};
+		});
+
+		const { result } = renderHandlers({
+			activeSession: detachedSession,
+			activateSession,
+		});
+
+		await act(async () => {
+			await result.current.handleModeChange("mode-new");
+		});
+
+		expect(activateSession).toHaveBeenCalledWith(detachedSession);
+		expect(mutations.setSessionModeMutation.mutate).toHaveBeenCalledWith({
+			sessionId: "session-1",
+			modeId: "mode-new",
+		});
+	});
+
+	it("activates a detached session before switching model", async () => {
+		const detachedSession = createBaseSession({
+			isAttached: false,
+			modelId: "model-old",
+		});
+		mockChatStoreState.sessions = {
+			"session-1": detachedSession,
+		};
+		const activateSession = vi.fn(async () => {
+			mockChatStoreState.sessions["session-1"] = {
+				...detachedSession,
+				isAttached: true,
+			};
+		});
+
+		const { result } = renderHandlers({
+			activeSession: detachedSession,
+			activateSession,
+		});
+
+		await act(async () => {
+			await result.current.handleModelChange("model-new");
+		});
+
+		expect(activateSession).toHaveBeenCalledWith(detachedSession);
+		expect(mutations.setSessionModelMutation.mutate).toHaveBeenCalledWith({
+			sessionId: "session-1",
+			modelId: "model-new",
+		});
+	});
+
+	it("does not switch mode when activation does not attach", async () => {
+		const detachedSession = createBaseSession({
+			isAttached: false,
+			modeId: "mode-old",
+		});
+		mockChatStoreState.sessions = {
+			"session-1": detachedSession,
+		};
+		const activateSession = vi.fn(async () => undefined);
+
+		const { result } = renderHandlers({
+			activeSession: detachedSession,
+			activateSession,
+		});
+
+		await act(async () => {
+			await result.current.handleModeChange("mode-new");
+		});
+
+		expect(mutations.setSessionModeMutation.mutate).not.toHaveBeenCalled();
 	});
 });
 
