@@ -499,6 +499,161 @@ describe("useSocket (webui)", () => {
 		);
 	});
 
+	it("keeps tracked sessions subscribed across gateway_disconnect and reconnect", async () => {
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				machineId: "machine-1",
+				revision: 2,
+				lastAppliedSeq: 4,
+			}),
+		};
+		setMockSessions(sessions);
+
+		renderHook(() =>
+			useSocket({
+				sessions,
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		await waitFor(() => {
+			expect(mockGatewaySocket.subscribeToSession).toHaveBeenCalledWith(
+				"session-1",
+			);
+		});
+
+		handlers.connect?.();
+		mockGatewaySocket.subscribeToSession.mockClear();
+		mockGatewaySocket.unsubscribeFromSession.mockClear();
+		mockBackfill.startBackfill.mockClear();
+
+		handlers.disconnect?.("transport close");
+		setMockSessions({
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: false,
+				detachedReason: "gateway_disconnect",
+				detachedAt: "2024-01-01T00:00:00Z",
+				machineId: "machine-1",
+				revision: 2,
+				lastAppliedSeq: 4,
+			}),
+		});
+
+		expect(mockGatewaySocket.unsubscribeFromSession).not.toHaveBeenCalledWith(
+			"session-1",
+		);
+
+		handlers.connect?.();
+
+		expect(mockGatewaySocket.subscribeToSession).toHaveBeenCalledWith(
+			"session-1",
+		);
+		expect(mockBackfill.startBackfill).toHaveBeenCalledWith("session-1", 2, 4);
+	});
+
+	it("clears tracked sessions after a real detach so reconnect does not re-subscribe", async () => {
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				machineId: "machine-1",
+				revision: 3,
+				lastAppliedSeq: 8,
+			}),
+		};
+		setMockSessions(sessions);
+
+		renderHook(() =>
+			useSocket({
+				sessions,
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		await waitFor(() => {
+			expect(mockGatewaySocket.subscribeToSession).toHaveBeenCalledWith(
+				"session-1",
+			);
+		});
+
+		handlers.connect?.();
+		mockGatewaySocket.subscribeToSession.mockClear();
+		mockGatewaySocket.unsubscribeFromSession.mockClear();
+		mockBackfill.startBackfill.mockClear();
+
+		handlers.sessionDetached?.({
+			sessionId: "session-1",
+			machineId: "machine-1",
+			detachedAt: "2024-01-01T00:00:00Z",
+			reason: "cli_disconnect",
+		});
+		setMockSessions({
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: false,
+				detachedReason: "cli_disconnect",
+				detachedAt: "2024-01-01T00:00:00Z",
+				machineId: "machine-1",
+				revision: 3,
+				lastAppliedSeq: 8,
+			}),
+		});
+
+		expect(mockGatewaySocket.unsubscribeFromSession).toHaveBeenCalledWith(
+			"session-1",
+		);
+
+		mockGatewaySocket.subscribeToSession.mockClear();
+		mockBackfill.startBackfill.mockClear();
+		handlers.connect?.();
+
+		expect(mockGatewaySocket.subscribeToSession).not.toHaveBeenCalledWith(
+			"session-1",
+		);
+		expect(mockBackfill.startBackfill).not.toHaveBeenCalledWith(
+			"session-1",
+			3,
+			8,
+		);
+	});
+
 	it("restores the previous transcript when a manual sync backfill fails before replay", async () => {
 		const store = createStore();
 		const sessions = {
@@ -888,6 +1043,121 @@ describe("useSocket (webui)", () => {
 			"secret restored",
 		);
 		expect(store.updateSessionCursor).toHaveBeenCalledWith("session-1", 1, 1);
+	});
+
+	it("keeps encrypted reconnect backfill buffered until the DEK is ready", async () => {
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				machineId: "machine-1",
+				revision: 1,
+				lastAppliedSeq: 0,
+			}),
+		};
+		setMockSessions(sessions);
+		mockE2EE.hasSessionDek.mockReturnValue(false);
+		decryptedPayloads.set("cipher-reconnect", {
+			sessionId: "session-1",
+			update: {
+				sessionUpdate: "agent_message_chunk",
+				content: { type: "text", text: "secret after reconnect" },
+			},
+		});
+
+		renderHook(() =>
+			useSocket({
+				sessions,
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		await waitFor(() => {
+			expect(mockGatewaySocket.subscribeToSession).toHaveBeenCalledWith(
+				"session-1",
+			);
+		});
+
+		const appendAssistantChunkMock = store.appendAssistantChunk as ReturnType<
+			typeof vi.fn
+		>;
+		const updateSessionCursorMock = store.updateSessionCursor as ReturnType<
+			typeof vi.fn
+		>;
+
+		handlers.connect?.();
+		mockGatewaySocket.subscribeToSession.mockClear();
+		mockBackfill.startBackfill.mockClear();
+		appendAssistantChunkMock.mockClear();
+		updateSessionCursorMock.mockClear();
+
+		handlers.disconnect?.("transport close");
+		setMockSessions({
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: false,
+				detachedReason: "gateway_disconnect",
+				detachedAt: "2024-01-01T00:00:00Z",
+				machineId: "machine-1",
+				revision: 1,
+				lastAppliedSeq: 0,
+			}),
+		});
+
+		handlers.connect?.();
+
+		expect(mockGatewaySocket.subscribeToSession).toHaveBeenCalledWith(
+			"session-1",
+		);
+		expect(mockBackfill.startBackfill).toHaveBeenCalledWith("session-1", 1, 0);
+
+		act(() => {
+			backfillOptionsRef.current?.onEvents?.("session-1", [
+				{
+					sessionId: "session-1",
+					machineId: "machine-1",
+					revision: 1,
+					seq: 1,
+					kind: "agent_message_chunk",
+					createdAt: "2024-01-01T00:00:00Z",
+					payload: {
+						t: "encrypted",
+						c: "cipher-reconnect",
+					},
+				},
+			]);
+		});
+
+		expect(appendAssistantChunkMock).not.toHaveBeenCalled();
+		expect(updateSessionCursorMock).not.toHaveBeenCalled();
+
+		mockE2EE.hasSessionDek.mockReturnValue(true);
+		act(() => {
+			emitDekReady("session-1");
+		});
+
+		expect(appendAssistantChunkMock).toHaveBeenCalledWith(
+			"session-1",
+			"secret after reconnect",
+		);
+		expect(updateSessionCursorMock).toHaveBeenCalledWith("session-1", 1, 1);
 	});
 
 	it("ignores decryptable events from an older revision", async () => {
