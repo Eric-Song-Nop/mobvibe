@@ -33,6 +33,16 @@ describe("buildForegroundSpawnArgs", () => {
 		).toEqual(["start", "--foreground"]);
 	});
 
+	test("drops Windows Bun virtual entrypoint from compiled binary argv", () => {
+		expect(
+			buildForegroundSpawnArgs([
+				"B:/Users/demo/AppData/Local/npx/_npx123/node_modules/@mobvibe/cli-win32-x64/bin/mobvibe.exe",
+				"B:/~BUN/root/mobvibe.exe",
+				"start",
+			]),
+		).toEqual(["start", "--foreground"]);
+	});
+
 	test("removes existing foreground flags before re-adding", () => {
 		expect(
 			buildForegroundSpawnArgs([
