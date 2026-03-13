@@ -410,6 +410,35 @@ const scenarios = {
 			],
 		});
 	},
+	"encrypted-detached-send": () => {
+		const encrypted = createEncryptedSessionState("session-1", {
+			title: "Encrypted Detached Send Session",
+			revision: 1,
+			isAttached: false,
+		});
+		return createScenarioState({
+			sessions: [encrypted.session],
+			events: [["session-1", []]],
+			loadResponses: [
+				[
+					"session-1",
+					buildActionScript({
+						...encrypted.session,
+						isAttached: true,
+					}),
+				],
+			],
+			sessionDeks: [["session-1", encrypted.dek]],
+			messageScripts: [
+				[
+					"session-1",
+					buildMessageScript({
+						assistantText: "Detached encrypted assistant reply",
+					}),
+				],
+			],
+		});
+	},
 	"sync-history": () =>
 		createScenarioState({
 			sessions: [baseSession({ title: "Sync Session", revision: 1 })],

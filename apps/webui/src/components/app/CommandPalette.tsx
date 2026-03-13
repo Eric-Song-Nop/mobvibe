@@ -83,6 +83,12 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 	const activeSession = activeSessionId ? sessions[activeSessionId] : undefined;
 	const isGenerating = activeSession?.sending ?? false;
 	const hasMessages = (activeSession?.messages?.length ?? 0) > 0;
+	const isReady = Boolean(
+		activeSession?.isAttached && !activeSession?.isLoading,
+	);
+	const hasRemoteSessionContext = Boolean(
+		activeSessionId && activeSession?.cwd && isReady,
+	);
 
 	const {
 		setFileExplorerOpen,
@@ -166,7 +172,7 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 				shortcut: "Mod+B",
 				icon: FolderOpenIcon,
 				group: "app",
-				enabled: !!activeSessionId,
+				enabled: hasRemoteSessionContext,
 				action: () => {
 					onOpenChange(false);
 					setFileExplorerOpen(true);
@@ -190,7 +196,7 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 				shortcut: "Mod+P",
 				icon: File01Icon,
 				group: "app",
-				enabled: !!activeSessionId,
+				enabled: hasRemoteSessionContext,
 				action: () => setQuery("@"),
 			},
 			{
@@ -198,7 +204,7 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 				name: t("commandPalette.openChanges"),
 				icon: GitCompareIcon,
 				group: "app",
-				enabled: !!activeSessionId,
+				enabled: hasRemoteSessionContext,
 				action: () => {
 					onOpenChange(false);
 					setFileExplorerOpen(true);
@@ -273,6 +279,7 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 		setCreateDialogOpen,
 		setMobileMenuOpen,
 		activeSessionId,
+		hasRemoteSessionContext,
 		hasMessages,
 		isGenerating,
 		navigate,
@@ -298,24 +305,24 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 	const resourcesQuery = useQuery({
 		queryKey: ["session-fs-resources", activeSessionId],
 		queryFn: () => {
-			if (!activeSessionId) {
+			if (!activeSessionId || !isReady) {
 				throw createFallbackError("No session", "request");
 			}
 			return fetchSessionFsResources({ sessionId: activeSessionId });
 		},
-		enabled: open && isFileMode && !!activeSessionId,
+		enabled: open && isFileMode && Boolean(activeSessionId && isReady),
 		staleTime: 60000,
 	});
 
 	const gitStatusQuery = useQuery({
 		queryKey: ["session-git-status", activeSessionId],
 		queryFn: () => {
-			if (!activeSessionId) {
+			if (!activeSessionId || !isReady) {
 				throw createFallbackError("No session", "request");
 			}
 			return fetchSessionGitStatus({ sessionId: activeSessionId });
 		},
-		enabled: open && isFileMode && !!activeSessionId,
+		enabled: open && isFileMode && Boolean(activeSessionId && isReady),
 		staleTime: 30000,
 	});
 

@@ -366,3 +366,56 @@ test("fails closed before sending when the session key is missing", async ({
 	const payload = (await response.json()) as { messages: unknown[] };
 	expect(payload.messages).toHaveLength(0);
 });
+
+test("auto-activates a detached cached session before sending", async ({
+	page,
+	request,
+}) => {
+	const reset = await request.post(`${gatewayUrl}/__test__/reset`, {
+		data: { scenario: "encrypted-detached-send" },
+	});
+	const { masterSecret } = (await reset.json()) as { masterSecret: string };
+
+	await preloadState(page, {
+		activeSessionId: "session-1",
+		sessions: [
+			{
+				sessionId: "session-1",
+				title: "Encrypted Detached Send Session",
+				revision: 1,
+				lastAppliedSeq: 1,
+				isAttached: false,
+				messages: [
+					{
+						id: "cached-1",
+						role: "assistant",
+						content: "Cached detached transcript",
+					},
+				],
+			},
+		],
+		masterSecret,
+	});
+
+	await page.goto("/");
+	await expect(page.getByText("Cached detached transcript")).toBeVisible();
+
+	await fillComposer(page, "Wake this session");
+	await clickSend(page);
+
+	await expect(
+		page.getByText("Detached encrypted assistant reply"),
+	).toBeVisible();
+
+	const response = await request.get(`${gatewayUrl}/__test__/messages`);
+	const payload = (await response.json()) as {
+		messages: Array<{
+			decryptedPrompt: Array<{ type: string; text?: string }>;
+		}>;
+	};
+
+	expect(payload.messages).toHaveLength(1);
+	expect(payload.messages[0]?.decryptedPrompt).toEqual([
+		{ type: "text", text: "Wake this session" },
+	]);
+});

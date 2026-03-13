@@ -551,6 +551,65 @@ test("sidebar load keeps the current chat visible when the target session fails 
 	});
 });
 
+test("sidebar selection prefers cached detached transcripts until sync is requested", async ({
+	page,
+	request,
+}) => {
+	await request.post(`${gatewayUrl}/__test__/reset`, {
+		data: { scenario: "sidebar-load" },
+	});
+	await preloadState(page, {
+		activeSessionId: "session-1",
+		sessions: [
+			{
+				sessionId: "session-1",
+				title: "Session Alpha",
+				revision: 1,
+				lastAppliedSeq: 1,
+				isAttached: true,
+				messages: [
+					{
+						id: "alpha-1",
+						role: "assistant",
+						content: "Alpha final transcript",
+					},
+				],
+			},
+			{
+				sessionId: "session-2",
+				title: "Session Beta",
+				revision: 1,
+				lastAppliedSeq: 1,
+				isAttached: false,
+				messages: [
+					{
+						id: "beta-cache-1",
+						role: "assistant",
+						content: "Beta cached transcript",
+					},
+				],
+			},
+		],
+	});
+
+	await page.goto("/");
+	await page.getByRole("button", { name: /Session Beta/ }).click();
+
+	await expectTranscript(page, {
+		present: ["Beta cached transcript"],
+		absent: ["Alpha final transcript", "Beta first line", "Beta second line"],
+		singles: ["Beta cached transcript"],
+	});
+
+	await page.getByLabel("Sync history").click();
+
+	await expectTranscript(page, {
+		present: ["Beta first line", "Beta second line"],
+		absent: ["Beta cached transcript", "Alpha final transcript"],
+		singles: ["Beta first line", "Beta second line"],
+	});
+});
+
 test("sidebar load does not let a stale delayed load steal focus from a newer session selection", async ({
 	page,
 	request,
