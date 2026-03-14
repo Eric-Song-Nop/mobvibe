@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as apiModule from "@/lib/api";
 import type { ChatSession } from "@/lib/chat-store";
 import { createDefaultContentBlocks } from "@/lib/content-block-utils";
+import { buildSessionNotReadyError } from "@/lib/error-utils";
 import type { Machine } from "@/lib/machines-store";
 import {
 	type UseSessionHandlersParams,
@@ -108,6 +109,7 @@ const createBaseSession = (overrides: Partial<ChatSession> = {}): ChatSession =>
 		sending: false,
 		canceling: false,
 		isLoading: false,
+		e2eeStatus: "none",
 		input: "",
 		inputContents: [],
 		messages: [],
@@ -600,6 +602,30 @@ describe("useSessionHandlers — handleSend", () => {
 		expect(chatActions.setSending).not.toHaveBeenCalled();
 		expect(mutations.sendMessageMutation.mutate).not.toHaveBeenCalled();
 		expect(mockUiStoreState.clearChatDraft).not.toHaveBeenCalled();
+	});
+
+	it("does not send while the restored session E2EE status is unresolved", () => {
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Top secret prompt",
+			inputContents: createDefaultContentBlocks("Top secret prompt"),
+		};
+
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({
+				e2eeStatus: undefined,
+			}),
+		});
+
+		act(() => {
+			result.current.handleSend();
+		});
+
+		expect(chatActions.setError).toHaveBeenCalledWith(
+			"session-1",
+			buildSessionNotReadyError(),
+		);
+		expect(chatActions.setSending).not.toHaveBeenCalled();
+		expect(mutations.sendMessageMutation.mutate).not.toHaveBeenCalled();
 	});
 
 	it("sends resource-only prompts from the draft store", () => {

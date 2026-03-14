@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SessionEventsResponse } from "@mobvibe/shared";
 import { useSessionBackfill } from "@/hooks/use-session-backfill";
 
 const mockFetch = vi.hoisted(() => vi.fn());
@@ -360,6 +361,57 @@ describe("useSessionBackfill", () => {
 		expect(onEvents).not.toHaveBeenCalled();
 		expect(onError).not.toHaveBeenCalled();
 		expect(onComplete).not.toHaveBeenCalled();
+	});
+
+	it("updates isBackfilling when an empty backfill starts and completes", async () => {
+		const onEvents = vi.fn();
+		let resolveFetch:
+			| ((value: {
+					ok: boolean;
+					json: () => Promise<SessionEventsResponse>;
+			  }) => void)
+			| undefined;
+
+		mockFetch.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveFetch = resolve;
+				}),
+		);
+
+		const { result } = renderHook(() =>
+			useSessionBackfill({
+				gatewayUrl: "http://localhost:3005",
+				onEvents,
+			}),
+		);
+
+		act(() => {
+			void result.current.startBackfill("session-1", 1, 2);
+		});
+
+		await waitFor(() =>
+			expect(result.current.isBackfilling("session-1")).toBe(true),
+		);
+
+		await act(async () => {
+			resolveFetch?.({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						sessionId: "session-1",
+						machineId: "machine-1",
+						revision: 1,
+						events: [],
+						hasMore: false,
+					}),
+			});
+		});
+
+		await waitFor(() =>
+			expect(result.current.isBackfilling("session-1")).toBe(false),
+		);
+		expect(onEvents).not.toHaveBeenCalled();
 	});
 
 	it("uses the stored Tauri auth token for backfill requests", async () => {

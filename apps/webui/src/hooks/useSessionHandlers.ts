@@ -428,6 +428,10 @@ export function useSessionHandlers({
 			chatActions.setError(activeSessionId, buildSessionNotReadyError());
 			return;
 		}
+		if (activeSession.e2eeStatus === undefined) {
+			chatActions.setError(activeSessionId, buildSessionNotReadyError());
+			return;
+		}
 		if (activeSession.e2eeStatus === "missing_key") {
 			chatActions.setError(activeSessionId, buildSessionE2EEKeyMissingError());
 			return;

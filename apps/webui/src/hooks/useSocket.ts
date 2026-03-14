@@ -904,6 +904,7 @@ export function useSocket({
 					const session = sessions[sessionId];
 					if (
 						session &&
+						gatewaySocket.isConnected() &&
 						!session.isLoading &&
 						!initialBackfillTriggeredRef.current.has(sessionId)
 					) {
@@ -942,6 +943,7 @@ export function useSocket({
 				const session = sessions[sessionId];
 				if (
 					session &&
+					gatewaySocket.isConnected() &&
 					!session.isLoading &&
 					!initialBackfillTriggeredRef.current.has(sessionId)
 				) {
@@ -970,25 +972,48 @@ export function useSocket({
 
 	// Re-subscribe on reconnect
 	useEffect(() => {
-		let isFirstConnect = true;
+		let hasConnectedOnce = false;
 		const handleConnect = () => {
-			if (isFirstConnect) {
-				isFirstConnect = false;
-				return;
-			}
-
-			const reconnectSessionIds = new Set([
+			const connectedSessionIds = new Set([
 				...subscribedSessionsRef.current,
 				...recoverableSessionsRef.current,
 			]);
 
+			if (!hasConnectedOnce) {
+				hasConnectedOnce = true;
+				for (const sessionId of connectedSessionIds) {
+					const session = sessionsRef.current[sessionId];
+					if (!session) {
+						clearTrackedSession(sessionId, { unsubscribe: false });
+						continue;
+					}
+
+					subscribedSessionsRef.current.add(sessionId);
+					recoverableSessionsRef.current.add(sessionId);
+					gatewaySocket.subscribeToSession(sessionId);
+
+					const isLoading =
+						useChatStore.getState().sessions[sessionId]?.isLoading;
+					if (
+						!isLoading &&
+						!initialBackfillTriggeredRef.current.has(sessionId)
+					) {
+						initialBackfillTriggeredRef.current.add(sessionId);
+						const revision = session.revision ?? 1;
+						const afterSeq = session.lastAppliedSeq ?? 0;
+						triggerBackfillRef.current?.(sessionId, revision, afterSeq);
+					}
+				}
+				return;
+			}
+
 			// Reset backfill tracking — stale refs from previous connection
 			// would block session:attached from triggering fresh backfill
-			for (const sessionId of reconnectSessionIds) {
+			for (const sessionId of connectedSessionIds) {
 				initialBackfillTriggeredRef.current.delete(sessionId);
 			}
 
-			for (const sessionId of reconnectSessionIds) {
+			for (const sessionId of connectedSessionIds) {
 				const session = sessionsRef.current[sessionId];
 				if (!session) {
 					clearTrackedSession(sessionId, { unsubscribe: false });

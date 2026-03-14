@@ -95,6 +95,7 @@ const buildSession = (overrides: Partial<ChatSession> = {}): ChatSession =>
 		canceling: false,
 		isAttached: true,
 		isLoading: false,
+		e2eeStatus: "none",
 		cwd: "/repo",
 		availableCommands: [],
 		availableModels: [],
@@ -257,5 +258,20 @@ describe("ChatFooter", () => {
 		await user.click(sendButton);
 
 		expect(onSend).toHaveBeenCalledOnce();
+	});
+
+	it("keeps send disabled until restored session E2EE status is hydrated", () => {
+		const session = buildSession({
+			e2eeStatus: undefined,
+		});
+
+		useUiStore.getState().setChatDraft(session.sessionId, {
+			input: "Top secret prompt",
+			inputContents: createDefaultContentBlocks("Top secret prompt"),
+		});
+
+		renderFooter(session);
+
+		expect(screen.getByRole("button", { name: "chat.send" })).toBeDisabled();
 	});
 });

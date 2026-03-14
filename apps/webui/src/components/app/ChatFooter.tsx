@@ -405,7 +405,9 @@ export function ChatFooter({
 	const modelLabel = activeSession?.modelName ?? activeSession?.modelId;
 	const modeLabel = activeSession?.modeName ?? activeSession?.modeId;
 	const isReady = Boolean(
-		activeSession?.isAttached && !activeSession?.isLoading,
+		activeSession?.isAttached &&
+			!activeSession?.isLoading &&
+			activeSession?.e2eeStatus !== undefined,
 	);
 	const contentBlocks =
 		storedDraft?.inputContents ??
