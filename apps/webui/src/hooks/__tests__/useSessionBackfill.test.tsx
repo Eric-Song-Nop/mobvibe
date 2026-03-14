@@ -1,6 +1,6 @@
+import type { SessionEventsResponse } from "@mobvibe/shared";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionEventsResponse } from "@mobvibe/shared";
 import { useSessionBackfill } from "@/hooks/use-session-backfill";
 
 const mockFetch = vi.hoisted(() => vi.fn());
