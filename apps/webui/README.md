@@ -211,6 +211,34 @@ When accessing from mobile devices on the same network:
 3. Access via `http://{local-ip}:5173`
 4. Ensure mobvibe-cli is connected to gateway
 
+## iOS
+
+Tauri automatically merges `src-tauri/tauri.ios.conf.json` for iOS commands. This repository uses that file to override the prerelease desktop version string with an App Store-safe iOS version (`0.1.0`).
+
+Before running any iOS command, export your Apple team ID so Tauri/Xcode can sign the generated app:
+
+```bash
+export APPLE_DEVELOPMENT_TEAM=YOURTEAMID
+```
+
+Common commands:
+
+```bash
+pnpm ios:init                  # Generate src-tauri/gen/apple and install iOS toolchains
+pnpm ios:dev                   # Run on a connected simulator/device
+pnpm ios:build                 # Release build for physical devices
+pnpm ios:build:sim             # Release build for Apple Silicon simulator
+pnpm ios:build:testflight      # Export an IPA for TestFlight / internal testing
+pnpm ios:build:app-store       # Export an IPA for App Store Connect
+```
+
+Publishing notes:
+
+- `tauri ios build` supports `--build-number <n>`; use it for each new TestFlight/App Store upload so `CFBundleVersion` keeps increasing.
+- If `xcodegen` is missing, `pnpm ios:init` installs it automatically with Homebrew.
+- The iOS scripts automatically patch the generated Xcode project to use `XcodeDefault.xctoolchain` Swift library paths, which avoids Xcode 26 resolving `TOOLCHAIN_DIR` to the Metal toolchain during simulator builds.
+- The iOS project is generated under `src-tauri/gen/apple/` and is intentionally kept local because Xcode signing metadata is machine/team-specific.
+
 ## Troubleshooting
 
 ### "No backends available"

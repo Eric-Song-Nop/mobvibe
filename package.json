@@ -20,7 +20,11 @@
 		"android:init": "pnpm --filter webui android:init",
 		"android:dev": "pnpm --filter webui android:dev",
 		"ios:init": "pnpm --filter webui ios:init",
-		"ios:dev": "pnpm --filter webui ios:dev"
+		"ios:dev": "pnpm --filter webui ios:dev",
+		"ios:build": "pnpm --filter webui ios:build",
+		"ios:build:sim": "pnpm --filter webui ios:build:sim",
+		"ios:build:testflight": "pnpm --filter webui ios:build:testflight",
+		"ios:build:app-store": "pnpm --filter webui ios:build:app-store"
 	},
 	"pnpm": {
 		"overrides": {
