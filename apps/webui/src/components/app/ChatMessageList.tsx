@@ -16,6 +16,7 @@ import { MessageItem } from "@/components/chat/MessageItem";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { ToolCallGroup } from "@/components/chat/tool-call-group";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { PermissionResultNotification } from "@/lib/acp";
 import type { ChatSession } from "@/lib/chat-store";
 import { buildMessageIndexMap, groupMessages } from "@/lib/group-tool-calls";
@@ -59,6 +60,7 @@ export const ChatMessageList = forwardRef<
 	const messages = activeSession?.messages ?? [];
 	const showIndicator = !!activeSession?.sending;
 	const isThinking = showIndicator && !activeSession?.streamingMessageId;
+	const isHistorySyncing = Boolean(activeSession?.historySyncing);
 
 	const displayItems = useMemo(() => groupMessages(messages), [messages]);
 	const totalItems = displayItems.length + (showIndicator ? 1 : 0);
@@ -193,16 +195,30 @@ export const ChatMessageList = forwardRef<
 							) : null}
 						</div>
 					) : null}
-					{activeSession?.isLoading ? (
-						<div
-							className="text-muted-foreground mt-8 text-center text-sm whitespace-pre font-mono"
-							aria-live="polite"
-						>
-							{loadingMessage ?? t("common.loading")}
+					{activeSession &&
+					isHistorySyncing &&
+					activeSession.messages.length === 0 ? (
+						<div className="flex flex-1 flex-col gap-4 pt-4" aria-live="polite">
+							<div className="text-muted-foreground text-sm font-mono whitespace-pre">
+								{loadingMessage ?? t("session.syncingHistory")}
+							</div>
+							<div className="flex flex-col gap-3">
+								<div className="ml-auto flex w-[72%] flex-col gap-2 rounded-none border border-primary/20 bg-primary/5 p-4">
+									<Skeleton className="h-3 w-20" />
+									<Skeleton className="h-4 w-full" />
+									<Skeleton className="h-4 w-4/5" />
+								</div>
+								<div className="flex w-[82%] flex-col gap-2 pl-4">
+									<Skeleton className="h-3 w-16" />
+									<Skeleton className="h-4 w-full" />
+									<Skeleton className="h-4 w-3/4" />
+								</div>
+							</div>
 						</div>
 					) : null}
 					{activeSession &&
 					!activeSession.isLoading &&
+					!isHistorySyncing &&
 					activeSession.messages.length === 0 ? (
 						<div
 							className="flex flex-1 items-center justify-center opacity-30"

@@ -187,24 +187,26 @@ describe("ChatMessageList", () => {
 		).not.toBeInTheDocument();
 	});
 
-	it("shows loading message when session is loading", () => {
-		const session = buildSession({ isLoading: true });
+	it("shows loading message when session history is syncing", () => {
+		const session = buildSession({ historySyncing: true });
 		render(
 			<ChatMessageList activeSession={session} onPermissionDecision={noop} />,
 		);
-		expect(screen.getByText(i18n.t("common.loading"))).toBeInTheDocument();
+		expect(
+			screen.getByText(i18n.t("session.syncingHistory")),
+		).toBeInTheDocument();
 	});
 
-	it("shows custom loading message when provided", () => {
-		const session = buildSession({ isLoading: true });
+	it("shows custom loading message when provided during history sync", () => {
+		const session = buildSession({ historySyncing: true });
 		render(
 			<ChatMessageList
 				activeSession={session}
-				loadingMessage="Connecting..."
+				loadingMessage="Connecting…"
 				onPermissionDecision={noop}
 			/>,
 		);
-		expect(screen.getByText("Connecting...")).toBeInTheDocument();
+		expect(screen.getByText("Connecting…")).toBeInTheDocument();
 	});
 
 	it("shows logo when session has no messages", () => {

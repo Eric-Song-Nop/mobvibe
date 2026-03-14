@@ -83,6 +83,8 @@ export function useSessionActivation(store: ChatStoreActions) {
 			};
 
 			store.setSessionLoading(fresh.sessionId, true);
+			store.setHistorySyncing(fresh.sessionId, true);
+			store.setHistorySyncWarning(fresh.sessionId, undefined);
 			const backupMessages: ChatMessage[] = [...fresh.messages];
 			const backupSnapshot = {
 				lastAppliedSeq: fresh.lastAppliedSeq,
@@ -105,6 +107,7 @@ export function useSessionActivation(store: ChatStoreActions) {
 					backupMessages,
 					backupSnapshot,
 				);
+				store.setHistorySyncing(fresh.sessionId, false);
 				gatewaySocket.unsubscribeFromSession(fresh.sessionId);
 			} finally {
 				store.setSessionLoading(fresh.sessionId, false);

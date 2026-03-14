@@ -14,9 +14,13 @@ const mockStoreState = vi.hoisted(
 		({
 			sessions: {} as Record<string, ChatSession>,
 			restoreSessionMessages: vi.fn(),
+			setHistorySyncing: vi.fn(),
+			setHistorySyncWarning: vi.fn(),
 		}) as {
 			sessions: Record<string, ChatSession>;
 			restoreSessionMessages: ChatStoreActions["restoreSessionMessages"];
+			setHistorySyncing: ChatStoreActions["setHistorySyncing"];
+			setHistorySyncWarning: ChatStoreActions["setHistorySyncWarning"];
 		},
 );
 
@@ -436,6 +440,8 @@ describe("useSocket (webui)", () => {
 		// Reset mock store state
 		setMockSessions({});
 		mockStoreState.restoreSessionMessages = vi.fn();
+		mockStoreState.setHistorySyncing = vi.fn();
+		mockStoreState.setHistorySyncWarning = vi.fn();
 		dekReadyListeners.clear();
 		decryptedPayloads.clear();
 
@@ -901,6 +907,17 @@ describe("useSocket (webui)", () => {
 			expect.objectContaining({
 				revision: 1,
 				lastAppliedSeq: 2,
+			}),
+		);
+		expect(mockStoreState.setHistorySyncing).toHaveBeenCalledWith(
+			"session-1",
+			false,
+		);
+		expect(mockStoreState.setHistorySyncWarning).toHaveBeenCalledWith(
+			"session-1",
+			expect.objectContaining({
+				code: "INTERNAL_ERROR",
+				message: "session.historyMayBeStale",
 			}),
 		);
 	});

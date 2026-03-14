@@ -59,6 +59,11 @@ type Mutations = {
 		mutate: (params: {
 			sessionId: string;
 			prompt: ChatSession["inputContents"];
+			messageId?: string;
+			draft?: {
+				input: string;
+				inputContents: ChatSession["inputContents"];
+			};
 		}) => void;
 	};
 	permissionDecisionMutation: {
@@ -452,6 +457,11 @@ export function useSessionHandlers({
 		mutations.sendMessageMutation.mutate({
 			sessionId: activeSessionId,
 			prompt: promptContents,
+			messageId,
+			draft: {
+				input: promptText,
+				inputContents: promptContents,
+			},
 		});
 	};
 

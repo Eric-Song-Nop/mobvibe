@@ -4,6 +4,8 @@ import { isInTauri } from "@/lib/auth";
 import { getAuthToken } from "@/lib/auth-token";
 import { platformFetch } from "@/lib/tauri-fetch";
 
+const BACKFILL_REQUEST_TIMEOUT_MS = 15_000;
+
 type BackfillState = {
 	sessionId: string;
 	revision: number;
@@ -92,12 +94,38 @@ export function useSessionBackfill({
 				headers.Authorization = `Bearer ${token}`;
 			}
 
-			const response = await platformFetch(url.toString(), {
-				method: "GET",
-				headers,
-				signal,
-				credentials: tauriEnv ? "omit" : "include",
-			});
+			const requestController = new AbortController();
+			let didTimeout = false;
+			const abortRequest = () => requestController.abort();
+			signal.addEventListener("abort", abortRequest, { once: true });
+			const timeoutId = setTimeout(() => {
+				didTimeout = true;
+				requestController.abort();
+			}, BACKFILL_REQUEST_TIMEOUT_MS);
+
+			let response: Response;
+			try {
+				response = await platformFetch(url.toString(), {
+					method: "GET",
+					headers,
+					signal: requestController.signal,
+					credentials: tauriEnv ? "omit" : "include",
+				});
+			} catch (error) {
+				if (
+					didTimeout &&
+					error instanceof Error &&
+					error.name === "AbortError"
+				) {
+					throw new Error(
+						`Backfill request timed out after ${BACKFILL_REQUEST_TIMEOUT_MS}ms`,
+					);
+				}
+				throw error;
+			} finally {
+				clearTimeout(timeoutId);
+				signal.removeEventListener("abort", abortRequest);
+			}
 
 			if (!response.ok) {
 				const errorText = await response.text();

@@ -94,6 +94,8 @@ function MainApp() {
 			setAppError: s.setAppError,
 			setLastCreatedCwd: s.setLastCreatedCwd,
 			setSessionLoading: s.setSessionLoading,
+			setHistorySyncing: s.setHistorySyncing,
+			setHistorySyncWarning: s.setHistorySyncWarning,
 			markSessionAttached: s.markSessionAttached,
 			markSessionDetached: s.markSessionDetached,
 			createLocalSession: s.createLocalSession,
@@ -111,6 +113,7 @@ function MainApp() {
 			appendAssistantChunk: s.appendAssistantChunk,
 			appendThoughtChunk: s.appendThoughtChunk,
 			confirmOrAppendUserMessage: s.confirmOrAppendUserMessage,
+			markUserMessageFailed: s.markUserMessageFailed,
 			finalizeAssistantMessage: s.finalizeAssistantMessage,
 			addPermissionRequest: s.addPermissionRequest,
 			setPermissionDecisionState: s.setPermissionDecisionState,
@@ -454,6 +457,7 @@ function MainApp() {
 		!syncHistoryAvailable ||
 		Boolean(
 			activeSession?.isLoading ||
+				activeSession?.historySyncing ||
 				isActivating ||
 				isForceReloading ||
 				(activeSessionId && isBackfilling(activeSessionId)),
@@ -470,7 +474,13 @@ function MainApp() {
 	);
 	const forceReloadDisabled =
 		!forceReloadAvailable ||
-		Boolean(activeSession?.isLoading || isActivating || isForceReloading);
+		Boolean(
+			activeSession?.isLoading ||
+				activeSession?.historySyncing ||
+				isActivating ||
+				isForceReloading ||
+				(activeSessionId && isBackfilling(activeSessionId)),
+		);
 
 	useEffect(() => {
 		if (fileExplorerAvailable) {
@@ -508,6 +518,8 @@ function MainApp() {
 		t,
 	]);
 
+	const warningMessage = activeSession?.historySyncWarning?.message;
+
 	const loadingMessage = useMemo(() => {
 		if (
 			mutations.loadSessionMutation.isPending &&
@@ -539,8 +551,12 @@ function MainApp() {
 		) {
 			return t("session.switchingModel");
 		}
+		if (activeSession?.historySyncing) {
+			return t("session.syncingHistory");
+		}
 		return undefined;
 	}, [
+		activeSession?.historySyncing,
 		activeSessionId,
 		discoverSessionsMutation.isPending,
 		discoverSessionsMutation.variables,
@@ -657,6 +673,7 @@ function MainApp() {
 						branchLabel={activeSession?.worktreeBranch}
 						subdirectoryLabel={subdirectoryLabel}
 						statusMessage={statusMessage}
+						warningMessage={warningMessage}
 						streamError={streamError}
 						loadingMessage={loadingMessage}
 						plan={activeSession?.plan}

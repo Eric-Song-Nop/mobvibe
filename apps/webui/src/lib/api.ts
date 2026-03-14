@@ -48,6 +48,7 @@ import { platformFetch } from "./tauri-fetch";
 
 let API_BASE_URL = getDefaultGatewayUrl();
 const SEND_MESSAGE_TIMEOUT_MS = 120_000;
+const SESSION_LOAD_TIMEOUT_MS = 30_000;
 
 /**
  * Update the API base URL. Used when Tauri app loads a stored gateway URL.
@@ -388,10 +389,14 @@ export const loadSession = async (payload: {
 	backendId: string;
 	machineId?: string;
 }): Promise<SessionSummary> =>
-	requestJson<SessionSummary>("/acp/session/load", {
-		method: "POST",
-		body: JSON.stringify(payload),
-	});
+	requestJsonWithTimeout<SessionSummary>(
+		"/acp/session/load",
+		SESSION_LOAD_TIMEOUT_MS,
+		{
+			method: "POST",
+			body: JSON.stringify(payload),
+		},
+	);
 
 export const reloadSession = async (payload: {
 	sessionId: string;
@@ -399,10 +404,14 @@ export const reloadSession = async (payload: {
 	backendId: string;
 	machineId?: string;
 }): Promise<SessionSummary> =>
-	requestJson<SessionSummary>("/acp/session/reload", {
-		method: "POST",
-		body: JSON.stringify(payload),
-	});
+	requestJsonWithTimeout<SessionSummary>(
+		"/acp/session/reload",
+		SESSION_LOAD_TIMEOUT_MS,
+		{
+			method: "POST",
+			body: JSON.stringify(payload),
+		},
+	);
 
 import type {
 	GitBlameParams,
