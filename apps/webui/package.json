@@ -19,8 +19,12 @@
 		"build:tauri": "tauri build",
 		"android:init": "tauri android init",
 		"android:dev": "tauri android dev",
-		"ios:init": "tauri ios init",
-		"ios:dev": "tauri ios dev",
+		"ios:init": "tauri ios init && node scripts/patch-ios-project.mjs",
+		"ios:dev": "node scripts/patch-ios-project.mjs && tauri ios dev",
+		"ios:build": "node scripts/patch-ios-project.mjs && tauri ios build",
+		"ios:build:sim": "node scripts/patch-ios-project.mjs && tauri ios build --target aarch64-sim",
+		"ios:build:testflight": "node scripts/patch-ios-project.mjs && tauri ios build --export-method release-testing",
+		"ios:build:app-store": "node scripts/patch-ios-project.mjs && tauri ios build --export-method app-store-connect",
 		"postinstall": "node scripts/postinstall.mjs"
 	},
 	"dependencies": {

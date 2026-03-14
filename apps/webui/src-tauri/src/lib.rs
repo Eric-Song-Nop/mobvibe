@@ -18,11 +18,11 @@ pub fn run() {
     }
 
     builder
-        .setup(|app| {
+        .setup(|_app| {
             #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
-                let _ = app.deep_link().register_all();
+                let _ = _app.deep_link().register_all();
             }
 
             Ok(())
