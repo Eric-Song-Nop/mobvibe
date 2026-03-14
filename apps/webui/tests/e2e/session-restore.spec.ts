@@ -29,6 +29,33 @@ test("restores a persisted session and backfills missed history on load", async 
 	await expect(page.getByText("Recovered after refresh")).toBeVisible();
 });
 
+// Regression: CLI consolidated backfill returns a single event at the final seq.
+test("restores a persisted session when backfill is consolidated", async ({
+	page,
+	request,
+}) => {
+	await request.post(`${gatewayUrl}/__test__/reset`, {
+		data: { scenario: "refresh-restore-consolidated" },
+	});
+	await preloadState(page, {
+		activeSessionId: "session-1",
+		sessions: [
+			{
+				sessionId: "session-1",
+				title: "Restore Session",
+				revision: 2,
+			},
+		],
+	});
+
+	await page.goto("/");
+
+	await expectTranscript(page, {
+		present: ["Recovered after consolidated refresh"],
+		singles: ["Recovered after consolidated refresh"],
+	});
+});
+
 test("sync history replaces stale local transcript with the authoritative chat", async ({
 	page,
 	request,
@@ -67,6 +94,46 @@ test("sync history replaces stale local transcript with the authoritative chat",
 		singles: ["Synced alpha line", "Synced omega line"],
 	});
 	await expectTextOrder(page, "Synced alpha line", "Synced omega line");
+});
+
+// Regression: sync history clears local transcript before replaying consolidated backfill.
+test("sync history replaces stale local transcript when backfill is consolidated", async ({
+	page,
+	request,
+}) => {
+	await request.post(`${gatewayUrl}/__test__/reset`, {
+		data: { scenario: "sync-history-consolidated" },
+	});
+	await preloadState(page, {
+		activeSessionId: "session-1",
+		sessions: [
+			{
+				sessionId: "session-1",
+				title: "Sync Session",
+				revision: 1,
+				lastAppliedSeq: 2,
+				isAttached: true,
+				messages: [
+					{
+						id: "stale-1",
+						role: "assistant",
+						content: "Stale local transcript",
+					},
+				],
+			},
+		],
+	});
+
+	await page.goto("/");
+	await expect(page.getByText("Stale local transcript")).toBeVisible();
+
+	await page.getByLabel("Sync history").click();
+
+	await expectTranscript(page, {
+		present: ["Authoritative consolidated transcript"],
+		absent: ["Stale local transcript"],
+		singles: ["Authoritative consolidated transcript"],
+	});
 });
 
 test("sync history remains idempotent when run repeatedly", async ({
@@ -214,6 +281,47 @@ test("force reload replaces the old revision transcript with the reloaded chat",
 	await expectTextOrder(page, "Reloaded alpha line", "Reloaded omega line");
 });
 
+// Regression: reload revision backfill is also subject to consolidated event replay.
+test("force reload replaces the old transcript when the new revision backfill is consolidated", async ({
+	page,
+	request,
+}) => {
+	await request.post(`${gatewayUrl}/__test__/reset`, {
+		data: { scenario: "force-reload-consolidated" },
+	});
+	await preloadState(page, {
+		activeSessionId: "session-1",
+		sessions: [
+			{
+				sessionId: "session-1",
+				title: "Reload Session",
+				revision: 1,
+				lastAppliedSeq: 1,
+				isAttached: true,
+				messages: [
+					{
+						id: "old-1",
+						role: "assistant",
+						content: "Old revision transcript",
+					},
+				],
+			},
+		],
+	});
+
+	await page.goto("/");
+	await expect(page.getByText("Old revision transcript")).toBeVisible();
+
+	await page.getByLabel("Force stop and reload?").click();
+	await page.getByRole("button", { name: "Force reload" }).click();
+
+	await expectTranscript(page, {
+		present: ["Reloaded consolidated transcript"],
+		absent: ["Old revision transcript"],
+		singles: ["Reloaded consolidated transcript"],
+	});
+});
+
 test("force reload restores the previous transcript when reload fails", async ({
 	page,
 	request,
@@ -350,6 +458,53 @@ test("sidebar session load switches to the selected session transcript without m
 	await page.getByRole("button", { name: /Session Alpha/ }).click();
 	await expect(page.getByText("Alpha final transcript")).toBeVisible();
 	await expect(page.getByText("Beta first line")).toHaveCount(0);
+});
+
+test("sidebar session load replaces the transcript when backfill is consolidated", async ({
+	page,
+	request,
+}) => {
+	// Regression: loadSession clears the chat before replaying consolidated backfill.
+	await request.post(`${gatewayUrl}/__test__/reset`, {
+		data: { scenario: "sidebar-load-consolidated" },
+	});
+	await preloadState(page, {
+		activeSessionId: "session-1",
+		sessions: [
+			{
+				sessionId: "session-1",
+				title: "Session Alpha",
+				revision: 1,
+				lastAppliedSeq: 1,
+				isAttached: true,
+				messages: [
+					{
+						id: "alpha-1",
+						role: "assistant",
+						content: "Alpha final transcript",
+					},
+				],
+			},
+			{
+				sessionId: "session-2",
+				title: "Session Beta",
+				revision: 1,
+				lastAppliedSeq: 0,
+				isAttached: false,
+			},
+		],
+	});
+
+	await page.goto("/");
+	await expect(page.getByText("Alpha final transcript")).toBeVisible();
+
+	await page.getByRole("button", { name: /Session Beta/ }).click();
+
+	await expectTranscript(page, {
+		present: ["Beta consolidated transcript"],
+		absent: ["Alpha final transcript"],
+		singles: ["Beta consolidated transcript"],
+	});
 });
 
 test("sidebar load keeps the current chat visible when the target session fails to load", async ({

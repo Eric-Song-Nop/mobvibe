@@ -597,6 +597,21 @@ const createSessionState = (
 	workspaceRootCwd: options?.workspaceRootCwd,
 });
 
+const resetSessionContentForRevision = (
+	session: ChatSession,
+	revision: number,
+): ChatSession => ({
+	...session,
+	messages: [],
+	terminalOutputs: {},
+	streamingMessageId: undefined,
+	streamingMessageRole: undefined,
+	streamingThoughtId: undefined,
+	plan: undefined,
+	revision,
+	lastAppliedSeq: 0,
+});
+
 /**
  * Merge a server session summary into an existing local session state.
  * Shared by handleSessionsChanged (added/updated) and syncSessions.
@@ -625,41 +640,54 @@ const mergeSessionFromSummary = (
 		workspaceRootCwd?: string | null;
 		isAttached?: boolean;
 		isTitlePinned?: boolean;
+		revision?: number;
 	},
 ): ChatSession => {
 	const isAttached = summary.isAttached === true;
+	const shouldResetForAttachedRevision =
+		isAttached &&
+		summary.revision !== undefined &&
+		existing.revision !== summary.revision;
+	const baseSession = shouldResetForAttachedRevision
+		? resetSessionContentForRevision(existing, summary.revision!)
+		: existing;
 	const attachedFields = isAttached
 		? {
 				isAttached: true as const,
-				attachedAt: existing.attachedAt ?? new Date().toISOString(),
+				attachedAt: baseSession.attachedAt ?? new Date().toISOString(),
 				detachedAt: undefined,
 				detachedReason: undefined,
+				...(summary.revision !== undefined && baseSession.revision === undefined
+					? { revision: summary.revision, lastAppliedSeq: 0 }
+					: {}),
 			}
 		: {};
 
 	return {
-		...existing,
-		title: summary.title ?? existing.title,
+		...baseSession,
+		title: summary.title ?? baseSession.title,
 		error: summary.error,
-		createdAt: summary.createdAt ?? existing.createdAt,
-		updatedAt: summary.updatedAt ?? existing.updatedAt,
-		backendId: summary.backendId ?? existing.backendId,
-		backendLabel: summary.backendLabel ?? existing.backendLabel,
-		cwd: summary.cwd ?? existing.cwd,
-		workspaceRootCwd: summary.workspaceRootCwd ?? existing.workspaceRootCwd,
-		agentName: summary.agentName ?? existing.agentName,
-		modelId: summary.modelId ?? existing.modelId,
-		modelName: summary.modelName ?? existing.modelName,
-		modeId: summary.modeId ?? existing.modeId,
-		modeName: summary.modeName ?? existing.modeName,
-		availableModes: summary.availableModes ?? existing.availableModes,
-		availableModels: summary.availableModels ?? existing.availableModels,
-		availableCommands: summary.availableCommands ?? existing.availableCommands,
-		machineId: summary.machineId ?? existing.machineId,
+		createdAt: summary.createdAt ?? baseSession.createdAt,
+		updatedAt: summary.updatedAt ?? baseSession.updatedAt,
+		backendId: summary.backendId ?? baseSession.backendId,
+		backendLabel: summary.backendLabel ?? baseSession.backendLabel,
+		cwd: summary.cwd ?? baseSession.cwd,
+		workspaceRootCwd: summary.workspaceRootCwd ?? baseSession.workspaceRootCwd,
+		agentName: summary.agentName ?? baseSession.agentName,
+		modelId: summary.modelId ?? baseSession.modelId,
+		modelName: summary.modelName ?? baseSession.modelName,
+		modeId: summary.modeId ?? baseSession.modeId,
+		modeName: summary.modeName ?? baseSession.modeName,
+		availableModes: summary.availableModes ?? baseSession.availableModes,
+		availableModels: summary.availableModels ?? baseSession.availableModels,
+		availableCommands:
+			summary.availableCommands ?? baseSession.availableCommands,
+		machineId: summary.machineId ?? baseSession.machineId,
 		isCreating: false,
-		isTitlePinned: summary.isTitlePinned ?? existing.isTitlePinned,
-		worktreeSourceCwd: summary.worktreeSourceCwd ?? existing.worktreeSourceCwd,
-		worktreeBranch: summary.worktreeBranch ?? existing.worktreeBranch,
+		isTitlePinned: summary.isTitlePinned ?? baseSession.isTitlePinned,
+		worktreeSourceCwd:
+			summary.worktreeSourceCwd ?? baseSession.worktreeSourceCwd,
+		worktreeBranch: summary.worktreeBranch ?? baseSession.worktreeBranch,
 		...attachedFields,
 	};
 };

@@ -175,6 +175,31 @@ vi.mock("react-i18next", async (importOriginal) => {
 });
 
 const createStore = (): ChatStoreActions => {
+	const updateSession = (
+		sessionId: string,
+		updater: (session: ChatSession) => ChatSession,
+	) => {
+		const session = mockStoreState.sessions[sessionId];
+		if (!session) {
+			return;
+		}
+		mockStoreState.sessions[sessionId] = updater(session);
+	};
+
+	const buildTextMessage = (
+		role: "assistant" | "user",
+		content: string,
+		messageId: string,
+	) => ({
+		id: messageId,
+		role,
+		kind: "text" as const,
+		content,
+		contentBlocks: [{ type: "text" as const, text: content }],
+		createdAt: "2024-01-01T00:00:00Z",
+		isStreaming: false,
+	});
+
 	// Create updateSessionCursor that also updates the mock store state
 	const updateSessionCursor = vi.fn(
 		(sessionId: string, revision: number, seq: number) => {
@@ -196,6 +221,8 @@ const createStore = (): ChatStoreActions => {
 			if (session) {
 				mockStoreState.sessions[sessionId] = {
 					...session,
+					messages: [],
+					terminalOutputs: {},
 					revision,
 					lastAppliedSeq: 0,
 				};
@@ -203,8 +230,99 @@ const createStore = (): ChatStoreActions => {
 		},
 	);
 
-	const restoreSessionMessages = vi.fn();
+	const restoreSessionMessages = vi.fn(
+		(
+			sessionId: string,
+			messages: ChatSession["messages"],
+			snapshot?: Parameters<ChatStoreActions["restoreSessionMessages"]>[2],
+		) => {
+			updateSession(sessionId, (session) => ({
+				...session,
+				messages,
+				...(snapshot?.lastAppliedSeq !== undefined
+					? { lastAppliedSeq: snapshot.lastAppliedSeq }
+					: {}),
+				...(snapshot?.revision !== undefined
+					? { revision: snapshot.revision }
+					: {}),
+				...(snapshot?.terminalOutputs !== undefined
+					? { terminalOutputs: snapshot.terminalOutputs }
+					: {}),
+				...(snapshot?.streamingMessageId !== undefined
+					? { streamingMessageId: snapshot.streamingMessageId }
+					: {}),
+				...(snapshot?.streamingMessageRole !== undefined
+					? { streamingMessageRole: snapshot.streamingMessageRole }
+					: {}),
+				...(snapshot?.streamingThoughtId !== undefined
+					? { streamingThoughtId: snapshot.streamingThoughtId }
+					: {}),
+			}));
+		},
+	);
 	mockStoreState.restoreSessionMessages = restoreSessionMessages;
+
+	const createLocalSession = vi.fn((sessionId: string) => {
+		if (mockStoreState.sessions[sessionId]) {
+			return;
+		}
+		mockStoreState.sessions[sessionId] = buildSession({ sessionId });
+	});
+
+	const clearSessionMessages = vi.fn((sessionId: string) => {
+		updateSession(sessionId, (session) => ({
+			...session,
+			messages: [],
+			terminalOutputs: {},
+			streamingMessageId: undefined,
+			streamingMessageRole: undefined,
+			streamingThoughtId: undefined,
+			revision: undefined,
+			lastAppliedSeq: 0,
+		}));
+	});
+
+	const appendAssistantChunk = vi.fn((sessionId: string, text: string) => {
+		updateSession(sessionId, (session) => {
+			const lastMessage = session.messages.at(-1);
+			const messages =
+				lastMessage?.kind === "text" && lastMessage.role === "assistant"
+					? [
+							...session.messages.slice(0, -1),
+							{
+								...lastMessage,
+								content: `${lastMessage.content}${text}`,
+								contentBlocks: [
+									{
+										type: "text" as const,
+										text: `${lastMessage.content}${text}`,
+									},
+								],
+							},
+						]
+					: [
+							...session.messages,
+							buildTextMessage(
+								"assistant",
+								text,
+								`assistant-${session.messages.length + 1}`,
+							),
+						];
+			return { ...session, messages };
+		});
+	});
+
+	const confirmOrAppendUserMessage = vi.fn(
+		(sessionId: string, text: string) => {
+			updateSession(sessionId, (session) => ({
+				...session,
+				messages: [
+					...session.messages,
+					buildTextMessage("user", text, `user-${session.messages.length + 1}`),
+				],
+			}));
+		},
+	);
 
 	return {
 		sessions: {},
@@ -213,7 +331,7 @@ const createStore = (): ChatStoreActions => {
 		setSessionLoading: vi.fn(),
 		markSessionAttached: vi.fn(),
 		markSessionDetached: vi.fn(),
-		createLocalSession: vi.fn(),
+		createLocalSession,
 		syncSessions: vi.fn(),
 		removeSession: vi.fn(),
 		renameSession: vi.fn(),
@@ -227,9 +345,9 @@ const createStore = (): ChatStoreActions => {
 		updateSessionMeta: vi.fn(),
 		addUserMessage: vi.fn(),
 		addStatusMessage: vi.fn(),
-		appendAssistantChunk: vi.fn(),
+		appendAssistantChunk,
 		appendThoughtChunk: vi.fn(),
-		confirmOrAppendUserMessage: vi.fn(),
+		confirmOrAppendUserMessage,
 		finalizeAssistantMessage: vi.fn(),
 		addPermissionRequest: vi.fn(),
 		setPermissionDecisionState: vi.fn(),
@@ -238,7 +356,7 @@ const createStore = (): ChatStoreActions => {
 		updateToolCall: vi.fn(),
 		appendTerminalOutput: vi.fn(),
 		handleSessionsChanged: vi.fn(),
-		clearSessionMessages: vi.fn(),
+		clearSessionMessages,
 		restoreSessionMessages,
 		updateSessionCursor,
 		resetSessionForRevision,
@@ -257,6 +375,59 @@ const buildSession = (overrides: Partial<ChatSession> = {}): ChatSession => ({
 	isAttached: false,
 	isLoading: false,
 	...overrides,
+});
+
+const buildAssistantBackfillEvent = ({
+	sessionId = "session-1",
+	revision = 1,
+	seq = 1,
+	text = "assistant event",
+}: {
+	sessionId?: string;
+	revision?: number;
+	seq?: number;
+	text?: string;
+}) => ({
+	sessionId,
+	machineId: "machine-1",
+	revision,
+	seq,
+	kind: "agent_message_chunk" as const,
+	createdAt: "2024-01-01T00:00:00Z",
+	payload: {
+		sessionId,
+		update: {
+			sessionUpdate: "agent_message_chunk" as const,
+			content: { type: "text" as const, text },
+		},
+	},
+});
+
+const buildTerminalOutputBackfillEvent = ({
+	sessionId = "session-1",
+	revision = 1,
+	seq = 1,
+	terminalId = "term-1",
+	delta = "$ ls\nfoo.ts\n",
+}: {
+	sessionId?: string;
+	revision?: number;
+	seq?: number;
+	terminalId?: string;
+	delta?: string;
+}) => ({
+	sessionId,
+	machineId: "machine-1",
+	revision,
+	seq,
+	kind: "terminal_output" as const,
+	createdAt: "2024-01-01T00:00:00Z",
+	payload: {
+		terminalId,
+		delta,
+		truncated: false,
+		exitStatus: { exitCode: 0, signal: null },
+	},
 });
 
 describe("useSocket (webui)", () => {
@@ -969,6 +1140,294 @@ describe("useSocket (webui)", () => {
 			"session-1",
 			"fifth",
 		);
+	});
+
+	it("applies consolidated backfill assistant events and advances the cursor to the final seq", async () => {
+		// Regression: CLI read-time consolidation returns one event at the final seq.
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				revision: 1,
+				lastAppliedSeq: 0,
+			}),
+		};
+		setMockSessions(sessions);
+
+		renderHook(() =>
+			useSocket({
+				sessions,
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		const appendAssistantChunkMock = store.appendAssistantChunk as ReturnType<
+			typeof vi.fn
+		>;
+		const updateSessionCursorMock = store.updateSessionCursor as ReturnType<
+			typeof vi.fn
+		>;
+		appendAssistantChunkMock.mockClear();
+		updateSessionCursorMock.mockClear();
+
+		act(() => {
+			backfillOptionsRef.current?.onEvents?.("session-1", [
+				buildAssistantBackfillEvent({
+					seq: 3,
+					text: "Consolidated assistant reply",
+				}),
+			]);
+		});
+
+		expect(appendAssistantChunkMock).toHaveBeenCalledWith(
+			"session-1",
+			"Consolidated assistant reply",
+		);
+		expect(updateSessionCursorMock).toHaveBeenCalledWith("session-1", 1, 3);
+	});
+
+	it("applies consolidated backfill terminal output events and advances the cursor to the final seq", async () => {
+		// Regression: consolidated non-text backfill should not stall behind strict seq replay.
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				revision: 1,
+				lastAppliedSeq: 0,
+			}),
+		};
+		setMockSessions(sessions);
+
+		renderHook(() =>
+			useSocket({
+				sessions,
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		const appendTerminalOutputMock = store.appendTerminalOutput as ReturnType<
+			typeof vi.fn
+		>;
+		const updateSessionCursorMock = store.updateSessionCursor as ReturnType<
+			typeof vi.fn
+		>;
+		appendTerminalOutputMock.mockClear();
+		updateSessionCursorMock.mockClear();
+
+		act(() => {
+			backfillOptionsRef.current?.onEvents?.("session-1", [
+				buildTerminalOutputBackfillEvent({
+					seq: 3,
+					delta: "$ pwd\n/repo\n",
+				}),
+			]);
+		});
+
+		expect(appendTerminalOutputMock).toHaveBeenCalledWith("session-1", {
+			terminalId: "term-1",
+			delta: "$ pwd\n/repo\n",
+			truncated: false,
+			output: undefined,
+			exitStatus: { exitCode: 0, signal: null },
+		});
+		expect(updateSessionCursorMock).toHaveBeenCalledWith("session-1", 1, 3);
+	});
+
+	it("does not leave the transcript empty when manual sync succeeds with a consolidated backfill", async () => {
+		// Regression: manual sync clears local history before replaying backfill.
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				revision: 1,
+				lastAppliedSeq: 2,
+				messages: [
+					{
+						id: "stale-1",
+						role: "assistant",
+						kind: "text",
+						content: "Stale local transcript",
+						contentBlocks: [{ type: "text", text: "Stale local transcript" }],
+						createdAt: "2024-01-01T00:00:00Z",
+						isStreaming: false,
+					},
+				],
+			}),
+		};
+		setMockSessions(sessions);
+
+		const { result } = renderHook(() =>
+			useSocket({
+				sessions,
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		act(() => {
+			result.current.syncSessionHistory("session-1");
+		});
+
+		expect(mockStoreState.sessions["session-1"].messages).toHaveLength(0);
+
+		act(() => {
+			backfillOptionsRef.current?.onEvents?.("session-1", [
+				buildAssistantBackfillEvent({
+					seq: 3,
+					text: "Authoritative consolidated transcript",
+				}),
+			]);
+		});
+
+		expect(mockStoreState.sessions["session-1"].messages).toEqual([
+			expect.objectContaining({
+				role: "assistant",
+				content: "Authoritative consolidated transcript",
+			}),
+		]);
+		expect(
+			mockStoreState.sessions["session-1"].messages.some(
+				(message) =>
+					message.kind === "text" &&
+					message.content === "Stale local transcript",
+			),
+		).toBe(false);
+		expect(mockStoreState.sessions["session-1"].lastAppliedSeq).toBe(3);
+	});
+
+	it("replays encrypted consolidated backfill after the DEK is ready", async () => {
+		// Regression: encrypted consolidated backfill should replay once DEK arrives.
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				revision: 1,
+				lastAppliedSeq: 0,
+			}),
+		};
+		setMockSessions(sessions);
+		mockE2EE.hasSessionDek.mockReturnValue(false);
+		decryptedPayloads.set("cipher-consolidated", {
+			sessionId: "session-1",
+			update: {
+				sessionUpdate: "agent_message_chunk",
+				content: { type: "text", text: "Encrypted consolidated reply" },
+			},
+		});
+
+		renderHook(() =>
+			useSocket({
+				sessions,
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		const appendAssistantChunkMock = store.appendAssistantChunk as ReturnType<
+			typeof vi.fn
+		>;
+		const updateSessionCursorMock = store.updateSessionCursor as ReturnType<
+			typeof vi.fn
+		>;
+		appendAssistantChunkMock.mockClear();
+		updateSessionCursorMock.mockClear();
+
+		act(() => {
+			backfillOptionsRef.current?.onEvents?.("session-1", [
+				{
+					sessionId: "session-1",
+					machineId: "machine-1",
+					revision: 1,
+					seq: 3,
+					kind: "agent_message_chunk",
+					createdAt: "2024-01-01T00:00:00Z",
+					payload: {
+						t: "encrypted",
+						c: "cipher-consolidated",
+					},
+				},
+			]);
+		});
+
+		expect(appendAssistantChunkMock).not.toHaveBeenCalled();
+		expect(updateSessionCursorMock).not.toHaveBeenCalled();
+
+		mockE2EE.hasSessionDek.mockReturnValue(true);
+		act(() => {
+			emitDekReady("session-1");
+		});
+
+		expect(appendAssistantChunkMock).toHaveBeenCalledWith(
+			"session-1",
+			"Encrypted consolidated reply",
+		);
+		expect(updateSessionCursorMock).toHaveBeenCalledWith("session-1", 1, 3);
 	});
 
 	it("buffers encrypted events until the session DEK is available", async () => {
@@ -2005,8 +2464,12 @@ describe("useSocket (webui)", () => {
 				revision: 5,
 			});
 
-			// But resetSessionForRevision should NOT be called (backfill deferred)
-			expect(store.resetSessionForRevision).not.toHaveBeenCalled();
+			// Revision state should still reset immediately, but backfill stays deferred.
+			expect(store.resetSessionForRevision).toHaveBeenCalledWith(
+				"session-1",
+				5,
+			);
+			expect(mockBackfill.startBackfill).not.toHaveBeenCalled();
 		});
 	});
 

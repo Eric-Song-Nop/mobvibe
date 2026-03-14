@@ -748,6 +748,23 @@ describe("SessionManager", () => {
 	});
 
 	describe("getSessionEvents", () => {
+		const createConsolidatedManager = () => {
+			const consolidatedConfig = {
+				...createMockConfig(),
+				walDbPath: `/tmp/mobvibe-test/events-consolidated-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+				consolidation: {
+					enabled: true,
+				},
+			} satisfies CliConfig;
+			const manager = new SessionManager(consolidatedConfig);
+			const connection = createMockConnection();
+			sessionUpdateCallback = undefined;
+			manager.createConnection = () => connection as unknown as AcpConnection;
+			return { manager, connection };
+		};
+
 		it("returns empty events when requested revision does not match actual revision (Fix 2)", async () => {
 			// Create a session first to have it in WAL
 			await sessionManager.createSession({
@@ -800,6 +817,124 @@ describe("SessionManager", () => {
 
 			expect(result.events).toHaveLength(0);
 			expect(result.hasMore).toBe(false);
+		});
+
+		it("consolidates consecutive assistant chunks and advances nextAfterSeq to the final chunk seq", async () => {
+			const { manager } = createConsolidatedManager();
+			await manager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const sessionId = manager.listSessions()[0].sessionId;
+
+			expect(sessionUpdateCallback).toBeDefined();
+			sessionUpdateCallback?.({
+				sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "Consolidated " },
+				},
+			} as SessionNotification);
+			sessionUpdateCallback?.({
+				sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "assistant " },
+				},
+			} as SessionNotification);
+			sessionUpdateCallback?.({
+				sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "reply" },
+				},
+			} as SessionNotification);
+
+			const result = manager.getSessionEvents({
+				sessionId,
+				revision: 1,
+				afterSeq: 0,
+			});
+
+			expect(result.events).toHaveLength(1);
+			expect(result.events[0]).toEqual(
+				expect.objectContaining({
+					sessionId,
+					kind: "agent_message_chunk",
+					seq: 3,
+				}),
+			);
+			expect(
+				(
+					result.events[0].payload as {
+						update: { content: { text: string } };
+					}
+				).update.content.text,
+			).toBe("Consolidated assistant reply");
+			expect(result.nextAfterSeq).toBe(3);
+		});
+
+		it("consolidates tool_call updates and returns the terminal seq in backfill", async () => {
+			const { manager } = createConsolidatedManager();
+			await manager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const sessionId = manager.listSessions()[0].sessionId;
+
+			expect(sessionUpdateCallback).toBeDefined();
+			sessionUpdateCallback?.({
+				sessionId,
+				update: {
+					sessionUpdate: "tool_call",
+					toolCallId: "tool-1",
+					status: "in_progress",
+					title: "Read file",
+				},
+			} as SessionNotification);
+			sessionUpdateCallback?.({
+				sessionId,
+				update: {
+					sessionUpdate: "tool_call_update",
+					toolCallId: "tool-1",
+					status: "completed",
+					title: "Read file",
+					rawOutput: { content: "done" },
+				},
+			} as SessionNotification);
+
+			const result = manager.getSessionEvents({
+				sessionId,
+				revision: 1,
+				afterSeq: 0,
+			});
+
+			expect(result.events).toHaveLength(1);
+			expect(result.events[0]).toEqual(
+				expect.objectContaining({
+					sessionId,
+					kind: "tool_call",
+					seq: 2,
+				}),
+			);
+			expect(
+				(
+					result.events[0].payload as {
+						update: {
+							sessionUpdate: string;
+							status: string;
+							toolCallId: string;
+						};
+					}
+				).update,
+			).toEqual(
+				expect.objectContaining({
+					sessionUpdate: "tool_call",
+					status: "completed",
+					toolCallId: "tool-1",
+				}),
+			);
+			expect(result.nextAfterSeq).toBe(2);
 		});
 	});
 
