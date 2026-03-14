@@ -804,6 +804,13 @@ const MessageItemInner = ({
 	const getLabel = (key: string, options?: Record<string, unknown>) =>
 		t(key, { defaultValue: key, ...options });
 	const isUser = message.role === "user";
+	const isPendingUserMessage =
+		isUser &&
+		message.kind === "text" &&
+		message.provisional === true &&
+		message.failed !== true;
+	const isFailedUserMessage =
+		isUser && message.kind === "text" && message.failed === true;
 
 	// User message copy button state
 	const [copied, setCopied] = useState(false);
@@ -955,14 +962,31 @@ const MessageItemInner = ({
 		return <ThoughtItemContent message={message} />;
 	}
 	// User messages: bubble style with hover-reveal copy button
-	if (isUser) {
+	if (isUser && message.kind === "text") {
 		return (
 			<div className="flex flex-col gap-1 items-end">
+				{isPendingUserMessage || isFailedUserMessage ? (
+					<div
+						className="flex max-w-[85%] items-center gap-2 self-end text-[11px]"
+						aria-live="polite"
+					>
+						<Badge variant={isFailedUserMessage ? "destructive" : "secondary"}>
+							{isFailedUserMessage
+								? t("chat.messageFailed")
+								: t("chat.messagePending")}
+						</Badge>
+						{isFailedUserMessage ? (
+							<span className="text-destructive">
+								{t("chat.messageFailedHint")}
+							</span>
+						) : null}
+					</div>
+				) : null}
 				<div className="group/user-msg flex items-center gap-1.5 max-w-[85%]">
 					{!message.isStreaming && (
 						<button
 							type="button"
-							className="shrink-0 flex items-center justify-center size-6 rounded-full border border-border bg-background text-muted-foreground shadow-sm transition-all hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 md:opacity-0 group-hover/user-msg:opacity-100 focus-visible:opacity-100"
+							className="shrink-0 flex items-center justify-center size-6 rounded-full border border-border bg-background text-muted-foreground shadow-sm transition-[opacity,background-color,color] hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 md:opacity-0 group-hover/user-msg:opacity-100 focus-visible:opacity-100"
 							onClick={(e) => {
 								e.stopPropagation();
 								handleCopy();
@@ -979,7 +1003,12 @@ const MessageItemInner = ({
 					<Card
 						size="sm"
 						className={cn(
-							"border-primary/30 bg-primary/10 min-w-0",
+							"min-w-0",
+							isFailedUserMessage
+								? "border-destructive/40 bg-destructive/10"
+								: isPendingUserMessage
+									? "border-primary/30 border-dashed bg-primary/5"
+									: "border-primary/30 bg-primary/10",
 							message.isStreaming ? "opacity-90" : "opacity-100",
 						)}
 					>

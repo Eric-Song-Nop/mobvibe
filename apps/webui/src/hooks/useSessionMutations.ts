@@ -32,6 +32,7 @@ import type {
 import { useChatStore } from "@/lib/chat-store";
 import { bootstrapSessionE2EE } from "@/lib/e2ee";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
+import { useUiStore } from "@/lib/ui-store";
 
 type SessionMetadata = Partial<
 	Pick<
@@ -74,10 +75,27 @@ type PermissionRequestPayload = {
 	options: PermissionOption[];
 };
 
+type SendMessageDraft = {
+	input: string;
+	inputContents: ContentBlock[];
+};
+
+type SendMessageVariables = {
+	sessionId: string;
+	prompt: ContentBlock[];
+	messageId?: string;
+	draft?: SendMessageDraft;
+};
+
 export interface ChatStoreActions {
 	setActiveSessionId: (id: string | undefined) => void;
 	setLastCreatedCwd: (machineId: string, cwd: string) => void;
 	setSessionLoading: (sessionId: string, value: boolean) => void;
+	setHistorySyncing: (sessionId: string, value: boolean) => void;
+	setHistorySyncWarning: (
+		sessionId: string,
+		error?: ChatSession["historySyncWarning"],
+	) => void;
 	markSessionAttached: (payload: {
 		sessionId: string;
 		machineId?: string;
@@ -134,6 +152,7 @@ export interface ChatStoreActions {
 		},
 	) => void;
 	confirmOrAppendUserMessage: (sessionId: string, text: string) => void;
+	markUserMessageFailed: (sessionId: string, messageId: string) => void;
 	addStatusMessage: (sessionId: string, status: StatusPayload) => void;
 	appendAssistantChunk: (sessionId: string, text: string) => void;
 	appendThoughtChunk: (sessionId: string, text: string) => void;
@@ -409,8 +428,24 @@ export function useSessionMutations(store: ChatStoreActions) {
 	});
 
 	const sendMessageMutation = useMutation({
-		mutationFn: sendMessage,
-		onError: (mutationError: unknown) => {
+		mutationFn: (variables: SendMessageVariables) => {
+			if (!variables) {
+				return Promise.resolve({ stopReason: "end_turn" as const });
+			}
+			return sendMessage({
+				sessionId: variables.sessionId,
+				prompt: variables.prompt,
+			});
+		},
+		onError: (mutationError: unknown, variables) => {
+			if (variables?.messageId) {
+				store.markUserMessageFailed(variables.sessionId, variables.messageId);
+			}
+			if (variables?.draft) {
+				useUiStore
+					.getState()
+					.setChatDraft(variables.sessionId, variables.draft);
+			}
 			store.setAppError(
 				normalizeError(
 					mutationError,

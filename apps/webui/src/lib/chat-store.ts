@@ -34,6 +34,8 @@ type TextMessage = {
 	isStreaming: boolean;
 	/** Optimistically added user message, awaiting server confirmation */
 	provisional?: boolean;
+	/** Message failed to send and needs user attention */
+	failed?: boolean;
 };
 
 type ThoughtMessage = {
@@ -155,6 +157,8 @@ export type ChatSession = {
 		| "gateway_disconnect"
 		| "unknown";
 	isLoading?: boolean;
+	historySyncing?: boolean;
+	historySyncWarning?: ErrorDetail;
 	/** Indicates this session is being created optimistically (before server confirmation) */
 	isCreating?: boolean;
 	/** Usage tracking from ACP agent */
@@ -232,6 +236,11 @@ type ChatState = {
 	setAppError: (value?: ErrorDetail) => void;
 	setLastCreatedCwd: (machineId: string, cwd: string) => void;
 	setSessionLoading: (sessionId: string, value: boolean) => void;
+	setHistorySyncing: (sessionId: string, value: boolean) => void;
+	setHistorySyncWarning: (
+		sessionId: string,
+		value?: ChatSession["historySyncWarning"],
+	) => void;
 	markSessionAttached: (payload: {
 		sessionId: string;
 		machineId?: string;
@@ -321,6 +330,7 @@ type ChatState = {
 	) => void;
 	/** Confirm a provisional user message or append a new one (backfill) */
 	confirmOrAppendUserMessage: (sessionId: string, text: string) => void;
+	markUserMessageFailed: (sessionId: string, messageId: string) => void;
 	addStatusMessage: (
 		sessionId: string,
 		payload: {
@@ -592,6 +602,8 @@ const createSessionState = (
 	detachedAt: undefined,
 	detachedReason: undefined,
 	isLoading: false,
+	historySyncing: false,
+	historySyncWarning: undefined,
 	worktreeSourceCwd: options?.worktreeSourceCwd,
 	worktreeBranch: options?.worktreeBranch,
 	workspaceRootCwd: options?.workspaceRootCwd,
@@ -695,6 +707,14 @@ const mergeSessionFromSummary = (
 const STORAGE_KEY = "mobvibe.chat-store";
 
 const sanitizeMessageForPersist = (message: ChatMessage): ChatMessage => {
+	if (isTextMessage(message)) {
+		return {
+			...message,
+			isStreaming: false,
+			provisional: false,
+			failed: false,
+		};
+	}
 	if (message.kind === "permission") {
 		return message;
 	}
@@ -722,6 +742,8 @@ const sanitizeSessionForPersist = (session: ChatSession): ChatSession => ({
 	detachedReason: undefined,
 	e2eeStatus: undefined,
 	plan: undefined,
+	historySyncing: false,
+	historySyncWarning: undefined,
 	// Preserve messages even when cursor is set so detached sessions keep history.
 	// Backfill applies only new events based on the cursor.
 	messages: session.messages.map(sanitizeMessageForPersist),
@@ -771,6 +793,32 @@ export const useChatStore = create<ChatState>()(
 						sessions: {
 							...state.sessions,
 							[sessionId]: { ...session, isLoading: value },
+						},
+					};
+				}),
+			setHistorySyncing: (sessionId, value) =>
+				set((state) => {
+					const session = state.sessions[sessionId];
+					if (!session) {
+						return state;
+					}
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: { ...session, historySyncing: value },
+						},
+					};
+				}),
+			setHistorySyncWarning: (sessionId, value) =>
+				set((state) => {
+					const session = state.sessions[sessionId];
+					if (!session) {
+						return state;
+					}
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: { ...session, historySyncWarning: value },
 						},
 					};
 				}),
@@ -1190,6 +1238,7 @@ export const useChatStore = create<ChatState>()(
 						contentBlocks:
 							options?.contentBlocks ?? createDefaultContentBlocks(content),
 						provisional: options?.provisional ?? false,
+						failed: false,
 					};
 					return {
 						sessions: {
@@ -1213,7 +1262,7 @@ export const useChatStore = create<ChatState>()(
 						if (msg.role === "user" && msg.kind === "text" && msg.provisional) {
 							// Confirm the optimistic message
 							const messages = [...session.messages];
-							messages[i] = { ...msg, provisional: false };
+							messages[i] = { ...msg, provisional: false, failed: false };
 							return {
 								sessions: {
 									...state.sessions,
@@ -1240,6 +1289,35 @@ export const useChatStore = create<ChatState>()(
 								...session,
 								messages: [...session.messages, newMsg],
 							},
+						},
+					};
+				}),
+			markUserMessageFailed: (sessionId, messageId) =>
+				set((state: ChatState) => {
+					const session = state.sessions[sessionId];
+					if (!session) {
+						return state;
+					}
+					let updated = false;
+					const messages = session.messages.map((message) => {
+						if (
+							message.id !== messageId ||
+							message.role !== "user" ||
+							message.kind !== "text" ||
+							message.provisional !== true
+						) {
+							return message;
+						}
+						updated = true;
+						return { ...message, failed: true };
+					});
+					if (!updated) {
+						return state;
+					}
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: { ...session, messages },
 						},
 					};
 				}),

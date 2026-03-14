@@ -26,9 +26,18 @@ vi.mock("@/lib/chat-store", async (importOriginal) => {
 });
 
 const mockBootstrapSessionE2EE = vi.hoisted(() => vi.fn(() => "ok"));
+const mockUiStoreState = vi.hoisted(() => ({
+	setChatDraft: vi.fn(),
+}));
 
 vi.mock("@/lib/e2ee", () => ({
 	bootstrapSessionE2EE: mockBootstrapSessionE2EE,
+}));
+
+vi.mock("@/lib/ui-store", () => ({
+	useUiStore: {
+		getState: () => mockUiStoreState,
+	},
 }));
 
 // Mock the API module
@@ -58,6 +67,8 @@ describe("useSessionMutations", () => {
 		setActiveSessionId: vi.fn(),
 		setLastCreatedCwd: vi.fn(),
 		setSessionLoading: vi.fn(),
+		setHistorySyncing: vi.fn(),
+		setHistorySyncWarning: vi.fn(),
 		markSessionAttached: vi.fn(),
 		markSessionDetached: vi.fn(),
 		createLocalSession: vi.fn(),
@@ -77,6 +88,7 @@ describe("useSessionMutations", () => {
 		appendAssistantChunk: vi.fn(),
 		appendThoughtChunk: vi.fn(),
 		confirmOrAppendUserMessage: vi.fn(),
+		markUserMessageFailed: vi.fn(),
 		finalizeAssistantMessage: vi.fn(),
 		addPermissionRequest: vi.fn(),
 		setPermissionDecisionState: vi.fn(),
@@ -107,6 +119,7 @@ describe("useSessionMutations", () => {
 		});
 		mockStore = createMockStore();
 		mockChatStoreState.sessions = {};
+		mockUiStoreState.setChatDraft.mockReset();
 		vi.clearAllMocks();
 	});
 
@@ -835,6 +848,36 @@ describe("useSessionMutations", () => {
 				"session-1",
 			);
 			expect(mockStore.setSending).toHaveBeenCalledWith("session-1", false);
+		});
+
+		it("marks the optimistic message failed and restores the draft on error", async () => {
+			vi.mocked(apiModule.sendMessage).mockRejectedValue(new Error("offline"));
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await expect(
+				result.current.sendMessageMutation.mutateAsync({
+					sessionId: "session-1",
+					prompt: [{ type: "text", text: "Hello" }],
+					messageId: "user-msg-1",
+					draft: {
+						input: "Hello",
+						inputContents: [{ type: "text", text: "Hello" }],
+					},
+				}),
+			).rejects.toThrow("offline");
+
+			expect(mockStore.markUserMessageFailed).toHaveBeenCalledWith(
+				"session-1",
+				"user-msg-1",
+			);
+			expect(mockUiStoreState.setChatDraft).toHaveBeenCalledWith("session-1", {
+				input: "Hello",
+				inputContents: [{ type: "text", text: "Hello" }],
+			});
+			expect(mockStore.setAppError).toHaveBeenCalled();
 		});
 
 		it("should handle undefined variables gracefully", async () => {

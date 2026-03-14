@@ -1,5 +1,6 @@
 import { isEncryptedPayload, type SessionSummary } from "@mobvibe/shared";
 import { useCallback, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useSessionBackfill } from "@/hooks/use-session-backfill";
 import type { ChatStoreActions } from "@/hooks/useSessionMutations";
 import {
@@ -27,7 +28,7 @@ import {
 	useChatStore,
 } from "@/lib/chat-store";
 import { bootstrapSessionE2EE, e2ee } from "@/lib/e2ee";
-import { isErrorDetail } from "@/lib/error-utils";
+import { createFallbackError, isErrorDetail } from "@/lib/error-utils";
 import { useMachinesStore } from "@/lib/machines-store";
 import {
 	notifyPermissionRequest,
@@ -127,6 +128,7 @@ export function useSocket({
 	resetSessionForRevision,
 	onReconnect,
 }: UseSocketOptions) {
+	const { t } = useTranslation();
 	const subscribedSessionsRef = useRef<Set<string>>(new Set());
 	const recoverableSessionsRef = useRef<Set<string>>(new Set());
 	const sessionsRef = useRef(useChatStore.getState().sessions);
@@ -417,9 +419,13 @@ export function useSocket({
 		},
 		onComplete: (_sessionId) => {
 			syncBackupsRef.current.delete(_sessionId);
+			const store = useChatStore.getState();
+			store.setHistorySyncing(_sessionId, false);
+			store.setHistorySyncWarning(_sessionId, undefined);
 		},
 		onError: (sessionId, error) => {
 			console.error(`[backfill] Error for session ${sessionId}:`, error);
+			const store = useChatStore.getState();
 			// Fall back to applying pending events best effort
 			const pending = pendingEventsRef.current.get(sessionId);
 			if (pending && pending.length > 0) {
@@ -444,27 +450,31 @@ export function useSocket({
 			}
 
 			const backup = syncBackupsRef.current.get(sessionId);
-			if (!backup) {
-				return;
+			if (backup) {
+				const failedSession = store.sessions[sessionId];
+				if (
+					failedSession &&
+					failedSession.messages.length === 0 &&
+					(failedSession.lastAppliedSeq ?? 0) === 0
+				) {
+					store.restoreSessionMessages(
+						sessionId,
+						backup.messages,
+						backup.snapshot,
+					);
+				}
+				syncBackupsRef.current.delete(sessionId);
 			}
-
-			const failedSession = useChatStore.getState().sessions[sessionId];
-			if (
-				failedSession &&
-				failedSession.messages.length === 0 &&
-				(failedSession.lastAppliedSeq ?? 0) === 0
-			) {
-				useChatStore
-					.getState()
-					.restoreSessionMessages(sessionId, backup.messages, backup.snapshot);
-			}
-			syncBackupsRef.current.delete(sessionId);
+			store.setHistorySyncing(sessionId, false);
+			store.setHistorySyncWarning(sessionId, {
+				...createFallbackError(t("session.historyMayBeStale"), "session"),
+				detail: error.message,
+			});
 		},
 		onRevisionMismatch: (sessionId, newRevision) => {
 			console.log(
 				`[backfill] Revision mismatch for ${sessionId}, resetting to revision ${newRevision}`,
 			);
-			syncBackupsRef.current.delete(sessionId);
 			resetSessionForRevision(sessionId, newRevision);
 			pendingEventsRef.current.delete(sessionId);
 			encryptedBufferRef.current.delete(sessionId);
@@ -537,8 +547,10 @@ export function useSocket({
 	const syncSessionHistory = useCallback(
 		(sessionId: string) => {
 			const session = useChatStore.getState().sessions[sessionId];
-			if (!session || session.sending) return;
+			if (!session || session.sending || session.historySyncing) return;
 
+			useChatStore.getState().setHistorySyncing(sessionId, true);
+			useChatStore.getState().setHistorySyncWarning(sessionId, undefined);
 			const revision = session.revision ?? 1;
 			syncBackupsRef.current.set(sessionId, {
 				messages: [...session.messages],

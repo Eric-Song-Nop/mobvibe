@@ -51,7 +51,10 @@
 		"commandModeLabel": "模式: {{value}}",
 		"commandModelLabel": "模型: {{value}}",
 		"copyMessage": "复制",
-		"copied": "已复制"
+		"copied": "已复制",
+		"messagePending": "发送中…",
+		"messageFailed": "发送失败",
+		"messageFailedHint": "草稿已恢复到下方输入框。"
 	},
 	"session": {
 		"title": "对话",
@@ -69,8 +72,10 @@
 		"forceReloadTitle": "强制停止并加载？",
 		"forceReloadDescription": "将先停止当前生成，再从代理重放历史。",
 		"forceReloadConfirm": "确认重载",
-		"loadingHistory": "正在加载历史...",
-		"reloadingHistory": "正在重放历史...",
+		"loadingHistory": "正在加载历史…",
+		"reloadingHistory": "正在重放历史…",
+		"syncingHistory": "正在同步历史…",
+		"historyMayBeStale": "历史可能不是最新的，请重新同步。",
 		"sessionClosed": "会话已结束或被关闭",
 		"createTitle": "新建对话",
 		"createDescription": "选择后端并设置对话标题与工作目录。",
@@ -136,6 +141,7 @@
 		"sessionE2EEKeyMissing": "E2EE 密钥缺失，请先配对此设备后再发送消息。",
 		"streamDisconnected": "SSE 连接异常",
 		"createSessionFailed": "创建会话失败",
+		"loadSessionFailed": "加载会话失败",
 		"renameSessionFailed": "重命名失败",
 		"archiveSessionFailed": "归档会话失败",
 		"closeSessionFailed": "关闭会话失败",

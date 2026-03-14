@@ -82,6 +82,8 @@ const createStore = (): ChatStoreActions =>
 		setActiveSessionId: vi.fn(),
 		setLastCreatedCwd: vi.fn(),
 		setSessionLoading: vi.fn(),
+		setHistorySyncing: vi.fn(),
+		setHistorySyncWarning: vi.fn(),
 		markSessionAttached: vi.fn(),
 		markSessionDetached: vi.fn(),
 		createLocalSession: vi.fn(),
@@ -274,6 +276,11 @@ describe("useSessionActivation", () => {
 		});
 
 		expect(store.setSessionLoading).toHaveBeenCalledWith("session-1", true);
+		expect(store.setHistorySyncing).toHaveBeenCalledWith("session-1", true);
+		expect(store.setHistorySyncWarning).toHaveBeenCalledWith(
+			"session-1",
+			undefined,
+		);
 		expect(store.clearSessionMessages).toHaveBeenCalledWith("session-1");
 		expect(loadSessionMutation.mutateAsync).toHaveBeenCalledWith({
 			sessionId: "session-1",
@@ -435,6 +442,10 @@ describe("useSessionActivation", () => {
 		);
 		expect(mockGatewaySocket.unsubscribeFromSession).toHaveBeenCalledWith(
 			"session-1",
+		);
+		expect(store.setHistorySyncing).toHaveBeenLastCalledWith(
+			"session-1",
+			false,
 		);
 		expect(store.setSessionLoading).toHaveBeenCalledWith("session-1", false);
 	});

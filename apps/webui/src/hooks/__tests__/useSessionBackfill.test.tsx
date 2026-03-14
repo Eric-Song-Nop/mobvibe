@@ -165,6 +165,53 @@ describe("useSessionBackfill", () => {
 		expect(onComplete).not.toHaveBeenCalled();
 	});
 
+	it("times out a stalled backfill request and surfaces the error", async () => {
+		vi.useFakeTimers();
+		const onEvents = vi.fn();
+		const onComplete = vi.fn();
+		const onError = vi.fn();
+
+		mockFetch.mockImplementationOnce(
+			(_input: RequestInfo | URL, init?: RequestInit) =>
+				new Promise((_resolve, reject) => {
+					const signal = init?.signal as AbortSignal | undefined;
+					signal?.addEventListener("abort", () => {
+						const abortError = new Error("Aborted");
+						abortError.name = "AbortError";
+						reject(abortError);
+					});
+				}),
+		);
+
+		const { result } = renderHook(() =>
+			useSessionBackfill({
+				gatewayUrl: "http://localhost:3005",
+				onEvents,
+				onComplete,
+				onError,
+			}),
+		);
+
+		try {
+			await act(async () => {
+				const pending = result.current.startBackfill("session-1", 1, 0);
+				await vi.advanceTimersByTimeAsync(15_000);
+				await pending;
+			});
+
+			expect(onEvents).not.toHaveBeenCalled();
+			expect(onComplete).not.toHaveBeenCalled();
+			expect(onError).toHaveBeenCalledWith(
+				"session-1",
+				expect.objectContaining({
+					message: "Backfill request timed out after 15000ms",
+				}),
+			);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("fetches multiple pages until hasMore is false", async () => {
 		const onEvents = vi.fn();
 		const onComplete = vi.fn();

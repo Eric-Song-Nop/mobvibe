@@ -51,7 +51,10 @@
 		"commandModeLabel": "Mode: {{value}}",
 		"commandModelLabel": "Model: {{value}}",
 		"copyMessage": "Copy",
-		"copied": "Copied"
+		"copied": "Copied",
+		"messagePending": "Sending…",
+		"messageFailed": "Send failed",
+		"messageFailedHint": "Draft restored below."
 	},
 	"session": {
 		"title": "Sessions",
@@ -69,8 +72,10 @@
 		"forceReloadTitle": "Force stop and reload?",
 		"forceReloadDescription": "This stops the current generation and reloads history from the agent.",
 		"forceReloadConfirm": "Force reload",
-		"loadingHistory": "Loading history...",
-		"reloadingHistory": "Reloading history...",
+		"loadingHistory": "Loading history…",
+		"reloadingHistory": "Reloading history…",
+		"syncingHistory": "Synchronizing history…",
+		"historyMayBeStale": "History may be out of date. Try syncing again.",
 		"sessionClosed": "Session has ended or was closed",
 		"createTitle": "New conversation",
 		"createDescription": "Choose a backend and set the title and working directory.",
@@ -136,6 +141,7 @@
 		"sessionE2EEKeyMissing": "E2EE key missing. Pair this device before sending messages.",
 		"streamDisconnected": "SSE connection lost",
 		"createSessionFailed": "Failed to create session",
+		"loadSessionFailed": "Failed to load session",
 		"renameSessionFailed": "Failed to rename",
 		"archiveSessionFailed": "Failed to archive session",
 		"closeSessionFailed": "Failed to close session",

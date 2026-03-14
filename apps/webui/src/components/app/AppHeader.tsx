@@ -45,6 +45,7 @@ export type AppHeaderProps = {
 	branchLabel?: string;
 	subdirectoryLabel?: string;
 	statusMessage?: string;
+	warningMessage?: string;
 	streamError?: ChatSession["streamError"];
 	loadingMessage?: string;
 	plan?: PlanEntry[];
@@ -90,6 +91,7 @@ export const AppHeader = memo(function AppHeader({
 	branchLabel,
 	subdirectoryLabel,
 	statusMessage,
+	warningMessage,
 	streamError,
 	loadingMessage,
 	plan,
@@ -324,12 +326,26 @@ export const AppHeader = memo(function AppHeader({
 			</div>
 
 			{loadingMessage ? (
-				<div className="text-muted-foreground mx-auto mt-2 w-full max-w-5xl text-xs">
+				<div
+					className="text-muted-foreground mx-auto mt-2 w-full max-w-5xl text-xs"
+					aria-live="polite"
+				>
 					{loadingMessage}
 				</div>
 			) : null}
+			{warningMessage ? (
+				<div
+					className="text-warning mx-auto mt-2 w-full max-w-5xl text-xs"
+					aria-live="polite"
+				>
+					{warningMessage}
+				</div>
+			) : null}
 			{statusMessage ? (
-				<div className="text-muted-foreground mx-auto mt-2 w-full max-w-5xl text-xs">
+				<div
+					className="text-destructive mx-auto mt-2 w-full max-w-5xl text-xs"
+					aria-live="polite"
+				>
 					{statusMessage}
 				</div>
 			) : null}

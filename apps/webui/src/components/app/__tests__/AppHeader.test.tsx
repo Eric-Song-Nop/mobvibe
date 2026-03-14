@@ -16,6 +16,9 @@ vi.mock("react-i18next", () => ({
 				"commandPalette.openCommandPalette": "Open Command Palette",
 				"common.toggleMenu": "Toggle menu",
 				"session.syncHistory": "Sync History",
+				"session.syncingHistory": "Synchronizing history…",
+				"session.historyMayBeStale":
+					"History may be out of date. Try syncing again.",
 				"session.forceReloadTitle": "Force Reload",
 				"session.forceReloadDescription": "This will force reload the session.",
 				"session.forceReloadConfirm": "Reload",
@@ -509,6 +512,15 @@ describe("AppHeader", () => {
 		it("displays loading message when provided", () => {
 			renderAppHeader({ loadingMessage: "Loading..." });
 			expect(screen.getByText("Loading...")).toBeInTheDocument();
+		});
+
+		it("displays warning message when provided", () => {
+			renderAppHeader({
+				warningMessage: "History may be out of date. Try syncing again.",
+			});
+			expect(
+				screen.getByText("History may be out of date. Try syncing again."),
+			).toBeInTheDocument();
 		});
 
 		it("displays status message when provided", () => {

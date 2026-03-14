@@ -161,11 +161,19 @@ describe("chat-store", () => {
 	// confirmOrAppendUserMessage
 	// ---------------------------------------------------------------------------
 	describe("confirmOrAppendUserMessage", () => {
-		it("confirms a provisional user message", () => {
-			const { createLocalSession, addUserMessage, confirmOrAppendUserMessage } =
-				useChatStore.getState();
+		it("confirms a provisional user message and clears failed state", () => {
+			const {
+				createLocalSession,
+				addUserMessage,
+				confirmOrAppendUserMessage,
+				markUserMessageFailed,
+			} = useChatStore.getState();
 			createLocalSession("s1");
 			addUserMessage("s1", "hello world", { provisional: true });
+			const messageId = useChatStore.getState().sessions.s1.messages[0]?.id;
+			if (messageId) {
+				markUserMessageFailed("s1", messageId);
+			}
 
 			expect(useChatStore.getState().sessions.s1.messages[0]).toHaveProperty(
 				"provisional",
@@ -176,6 +184,7 @@ describe("chat-store", () => {
 
 			const msg = useChatStore.getState().sessions.s1.messages[0];
 			expect(msg).toHaveProperty("provisional", false);
+			expect(msg).toHaveProperty("failed", false);
 			// Should NOT add a second message
 			expect(useChatStore.getState().sessions.s1.messages).toHaveLength(1);
 		});
@@ -246,18 +255,32 @@ describe("chat-store", () => {
 			}
 		});
 
-		it("provisional flag survives sanitizeMessageForPersist (not stripped)", () => {
+		it("defaults failed to false on optimistic messages", () => {
 			const { createLocalSession, addUserMessage } = useChatStore.getState();
 			createLocalSession("s1");
 			addUserMessage("s1", "prov msg", { provisional: true });
 
-			// Read persisted state — sanitizeMessageForPersist sets isStreaming=false
-			// but should not strip the provisional field
 			const msg = useChatStore.getState().sessions.s1.messages[0];
 			expect(msg.kind).toBe("text");
 			if (msg.kind === "text") {
 				expect(msg.provisional).toBe(true);
+				expect(msg.failed).toBe(false);
 				expect(msg.isStreaming).toBe(false);
+			}
+		});
+
+		it("marks a provisional user message as failed", () => {
+			const { createLocalSession, addUserMessage, markUserMessageFailed } =
+				useChatStore.getState();
+			createLocalSession("s1");
+			addUserMessage("s1", "hello", { provisional: true, messageId: "msg-1" });
+
+			markUserMessageFailed("s1", "msg-1");
+
+			const msg = useChatStore.getState().sessions.s1.messages[0];
+			if (msg.kind === "text") {
+				expect(msg.provisional).toBe(true);
+				expect(msg.failed).toBe(true);
 			}
 		});
 	});

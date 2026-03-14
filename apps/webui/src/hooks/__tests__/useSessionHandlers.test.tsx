@@ -584,6 +584,11 @@ describe("useSessionHandlers — handleSend", () => {
 		expect(mutations.sendMessageMutation.mutate).toHaveBeenCalledWith({
 			sessionId: "session-1",
 			prompt: promptContents,
+			messageId: expect.any(String),
+			draft: {
+				input: "Ship it",
+				inputContents: promptContents,
+			},
 		});
 	});
 
@@ -664,6 +669,11 @@ describe("useSessionHandlers — handleSend", () => {
 		expect(mutations.sendMessageMutation.mutate).toHaveBeenCalledWith({
 			sessionId: "session-1",
 			prompt: promptContents,
+			messageId: expect.any(String),
+			draft: {
+				input: "",
+				inputContents: promptContents,
+			},
 		});
 	});
 });
