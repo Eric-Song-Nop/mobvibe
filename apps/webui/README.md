@@ -237,6 +237,7 @@ Publishing notes:
 - `tauri ios build` supports `--build-number <n>`; use it for each new TestFlight/App Store upload so `CFBundleVersion` keeps increasing.
 - If `xcodegen` is missing, `pnpm ios:init` installs it automatically with Homebrew.
 - The iOS scripts automatically patch the generated Xcode project to use `XcodeDefault.xctoolchain` Swift library paths, which avoids Xcode 26 resolving `TOOLCHAIN_DIR` to the Metal toolchain during simulator builds.
+- The iOS build/export scripts also clear `src-tauri/gen/apple/build/` first. This avoids Tauri failing with `failed to rename app ... Directory not empty` when stale archive/app output is present.
 - The iOS project is generated under `src-tauri/gen/apple/` and is intentionally kept local because Xcode signing metadata is machine/team-specific.
 
 ## Troubleshooting
