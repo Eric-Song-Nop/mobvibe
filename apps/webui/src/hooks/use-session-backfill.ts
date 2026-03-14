@@ -166,7 +166,9 @@ export function useSessionBackfill({
 					error instanceof Error ? error : new Error(String(error)),
 				);
 			} finally {
-				activeBackfills.current.delete(sessionId);
+				if (activeBackfills.current.get(sessionId) === state) {
+					activeBackfills.current.delete(sessionId);
+				}
 			}
 		},
 		[fetchEvents, onEvents, onComplete, onError, onRevisionMismatch],

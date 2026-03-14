@@ -231,6 +231,28 @@ const normalizeActionScript = (value) => {
 	return buildActionScript(value);
 };
 
+const buildConsolidatedBackfillBody = ({
+	sessionId = "session-1",
+	revision = 1,
+	seq = 3,
+	text,
+}) => ({
+	sessionId,
+	machineId: MACHINE_ID,
+	revision,
+	events: [
+		buildEvent({
+			sessionId,
+			revision,
+			seq,
+			text,
+			sessionDeks: new Map(),
+		}),
+	],
+	nextAfterSeq: seq,
+	hasMore: false,
+});
+
 const buildEventFetchKey = (sessionId, revision, afterSeq) =>
 	`${sessionId}:${revision}:${afterSeq}`;
 
@@ -282,6 +304,24 @@ const scenarios = {
 							sessionDeks: new Map(),
 						}),
 					],
+				],
+			],
+		}),
+	"refresh-restore-consolidated": () =>
+		createScenarioState({
+			sessions: [baseSession({ title: "Restore Session", revision: 2 })],
+			events: [["session-1", []]],
+			eventFetchScripts: [
+				[
+					buildEventFetchKey("session-1", 2, 0),
+					buildEventFetchScript({
+						body: buildConsolidatedBackfillBody({
+							sessionId: "session-1",
+							revision: 2,
+							seq: 3,
+							text: "Recovered after consolidated refresh",
+						}),
+					}),
 				],
 			],
 		}),
@@ -395,6 +435,24 @@ const scenarios = {
 				],
 			],
 		}),
+	"sync-history-consolidated": () =>
+		createScenarioState({
+			sessions: [baseSession({ title: "Sync Session", revision: 1 })],
+			events: [["session-1", []]],
+			eventFetchScripts: [
+				[
+					buildEventFetchKey("session-1", 1, 0),
+					buildEventFetchScript({
+						body: buildConsolidatedBackfillBody({
+							sessionId: "session-1",
+							revision: 1,
+							seq: 3,
+							text: "Authoritative consolidated transcript",
+						}),
+					}),
+				],
+			],
+		}),
 	"sync-history-interleaved": () =>
 		createScenarioState({
 			sessions: [baseSession({ title: "Sync Session", revision: 1 })],
@@ -467,6 +525,36 @@ const scenarios = {
 							isAttached: true,
 						}),
 					),
+				],
+			],
+		}),
+	"force-reload-consolidated": () =>
+		createScenarioState({
+			sessions: [baseSession({ title: "Reload Session", revision: 1 })],
+			events: [["session-1", []]],
+			reloadResponses: [
+				[
+					"session-1",
+					buildActionScript(
+						baseSession({
+							title: "Reload Session",
+							revision: 2,
+							isAttached: true,
+						}),
+					),
+				],
+			],
+			eventFetchScripts: [
+				[
+					buildEventFetchKey("session-1", 2, 0),
+					buildEventFetchScript({
+						body: buildConsolidatedBackfillBody({
+							sessionId: "session-1",
+							revision: 2,
+							seq: 3,
+							text: "Reloaded consolidated transcript",
+						}),
+					}),
 				],
 			],
 		}),
@@ -557,6 +645,64 @@ const scenarios = {
 							isAttached: true,
 						}),
 					),
+				],
+			],
+		}),
+	"sidebar-load-consolidated": () =>
+		createScenarioState({
+			sessions: [
+				baseSession({
+					sessionId: "session-1",
+					title: "Session Alpha",
+					revision: 1,
+					isAttached: true,
+				}),
+				baseSession({
+					sessionId: "session-2",
+					title: "Session Beta",
+					revision: 1,
+					isAttached: false,
+				}),
+			],
+			events: [
+				[
+					"session-1",
+					[
+						buildEvent({
+							sessionId: "session-1",
+							revision: 1,
+							seq: 1,
+							text: "Alpha final transcript",
+							sessionDeks: new Map(),
+						}),
+					],
+				],
+				["session-2", []],
+			],
+			loadResponses: [
+				[
+					"session-2",
+					buildActionScript(
+						baseSession({
+							sessionId: "session-2",
+							title: "Session Beta",
+							revision: 1,
+							isAttached: true,
+						}),
+					),
+				],
+			],
+			eventFetchScripts: [
+				[
+					buildEventFetchKey("session-2", 1, 0),
+					buildEventFetchScript({
+						body: buildConsolidatedBackfillBody({
+							sessionId: "session-2",
+							revision: 1,
+							seq: 3,
+							text: "Beta consolidated transcript",
+						}),
+					}),
 				],
 			],
 		}),
@@ -830,6 +976,10 @@ const server = http.createServer(async (req, res) => {
 					error: "event_fetch_failed_for_test",
 				},
 			);
+			return;
+		}
+		if (fetchScript?.body) {
+			json(req, res, fetchScript.statusCode ?? 200, fetchScript.body);
 			return;
 		}
 

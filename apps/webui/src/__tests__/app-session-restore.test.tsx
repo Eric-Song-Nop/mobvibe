@@ -483,6 +483,62 @@ describe("App session restore integration", () => {
 		);
 	});
 
+	it("uses the server summary revision when refreshing a persisted attached session", async () => {
+		sessionsState.sessionsQuery = {
+			data: {
+				sessions: [
+					{
+						sessionId: "session-1",
+						title: "Revision Sync Session",
+						backendId: "backend-1",
+						backendLabel: "Claude",
+						createdAt: "2024-01-01T00:00:00Z",
+						updatedAt: "2024-01-01T00:00:00Z",
+						machineId: "machine-1",
+						cwd: "/repo",
+						revision: 3,
+						isAttached: true,
+					},
+				],
+			},
+			isError: false,
+		};
+		useChatStore.setState({
+			sessions: {
+				"session-1": createStoredSession({
+					title: "Revision Sync Session",
+					isAttached: false,
+					revision: 1,
+					lastAppliedSeq: 5,
+				}),
+			},
+			activeSessionId: "session-1",
+		});
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					sessionId: "session-1",
+					machineId: "machine-1",
+					revision: 3,
+					events: [],
+					nextAfterSeq: 0,
+					hasMore: false,
+				}),
+		});
+
+		renderApp();
+
+		await waitFor(() => {
+			expect(mockFetch).toHaveBeenCalled();
+		});
+
+		const firstRequestedUrl = String(mockFetch.mock.calls[0]?.[0] ?? "");
+		expect(firstRequestedUrl).toContain("sessionId=session-1");
+		expect(firstRequestedUrl).toContain("revision=3");
+		expect(firstRequestedUrl).toContain("afterSeq=0");
+	});
+
 	it("buffers encrypted live events until the DEK becomes available", async () => {
 		sessionsState.sessionsQuery = {
 			data: {

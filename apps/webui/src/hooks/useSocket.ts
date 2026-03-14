@@ -1,4 +1,4 @@
-import { isEncryptedPayload } from "@mobvibe/shared";
+import { isEncryptedPayload, type SessionSummary } from "@mobvibe/shared";
 import { useCallback, useEffect, useRef } from "react";
 import { useSessionBackfill } from "@/hooks/use-session-backfill";
 import type { ChatStoreActions } from "@/hooks/useSessionMutations";
@@ -39,6 +39,7 @@ import { gatewaySocket } from "@/lib/socket";
 type UseSocketOptions = {
 	// Legacy compatibility for older tests; the hook now reads sessions from the store.
 	sessions?: Record<string, ChatSession>;
+	syncSessions?: ChatStoreActions["syncSessions"];
 	setSending?: ChatStoreActions["setSending"];
 	setCanceling?: ChatStoreActions["setCanceling"];
 	finalizeAssistantMessage?: ChatStoreActions["finalizeAssistantMessage"];
@@ -64,6 +65,13 @@ type UseSocketOptions = {
 	| "updateSessionCursor"
 	| "resetSessionForRevision"
 >;
+
+type EventSource = "live" | "backfill";
+
+type BufferedEncryptedEvent = {
+	event: SessionEvent;
+	source: EventSource;
+};
 
 // Helper to get cursor from store directly (unified source of truth)
 const getCursor = (sessionId: string) => {
@@ -96,6 +104,7 @@ function processPermissionRequest(
 }
 
 export function useSocket({
+	syncSessions,
 	setSending,
 	setCanceling,
 	finalizeAssistantMessage,
@@ -134,7 +143,9 @@ export function useSocket({
 	const pendingEventsRef = useRef<Map<string, SessionEvent[]>>(new Map());
 
 	// Buffer for encrypted events received before DEK is ready
-	const encryptedBufferRef = useRef<Map<string, SessionEvent[]>>(new Map());
+	const encryptedBufferRef = useRef<Map<string, BufferedEncryptedEvent[]>>(
+		new Map(),
+	);
 	const syncBackupsRef = useRef<
 		Map<
 			string,
@@ -332,6 +343,32 @@ export function useSocket({
 	};
 
 	// Flush pending events that are now in order
+	const prunePendingEventsRef = useRef<
+		((sessionId: string) => SessionEvent[]) | undefined
+	>(undefined);
+	prunePendingEventsRef.current = (sessionId: string) => {
+		const cursor = getCursor(sessionId);
+		const pending = pendingEventsRef.current.get(sessionId);
+		if (!pending || pending.length === 0) {
+			return [];
+		}
+
+		const pruned = pending.filter((event) => {
+			if (cursor.revision !== undefined && event.revision !== cursor.revision) {
+				return false;
+			}
+			return event.seq > cursor.lastAppliedSeq;
+		});
+
+		if (pruned.length > 0) {
+			pendingEventsRef.current.set(sessionId, pruned);
+		} else {
+			pendingEventsRef.current.delete(sessionId);
+		}
+
+		return pruned;
+	};
+
 	const flushPendingEventsRef = useRef<
 		((sessionId: string) => void) | undefined
 	>(undefined);
@@ -339,16 +376,9 @@ export function useSocket({
 		const cursor = getCursor(sessionId);
 		if (cursor.revision === undefined) return;
 
-		const pending = pendingEventsRef.current.get(sessionId);
-		if (!pending || pending.length === 0) return;
-
 		let lastSeq = cursor.lastAppliedSeq;
-		const currentRevision = cursor.revision;
-
-		// Filter out stale events (seq <= lastSeq or wrong revision)
-		const validPending = pending.filter(
-			(e) => e.seq > lastSeq && e.revision === currentRevision,
-		);
+		const validPending = prunePendingEventsRef.current?.(sessionId) ?? [];
+		if (validPending.length === 0) return;
 
 		// Sort by seq
 		validPending.sort((a, b) => a.seq - b.seq);
@@ -371,47 +401,18 @@ export function useSocket({
 			pendingEventsRef.current.delete(sessionId);
 		}
 	};
+	const ingestSessionEventRef = useRef<
+		((event: SessionEvent, source: EventSource) => void) | undefined
+	>(undefined);
 
 	// Setup backfill hook for gap recovery
 	const { startBackfill, cancelBackfill, isBackfilling } = useSessionBackfill({
 		gatewayUrl: gatewaySocket.getGatewayUrl(),
 		onEvents: (sessionId, events) => {
-			for (const rawEvent of events) {
-				// Buffer encrypted events when DEK is not yet available
-				if (
-					isEncryptedPayload(rawEvent.payload) &&
-					!e2ee.hasSessionDek(sessionId)
-				) {
-					const buf = encryptedBufferRef.current.get(sessionId) ?? [];
-					buf.push(rawEvent);
-					encryptedBufferRef.current.set(sessionId, buf);
-					// Do NOT advance cursor — cursor should only reflect actually
-					// processed events. When DEK arrives, onDekReady will replay
-					// buffered events through handleSessionEventRef normally.
-					continue;
-				}
-
-				// Decrypt event payload if encrypted
-				const event = e2ee.decryptEvent(rawEvent);
-
-				const cursor = getCursor(sessionId);
-				const lastSeq = cursor.lastAppliedSeq;
-
-				// Skip already applied
-				if (event.seq <= lastSeq) continue;
-
-				// Apply if next in sequence
-				if (event.seq === lastSeq + 1) {
-					applySessionEventRef.current?.(event);
-					updateSessionCursor(sessionId, event.revision, event.seq);
-				} else if (event.seq > lastSeq + 1) {
-					// Gap (e.g. encrypted events created holes) — buffer for later
-					const pending = pendingEventsRef.current.get(sessionId) ?? [];
-					pending.push(event);
-					pendingEventsRef.current.set(sessionId, pending);
-				}
+			for (const rawEvent of [...events].sort((a, b) => a.seq - b.seq)) {
+				ingestSessionEventRef.current?.(rawEvent, "backfill");
 			}
-			// Flush any pending events
+			prunePendingEventsRef.current?.(sessionId);
 			flushPendingEventsRef.current?.(sessionId);
 		},
 		onComplete: (_sessionId) => {
@@ -466,6 +467,8 @@ export function useSocket({
 			syncBackupsRef.current.delete(sessionId);
 			resetSessionForRevision(sessionId, newRevision);
 			pendingEventsRef.current.delete(sessionId);
+			encryptedBufferRef.current.delete(sessionId);
+			initialBackfillTriggeredRef.current.delete(sessionId);
 
 			// Defer restart to avoid race conditions
 			queueMicrotask(() => {
@@ -473,6 +476,46 @@ export function useSocket({
 			});
 		},
 	});
+
+	const getRevisionResetSessionIds = useCallback(
+		(
+			summaries: Array<
+				Pick<SessionSummary, "sessionId" | "isAttached" | "revision">
+			>,
+		) =>
+			summaries
+				.filter((summary) => {
+					if (summary.isAttached !== true || summary.revision === undefined) {
+						return false;
+					}
+					const current = sessionsRef.current[summary.sessionId];
+					return current !== undefined && current.revision !== summary.revision;
+				})
+				.map((summary) => summary.sessionId),
+		[],
+	);
+
+	const clearRevisionRuntimeState = useCallback(
+		(sessionId: string) => {
+			pendingEventsRef.current.delete(sessionId);
+			encryptedBufferRef.current.delete(sessionId);
+			syncBackupsRef.current.delete(sessionId);
+			cancelBackfill(sessionId);
+			initialBackfillTriggeredRef.current.delete(sessionId);
+			setStreamError(sessionId, undefined);
+		},
+		[cancelBackfill, setStreamError],
+	);
+
+	const syncSessionSummaries = useCallback(
+		(summaries: SessionSummary[]) => {
+			for (const sessionId of getRevisionResetSessionIds(summaries)) {
+				clearRevisionRuntimeState(sessionId);
+			}
+			syncSessions?.(summaries);
+		},
+		[clearRevisionRuntimeState, getRevisionResetSessionIds, syncSessions],
+	);
 
 	const clearTrackedSession = useCallback(
 		(sessionId: string, options?: { unsubscribe?: boolean }) => {
@@ -482,6 +525,9 @@ export function useSocket({
 			}
 			subscribedSessionsRef.current.delete(sessionId);
 			recoverableSessionsRef.current.delete(sessionId);
+			pendingEventsRef.current.delete(sessionId);
+			encryptedBufferRef.current.delete(sessionId);
+			syncBackupsRef.current.delete(sessionId);
 			cancelBackfill(sessionId);
 			initialBackfillTriggeredRef.current.delete(sessionId);
 		},
@@ -524,28 +570,126 @@ export function useSocket({
 	) => {
 		startBackfill(sessionId, revision, afterSeq);
 	};
+	ingestSessionEventRef.current = (
+		incomingEvent: SessionEvent,
+		source: EventSource,
+	) => {
+		if (
+			isEncryptedPayload(incomingEvent.payload) &&
+			!e2ee.hasSessionDek(incomingEvent.sessionId)
+		) {
+			const buffered =
+				encryptedBufferRef.current.get(incomingEvent.sessionId) ?? [];
+			buffered.push({ event: incomingEvent, source });
+			encryptedBufferRef.current.set(incomingEvent.sessionId, buffered);
+			return;
+		}
+
+		const event = e2ee.decryptEvent(incomingEvent);
+
+		let session = sessionsRef.current[event.sessionId];
+		if (!session) {
+			createLocalSession(event.sessionId);
+			session = sessionsRef.current[event.sessionId];
+		}
+
+		const cursor = getCursor(event.sessionId);
+		const currentRevision = cursor.revision;
+
+		if (currentRevision === undefined) {
+			updateSessionCursor(event.sessionId, event.revision, 0);
+		} else if (event.revision < currentRevision) {
+			return;
+		} else if (event.revision > currentRevision) {
+			if (source === "backfill") {
+				pendingEventsRef.current.delete(event.sessionId);
+				resetSessionForRevision(event.sessionId, event.revision);
+			} else {
+				clearRevisionRuntimeState(event.sessionId);
+				resetSessionForRevision(event.sessionId, event.revision);
+				const pending = pendingEventsRef.current.get(event.sessionId) ?? [];
+				pending.push(event);
+				pendingEventsRef.current.set(event.sessionId, pending);
+				triggerBackfillRef.current?.(event.sessionId, event.revision, 0);
+				return;
+			}
+		}
+
+		const { lastAppliedSeq } = getCursor(event.sessionId);
+		if (event.seq <= lastAppliedSeq) {
+			return;
+		}
+
+		if (source === "backfill") {
+			applySessionEventRef.current?.(event);
+			updateSessionCursor(event.sessionId, event.revision, event.seq);
+			return;
+		}
+
+		if (event.seq === lastAppliedSeq + 1) {
+			applySessionEventRef.current?.(event);
+			updateSessionCursor(event.sessionId, event.revision, event.seq);
+			prunePendingEventsRef.current?.(event.sessionId);
+			flushPendingEventsRef.current?.(event.sessionId);
+			return;
+		}
+
+		const pending = pendingEventsRef.current.get(event.sessionId) ?? [];
+		if (pending.length >= MAX_PENDING_SIZE) {
+			console.warn(
+				`[socket] Pending overflow for ${event.sessionId}, forcing reset`,
+			);
+			pendingEventsRef.current.delete(event.sessionId);
+			encryptedBufferRef.current.delete(event.sessionId);
+			resetSessionForRevision(event.sessionId, event.revision);
+			triggerBackfillRef.current?.(event.sessionId, event.revision, 0);
+			return;
+		}
+
+		pending.push(event);
+		pendingEventsRef.current.set(event.sessionId, pending);
+		if (!isBackfilling(event.sessionId)) {
+			triggerBackfillRef.current?.(
+				event.sessionId,
+				event.revision,
+				lastAppliedSeq,
+			);
+		}
+	};
 
 	// Update handler refs
 	handleSessionAttachedRef.current = (payload: SessionAttachedPayload) => {
+		const currentSession = useChatStore.getState().sessions[payload.sessionId];
+		const shouldResetForRevision =
+			currentSession !== undefined &&
+			payload.revision !== undefined &&
+			currentSession.revision !== payload.revision;
+
 		recoverableSessionsRef.current.add(payload.sessionId);
 		markSessionAttached(payload);
 
+		if (shouldResetForRevision && payload.revision !== undefined) {
+			clearRevisionRuntimeState(payload.sessionId);
+			resetSessionForRevision(payload.sessionId, payload.revision);
+		}
+
 		// If revision is provided, trigger backfill (skip if still loading)
 		if (payload.revision !== undefined) {
-			const session = sessionsRef.current[payload.sessionId];
 			const isLoading =
 				useChatStore.getState().sessions[payload.sessionId]?.isLoading;
 			if (
-				session &&
 				!isLoading &&
-				!initialBackfillTriggeredRef.current.has(payload.sessionId)
+				(!initialBackfillTriggeredRef.current.has(payload.sessionId) ||
+					shouldResetForRevision)
 			) {
 				initialBackfillTriggeredRef.current.add(payload.sessionId);
-				const { lastAppliedSeq } = getCursor(payload.sessionId);
+				const afterSeq = shouldResetForRevision
+					? 0
+					: getCursor(payload.sessionId).lastAppliedSeq;
 				triggerBackfillRef.current?.(
 					payload.sessionId,
 					payload.revision,
-					lastAppliedSeq,
+					afterSeq,
 				);
 			}
 		}
@@ -576,6 +720,9 @@ export function useSocket({
 
 	handleSessionsChangedRef.current = (payload: SessionsChangedPayload) => {
 		const addedOrUpdated = [...payload.added, ...payload.updated];
+		for (const sessionId of getRevisionResetSessionIds(addedOrUpdated)) {
+			clearRevisionRuntimeState(sessionId);
+		}
 		handleSessionsChanged(payload);
 
 		// Bootstrap session DEKs and keep runtime E2EE status in sync.
@@ -600,82 +747,7 @@ export function useSocket({
 	};
 
 	handleSessionEventRef.current = (incomingEvent: SessionEvent) => {
-		// Buffer encrypted events when DEK is not yet available
-		if (
-			isEncryptedPayload(incomingEvent.payload) &&
-			!e2ee.hasSessionDek(incomingEvent.sessionId)
-		) {
-			const buf = encryptedBufferRef.current.get(incomingEvent.sessionId) ?? [];
-			buf.push(incomingEvent);
-			encryptedBufferRef.current.set(incomingEvent.sessionId, buf);
-			return;
-		}
-
-		// Decrypt event payload if encrypted
-		const event = e2ee.decryptEvent(incomingEvent);
-
-		let session = sessionsRef.current[event.sessionId];
-		if (!session) {
-			createLocalSession(event.sessionId);
-			session = sessionsRef.current[event.sessionId];
-		}
-
-		const cursor = getCursor(event.sessionId);
-		const currentRevision = cursor.revision;
-
-		// Case 1: First revision initialization
-		if (currentRevision === undefined) {
-			updateSessionCursor(event.sessionId, event.revision, 0);
-		}
-		// Case 2: Revision bump (session reload)
-		else if (event.revision > currentRevision) {
-			resetSessionForRevision(event.sessionId, event.revision);
-			pendingEventsRef.current.delete(event.sessionId);
-			// Buffer current event for after backfill
-			const pending = pendingEventsRef.current.get(event.sessionId) ?? [];
-			pending.push(event);
-			pendingEventsRef.current.set(event.sessionId, pending);
-			triggerBackfillRef.current?.(event.sessionId, event.revision, 0);
-			return;
-		}
-		// Case 3: Event from old revision - ignore
-		else if (event.revision < currentRevision) {
-			return;
-		}
-
-		// Re-read cursor after potential update
-		const updatedCursor = getCursor(event.sessionId);
-		const lastSeq = updatedCursor.lastAppliedSeq;
-
-		// Skip already applied events
-		if (event.seq <= lastSeq) {
-			return;
-		}
-
-		// Apply if next expected event
-		if (event.seq === lastSeq + 1) {
-			applySessionEventRef.current?.(event);
-			updateSessionCursor(event.sessionId, event.revision, event.seq);
-			flushPendingEventsRef.current?.(event.sessionId);
-		} else if (event.seq > lastSeq + 1) {
-			// Gap detected - buffer and trigger backfill
-			const pending = pendingEventsRef.current.get(event.sessionId) ?? [];
-
-			// Check pending overflow
-			if (pending.length >= MAX_PENDING_SIZE) {
-				console.warn(
-					`[socket] Pending overflow for ${event.sessionId}, forcing reset`,
-				);
-				pendingEventsRef.current.delete(event.sessionId);
-				resetSessionForRevision(event.sessionId, event.revision);
-				triggerBackfillRef.current?.(event.sessionId, event.revision, 0);
-				return;
-			}
-
-			pending.push(event);
-			pendingEventsRef.current.set(event.sessionId, pending);
-			triggerBackfillRef.current?.(event.sessionId, event.revision, lastSeq);
-		}
+		ingestSessionEventRef.current?.(incomingEvent, "live");
 	};
 
 	// Flush buffered encrypted events once a DEK becomes available
@@ -685,9 +757,12 @@ export function useSocket({
 			if (!buffered || buffered.length === 0) return;
 			encryptedBufferRef.current.delete(sessionId);
 
-			// Re-process each buffered event through the normal handler
-			for (const rawEvent of buffered) {
-				handleSessionEventRef.current?.(rawEvent);
+			// Re-process each buffered event through the original ingest path.
+			for (const bufferedEvent of buffered) {
+				ingestSessionEventRef.current?.(
+					bufferedEvent.event,
+					bufferedEvent.source,
+				);
 			}
 		});
 		return unsubDekReady;
@@ -897,6 +972,11 @@ export function useSocket({
 	useEffect(() => {
 		let isFirstConnect = true;
 		const handleConnect = () => {
+			if (isFirstConnect) {
+				isFirstConnect = false;
+				return;
+			}
+
 			const reconnectSessionIds = new Set([
 				...subscribedSessionsRef.current,
 				...recoverableSessionsRef.current,
@@ -929,11 +1009,7 @@ export function useSocket({
 				}
 			}
 
-			if (isFirstConnect) {
-				isFirstConnect = false;
-			} else {
-				onReconnectRef.current?.();
-			}
+			onReconnectRef.current?.();
 		};
 
 		const unsubscribe = gatewaySocket.onConnect(handleConnect);
@@ -941,6 +1017,7 @@ export function useSocket({
 	}, [clearTrackedSession]);
 
 	return {
+		syncSessionSummaries,
 		syncSessionHistory,
 		isBackfilling,
 	};

@@ -182,32 +182,35 @@ function MainApp() {
 
 	const isActivating = activationState.phase !== "idle";
 
-	const { syncSessionHistory, isBackfilling } = useSocket({
-		setSending: chatActions.setSending,
-		setCanceling: chatActions.setCanceling,
-		finalizeAssistantMessage: chatActions.finalizeAssistantMessage,
-		appendAssistantChunk: chatActions.appendAssistantChunk,
-		appendThoughtChunk: chatActions.appendThoughtChunk,
-		confirmOrAppendUserMessage: chatActions.confirmOrAppendUserMessage,
-		updateSessionMeta: chatActions.updateSessionMeta,
-		setStreamError: chatActions.setStreamError,
-		addPermissionRequest: chatActions.addPermissionRequest,
-		setPermissionDecisionState: chatActions.setPermissionDecisionState,
-		setPermissionOutcome: chatActions.setPermissionOutcome,
-		addToolCall: chatActions.addToolCall,
-		updateToolCall: chatActions.updateToolCall,
-		appendTerminalOutput: chatActions.appendTerminalOutput,
-		handleSessionsChanged: chatActions.handleSessionsChanged,
-		markSessionAttached: chatActions.markSessionAttached,
-		markSessionDetached: chatActions.markSessionDetached,
-		createLocalSession: chatActions.createLocalSession,
-		updateSessionCursor: chatActions.updateSessionCursor,
-		resetSessionForRevision: chatActions.resetSessionForRevision,
-		onReconnect: () => {
-			queryClient.invalidateQueries({ queryKey: ["sessions"] });
-			queryClient.invalidateQueries({ queryKey: ["acp-backends"] });
+	const { syncSessionSummaries, syncSessionHistory, isBackfilling } = useSocket(
+		{
+			syncSessions: chatActions.syncSessions,
+			setSending: chatActions.setSending,
+			setCanceling: chatActions.setCanceling,
+			finalizeAssistantMessage: chatActions.finalizeAssistantMessage,
+			appendAssistantChunk: chatActions.appendAssistantChunk,
+			appendThoughtChunk: chatActions.appendThoughtChunk,
+			confirmOrAppendUserMessage: chatActions.confirmOrAppendUserMessage,
+			updateSessionMeta: chatActions.updateSessionMeta,
+			setStreamError: chatActions.setStreamError,
+			addPermissionRequest: chatActions.addPermissionRequest,
+			setPermissionDecisionState: chatActions.setPermissionDecisionState,
+			setPermissionOutcome: chatActions.setPermissionOutcome,
+			addToolCall: chatActions.addToolCall,
+			updateToolCall: chatActions.updateToolCall,
+			appendTerminalOutput: chatActions.appendTerminalOutput,
+			handleSessionsChanged: chatActions.handleSessionsChanged,
+			markSessionAttached: chatActions.markSessionAttached,
+			markSessionDetached: chatActions.markSessionDetached,
+			createLocalSession: chatActions.createLocalSession,
+			updateSessionCursor: chatActions.updateSessionCursor,
+			resetSessionForRevision: chatActions.resetSessionForRevision,
+			onReconnect: () => {
+				queryClient.invalidateQueries({ queryKey: ["sessions"] });
+				queryClient.invalidateQueries({ queryKey: ["acp-backends"] });
+			},
 		},
-	});
+	);
 
 	const { machines, selectedMachineId, setSelectedMachineId } =
 		useMachinesStore(
@@ -278,7 +281,7 @@ function MainApp() {
 
 	useEffect(() => {
 		if (sessionsQuery.data?.sessions) {
-			chatActions.syncSessions(sessionsQuery.data.sessions);
+			syncSessionSummaries(sessionsQuery.data.sessions);
 
 			// Bootstrap session DEKs and keep runtime E2EE status in sync.
 			const { setSessionE2EEStatus } = useChatStore.getState();
@@ -289,7 +292,7 @@ function MainApp() {
 				);
 			}
 		}
-	}, [sessionsQuery.data?.sessions, chatActions.syncSessions]);
+	}, [sessionsQuery.data?.sessions, syncSessionSummaries]);
 
 	useEffect(() => {
 		void ensureNotificationPermission({ isAuthenticated });

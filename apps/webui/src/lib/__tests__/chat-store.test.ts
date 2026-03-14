@@ -391,6 +391,78 @@ describe("chat-store", () => {
 		});
 	});
 
+	describe("syncSessions (attached revision authority)", () => {
+		it("resets attached transcript when the summary revision changes", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1", {
+				title: "Attached Session",
+				backendId: "backend-1",
+				backendLabel: "Claude",
+				machineId: "machine-1",
+			});
+			store.markSessionAttached({
+				sessionId: "s1",
+				machineId: "machine-1",
+				attachedAt: "2024-01-01T00:00:00Z",
+				revision: 1,
+			});
+			store.addUserMessage("s1", "stale");
+			store.updateSessionCursor("s1", 1, 5);
+
+			store.syncSessions([
+				{
+					sessionId: "s1",
+					title: "Attached Session",
+					backendId: "backend-1",
+					backendLabel: "Claude",
+					createdAt: "2024-01-01T00:00:00Z",
+					updatedAt: "2024-01-01T00:00:00Z",
+					machineId: "machine-1",
+					revision: 3,
+					isAttached: true,
+				},
+			]);
+
+			const session = useChatStore.getState().sessions.s1;
+			expect(session.revision).toBe(3);
+			expect(session.lastAppliedSeq).toBe(0);
+			expect(session.messages).toEqual([]);
+			expect(session.isAttached).toBe(true);
+		});
+
+		it("preserves detached local history when only the summary revision changes", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1", {
+				title: "Detached Session",
+				backendId: "backend-1",
+				backendLabel: "Claude",
+				machineId: "machine-1",
+			});
+			store.addUserMessage("s1", "keep me");
+			store.updateSessionCursor("s1", 1, 2);
+
+			store.syncSessions([
+				{
+					sessionId: "s1",
+					title: "Detached Session",
+					backendId: "backend-1",
+					backendLabel: "Claude",
+					createdAt: "2024-01-01T00:00:00Z",
+					updatedAt: "2024-01-01T00:00:00Z",
+					machineId: "machine-1",
+					revision: 4,
+					isAttached: false,
+				},
+			]);
+
+			const session = useChatStore.getState().sessions.s1;
+			expect(session.revision).toBe(1);
+			expect(session.lastAppliedSeq).toBe(2);
+			expect(session.messages).toHaveLength(1);
+			expect(session.isAttached).toBe(false);
+		});
+	});
+
 	// ---------------------------------------------------------------------------
 	// clearSessionMessages + restoreSessionMessages roundtrip
 	// ---------------------------------------------------------------------------
