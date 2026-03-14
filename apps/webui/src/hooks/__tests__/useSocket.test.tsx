@@ -82,6 +82,7 @@ const mockGatewaySocket = vi.hoisted(() => ({
 	connect: vi.fn(),
 	disconnect: vi.fn(),
 	destroy: vi.fn(),
+	isConnected: vi.fn(() => true),
 	subscribeToSession: vi.fn(),
 	unsubscribeFromSession: vi.fn(),
 	getSubscribedSessions: vi.fn(() => []),
@@ -443,6 +444,8 @@ describe("useSocket (webui)", () => {
 		}
 		mockGatewaySocket.connect.mockReset();
 		mockGatewaySocket.disconnect.mockReset();
+		mockGatewaySocket.isConnected.mockReset();
+		mockGatewaySocket.isConnected.mockReturnValue(true);
 		mockGatewaySocket.subscribeToSession.mockReset();
 		mockGatewaySocket.unsubscribeFromSession.mockReset();
 		mockBackfill.startBackfill.mockReset();
@@ -2477,6 +2480,59 @@ describe("useSocket (webui)", () => {
 	// onReconnect callback
 	// =========================================================================
 	describe("onReconnect callback", () => {
+		it("backfills pre-subscribed sessions on first connect without treating it as a reconnect", async () => {
+			const store = createStore();
+			mockGatewaySocket.isConnected.mockReturnValue(false);
+			setMockSessions({
+				"session-1": buildSession({
+					sessionId: "session-1",
+					isAttached: true,
+					revision: 1,
+					lastAppliedSeq: 0,
+				}),
+			});
+
+			renderHook(() =>
+				useSocket({
+					sessions: {},
+					appendAssistantChunk: store.appendAssistantChunk,
+					appendThoughtChunk: store.appendThoughtChunk,
+					confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+					updateSessionMeta: store.updateSessionMeta,
+					setStreamError: store.setStreamError,
+					addPermissionRequest: store.addPermissionRequest,
+					setPermissionDecisionState: store.setPermissionDecisionState,
+					setPermissionOutcome: store.setPermissionOutcome,
+					addToolCall: store.addToolCall,
+					updateToolCall: store.updateToolCall,
+					appendTerminalOutput: store.appendTerminalOutput,
+					handleSessionsChanged: store.handleSessionsChanged,
+					markSessionAttached: store.markSessionAttached,
+					markSessionDetached: store.markSessionDetached,
+					createLocalSession: store.createLocalSession,
+					updateSessionCursor: store.updateSessionCursor,
+					resetSessionForRevision: store.resetSessionForRevision,
+					onReconnect: vi.fn(),
+				}),
+			);
+
+			expect(mockGatewaySocket.subscribeToSession).toHaveBeenCalledWith(
+				"session-1",
+			);
+			expect(mockBackfill.startBackfill).not.toHaveBeenCalled();
+
+			mockGatewaySocket.isConnected.mockReturnValue(true);
+			await act(async () => {
+				handlers.connect?.();
+			});
+
+			expect(mockBackfill.startBackfill).toHaveBeenCalledWith(
+				"session-1",
+				1,
+				0,
+			);
+		});
+
 		it("does NOT call onReconnect on first connect", async () => {
 			const store = createStore();
 			const onReconnect = vi.fn();

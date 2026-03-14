@@ -1,5 +1,5 @@
 import type { SessionEvent, SessionEventsResponse } from "@mobvibe/shared";
-import { useCallback, useRef } from "react";
+import { useCallback, useReducer, useRef } from "react";
 import { isInTauri } from "@/lib/auth";
 import { getAuthToken } from "@/lib/auth-token";
 import { platformFetch } from "@/lib/tauri-fetch";
@@ -42,6 +42,30 @@ export function useSessionBackfill({
 	pageSize = 100,
 }: BackfillOptions) {
 	const activeBackfills = useRef<Map<string, BackfillState>>(new Map());
+	const [, bumpActiveVersion] = useReducer((count: number) => count + 1, 0);
+
+	const trackActiveBackfill = useCallback(
+		(sessionId: string, state: BackfillState) => {
+			activeBackfills.current.set(sessionId, state);
+			bumpActiveVersion();
+		},
+		[],
+	);
+
+	const untrackActiveBackfill = useCallback(
+		(sessionId: string, state?: BackfillState) => {
+			const current = activeBackfills.current.get(sessionId);
+			if (!current) {
+				return;
+			}
+			if (state && current !== state) {
+				return;
+			}
+			activeBackfills.current.delete(sessionId);
+			bumpActiveVersion();
+		},
+		[],
+	);
 
 	/**
 	 * Fetch events from the gateway REST API.
@@ -101,7 +125,7 @@ export function useSessionBackfill({
 			const existing = activeBackfills.current.get(sessionId);
 			if (existing) {
 				existing.abortController.abort();
-				activeBackfills.current.delete(sessionId);
+				untrackActiveBackfill(sessionId, existing);
 			}
 
 			const abortController = new AbortController();
@@ -111,7 +135,7 @@ export function useSessionBackfill({
 				afterSeq,
 				abortController,
 			};
-			activeBackfills.current.set(sessionId, state);
+			trackActiveBackfill(sessionId, state);
 
 			let currentAfterSeq = afterSeq;
 			let totalEvents = 0;
@@ -137,7 +161,7 @@ export function useSessionBackfill({
 
 					// Check if revision changed (session was reloaded)
 					if (response.revision !== revision) {
-						activeBackfills.current.delete(sessionId);
+						untrackActiveBackfill(sessionId, state);
 						onRevisionMismatch?.(sessionId, response.revision);
 						return;
 					}
@@ -166,24 +190,33 @@ export function useSessionBackfill({
 					error instanceof Error ? error : new Error(String(error)),
 				);
 			} finally {
-				if (activeBackfills.current.get(sessionId) === state) {
-					activeBackfills.current.delete(sessionId);
-				}
+				untrackActiveBackfill(sessionId, state);
 			}
 		},
-		[fetchEvents, onEvents, onComplete, onError, onRevisionMismatch],
+		[
+			fetchEvents,
+			onEvents,
+			onComplete,
+			onError,
+			onRevisionMismatch,
+			trackActiveBackfill,
+			untrackActiveBackfill,
+		],
 	);
 
 	/**
 	 * Cancel backfill for a session.
 	 */
-	const cancelBackfill = useCallback((sessionId: string): void => {
-		const state = activeBackfills.current.get(sessionId);
-		if (state) {
-			state.abortController.abort();
-			activeBackfills.current.delete(sessionId);
-		}
-	}, []);
+	const cancelBackfill = useCallback(
+		(sessionId: string): void => {
+			const state = activeBackfills.current.get(sessionId);
+			if (state) {
+				state.abortController.abort();
+				untrackActiveBackfill(sessionId, state);
+			}
+		},
+		[untrackActiveBackfill],
+	);
 
 	/**
 	 * Check if backfill is active for a session.
@@ -200,6 +233,7 @@ export function useSessionBackfill({
 			state.abortController.abort();
 		}
 		activeBackfills.current.clear();
+		bumpActiveVersion();
 	}, []);
 
 	return {

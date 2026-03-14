@@ -210,6 +210,7 @@ const mockGatewaySocket = vi.hoisted(() => ({
 	connect: vi.fn(),
 	disconnect: vi.fn(),
 	destroy: vi.fn(),
+	isConnected: vi.fn(() => true),
 	subscribeToSession: vi.fn((sessionId: string) => {
 		subscribedSessions.add(sessionId);
 	}),
@@ -373,6 +374,8 @@ describe("App session restore integration", () => {
 		mockGatewaySocket.connect.mockReset();
 		mockGatewaySocket.disconnect.mockReset();
 		mockGatewaySocket.destroy.mockReset();
+		mockGatewaySocket.isConnected.mockReset();
+		mockGatewaySocket.isConnected.mockReturnValue(true);
 		mockGatewaySocket.subscribeToSession.mockClear();
 		mockGatewaySocket.unsubscribeFromSession.mockClear();
 		mockE2EE.hasSessionDek.mockReset();
