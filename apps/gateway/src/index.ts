@@ -8,6 +8,7 @@ import { toNodeHandler } from "better-auth/node";
 import cors from "cors";
 import express, { type Express } from "express";
 import { Server } from "socket.io";
+import type { WebSocket } from "ws";
 import { getGatewayConfig, tauriOrigins } from "./config.js";
 import { closeDb } from "./db/index.js";
 import { auth } from "./lib/auth.js";
@@ -26,6 +27,7 @@ import { closeRedis, initRedis } from "./services/redis.js";
 import { SessionRouter } from "./services/session-router.js";
 import { UserAffinityManager } from "./services/user-affinity.js";
 import { setupCliHandlers } from "./socket/cli-handlers.js";
+import { createCliWsServer } from "./socket/cli-ws-server.js";
 import { setupWebuiHandlers } from "./socket/webui-handlers.js";
 
 const config = getGatewayConfig();
@@ -146,6 +148,18 @@ httpServer.removeAllListeners("upgrade");
 httpServer.on(
 	"upgrade",
 	async (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+		if (req.url?.startsWith("/cli-ws")) {
+			cliWsServer.handleUpgrade(
+				req,
+				socket,
+				head,
+				(webSocket: WebSocket, upgradedRequest: IncomingMessage) => {
+					cliWsServer.emit("connection", webSocket, upgradedRequest);
+				},
+			);
+			return;
+		}
+
 		if (!req.url?.startsWith("/socket.io")) {
 			socket.destroy();
 			return;
@@ -268,6 +282,56 @@ setupCliHandlers(
 	config,
 	notificationService,
 );
+
+const cliWsServer = createCliWsServer({
+	config,
+	cliRegistry,
+	emitToWebui: (event, payload, userId) => {
+		switch (event) {
+			case "session:attached":
+				if (userId) {
+					webuiEmitter.emitToUser(userId, "session:attached", payload);
+				}
+				return;
+			case "session:detached":
+				if (userId) {
+					webuiEmitter.emitToUser(userId, "session:detached", payload);
+				}
+				return;
+			case "sessions:changed":
+				if (userId) {
+					webuiEmitter.emitToUser(userId, "sessions:changed", payload);
+				}
+				return;
+			case "permission:request":
+				webuiEmitter.emitPermissionRequest(
+					payload as Parameters<typeof webuiEmitter.emitPermissionRequest>[0],
+				);
+				return;
+			case "permission:result":
+				webuiEmitter.emitPermissionResult(
+					payload as Parameters<typeof webuiEmitter.emitPermissionResult>[0],
+				);
+				return;
+			case "session:event":
+				webuiEmitter.emitSessionEvent(
+					payload as Parameters<typeof webuiEmitter.emitSessionEvent>[0],
+				);
+				return;
+			default:
+				logger.warn({ event }, "emitToWebui_unknown_event");
+		}
+	},
+	hasOtherUserConnections: (userId) =>
+		Array.from(io.of("/webui").sockets.values()).some(
+			(socket) =>
+				(socket as unknown as { data: { userId?: string } }).data.userId ===
+				userId,
+		),
+	notificationService,
+	sessionRouter,
+	userAffinity,
+});
 
 app.use((request, response, next) => {
 	const start = process.hrtime.bigint();

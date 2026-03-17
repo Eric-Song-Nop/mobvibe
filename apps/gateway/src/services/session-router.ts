@@ -54,9 +54,9 @@ import type {
 	SetSessionModeParams,
 	StopReason,
 } from "@mobvibe/shared";
-import type { Socket } from "socket.io";
 import { logger } from "../lib/logger.js";
 import type { CliRecord, CliRegistry } from "./cli-registry.js";
+import type { CliTransport } from "./cli-transport.js";
 
 type PendingRpc<T> = {
 	requestId: string;
@@ -159,7 +159,7 @@ export class SessionRouter {
 			worktree: params.worktree,
 		};
 		const result = await this.sendRpc<CreateSessionParams, SessionSummary>(
-			cli.socket,
+			cli.transport,
 			"rpc:session:create",
 			rpcParams,
 		);
@@ -189,7 +189,7 @@ export class SessionRouter {
 
 		const cli = this.resolveCliForSession(params.sessionId, userId);
 		const result = await this.sendRpc<ArchiveSessionParams, { ok: boolean }>(
-			cli.socket,
+			cli.transport,
 			"rpc:session:archive",
 			{
 				sessionId: params.sessionId,
@@ -197,7 +197,7 @@ export class SessionRouter {
 		);
 
 		// Immediately remove from registry so the webui sees it gone
-		this.cliRegistry.updateSessionsIncremental(cli.socket.id, {
+		this.cliRegistry.updateSessionsIncremental(cli.transport.id, {
 			added: [],
 			updated: [],
 			removed: [params.sessionId],
@@ -258,10 +258,10 @@ export class SessionRouter {
 				const result = await this.sendRpc<
 					BulkArchiveSessionsParams,
 					{ archivedCount: number }
-				>(cli.socket, "rpc:session:archive-all", { sessionIds: ids });
+				>(cli.transport, "rpc:session:archive-all", { sessionIds: ids });
 
 				// Immediately remove from registry so the webui sees them gone
-				this.cliRegistry.updateSessionsIncremental(cli.socket.id, {
+				this.cliRegistry.updateSessionsIncremental(cli.transport.id, {
 					added: [],
 					updated: [],
 					removed: ids,
@@ -303,7 +303,7 @@ export class SessionRouter {
 		);
 
 		const result = await this.sendRpc<RenameSessionParams, SessionSummary>(
-			cli.socket,
+			cli.transport,
 			"rpc:session:rename",
 			params,
 		);
@@ -333,7 +333,7 @@ export class SessionRouter {
 		);
 
 		const result = await this.sendRpc<CancelSessionParams, { ok: boolean }>(
-			cli.socket,
+			cli.transport,
 			"rpc:session:cancel",
 			params,
 		);
@@ -363,7 +363,7 @@ export class SessionRouter {
 		);
 
 		const result = await this.sendRpc<SetSessionModeParams, SessionSummary>(
-			cli.socket,
+			cli.transport,
 			"rpc:session:mode",
 			params,
 		);
@@ -393,7 +393,7 @@ export class SessionRouter {
 		);
 
 		const result = await this.sendRpc<SetSessionModelParams, SessionSummary>(
-			cli.socket,
+			cli.transport,
 			"rpc:session:model",
 			params,
 		);
@@ -427,7 +427,7 @@ export class SessionRouter {
 		);
 
 		return this.sendRpc<SendMessageParams, { stopReason: StopReason }>(
-			cli.socket,
+			cli.transport,
 			"rpc:message:send",
 			params,
 		);
@@ -452,7 +452,7 @@ export class SessionRouter {
 		const result = await this.sendRpc<
 			PermissionDecisionPayload,
 			{ ok: boolean }
-		>(cli.socket, "rpc:permission:decision", params);
+		>(cli.transport, "rpc:permission:decision", params);
 
 		logger.info(
 			{ sessionId: params.sessionId, requestId: params.requestId, userId },
@@ -476,7 +476,7 @@ export class SessionRouter {
 		logger.debug({ sessionId, userId }, "fs_roots_rpc_start");
 
 		const result = await this.sendRpc<{ sessionId: string }, FsRootsResponse>(
-			cli.socket,
+			cli.transport,
 			"rpc:fs:roots",
 			{ sessionId },
 		);
@@ -502,7 +502,7 @@ export class SessionRouter {
 		);
 
 		const result = await this.sendRpc<FsEntriesParams, FsEntriesResponse>(
-			cli.socket,
+			cli.transport,
 			"rpc:fs:entries",
 			params,
 		);
@@ -529,7 +529,7 @@ export class SessionRouter {
 		logger.debug({ sessionId: params.sessionId, userId }, "fs_file_rpc_start");
 
 		const result = await this.sendRpc<FsFileParams, SessionFsFilePreview>(
-			cli.socket,
+			cli.transport,
 			"rpc:fs:file",
 			params,
 		);
@@ -559,7 +559,7 @@ export class SessionRouter {
 		);
 
 		const result = await this.sendRpc<FsResourcesParams, FsResourcesResponse>(
-			cli.socket,
+			cli.transport,
 			"rpc:fs:resources",
 			params,
 		);
@@ -587,7 +587,7 @@ export class SessionRouter {
 		);
 
 		const result = await this.sendRpc<HostFsRootsParams, HostFsRootsResponse>(
-			cli.socket,
+			cli.transport,
 			"rpc:hostfs:roots",
 			params,
 		);
@@ -614,7 +614,7 @@ export class SessionRouter {
 		);
 
 		const result = await this.sendRpc<HostFsEntriesParams, FsEntriesResponse>(
-			cli.socket,
+			cli.transport,
 			"rpc:hostfs:entries",
 			params,
 		);
@@ -661,7 +661,7 @@ export class SessionRouter {
 		const result = await this.sendRpc<
 			DiscoverSessionsRpcParams,
 			DiscoverSessionsRpcResult
-		>(cli.socket, "rpc:sessions:discover", params);
+		>(cli.transport, "rpc:sessions:discover", params);
 
 		logger.info(
 			{
@@ -716,7 +716,7 @@ export class SessionRouter {
 			backendId: params.backendId,
 		};
 		const result = await this.sendRpc<LoadSessionRpcParams, SessionSummary>(
-			cli.socket,
+			cli.transport,
 			"rpc:session:load",
 			rpcParams,
 		);
@@ -770,7 +770,7 @@ export class SessionRouter {
 			backendId: params.backendId,
 		};
 		const result = await this.sendRpc<ReloadSessionRpcParams, SessionSummary>(
-			cli.socket,
+			cli.transport,
 			"rpc:session:reload",
 			rpcParams,
 		);
@@ -797,7 +797,7 @@ export class SessionRouter {
 		logger.debug({ sessionId, userId }, "git_status_rpc_start");
 
 		const result = await this.sendRpc<GitStatusParams, GitStatusResponse>(
-			cli.socket,
+			cli.transport,
 			"rpc:git:status",
 			{ sessionId },
 		);
@@ -823,7 +823,7 @@ export class SessionRouter {
 		);
 
 		const result = await this.sendRpc<GitFileDiffParams, GitFileDiffResponse>(
-			cli.socket,
+			cli.transport,
 			"rpc:git:fileDiff",
 			params,
 		);
@@ -845,7 +845,7 @@ export class SessionRouter {
 		const cli = this.resolveCliForSession(params.sessionId, userId);
 		logger.debug({ sessionId: params.sessionId, userId }, "git_log_rpc_start");
 		const result = await this.sendRpc<GitLogParams, GitLogResponse>(
-			cli.socket,
+			cli.transport,
 			"rpc:git:log",
 			params,
 		);
@@ -869,7 +869,7 @@ export class SessionRouter {
 			"git_show_rpc_start",
 		);
 		const result = await this.sendRpc<GitShowParams, GitShowResponse>(
-			cli.socket,
+			cli.transport,
 			"rpc:git:show",
 			params,
 		);
@@ -893,7 +893,7 @@ export class SessionRouter {
 			"git_blame_rpc_start",
 		);
 		const result = await this.sendRpc<GitBlameParams, GitBlameResponse>(
-			cli.socket,
+			cli.transport,
 			"rpc:git:blame",
 			params,
 		);
@@ -917,7 +917,7 @@ export class SessionRouter {
 			"git_branches_rpc_start",
 		);
 		const result = await this.sendRpc<GitBranchesParams, GitBranchesResponse>(
-			cli.socket,
+			cli.transport,
 			"rpc:git:branches",
 			params,
 		);
@@ -943,7 +943,7 @@ export class SessionRouter {
 		const result = await this.sendRpc<
 			GitBranchesForCwdParams,
 			GitBranchesForCwdResponse
-		>(cli.socket, "rpc:git:branchesForCwd", { cwd: params.cwd });
+		>(cli.transport, "rpc:git:branchesForCwd", { cwd: params.cwd });
 		logger.debug(
 			{ cwd: params.cwd, userId },
 			"git_branches_for_cwd_rpc_complete",
@@ -964,7 +964,7 @@ export class SessionRouter {
 			"git_stash_list_rpc_start",
 		);
 		const result = await this.sendRpc<GitStashListParams, GitStashListResponse>(
-			cli.socket,
+			cli.transport,
 			"rpc:git:stashList",
 			params,
 		);
@@ -990,7 +990,7 @@ export class SessionRouter {
 		const result = await this.sendRpc<
 			GitStatusExtendedParams,
 			GitStatusExtendedResponse
-		>(cli.socket, "rpc:git:statusExtended", params);
+		>(cli.transport, "rpc:git:statusExtended", params);
 		logger.debug(
 			{ sessionId: params.sessionId, userId },
 			"git_status_extended_rpc_complete",
@@ -1011,7 +1011,7 @@ export class SessionRouter {
 			"git_search_log_rpc_start",
 		);
 		const result = await this.sendRpc<GitSearchLogParams, GitSearchLogResponse>(
-			cli.socket,
+			cli.transport,
 			"rpc:git:searchLog",
 			params,
 		);
@@ -1037,7 +1037,7 @@ export class SessionRouter {
 		const result = await this.sendRpc<
 			GitFileHistoryParams,
 			GitFileHistoryResponse
-		>(cli.socket, "rpc:git:fileHistory", params);
+		>(cli.transport, "rpc:git:fileHistory", params);
 		logger.debug(
 			{ sessionId: params.sessionId, path: params.path, userId },
 			"git_file_history_rpc_complete",
@@ -1058,7 +1058,7 @@ export class SessionRouter {
 			"git_grep_rpc_start",
 		);
 		const result = await this.sendRpc<GitGrepParams, GitGrepResponse>(
-			cli.socket,
+			cli.transport,
 			"rpc:git:grep",
 			params,
 		);
@@ -1093,7 +1093,7 @@ export class SessionRouter {
 		const result = await this.sendRpc<
 			SessionEventsParams,
 			SessionEventsResponse
-		>(cli.socket, "rpc:session:events", params);
+		>(cli.transport, "rpc:session:events", params);
 
 		logger.debug(
 			{
@@ -1109,7 +1109,7 @@ export class SessionRouter {
 	}
 
 	private sendRpc<TParams, TResult>(
-		socket: Socket,
+		transport: CliTransport,
 		event: string,
 		params: TParams,
 	): Promise<TResult> {
@@ -1151,7 +1151,7 @@ export class SessionRouter {
 
 			const request: RpcRequest<TParams> = { requestId, params };
 			logger.debug({ requestId, event }, "rpc_request_sent");
-			socket.emit(event, request);
+			transport.send(event as never, request as never);
 		});
 	}
 }

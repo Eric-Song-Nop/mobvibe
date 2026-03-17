@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { Readable, Writable } from "node:stream";
 import {
 	type AgentCapabilities,
 	type Client,
@@ -38,10 +37,6 @@ import {
 	type TerminalOutputEvent,
 } from "@mobvibe/shared";
 import type { AcpBackendConfig } from "../config.js";
-import {
-	type ChildProcessWithoutNullStreams,
-	spawn,
-} from "../lib/child-process.js";
 import { logger } from "../lib/logger.js";
 import { buildShellCommand, resolveShell } from "../lib/shell.js";
 
@@ -83,7 +78,7 @@ type TerminalRecord = {
 	args: string[];
 	outputByteLimit: number;
 	output: TerminalOutputSnapshot;
-	process?: ChildProcessWithoutNullStreams;
+	process?: Bun.Subprocess<"pipe", "pipe", "pipe">;
 	onExit?: Promise<WaitForTerminalExitResponse>;
 	resolveExit?: (response: WaitForTerminalExitResponse) => void;
 };
@@ -221,9 +216,44 @@ const sliceOutputToLimit = (value: string, limit: number) => {
 	return sliced.subarray(start).toString("utf8");
 };
 
+const createProcessInputStream = (
+	process: Bun.Subprocess<"pipe", "pipe", "pipe">,
+) =>
+	new WritableStream<Uint8Array>({
+		write(chunk) {
+			process.stdin.write(chunk);
+		},
+		close() {
+			process.stdin.end();
+		},
+		abort() {
+			process.kill();
+		},
+	});
+
+const pumpProcessStream = (
+	stream: ReadableStream<Uint8Array<ArrayBuffer>> | number | undefined,
+	onChunk: (chunk: Buffer) => void,
+) => {
+	if (!stream || typeof stream === "number") {
+		return;
+	}
+
+	const reader = stream.getReader();
+	void (async () => {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) {
+				break;
+			}
+			onChunk(Buffer.from(value));
+		}
+	})();
+};
+
 export class AcpConnection {
 	private connection?: ClientSideConnection;
-	private process?: ChildProcessWithoutNullStreams;
+	private process?: Bun.Subprocess<"pipe", "pipe", "pipe">;
 	private closedPromise?: Promise<void>;
 	private state: AcpConnectionState = "idle";
 	private connectedAt?: Date;
@@ -381,17 +411,16 @@ export class AcpConnection {
 			const env = this.options.backend.envOverrides
 				? { ...process.env, ...this.options.backend.envOverrides }
 				: process.env;
-			const child = spawn(
-				this.options.backend.command,
-				this.options.backend.args,
+			const child = Bun.spawn(
+				[this.options.backend.command, ...this.options.backend.args],
 				{
-					stdio: ["pipe", "pipe", "pipe"],
 					env,
+					stdio: ["pipe", "pipe", "pipe"],
 				},
 			);
 			this.process = child;
 			this.sessionId = undefined;
-			child.stderr.on("data", (chunk: Buffer) => {
+			pumpProcessStream(child.stderr, (chunk) => {
 				const text = chunk.toString("utf8").trimEnd();
 				if (text) {
 					logger.debug(
@@ -401,11 +430,10 @@ export class AcpConnection {
 				}
 			});
 
-			const input = Writable.toWeb(child.stdin) as WritableStream<Uint8Array>;
-			const output = Readable.toWeb(
+			const stream = ndJsonStream(
+				createProcessInputStream(child),
 				child.stdout,
-			) as unknown as ReadableStream<Uint8Array>;
-			const stream = ndJsonStream(input, output);
+			);
 			const connection = new ClientSideConnection(
 				() =>
 					buildClient({
@@ -422,21 +450,13 @@ export class AcpConnection {
 				stream,
 			);
 			this.connection = connection;
-
-			child.once("error", (error) => {
-				if (this.state === "stopped") {
-					return;
-				}
-				this.updateStatus("error", buildConnectError(error));
-			});
-
-			child.once("exit", (code, signal) => {
+			void child.exited.then((code) => {
 				if (this.state === "stopped") {
 					return;
 				}
 				this.updateStatus(
 					"error",
-					buildProcessExitError(formatExitMessage(code, signal)),
+					buildProcessExitError(formatExitMessage(code, child.signalCode)),
 				);
 			});
 
@@ -529,24 +549,10 @@ export class AcpConnection {
 
 		const shell = resolveShell();
 		const fullCommand = buildShellCommand(params.command, params.args ?? []);
-		const child = spawn(shell, ["-c", fullCommand], {
+		const child = Bun.spawn([shell, "-c", fullCommand], {
 			cwd: params.cwd ?? undefined,
 			env: resolvedEnv ? { ...process.env, ...resolvedEnv } : process.env,
-		});
-		child.once("error", (error) => {
-			record.output.exitStatus = {
-				exitCode: null,
-				signal: null,
-			};
-			record.resolveExit?.({ exitCode: null, signal: null });
-			this.terminalOutputEmitter.emit("output", {
-				sessionId: record.sessionId,
-				terminalId,
-				delta: `\n[terminal error] ${String(error)}`,
-				truncated: record.output.truncated,
-				output: record.output.output,
-				exitStatus: record.output.exitStatus,
-			} satisfies TerminalOutputEvent);
+			stdio: ["pipe", "pipe", "pipe"],
 		});
 		record.process = child;
 		let resolveExit: (response: WaitForTerminalExitResponse) => void = () => {};
@@ -580,16 +586,16 @@ export class AcpConnection {
 			} satisfies TerminalOutputEvent);
 		};
 
-		child.stdout?.on("data", handleChunk);
-		child.stderr?.on("data", handleChunk);
-		child.on("exit", (code, signal) => {
+		pumpProcessStream(child.stdout, handleChunk);
+		pumpProcessStream(child.stderr, handleChunk);
+		void child.exited.then((code) => {
 			record.output.exitStatus = {
 				exitCode: code ?? null,
-				signal: signal ?? null,
+				signal: child.signalCode ?? null,
 			};
 			record.resolveExit?.({
 				exitCode: code ?? null,
-				signal: signal ?? null,
+				signal: child.signalCode ?? null,
 			});
 			this.terminalOutputEmitter.emit("output", {
 				sessionId: record.sessionId,

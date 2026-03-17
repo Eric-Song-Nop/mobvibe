@@ -2,26 +2,6 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { SessionEvent } from "@mobvibe/shared";
 import type { CliConfig } from "../../config.js";
 
-const socketHandlers = new Map<string, (...args: Array<unknown>) => void>();
-
-const socketMock = {
-	on: mock((event: string, handler: (...args: Array<unknown>) => void) => {
-		socketHandlers.set(event, handler);
-	}),
-	emit: mock(() => {}),
-	connect: mock(() => {}),
-	disconnect: mock(() => {}),
-	io: {
-		opts: {
-			extraHeaders: {},
-		},
-	},
-};
-
-mock.module("socket.io-client", () => ({
-	io: mock((_url: string, _options: unknown) => socketMock),
-}));
-
 mock.module("../../lib/logger.js", () => ({
 	logger: {
 		info: mock(() => {}),
@@ -86,8 +66,19 @@ const createSessionEvent = (
 	...overrides,
 });
 
+type GatewayConnectionHarness = {
+	emit: (event: string, payload?: unknown) => boolean;
+	socket?: {
+		close: ReturnType<typeof mock>;
+		readyState: number;
+		send: ReturnType<typeof mock>;
+	};
+};
+
 describe("SocketClient restore semantics", () => {
 	let client: InstanceType<typeof SocketClient>;
+	let gatewayConnection: GatewayConnectionHarness;
+	let sentMessages: Array<{ payload: unknown; type: string }>;
 	let sessionEventListener: ((event: SessionEvent) => void) | undefined;
 	let promptConnection: {
 		prompt: ReturnType<typeof mock>;
@@ -117,12 +108,7 @@ describe("SocketClient restore semantics", () => {
 	};
 
 	beforeEach(() => {
-		socketHandlers.clear();
-		socketMock.on.mockClear();
-		socketMock.emit.mockClear();
-		socketMock.connect.mockClear();
-		socketMock.disconnect.mockClear();
-		socketMock.io.opts.extraHeaders = {};
+		sentMessages = [];
 		sessionEventListener = undefined;
 		promptConnection = {
 			prompt: mock(() => Promise.resolve({ stopReason: "end_turn" })),
@@ -172,6 +158,20 @@ describe("SocketClient restore semantics", () => {
 			sessionManager: sessionManager as never,
 			cryptoService: cryptoService as never,
 		});
+
+		const clientHarness = client as unknown as {
+			socket: GatewayConnectionHarness;
+		};
+		gatewayConnection = clientHarness.socket;
+		gatewayConnection.socket = {
+			close: mock(() => {}),
+			readyState: WebSocket.OPEN,
+			send: mock((raw: string) => {
+				sentMessages.push(
+					JSON.parse(raw) as { payload: unknown; type: string },
+				);
+			}),
+		};
 	});
 
 	afterEach(() => {
@@ -181,9 +181,7 @@ describe("SocketClient restore semantics", () => {
 	test("replays unacked events after reconnect using the active revision", async () => {
 		(client as unknown as { reconnectAttempts: number }).reconnectAttempts = 1;
 
-		await (
-			socketHandlers.get("connect") as (() => Promise<void>) | undefined
-		)?.();
+		await gatewayConnection.emit("connect", undefined);
 
 		expect(sessionManager.getSessionRevision).toHaveBeenCalledWith("session-1");
 		expect(sessionManager.getUnackedEvents).toHaveBeenCalledWith(
@@ -197,12 +195,14 @@ describe("SocketClient restore semantics", () => {
 				seq: 4,
 			}),
 		);
-		expect(socketMock.emit).toHaveBeenCalledWith(
-			"session:event",
+		expect(sentMessages).toContainEqual(
 			expect.objectContaining({
-				sessionId: "session-1",
-				revision: 2,
-				payload: { encrypted: true, originalSeq: 4 },
+				type: "session:event",
+				payload: expect.objectContaining({
+					sessionId: "session-1",
+					revision: 2,
+					payload: { encrypted: true, originalSeq: 4 },
+				}),
 			}),
 		);
 	});
@@ -210,24 +210,16 @@ describe("SocketClient restore semantics", () => {
 	test("does not replay events on the first successful connect", async () => {
 		(client as unknown as { reconnectAttempts: number }).reconnectAttempts = 0;
 
-		await (
-			socketHandlers.get("connect") as (() => Promise<void>) | undefined
-		)?.();
+		await gatewayConnection.emit("connect", undefined);
 
 		expect(sessionManager.getUnackedEvents).not.toHaveBeenCalled();
-		expect(socketMock.emit).not.toHaveBeenCalledWith(
-			"session:event",
-			expect.anything(),
-		);
+		expect(
+			sentMessages.find((message) => message.type === "session:event"),
+		).toBe(undefined);
 	});
 
 	test("acks replayed events through the session manager", () => {
-		const ackHandler = socketHandlers.get("events:ack");
-		if (!ackHandler) {
-			throw new Error("events:ack handler not registered");
-		}
-
-		ackHandler({
+		gatewayConnection.emit("events:ack", {
 			sessionId: "session-1",
 			revision: 2,
 			upToSeq: 4,
@@ -246,9 +238,7 @@ describe("SocketClient restore semantics", () => {
 		);
 
 		(client as unknown as { reconnectAttempts: number }).reconnectAttempts = 1;
-		await (
-			socketHandlers.get("connect") as (() => Promise<void>) | undefined
-		)?.();
+		await gatewayConnection.emit("connect", undefined);
 
 		expect(sessionManager.getUnackedEvents).toHaveBeenCalledTimes(1);
 		expect(sessionManager.getUnackedEvents).toHaveBeenCalledWith(
@@ -259,12 +249,8 @@ describe("SocketClient restore semantics", () => {
 
 	test("forwards plaintext prompts through rpc:message:send", async () => {
 		const prompt = [{ type: "text", text: "plain prompt" }] as const;
-		const handler = socketHandlers.get("rpc:message:send");
-		if (!handler) {
-			throw new Error("rpc:message:send handler not registered");
-		}
 
-		await handler({
+		await gatewayConnection.emit("rpc:message:send", {
 			requestId: "req-1",
 			params: {
 				sessionId: "session-1",
@@ -282,13 +268,16 @@ describe("SocketClient restore semantics", () => {
 			"session-1",
 			"end_turn",
 		);
-		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
-			requestId: "req-1",
-			result: { stopReason: "end_turn" },
+		expect(sentMessages).toContainEqual({
+			type: "rpc:response",
+			payload: {
+				requestId: "req-1",
+				result: { stopReason: "end_turn" },
+			},
 		});
 	});
 
-	test("emits plaintext session events when crypto service is pass-through", async () => {
+	test("emits plaintext session events when crypto service is pass-through", () => {
 		const event = createSessionEvent({
 			payload: { text: "plain event" },
 		});
@@ -303,6 +292,9 @@ describe("SocketClient restore semantics", () => {
 		sessionEventListener(event);
 
 		expect(cryptoService.encryptEvent).toHaveBeenCalledWith(event);
-		expect(socketMock.emit).toHaveBeenCalledWith("session:event", event);
+		expect(sentMessages).toContainEqual({
+			type: "session:event",
+			payload: event,
+		});
 	});
 });
