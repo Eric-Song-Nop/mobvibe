@@ -37,6 +37,24 @@ export {
 	legalDocumentsById,
 } from "./legal/index.js";
 export type {
+	PromptImageMimeType,
+	PromptImageValidationFailure,
+	PromptImageValidationResult,
+	PromptImageValidationSuccess,
+} from "./prompt-images.js";
+export {
+	estimateBase64DecodedBytes,
+	getPromptImageBlocks,
+	isPromptImageMimeType,
+	PROMPT_IMAGE_MAX_BYTES,
+	PROMPT_IMAGE_MAX_COUNT,
+	PROMPT_IMAGE_MAX_EDGE,
+	PROMPT_IMAGE_MAX_TOTAL_BYTES,
+	PROMPT_IMAGE_MIME_TYPES,
+	resolvePromptImageMimeTypeFromPath,
+	validatePromptImageBlocks,
+} from "./prompt-images.js";
+export type {
 	// SDK types (directly from SDK)
 	AgentCapabilities,
 	AudioContent,
@@ -122,6 +140,7 @@ export type {
 	AcpBackendSummary,
 	AcpConnectionState,
 	AcpSessionInfo,
+	AgentPromptCapabilities,
 	AgentSessionCapabilities,
 	DiscoverSessionsResult,
 	FsEntry,

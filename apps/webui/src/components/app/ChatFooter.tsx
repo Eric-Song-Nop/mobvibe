@@ -1,5 +1,10 @@
 import { ArrowUp01Icon, StopIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import {
+	PROMPT_IMAGE_MIME_TYPES,
+	resolvePromptImageMimeTypeFromPath,
+	validatePromptImageBlocks,
+} from "@mobvibe/shared";
 import { useQuery } from "@tanstack/react-query";
 import type { ClipboardEvent, FormEvent, KeyboardEvent } from "react";
 import {
@@ -25,6 +30,7 @@ import {
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { AvailableCommand, ContentBlock, ResourceLink } from "@/lib/acp";
 import {
+	fetchSessionFsFile,
 	fetchSessionFsResources,
 	type SessionFsResourceEntry,
 } from "@/lib/api";
@@ -32,6 +38,11 @@ import type { ChatSession } from "@/lib/chat-store";
 import { filterCommandItems } from "@/lib/command-utils";
 import { createDefaultContentBlocks } from "@/lib/content-block-utils";
 import type { FuzzySearchResult } from "@/lib/fuzzy-search";
+import { useMachinesStore } from "@/lib/machines-store";
+import {
+	normalizeImageFileForPrompt,
+	parseWorkspaceImageForPrompt,
+} from "@/lib/prompt-images";
 import { filterResourceItems } from "@/lib/resource-utils";
 import { createEmptyChatDraft, useUiStore } from "@/lib/ui-store";
 import { cn } from "@/lib/utils";
@@ -56,6 +67,40 @@ type ResourceToken = {
 };
 
 const buildResourceTokenLabel = (resource: ResourceLink) => `@${resource.name}`;
+
+const isEditorContentBlock = (
+	block: ContentBlock,
+): block is Extract<ContentBlock, { type: "text" | "resource_link" }> =>
+	block.type === "text" || block.type === "resource_link";
+
+const isImageContentBlock = (
+	block: ContentBlock,
+): block is Extract<ContentBlock, { type: "image" }> => block.type === "image";
+
+const getEditorContentBlocks = (blocks: ContentBlock[]) =>
+	blocks.filter(isEditorContentBlock);
+
+const getImageContentBlocks = (blocks: ContentBlock[]) =>
+	blocks.filter(isImageContentBlock);
+
+const mergeComposerContents = (
+	editorBlocks: ContentBlock[],
+	imageBlocks: Extract<ContentBlock, { type: "image" }>[],
+): ContentBlock[] => [...editorBlocks, ...imageBlocks];
+
+const hasSendablePromptContent = (blocks: ContentBlock[]) =>
+	blocks.some(
+		(block) =>
+			block.type === "image" ||
+			block.type === "resource_link" ||
+			(block.type === "text" && block.text.trim().length > 0),
+	);
+
+const isPromptImageFile = (file: File | null): file is File =>
+	file !== null &&
+	PROMPT_IMAGE_MIME_TYPES.includes(
+		file.type as (typeof PROMPT_IMAGE_MIME_TYPES)[number],
+	);
 
 const coalesceTextBlocks = (blocks: ContentBlock[]): ContentBlock[] => {
 	const merged: ContentBlock[] = [];
@@ -399,6 +444,7 @@ export function ChatFooter({
 	);
 	const setChatDraft = useUiStore((state) => state.setChatDraft);
 	const clearChatDraft = useUiStore((state) => state.clearChatDraft);
+	const machines = useMachinesStore((state) => state.machines);
 	const availableModels = activeSession?.availableModels ?? [];
 	const availableModes = activeSession?.availableModes ?? [];
 	const availableCommands = activeSession?.availableCommands ?? [];
@@ -418,11 +464,29 @@ export function ChatFooter({
 		storedDraft?.inputContents ??
 		activeSession?.inputContents ??
 		emptyDraft.inputContents;
+	const editorContentBlocks = useMemo(
+		() => getEditorContentBlocks(contentBlocks),
+		[contentBlocks],
+	);
+	const imageAttachments = useMemo(
+		() => getImageContentBlocks(contentBlocks),
+		[contentBlocks],
+	);
 	const draftInput = storedDraft?.input;
 	const rawInput = useMemo(
-		() => draftInput ?? buildInputValueFromContents(contentBlocks),
-		[draftInput, contentBlocks],
+		() => draftInput ?? buildInputValueFromContents(editorContentBlocks),
+		[draftInput, editorContentBlocks],
 	);
+	const imageCapability =
+		activeSession?.machineId && activeSession?.backendId
+			? machines[activeSession.machineId]?.backendCapabilities?.[
+					activeSession.backendId
+				]?.prompt?.image
+			: undefined;
+	const canAttachImages = Boolean(
+		activeSessionId && canMutateSession && imageCapability === true,
+	);
+	const canAttachWorkspaceImages = Boolean(canAttachImages && isReady);
 	const hasSlashPrefix = rawInput.startsWith("/");
 	const slashInput = hasSlashPrefix ? rawInput.slice(1) : "";
 	const commandQuery = hasSlashPrefix
@@ -451,9 +515,16 @@ export function ChatFooter({
 		enabled: Boolean(activeSessionId && isReady),
 	});
 	const resourceEntries = resourcesQuery.data?.entries ?? [];
+	const imageResourceEntries = useMemo(
+		() =>
+			resourceEntries.filter((entry) =>
+				Boolean(resolvePromptImageMimeTypeFromPath(entry.path)),
+			),
+		[resourceEntries],
+	);
 	const resourceTokens = useMemo(
-		() => buildResourceTokens(contentBlocks),
-		[contentBlocks],
+		() => buildResourceTokens(editorContentBlocks),
+		[editorContentBlocks],
 	);
 	const [resourceHighlight, setResourceHighlight] = useState(0);
 	const [resourcePickerSuppressed, setResourcePickerSuppressed] =
@@ -488,6 +559,39 @@ export function ChatFooter({
 		commandHighlight >= commandMatches.length ? 0 : commandHighlight;
 	const effectiveResourceHighlight =
 		resourceHighlight >= resourceMatches.length ? 0 : resourceHighlight;
+	const [workspaceImagePickerOpen, setWorkspaceImagePickerOpen] =
+		useState(false);
+	const [workspaceImageQuery, setWorkspaceImageQuery] = useState("");
+	const [workspaceImageHighlight, setWorkspaceImageHighlight] = useState(0);
+	const [attachmentError, setAttachmentError] = useState<string | null>(null);
+	const [isAttachingImages, setIsAttachingImages] = useState(false);
+	const workspaceImageMatches = useMemo(
+		() => filterResourceItems(imageResourceEntries, workspaceImageQuery),
+		[imageResourceEntries, workspaceImageQuery],
+	);
+	const effectiveWorkspaceImageHighlight =
+		workspaceImageHighlight >= workspaceImageMatches.length
+			? 0
+			: workspaceImageHighlight;
+	const fileInputRef = useRef<HTMLInputElement | null>(null);
+	const previousSessionId = useRef(activeSessionId);
+
+	const setComposerDraft = useCallback(
+		(
+			nextEditorBlocks: ContentBlock[],
+			nextImageBlocks: Extract<ContentBlock, { type: "image" }>[],
+			nextInputValue?: string,
+		) => {
+			if (!activeSessionId) {
+				return;
+			}
+			setChatDraft(activeSessionId, {
+				input: nextInputValue ?? buildInputValueFromContents(nextEditorBlocks),
+				inputContents: mergeComposerContents(nextEditorBlocks, nextImageBlocks),
+			});
+		},
+		[activeSessionId, setChatDraft],
+	);
 
 	const renderEditorContents = useCallback(
 		(
@@ -542,10 +646,7 @@ export function ChatFooter({
 			const nextValue = `/${result.item.name}`;
 			if (activeSessionId) {
 				const nextBlocks = createDefaultContentBlocks(nextValue);
-				setChatDraft(activeSessionId, {
-					input: nextValue,
-					inputContents: nextBlocks,
-				});
+				setComposerDraft(nextBlocks, imageAttachments, nextValue);
 				setInputCursor(nextValue.length);
 				// 程序化变更——浏览器 DOM 不会自动反映，需显式重建
 				syncEditorDOM(nextBlocks, nextValue.length);
@@ -553,7 +654,7 @@ export function ChatFooter({
 			setCommandHighlight(0);
 			setCommandPickerSuppressed(true);
 		},
-		[activeSessionId, setChatDraft, syncEditorDOM],
+		[activeSessionId, imageAttachments, setComposerDraft, syncEditorDOM],
 	);
 
 	const handleResourceNavigate = useCallback(
@@ -580,13 +681,10 @@ export function ChatFooter({
 			if (!activeSessionId) {
 				return;
 			}
-			setChatDraft(activeSessionId, {
-				input: buildInputValueFromContents(nextContents),
-				inputContents: nextContents,
-			});
+			setComposerDraft(nextContents, imageAttachments);
 			setInputCursor(nextCursor);
 		},
-		[activeSessionId, setChatDraft],
+		[activeSessionId, imageAttachments, setComposerDraft],
 	);
 
 	const applyResourceSelection = useCallback(
@@ -645,6 +743,95 @@ export function ChatFooter({
 		[applyResourceSelection],
 	);
 
+	const updateImageAttachments = useCallback(
+		(nextImages: Extract<ContentBlock, { type: "image" }>[]) => {
+			setComposerDraft(editorContentBlocks, nextImages, rawInput);
+		},
+		[editorContentBlocks, rawInput, setComposerDraft],
+	);
+
+	const appendImageAttachments = useCallback(
+		async (nextImages: Extract<ContentBlock, { type: "image" }>[]) => {
+			const mergedImages = [...imageAttachments, ...nextImages];
+			const validation = validatePromptImageBlocks(mergedImages);
+			if (!validation.ok) {
+				throw new Error(validation.message);
+			}
+			updateImageAttachments(mergedImages);
+			setAttachmentError(null);
+		},
+		[imageAttachments, updateImageAttachments],
+	);
+
+	const handleLocalImageFiles = useCallback(
+		async (files: File[]) => {
+			if (!canAttachImages || files.length === 0) {
+				return;
+			}
+			setIsAttachingImages(true);
+			try {
+				const normalizedImages = await Promise.all(
+					files.map((file) => normalizeImageFileForPrompt(file)),
+				);
+				await appendImageAttachments(normalizedImages);
+			} catch (error) {
+				setAttachmentError(
+					error instanceof Error ? error.message : "Failed to attach image",
+				);
+			} finally {
+				setIsAttachingImages(false);
+			}
+		},
+		[appendImageAttachments, canAttachImages],
+	);
+
+	const handleWorkspaceImageClick = useCallback(
+		async (result: FuzzySearchResult<SessionFsResourceEntry>) => {
+			if (!activeSessionId || !canAttachWorkspaceImages) {
+				return;
+			}
+			setIsAttachingImages(true);
+			try {
+				const preview = await fetchSessionFsFile({
+					sessionId: activeSessionId,
+					path: result.item.path,
+				});
+				if (preview.previewType !== "image") {
+					throw new Error("Selected workspace file is not an image");
+				}
+				await appendImageAttachments([
+					parseWorkspaceImageForPrompt(
+						preview.content,
+						preview.path,
+						preview.mimeType,
+					),
+				]);
+				setWorkspaceImagePickerOpen(false);
+				setWorkspaceImageQuery("");
+				setWorkspaceImageHighlight(0);
+			} catch (error) {
+				setAttachmentError(
+					error instanceof Error ? error.message : "Failed to attach image",
+				);
+			} finally {
+				setIsAttachingImages(false);
+			}
+		},
+		[activeSessionId, appendImageAttachments, canAttachWorkspaceImages],
+	);
+
+	const handleRemoveImageAttachment = useCallback(
+		(index: number) => {
+			updateImageAttachments(
+				imageAttachments.filter(
+					(_, attachmentIndex) => attachmentIndex !== index,
+				),
+			);
+			setAttachmentError(null);
+		},
+		[imageAttachments, updateImageAttachments],
+	);
+
 	useEffect(() => {
 		const nextKey = resourceTrigger
 			? { start: resourceTrigger.start, query: resourceTrigger.query }
@@ -675,6 +862,25 @@ export function ChatFooter({
 			setCommandHighlight(0);
 		}
 	}, [hasSlashPrefix, rawInput]);
+
+	useEffect(() => {
+		if (canAttachImages) {
+			return;
+		}
+		setWorkspaceImagePickerOpen(false);
+		setWorkspaceImageQuery("");
+	}, [canAttachImages]);
+
+	useEffect(() => {
+		if (previousSessionId.current === activeSessionId) {
+			return;
+		}
+		previousSessionId.current = activeSessionId;
+		setAttachmentError(null);
+		setWorkspaceImagePickerOpen(false);
+		setWorkspaceImageQuery("");
+		setWorkspaceImageHighlight(0);
+	}, [activeSessionId]);
 
 	const handleCommandNavigate = useCallback(
 		(direction: "next" | "prev") => {
@@ -928,6 +1134,18 @@ export function ChatFooter({
 			if (!editor || !activeSessionId) {
 				return;
 			}
+			const clipboardImageFiles =
+				canAttachImages && event.clipboardData
+					? Array.from(event.clipboardData.items)
+							.filter((item) => item.kind === "file")
+							.map((item) => item.getAsFile())
+							.filter(isPromptImageFile)
+					: [];
+			if (clipboardImageFiles.length > 0) {
+				event.preventDefault();
+				void handleLocalImageFiles(clipboardImageFiles);
+				return;
+			}
 			event.preventDefault();
 			const text = event.clipboardData.getData("text/plain");
 			const selection = window.getSelection();
@@ -941,7 +1159,29 @@ export function ChatFooter({
 			updateFromEditor(nextContents, selectionOffset);
 			renderEditorContents(editor, nextContents, selectionOffset);
 		},
-		[activeSessionId, renderEditorContents, updateFromEditor],
+		[
+			activeSessionId,
+			canAttachImages,
+			handleLocalImageFiles,
+			renderEditorContents,
+			updateFromEditor,
+		],
+	);
+
+	const handleUploadButtonClick = useCallback(() => {
+		if (!canAttachImages || isAttachingImages) {
+			return;
+		}
+		fileInputRef.current?.click();
+	}, [canAttachImages, isAttachingImages]);
+
+	const handleImageInputChange = useCallback(
+		(event: React.ChangeEvent<HTMLInputElement>) => {
+			const files = event.target.files ? Array.from(event.target.files) : [];
+			event.target.value = "";
+			void handleLocalImageFiles(files);
+		},
+		[handleLocalImageFiles],
 	);
 
 	const handleCompositionStart = useCallback(() => {
@@ -961,7 +1201,7 @@ export function ChatFooter({
 		if (document.activeElement !== editor) {
 			// Editor is not focused — external state change (e.g. session switch),
 			// must rebuild DOM.
-			renderEditorContents(editor, contentBlocks);
+			renderEditorContents(editor, editorContentBlocks);
 			return;
 		}
 		if (isComposingRef.current) {
@@ -973,7 +1213,7 @@ export function ChatFooter({
 		// handleEditorBeforeInput / handleEditorPaste will call
 		// renderEditorContents explicitly when they need to (e.g. token
 		// deletion, paste with resource links).
-	}, [contentBlocks, renderEditorContents]);
+	}, [editorContentBlocks, renderEditorContents]);
 
 	// Mobile virtual keyboard: track keyboard height via visualViewport
 	const footerRef = useRef<HTMLElement | null>(null);
@@ -997,7 +1237,7 @@ export function ChatFooter({
 		return () => vv.removeEventListener("resize", update);
 	}, [isMobile]);
 
-	const canSend = rawInput.trim().length > 0 || resourceTokens.length > 0;
+	const canSend = hasSendablePromptContent(contentBlocks);
 
 	const footerContent = (
 		<footer
@@ -1037,7 +1277,120 @@ export function ChatFooter({
 						/>
 					) : null}
 
+					<input
+						ref={fileInputRef}
+						type="file"
+						accept={PROMPT_IMAGE_MIME_TYPES.join(",")}
+						multiple
+						className="hidden"
+						tabIndex={-1}
+						onChange={handleImageInputChange}
+					/>
+
+					{imageAttachments.length > 0 ? (
+						<div className="flex flex-wrap gap-2 border-b border-input px-2.5 py-2">
+							{imageAttachments.map((image, index) => (
+								<div
+									key={`${image.uri ?? "upload"}-${index}`}
+									className="bg-muted/40 flex items-start gap-2 border border-input p-2"
+								>
+									<img
+										src={`data:${image.mimeType};base64,${image.data}`}
+										alt={image.uri ?? `Attached image ${index + 1}`}
+										width={48}
+										height={48}
+										loading="lazy"
+										className="size-12 object-cover"
+									/>
+									<div className="flex min-w-0 flex-col gap-1">
+										<span className="max-w-40 truncate text-[11px] text-foreground">
+											{image.uri
+												? (resolveFilePathFromUri(image.uri) ?? image.uri)
+												: `Image ${index + 1}`}
+										</span>
+										<span className="text-[10px] text-muted-foreground">
+											{image.mimeType}
+										</span>
+										<Button
+											type="button"
+											variant="ghost"
+											size="xs"
+											className="h-auto justify-start px-0 text-[10px]"
+											onClick={() => handleRemoveImageAttachment(index)}
+										>
+											Remove
+										</Button>
+									</div>
+								</div>
+							))}
+						</div>
+					) : null}
+
+					<div className="flex flex-wrap items-center gap-2 border-b border-input px-2.5 py-2">
+						<Button
+							type="button"
+							variant="outline"
+							size="xs"
+							onClick={handleUploadButtonClick}
+							disabled={!canAttachImages || isAttachingImages}
+						>
+							Upload image
+						</Button>
+						<Button
+							type="button"
+							variant="outline"
+							size="xs"
+							onClick={() =>
+								setWorkspaceImagePickerOpen((previous) => !previous)
+							}
+							disabled={!canAttachWorkspaceImages || isAttachingImages}
+						>
+							From workspace
+						</Button>
+						{imageCapability !== true ? (
+							<span className="text-[11px] text-muted-foreground">
+								Image prompts unavailable
+							</span>
+						) : null}
+						{isAttachingImages ? (
+							<span className="text-[11px] text-muted-foreground">
+								Attaching image...
+							</span>
+						) : null}
+					</div>
+
+					{workspaceImagePickerOpen ? (
+						<div className="border-b border-input px-2.5 py-2">
+							<input
+								type="text"
+								value={workspaceImageQuery}
+								onChange={(event) => {
+									setWorkspaceImageQuery(event.target.value);
+									setWorkspaceImageHighlight(0);
+								}}
+								placeholder="Search workspace images"
+								className="mb-2 h-8 w-full border border-input bg-background px-2 text-xs outline-none"
+							/>
+							<ResourceCombobox
+								results={workspaceImageMatches}
+								open={workspaceImagePickerOpen}
+								highlightedIndex={effectiveWorkspaceImageHighlight}
+								onHighlightChange={setWorkspaceImageHighlight}
+								onSelect={(result) => {
+									void handleWorkspaceImageClick(result);
+								}}
+							/>
+						</div>
+					) : null}
+
+					{attachmentError ? (
+						<div className="border-b border-input px-2.5 py-2 text-[11px] text-destructive">
+							{attachmentError}
+						</div>
+					) : null}
+
 					{/* Text input */}
+					{/* biome-ignore lint/a11y/useSemanticElements: contentEditable composer needs explicit textbox semantics. */}
 					<div
 						ref={editorRef}
 						role="textbox"

@@ -11,6 +11,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSession } from "@/lib/chat-store";
 import { createDefaultContentBlocks } from "@/lib/content-block-utils";
+import { useMachinesStore } from "@/lib/machines-store";
 import { useUiStore } from "@/lib/ui-store";
 import { ChatFooter } from "../ChatFooter";
 
@@ -74,14 +75,23 @@ vi.mock("@/components/ui/select", () => ({
 }));
 
 const fetchSessionFsResources = vi.hoisted(() => vi.fn());
+const fetchSessionFsFile = vi.hoisted(() => vi.fn());
+const normalizeImageFileForPrompt = vi.hoisted(() => vi.fn());
+const parseWorkspaceImageForPrompt = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/lib/api")>();
 	return {
 		...actual,
 		fetchSessionFsResources: fetchSessionFsResources,
+		fetchSessionFsFile: fetchSessionFsFile,
 	};
 });
+
+vi.mock("@/lib/prompt-images", () => ({
+	normalizeImageFileForPrompt,
+	parseWorkspaceImageForPrompt,
+}));
 
 const buildSession = (overrides: Partial<ChatSession> = {}): ChatSession =>
 	({
@@ -96,6 +106,8 @@ const buildSession = (overrides: Partial<ChatSession> = {}): ChatSession =>
 		isAttached: true,
 		isLoading: false,
 		e2eeStatus: "none",
+		machineId: "machine-1",
+		backendId: "backend-1",
 		cwd: "/repo",
 		availableCommands: [],
 		availableModels: [],
@@ -148,9 +160,47 @@ describe("ChatFooter", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		useUiStore.setState({ chatDrafts: {} });
+		useMachinesStore.setState({
+			machines: {
+				"machine-1": {
+					machineId: "machine-1",
+					connected: true,
+					backendCapabilities: {
+						"backend-1": {
+							list: true,
+							load: true,
+							prompt: {
+								image: true,
+								audio: false,
+								embeddedContext: false,
+							},
+						},
+					},
+				},
+			},
+			selectedMachineId: "machine-1",
+		});
 		fetchSessionFsResources.mockResolvedValue({
 			rootPath: "/repo",
 			entries: [],
+		});
+		fetchSessionFsFile.mockResolvedValue({
+			path: "/repo/image.png",
+			previewType: "image",
+			content: "data:image/png;base64,dGVzdA==",
+			mimeType: "image/png",
+		});
+		normalizeImageFileForPrompt.mockResolvedValue({
+			type: "image",
+			data: "dGVzdA==",
+			mimeType: "image/png",
+			uri: null,
+		});
+		parseWorkspaceImageForPrompt.mockReturnValue({
+			type: "image",
+			data: "dGVzdA==",
+			mimeType: "image/png",
+			uri: "file:///repo/image.png",
 		});
 		HTMLElement.prototype.scrollIntoView = vi.fn();
 	});
@@ -259,6 +309,170 @@ describe("ChatFooter", () => {
 		await user.click(sendButton);
 
 		expect(onSend).toHaveBeenCalledOnce();
+	});
+
+	it("enables send for image-only drafts", () => {
+		const session = buildSession();
+
+		useUiStore.getState().setChatDraft(session.sessionId, {
+			input: "",
+			inputContents: [
+				{
+					type: "image",
+					data: "dGVzdA==",
+					mimeType: "image/png",
+				},
+			],
+		});
+
+		renderFooter(session);
+
+		expect(screen.getByRole("button", { name: "chat.send" })).toBeEnabled();
+	});
+
+	it("attaches and removes uploaded images", async () => {
+		const user = userEvent.setup();
+		const session = buildSession();
+		const { container } = renderFooter(session);
+		const input = container.querySelector(
+			'input[type="file"]',
+		) as HTMLInputElement | null;
+		if (!input) {
+			throw new Error("file input not found");
+		}
+
+		await user.upload(
+			input,
+			new File(["png"], "demo.png", { type: "image/png" }),
+		);
+
+		await waitFor(() => {
+			expect(normalizeImageFileForPrompt).toHaveBeenCalledTimes(1);
+			expect(
+				useUiStore.getState().chatDrafts[session.sessionId]?.inputContents,
+			).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						type: "image",
+						mimeType: "image/png",
+					}),
+				]),
+			);
+		});
+
+		await user.click(screen.getByRole("button", { name: "Remove" }));
+
+		await waitFor(() => {
+			expect(
+				useUiStore
+					.getState()
+					.chatDrafts[session.sessionId]?.inputContents.some(
+						(block) => block.type === "image",
+					),
+			).toBe(false);
+		});
+	});
+
+	it("attaches workspace images through the explicit image flow", async () => {
+		const user = userEvent.setup();
+		const session = buildSession();
+		fetchSessionFsResources.mockResolvedValue({
+			rootPath: "/repo",
+			entries: [
+				{
+					name: "image.png",
+					path: "/repo/image.png",
+					relativePath: "image.png",
+				},
+			],
+		});
+
+		renderFooter(session);
+
+		await user.click(screen.getByRole("button", { name: "From workspace" }));
+		const option = await screen.findByRole("option", { name: /image\.png/i });
+		await user.click(option);
+
+		await waitFor(() => {
+			expect(fetchSessionFsFile).toHaveBeenCalledWith({
+				sessionId: session.sessionId,
+				path: "/repo/image.png",
+			});
+			expect(parseWorkspaceImageForPrompt).toHaveBeenCalledWith(
+				"data:image/png;base64,dGVzdA==",
+				"/repo/image.png",
+				"image/png",
+			);
+			expect(
+				useUiStore.getState().chatDrafts[session.sessionId]?.inputContents,
+			).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						type: "image",
+						uri: "file:///repo/image.png",
+					}),
+				]),
+			);
+		});
+	});
+
+	it("preserves attached images while typing in the editor", async () => {
+		const session = buildSession();
+		useUiStore.getState().setChatDraft(session.sessionId, {
+			input: "",
+			inputContents: [
+				{
+					type: "image",
+					data: "dGVzdA==",
+					mimeType: "image/png",
+				},
+			],
+		});
+
+		renderFooter(session);
+
+		const editor = screen.getByRole("textbox", { name: "chat.placeholder" });
+		setEditorValue(editor, "hello");
+
+		await waitFor(() => {
+			expect(useUiStore.getState().chatDrafts[session.sessionId]).toEqual(
+				expect.objectContaining({
+					input: "hello",
+					inputContents: expect.arrayContaining([
+						{ type: "text", text: "hello" },
+						expect.objectContaining({
+							type: "image",
+							mimeType: "image/png",
+						}),
+					]),
+				}),
+			);
+		});
+	});
+
+	it("disables image attach UI when image capability is missing", () => {
+		useMachinesStore.setState({
+			machines: {
+				"machine-1": {
+					machineId: "machine-1",
+					connected: true,
+					backendCapabilities: {
+						"backend-1": {
+							list: true,
+							load: true,
+						},
+					},
+				},
+			},
+			selectedMachineId: "machine-1",
+		});
+
+		renderFooter(buildSession());
+
+		expect(screen.getByRole("button", { name: "Upload image" })).toBeDisabled();
+		expect(
+			screen.getByRole("button", { name: "From workspace" }),
+		).toBeDisabled();
 	});
 
 	it("keeps send disabled until restored session E2EE status is hydrated", () => {

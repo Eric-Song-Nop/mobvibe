@@ -290,6 +290,12 @@ export class AcpConnection {
 		return {
 			list: this.agentCapabilities?.sessionCapabilities?.list != null,
 			load: this.agentCapabilities?.loadSession === true,
+			prompt: {
+				image: this.agentCapabilities?.promptCapabilities?.image === true,
+				audio: this.agentCapabilities?.promptCapabilities?.audio === true,
+				embeddedContext:
+					this.agentCapabilities?.promptCapabilities?.embeddedContext === true,
+			},
 		};
 	}
 

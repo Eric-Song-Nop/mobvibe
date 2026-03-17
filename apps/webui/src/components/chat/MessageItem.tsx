@@ -10,6 +10,7 @@ import { LazyStreamdown } from "@/components/chat/LazyStreamdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import i18n from "@/i18n";
 import type {
 	AudioContent,
 	ContentBlock,
@@ -241,6 +242,7 @@ const renderImageContent = (
 				<img
 					src={source}
 					alt={label}
+					loading="lazy"
 					className="mt-2 max-h-48 rounded border border-border"
 				/>
 			) : (
@@ -375,6 +377,14 @@ const renderUserContent = (
 				<LazyStreamdown key={`text-${index}`}>{block.text}</LazyStreamdown>
 			);
 		}
+		if (block.type === "image") {
+			return renderImageContent(
+				block,
+				`image-${index}`,
+				(key, options) => i18n.t(key, options),
+				onOpenFilePreview,
+			);
+		}
 		if (block.type === "resource_link") {
 			const label = `@${block.name}`;
 			const filePath = resolveFilePathFromUri(block.uri);
@@ -401,7 +411,7 @@ const renderUserContent = (
 		}
 		return null;
 	});
-	return <div className="flex flex-wrap gap-1">{parts}</div>;
+	return <div className="flex flex-col gap-2">{parts}</div>;
 };
 
 const renderContentBlock = (

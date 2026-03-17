@@ -62,6 +62,11 @@ const createMockDiscoverResult = (): DiscoverSessionsRpcResult => ({
 	capabilities: {
 		list: true,
 		load: true,
+		prompt: {
+			image: true,
+			audio: false,
+			embeddedContext: false,
+		},
 	},
 });
 
@@ -106,6 +111,7 @@ describe("SessionRouter", () => {
 			expect(result.sessions[0].sessionId).toBe("discovered-session-1");
 			expect(result.capabilities.list).toBe(true);
 			expect(result.capabilities.load).toBe(true);
+			expect(result.capabilities.prompt?.image).toBe(true);
 		});
 
 		it("throws error when no CLI connected for machine", async () => {
