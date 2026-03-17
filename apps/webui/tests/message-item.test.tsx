@@ -56,6 +56,22 @@ describe("MessageItem", () => {
 		expect(container.firstChild).toHaveClass("items-end");
 	});
 
+	it("renders user image attachments inline", () => {
+		const message = buildMessage({
+			role: "user",
+			content: "",
+			contentBlocks: [
+				{
+					type: "image",
+					data: "dGVzdA==",
+					mimeType: "image/png",
+				},
+			],
+		});
+		const { getByAltText } = render(<MessageItem message={message} />);
+		expect(getByAltText("Image")).toBeInTheDocument();
+	});
+
 	it("renders assistant content with streaming opacity", () => {
 		const message = buildMessage({
 			isStreaming: true,

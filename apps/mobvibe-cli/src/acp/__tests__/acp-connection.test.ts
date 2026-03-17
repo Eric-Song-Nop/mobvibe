@@ -56,6 +56,11 @@ describe("AcpConnection", () => {
 
 			expect(capabilities.list).toBe(false);
 			expect(capabilities.load).toBe(false);
+			expect(capabilities.prompt).toEqual({
+				audio: false,
+				embeddedContext: false,
+				image: false,
+			});
 		});
 
 		it("returns correct capabilities when sessionCapabilities.list is defined", () => {
@@ -70,6 +75,7 @@ describe("AcpConnection", () => {
 
 			expect(capabilities.list).toBe(true);
 			expect(capabilities.load).toBe(false);
+			expect(capabilities.prompt?.image).toBe(false);
 		});
 
 		it("returns correct capabilities when loadSession is true", () => {
@@ -82,6 +88,26 @@ describe("AcpConnection", () => {
 
 			expect(capabilities.list).toBe(false);
 			expect(capabilities.load).toBe(true);
+			expect(capabilities.prompt?.image).toBe(false);
+		});
+
+		it("maps prompt capabilities from agent initialize response", () => {
+			// @ts-expect-error - accessing private property for testing
+			connection.agentCapabilities = {
+				promptCapabilities: {
+					image: true,
+					audio: false,
+					embeddedContext: true,
+				},
+			};
+
+			const capabilities = connection.getSessionCapabilities();
+
+			expect(capabilities.prompt).toEqual({
+				image: true,
+				audio: false,
+				embeddedContext: true,
+			});
 		});
 	});
 

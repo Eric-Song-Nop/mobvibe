@@ -91,6 +91,7 @@ describe("SocketClient restore semantics", () => {
 	let sessionEventListener: ((event: SessionEvent) => void) | undefined;
 	let promptConnection: {
 		prompt: ReturnType<typeof mock>;
+		getSessionCapabilities: ReturnType<typeof mock>;
 	};
 	let sessionManager: {
 		backfillDiscoveredWorkspaceRoots: ReturnType<typeof mock>;
@@ -126,6 +127,15 @@ describe("SocketClient restore semantics", () => {
 		sessionEventListener = undefined;
 		promptConnection = {
 			prompt: mock(() => Promise.resolve({ stopReason: "end_turn" })),
+			getSessionCapabilities: mock(() => ({
+				list: true,
+				load: true,
+				prompt: {
+					image: false,
+					audio: false,
+					embeddedContext: false,
+				},
+			})),
 		};
 
 		sessionManager = {
@@ -285,6 +295,83 @@ describe("SocketClient restore semantics", () => {
 		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
 			requestId: "req-1",
 			result: { stopReason: "end_turn" },
+		});
+	});
+
+	test("rejects image prompts when backend image capability is disabled", async () => {
+		const prompt = [
+			{
+				type: "image",
+				data: "dGVzdA==",
+				mimeType: "image/png",
+			},
+		] as const;
+		const handler = socketHandlers.get("rpc:message:send");
+		if (!handler) {
+			throw new Error("rpc:message:send handler not registered");
+		}
+
+		await handler({
+			requestId: "req-image-disabled",
+			params: {
+				sessionId: "session-1",
+				prompt,
+			},
+		});
+
+		expect(promptConnection.prompt).not.toHaveBeenCalledWith(
+			"session-1",
+			prompt,
+		);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-image-disabled",
+			error: expect.objectContaining({
+				code: "INTERNAL_ERROR",
+				message: "Selected backend does not support image prompts",
+			}),
+		});
+	});
+
+	test("rejects oversized image prompts before ACP prompt()", async () => {
+		promptConnection.getSessionCapabilities.mockReturnValue({
+			list: true,
+			load: true,
+			prompt: {
+				image: true,
+				audio: false,
+				embeddedContext: false,
+			},
+		});
+		const prompt = [
+			{
+				type: "image",
+				data: "A".repeat(700_000),
+				mimeType: "image/png",
+			},
+		] as const;
+		const handler = socketHandlers.get("rpc:message:send");
+		if (!handler) {
+			throw new Error("rpc:message:send handler not registered");
+		}
+
+		await handler({
+			requestId: "req-image-too-large",
+			params: {
+				sessionId: "session-1",
+				prompt,
+			},
+		});
+
+		expect(promptConnection.prompt).not.toHaveBeenCalledWith(
+			"session-1",
+			prompt,
+		);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-image-too-large",
+			error: expect.objectContaining({
+				code: "INTERNAL_ERROR",
+				message: "Each image must be 512 KiB or smaller",
+			}),
 		});
 	});
 

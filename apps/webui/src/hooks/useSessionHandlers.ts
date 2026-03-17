@@ -15,6 +15,11 @@ import { getBackendCapability, type Machine } from "@/lib/machines-store";
 import { useUiStore } from "@/lib/ui-store";
 import { buildSessionTitle } from "@/lib/ui-utils";
 
+const isSendablePromptBlock = (block: ChatSession["inputContents"][number]) =>
+	block.type === "image" ||
+	block.type === "resource_link" ||
+	(block.type === "text" && block.text.trim().length > 0);
+
 type Mutations = {
 	createSessionMutation: {
 		mutateAsync: (params: {
@@ -449,11 +454,7 @@ export function useSessionHandlers({
 			activeSessionRef.current;
 		const draft = useUiStore.getState().chatDrafts[activeSessionId];
 		const promptContents = draft?.inputContents ?? initialSession.inputContents;
-		const hasPromptContent = promptContents.some(
-			(block) =>
-				block.type === "resource_link" ||
-				(block.type === "text" && block.text.trim().length > 0),
-		);
+		const hasPromptContent = promptContents.some(isSendablePromptBlock);
 		if (!hasPromptContent || initialSession.sending) {
 			return;
 		}
@@ -467,9 +468,7 @@ export function useSessionHandlers({
 			latestDraft?.inputContents ?? readySession.inputContents;
 		const latestPromptText = latestDraft?.input ?? readySession.input ?? "";
 		const hasLatestPromptContent = latestPromptContents.some(
-			(block) =>
-				block.type === "resource_link" ||
-				(block.type === "text" && block.text.trim().length > 0),
+			isSendablePromptBlock,
 		);
 		if (!hasLatestPromptContent || readySession.sending) {
 			return;

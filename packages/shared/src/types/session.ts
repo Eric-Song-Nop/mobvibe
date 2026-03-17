@@ -120,9 +120,16 @@ export type AcpSessionInfo = {
 };
 
 /** Agent session capabilities */
+export type AgentPromptCapabilities = {
+	image?: boolean;
+	audio?: boolean;
+	embeddedContext?: boolean;
+};
+
 export type AgentSessionCapabilities = {
 	list: boolean;
 	load: boolean;
+	prompt?: AgentPromptCapabilities;
 };
 
 /** Result of discovering sessions */

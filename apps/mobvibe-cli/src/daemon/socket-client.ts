@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type {
 	CliToGatewayEvents,
+	ContentBlock,
 	EventsAckPayload,
 	FsEntry,
 	FsRoot,
@@ -16,7 +17,11 @@ import type {
 	SessionFsResourceEntry,
 	StopReason,
 } from "@mobvibe/shared";
-import { createSignedToken } from "@mobvibe/shared";
+import {
+	createSignedToken,
+	getPromptImageBlocks,
+	validatePromptImageBlocks,
+} from "@mobvibe/shared";
 import ignore, { type Ignore } from "ignore";
 import { io, type Socket } from "socket.io-client";
 import type { SessionManager } from "../acp/session-manager.js";
@@ -99,6 +104,23 @@ const resolveImageMimeType = (filePath: string) => {
 			return "image/webp";
 		default:
 			return undefined;
+	}
+};
+
+const validatePromptForBackend = (
+	prompt: ContentBlock[],
+	supportsPromptImages: boolean,
+) => {
+	const imageBlocks = getPromptImageBlocks(prompt);
+	if (imageBlocks.length === 0) {
+		return;
+	}
+	if (!supportsPromptImages) {
+		throw new Error("Selected backend does not support image prompts");
+	}
+	const validation = validatePromptImageBlocks(imageBlocks);
+	if (!validation.ok) {
+		throw new Error(validation.message);
 	}
 };
 
@@ -411,6 +433,10 @@ export class SocketClient extends EventEmitter {
 				if (!record) {
 					throw new Error("Session not found");
 				}
+				validatePromptForBackend(
+					prompt,
+					record.connection.getSessionCapabilities().prompt?.image === true,
+				);
 				sessionManager.touchSession(sessionId);
 				const result = await record.connection.prompt(sessionId, prompt);
 				sessionManager.touchSession(sessionId);

@@ -677,6 +677,50 @@ describe("useSessionHandlers — handleSend", () => {
 		});
 	});
 
+	it("sends image-only prompts from the draft store", async () => {
+		const promptContents: ChatSession["inputContents"] = [
+			{
+				type: "image",
+				data: "dGVzdA==",
+				mimeType: "image/png",
+			},
+		];
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "",
+			inputContents: promptContents,
+		};
+
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({
+				input: "",
+				inputContents: createDefaultContentBlocks("stale"),
+			}),
+		});
+
+		await act(async () => {
+			await result.current.handleSend();
+		});
+
+		expect(mockUiStoreState.clearChatDraft).toHaveBeenCalledWith("session-1");
+		expect(chatActions.addUserMessage).toHaveBeenCalledWith(
+			"session-1",
+			"",
+			expect.objectContaining({
+				contentBlocks: promptContents,
+				provisional: true,
+			}),
+		);
+		expect(mutations.sendMessageMutation.mutate).toHaveBeenCalledWith({
+			sessionId: "session-1",
+			prompt: promptContents,
+			messageId: expect.any(String),
+			draft: {
+				input: "",
+				inputContents: promptContents,
+			},
+		});
+	});
+
 	it("activates a detached session before sending", async () => {
 		const promptContents = createDefaultContentBlocks("Ship it");
 		const detachedSession = createBaseSession({

@@ -122,7 +122,7 @@ export const useMachinesStore = create<MachinesState>((set) => ({
 export const getBackendCapability = (
 	machine: Machine | undefined,
 	backendId: string | undefined,
-	capability: keyof AgentSessionCapabilities,
+	capability: Exclude<keyof AgentSessionCapabilities, "prompt">,
 ): boolean | undefined => {
 	if (!machine?.backendCapabilities || !backendId) return undefined;
 	return machine.backendCapabilities[backendId]?.[capability];

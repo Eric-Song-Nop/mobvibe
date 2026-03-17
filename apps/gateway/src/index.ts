@@ -136,6 +136,7 @@ const corsConfig = {
 const io = new Server({
 	path: "/socket.io",
 	cors: corsConfig,
+	maxHttpBufferSize: 4 * 1024 * 1024,
 });
 
 // Attach engine for polling transport
@@ -321,7 +322,7 @@ app.use(
 app.all("/api/auth/*", toNodeHandler(auth));
 logger.info("better_auth_enabled");
 
-app.use(express.json());
+app.use(express.json({ limit: "4mb" }));
 
 // Health check — mounted before auth-guarded routers so the
 // health probe (unauthenticated GET /health) is never blocked.
