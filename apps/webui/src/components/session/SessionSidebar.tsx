@@ -223,7 +223,7 @@ export const SessionSidebar = ({
 
 				{/* Workspaces tab */}
 				{sidebarTab === "workspaces" ? (
-					<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain">
+					<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
 						{selectedMachineId ? (
 							<WorkspaceList
 								machineId={selectedMachineId}
@@ -250,7 +250,7 @@ export const SessionSidebar = ({
 						) : null}
 
 						{/* Session list */}
-						<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain">
+						<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
 							{sessions.length === 0 ? (
 								<div className="text-muted-foreground text-xs">
 									{t("session.empty")}
