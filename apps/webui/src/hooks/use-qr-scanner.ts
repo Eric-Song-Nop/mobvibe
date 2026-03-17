@@ -107,6 +107,11 @@ export function useQrScanner(): UseQrScannerReturn {
 	return { canScan, isScanning, startScan, cancelScan, videoRef };
 }
 
+function isCancelledScanError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	return message.toLowerCase().includes("cancel");
+}
+
 /* ------------------------------------------------------------------ */
 /*  Tauri mobile strategy                                              */
 /* ------------------------------------------------------------------ */
@@ -132,22 +137,6 @@ async function startTauriScan(
 
 	let popstateCleanup: (() => void) | null = null;
 
-	const onPopstate = () => {
-		void cancel();
-	};
-	window.addEventListener("popstate", onPopstate);
-	popstateCleanup = () => {
-		window.removeEventListener("popstate", onPopstate);
-		// Clean up the fake history entry if scan completed normally
-		if (history.state?.qrScan) {
-			history.back();
-		}
-	};
-
-	cancelRef.current = async () => {
-		await cancel();
-	};
-
 	// Make the WebView transparent so the native camera preview behind it
 	// is visible. The plugin sets the Android WebView background to
 	// transparent when `windowed: true`, but the HTML/CSS backgrounds
@@ -155,21 +144,64 @@ async function startTauriScan(
 	document.documentElement.classList.add("qr-scanning");
 
 	try {
-		const result = await scan({
-			formats: [Format.QRCode],
-			windowed: true,
+		return await new Promise<string | null>((resolve, reject) => {
+			let settled = false;
+
+			const finish = (
+				handler: (
+					resolve: (value: string | null) => void,
+					reject: (reason?: unknown) => void,
+				) => void,
+			) => {
+				if (settled) return;
+				settled = true;
+				popstateCleanup?.();
+				popstateCleanup = null;
+				handler(resolve, reject);
+			};
+
+			const cancelCurrentScan = async () => {
+				finish((resolve) => resolve(null));
+				try {
+					await cancel();
+				} catch (error) {
+					if (!isCancelledScanError(error)) {
+						console.warn("Failed to cancel native QR scan:", error);
+					}
+				}
+			};
+
+			const onPopstate = () => {
+				void cancelCurrentScan();
+			};
+			window.addEventListener("popstate", onPopstate);
+			popstateCleanup = () => {
+				window.removeEventListener("popstate", onPopstate);
+				if (history.state?.qrScan) {
+					history.back();
+				}
+			};
+
+			cancelRef.current = cancelCurrentScan;
+
+			void Promise.resolve()
+				.then(() =>
+					scan({
+						formats: [Format.QRCode],
+						windowed: true,
+					}),
+				)
+				.then((result) => {
+					finish((resolve) => resolve(result?.content ?? null));
+				})
+				.catch((error) => {
+					if (isCancelledScanError(error)) {
+						finish((resolve) => resolve(null));
+						return;
+					}
+					finish((_, reject) => reject(error));
+				});
 		});
-		popstateCleanup();
-		popstateCleanup = null;
-		return result?.content ?? null;
-	} catch (err) {
-		popstateCleanup?.();
-		popstateCleanup = null;
-		const msg = err instanceof Error ? err.message : String(err);
-		if (msg.toLowerCase().includes("cancel")) {
-			return null;
-		}
-		throw err;
 	} finally {
 		document.documentElement.classList.remove("qr-scanning");
 	}
