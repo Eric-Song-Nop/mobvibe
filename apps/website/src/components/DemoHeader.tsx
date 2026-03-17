@@ -1,4 +1,8 @@
-import { GithubIcon, Menu01Icon } from "@hugeicons/core-free-icons";
+import {
+	DiscordIcon,
+	GithubIcon,
+	Menu01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
 import { BrandLogo } from "@/components/brand-logo";
@@ -106,6 +110,22 @@ export function DemoHeader({
 							aria-hidden="true"
 						/>
 						<span className="sr-only">{t("header.github")}</span>
+					</Button>
+				</a>
+
+				<a
+					href="https://discord.gg/wrv2JXz7"
+					target="_blank"
+					rel="noopener noreferrer"
+				>
+					<Button variant="ghost" size="icon-sm">
+						<HugeiconsIcon
+							icon={DiscordIcon}
+							strokeWidth={2}
+							className="size-4"
+							aria-hidden="true"
+						/>
+						<span className="sr-only">{t("header.discord")}</span>
 					</Button>
 				</a>
 
