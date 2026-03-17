@@ -2,8 +2,6 @@ packages:
   - apps/*
   - packages/*
 
-enableGlobalVirtualStore: true
-
 onlyBuiltDependencies:
   - esbuild
   - msw

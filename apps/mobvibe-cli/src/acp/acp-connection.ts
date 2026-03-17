@@ -9,8 +9,8 @@ import {
 	type CreateTerminalRequest,
 	type CreateTerminalResponse,
 	type Implementation,
-	type KillTerminalCommandRequest,
-	type KillTerminalCommandResponse,
+	type KillTerminalRequest,
+	type KillTerminalResponse,
 	type ListSessionsResponse,
 	type LoadSessionResponse,
 	type NewSessionResponse,
@@ -103,8 +103,8 @@ type ClientHandlers = {
 		params: WaitForTerminalExitRequest,
 	) => Promise<WaitForTerminalExitResponse>;
 	onKillTerminal?: (
-		params: KillTerminalCommandRequest,
-	) => Promise<KillTerminalCommandResponse>;
+		params: KillTerminalRequest,
+	) => Promise<KillTerminalResponse>;
 	onReleaseTerminal?: (
 		params: ReleaseTerminalRequest,
 	) => Promise<ReleaseTerminalResponse>;
@@ -138,7 +138,7 @@ const buildClient = (handlers: ClientHandlers): Client => ({
 		}
 		return handlers.onWaitForTerminalExit(params);
 	},
-	async killTerminal(params: KillTerminalCommandRequest) {
+	async killTerminal(params: KillTerminalRequest) {
 		if (!handlers.onKillTerminal) {
 			return {};
 		}
@@ -301,11 +301,10 @@ export class AcpConnection {
 			return { sessions: [] };
 		}
 		const connection = await this.ensureReady();
-		const response: ListSessionsResponse =
-			await connection.unstable_listSessions({
-				cursor: params?.cursor ?? undefined,
-				cwd: params?.cwd ?? undefined,
-			});
+		const response: ListSessionsResponse = await connection.listSessions({
+			cursor: params?.cursor ?? undefined,
+			cwd: params?.cwd ?? undefined,
+		});
 		return {
 			sessions: response.sessions,
 			nextCursor: response.nextCursor ?? undefined,
@@ -403,7 +402,9 @@ export class AcpConnection {
 			});
 
 			const input = Writable.toWeb(child.stdin) as WritableStream<Uint8Array>;
-			const output = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
+			const output = Readable.toWeb(
+				child.stdout,
+			) as unknown as ReadableStream<Uint8Array>;
 			const stream = ndJsonStream(input, output);
 			const connection = new ClientSideConnection(
 				() =>
@@ -624,8 +625,8 @@ export class AcpConnection {
 	}
 
 	async killTerminal(
-		params: KillTerminalCommandRequest,
-	): Promise<KillTerminalCommandResponse> {
+		params: KillTerminalRequest,
+	): Promise<KillTerminalResponse> {
 		const record = this.terminals.get(params.terminalId);
 		if (!record || record.sessionId !== params.sessionId) {
 			return {};

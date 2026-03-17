@@ -52,7 +52,7 @@ export type {
 	PermissionOutcome,
 	PermissionResultNotification,
 	PermissionToolCall,
-	// Plan types (local definitions matching SDK schema)
+	// Plan types (SDK exports)
 	Plan,
 	PlanEntry,
 	PlanEntryPriority,
