@@ -6,6 +6,7 @@ import type { ChatStoreActions } from "@/hooks/useSessionMutations";
 import {
 	type CliStatusPayload,
 	extractAvailableCommandsUpdate,
+	extractConfigOptionUpdate,
 	extractPlanUpdate,
 	extractSessionInfoUpdate,
 	extractSessionModeUpdate,
@@ -200,7 +201,10 @@ export function useSocket({
 				const notification = event.payload as SessionNotification;
 				const textChunk = extractTextChunk(notification);
 				if (textChunk?.role === "user") {
-					confirmOrAppendUserMessage(event.sessionId, textChunk.text);
+					confirmOrAppendUserMessage(event.sessionId, {
+						text: textChunk.text,
+						messageId: textChunk.messageId,
+					});
 				}
 				break;
 			}
@@ -264,6 +268,12 @@ export function useSocket({
 				const planUpdate = extractPlanUpdate(notification);
 				if (planUpdate) {
 					updateSessionMeta(event.sessionId, { plan: planUpdate.entries });
+				}
+				const configOptionUpdate = extractConfigOptionUpdate(notification);
+				if (configOptionUpdate) {
+					updateSessionMeta(event.sessionId, {
+						configOptions: configOptionUpdate.configOptions,
+					});
 				}
 				break;
 			}

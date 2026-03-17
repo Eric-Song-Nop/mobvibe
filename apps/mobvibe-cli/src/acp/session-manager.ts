@@ -20,12 +20,14 @@ import {
 	type PermissionDecisionPayload,
 	type PermissionRequestPayload,
 	resolveWorktreeBranchName,
+	type SessionConfigOption,
 	type SessionEvent,
 	type SessionEventKind,
 	type SessionEventsParams,
 	type SessionEventsResponse,
 	type SessionSummary,
 	type SessionsChangedPayload,
+	type SetSessionConfigOptionRequest,
 	type StopReason,
 	sanitizeWorktreeBranchForPath,
 } from "@mobvibe/shared";
@@ -58,6 +60,7 @@ type SessionRecord = {
 	modelName?: string;
 	modeId?: string;
 	modeName?: string;
+	configOptions?: SessionConfigOption[];
 	availableModes?: Array<{ id: string; name: string }>;
 	availableModels?: Array<{
 		id: string;
@@ -199,6 +202,57 @@ const resolveModeState = (modes?: SessionModeState | null) => {
 	};
 };
 
+const flattenConfigSelectOptions = (
+	options: Extract<SessionConfigOption, { type: "select" }>["options"],
+) =>
+	options.flatMap((option) =>
+		"options" in option ? option.options : [option],
+	);
+
+const resolveConfigOptionsState = (
+	configOptions?: SessionConfigOption[] | null,
+) => {
+	const modeOption = configOptions?.find(
+		(option) => option.category === "mode" && option.type === "select",
+	);
+	const modelOption = configOptions?.find(
+		(option) => option.category === "model" && option.type === "select",
+	);
+
+	return {
+		modeId: modeOption?.type === "select" ? modeOption.currentValue : undefined,
+		modeName:
+			modeOption?.type === "select"
+				? flattenConfigSelectOptions(modeOption.options).find(
+						(option) => option.value === modeOption.currentValue,
+					)?.name
+				: undefined,
+		availableModes:
+			modeOption?.type === "select"
+				? flattenConfigSelectOptions(modeOption.options).map((option) => ({
+						id: option.value,
+						name: option.name,
+					}))
+				: undefined,
+		modelId:
+			modelOption?.type === "select" ? modelOption.currentValue : undefined,
+		modelName:
+			modelOption?.type === "select"
+				? flattenConfigSelectOptions(modelOption.options).find(
+						(option) => option.value === modelOption.currentValue,
+					)?.name
+				: undefined,
+		availableModels:
+			modelOption?.type === "select"
+				? flattenConfigSelectOptions(modelOption.options).map((option) => ({
+						id: option.value,
+						name: option.name,
+						description: option.description ?? undefined,
+					}))
+				: undefined,
+	};
+};
+
 const createCapabilityNotSupportedError = (message: string) =>
 	new AppError(
 		createErrorDetail({
@@ -216,6 +270,35 @@ const isValidWorkspacePath = async (cwd: string): Promise<boolean> => {
 		return stats.isDirectory();
 	} catch {
 		return false;
+	}
+};
+
+const applyConfigOptionsToRecord = (
+	record: SessionRecord,
+	configOptions?: SessionConfigOption[] | null,
+) => {
+	record.configOptions = configOptions ?? undefined;
+	if (!configOptions) {
+		return;
+	}
+	const state = resolveConfigOptionsState(configOptions);
+	if (state.modeId !== undefined) {
+		record.modeId = state.modeId;
+	}
+	if (state.modeName !== undefined) {
+		record.modeName = state.modeName;
+	}
+	if (state.availableModes !== undefined) {
+		record.availableModes = state.availableModes;
+	}
+	if (state.modelId !== undefined) {
+		record.modelId = state.modelId;
+	}
+	if (state.modelName !== undefined) {
+		record.modelName = state.modelName;
+	}
+	if (state.availableModels !== undefined) {
+		record.availableModels = state.availableModels;
 	}
 };
 
@@ -859,6 +942,7 @@ export class SessionManager {
 			const { modeId, modeName, availableModes } = resolveModeState(
 				session.modes,
 			);
+			const configOptions = session.configOptions ?? undefined;
 
 			// Pin title when explicitly provided by the user
 			const hasExplicitTitle = !!options?.title;
@@ -897,12 +981,14 @@ export class SessionManager {
 				modelName,
 				modeId,
 				modeName,
+				configOptions,
 				availableModes,
 				availableModels,
 				availableCommands: undefined,
 				revision,
 				isTitlePinned: hasExplicitTitle,
 			};
+			applyConfigOptionsToRecord(record, configOptions);
 			record.unsubscribe = connection.onSessionUpdate(
 				(notification: SessionNotification) => {
 					logger.debug(
@@ -1175,6 +1261,77 @@ export class SessionManager {
 		return summary;
 	}
 
+	async setSessionConfigOption(
+		params: SetSessionConfigOptionRequest,
+	): Promise<SessionSummary> {
+		const record = this.sessions.get(params.sessionId);
+		if (!record) {
+			throw new AppError(
+				createErrorDetail({
+					code: "SESSION_NOT_FOUND",
+					message: "Session not found",
+					retryable: false,
+					scope: "session",
+				}),
+				404,
+			);
+		}
+		if (!record.configOptions || record.configOptions.length === 0) {
+			throw createCapabilityNotSupportedError(
+				"Current agent does not expose session configuration options",
+			);
+		}
+
+		const selected = record.configOptions.find(
+			(option) => option.id === params.configId,
+		);
+		if (!selected) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Invalid session config option",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		const isBooleanValue = typeof params.value === "boolean";
+		if (selected.type === "boolean" && !isBooleanValue) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Config option requires a boolean value",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		if (selected.type === "select" && isBooleanValue) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Config option requires a select value",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+
+		const response = await record.connection.setSessionConfigOption(params);
+		applyConfigOptionsToRecord(record, response.configOptions);
+		record.updatedAt = new Date();
+		const summary = this.buildSummary(record);
+		this.emitSessionsChanged({
+			added: [],
+			updated: [summary],
+			removed: [],
+		});
+		return summary;
+	}
+
 	async cancelSession(sessionId: string): Promise<boolean> {
 		const record = this.sessions.get(sessionId);
 		if (!record) {
@@ -1186,11 +1343,39 @@ export class SessionManager {
 		return true;
 	}
 
-	async closeSession(sessionId: string): Promise<boolean> {
+	async closeSession(sessionId: string): Promise<SessionSummary | false> {
 		const record = this.sessions.get(sessionId);
 		if (!record) {
 			return false;
 		}
+		if (!record.connection.supportsSessionClose()) {
+			throw createCapabilityNotSupportedError(
+				"Current agent does not support session closing",
+			);
+		}
+		await record.connection.closeSession(sessionId);
+		if (record.cwd) {
+			this.discoveredSessions.set(sessionId, {
+				sessionId,
+				cwd: record.cwd,
+				workspaceRootCwd: record.workspaceRootCwd,
+				title: record.title,
+				updatedAt: record.updatedAt.toISOString(),
+				_meta: record._meta,
+			});
+		}
+		this.walStore.saveDiscoveredSessions([
+			{
+				sessionId,
+				backendId: record.backendId,
+				cwd: record.cwd,
+				workspaceRootCwd: record.workspaceRootCwd,
+				title: record.title,
+				agentUpdatedAt: record.updatedAt.toISOString(),
+				discoveredAt: new Date().toISOString(),
+				isStale: false,
+			},
+		]);
 		try {
 			record.unsubscribe?.();
 			record.unsubscribeTerminal?.();
@@ -1204,20 +1389,40 @@ export class SessionManager {
 			logger.error({ err: error, sessionId }, "session_disconnect_failed");
 		}
 		this.emitSessionDetached(sessionId, "unknown");
+		record.isAttached = false;
+		const summary = this.buildSummary(record);
 		this.sessions.delete(sessionId);
 		this.emitSessionsChanged({
 			added: [],
-			updated: [],
-			removed: [sessionId],
+			updated: [summary],
+			removed: [],
 		});
-		return true;
+		return summary;
 	}
 
 	async closeAll(): Promise<void> {
-		const sessionIds = Array.from(this.sessions.keys());
+		const records = Array.from(this.sessions.values());
 		await Promise.all(
-			sessionIds.map((sessionId) => this.closeSession(sessionId)),
+			records.map(async (record) => {
+				try {
+					record.unsubscribe?.();
+					record.unsubscribeTerminal?.();
+				} catch (error) {
+					logger.error(
+						{ err: error, sessionId: record.sessionId },
+						"session_unsubscribe_failed",
+					);
+				}
+				this.cancelPermissionRequests(record.sessionId);
+				await record.connection.disconnect().catch((error) => {
+					logger.error(
+						{ err: error, sessionId: record.sessionId },
+						"session_disconnect_failed",
+					);
+				});
+			}),
 		);
+		this.sessions.clear();
 		// Also disconnect idle connections
 		for (const [, conn] of this.idleConnections) {
 			await conn.disconnect().catch(() => {});
@@ -1229,8 +1434,20 @@ export class SessionManager {
 	 * Archive a session: close if active, delete WAL messages, mark as archived.
 	 */
 	async archiveSession(sessionId: string): Promise<void> {
-		if (this.sessions.has(sessionId)) {
-			await this.closeSession(sessionId);
+		const record = this.sessions.get(sessionId);
+		if (record) {
+			try {
+				record.unsubscribe?.();
+				record.unsubscribeTerminal?.();
+			} catch (error) {
+				logger.error({ err: error, sessionId }, "session_unsubscribe_failed");
+			}
+			this.cancelPermissionRequests(sessionId);
+			await record.connection.disconnect().catch((error) => {
+				logger.error({ err: error, sessionId }, "session_disconnect_failed");
+			});
+			this.emitSessionDetached(sessionId, "unknown");
+			this.sessions.delete(sessionId);
 		}
 		this.walStore.archiveSession(sessionId);
 		this.discoveredSessions.delete(sessionId);
@@ -1243,9 +1460,24 @@ export class SessionManager {
 		sessionIds: string[],
 	): Promise<{ archivedCount: number }> {
 		await Promise.allSettled(
-			sessionIds
-				.filter((id) => this.sessions.has(id))
-				.map((id) => this.closeSession(id)),
+			sessionIds.map(async (sessionId) => {
+				const record = this.sessions.get(sessionId);
+				if (!record) {
+					return;
+				}
+				try {
+					record.unsubscribe?.();
+					record.unsubscribeTerminal?.();
+				} catch (error) {
+					logger.error({ err: error, sessionId }, "session_unsubscribe_failed");
+				}
+				this.cancelPermissionRequests(sessionId);
+				await record.connection.disconnect().catch((error) => {
+					logger.error({ err: error, sessionId }, "session_disconnect_failed");
+				});
+				this.emitSessionDetached(sessionId, "unknown");
+				this.sessions.delete(sessionId);
+			}),
 		);
 		const archivedCount = this.walStore.bulkArchiveSessions(sessionIds);
 		for (const id of sessionIds) {
@@ -1405,9 +1637,28 @@ export class SessionManager {
 		// Check if session is already loaded
 		const existing = this.sessions.get(sessionId);
 		if (existing) {
-			logger.debug({ sessionId }, "load_session_already_loaded");
-			this.emitSessionAttached(sessionId, true);
-			return this.buildSummary(existing);
+			if (!existing.isAttached) {
+				try {
+					existing.unsubscribe?.();
+					existing.unsubscribeTerminal?.();
+				} catch (error) {
+					logger.error(
+						{ err: error, sessionId },
+						"load_session_existing_cleanup_failed",
+					);
+				}
+				await existing.connection.disconnect().catch((error) => {
+					logger.error(
+						{ err: error, sessionId },
+						"load_session_existing_disconnect_failed",
+					);
+				});
+				this.sessions.delete(sessionId);
+			} else {
+				logger.debug({ sessionId }, "load_session_already_loaded");
+				this.emitSessionAttached(sessionId, true);
+				return this.buildSummary(existing);
+			}
 		}
 
 		const backend = this.resolveBackend(backendId);
@@ -1498,6 +1749,7 @@ export class SessionManager {
 			const { modeId, modeName, availableModes } = resolveModeState(
 				response.modes,
 			);
+			const configOptions = response.configOptions ?? undefined;
 			const discovered = this.discoveredSessions.get(sessionId);
 			const projectContext = await resolveGitProjectContext(cwd);
 
@@ -1522,12 +1774,14 @@ export class SessionManager {
 				modelName,
 				modeId,
 				modeName,
+				configOptions,
 				availableModes,
 				availableModels,
 				availableCommands: undefined,
 				revision,
 				isTitlePinned: walPinned,
 			};
+			applyConfigOptionsToRecord(record, configOptions);
 
 			recordRef = record;
 			record.unsubscribe = unsubscribe;
@@ -1606,6 +1860,7 @@ export class SessionManager {
 		const { modeId, modeName, availableModes } = resolveModeState(
 			response.modes,
 		);
+		const configOptions = response.configOptions ?? undefined;
 		const agentInfo = existing.connection.getAgentInfo();
 
 		existing.cwd = cwd;
@@ -1619,6 +1874,7 @@ export class SessionManager {
 		existing.modeId = modeId;
 		existing.modeName = modeName;
 		existing.availableModes = availableModes;
+		applyConfigOptionsToRecord(existing, configOptions);
 		existing.updatedAt = new Date();
 
 		const summary = this.buildSummary(existing);
@@ -1682,6 +1938,10 @@ export class SessionManager {
 			if (update.availableCommands) {
 				record.availableCommands = update.availableCommands;
 			}
+			return;
+		}
+		if (update.sessionUpdate === "config_option_update") {
+			applyConfigOptionsToRecord(record, update.configOptions);
 		}
 	}
 
@@ -1840,6 +2100,7 @@ export class SessionManager {
 			modelName: record.modelName,
 			modeId: record.modeId,
 			modeName: record.modeName,
+			configOptions: record.configOptions,
 			availableModes: record.availableModes,
 			availableModels: record.availableModels,
 			availableCommands: record.availableCommands,
@@ -1850,7 +2111,7 @@ export class SessionManager {
 			isTitlePinned: record.isTitlePinned,
 			worktreeSourceCwd: record.worktreeSourceCwd,
 			worktreeBranch: record.worktreeBranch,
-			isAttached: true,
+			isAttached: record.isAttached !== false,
 		};
 	}
 }

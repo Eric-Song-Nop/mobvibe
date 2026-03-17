@@ -6,6 +6,7 @@ import type {
 	PermissionOutcome,
 	PermissionToolCall,
 	PlanEntry,
+	SessionConfigOption,
 	SessionModelOption,
 	SessionModeOption,
 	SessionSummary,
@@ -20,6 +21,10 @@ import { persist } from "zustand/middleware";
 import i18n from "@/i18n";
 import { createDefaultContentBlocks } from "./content-block-utils";
 import type { E2EEStatus } from "./e2ee";
+import {
+	deriveModelStateFromConfigOptions,
+	deriveModeStateFromConfigOptions,
+} from "./session-config-options";
 import { getStorageAdapter } from "./storage-adapter";
 
 export type ChatRole = "user" | "assistant";
@@ -143,6 +148,7 @@ export type ChatSession = {
 	modelName?: string;
 	modeId?: string;
 	modeName?: string;
+	configOptions?: SessionConfigOption[];
 	availableModes?: SessionModeOption[];
 	availableModels?: SessionModelOption[];
 	availableCommands?: AvailableCommand[];
@@ -272,6 +278,7 @@ type ChatState = {
 			modelName?: string;
 			modeId?: string;
 			modeName?: string;
+			configOptions?: SessionConfigOption[];
 			availableModes?: SessionModeOption[];
 			availableModels?: SessionModelOption[];
 			availableCommands?: AvailableCommand[];
@@ -307,6 +314,7 @@ type ChatState = {
 				| "modelName"
 				| "modeId"
 				| "modeName"
+				| "configOptions"
 				| "availableModes"
 				| "availableModels"
 				| "availableCommands"
@@ -329,7 +337,15 @@ type ChatState = {
 		},
 	) => void;
 	/** Confirm a provisional user message or append a new one (backfill) */
-	confirmOrAppendUserMessage: (sessionId: string, text: string) => void;
+	confirmOrAppendUserMessage: (
+		sessionId: string,
+		payload: string | { text: string; messageId?: string },
+	) => void;
+	reconcileUserMessageId: (
+		sessionId: string,
+		optimisticMessageId: string,
+		acknowledgedMessageId: string,
+	) => void;
 	markUserMessageFailed: (sessionId: string, messageId: string) => void;
 	addStatusMessage: (
 		sessionId: string,
@@ -557,6 +573,7 @@ const createSessionState = (
 		modelName?: string;
 		modeId?: string;
 		modeName?: string;
+		configOptions?: SessionConfigOption[];
 		availableModes?: SessionModeOption[];
 		availableModels?: SessionModelOption[];
 		availableCommands?: AvailableCommand[];
@@ -592,6 +609,7 @@ const createSessionState = (
 	modelName: options?.modelName,
 	modeId: options?.modeId,
 	modeName: options?.modeName,
+	configOptions: options?.configOptions,
 	availableModes: options?.availableModes,
 	availableModels: options?.availableModels,
 	availableCommands: options?.availableCommands,
@@ -643,6 +661,7 @@ const mergeSessionFromSummary = (
 		modelName?: string | null;
 		modeId?: string | null;
 		modeName?: string | null;
+		configOptions?: ChatSession["configOptions"];
 		availableModes?: ChatSession["availableModes"];
 		availableModels?: ChatSession["availableModels"];
 		availableCommands?: ChatSession["availableCommands"];
@@ -674,6 +693,10 @@ const mergeSessionFromSummary = (
 					: {}),
 			}
 		: {};
+	const nextConfigOptions = summary.configOptions ?? baseSession.configOptions;
+	const derivedModeState = deriveModeStateFromConfigOptions(nextConfigOptions);
+	const derivedModelState =
+		deriveModelStateFromConfigOptions(nextConfigOptions);
 
 	return {
 		...baseSession,
@@ -686,12 +709,22 @@ const mergeSessionFromSummary = (
 		cwd: summary.cwd ?? baseSession.cwd,
 		workspaceRootCwd: summary.workspaceRootCwd ?? baseSession.workspaceRootCwd,
 		agentName: summary.agentName ?? baseSession.agentName,
-		modelId: summary.modelId ?? baseSession.modelId,
-		modelName: summary.modelName ?? baseSession.modelName,
-		modeId: summary.modeId ?? baseSession.modeId,
-		modeName: summary.modeName ?? baseSession.modeName,
-		availableModes: summary.availableModes ?? baseSession.availableModes,
-		availableModels: summary.availableModels ?? baseSession.availableModels,
+		modelId:
+			derivedModelState.modelId ?? summary.modelId ?? baseSession.modelId,
+		modelName:
+			derivedModelState.modelName ?? summary.modelName ?? baseSession.modelName,
+		modeId: derivedModeState.modeId ?? summary.modeId ?? baseSession.modeId,
+		modeName:
+			derivedModeState.modeName ?? summary.modeName ?? baseSession.modeName,
+		configOptions: nextConfigOptions,
+		availableModes:
+			derivedModeState.availableModes ??
+			summary.availableModes ??
+			baseSession.availableModes,
+		availableModels:
+			derivedModelState.availableModels ??
+			summary.availableModels ??
+			baseSession.availableModels,
 		availableCommands:
 			summary.availableCommands ?? baseSession.availableCommands,
 		machineId: summary.machineId ?? baseSession.machineId,
@@ -920,6 +953,7 @@ export const useChatStore = create<ChatState>()(
 									modelName: added.modelName,
 									modeId: added.modeId,
 									modeName: added.modeName,
+									configOptions: added.configOptions,
 									availableModes: added.availableModes,
 									availableModels: added.availableModels,
 									availableCommands: added.availableCommands,
@@ -1035,6 +1069,7 @@ export const useChatStore = create<ChatState>()(
 								cwd: summary.cwd,
 								availableModes: summary.availableModes,
 								availableModels: summary.availableModels,
+								configOptions: summary.configOptions,
 								availableCommands: summary.availableCommands,
 								machineId: summary.machineId,
 								worktreeSourceCwd: summary.worktreeSourceCwd,
@@ -1193,6 +1228,33 @@ export const useChatStore = create<ChatState>()(
 					if (payload.modeName !== undefined) {
 						nextSession.modeName = payload.modeName;
 					}
+					if (payload.configOptions !== undefined) {
+						nextSession.configOptions = payload.configOptions;
+						const derivedModeState = deriveModeStateFromConfigOptions(
+							payload.configOptions,
+						);
+						const derivedModelState = deriveModelStateFromConfigOptions(
+							payload.configOptions,
+						);
+						if (derivedModeState.modeId !== undefined) {
+							nextSession.modeId = derivedModeState.modeId;
+						}
+						if (derivedModeState.modeName !== undefined) {
+							nextSession.modeName = derivedModeState.modeName;
+						}
+						if (derivedModeState.availableModes !== undefined) {
+							nextSession.availableModes = derivedModeState.availableModes;
+						}
+						if (derivedModelState.modelId !== undefined) {
+							nextSession.modelId = derivedModelState.modelId;
+						}
+						if (derivedModelState.modelName !== undefined) {
+							nextSession.modelName = derivedModelState.modelName;
+						}
+						if (derivedModelState.availableModels !== undefined) {
+							nextSession.availableModels = derivedModelState.availableModels;
+						}
+					}
 					if (payload.availableModes !== undefined) {
 						nextSession.availableModes = payload.availableModes;
 					}
@@ -1250,10 +1312,37 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
-			confirmOrAppendUserMessage: (sessionId, text) =>
+			confirmOrAppendUserMessage: (sessionId, payload) =>
 				set((state: ChatState) => {
 					const session = state.sessions[sessionId];
 					if (!session) return state;
+					const normalizedPayload =
+						typeof payload === "string" ? { text: payload } : payload;
+					if (normalizedPayload.messageId) {
+						const exactMatchIndex = session.messages.findIndex(
+							(message) =>
+								message.id === normalizedPayload.messageId &&
+								message.role === "user" &&
+								message.kind === "text",
+						);
+						if (exactMatchIndex !== -1) {
+							const messages = [...session.messages];
+							const message = messages[exactMatchIndex];
+							if (message.role === "user" && message.kind === "text") {
+								messages[exactMatchIndex] = {
+									...message,
+									provisional: false,
+									failed: false,
+								};
+							}
+							return {
+								sessions: {
+									...state.sessions,
+									[sessionId]: { ...session, messages },
+								},
+							};
+						}
+					}
 
 					// Search backward for a provisional user message (stop at assistant boundary)
 					for (let i = session.messages.length - 1; i >= 0; i--) {
@@ -1262,7 +1351,12 @@ export const useChatStore = create<ChatState>()(
 						if (msg.role === "user" && msg.kind === "text" && msg.provisional) {
 							// Confirm the optimistic message
 							const messages = [...session.messages];
-							messages[i] = { ...msg, provisional: false, failed: false };
+							messages[i] = {
+								...msg,
+								id: normalizedPayload.messageId ?? msg.id,
+								provisional: false,
+								failed: false,
+							};
 							return {
 								sessions: {
 									...state.sessions,
@@ -1274,11 +1368,11 @@ export const useChatStore = create<ChatState>()(
 
 					// No provisional found → append new message (backfill scenario)
 					const newMsg: TextMessage = {
-						id: createLocalId(),
+						id: normalizedPayload.messageId ?? createLocalId(),
 						role: "user",
 						kind: "text",
-						content: text,
-						contentBlocks: createDefaultContentBlocks(text),
+						content: normalizedPayload.text,
+						contentBlocks: createDefaultContentBlocks(normalizedPayload.text),
 						createdAt: new Date().toISOString(),
 						isStreaming: false,
 					};
@@ -1289,6 +1383,46 @@ export const useChatStore = create<ChatState>()(
 								...session,
 								messages: [...session.messages, newMsg],
 							},
+						},
+					};
+				}),
+			reconcileUserMessageId: (
+				sessionId,
+				optimisticMessageId,
+				acknowledgedMessageId,
+			) =>
+				set((state: ChatState) => {
+					if (optimisticMessageId === acknowledgedMessageId) {
+						return state;
+					}
+					const session = state.sessions[sessionId];
+					if (!session) {
+						return state;
+					}
+					let updated = false;
+					const messages = session.messages.map((message) => {
+						if (
+							message.id !== optimisticMessageId ||
+							message.role !== "user" ||
+							message.kind !== "text"
+						) {
+							return message;
+						}
+						updated = true;
+						return {
+							...message,
+							id: acknowledgedMessageId,
+							provisional: false,
+							failed: false,
+						};
+					});
+					if (!updated) {
+						return state;
+					}
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: { ...session, messages },
 						},
 					};
 				}),

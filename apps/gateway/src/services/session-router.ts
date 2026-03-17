@@ -3,6 +3,7 @@ import type {
 	ArchiveSessionParams,
 	BulkArchiveSessionsParams,
 	CancelSessionParams,
+	CloseSessionParams,
 	CreateSessionParams,
 	DiscoverSessionsRpcParams,
 	DiscoverSessionsRpcResult,
@@ -46,13 +47,14 @@ import type {
 	RpcRequest,
 	RpcResponse,
 	SendMessageParams,
+	SendMessageResult,
 	SessionEventsParams,
 	SessionEventsResponse,
 	SessionFsFilePreview,
 	SessionSummary,
+	SetSessionConfigOptionParams,
 	SetSessionModelParams,
 	SetSessionModeParams,
-	StopReason,
 } from "@mobvibe/shared";
 import type { Socket } from "socket.io";
 import { logger } from "../lib/logger.js";
@@ -63,6 +65,16 @@ type PendingRpc<T> = {
 	resolve: (result: T) => void;
 	reject: (error: Error) => void;
 	timeout: NodeJS.Timeout;
+};
+
+type RpcError = Error & {
+	detail?: {
+		code: string;
+		message: string;
+		retryable: boolean;
+		scope: string;
+		detail?: string;
+	};
 };
 
 const RPC_TIMEOUT = 120000; // 2 minutes for long operations like message sending
@@ -119,7 +131,8 @@ export class SessionRouter {
 				},
 				"rpc_response_error",
 			);
-			const error = new Error(response.error.message);
+			const error = new Error(response.error.message) as RpcError;
+			error.detail = response.error;
 			if (response.error.detail) {
 				error.cause = response.error.detail;
 			}
@@ -347,6 +360,34 @@ export class SessionRouter {
 	}
 
 	/**
+	 * Close a session remotely while preserving local history/session entry.
+	 */
+	async closeSession(
+		params: CloseSessionParams,
+		userId: string,
+	): Promise<SessionSummary> {
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+
+		logger.info(
+			{ sessionId: params.sessionId, userId },
+			"session_close_rpc_start",
+		);
+
+		const result = await this.sendRpc<CloseSessionParams, SessionSummary>(
+			cli.socket,
+			"rpc:session:close",
+			params,
+		);
+
+		logger.info(
+			{ sessionId: params.sessionId, userId },
+			"session_close_rpc_complete",
+		);
+
+		return result;
+	}
+
+	/**
 	 * Set session mode.
 	 * @param params - Session mode parameters
 	 * @param userId - User ID for authorization
@@ -407,6 +448,41 @@ export class SessionRouter {
 	}
 
 	/**
+	 * Set a protocol-native session configuration option.
+	 */
+	async setSessionConfigOption(
+		params: SetSessionConfigOptionParams,
+		userId: string,
+	): Promise<SessionSummary> {
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+
+		logger.info(
+			{
+				sessionId: params.sessionId,
+				configId: params.configId,
+				userId,
+			},
+			"session_config_rpc_start",
+		);
+
+		const result = await this.sendRpc<
+			SetSessionConfigOptionParams,
+			SessionSummary
+		>(cli.socket, "rpc:session:config", params);
+
+		logger.info(
+			{
+				sessionId: params.sessionId,
+				configId: params.configId,
+				userId,
+			},
+			"session_config_rpc_complete",
+		);
+
+		return result;
+	}
+
+	/**
 	 * Send a message to a session.
 	 * @param params - Message send parameters
 	 * @param userId - User ID for authorization
@@ -414,7 +490,7 @@ export class SessionRouter {
 	async sendMessage(
 		params: SendMessageParams,
 		userId: string,
-	): Promise<{ stopReason: StopReason }> {
+	): Promise<SendMessageResult> {
 		const cli = this.resolveCliForSession(params.sessionId, userId);
 
 		logger.info(
@@ -426,7 +502,7 @@ export class SessionRouter {
 			"message_send_rpc_start",
 		);
 
-		return this.sendRpc<SendMessageParams, { stopReason: StopReason }>(
+		return this.sendRpc<SendMessageParams, SendMessageResult>(
 			cli.socket,
 			"rpc:message:send",
 			params,

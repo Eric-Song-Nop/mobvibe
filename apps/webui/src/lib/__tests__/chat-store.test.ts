@@ -226,6 +226,101 @@ describe("chat-store", () => {
 				expect(msgs[0].provisional).toBe(true);
 			}
 		});
+
+		it("matches an optimistic user message by messageId", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.addUserMessage("s1", "hello", {
+				provisional: true,
+				messageId: "client-msg-1",
+			});
+
+			store.confirmOrAppendUserMessage("s1", {
+				text: "hello",
+				messageId: "client-msg-1",
+			});
+
+			const msg = useChatStore.getState().sessions.s1.messages[0];
+			expect(msg.id).toBe("client-msg-1");
+			if (msg.kind === "text") {
+				expect(msg.provisional).toBe(false);
+				expect(msg.failed).toBe(false);
+			}
+		});
+	});
+
+	describe("reconcileUserMessageId", () => {
+		it("remaps a provisional user message to the ACP userMessageId", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.addUserMessage("s1", "hello", {
+				provisional: true,
+				messageId: "client-msg-1",
+			});
+
+			store.reconcileUserMessageId("s1", "client-msg-1", "agent-user-1");
+
+			const msg = useChatStore.getState().sessions.s1.messages[0];
+			expect(msg.id).toBe("agent-user-1");
+			if (msg.kind === "text") {
+				expect(msg.provisional).toBe(false);
+				expect(msg.failed).toBe(false);
+			}
+		});
+	});
+
+	describe("configOptions", () => {
+		it("derives mode and model selectors from ACP config options", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+
+			store.updateSessionMeta("s1", {
+				configOptions: [
+					{
+						id: "mode",
+						name: "Mode",
+						type: "select",
+						category: "mode",
+						currentValue: "plan",
+						options: [
+							{ value: "plan", name: "Plan" },
+							{ value: "build", name: "Build" },
+						],
+					},
+					{
+						id: "model",
+						name: "Model",
+						type: "select",
+						category: "model",
+						currentValue: "gpt-5.4",
+						options: [
+							{
+								value: "gpt-5.4",
+								name: "GPT-5.4",
+								description: "Primary model",
+							},
+						],
+					},
+				],
+			});
+
+			const session = useChatStore.getState().sessions.s1;
+			expect(session.modeId).toBe("plan");
+			expect(session.modeName).toBe("Plan");
+			expect(session.availableModes).toEqual([
+				{ id: "plan", name: "Plan" },
+				{ id: "build", name: "Build" },
+			]);
+			expect(session.modelId).toBe("gpt-5.4");
+			expect(session.modelName).toBe("GPT-5.4");
+			expect(session.availableModels).toEqual([
+				{
+					id: "gpt-5.4",
+					name: "GPT-5.4",
+					description: "Primary model",
+				},
+			]);
+		});
 	});
 
 	// ---------------------------------------------------------------------------

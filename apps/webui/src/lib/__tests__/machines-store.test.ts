@@ -19,12 +19,12 @@ describe("machines-store", () => {
 			.updateMachine({ machineId: "machine-1", connected: true });
 
 		useMachinesStore.getState().updateBackendCapabilities("machine-1", {
-			"backend-a": { list: true, load: true },
+			"backend-a": { close: false, list: true, load: true },
 		});
 
 		const machine = useMachinesStore.getState().machines["machine-1"];
 		expect(machine?.backendCapabilities).toEqual({
-			"backend-a": { list: true, load: true },
+			"backend-a": { close: false, list: true, load: true },
 		});
 	});
 
@@ -34,16 +34,16 @@ describe("machines-store", () => {
 			.updateMachine({ machineId: "machine-1", connected: true });
 
 		useMachinesStore.getState().updateBackendCapabilities("machine-1", {
-			"backend-a": { list: true, load: true },
+			"backend-a": { close: false, list: true, load: true },
 		});
 		useMachinesStore.getState().updateBackendCapabilities("machine-1", {
-			"backend-b": { list: true, load: false },
+			"backend-b": { close: false, list: true, load: false },
 		});
 
 		const machine = useMachinesStore.getState().machines["machine-1"];
 		expect(machine?.backendCapabilities).toEqual({
-			"backend-a": { list: true, load: true },
-			"backend-b": { list: true, load: false },
+			"backend-a": { close: false, list: true, load: true },
+			"backend-b": { close: false, list: true, load: false },
 		});
 	});
 
@@ -52,7 +52,7 @@ describe("machines-store", () => {
 			.getState()
 			.updateMachine({ machineId: "machine-1", connected: true });
 		useMachinesStore.getState().updateBackendCapabilities("machine-1", {
-			"backend-a": { list: true, load: false },
+			"backend-a": { close: false, list: true, load: false },
 		});
 
 		useMachinesStore
@@ -61,7 +61,7 @@ describe("machines-store", () => {
 
 		const after = useMachinesStore.getState().machines["machine-1"];
 		expect(after?.backendCapabilities).toEqual({
-			"backend-a": { list: true, load: false },
+			"backend-a": { close: false, list: true, load: false },
 		});
 	});
 
@@ -70,7 +70,7 @@ describe("machines-store", () => {
 			.getState()
 			.updateMachine({ machineId: "machine-1", connected: true });
 		useMachinesStore.getState().updateBackendCapabilities("machine-1", {
-			"backend-a": { list: true, load: true },
+			"backend-a": { close: false, list: true, load: true },
 		});
 
 		// Simulate a cli:status with new backend capabilities
@@ -78,14 +78,14 @@ describe("machines-store", () => {
 			machineId: "machine-1",
 			connected: true,
 			backendCapabilities: {
-				"backend-b": { list: false, load: false },
+				"backend-b": { close: false, list: false, load: false },
 			},
 		});
 
 		const machine = useMachinesStore.getState().machines["machine-1"];
 		expect(machine?.backendCapabilities).toEqual({
-			"backend-a": { list: true, load: true },
-			"backend-b": { list: false, load: false },
+			"backend-a": { close: false, list: true, load: true },
+			"backend-b": { close: false, list: false, load: false },
 		});
 	});
 
@@ -94,7 +94,7 @@ describe("machines-store", () => {
 			.getState()
 			.updateMachine({ machineId: "machine-1", connected: true });
 		useMachinesStore.getState().updateBackendCapabilities("machine-1", {
-			"backend-a": { list: true, load: true },
+			"backend-a": { close: false, list: true, load: true },
 		});
 
 		useMachinesStore.getState().syncMachines([
@@ -107,7 +107,7 @@ describe("machines-store", () => {
 
 		const machine = useMachinesStore.getState().machines["machine-1"];
 		expect(machine?.backendCapabilities).toEqual({
-			"backend-a": { list: true, load: true },
+			"backend-a": { close: false, list: true, load: true },
 		});
 	});
 
@@ -117,8 +117,8 @@ describe("machines-store", () => {
 				machineId: "m1",
 				connected: true,
 				backendCapabilities: {
-					"backend-a": { list: true, load: true },
-					"backend-b": { list: true, load: false },
+					"backend-a": { close: false, list: true, load: true },
+					"backend-b": { close: false, list: true, load: false },
 				},
 			};
 			expect(getBackendCapability(machine, "backend-a", "load")).toBe(true);
@@ -130,7 +130,7 @@ describe("machines-store", () => {
 				machineId: "m1",
 				connected: true,
 				backendCapabilities: {
-					"backend-a": { list: true, load: true },
+					"backend-a": { close: false, list: true, load: true },
 				},
 			};
 			expect(getBackendCapability(machine, "unknown", "load")).toBeUndefined();

@@ -38,6 +38,7 @@ import type {
 	SessionFsFilePreviewResponse,
 	SessionSummary,
 	SessionsResponse,
+	SetSessionConfigOptionRequest,
 } from "@mobvibe/shared";
 import { isErrorDetail } from "@mobvibe/shared";
 import { isInTauri } from "./auth";
@@ -339,6 +340,14 @@ export const cancelSession = async (payload: {
 		body: JSON.stringify(payload),
 	});
 
+export const closeSession = async (payload: {
+	sessionId: string;
+}): Promise<SessionSummary> =>
+	requestJson<SessionSummary>("/acp/session/close", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+
 export const setSessionMode = async (payload: {
 	sessionId: string;
 	modeId: string;
@@ -357,9 +366,18 @@ export const setSessionModel = async (payload: {
 		body: JSON.stringify(payload),
 	});
 
+export const setSessionConfigOption = async (
+	payload: SetSessionConfigOptionRequest,
+): Promise<SessionSummary> =>
+	requestJson<SessionSummary>("/acp/session/config-option", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+
 export const sendMessage = async (payload: {
 	sessionId: string;
 	prompt: ContentBlock[];
+	messageId?: string;
 }): Promise<SendMessageResult> => {
 	const encryptedPrompt = e2ee.encryptPayloadForSession(
 		payload.sessionId,

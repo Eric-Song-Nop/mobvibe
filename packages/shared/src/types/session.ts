@@ -1,4 +1,4 @@
-import type { AvailableCommand } from "./acp.js";
+import type { AvailableCommand, SessionConfigOption } from "./acp.js";
 import type { ErrorDetail } from "./errors.js";
 
 export type AcpConnectionState =
@@ -45,6 +45,7 @@ export type SessionSummary = {
 	modelName?: string;
 	modeId?: string;
 	modeName?: string;
+	configOptions?: SessionConfigOption[];
 	availableModes?: SessionModeOption[];
 	availableModels?: SessionModelOption[];
 	availableCommands?: AvailableCommand[];
@@ -121,6 +122,7 @@ export type AcpSessionInfo = {
 
 /** Agent session capabilities */
 export type AgentSessionCapabilities = {
+	close: boolean;
 	list: boolean;
 	load: boolean;
 };
