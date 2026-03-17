@@ -18,15 +18,16 @@
 		"test:e2e": "playwright test",
 		"dev:tauri": "tauri dev",
 		"build:tauri": "tauri build",
-		"android:init": "tauri android init",
-		"android:dev": "tauri android dev",
+		"android:init": "tauri android init && node scripts/patch-android-project.mjs",
+		"android:dev": "node scripts/patch-android-project.mjs && tauri android dev",
+		"android:build": "node scripts/patch-android-project.mjs && tauri android build",
 		"ios:init": "tauri ios init && node scripts/patch-ios-project.mjs",
 		"ios:dev": "node scripts/patch-ios-project.mjs && tauri ios dev",
 		"ios:build": "node scripts/clean-ios-build-output.mjs && node scripts/patch-ios-project.mjs && tauri ios build",
 		"ios:build:sim": "node scripts/clean-ios-build-output.mjs && node scripts/patch-ios-project.mjs && tauri ios build --target aarch64-sim",
 		"ios:build:testflight": "node scripts/clean-ios-build-output.mjs && node scripts/patch-ios-project.mjs && tauri ios build --export-method release-testing",
 		"ios:build:app-store": "node scripts/clean-ios-build-output.mjs && node scripts/patch-ios-project.mjs && tauri ios build --export-method app-store-connect",
-		"postinstall": "node scripts/postinstall.mjs"
+		"postinstall": "node scripts/postinstall.mjs && node scripts/patch-android-project.mjs --if-present"
 	},
 	"dependencies": {
 		"@base-ui/react": "^1.0.0",
