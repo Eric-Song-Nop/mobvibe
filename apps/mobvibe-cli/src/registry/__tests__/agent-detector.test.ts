@@ -107,7 +107,7 @@ describe("detectAgents", () => {
 			label: "Test NPX Agent",
 			icon: "https://example.com/icon.svg",
 			description: "An npx agent",
-			command: "npx",
+			command: "/usr/bin/npx",
 			args: ["-y", "@test/agent@1.0.0", "--acp"],
 			envOverrides: { DISABLE_UPDATE: "1" },
 		});
@@ -133,7 +133,7 @@ describe("detectAgents", () => {
 			label: "Test Binary Agent",
 			icon: undefined,
 			description: "A binary agent",
-			command: "test-binary-cmd",
+			command: "/usr/local/bin/test-binary-cmd",
 			args: ["serve"],
 			envOverrides: undefined,
 		});
@@ -167,7 +167,7 @@ describe("detectAgents", () => {
 			label: "Test UVX Agent",
 			icon: undefined,
 			description: "A uvx agent",
-			command: "uvx",
+			command: "/usr/bin/uvx",
 			args: ["test-uvx-pkg@0.1.0", "acp"],
 			envOverrides: undefined,
 		});
@@ -183,7 +183,7 @@ describe("detectAgents", () => {
 		const results = await detectAgents(makeRegistry([multiDistAgent]));
 
 		expect(results).toHaveLength(1);
-		expect(results[0].command).toBe("multi-bin");
+		expect(results[0].command).toBe("/usr/local/bin/multi-bin");
 	});
 
 	it("falls back to npx when binary not in PATH for multi-dist agents", async () => {
@@ -194,7 +194,7 @@ describe("detectAgents", () => {
 		const results = await detectAgents(makeRegistry([multiDistAgent]));
 
 		expect(results).toHaveLength(1);
-		expect(results[0].command).toBe("npx");
+		expect(results[0].command).toBe("/usr/bin/npx");
 		expect(results[0].args).toEqual(["-y", "@test/multi@3.0.0"]);
 	});
 
@@ -237,7 +237,7 @@ describe("detectAgents", () => {
 		const results = await detectAgents(makeRegistry([dotSlashAgent]));
 
 		expect(results).toHaveLength(1);
-		expect(results[0].command).toBe("dotslash-bin");
+		expect(results[0].command).toBe("/usr/bin/dotslash-bin");
 		expect(results[0].args).toEqual(["acp"]);
 	});
 
