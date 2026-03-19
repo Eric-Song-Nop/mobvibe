@@ -92,6 +92,21 @@ export type {
 	MobvibeUserConfig,
 	UserAgentConfig,
 } from "./types/agent-config.js";
+// Socket event types
+export type {
+	CliAuthOkPayload,
+	CliControlWireMessage,
+	CliControlWirePayloadMap,
+	CliControlWireType,
+	CliRedirectPayload,
+	CliToGatewayWireMessage,
+	CliToGatewayWirePayloadMap,
+	CliToGatewayWireType,
+	GatewayRpcResultMap,
+	GatewayToCliWireMessage,
+	GatewayToCliWirePayloadMap,
+	GatewayToCliWireType,
+} from "./types/cli-wire.js";
 // Error types
 export type {
 	ErrorCode,
@@ -134,7 +149,6 @@ export type {
 	SessionSummary,
 	SessionsChangedPayload,
 } from "./types/session.js";
-// Socket event types
 export type {
 	// HTTP API response types
 	AcpBackendsResponse,

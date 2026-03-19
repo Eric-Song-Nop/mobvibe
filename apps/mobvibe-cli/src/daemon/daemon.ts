@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { base64ToUint8, initCrypto } from "@mobvibe/shared";
@@ -12,11 +12,53 @@ import { WalCompactor, WalStore } from "../wal/index.js";
 import { SocketClient } from "./socket-client.js";
 import { buildBackgroundSpawnArgs } from "./spawn-utils.js";
 
+type DaemonControlState = {
+	logFile: string;
+	pid: number;
+	port: number;
+	startedAt: string;
+	token: string;
+};
+
 type DaemonStatus = {
 	running: boolean;
 	pid?: number;
 	connected?: boolean;
 	sessionCount?: number;
+	startedAt?: string;
+	logFile?: string;
+};
+
+const CONTROL_HOST = "127.0.0.1";
+const CONTROL_STATE_FILE = "daemon-state.json";
+const CONTROL_WAIT_TIMEOUT_MS = 5000;
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const toBearerToken = (token: string) => `Bearer ${token}`;
+
+const readLogSnapshot = async (logFile: string) => {
+	try {
+		const text = await fs.readFile(logFile, "utf8");
+		return {
+			cursor: text.length,
+			text,
+		};
+	} catch {
+		return {
+			cursor: 0,
+			text: "",
+		};
+	}
+};
+
+const tailLogLines = async (logFile: string, lines: number) => {
+	const snapshot = await readLogSnapshot(logFile);
+	const contentLines = snapshot.text.split("\n");
+	return {
+		cursor: snapshot.cursor,
+		text: contentLines.slice(-lines).join("\n"),
+	};
 };
 
 export class DaemonManager {
@@ -27,6 +69,35 @@ export class DaemonManager {
 		await fs.mkdir(this.config.logPath, { recursive: true });
 	}
 
+	private getStateFilePath() {
+		return path.join(this.config.homePath, CONTROL_STATE_FILE);
+	}
+
+	private async readStateFile(): Promise<DaemonControlState | null> {
+		try {
+			const content = await fs.readFile(this.getStateFilePath(), "utf8");
+			return JSON.parse(content) as DaemonControlState;
+		} catch {
+			return null;
+		}
+	}
+
+	private async writeStateFile(state: DaemonControlState) {
+		await fs.writeFile(
+			this.getStateFilePath(),
+			JSON.stringify(state, null, 2),
+			"utf8",
+		);
+	}
+
+	private async removeStateFile() {
+		try {
+			await fs.unlink(this.getStateFilePath());
+		} catch {
+			// ignore cleanup errors
+		}
+	}
+
 	async getPid(): Promise<number | null> {
 		try {
 			const content = await fs.readFile(this.config.pidFile, "utf8");
@@ -34,15 +105,8 @@ export class DaemonManager {
 			if (Number.isNaN(pid)) {
 				return null;
 			}
-			// Check if process is running
-			try {
-				process.kill(pid, 0);
-				return pid;
-			} catch {
-				// Process not running, clean up stale PID file
-				await this.removePidFile();
-				return null;
-			}
+			process.kill(pid, 0);
+			return pid;
 		} catch {
 			return null;
 		}
@@ -56,25 +120,100 @@ export class DaemonManager {
 		try {
 			await fs.unlink(this.config.pidFile);
 		} catch {
-			// Ignore errors
+			// ignore cleanup errors
 		}
 	}
 
-	async status(): Promise<DaemonStatus> {
-		const pid = await this.getPid();
-		if (!pid) {
-			return { running: false };
+	private async cleanupStaleState() {
+		await this.removeStateFile();
+		await this.removePidFile();
+	}
+
+	private async getRunningState(): Promise<DaemonControlState | null> {
+		const state = await this.readStateFile();
+		if (!state) {
+			return null;
 		}
-		return { running: true, pid };
+
+		try {
+			process.kill(state.pid, 0);
+			return state;
+		} catch {
+			logger.warn({ pid: state.pid }, "daemon_state_stale_cleanup");
+			await this.cleanupStaleState();
+			return null;
+		}
+	}
+
+	private async requestControl(
+		pathname: string,
+		init?: RequestInit,
+	): Promise<{
+		response: Response;
+		state: DaemonControlState;
+	} | null> {
+		const state = await this.getRunningState();
+		if (!state) {
+			return null;
+		}
+
+		try {
+			const response = await fetch(
+				`http://${CONTROL_HOST}:${state.port}${pathname}`,
+				{
+					...init,
+					headers: {
+						...(init?.headers ?? {}),
+						authorization: toBearerToken(state.token),
+					},
+				},
+			);
+
+			if (!response.ok) {
+				throw new Error(`Control request failed with ${response.status}`);
+			}
+
+			return { response, state };
+		} catch (error) {
+			logger.warn({ err: error, pathname }, "daemon_control_request_failed");
+			try {
+				process.kill(state.pid, 0);
+			} catch {
+				await this.cleanupStaleState();
+			}
+			return null;
+		}
+	}
+
+	private async waitForStateFile(expectedPid: number) {
+		const start = Date.now();
+		while (Date.now() - start < CONTROL_WAIT_TIMEOUT_MS) {
+			const state = await this.readStateFile();
+			if (state?.pid === expectedPid) {
+				return state;
+			}
+			await wait(100);
+		}
+		return null;
+	}
+
+	async status(): Promise<DaemonStatus> {
+		const control = await this.requestControl("/status");
+		if (!control) {
+			const pid = await this.getPid();
+			return pid ? { running: true, pid } : { running: false };
+		}
+
+		return (await control.response.json()) as DaemonStatus;
 	}
 
 	async start(options?: {
 		foreground?: boolean;
 		noE2ee?: boolean;
 	}): Promise<void> {
-		const existingPid = await this.getPid();
-		if (existingPid) {
-			logger.info({ pid: existingPid }, "daemon_already_running");
+		const status = await this.status();
+		if (status.running && status.pid) {
+			logger.info({ pid: status.pid }, "daemon_already_running");
 			return;
 		}
 
@@ -82,63 +221,47 @@ export class DaemonManager {
 
 		if (options?.foreground) {
 			await this.runForeground({ noE2ee: options.noE2ee });
-		} else {
-			await this.spawnBackground({ noE2ee: options?.noE2ee });
+			return;
 		}
+
+		await this.spawnBackground({ noE2ee: options?.noE2ee });
 	}
 
 	async stop(): Promise<void> {
-		const pid = await this.getPid();
-		if (!pid) {
-			logger.info("daemon_not_running");
-			return;
-		}
+		const control = await this.requestControl("/shutdown", {
+			method: "POST",
+		});
 
-		// Check if process actually exists
-		try {
-			process.kill(pid, 0);
-		} catch {
-			logger.warn("daemon_pid_missing_cleanup");
-			await this.removePidFile();
-			return;
-		}
-
-		try {
-			logger.info({ pid }, "daemon_stop_sigterm");
-			process.kill(pid, "SIGTERM");
-
-			// Wait for process to exit (up to 5 seconds)
-			const startTime = Date.now();
-			const timeout = 5000;
-
-			while (Date.now() - startTime < timeout) {
-				await new Promise((resolve) => setTimeout(resolve, 100));
+		if (control) {
+			logger.info({ pid: control.state.pid }, "daemon_shutdown_requested");
+			const start = Date.now();
+			while (Date.now() - start < CONTROL_WAIT_TIMEOUT_MS) {
 				try {
-					process.kill(pid, 0);
-					// Process still running
+					process.kill(control.state.pid, 0);
+					await wait(100);
 				} catch {
-					// Process exited
-					logger.info({ pid }, "daemon_stopped_gracefully");
-					await this.removePidFile();
+					await this.cleanupStaleState();
+					logger.info({ pid: control.state.pid }, "daemon_stopped_gracefully");
 					return;
 				}
 			}
+		}
 
-			// Process didn't exit gracefully, force kill
-			logger.warn({ pid }, "daemon_force_kill_start");
-			try {
-				process.kill(pid, "SIGKILL");
-				// Wait a bit for SIGKILL to take effect
-				await new Promise((resolve) => setTimeout(resolve, 500));
-				logger.warn({ pid }, "daemon_force_kill_complete");
-			} catch {
-				// Already dead
-				logger.info({ pid }, "daemon_already_stopped");
-			}
-			await this.removePidFile();
+		const pid = await this.getPid();
+		if (!pid) {
+			logger.info("daemon_not_running");
+			await this.cleanupStaleState();
+			return;
+		}
+
+		try {
+			logger.warn({ pid }, "daemon_stop_fallback_sigterm");
+			process.kill(pid, "SIGTERM");
+			await wait(500);
+			await this.cleanupStaleState();
 		} catch (error) {
-			logger.error({ err: error }, "daemon_stop_error");
-			await this.removePidFile();
+			logger.error({ err: error, pid }, "daemon_stop_error");
+			await this.cleanupStaleState();
 		}
 	}
 
@@ -149,19 +272,18 @@ export class DaemonManager {
 			this.config.logPath,
 			`${new Date().toISOString().replace(/[:.]/g, "-")}-daemon.log`,
 		);
-
-		const args = buildBackgroundSpawnArgs(process.argv, options);
-
-		// Open log file for direct stdio redirection (no pipe, parent can exit immediately)
-		const logFd = await fs.open(logFile, "a");
-
-		const child = spawn(process.execPath, args, {
+		const args = buildBackgroundSpawnArgs(
+			Bun.argv.length > 0 ? Bun.argv : process.argv,
+			options,
+		);
+		const child = Bun.spawn([process.execPath, ...args], {
 			detached: true,
-			stdio: ["ignore", logFd.fd, logFd.fd],
 			env: {
 				...process.env,
+				MOBVIBE_DAEMON_LOG_FILE: logFile,
 				MOBVIBE_GATEWAY_URL: this.config.gatewayUrl,
 			},
+			stdio: ["ignore", Bun.file(logFile), Bun.file(logFile)],
 		});
 
 		if (!child.pid) {
@@ -169,20 +291,23 @@ export class DaemonManager {
 			throw new Error("Failed to spawn daemon process");
 		}
 
-		// Close parent's fd reference (child has duplicated it)
-		await logFd.close();
-
-		// Detach from parent - no event listeners needed since stdio is directly redirected
-		// Note: The child process writes its own PID file in runForeground()
 		child.unref();
 
+		const state = await this.waitForStateFile(child.pid);
 		logger.info({ pid: child.pid }, "daemon_started");
-		console.log(`Logs: ${logFile}`);
-		logger.info({ logFile }, "daemon_log_path");
+		console.log(`Logs: ${state?.logFile ?? logFile}`);
 	}
 
 	async runForeground(options?: { noE2ee?: boolean }): Promise<void> {
 		const pid = process.pid;
+		const startedAt = new Date().toISOString();
+		const logFile =
+			process.env.MOBVIBE_DAEMON_LOG_FILE ??
+			path.join(
+				this.config.logPath,
+				`${startedAt.replace(/[:.]/g, "-")}-daemon.log`,
+			);
+
 		await this.writePidFile(pid);
 
 		logger.info({ pid }, "daemon_starting");
@@ -195,11 +320,10 @@ export class DaemonManager {
 
 		const sessionManager = this.createSessionManager(cryptoService);
 		const socketClient = this.createSocketClient(sessionManager, cryptoService);
+		const controlToken = randomUUID();
 
-		// Initialize compactor if enabled
 		let compactor: WalCompactor | undefined;
 		let compactionInterval: NodeJS.Timeout | undefined;
-		// P1-2: Track compactor resources for cleanup on shutdown
 		let compactorWalStore: WalStore | undefined;
 		let compactorDb: Database | undefined;
 
@@ -212,31 +336,23 @@ export class DaemonManager {
 				compactorDb,
 			);
 
-			// Run compaction on startup
 			if (this.config.compaction.runOnStartup) {
-				logger.info("compaction_startup_start");
-				compactor.compactAll().catch((error) => {
+				void compactor.compactAll().catch((error) => {
 					logger.error({ err: error }, "compaction_startup_error");
 				});
 			}
 
-			// Schedule periodic compaction
 			const intervalMs =
 				this.config.compaction.runIntervalHours * 60 * 60 * 1000;
 			compactionInterval = setInterval(() => {
-				logger.info("compaction_scheduled_start");
-				compactor?.compactAll().catch((error) => {
+				void compactor?.compactAll().catch((error) => {
 					logger.error({ err: error }, "compaction_scheduled_error");
 				});
 			}, intervalMs);
-
-			logger.info(
-				{ intervalHours: this.config.compaction.runIntervalHours },
-				"compaction_scheduled",
-			);
 		}
 
 		let shuttingDown = false;
+		let controlServer: Bun.Server<undefined> | undefined;
 
 		const shutdown = async (signal: string) => {
 			if (shuttingDown) {
@@ -244,46 +360,145 @@ export class DaemonManager {
 				return;
 			}
 			shuttingDown = true;
-
 			logger.info({ signal }, "daemon_shutdown_start");
 
-			try {
-				// Stop compaction interval
-				if (compactionInterval) {
-					clearInterval(compactionInterval);
-				}
-
-				// P1-2: Close compactor resources to prevent connection leak
-				if (compactorWalStore) {
-					compactorWalStore.close();
-				}
-				if (compactorDb) {
-					compactorDb.close();
-				}
-
-				socketClient.disconnect();
-				await sessionManager.shutdown();
-				await this.removePidFile();
-				logger.info({ signal }, "daemon_shutdown_complete");
-			} catch (error) {
-				logger.error({ err: error, signal }, "daemon_shutdown_error");
+			if (compactionInterval) {
+				clearInterval(compactionInterval);
 			}
+
+			compactorWalStore?.close();
+			compactorDb?.close();
+			socketClient.disconnect();
+			await sessionManager.shutdown();
+			await controlServer?.stop(true);
+			await this.cleanupStaleState();
+			logger.info({ signal }, "daemon_shutdown_complete");
+			process.exit(0);
 		};
 
-		process.on("SIGINT", () => {
-			shutdown("SIGINT").catch((error) => {
-				logger.error({ err: error }, "daemon_shutdown_sigint_error");
+		const createLogStream = (startCursor: number) => {
+			const encoder = new TextEncoder();
+			let interval: NodeJS.Timeout | undefined;
+			return new ReadableStream<Uint8Array>({
+				start: (controller) => {
+					let cursor = startCursor;
+					interval = setInterval(() => {
+						void (async () => {
+							const snapshot = await readLogSnapshot(logFile);
+							if (snapshot.cursor < cursor) {
+								cursor = 0;
+							}
+							if (snapshot.cursor > cursor) {
+								controller.enqueue(encoder.encode(snapshot.text.slice(cursor)));
+								cursor = snapshot.cursor;
+							}
+						})().catch((error) => {
+							controller.error(error);
+						});
+					}, 500);
+
+					void (async () => {
+						const snapshot = await readLogSnapshot(logFile);
+						if (startCursor === 0 && snapshot.text.length > 0) {
+							controller.enqueue(encoder.encode(snapshot.text));
+							cursor = snapshot.cursor;
+						}
+					})();
+				},
+				cancel: () => {
+					if (interval) {
+						clearInterval(interval);
+					}
+				},
 			});
+		};
+
+		controlServer = Bun.serve({
+			hostname: CONTROL_HOST,
+			port: 0,
+			fetch: async (request) => {
+				const url = new URL(request.url);
+				if (
+					request.headers.get("authorization") !== toBearerToken(controlToken)
+				) {
+					return new Response("Unauthorized", { status: 401 });
+				}
+
+				if (request.method === "GET" && url.pathname === "/status") {
+					return Response.json({
+						running: true,
+						pid,
+						connected: socketClient.isConnected(),
+						sessionCount: sessionManager.listAllSessions().length,
+						startedAt,
+						logFile,
+					} satisfies DaemonStatus);
+				}
+
+				if (request.method === "POST" && url.pathname === "/shutdown") {
+					queueMicrotask(() => {
+						void shutdown("control-plane");
+					});
+					return Response.json({ ok: true });
+				}
+
+				if (request.method === "GET" && url.pathname === "/logs") {
+					const lineCount = Number.parseInt(
+						url.searchParams.get("lines") ?? "50",
+						10,
+					);
+					const snapshot = await tailLogLines(
+						logFile,
+						Number.isNaN(lineCount) ? 50 : lineCount,
+					);
+					return new Response(snapshot.text, {
+						headers: {
+							"content-type": "text/plain; charset=utf-8",
+							"x-mobvibe-log-cursor": String(snapshot.cursor),
+						},
+					});
+				}
+
+				if (request.method === "GET" && url.pathname === "/logs/stream") {
+					const startCursor = Number.parseInt(
+						url.searchParams.get("cursor") ?? "0",
+						10,
+					);
+					return new Response(
+						createLogStream(Number.isNaN(startCursor) ? 0 : startCursor),
+						{
+							headers: {
+								"cache-control": "no-cache",
+								"content-type": "text/plain; charset=utf-8",
+							},
+						},
+					);
+				}
+
+				return new Response("Not found", { status: 404 });
+			},
+		});
+		const controlPort = controlServer.port;
+		if (typeof controlPort !== "number") {
+			throw new Error("Control server did not bind a local port");
+		}
+
+		await this.writeStateFile({
+			logFile,
+			pid,
+			port: controlPort,
+			startedAt,
+			token: controlToken,
+		});
+
+		process.on("SIGINT", () => {
+			void shutdown("SIGINT");
 		});
 		process.on("SIGTERM", () => {
-			shutdown("SIGTERM").catch((error) => {
-				logger.error({ err: error }, "daemon_shutdown_sigterm_error");
-			});
+			void shutdown("SIGTERM");
 		});
 
 		socketClient.connect();
-
-		// Keep process alive
 		await new Promise(() => {});
 	}
 
@@ -297,11 +512,9 @@ export class DaemonManager {
 			console.error(
 				`[mobvibe-cli] No credentials found. Run 'mobvibe login' to authenticate.`,
 			);
-			logger.warn("daemon_exit_missing_master_secret");
 			process.exit(1);
 		}
-		const masterSecret = base64ToUint8(masterSecretBase64);
-		return new CliCryptoService(masterSecret, {
+		return new CliCryptoService(base64ToUint8(masterSecretBase64), {
 			contentEncryptionEnabled: !options?.noE2ee,
 		});
 	}
@@ -323,36 +536,62 @@ export class DaemonManager {
 		});
 	}
 
-	async logs(options?: { follow?: boolean; lines?: number }): Promise<void> {
-		const files = await fs.readdir(this.config.logPath);
-		const logFiles = files
-			.filter((f) => f.endsWith("-daemon.log"))
+	private async readLatestLocalLogFile() {
+		const files = await fs.readdir(this.config.logPath).catch(() => []);
+		const latestLog = files
+			.filter((file) => file.endsWith("-daemon.log"))
 			.sort()
-			.reverse();
+			.reverse()[0];
+		return latestLog ? path.join(this.config.logPath, latestLog) : null;
+	}
 
-		if (logFiles.length === 0) {
+	async logs(options?: { follow?: boolean; lines?: number }): Promise<void> {
+		const requestedLines = options?.lines ?? 50;
+		const control = await this.requestControl(`/logs?lines=${requestedLines}`);
+		if (control) {
+			const cursor = Number.parseInt(
+				control.response.headers.get("x-mobvibe-log-cursor") ?? "0",
+				10,
+			);
+			const content = await control.response.text();
+			if (content) {
+				process.stdout.write(`${content}${content.endsWith("\n") ? "" : "\n"}`);
+			}
+
+			if (!options?.follow) {
+				return;
+			}
+
+			const streamResponse = await this.requestControl(
+				`/logs/stream?cursor=${Number.isNaN(cursor) ? 0 : cursor}`,
+			);
+			if (!streamResponse?.response.body) {
+				return;
+			}
+
+			const reader = streamResponse.response.body.getReader();
+			const decoder = new TextDecoder();
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) {
+					break;
+				}
+				process.stdout.write(decoder.decode(value, { stream: true }));
+			}
+			return;
+		}
+
+		const latestLog = await this.readLatestLocalLogFile();
+		if (!latestLog) {
 			logger.warn("daemon_logs_empty");
 			console.log("No log files found");
 			return;
 		}
 
-		const latestLog = path.join(this.config.logPath, logFiles[0]);
-		logger.info({ logFile: latestLog }, "daemon_logs_latest");
-		console.log(`Log file: ${latestLog}\n`);
-
+		const { text } = await tailLogLines(latestLog, requestedLines);
+		console.log(text);
 		if (options?.follow) {
-			// Use tail -f
-			const tail = spawn("tail", ["-f", latestLog], {
-				stdio: "inherit",
-			});
-			await new Promise<void>((resolve) => {
-				tail.on("close", () => resolve());
-			});
-		} else {
-			const content = await fs.readFile(latestLog, "utf8");
-			const lines = content.split("\n");
-			const count = options?.lines ?? 50;
-			console.log(lines.slice(-count).join("\n"));
+			console.log("Daemon is not running; live log streaming is unavailable.");
 		}
 	}
 }

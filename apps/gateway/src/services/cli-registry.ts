@@ -7,13 +7,35 @@ import type {
 	SessionSummary,
 	SessionsChangedPayload,
 } from "@mobvibe/shared";
-import type { Socket } from "socket.io";
+import type { CliTransport } from "./cli-transport.js";
+
+type TransportLike =
+	| CliTransport
+	| {
+			id: string;
+			emit: (event: string, payload: unknown) => void;
+	  };
+
+const normalizeTransport = (transport: TransportLike): CliTransport => {
+	if ("send" in transport) {
+		return transport;
+	}
+	return {
+		id: transport.id,
+		close: () => {},
+		onDisconnect: () => () => {},
+		send: (type, payload) => {
+			transport.emit(type, payload);
+		},
+	};
+};
 
 export type CliRecord = {
 	machineId: string;
 	hostname: string;
 	version?: string;
-	socket: Socket;
+	socket: TransportLike;
+	transport: CliTransport;
 	connectedAt: Date;
 	sessions: SessionSummary[];
 	backends: AcpBackendSummary[];
@@ -27,25 +49,26 @@ export type CliRecord = {
 
 export class CliRegistry extends EventEmitter {
 	private cliByMachineId = new Map<string, CliRecord>();
-	private cliBySocketId = new Map<string, CliRecord>();
+	private cliByTransportId = new Map<string, CliRecord>();
 	/** Index of machines by user ID for efficient lookup */
 	private clisByUserId = new Map<string, Set<string>>();
 
 	/**
 	 * Register a CLI connection.
-	 * @param socket - The Socket.io socket
+	 * @param transport - The CLI transport
 	 * @param info - CLI registration info
 	 * @param authInfo - Auth info (userId, deviceId) from signed token verification
 	 */
 	register(
-		socket: Socket,
+		transport: TransportLike,
 		info: CliRegistrationInfo,
 		authInfo?: { userId: string; deviceId: string },
 	): CliRecord {
+		const normalizedTransport = normalizeTransport(transport);
 		// Remove any existing connection for this machine
 		const existing = this.cliByMachineId.get(info.machineId);
 		if (existing) {
-			this.cliBySocketId.delete(existing.socket.id);
+			this.cliByTransportId.delete(existing.transport.id);
 			// Remove from user index if it had a userId
 			if (existing.userId) {
 				const userMachines = this.clisByUserId.get(existing.userId);
@@ -62,7 +85,8 @@ export class CliRegistry extends EventEmitter {
 			machineId: info.machineId,
 			hostname: info.hostname,
 			version: info.version,
-			socket,
+			socket: transport,
+			transport: normalizedTransport,
 			connectedAt: new Date(),
 			sessions: [],
 			backends: info.backends ?? [],
@@ -71,7 +95,7 @@ export class CliRegistry extends EventEmitter {
 		};
 
 		this.cliByMachineId.set(info.machineId, record);
-		this.cliBySocketId.set(socket.id, record);
+		this.cliByTransportId.set(normalizedTransport.id, record);
 
 		// Add to user index if authenticated
 		if (authInfo?.userId) {
@@ -96,12 +120,12 @@ export class CliRegistry extends EventEmitter {
 	}
 
 	unregister(socketId: string): CliRecord | undefined {
-		const record = this.cliBySocketId.get(socketId);
+		const record = this.cliByTransportId.get(socketId);
 		if (!record) {
 			return undefined;
 		}
 
-		this.cliBySocketId.delete(socketId);
+		this.cliByTransportId.delete(socketId);
 		this.cliByMachineId.delete(record.machineId);
 
 		// Remove from user index
@@ -126,7 +150,7 @@ export class CliRegistry extends EventEmitter {
 	}
 
 	updateSessions(socketId: string, sessions: SessionSummary[]) {
-		const record = this.cliBySocketId.get(socketId);
+		const record = this.cliByTransportId.get(socketId);
 		if (!record) {
 			return;
 		}
@@ -145,7 +169,7 @@ export class CliRegistry extends EventEmitter {
 		socketId: string,
 		payload: SessionsChangedPayload,
 	): SessionsChangedPayload | undefined {
-		const record = this.cliBySocketId.get(socketId);
+		const record = this.cliByTransportId.get(socketId);
 		if (!record) {
 			return undefined;
 		}
@@ -180,9 +204,12 @@ export class CliRegistry extends EventEmitter {
 
 		// Emit the enhanced payload with machineId
 		const enhancedPayload: SessionsChangedPayload = {
-			added: payload.added.map((s) => ({ ...s, machineId: record.machineId })),
-			updated: payload.updated.map((s) => ({
-				...s,
+			added: payload.added.map((session) => ({
+				...session,
+				machineId: record.machineId,
+			})),
+			updated: payload.updated.map((session) => ({
+				...session,
 				machineId: record.machineId,
 			})),
 			removed: payload.removed,
@@ -222,7 +249,7 @@ export class CliRegistry extends EventEmitter {
 		socketId: string,
 		sessions: SessionSummary[],
 	): SessionSummary[] {
-		const record = this.cliBySocketId.get(socketId);
+		const record = this.cliByTransportId.get(socketId);
 		if (!record) {
 			return [];
 		}
@@ -292,7 +319,7 @@ export class CliRegistry extends EventEmitter {
 	}
 
 	getCliBySocketId(socketId: string): CliRecord | undefined {
-		return this.cliBySocketId.get(socketId);
+		return this.cliByTransportId.get(socketId);
 	}
 
 	/**
@@ -410,7 +437,7 @@ export class CliRegistry extends EventEmitter {
 		socketId: string,
 		capabilities: Record<string, AgentSessionCapabilities>,
 	): void {
-		const record = this.cliBySocketId.get(socketId);
+		const record = this.cliByTransportId.get(socketId);
 		if (!record) return;
 		record.backendCapabilities = {
 			...record.backendCapabilities,

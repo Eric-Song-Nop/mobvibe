@@ -3,22 +3,23 @@ import fs from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import type {
-	CliToGatewayEvents,
+	CliErrorPayload,
+	CliRedirectPayload,
 	EventsAckPayload,
 	FsEntry,
 	FsRoot,
-	GatewayToCliEvents,
+	GatewayToCliWirePayloadMap,
 	GitBranchesForCwdResponse,
 	HostFsRootsResponse,
 	RpcResponse,
 	SessionEventsResponse,
 	SessionFsFilePreview,
 	SessionFsResourceEntry,
+	SignedAuthToken,
 	StopReason,
 } from "@mobvibe/shared";
 import { createSignedToken } from "@mobvibe/shared";
 import ignore, { type Ignore } from "ignore";
-import { io, type Socket } from "socket.io-client";
 import type { SessionManager } from "../acp/session-manager.js";
 import type { CliConfig } from "../config.js";
 import type { CliCryptoService } from "../e2ee/crypto-service.js";
@@ -147,8 +148,197 @@ const buildHostFsRoots = async (): Promise<HostFsRootsResponse> => {
 /** Minimum interval between automatic discover calls (ms) */
 const DISCOVER_THROTTLE_MS = 60_000;
 
+type GatewayConnectionEvents = {
+	"cli:error": CliErrorPayload;
+	"cli:registered": { machineId: string; userId?: string };
+	connect: undefined;
+	connect_error: Error;
+	disconnect: string;
+	"events:ack": EventsAckPayload;
+	redirect: CliRedirectPayload;
+};
+
+type GatewayConnectionEventMap = GatewayConnectionEvents &
+	GatewayToCliWirePayloadMap;
+
+type GatewayConnectionListener<T> = [T] extends [null]
+	? () => void
+	: (payload: T) => void;
+
+class GatewayConnection extends EventEmitter {
+	private reconnectAttemptCount = 0;
+	private reconnectTimer?: NodeJS.Timeout;
+	private shouldReconnect = false;
+	private socket?: WebSocket;
+	private socketAuthenticated = false;
+	readonly io = {
+		opts: {
+			extraHeaders: {} as Record<string, string>,
+		},
+	};
+
+	constructor(
+		private readonly gatewayUrl: string,
+		private readonly createAuthToken: () => SignedAuthToken,
+	) {
+		super();
+	}
+
+	on<TEvent extends keyof GatewayConnectionEventMap>(
+		event: TEvent,
+		listener: GatewayConnectionListener<GatewayConnectionEventMap[TEvent]>,
+	): this;
+	override on(
+		event: string,
+		listener: (...args: Array<unknown>) => void,
+	): this {
+		return super.on(event, listener);
+	}
+
+	private emitEvent<TEvent extends keyof GatewayConnectionEventMap>(
+		event: TEvent,
+		payload: GatewayConnectionEventMap[TEvent],
+	) {
+		super.emit(event, payload);
+	}
+
+	emitMessage(type: string, payload: unknown) {
+		if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+			return;
+		}
+		this.socket.send(JSON.stringify({ type, payload }));
+	}
+
+	connect() {
+		this.shouldReconnect = true;
+		this.clearReconnectTimer();
+		if (
+			this.socket &&
+			(this.socket.readyState === WebSocket.OPEN ||
+				this.socket.readyState === WebSocket.CONNECTING)
+		) {
+			return;
+		}
+		this.open();
+	}
+
+	disconnect() {
+		this.shouldReconnect = false;
+		this.clearReconnectTimer();
+		this.socketAuthenticated = false;
+		this.socket?.close();
+		this.socket = undefined;
+	}
+
+	private clearReconnectTimer() {
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = undefined;
+		}
+	}
+
+	private open() {
+		const url = new URL("/cli-ws", this.gatewayUrl);
+		const ws = new WebSocket(url.toString(), {
+			headers:
+				Object.keys(this.io.opts.extraHeaders).length > 0
+					? this.io.opts.extraHeaders
+					: undefined,
+		});
+		this.socket = ws;
+		this.socketAuthenticated = false;
+
+		ws.addEventListener("open", () => {
+			this.emitMessage("auth", this.createAuthToken());
+		});
+
+		ws.addEventListener("message", (event) => {
+			this.handleMessage(event.data);
+		});
+
+		ws.addEventListener("close", (event) => {
+			const wasAuthenticated = this.socketAuthenticated;
+			this.socketAuthenticated = false;
+			this.socket = undefined;
+
+			const reason = event.reason || `close_${event.code}`;
+			if (wasAuthenticated) {
+				this.emitEvent("disconnect", reason);
+			} else {
+				this.emitEvent("connect_error", new Error(reason));
+			}
+
+			if (!this.shouldReconnect) {
+				return;
+			}
+
+			const delay = Math.min(
+				1000 * 2 ** Math.max(0, this.reconnectAttemptCount - 1),
+				30000,
+			);
+			this.reconnectAttemptCount += 1;
+			this.reconnectTimer = setTimeout(() => {
+				this.open();
+			}, delay);
+		});
+
+		ws.addEventListener("error", () => {
+			// close event drives reconnect and error emission
+		});
+	}
+
+	private handleMessage(raw: string | ArrayBuffer | Blob) {
+		if (raw instanceof Blob) {
+			raw
+				.text()
+				.then((text) => this.handleTextMessage(text))
+				.catch(() => {});
+			return;
+		}
+		if (raw instanceof ArrayBuffer) {
+			this.handleTextMessage(Buffer.from(raw).toString("utf8"));
+			return;
+		}
+		this.handleTextMessage(raw);
+	}
+
+	private handleTextMessage(text: string) {
+		try {
+			const message = JSON.parse(text) as { type: string; payload: unknown };
+			switch (message.type) {
+				case "auth-ok":
+					this.socketAuthenticated = true;
+					this.reconnectAttemptCount = 0;
+					this.emitEvent("connect", undefined);
+					return;
+				case "auth-error":
+					this.emitEvent("cli:error", message.payload as CliErrorPayload);
+					this.socket?.close();
+					return;
+				case "redirect": {
+					const payload = message.payload as CliRedirectPayload;
+					this.io.opts.extraHeaders = {
+						...this.io.opts.extraHeaders,
+						"fly-force-instance-id": payload.instanceId,
+					};
+					this.emitEvent("redirect", payload);
+					this.socket?.close();
+					return;
+				}
+				default:
+					super.emit(message.type, message.payload);
+			}
+		} catch (error) {
+			this.emitEvent(
+				"connect_error",
+				error instanceof Error ? error : new Error(String(error)),
+			);
+		}
+	}
+}
+
 export class SocketClient extends EventEmitter {
-	private socket: Socket<GatewayToCliEvents, CliToGatewayEvents>;
+	private socket: GatewayConnection;
 	private connected = false;
 	private reconnectAttempts = 0;
 	private heartbeatInterval?: NodeJS.Timeout;
@@ -157,16 +347,9 @@ export class SocketClient extends EventEmitter {
 	constructor(private readonly options: SocketClientOptions) {
 		super();
 		const { cryptoService } = options;
-		this.socket = io(`${options.config.gatewayUrl}/cli`, {
-			path: "/socket.io",
-			reconnection: true,
-			reconnectionAttempts: Number.POSITIVE_INFINITY,
-			reconnectionDelay: 1000,
-			reconnectionDelayMax: 30000,
-			transports: ["websocket"],
-			autoConnect: false,
-			auth: (cb) => cb(createSignedToken(cryptoService.authKeyPair)),
-		});
+		this.socket = new GatewayConnection(options.config.gatewayUrl, () =>
+			createSignedToken(cryptoService.authKeyPair),
+		);
 		this.setupEventHandlers();
 		this.setupRpcHandlers();
 		this.setupSessionManagerListeners();
@@ -187,24 +370,19 @@ export class SocketClient extends EventEmitter {
 		this.socket.on("connect_error", (error) => {
 			this.reconnectAttempts++;
 
-			// Handle affinity redirect — Fly.io routes to the correct instance
-			if (error.message.startsWith("WRONG_INSTANCE:")) {
-				const targetId = error.message.split(":")[1];
-				logger.info({ targetInstance: targetId }, "gateway_affinity_redirect");
-				this.socket.io.opts.extraHeaders = {
-					...this.socket.io.opts.extraHeaders,
-					"fly-force-instance-id": targetId,
-				};
-				// Socket.io auto-reconnect will carry the new header
-				return;
-			}
-
 			if (this.reconnectAttempts <= 3 || this.reconnectAttempts % 10 === 0) {
 				logger.error(
 					{ attempt: this.reconnectAttempts, err: error },
 					"gateway_connect_error",
 				);
 			}
+		});
+
+		this.socket.on("redirect", (payload) => {
+			logger.info(
+				{ targetInstance: payload.instanceId },
+				"gateway_affinity_redirect",
+			);
 		});
 
 		this.socket.on("cli:registered", async (info) => {
@@ -231,7 +409,7 @@ export class SocketClient extends EventEmitter {
 							});
 						cursor = nextCursor;
 						if (sessions.length > 0) {
-							this.socket.emit("sessions:discovered", {
+							this.socket.emitMessage("sessions:discovered", {
 								sessions,
 								capabilities,
 								nextCursor,
@@ -1288,13 +1466,13 @@ export class SocketClient extends EventEmitter {
 
 		sessionManager.onPermissionRequest((payload) => {
 			if (this.connected) {
-				this.socket.emit("permission:request", payload);
+				this.socket.emitMessage("permission:request", payload);
 			}
 		});
 
 		sessionManager.onPermissionResult((payload) => {
 			if (this.connected) {
-				this.socket.emit("permission:result", payload);
+				this.socket.emitMessage("permission:result", payload);
 			}
 		});
 
@@ -1308,19 +1486,19 @@ export class SocketClient extends EventEmitter {
 					},
 					"sessions_changed_emit",
 				);
-				this.socket.emit("sessions:changed", payload);
+				this.socket.emitMessage("sessions:changed", payload);
 			}
 		});
 
 		sessionManager.onSessionAttached((payload) => {
 			if (this.connected) {
-				this.socket.emit("session:attached", payload);
+				this.socket.emitMessage("session:attached", payload);
 			}
 		});
 
 		sessionManager.onSessionDetached((payload) => {
 			if (this.connected) {
-				this.socket.emit("session:detached", payload);
+				this.socket.emitMessage("session:detached", payload);
 			}
 		});
 
@@ -1349,7 +1527,7 @@ export class SocketClient extends EventEmitter {
 					},
 					"session_event_emitting_to_gateway",
 				);
-				this.socket.emit("session:event", encrypted);
+				this.socket.emitMessage("session:event", encrypted);
 				logger.debug(
 					{
 						sessionId: event.sessionId,
@@ -1416,7 +1594,7 @@ export class SocketClient extends EventEmitter {
 
 	private sendRpcResponse<T>(requestId: string, result: T) {
 		const response: RpcResponse<T> = { requestId, result };
-		this.socket.emit("rpc:response", response);
+		this.socket.emitMessage("rpc:response", response);
 		logger.debug({ requestId }, "rpc_response_sent");
 	}
 
@@ -1447,13 +1625,13 @@ export class SocketClient extends EventEmitter {
 				detail,
 			},
 		};
-		this.socket.emit("rpc:response", response);
+		this.socket.emitMessage("rpc:response", response);
 	}
 
 	private register() {
 		const { config } = this.options;
 		logger.info({ machineId: config.machineId }, "cli_register_emit");
-		this.socket.emit("cli:register", {
+		this.socket.emitMessage("cli:register", {
 			machineId: config.machineId,
 			hostname: config.hostname,
 			version: config.clientVersion,
@@ -1486,7 +1664,7 @@ export class SocketClient extends EventEmitter {
 			logger.error({ err: error }, "cli_register_backfill_failed");
 		}
 		logger.info({ machineId: config.machineId }, "cli_register_sessions_list");
-		this.socket.emit("sessions:list", sessionManager.listAllSessions());
+		this.socket.emitMessage("sessions:list", sessionManager.listAllSessions());
 		this.startHeartbeat();
 
 		if (wasReconnect) {
@@ -1500,8 +1678,8 @@ export class SocketClient extends EventEmitter {
 		this.stopHeartbeat();
 		this.heartbeatInterval = setInterval(() => {
 			if (this.connected) {
-				this.socket.emit("cli:heartbeat");
-				this.socket.emit(
+				this.socket.emitMessage("cli:heartbeat", null);
+				this.socket.emitMessage(
 					"sessions:list",
 					this.options.sessionManager.listAllSessions(),
 				);
@@ -1544,7 +1722,7 @@ export class SocketClient extends EventEmitter {
 
 				for (const event of unackedEvents) {
 					const encrypted = this.options.cryptoService.encryptEvent(event);
-					this.socket.emit("session:event", encrypted);
+					this.socket.emitMessage("session:event", encrypted);
 				}
 			}
 		}
