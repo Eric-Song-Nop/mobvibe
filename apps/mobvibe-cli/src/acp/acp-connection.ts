@@ -50,6 +50,8 @@ type ClientInfo = {
 	version: string;
 };
 
+const MAX_STDERR_LINES = 20;
+
 export type AcpBackendStatus = {
 	backendId: string;
 	backendLabel: string;
@@ -165,8 +167,18 @@ const formatExitMessage = (
 	return "ACP process exited";
 };
 
-const buildConnectError = (error: unknown): ErrorDetail => {
-	const detail = getErrorMessage(error);
+const appendStderrDetail = (detail: string, stderrTail?: string) => {
+	if (!stderrTail) {
+		return detail;
+	}
+	return `${detail}\nBackend stderr:\n${stderrTail}`;
+};
+
+const buildConnectError = (
+	error: unknown,
+	stderrTail?: string,
+): ErrorDetail => {
+	const detail = appendStderrDetail(getErrorMessage(error), stderrTail);
 	if (isProtocolMismatch(error)) {
 		return createErrorDetail({
 			code: "ACP_PROTOCOL_MISMATCH",
@@ -185,22 +197,28 @@ const buildConnectError = (error: unknown): ErrorDetail => {
 	});
 };
 
-const buildProcessExitError = (detail: string): ErrorDetail =>
+const buildProcessExitError = (
+	detail: string,
+	stderrTail?: string,
+): ErrorDetail =>
 	createErrorDetail({
 		code: "ACP_PROCESS_EXITED",
 		message: "ACP backend process exited unexpectedly",
 		retryable: true,
 		scope: "service",
-		detail,
+		detail: appendStderrDetail(detail, stderrTail),
 	});
 
-const buildConnectionClosedError = (detail: string): ErrorDetail =>
+const buildConnectionClosedError = (
+	detail: string,
+	stderrTail?: string,
+): ErrorDetail =>
 	createErrorDetail({
 		code: "ACP_CONNECTION_CLOSED",
 		message: "ACP connection closed",
 		retryable: true,
 		scope: "service",
-		detail,
+		detail: appendStderrDetail(detail, stderrTail),
 	});
 
 const normalizeOutputText = (value: string) => value.normalize("NFC");
@@ -238,6 +256,7 @@ export class AcpConnection {
 		params: RequestPermissionRequest,
 	) => Promise<RequestPermissionResponse>;
 	private terminals = new Map<string, TerminalRecord>();
+	private recentStderr: string[] = [];
 
 	constructor(
 		private readonly options: {
@@ -369,6 +388,25 @@ export class AcpConnection {
 		this.statusEmitter.emit("status", this.getStatus());
 	}
 
+	private recordStderr(text: string) {
+		for (const line of text.split(/\r?\n/)) {
+			const trimmed = line.trim();
+			if (!trimmed) {
+				continue;
+			}
+			this.recentStderr.push(trimmed);
+			if (this.recentStderr.length > MAX_STDERR_LINES) {
+				this.recentStderr.shift();
+			}
+		}
+	}
+
+	private getStderrTail(): string | undefined {
+		return this.recentStderr.length > 0
+			? this.recentStderr.join("\n")
+			: undefined;
+	}
+
 	async connect(): Promise<void> {
 		if (this.state === "connecting" || this.state === "ready") {
 			return;
@@ -376,6 +414,15 @@ export class AcpConnection {
 
 		this.updateStatus("connecting");
 		this.agentInfo = undefined;
+		this.recentStderr = [];
+		logger.info(
+			{
+				backendId: this.options.backend.id,
+				command: this.options.backend.command,
+				args: this.options.backend.args,
+			},
+			"acp_backend_connect_start",
+		);
 
 		try {
 			const env = this.options.backend.envOverrides
@@ -391,14 +438,36 @@ export class AcpConnection {
 			);
 			this.process = child;
 			this.sessionId = undefined;
+			logger.info(
+				{
+					backendId: this.options.backend.id,
+					pid: child.pid,
+					command: this.options.backend.command,
+					args: this.options.backend.args,
+				},
+				"acp_backend_spawned",
+			);
 			child.stderr.on("data", (chunk: Buffer) => {
 				const text = chunk.toString("utf8").trimEnd();
 				if (text) {
+					this.recordStderr(text);
 					logger.debug(
 						{ backendId: this.options.backend.id, stderr: text },
 						"acp_backend_stderr",
 					);
 				}
+			});
+			child.stdout.once("close", () => {
+				logger.info(
+					{ backendId: this.options.backend.id, pid: child.pid },
+					"acp_backend_stdout_closed",
+				);
+			});
+			child.stdin.once("close", () => {
+				logger.info(
+					{ backendId: this.options.backend.id, pid: child.pid },
+					"acp_backend_stdin_closed",
+				);
 			});
 
 			const input = Writable.toWeb(child.stdin) as WritableStream<Uint8Array>;
@@ -424,29 +493,73 @@ export class AcpConnection {
 			this.connection = connection;
 
 			child.once("error", (error) => {
+				const stderrTail = this.getStderrTail();
+				logger.error(
+					{
+						backendId: this.options.backend.id,
+						pid: child.pid,
+						err: error,
+						stderrTail,
+					},
+					"acp_backend_process_error",
+				);
 				if (this.state === "stopped") {
 					return;
 				}
-				this.updateStatus("error", buildConnectError(error));
+				this.updateStatus("error", buildConnectError(error, stderrTail));
 			});
 
 			child.once("exit", (code, signal) => {
+				const detail = formatExitMessage(code, signal);
+				const stderrTail = this.getStderrTail();
+				logger.warn(
+					{
+						backendId: this.options.backend.id,
+						pid: child.pid,
+						code,
+						signal,
+						stderrTail,
+					},
+					"acp_backend_process_exit",
+				);
 				if (this.state === "stopped") {
 					return;
 				}
-				this.updateStatus(
-					"error",
-					buildProcessExitError(formatExitMessage(code, signal)),
+				this.updateStatus("error", buildProcessExitError(detail, stderrTail));
+			});
+			child.once("close", (code, signal) => {
+				logger.info(
+					{
+						backendId: this.options.backend.id,
+						pid: child.pid,
+						code,
+						signal,
+					},
+					"acp_backend_process_close",
 				);
 			});
 
 			this.closedPromise = connection.closed.catch((error) => {
+				const stderrTail = this.getStderrTail();
+				logger.warn(
+					{
+						backendId: this.options.backend.id,
+						pid: child.pid,
+						err: error,
+						stderrTail,
+					},
+					"acp_backend_connection_closed",
+				);
 				this.updateStatus(
 					"error",
-					buildConnectionClosedError(getErrorMessage(error)),
+					buildConnectionClosedError(getErrorMessage(error), stderrTail),
 				);
 			});
 
+			logger.info(
+				{ backendId: this.options.backend.id, pid: child.pid },
+				"acp_backend_initialize_start",
+			);
 			const initializeResponse = await connection.initialize({
 				protocolVersion: PROTOCOL_VERSION,
 				clientInfo: {
@@ -461,8 +574,28 @@ export class AcpConnection {
 				initializeResponse.agentCapabilities ?? undefined;
 			this.connectedAt = new Date();
 			this.updateStatus("ready");
+			logger.info(
+				{
+					backendId: this.options.backend.id,
+					pid: child.pid,
+					agentInfo: this.agentInfo,
+					sessionCapabilities: this.getSessionCapabilities(),
+				},
+				"acp_backend_initialize_complete",
+			);
 		} catch (error) {
-			this.updateStatus("error", buildConnectError(error));
+			const stderrTail = this.getStderrTail();
+			logger.error(
+				{
+					backendId: this.options.backend.id,
+					command: this.options.backend.command,
+					args: this.options.backend.args,
+					err: error,
+					stderrTail,
+				},
+				"acp_backend_connect_failed",
+			);
+			this.updateStatus("error", buildConnectError(error, stderrTail));
 			await this.stopProcess();
 			throw error;
 		}
