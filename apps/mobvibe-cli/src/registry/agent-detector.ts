@@ -12,8 +12,8 @@ import { getRegistryPlatformKey } from "./platform.js";
 export const resolveAgentCommand = (
 	agent: RegistryAgent,
 	platformKey: string | null,
-	hasNpx: boolean,
-	hasUvx: boolean,
+	npxPath: string | null,
+	uvxPath: string | null,
 ): Pick<AcpBackendConfig, "command" | "args" | "envOverrides"> | null => {
 	const { distribution } = agent;
 
@@ -31,7 +31,7 @@ export const resolveAgentCommand = (
 			const binPath = Bun.which(baseName);
 			if (binPath) {
 				return {
-					command: baseName,
+					command: binPath,
 					args: entry.args ?? [],
 					envOverrides:
 						entry.env && Object.keys(entry.env).length > 0
@@ -43,20 +43,20 @@ export const resolveAgentCommand = (
 	}
 
 	// 2. npx — available as long as npx is installed (downloads on demand)
-	if (distribution.npx && hasNpx) {
+	if (distribution.npx && npxPath) {
 		const { package: pkg, args, env } = distribution.npx;
 		return {
-			command: "npx",
+			command: npxPath,
 			args: ["-y", pkg, ...(args ?? [])],
 			envOverrides: env && Object.keys(env).length > 0 ? env : undefined,
 		};
 	}
 
 	// 3. uvx
-	if (distribution.uvx && hasUvx) {
+	if (distribution.uvx && uvxPath) {
 		const { package: pkg, args, env } = distribution.uvx;
 		return {
-			command: "uvx",
+			command: uvxPath,
 			args: [pkg, ...(args ?? [])],
 			envOverrides: env && Object.keys(env).length > 0 ? env : undefined,
 		};
@@ -77,15 +77,15 @@ export const detectAgents = async (
 	registry: RegistryData,
 ): Promise<AcpBackendConfig[]> => {
 	const platformKey = getRegistryPlatformKey();
-	const hasNpx = Bun.which("npx") !== null;
-	const hasUvx = Bun.which("uvx") !== null;
+	const npxPath = Bun.which("npx");
+	const uvxPath = Bun.which("uvx");
 
-	logger.debug({ platformKey, hasNpx, hasUvx }, "agent_detector_environment");
+	logger.debug({ platformKey, npxPath, uvxPath }, "agent_detector_environment");
 
 	const results: AcpBackendConfig[] = [];
 
 	for (const agent of registry.agents) {
-		const resolved = resolveAgentCommand(agent, platformKey, hasNpx, hasUvx);
+		const resolved = resolveAgentCommand(agent, platformKey, npxPath, uvxPath);
 		if (!resolved) continue;
 
 		results.push({
@@ -121,15 +121,15 @@ export const resolveSelectedAgents = (
 	selectedIds: string[],
 ): ResolveResult => {
 	const platformKey = getRegistryPlatformKey();
-	const hasNpx = Bun.which("npx") !== null;
-	const hasUvx = Bun.which("uvx") !== null;
+	const npxPath = Bun.which("npx");
+	const uvxPath = Bun.which("uvx");
 
 	const selected = agents.filter((a) => selectedIds.includes(a.id));
 	const resolved: AcpBackendConfig[] = [];
 	const failed: RegistryAgent[] = [];
 
 	for (const agent of selected) {
-		const cmd = resolveAgentCommand(agent, platformKey, hasNpx, hasUvx);
+		const cmd = resolveAgentCommand(agent, platformKey, npxPath, uvxPath);
 		if (cmd) {
 			resolved.push({
 				id: agent.id,
