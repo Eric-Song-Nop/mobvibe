@@ -89,11 +89,13 @@ const createMockConnection = () => ({
 		title: "Claude Code",
 	})),
 	getSessionCapabilities: mock(() => ({
+		close: true,
 		list: true,
 		load: true,
 	})),
 	supportsSessionList: mock(() => true),
 	supportsSessionLoad: mock(() => true),
+	supportsSessionClose: mock(() => true),
 	listSessions: mock(() =>
 		Promise.resolve({
 			sessions: [
@@ -116,6 +118,12 @@ const createMockConnection = () => ({
 		Promise.resolve({
 			modes: null,
 			models: null,
+		}),
+	),
+	closeSession: mock(() => Promise.resolve(undefined)),
+	setSessionConfigOption: mock(() =>
+		Promise.resolve({
+			configOptions: [],
 		}),
 	),
 	setPermissionHandler: mock(() => {}),
@@ -677,7 +685,7 @@ describe("SessionManager", () => {
 	});
 
 	describe("closeSession", () => {
-		it("closes and removes session", async () => {
+		it("closes and detaches session", async () => {
 			const created = await sessionManager.createSession({
 				cwd: "/home/user/project",
 				backendId: "backend-1",
@@ -685,7 +693,12 @@ describe("SessionManager", () => {
 
 			const result = await sessionManager.closeSession(created.sessionId);
 
-			expect(result).toBe(true);
+			expect(result).toEqual(
+				expect.objectContaining({
+					sessionId: created.sessionId,
+					isAttached: false,
+				}),
+			);
 			expect(sessionManager.listSessions()).toHaveLength(0);
 		});
 
@@ -703,8 +716,13 @@ describe("SessionManager", () => {
 			expect(changedListener).toHaveBeenCalledWith(
 				expect.objectContaining({
 					added: [],
-					updated: [],
-					removed: [created.sessionId],
+					updated: [
+						expect.objectContaining({
+							sessionId: created.sessionId,
+							isAttached: false,
+						}),
+					],
+					removed: [],
 				}),
 			);
 		});

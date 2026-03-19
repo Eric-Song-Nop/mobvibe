@@ -102,6 +102,8 @@ describe("SocketClient restore semantics", () => {
 		getSession: ReturnType<typeof mock>;
 		touchSession: ReturnType<typeof mock>;
 		recordTurnEnd: ReturnType<typeof mock>;
+		closeSession: ReturnType<typeof mock>;
+		setSessionConfigOption: ReturnType<typeof mock>;
 		onSessionsChanged: ReturnType<typeof mock>;
 		onSessionAttached: ReturnType<typeof mock>;
 		onSessionDetached: ReturnType<typeof mock>;
@@ -125,7 +127,12 @@ describe("SocketClient restore semantics", () => {
 		socketMock.io.opts.extraHeaders = {};
 		sessionEventListener = undefined;
 		promptConnection = {
-			prompt: mock(() => Promise.resolve({ stopReason: "end_turn" })),
+			prompt: mock(() =>
+				Promise.resolve({
+					stopReason: "end_turn",
+					userMessageId: "agent-user-1",
+				}),
+			),
 		};
 
 		sessionManager = {
@@ -141,6 +148,12 @@ describe("SocketClient restore semantics", () => {
 			})),
 			touchSession: mock(() => {}),
 			recordTurnEnd: mock(() => {}),
+			closeSession: mock(() =>
+				Promise.resolve({ sessionId: "session-1", isAttached: false }),
+			),
+			setSessionConfigOption: mock(() =>
+				Promise.resolve({ sessionId: "session-1", configOptions: [] }),
+			),
 			onSessionsChanged: mock(() => () => {}),
 			onSessionAttached: mock(() => () => {}),
 			onSessionDetached: mock(() => () => {}),
@@ -269,6 +282,7 @@ describe("SocketClient restore semantics", () => {
 			params: {
 				sessionId: "session-1",
 				prompt,
+				messageId: "client-msg-1",
 			},
 		});
 
@@ -276,7 +290,11 @@ describe("SocketClient restore semantics", () => {
 			"session-1",
 			prompt,
 		);
-		expect(promptConnection.prompt).toHaveBeenCalledWith("session-1", prompt);
+		expect(promptConnection.prompt).toHaveBeenCalledWith(
+			"session-1",
+			prompt,
+			"client-msg-1",
+		);
 		expect(sessionManager.touchSession).toHaveBeenCalledTimes(2);
 		expect(sessionManager.recordTurnEnd).toHaveBeenCalledWith(
 			"session-1",
@@ -284,7 +302,51 @@ describe("SocketClient restore semantics", () => {
 		);
 		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
 			requestId: "req-1",
-			result: { stopReason: "end_turn" },
+			result: { stopReason: "end_turn", userMessageId: "agent-user-1" },
+		});
+	});
+
+	test("routes rpc:session:close through sessionManager", async () => {
+		const handler = socketHandlers.get("rpc:session:close");
+		if (!handler) {
+			throw new Error("rpc:session:close handler not registered");
+		}
+
+		await handler({
+			requestId: "req-close-1",
+			params: { sessionId: "session-1" },
+		});
+
+		expect(sessionManager.closeSession).toHaveBeenCalledWith("session-1");
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-close-1",
+			result: { sessionId: "session-1", isAttached: false },
+		});
+	});
+
+	test("routes rpc:session:config through sessionManager", async () => {
+		const handler = socketHandlers.get("rpc:session:config");
+		if (!handler) {
+			throw new Error("rpc:session:config handler not registered");
+		}
+
+		await handler({
+			requestId: "req-config-1",
+			params: {
+				sessionId: "session-1",
+				configId: "mode",
+				value: "plan",
+			},
+		});
+
+		expect(sessionManager.setSessionConfigOption).toHaveBeenCalledWith({
+			sessionId: "session-1",
+			configId: "mode",
+			value: "plan",
+		});
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-config-1",
+			result: { sessionId: "session-1", configOptions: [] },
 		});
 	});
 

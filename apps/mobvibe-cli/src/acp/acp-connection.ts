@@ -23,6 +23,8 @@ import {
 	type RequestPermissionResponse,
 	type SessionInfo,
 	type SessionNotification,
+	type SetSessionConfigOptionRequest,
+	type SetSessionConfigOptionResponse,
 	type TerminalExitStatus,
 	type TerminalOutputRequest,
 	type TerminalOutputResponse,
@@ -269,6 +271,7 @@ export class AcpConnection {
 	 */
 	getSessionCapabilities(): AgentSessionCapabilities {
 		return {
+			close: this.agentCapabilities?.sessionCapabilities?.close != null,
 			list: this.agentCapabilities?.sessionCapabilities?.list != null,
 			load: this.agentCapabilities?.loadSession === true,
 		};
@@ -286,6 +289,13 @@ export class AcpConnection {
 	 */
 	supportsSessionLoad(): boolean {
 		return this.agentCapabilities?.loadSession === true;
+	}
+
+	/**
+	 * Check if the agent supports session/close.
+	 */
+	supportsSessionClose(): boolean {
+		return this.agentCapabilities?.sessionCapabilities?.close != null;
 	}
 
 	/**
@@ -481,9 +491,14 @@ export class AcpConnection {
 	async prompt(
 		sessionId: string,
 		prompt: ContentBlock[],
+		messageId?: string,
 	): Promise<PromptResponse> {
 		const connection = await this.ensureReady();
-		return connection.prompt({ sessionId, prompt });
+		return connection.prompt({
+			sessionId,
+			prompt,
+			messageId: messageId ?? undefined,
+		});
 	}
 
 	async cancel(sessionId: string): Promise<void> {
@@ -499,6 +514,21 @@ export class AcpConnection {
 	async setSessionModel(sessionId: string, modelId: string): Promise<void> {
 		const connection = await this.ensureReady();
 		await connection.unstable_setSessionModel({ sessionId, modelId });
+	}
+
+	async setSessionConfigOption(
+		params: SetSessionConfigOptionRequest,
+	): Promise<SetSessionConfigOptionResponse> {
+		const connection = await this.ensureReady();
+		return connection.setSessionConfigOption(params);
+	}
+
+	async closeSession(sessionId: string): Promise<void> {
+		if (!this.supportsSessionClose()) {
+			throw new Error("Agent does not support session/close capability");
+		}
+		const connection = await this.ensureReady();
+		await connection.unstable_closeSession({ sessionId });
 	}
 
 	async createTerminal(

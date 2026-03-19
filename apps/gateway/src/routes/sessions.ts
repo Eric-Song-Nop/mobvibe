@@ -7,6 +7,7 @@ import {
 	createInternalError,
 	type ErrorDetail,
 	isEncryptedPayload,
+	isErrorDetail,
 } from "@mobvibe/shared";
 import type { Router } from "express";
 import { logger } from "../lib/logger.js";
@@ -48,6 +49,36 @@ const buildAuthorizationError = (message = "Not authorized") =>
 		retryable: false,
 		scope: "request",
 	});
+
+const getStructuredErrorDetail = (error: unknown): ErrorDetail | undefined => {
+	if (error instanceof AppError) {
+		return error.detail;
+	}
+	if (
+		error &&
+		typeof error === "object" &&
+		"detail" in error &&
+		isErrorDetail((error as { detail?: unknown }).detail)
+	) {
+		return (error as { detail: ErrorDetail }).detail;
+	}
+	return undefined;
+};
+
+const getStatusForErrorDetail = (detail: ErrorDetail): number => {
+	switch (detail.code) {
+		case "REQUEST_VALIDATION_FAILED":
+			return 400;
+		case "AUTHORIZATION_FAILED":
+			return 403;
+		case "SESSION_NOT_FOUND":
+			return 404;
+		case "CAPABILITY_NOT_SUPPORTED":
+			return 409;
+		default:
+			return 500;
+	}
+};
 
 const normalizeRelativeCwd = (value: unknown): string | undefined => {
 	if (typeof value !== "string") {
@@ -360,6 +391,47 @@ export function setupSessionRoutes(
 		},
 	);
 
+	// Close session - with authorization check
+	router.post(
+		"/session/close",
+		async (request: AuthenticatedRequest, response) => {
+			const { sessionId } = request.body ?? {};
+			if (typeof sessionId !== "string") {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId required"),
+					400,
+				);
+				return;
+			}
+
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			try {
+				logger.info({ sessionId, userId }, "session_close_request");
+				const session = await sessionRouter.closeSession({ sessionId }, userId);
+				logger.info({ sessionId, userId }, "session_close_success");
+				response.json(session);
+			} catch (error) {
+				const detail = getStructuredErrorDetail(error);
+				logger.error({ err: error, sessionId }, "session_close_error");
+				if (detail) {
+					respondError(response, detail, getStatusForErrorDetail(detail));
+					return;
+				}
+				const message = getErrorMessage(error);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
+				} else {
+					respondError(response, createInternalError("session"));
+				}
+			}
+		},
+	);
+
 	// Set session mode - with authorization check
 	router.post(
 		"/session/mode",
@@ -438,6 +510,77 @@ export function setupSessionRoutes(
 		},
 	);
 
+	// Set protocol-native session config option - with authorization check
+	router.post(
+		"/session/config-option",
+		async (request: AuthenticatedRequest, response) => {
+			const { sessionId, configId, type, value } = request.body ?? {};
+			if (
+				typeof sessionId !== "string" ||
+				typeof configId !== "string" ||
+				(type !== "boolean" && typeof value !== "string")
+			) {
+				respondError(
+					response,
+					buildRequestValidationError(
+						"sessionId, configId, and a valid config value are required",
+					),
+					400,
+				);
+				return;
+			}
+			if (type === "boolean" && typeof value !== "boolean") {
+				respondError(
+					response,
+					buildRequestValidationError(
+						"boolean config option requires a boolean value",
+					),
+					400,
+				);
+				return;
+			}
+
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			try {
+				logger.info(
+					{ sessionId, configId, type, userId },
+					"session_config_option_request",
+				);
+				const session = await sessionRouter.setSessionConfigOption(
+					type === "boolean"
+						? { sessionId, configId, type, value }
+						: { sessionId, configId, value },
+					userId,
+				);
+				logger.info(
+					{ sessionId, configId, userId },
+					"session_config_option_success",
+				);
+				response.json(session);
+			} catch (error) {
+				const detail = getStructuredErrorDetail(error);
+				logger.error(
+					{ err: error, sessionId, configId },
+					"session_config_option_error",
+				);
+				if (detail) {
+					respondError(response, detail, getStatusForErrorDetail(detail));
+					return;
+				}
+				const message = getErrorMessage(error);
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
+				} else {
+					respondError(response, createInternalError("session"));
+				}
+			}
+		},
+	);
+
 	// Generate message ID - for optimistic UI updates
 	router.post("/message/id", (request: AuthenticatedRequest, response) => {
 		const { sessionId } = request.body ?? {};
@@ -458,8 +601,12 @@ export function setupSessionRoutes(
 
 	// Send message - with authorization check
 	router.post("/message", async (request: AuthenticatedRequest, response) => {
-		const { sessionId, prompt } = request.body ?? {};
-		if (typeof sessionId !== "string" || !isEncryptedPayload(prompt)) {
+		const { sessionId, prompt, messageId } = request.body ?? {};
+		if (
+			typeof sessionId !== "string" ||
+			!isEncryptedPayload(prompt) ||
+			(messageId !== undefined && typeof messageId !== "string")
+		) {
 			respondError(
 				response,
 				buildRequestValidationError("sessionId and prompt required"),
@@ -510,7 +657,7 @@ export function setupSessionRoutes(
 			);
 
 			const result = await sessionRouter.sendMessage(
-				{ sessionId, prompt },
+				{ sessionId, prompt, messageId },
 				userId,
 			);
 			logger.debug(

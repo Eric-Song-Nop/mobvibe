@@ -180,12 +180,12 @@ describe("useSessionQueries", () => {
 		});
 		vi.mocked(api.discoverSessions).mockResolvedValueOnce({
 			sessions: [],
-			capabilities: { list: true, load: true },
+			capabilities: { close: false, list: true, load: true },
 			nextCursor: "next",
 		});
 		vi.mocked(api.discoverSessions).mockResolvedValueOnce({
 			sessions: [],
-			capabilities: { list: true, load: true },
+			capabilities: { close: false, list: true, load: true },
 			nextCursor: undefined,
 		});
 
@@ -223,7 +223,7 @@ describe("useSessionQueries", () => {
 		});
 		vi.mocked(api.discoverSessions).mockResolvedValue({
 			sessions: [],
-			capabilities: { list: true, load: true },
+			capabilities: { close: false, list: true, load: true },
 			nextCursor: undefined,
 		});
 
@@ -266,7 +266,7 @@ describe("useSessionQueries", () => {
 			}
 			return {
 				sessions: [],
-				capabilities: { list: true, load: true },
+				capabilities: { close: false, list: true, load: true },
 				nextCursor: undefined,
 			};
 		});
@@ -283,7 +283,7 @@ describe("useSessionQueries", () => {
 		).resolves.toEqual({
 			machineId: "machine-1",
 			backendCapabilities: {
-				"codex-acp": { list: true, load: true },
+				"codex-acp": { close: false, list: true, load: true },
 			},
 		});
 		expect(api.discoverSessions).toHaveBeenCalledTimes(2);

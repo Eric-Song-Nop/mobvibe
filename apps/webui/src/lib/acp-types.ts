@@ -1,6 +1,7 @@
 import type {
 	AvailableCommand,
 	PlanEntry,
+	SessionConfigOption,
 	SessionNotification,
 	ToolCallUpdate,
 } from "@mobvibe/shared";
@@ -9,6 +10,7 @@ import type {
 export type SessionTextChunk = {
 	role: "user" | "assistant";
 	text: string;
+	messageId?: string;
 };
 
 export type SessionModeUpdate = {
@@ -19,6 +21,10 @@ export type SessionInfoPayload = {
 	title?: string;
 	updatedAt?: string;
 	_meta?: Record<string, unknown> | null;
+};
+
+export type ConfigOptionUpdatePayload = {
+	configOptions: SessionConfigOption[];
 };
 
 // Extraction utility functions (these work with SDK types)
@@ -37,10 +43,18 @@ export const extractTextChunk = (
 	}
 
 	if (update.sessionUpdate === "user_message_chunk") {
-		return { role: "user", text: update.content.text };
+		return {
+			role: "user",
+			text: update.content.text,
+			messageId: update.messageId ?? undefined,
+		};
 	}
 
-	return { role: "assistant", text: update.content.text };
+	return {
+		role: "assistant",
+		text: update.content.text,
+		messageId: update.messageId ?? undefined,
+	};
 };
 
 export const extractSessionModeUpdate = (
@@ -106,4 +120,13 @@ export const extractAvailableCommandsUpdate = (
 		return null;
 	}
 	return notification.update.availableCommands ?? [];
+};
+
+export const extractConfigOptionUpdate = (
+	notification: SessionNotification,
+): ConfigOptionUpdatePayload | null => {
+	if (notification.update.sessionUpdate !== "config_option_update") {
+		return null;
+	}
+	return { configOptions: notification.update.configOptions ?? [] };
 };

@@ -323,6 +323,33 @@ export class SocketClient extends EventEmitter {
 			}
 		});
 
+		// Session close
+		this.socket.on("rpc:session:close", async (request) => {
+			try {
+				logger.info(
+					{ requestId: request.requestId, sessionId: request.params.sessionId },
+					"rpc_session_close",
+				);
+				const session = await sessionManager.closeSession(
+					request.params.sessionId,
+				);
+				if (!session) {
+					throw new Error("Session not found");
+				}
+				this.sendRpcResponse(request.requestId, session);
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_session_close_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
 		// Session mode
 		this.socket.on("rpc:session:mode", async (request) => {
 			try {
@@ -383,11 +410,40 @@ export class SocketClient extends EventEmitter {
 			}
 		});
 
+		// Session config option
+		this.socket.on("rpc:session:config", async (request) => {
+			try {
+				logger.info(
+					{
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+						configId: request.params.configId,
+					},
+					"rpc_session_config",
+				);
+				const session = await sessionManager.setSessionConfigOption(
+					request.params,
+				);
+				this.sendRpcResponse(request.requestId, session);
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+						configId: request.params.configId,
+					},
+					"rpc_session_config_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
 		// Send message
 		this.socket.on("rpc:message:send", async (request) => {
 			const requestStart = process.hrtime.bigint();
 			try {
-				const { sessionId, prompt: rawPrompt } = request.params;
+				const { sessionId, prompt: rawPrompt, messageId } = request.params;
 				const prompt = this.options.cryptoService.decryptRpcPayload<
 					import("@agentclientprotocol/sdk").ContentBlock[]
 				>(sessionId, rawPrompt);
@@ -412,14 +468,22 @@ export class SocketClient extends EventEmitter {
 					throw new Error("Session not found");
 				}
 				sessionManager.touchSession(sessionId);
-				const result = await record.connection.prompt(sessionId, prompt);
+				const result = await record.connection.prompt(
+					sessionId,
+					prompt,
+					messageId,
+				);
 				sessionManager.touchSession(sessionId);
 				sessionManager.recordTurnEnd(
 					sessionId,
 					result.stopReason as StopReason,
 				);
-				this.sendRpcResponse<{ stopReason: StopReason }>(request.requestId, {
+				this.sendRpcResponse<{
+					stopReason: StopReason;
+					userMessageId?: string;
+				}>(request.requestId, {
 					stopReason: result.stopReason as StopReason,
+					userMessageId: result.userMessageId ?? undefined,
 				});
 				const durationMs =
 					Number(process.hrtime.bigint() - requestStart) / 1_000_000;

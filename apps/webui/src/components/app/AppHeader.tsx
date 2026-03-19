@@ -22,11 +22,19 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Popover,
 	PopoverContent,
 	PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import {
 	Sheet,
 	SheetContent,
@@ -34,8 +42,14 @@ import {
 	SheetTitle,
 } from "@/components/ui/sheet";
 import { useIsMobile } from "@/hooks/use-mobile";
-import type { PlanEntry } from "@/lib/acp";
+import type { PlanEntry, SessionConfigOption } from "@/lib/acp";
 import type { ChatSession } from "@/lib/chat-store";
+import {
+	flattenSessionConfigSelectOptions,
+	getAdditionalSessionConfigOptions,
+	isBooleanSessionConfigOption,
+	isSelectSessionConfigOption,
+} from "@/lib/session-config-options";
 
 export type AppHeaderProps = {
 	backendLabel?: string;
@@ -54,12 +68,21 @@ export type AppHeaderProps = {
 	onOpenCommandPalette?: () => void;
 	onSyncHistory?: () => void;
 	onForceReload?: () => void;
+	onCloseSession?: () => void;
+	onSessionOptionChange?: (
+		params:
+			| { configId: string; type: "boolean"; value: boolean }
+			| { configId: string; value: string },
+	) => void;
 	showFileExplorer?: boolean;
 	showSyncHistory?: boolean;
 	fileExplorerDisabled?: boolean;
 	syncHistoryDisabled?: boolean;
 	showForceReload?: boolean;
 	forceReloadDisabled?: boolean;
+	showCloseSession?: boolean;
+	closeSessionDisabled?: boolean;
+	sessionOptions?: SessionConfigOption[];
 };
 
 type SessionDetailItem = {
@@ -68,18 +91,110 @@ type SessionDetailItem = {
 	value: string;
 };
 
-function SessionDetailsContent({ items }: { items: SessionDetailItem[] }) {
+function SessionDetailsContent({
+	items,
+	sessionOptions,
+	onSessionOptionChange,
+	t,
+}: {
+	items: SessionDetailItem[];
+	sessionOptions?: SessionConfigOption[];
+	onSessionOptionChange?: (
+		params:
+			| { configId: string; type: "boolean"; value: boolean }
+			| { configId: string; value: string },
+	) => void;
+	t: (key: string, options?: Record<string, unknown>) => string;
+}) {
+	const additionalOptions = getAdditionalSessionConfigOptions(sessionOptions);
+
 	return (
-		<dl className="space-y-3">
-			{items.map((item) => (
-				<div key={item.key} className="space-y-1">
-					<dt className="text-muted-foreground text-[11px] font-medium">
-						{item.label}
-					</dt>
-					<dd className="text-sm break-words">{item.value}</dd>
+		<div className="space-y-4">
+			<dl className="space-y-3">
+				{items.map((item) => (
+					<div key={item.key} className="space-y-1">
+						<dt className="text-muted-foreground text-[11px] font-medium">
+							{item.label}
+						</dt>
+						<dd className="text-sm break-words">{item.value}</dd>
+					</div>
+				))}
+			</dl>
+			{additionalOptions.length > 0 ? (
+				<div className="space-y-3 border-t pt-3">
+					<h3 className="text-sm font-medium">{t("session.sessionOptions")}</h3>
+					<div className="space-y-3">
+						{additionalOptions.map((option) => {
+							if (isSelectSessionConfigOption(option)) {
+								const choices = flattenSessionConfigSelectOptions(option);
+								return (
+									<div key={option.id} className="space-y-1.5">
+										<div>
+											<div className="text-sm font-medium">{option.name}</div>
+											{option.description ? (
+												<div className="text-muted-foreground text-xs">
+													{option.description}
+												</div>
+											) : null}
+										</div>
+										<Select
+											value={option.currentValue}
+											onValueChange={(value) =>
+												onSessionOptionChange?.({
+													configId: option.id,
+													value,
+												})
+											}
+										>
+											<SelectTrigger className="h-8 text-xs">
+												<SelectValue placeholder={option.name} />
+											</SelectTrigger>
+											<SelectContent>
+												{choices.map((choice) => (
+													<SelectItem key={choice.value} value={choice.value}>
+														{choice.name}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									</div>
+								);
+							}
+							if (isBooleanSessionConfigOption(option)) {
+								return (
+									<div
+										key={option.id}
+										className="flex items-start gap-2 rounded-md border p-2"
+									>
+										<Checkbox
+											checked={option.currentValue}
+											onCheckedChange={(checked) =>
+												onSessionOptionChange?.({
+													configId: option.id,
+													type: "boolean",
+													value: checked === true,
+												})
+											}
+										/>
+										<span className="space-y-1">
+											<span className="block text-sm font-medium">
+												{option.name}
+											</span>
+											{option.description ? (
+												<span className="text-muted-foreground block text-xs">
+													{option.description}
+												</span>
+											) : null}
+										</span>
+									</div>
+								);
+							}
+							return null;
+						})}
+					</div>
 				</div>
-			))}
-		</dl>
+			) : null}
+		</div>
 	);
 }
 
@@ -100,12 +215,17 @@ export const AppHeader = memo(function AppHeader({
 	onOpenCommandPalette,
 	onSyncHistory,
 	onForceReload,
+	onCloseSession,
+	onSessionOptionChange,
 	showFileExplorer = false,
 	showSyncHistory = false,
 	fileExplorerDisabled = false,
 	syncHistoryDisabled = false,
 	showForceReload = false,
 	forceReloadDisabled = false,
+	showCloseSession = false,
+	closeSessionDisabled = false,
+	sessionOptions,
 }: AppHeaderProps) {
 	const { t } = useTranslation();
 	const isMobile = useIsMobile();
@@ -153,7 +273,9 @@ export const AppHeader = memo(function AppHeader({
 			workspacePath ||
 			executionMode ||
 			branchLabel ||
-			subdirectoryLabel,
+			subdirectoryLabel ||
+			(sessionOptions &&
+				getAdditionalSessionConfigOptions(sessionOptions).length > 0),
 	);
 	const detailsTitle = t("session.context.details");
 	const detailsTrigger = showDetailsTrigger ? (
@@ -251,6 +373,35 @@ export const AppHeader = memo(function AppHeader({
 								</AlertDialogContent>
 							</AlertDialog>
 						) : null}
+						{showCloseSession ? (
+							<AlertDialog>
+								<AlertDialogTrigger asChild>
+									<Button
+										variant="outline"
+										size="sm"
+										disabled={closeSessionDisabled}
+									>
+										{t("common.close")}
+									</Button>
+								</AlertDialogTrigger>
+								<AlertDialogContent size="sm">
+									<AlertDialogHeader>
+										<AlertDialogTitle>
+											{t("session.closeTitle")}
+										</AlertDialogTitle>
+										<AlertDialogDescription>
+											{t("session.closeDescription")}
+										</AlertDialogDescription>
+									</AlertDialogHeader>
+									<AlertDialogFooter>
+										<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+										<AlertDialogAction onClick={() => onCloseSession?.()}>
+											{t("session.closeConfirm")}
+										</AlertDialogAction>
+									</AlertDialogFooter>
+								</AlertDialogContent>
+							</AlertDialog>
+						) : null}
 						{showFileExplorer ? (
 							<Button
 								variant="outline"
@@ -304,7 +455,12 @@ export const AppHeader = memo(function AppHeader({
 												<SheetTitle>{detailsTitle}</SheetTitle>
 											</SheetHeader>
 											<div className="px-4 pb-4">
-												<SessionDetailsContent items={detailItems} />
+												<SessionDetailsContent
+													items={detailItems}
+													sessionOptions={sessionOptions}
+													onSessionOptionChange={onSessionOptionChange}
+													t={t}
+												/>
 											</div>
 										</SheetContent>
 									</Sheet>
@@ -315,7 +471,12 @@ export const AppHeader = memo(function AppHeader({
 									<PopoverContent align="end" className="w-80">
 										<div className="space-y-3">
 											<h2 className="text-sm font-medium">{detailsTitle}</h2>
-											<SessionDetailsContent items={detailItems} />
+											<SessionDetailsContent
+												items={detailItems}
+												sessionOptions={sessionOptions}
+												onSessionOptionChange={onSessionOptionChange}
+												t={t}
+											/>
 										</div>
 									</PopoverContent>
 								</Popover>

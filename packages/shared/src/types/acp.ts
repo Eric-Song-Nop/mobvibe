@@ -5,6 +5,8 @@ export type {
 	AudioContent,
 	// Other
 	AvailableCommand,
+	CloseSessionRequest,
+	CloseSessionResponse,
 	// Content types
 	ContentBlock,
 	// Cost & usage types (new in SDK 0.14.x)
@@ -20,8 +22,14 @@ export type {
 	RequestPermissionRequest,
 	RequestPermissionResponse,
 	ResourceLink,
+	SessionConfigBoolean,
+	SessionConfigOption,
 	// Session config option category (new in SDK 0.14.x)
 	SessionConfigOptionCategory,
+	SessionConfigSelect,
+	SessionConfigSelectGroup,
+	SessionConfigSelectOption,
+	SessionConfigValueId,
 	// Session info & state types
 	SessionInfo,
 	SessionModelState,
@@ -29,6 +37,8 @@ export type {
 	// Session types
 	SessionNotification,
 	SessionUpdate,
+	SetSessionConfigOptionRequest,
+	SetSessionConfigOptionResponse,
 	StopReason,
 	TerminalExitStatus,
 	TextContent,

@@ -12,6 +12,7 @@ import {
 	normalizeError,
 } from "@/lib/error-utils";
 import { getBackendCapability, type Machine } from "@/lib/machines-store";
+import { findConfigOptionByCategory } from "@/lib/session-config-options";
 import { useUiStore } from "@/lib/ui-store";
 import { buildSessionTitle } from "@/lib/ui-utils";
 
@@ -37,6 +38,10 @@ type Mutations = {
 	archiveSessionMutation: {
 		mutateAsync: (params: { sessionId: string }) => Promise<unknown>;
 	};
+	closeSessionMutation: {
+		mutateAsync: (params: { sessionId: string }) => Promise<unknown>;
+		isPending?: boolean;
+	};
 	bulkArchiveSessionsMutation: {
 		mutateAsync: (params: { sessionIds: string[] }) => Promise<unknown>;
 		isPending: boolean;
@@ -54,6 +59,24 @@ type Mutations = {
 		mutate: (params: { sessionId: string; modelId: string }) => void;
 		isPending: boolean;
 		variables?: { sessionId: string };
+	};
+	setSessionConfigOptionMutation: {
+		mutate: (
+			params:
+				| {
+						sessionId: string;
+						configId: string;
+						type: "boolean";
+						value: boolean;
+				  }
+				| {
+						sessionId: string;
+						configId: string;
+						value: string;
+				  },
+		) => void;
+		isPending?: boolean;
+		variables?: { sessionId?: string };
 	};
 	sendMessageMutation: {
 		mutate: (params: {
@@ -316,6 +339,20 @@ export function useSessionHandlers({
 		[mutations.archiveSessionMutation],
 	);
 
+	const handleCloseSession = useCallback(async () => {
+		const session = activeSessionRef.current;
+		if (!session?.sessionId || !session.isAttached) {
+			return;
+		}
+		try {
+			await mutations.closeSessionMutation.mutateAsync({
+				sessionId: session.sessionId,
+			});
+		} catch {
+			return;
+		}
+	}, [mutations.closeSessionMutation]);
+
 	const handleBulkArchiveSessions = useCallback(
 		async (sessionIds: string[]) => {
 			try {
@@ -362,6 +399,18 @@ export function useSessionHandlers({
 			return;
 		}
 		chatActions.setError(activeSessionId, undefined);
+		const modeConfigOption = findConfigOptionByCategory(
+			readySession.configOptions,
+			"mode",
+		);
+		if (modeConfigOption) {
+			mutations.setSessionConfigOptionMutation.mutate({
+				sessionId: activeSessionId,
+				configId: modeConfigOption.id,
+				value: modeId,
+			});
+			return;
+		}
 		mutations.setSessionModeMutation.mutate({
 			sessionId: activeSessionId,
 			modeId,
@@ -380,9 +429,40 @@ export function useSessionHandlers({
 			return;
 		}
 		chatActions.setError(activeSessionId, undefined);
+		const modelConfigOption = findConfigOptionByCategory(
+			readySession.configOptions,
+			"model",
+		);
+		if (modelConfigOption) {
+			mutations.setSessionConfigOptionMutation.mutate({
+				sessionId: activeSessionId,
+				configId: modelConfigOption.id,
+				value: modelId,
+			});
+			return;
+		}
 		mutations.setSessionModelMutation.mutate({
 			sessionId: activeSessionId,
 			modelId,
+		});
+	};
+
+	const handleSessionConfigOptionChange = async (
+		params:
+			| { configId: string; type: "boolean"; value: boolean }
+			| { configId: string; value: string },
+	) => {
+		if (!activeSessionId || !activeSessionRef.current) {
+			return;
+		}
+		const readySession = await ensureSessionAttached();
+		if (!readySession) {
+			return;
+		}
+		chatActions.setError(activeSessionId, undefined);
+		mutations.setSessionConfigOptionMutation.mutate({
+			sessionId: activeSessionId,
+			...params,
 		});
 	};
 
@@ -513,10 +593,12 @@ export function useSessionHandlers({
 		handleCreateSession,
 		handleRenameSubmit,
 		handleArchiveSession,
+		handleCloseSession,
 		handleBulkArchiveSessions,
 		handlePermissionDecision,
 		handleModeChange,
 		handleModelChange,
+		handleSessionConfigOptionChange,
 		handleCancel,
 		handleForceReload,
 		handleSyncHistory,

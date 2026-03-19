@@ -1991,10 +1991,10 @@ describe("useSocket (webui)", () => {
 		// Cursor should advance and confirmOrAppendUserMessage should be called
 		// (provisional pattern handles dedup internally via store action)
 		expect(store.updateSessionCursor).toHaveBeenCalledWith("session-1", 1, 1);
-		expect(store.confirmOrAppendUserMessage).toHaveBeenCalledWith(
-			"session-1",
-			"Hello",
-		);
+		expect(store.confirmOrAppendUserMessage).toHaveBeenCalledWith("session-1", {
+			text: "Hello",
+			messageId: undefined,
+		});
 	});
 
 	it("processes user_message event when session is not sending", async () => {
@@ -2049,10 +2049,10 @@ describe("useSocket (webui)", () => {
 
 		// Both cursor and confirmOrAppendUserMessage should be called
 		expect(store.updateSessionCursor).toHaveBeenCalledWith("session-1", 1, 1);
-		expect(store.confirmOrAppendUserMessage).toHaveBeenCalledWith(
-			"session-1",
-			"Hello from CLI",
-		);
+		expect(store.confirmOrAppendUserMessage).toHaveBeenCalledWith("session-1", {
+			text: "Hello from CLI",
+			messageId: undefined,
+		});
 	});
 
 	// =========================================================================

@@ -60,6 +60,7 @@ const createMockDiscoverResult = (): DiscoverSessionsRpcResult => ({
 		},
 	],
 	capabilities: {
+		close: false,
 		list: true,
 		load: true,
 	},
@@ -368,6 +369,100 @@ describe("SessionRouter", () => {
 		});
 	});
 
+	describe("closeSession", () => {
+		it("sends close RPC to CLI and returns detached session summary", async () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
+			cliRegistry.register(socket, info, authInfo);
+
+			const mockSession = createMockSessionSummary({
+				sessionId: "session-1",
+				isAttached: true,
+			});
+			cliRegistry.updateSessions(socket.id, [mockSession]);
+
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:session:close") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							result: {
+								...mockSession,
+								isAttached: false,
+							},
+						});
+					}, 0);
+				}
+			});
+
+			const result = await sessionRouter.closeSession(
+				{ sessionId: "session-1" },
+				"user-1",
+			);
+
+			expect(result.isAttached).toBe(false);
+			expect(socket.emit).toHaveBeenCalledWith(
+				"rpc:session:close",
+				expect.objectContaining({
+					params: { sessionId: "session-1" },
+				}),
+			);
+		});
+	});
+
+	describe("setSessionConfigOption", () => {
+		it("sends config RPC to CLI and returns updated summary", async () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
+			cliRegistry.register(socket, info, authInfo);
+
+			const mockSession = createMockSessionSummary({
+				sessionId: "session-1",
+			});
+			cliRegistry.updateSessions(socket.id, [mockSession]);
+
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:session:config") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							result: {
+								...mockSession,
+								configOptions: [
+									{
+										id: "mode",
+										name: "Mode",
+										type: "select",
+										currentValue: "plan",
+										options: [
+											{ value: "plan", name: "Plan" },
+											{ value: "build", name: "Build" },
+										],
+									},
+								],
+							},
+						});
+					}, 0);
+				}
+			});
+
+			const result = await sessionRouter.setSessionConfigOption(
+				{ sessionId: "session-1", configId: "mode", value: "plan" },
+				"user-1",
+			);
+
+			expect(result.configOptions).toHaveLength(1);
+			expect(socket.emit).toHaveBeenCalledWith(
+				"rpc:session:config",
+				expect.objectContaining({
+					params: { sessionId: "session-1", configId: "mode", value: "plan" },
+				}),
+			);
+		});
+	});
+
 	describe("bulkArchiveSessions", () => {
 		it("sends archive-all RPC grouped by machine", async () => {
 			const socket = createMockSocket("socket-1");
@@ -460,6 +555,57 @@ describe("SessionRouter", () => {
 			await expect(
 				sessionRouter.discoverSessions("machine-1", undefined, "user-1"),
 			).rejects.toThrow("Agent does not support session listing");
+		});
+	});
+
+	describe("sendMessage", () => {
+		it("returns userMessageId from message send RPC", async () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			const authInfo = { userId: "user-1", deviceId: "device-123" };
+			cliRegistry.register(socket, info, authInfo);
+
+			const mockSession = createMockSessionSummary({
+				sessionId: "session-1",
+			});
+			cliRegistry.updateSessions(socket.id, [mockSession]);
+
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:message:send") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							result: {
+								stopReason: "end_turn",
+								userMessageId: "agent-user-1",
+							},
+						});
+					}, 0);
+				}
+			});
+
+			const result = await sessionRouter.sendMessage(
+				{
+					sessionId: "session-1",
+					messageId: "client-msg-1",
+					prompt: { t: "encrypted", c: "opaque-prompt" },
+				},
+				"user-1",
+			);
+
+			expect(result).toEqual({
+				stopReason: "end_turn",
+				userMessageId: "agent-user-1",
+			});
+			expect(socket.emit).toHaveBeenCalledWith(
+				"rpc:message:send",
+				expect.objectContaining({
+					params: expect.objectContaining({
+						sessionId: "session-1",
+						messageId: "client-msg-1",
+					}),
+				}),
+			);
 		});
 	});
 

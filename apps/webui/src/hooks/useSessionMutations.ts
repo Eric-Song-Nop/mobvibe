@@ -12,6 +12,7 @@ import {
 	archiveSession,
 	bulkArchiveSessions,
 	cancelSession,
+	closeSession,
 	createSession,
 	loadSession,
 	reloadSession,
@@ -19,6 +20,7 @@ import {
 	type SessionSummary,
 	sendMessage,
 	sendPermissionDecision,
+	setSessionConfigOption,
 	setSessionMode,
 	setSessionModel,
 } from "@/lib/api";
@@ -49,6 +51,7 @@ type SessionMetadata = Partial<
 		| "modelName"
 		| "modeId"
 		| "modeName"
+		| "configOptions"
 		| "availableModes"
 		| "availableModels"
 		| "availableCommands"
@@ -131,6 +134,7 @@ export interface ChatStoreActions {
 				| "modelName"
 				| "modeId"
 				| "modeName"
+				| "configOptions"
 				| "availableModes"
 				| "availableModels"
 				| "availableCommands"
@@ -151,7 +155,15 @@ export interface ChatStoreActions {
 			provisional?: boolean;
 		},
 	) => void;
-	confirmOrAppendUserMessage: (sessionId: string, text: string) => void;
+	confirmOrAppendUserMessage: (
+		sessionId: string,
+		payload: { text: string; messageId?: string },
+	) => void;
+	reconcileUserMessageId: (
+		sessionId: string,
+		optimisticMessageId: string,
+		acknowledgedMessageId: string,
+	) => void;
 	markUserMessageFailed: (sessionId: string, messageId: string) => void;
 	addStatusMessage: (sessionId: string, status: StatusPayload) => void;
 	appendAssistantChunk: (sessionId: string, text: string) => void;
@@ -217,6 +229,7 @@ const applySessionSummary = (
 		modelName: summary.modelName,
 		modeId: summary.modeId,
 		modeName: summary.modeName,
+		configOptions: summary.configOptions,
 		availableModes: summary.availableModes,
 		availableModels: summary.availableModels,
 		availableCommands: summary.availableCommands,
@@ -274,6 +287,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 				modelName: data.modelName,
 				modeId: data.modeId,
 				modeName: data.modeName,
+				configOptions: data.configOptions,
 				availableModes: data.availableModes,
 				availableModels: data.availableModels,
 				availableCommands: data.availableCommands,
@@ -343,6 +357,28 @@ export function useSessionMutations(store: ChatStoreActions) {
 				normalizeError(
 					mutationError,
 					createFallbackError(t("errors.archiveSessionFailed"), "session"),
+				),
+			);
+		},
+	});
+
+	const closeSessionMutation = useMutation({
+		mutationFn: closeSession,
+		onSuccess: (summary) => {
+			applySessionSummary(store, summary);
+			store.markSessionDetached({
+				sessionId: summary.sessionId,
+				machineId: summary.machineId,
+				detachedAt: new Date().toISOString(),
+				reason: "unknown",
+			});
+			store.setAppError(undefined);
+		},
+		onError: (mutationError: unknown) => {
+			store.setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError(t("errors.closeSessionFailed"), "session"),
 				),
 			);
 		},
@@ -427,6 +463,22 @@ export function useSessionMutations(store: ChatStoreActions) {
 		},
 	});
 
+	const setSessionConfigOptionMutation = useMutation({
+		mutationFn: setSessionConfigOption,
+		onSuccess: (summary) => {
+			applySessionSummary(store, summary);
+			store.setAppError(undefined);
+		},
+		onError: (mutationError: unknown) => {
+			store.setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError(t("errors.switchModeFailed"), "session"),
+				),
+			);
+		},
+	});
+
 	const sendMessageMutation = useMutation({
 		mutationFn: (variables: SendMessageVariables) => {
 			if (!variables) {
@@ -435,7 +487,21 @@ export function useSessionMutations(store: ChatStoreActions) {
 			return sendMessage({
 				sessionId: variables.sessionId,
 				prompt: variables.prompt,
+				messageId: variables.messageId,
 			});
+		},
+		onSuccess: (data, variables) => {
+			if (
+				variables?.messageId &&
+				data.userMessageId &&
+				data.userMessageId !== variables.messageId
+			) {
+				store.reconcileUserMessageId(
+					variables.sessionId,
+					variables.messageId,
+					data.userMessageId,
+				);
+			}
 		},
 		onError: (mutationError: unknown, variables) => {
 			if (variables?.messageId) {
@@ -510,6 +576,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 				modelName: data.modelName,
 				modeId: data.modeId,
 				modeName: data.modeName,
+				configOptions: data.configOptions,
 				availableModes: data.availableModes,
 				availableModels: data.availableModels,
 				availableCommands: data.availableCommands,
@@ -543,8 +610,10 @@ export function useSessionMutations(store: ChatStoreActions) {
 		createSessionMutation,
 		renameSessionMutation,
 		archiveSessionMutation,
+		closeSessionMutation,
 		bulkArchiveSessionsMutation,
 		cancelSessionMutation,
+		setSessionConfigOptionMutation,
 		setSessionModeMutation,
 		setSessionModelMutation,
 		sendMessageMutation,

@@ -151,6 +151,23 @@ describe("AcpConnection", () => {
 		});
 	});
 
+	describe("supportsSessionClose", () => {
+		it("returns false when session close is unavailable", () => {
+			expect(connection.supportsSessionClose()).toBe(false);
+		});
+
+		it("returns true when session close capability is advertised", () => {
+			// @ts-expect-error - accessing private property for testing
+			connection.agentCapabilities = {
+				sessionCapabilities: {
+					close: {},
+				},
+			};
+
+			expect(connection.supportsSessionClose()).toBe(true);
+		});
+	});
+
 	describe("listSessions", () => {
 		it("returns empty array when session list not supported", async () => {
 			// agentCapabilities is undefined, so supportsSessionList() returns false
@@ -178,6 +195,35 @@ describe("AcpConnection", () => {
 			expect(status.command).toBe("test-command");
 			expect(status.args).toEqual(["--arg1"]);
 			expect(status.state).toBe("idle");
+		});
+	});
+
+	describe("prompt", () => {
+		it("forwards messageId and returns userMessageId", async () => {
+			const promptMock = mock(() =>
+				Promise.resolve({
+					stopReason: "end_turn",
+					userMessageId: "agent-user-1",
+				}),
+			);
+
+			// @ts-expect-error - accessing private property for testing
+			connection.connection = { prompt: promptMock };
+			// @ts-expect-error - accessing private property for testing
+			connection.state = "ready";
+
+			const result = await connection.prompt(
+				"session-1",
+				[{ type: "text", text: "hello" }],
+				"client-msg-1",
+			);
+
+			expect(promptMock).toHaveBeenCalledWith({
+				sessionId: "session-1",
+				prompt: [{ type: "text", text: "hello" }],
+				messageId: "client-msg-1",
+			});
+			expect(result.userMessageId).toBe("agent-user-1");
 		});
 	});
 });

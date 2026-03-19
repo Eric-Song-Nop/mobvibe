@@ -90,10 +90,12 @@ const createMockMutations = (): UseSessionHandlersParams["mutations"] => ({
 	},
 	renameSessionMutation: { mutate: vi.fn() },
 	archiveSessionMutation: { mutateAsync: vi.fn() },
+	closeSessionMutation: { mutateAsync: vi.fn(), isPending: false },
 	bulkArchiveSessionsMutation: { mutateAsync: vi.fn(), isPending: false },
 	cancelSessionMutation: { mutate: vi.fn(), mutateAsync: vi.fn() },
 	setSessionModeMutation: { mutate: vi.fn(), isPending: false },
 	setSessionModelMutation: { mutate: vi.fn(), isPending: false },
+	setSessionConfigOptionMutation: { mutate: vi.fn(), isPending: false },
 	sendMessageMutation: { mutate: vi.fn() },
 	permissionDecisionMutation: { mutate: vi.fn() },
 });
@@ -912,6 +914,7 @@ describe("useSessionHandlers — sync and force reload", () => {
 					connected: true,
 					backendCapabilities: {
 						"backend-1": {
+							close: false,
 							list: true,
 							load: true,
 						},
@@ -1048,6 +1051,7 @@ describe("useSessionHandlers — sync and force reload", () => {
 					connected: true,
 					backendCapabilities: {
 						"backend-1": {
+							close: false,
 							list: true,
 							load: false,
 						},

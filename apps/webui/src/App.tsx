@@ -114,6 +114,7 @@ function MainApp() {
 			appendAssistantChunk: s.appendAssistantChunk,
 			appendThoughtChunk: s.appendThoughtChunk,
 			confirmOrAppendUserMessage: s.confirmOrAppendUserMessage,
+			reconcileUserMessageId: s.reconcileUserMessageId,
 			markUserMessageFailed: s.markUserMessageFailed,
 			finalizeAssistantMessage: s.finalizeAssistantMessage,
 			addPermissionRequest: s.addPermissionRequest,
@@ -256,10 +257,12 @@ function MainApp() {
 		handleCreateSession,
 		handleRenameSubmit,
 		handleArchiveSession,
+		handleCloseSession,
 		handleBulkArchiveSessions,
 		handlePermissionDecision,
 		handleModeChange,
 		handleModelChange,
+		handleSessionConfigOptionChange,
 		handleCancel,
 		handleForceReload,
 		handleSyncHistory,
@@ -505,6 +508,21 @@ function MainApp() {
 				isForceReloading ||
 				(activeSessionId && isBackfilling(activeSessionId)),
 		);
+	const closeSessionAvailable = Boolean(
+		activeSessionId &&
+			activeSession?.isAttached &&
+			activeSession?.machineId &&
+			getBackendCapability(
+				machines[activeSession.machineId],
+				activeSession.backendId,
+				"close",
+			) === true,
+	);
+	const closeSessionDisabled =
+		!closeSessionAvailable ||
+		Boolean(
+			activeSession?.isLoading || mutations.closeSessionMutation.isPending,
+		);
 
 	useEffect(() => {
 		if (fileExplorerAvailable) {
@@ -575,6 +593,13 @@ function MainApp() {
 		) {
 			return t("session.switchingModel");
 		}
+		if (
+			mutations.setSessionConfigOptionMutation.isPending &&
+			mutations.setSessionConfigOptionMutation.variables?.sessionId ===
+				activeSessionId
+		) {
+			return t("session.syncingHistory");
+		}
 		if (activeSession?.historySyncing) {
 			return t("session.syncingHistory");
 		}
@@ -592,6 +617,8 @@ function MainApp() {
 		mutations.setSessionModeMutation.variables,
 		mutations.setSessionModelMutation.isPending,
 		mutations.setSessionModelMutation.variables,
+		mutations.setSessionConfigOptionMutation.isPending,
+		mutations.setSessionConfigOptionMutation.variables,
 		selectedMachineId,
 		t,
 	]);
@@ -699,11 +726,16 @@ function MainApp() {
 						onOpenCommandPalette={() => uiActions.setCommandPaletteOpen(true)}
 						onSyncHistory={handleSyncHistory}
 						onForceReload={handleForceReload}
+						onCloseSession={handleCloseSession}
+						onSessionOptionChange={handleSessionConfigOptionChange}
 						showFileExplorer={fileExplorerAvailable}
 						showSyncHistory={syncHistoryAvailable}
 						showForceReload={Boolean(activeSessionId)}
 						syncHistoryDisabled={syncHistoryDisabled}
 						forceReloadDisabled={forceReloadDisabled}
+						showCloseSession={closeSessionAvailable}
+						closeSessionDisabled={closeSessionDisabled}
+						sessionOptions={activeSession?.configOptions}
 					/>
 					<ChatSearchBar
 						open={chatSearchOpen}

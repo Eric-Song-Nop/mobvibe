@@ -1,8 +1,10 @@
 import type { EncryptedPayload } from "../crypto/types.js";
 import type {
+	CloseSessionRequest,
 	PermissionOption,
 	PermissionOutcome,
 	PermissionToolCall,
+	SetSessionConfigOptionRequest,
 	StopReason,
 } from "./acp.js";
 import type { ErrorDetail } from "./errors.js";
@@ -158,11 +160,13 @@ export type CreateSessionParams = {
 export type SendMessageParams = {
 	sessionId: string;
 	prompt: EncryptedPayload;
+	messageId?: string;
 };
 
 // Send message RPC result
 export type SendMessageResult = {
 	stopReason: StopReason;
+	userMessageId?: string;
 };
 
 // Cancel session RPC params
@@ -181,6 +185,10 @@ export type SetSessionModelParams = {
 	sessionId: string;
 	modelId: string;
 };
+
+export type CloseSessionParams = CloseSessionRequest;
+
+export type SetSessionConfigOptionParams = SetSessionConfigOptionRequest;
 
 // File system RPC params
 export type FsEntriesParams = {
@@ -307,6 +315,10 @@ export interface GatewayToCliEvents {
 	// RPC requests
 	"rpc:session:create": (request: RpcRequest<CreateSessionParams>) => void;
 	"rpc:session:cancel": (request: RpcRequest<CancelSessionParams>) => void;
+	"rpc:session:close": (request: RpcRequest<CloseSessionParams>) => void;
+	"rpc:session:config": (
+		request: RpcRequest<SetSessionConfigOptionParams>,
+	) => void;
 	"rpc:session:mode": (request: RpcRequest<SetSessionModeParams>) => void;
 	"rpc:session:model": (request: RpcRequest<SetSessionModelParams>) => void;
 	"rpc:message:send": (request: RpcRequest<SendMessageParams>) => void;
