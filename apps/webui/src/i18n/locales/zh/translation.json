@@ -118,6 +118,7 @@
 			"executionModeLabel": "执行模式",
 			"branchLabel": "分支",
 			"subdirectoryLabel": "子目录",
+			"contextLeftLabel": "剩余上下文",
 			"local": "本地",
 			"worktree": "Worktree",
 			"subdir": "子目录：{{path}}"

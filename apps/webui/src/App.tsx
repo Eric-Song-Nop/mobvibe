@@ -49,6 +49,7 @@ import { isInputFocused, registerHotkeys } from "@/lib/hotkeys";
 import { getBackendCapability, useMachinesStore } from "@/lib/machines-store";
 import { ensureNotificationPermission } from "@/lib/notifications";
 import { shouldActivateSessionOnSelect } from "@/lib/session-selection";
+import { getContextLeftPercent } from "@/lib/session-usage";
 import { useUiStore } from "@/lib/ui-store";
 import { getPathBasename } from "@/lib/ui-utils";
 
@@ -626,6 +627,7 @@ function MainApp() {
 				: undefined
 			: undefined;
 	const executionMode = activeSession?.worktreeBranch ? "worktree" : "local";
+	const contextLeftPercent = getContextLeftPercent(activeSession?.usage);
 	const isModeSwitching =
 		mutations.setSessionModeMutation.isPending &&
 		mutations.setSessionModeMutation.variables?.sessionId === activeSessionId;
@@ -689,6 +691,7 @@ function MainApp() {
 						executionMode={activeSession ? executionMode : undefined}
 						branchLabel={activeSession?.worktreeBranch}
 						subdirectoryLabel={subdirectoryLabel}
+						contextLeftPercent={contextLeftPercent}
 						statusMessage={statusMessage}
 						warningMessage={warningMessage}
 						streamError={streamError}
