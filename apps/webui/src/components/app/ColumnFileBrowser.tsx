@@ -19,38 +19,8 @@ import { GitStatusIndicator } from "@/components/app/git-status-indicator";
 import type { FsEntriesResponse, FsEntry, GitFileStatus } from "@/lib/api";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { FuzzyHighlight, fuzzySearch } from "@/lib/fuzzy-search";
+import { buildPathSegments, isPathWithinRoot } from "@/lib/path-utils";
 import { cn } from "@/lib/utils";
-
-const normalizePath = (value: string) => value.replace(/\/+$/, "");
-
-type PathSegment = {
-	name: string;
-	path: string;
-};
-
-const buildPathSegments = (
-	rootPath: string,
-	targetPath: string,
-	rootLabel: string,
-): PathSegment[] => {
-	const normalizedRoot = normalizePath(rootPath);
-	const normalizedTarget = normalizePath(targetPath);
-	const segments: PathSegment[] = [{ name: rootLabel, path: normalizedRoot }];
-	if (normalizedTarget === normalizedRoot) {
-		return segments;
-	}
-	if (!normalizedTarget.startsWith(`${normalizedRoot}/`)) {
-		return segments;
-	}
-	const relative = normalizedTarget.slice(normalizedRoot.length + 1);
-	const parts = relative.split("/").filter(Boolean);
-	let currentPath = normalizedRoot;
-	parts.forEach((part) => {
-		currentPath = `${currentPath}/${part}`;
-		segments.push({ name: part, path: currentPath });
-	});
-	return segments;
-};
 
 export type ColumnFileBrowserColumn = {
 	name: string;
@@ -295,7 +265,8 @@ export function useColumnFileBrowser({
 		if (!rootPath || initialized) {
 			return;
 		}
-		const initialPath = value ?? rootPath;
+		const initialPath =
+			value && isPathWithinRoot(value, rootPath) ? value : rootPath;
 		void buildColumnsForPath(
 			initialPath,
 			false,
