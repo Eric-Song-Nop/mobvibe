@@ -1,0 +1,16 @@
+{
+	"extends": "./tsconfig.app.json",
+	"compilerOptions": {
+		"tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
+		"types": ["vitest/globals", "vite/client", "vitest/jsdom"]
+	},
+	"include": [
+		"src/**/__tests__/**/*.ts",
+		"src/**/__tests__/**/*.tsx",
+		"src/**/*.test.ts",
+		"src/**/*.test.tsx",
+		"tests/**/*.test.ts",
+		"tests/**/*.test.tsx",
+		"src/setup-tests.ts"
+	]
+}

@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ToolCallContent } from "@/lib/acp";
 import type { ChatMessage, ChatSession } from "@/lib/chat-store";
 import { useChatStore } from "@/lib/chat-store";
 import {
@@ -10,8 +11,13 @@ import {
 import i18n from "../src/i18n";
 import { createDefaultContentBlocks } from "../src/lib/content-block-utils";
 
-const buildMessage = (overrides?: Partial<ChatMessage>): ChatMessage => {
-	const base: ChatMessage = {
+type TextChatMessage = Extract<ChatMessage, { kind: "text" }>;
+type ToolCallChatMessage = Extract<ChatMessage, { kind: "tool_call" }>;
+
+const buildMessage = (
+	overrides?: Partial<TextChatMessage>,
+): TextChatMessage => {
+	const base: TextChatMessage = {
 		id: "message-1",
 		role: "assistant",
 		kind: "text",
@@ -20,8 +26,21 @@ const buildMessage = (overrides?: Partial<ChatMessage>): ChatMessage => {
 		createdAt: new Date().toISOString(),
 		isStreaming: false,
 	};
-	return { ...base, ...overrides } as ChatMessage;
+	return { ...base, ...overrides };
 };
+
+const buildToolCallMessage = (
+	overrides?: Partial<ToolCallChatMessage>,
+): ToolCallChatMessage => ({
+	id: "message-tool-1",
+	role: "assistant",
+	kind: "tool_call",
+	sessionId: "session-1",
+	toolCallId: "tool-1",
+	createdAt: new Date().toISOString(),
+	isStreaming: false,
+	...overrides,
+});
 
 const buildSession = (overrides?: Partial<ChatSession>): ChatSession => ({
 	sessionId: "session-1",
@@ -84,19 +103,17 @@ describe("MessageItem", () => {
 	});
 
 	it("renders tool call text output as plain text", () => {
-		const message = {
-			...buildMessage({
-				kind: "tool_call",
-				sessionId: "session-1",
-				toolCallId: "tool-1",
-			}),
+		const message = buildToolCallMessage({
 			content: [
 				{
 					type: "content",
-					content: "first line\nsecond line",
+					content: {
+						type: "text",
+						text: "first line\nsecond line",
+					},
 				},
 			],
-		} as ChatMessage;
+		});
 		const { container, getByText } = render(<MessageItem message={message} />);
 		// Open the "Details" accordion to reveal output
 		const detailsSummary = getByText(i18n.t("toolCall.details"));
@@ -117,61 +134,58 @@ describe("MessageItem", () => {
 	});
 
 	it("renders tool call content types", () => {
-		const message = {
-			...buildMessage({
-				kind: "tool_call",
-				sessionId: "session-1",
-				toolCallId: "tool-2",
-			}),
-			content: [
-				{
-					type: "content",
-					content: {
-						type: "image",
-						data: "dGVzdA==",
-						mimeType: "image/png",
+		const content: ToolCallContent[] = [
+			{
+				type: "content",
+				content: {
+					type: "image",
+					data: "dGVzdA==",
+					mimeType: "image/png",
+				},
+			},
+			{
+				type: "content",
+				content: {
+					type: "audio",
+					data: "dGVzdA==",
+					mimeType: "audio/wav",
+				},
+			},
+			{
+				type: "content",
+				content: {
+					type: "resource",
+					resource: {
+						uri: "file:///tmp/test.txt",
+						text: "resource text",
 					},
 				},
-				{
-					type: "content",
-					content: {
-						type: "audio",
-						data: "dGVzdA==",
-						mimeType: "audio/wav",
-					},
+			},
+			{
+				type: "content",
+				content: {
+					type: "resource_link",
+					uri: "https://example.com/resource",
+					name: "resource",
+					mimeType: "text/plain",
+					size: 2048,
 				},
-				{
-					type: "content",
-					content: {
-						type: "resource",
-						resource: {
-							uri: "file:///tmp/test.txt",
-							text: "resource text",
-						},
-					},
-				},
-				{
-					type: "content",
-					content: {
-						type: "resource_link",
-						uri: "https://example.com/resource",
-						name: "resource",
-						mimeType: "text/plain",
-						size: 2048,
-					},
-				},
-				{
-					type: "diff",
-					path: "/tmp/demo.txt",
-					oldText: "old",
-					newText: "new",
-				},
-				{
-					type: "terminal",
-					terminalId: "terminal-1",
-				},
-			],
-		} as ChatMessage;
+			},
+			{
+				type: "diff",
+				path: "/tmp/demo.txt",
+				oldText: "old",
+				newText: "new",
+			},
+			{
+				type: "terminal",
+				terminalId: "terminal-1",
+			},
+		];
+		const message = buildToolCallMessage({
+			toolCallId: "tool-2",
+			content,
+		});
 		const terminalSession = buildSession({
 			terminalOutputs: {
 				"terminal-1": {
@@ -211,17 +225,13 @@ describe("MessageItem", () => {
 
 	it("renders tool call path from rawInput.path", () => {
 		const onOpenFilePreview = vi.fn();
-		const message = {
-			...buildMessage({
-				kind: "tool_call",
-				sessionId: "session-1",
-				toolCallId: "tool-3",
-			}),
+		const message = buildToolCallMessage({
+			toolCallId: "tool-3",
 			content: [],
 			rawInput: {
 				path: "/tmp/foo.txt",
 			},
-		} as ChatMessage;
+		});
 		const { getByRole } = render(
 			<MessageItem message={message} onOpenFilePreview={onOpenFilePreview} />,
 		);
@@ -232,12 +242,8 @@ describe("MessageItem", () => {
 
 	it("renders tool call paths from rawInput.patch", () => {
 		const onOpenFilePreview = vi.fn();
-		const message = {
-			...buildMessage({
-				kind: "tool_call",
-				sessionId: "session-1",
-				toolCallId: "tool-4",
-			}),
+		const message = buildToolCallMessage({
+			toolCallId: "tool-4",
 			content: [],
 			rawInput: {
 				patch: [
@@ -248,7 +254,7 @@ describe("MessageItem", () => {
 					"*** End Patch",
 				].join("\n"),
 			},
-		} as ChatMessage;
+		});
 		const { getByRole } = render(
 			<MessageItem message={message} onOpenFilePreview={onOpenFilePreview} />,
 		);

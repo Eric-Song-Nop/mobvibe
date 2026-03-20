@@ -46,6 +46,18 @@ const createBlob = ({
 	size?: number;
 }) => registerDataUrl(new Blob([new Uint8Array(size)], { type }), dataUrl);
 
+const createFileReaderProgressEvent = (
+	type: "error" | "load",
+): ProgressEvent<FileReader> =>
+	new ProgressEvent(type) as ProgressEvent<FileReader>;
+
+type MockCanvasElement = {
+	width: number;
+	height: number;
+	getContext: () => typeof mockContext | null;
+	toBlob: (callback: BlobCallback, type?: string, quality?: number) => void;
+};
+
 class MockFileReader {
 	result: string | ArrayBuffer | null = null;
 	error: DOMException | null = null;
@@ -57,14 +69,15 @@ class MockFileReader {
 		| null = null;
 
 	readAsDataURL(blob: Blob) {
+		const fileReader = this as unknown as FileReader;
 		const dataUrl = blobDataUrls.get(blob);
 		if (!dataUrl) {
 			this.error = new DOMException("Missing mocked data URL");
-			this.onerror?.call(this as never, new ProgressEvent("error"));
+			this.onerror?.call(fileReader, createFileReaderProgressEvent("error"));
 			return;
 		}
 		this.result = dataUrl;
-		this.onload?.call(this as never, new ProgressEvent("load"));
+		this.onload?.call(fileReader, createFileReaderProgressEvent("load"));
 	}
 }
 
@@ -141,7 +154,7 @@ describe("prompt-images", () => {
 			if (tagName !== "canvas") {
 				return originalCreateElement(tagName, options);
 			}
-			const canvas = {
+			const canvas: MockCanvasElement = {
 				width: 0,
 				height: 0,
 				getContext: vi.fn(() => canvasContext),
@@ -150,13 +163,13 @@ describe("prompt-images", () => {
 						canvasBlobFactory({
 							type: type ?? "image/png",
 							quality,
-							width: (canvas as { width: number }).width,
-							height: (canvas as { height: number }).height,
+							width: canvas.width,
+							height: canvas.height,
 						}),
 					);
 				},
-			} as HTMLCanvasElement;
-			return canvas;
+			};
+			return canvas as unknown as HTMLCanvasElement;
 		}) as typeof document.createElement);
 	});
 

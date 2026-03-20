@@ -8,7 +8,9 @@ import { createDefaultContentBlocks } from "../src/lib/content-block-utils";
 
 vi.mock("../src/components/chat/MessageItem", () => ({
 	MessageItem: ({ message }: { message: ChatMessage }) => (
-		<div data-testid={`message-${message.id}`}>{message.content as string}</div>
+		<div data-testid={`message-${message.id}`}>
+			{message.kind === "text" ? message.content : ""}
+		</div>
 	),
 }));
 
@@ -91,8 +93,12 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-const buildMessage = (overrides?: Partial<ChatMessage>): ChatMessage => {
-	const base: ChatMessage = {
+type TextChatMessage = Extract<ChatMessage, { kind: "text" }>;
+
+const buildMessage = (
+	overrides?: Partial<TextChatMessage>,
+): TextChatMessage => {
+	const base: TextChatMessage = {
 		id: "msg-1",
 		role: "assistant",
 		kind: "text",
@@ -101,7 +107,7 @@ const buildMessage = (overrides?: Partial<ChatMessage>): ChatMessage => {
 		createdAt: new Date().toISOString(),
 		isStreaming: false,
 	};
-	return { ...base, ...overrides } as ChatMessage;
+	return { ...base, ...overrides };
 };
 
 const buildSession = (overrides?: Partial<ChatSession>): ChatSession =>
