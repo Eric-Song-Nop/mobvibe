@@ -118,6 +118,7 @@
 			"executionModeLabel": "Execution Mode",
 			"branchLabel": "Branch",
 			"subdirectoryLabel": "Subdirectory",
+			"contextLeftLabel": "Context Left",
 			"local": "Local",
 			"worktree": "Worktree",
 			"subdir": "Subdir: {{path}}"
