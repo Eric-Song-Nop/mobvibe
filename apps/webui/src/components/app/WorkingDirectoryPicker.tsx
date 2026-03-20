@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	ColumnFileBrowser,
 	useColumnFileBrowser,
 } from "@/components/app/ColumnFileBrowser";
+import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group";
 import { Label } from "@/components/ui/label";
 import {
@@ -13,9 +14,19 @@ import {
 	type HostFsRootsResponse,
 } from "@/lib/api";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
+import { findBestMatchingRoot, isPathAtRoot } from "@/lib/path-utils";
 import { cn } from "@/lib/utils";
 
 const HOME_LABEL_FALLBACK = "Home";
+
+const resolveActiveRoot = (
+	roots: HostFsRootsResponse["roots"],
+	value: string | undefined,
+	homePath: string | undefined,
+) =>
+	findBestMatchingRoot(roots, value) ??
+	roots.find((root) => homePath && isPathAtRoot(root.path, homePath)) ??
+	roots[0];
 
 export type WorkingDirectoryPickerProps = {
 	open: boolean;
@@ -40,6 +51,15 @@ export function WorkingDirectoryPicker({
 }: WorkingDirectoryPickerProps) {
 	const { t } = useTranslation();
 	const [inputValue, setInputValue] = useState("");
+	const [activeRootPath, setActiveRootPath] = useState<string | undefined>();
+	const pendingBuildRef = useRef<
+		| {
+				targetPath: string;
+				notifySelect: boolean;
+				rootPath: string;
+		  }
+		| undefined
+	>(undefined);
 
 	const rootsQuery = useQuery<HostFsRootsResponse>({
 		queryKey: ["fs-roots", machineId],
@@ -52,12 +72,18 @@ export function WorkingDirectoryPicker({
 		enabled: open && Boolean(machineId),
 	});
 
+	const roots = rootsQuery.data?.roots ?? [];
 	const homePath = rootsQuery.data?.homePath;
 	const homeLabel =
-		rootsQuery.data?.roots[0]?.name ??
+		roots.find((root) => homePath && isPathAtRoot(root.path, homePath))?.name ??
 		t("workingDirectory.homeLabel", {
 			defaultValue: HOME_LABEL_FALLBACK,
 		});
+	const matchedActiveRoot = roots.find((root) => root.path === activeRootPath);
+	const activeRoot =
+		matchedActiveRoot ?? resolveActiveRoot(roots, value, homePath);
+	const resolvedActiveRootPath = activeRoot?.path;
+	const resolvedActiveRootLabel = activeRoot?.name ?? homeLabel;
 
 	const fetchEntries = useCallback(
 		async (payload: { path: string }) => {
@@ -80,8 +106,8 @@ export function WorkingDirectoryPicker({
 		columnRefs,
 	} = useColumnFileBrowser({
 		open,
-		rootPath: homePath,
-		rootLabel: homeLabel,
+		rootPath: resolvedActiveRootPath,
+		rootLabel: resolvedActiveRootLabel,
 		value,
 		onChange,
 		onSelect,
@@ -94,12 +120,42 @@ export function WorkingDirectoryPicker({
 		if (!nextPath) {
 			return;
 		}
+		const nextRoot = findBestMatchingRoot(roots, nextPath);
+		if (nextRoot && nextRoot.path !== resolvedActiveRootPath) {
+			pendingBuildRef.current = {
+				targetPath: nextPath,
+				notifySelect: true,
+				rootPath: nextRoot.path,
+			};
+			setActiveRootPath(nextRoot.path);
+			return;
+		}
 		void buildColumnsForPath(nextPath, true);
-	}, [buildColumnsForPath, inputValue]);
+	}, [buildColumnsForPath, inputValue, resolvedActiveRootPath, roots]);
+
+	const handleRootClick = useCallback(
+		(rootPath: string) => {
+			onChange(rootPath);
+			setInputValue(rootPath);
+			if (rootPath === resolvedActiveRootPath) {
+				void buildColumnsForPath(rootPath, true);
+				return;
+			}
+			pendingBuildRef.current = {
+				targetPath: rootPath,
+				notifySelect: true,
+				rootPath,
+			};
+			setActiveRootPath(rootPath);
+		},
+		[buildColumnsForPath, onChange, resolvedActiveRootPath],
+	);
 
 	useEffect(() => {
 		if (!open) {
 			setInputValue("");
+			setActiveRootPath(undefined);
+			pendingBuildRef.current = undefined;
 			return;
 		}
 		if (!value) {
@@ -107,6 +163,34 @@ export function WorkingDirectoryPicker({
 		}
 		setInputValue(value);
 	}, [open, value]);
+
+	useEffect(() => {
+		if (!open || roots.length === 0) {
+			return;
+		}
+		const nextActiveRoot = resolveActiveRoot(roots, value, homePath);
+		if (!nextActiveRoot) {
+			return;
+		}
+		setActiveRootPath((currentPath) =>
+			currentPath === nextActiveRoot.path ? currentPath : nextActiveRoot.path,
+		);
+	}, [homePath, open, roots, value]);
+
+	useEffect(() => {
+		if (!open || !resolvedActiveRootPath) {
+			return;
+		}
+		const pendingBuild = pendingBuildRef.current;
+		if (!pendingBuild || pendingBuild.rootPath !== resolvedActiveRootPath) {
+			return;
+		}
+		pendingBuildRef.current = undefined;
+		void buildColumnsForPath(
+			pendingBuild.targetPath,
+			pendingBuild.notifySelect,
+		);
+	}, [buildColumnsForPath, open, resolvedActiveRootPath]);
 
 	const machineError =
 		open && !machineId ? t("errors.selectMachine") : undefined;
@@ -145,6 +229,25 @@ export function WorkingDirectoryPicker({
 			) : null}
 			{pathError ? (
 				<div className="text-destructive text-xs">{pathError}</div>
+			) : null}
+			{roots.length > 1 ? (
+				<div className="flex flex-wrap gap-1">
+					{roots.map((root) => {
+						const isActive = root.path === resolvedActiveRootPath;
+						return (
+							<Button
+								key={root.path}
+								type="button"
+								variant={isActive ? "secondary" : "outline"}
+								size="xs"
+								aria-pressed={isActive}
+								onClick={() => handleRootClick(root.path)}
+							>
+								{root.name}
+							</Button>
+						);
+					})}
+				</div>
 			) : null}
 			<ColumnFileBrowser
 				columns={columns}
