@@ -27,6 +27,7 @@ vi.mock("react-i18next", () => ({
 				"session.context.executionModeLabel": "Execution Mode",
 				"session.context.branchLabel": "Branch",
 				"session.context.subdirectoryLabel": "Subdirectory",
+				"session.context.contextLeftLabel": "Context Left",
 				"session.context.local": "Local",
 				"session.context.worktree": "Worktree",
 				"session.context.subdir": `Subdir: ${options?.path ?? ""}`,
@@ -448,6 +449,17 @@ describe("AppHeader", () => {
 			).not.toBeInTheDocument();
 		});
 
+		it("shows the details trigger when context left is the only detail", () => {
+			renderAppHeader({
+				backendLabel: "Claude Agent",
+				contextLeftPercent: 74,
+			});
+
+			expect(
+				screen.getByRole("button", { name: "Session Details" }),
+			).toBeInTheDocument();
+		});
+
 		it("opens a desktop popover with session details", async () => {
 			const user = userEvent.setup();
 			renderAppHeader({
@@ -457,6 +469,7 @@ describe("AppHeader", () => {
 				executionMode: "worktree",
 				branchLabel: "feat/detection-fix",
 				subdirectoryLabel: "apps/webui",
+				contextLeftPercent: 74,
 			});
 
 			await user.click(screen.getByRole("button", { name: "Session Details" }));
@@ -470,6 +483,8 @@ describe("AppHeader", () => {
 			expect(screen.getByText("feat/detection-fix")).toBeInTheDocument();
 			expect(screen.getByText("Subdirectory")).toBeInTheDocument();
 			expect(screen.getByText("apps/webui")).toBeInTheDocument();
+			expect(screen.getByText("Context Left")).toBeInTheDocument();
+			expect(screen.getByText("74%")).toBeInTheDocument();
 		});
 
 		it("opens a mobile sheet with session details", async () => {
@@ -482,6 +497,7 @@ describe("AppHeader", () => {
 				executionMode: "worktree",
 				branchLabel: "feat/detection-fix",
 				subdirectoryLabel: "apps/webui",
+				contextLeftPercent: 74,
 			});
 
 			await user.click(screen.getByRole("button", { name: "Session Details" }));
@@ -490,7 +506,23 @@ describe("AppHeader", () => {
 			expect(screen.getByTestId("sheet-title")).toHaveTextContent(
 				"Session Details",
 			);
+			expect(screen.getByText("Context Left")).toBeInTheDocument();
+			expect(screen.getByText("74%")).toBeInTheDocument();
 			expect(screen.queryByTestId("popover-content")).not.toBeInTheDocument();
+		});
+
+		it("does not render a context-left row when the prop is absent", async () => {
+			const user = userEvent.setup();
+			renderAppHeader({
+				backendLabel: "Claude Agent",
+				workspaceLabel: "mobvibe",
+				workspacePath: "/Users/eric/src/mobvibe",
+			});
+
+			await user.click(screen.getByRole("button", { name: "Session Details" }));
+
+			expect(screen.queryByText("Context Left")).not.toBeInTheDocument();
+			expect(screen.queryByText("74%")).not.toBeInTheDocument();
 		});
 
 		it("uses a single-line truncating metadata strip", () => {
