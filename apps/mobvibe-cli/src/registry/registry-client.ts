@@ -18,6 +18,18 @@ export type RegistryClientOptions = {
 	cacheTtlMs?: number;
 };
 
+export type RegistryLoadSource =
+	| "fresh-cache"
+	| "network"
+	| "stale-cache"
+	| "unavailable";
+
+export type RegistryLoadResult = {
+	data: RegistryData | null;
+	source: RegistryLoadSource;
+	fetchError?: string;
+};
+
 const getCachePath = (homePath: string): string =>
 	path.join(homePath, "cache", "registry.json");
 
@@ -85,9 +97,9 @@ const fetchAndCache = async (
  * 3. On network failure, fall back to stale cache
  * 4. If no cache at all, return null
  */
-export const getRegistry = async (
+export const loadRegistry = async (
 	opts: RegistryClientOptions,
-): Promise<RegistryData | null> => {
+): Promise<RegistryLoadResult> => {
 	const url = opts.url ?? DEFAULT_REGISTRY_URL;
 	const ttlMs = opts.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
 	const cachePath = getCachePath(opts.homePath);
@@ -96,29 +108,45 @@ export const getRegistry = async (
 	const cached = await readCache(cachePath, ttlMs);
 	if (cached) {
 		logger.debug("registry_cache_hit");
-		return cached;
+		return {
+			data: cached,
+			source: "fresh-cache",
+		};
 	}
 
 	// 2. Fetch from network
 	try {
 		const data = await fetchAndCache(url, cachePath);
 		logger.info({ agentCount: data.agents.length }, "registry_fetched");
-		return data;
+		return {
+			data,
+			source: "network",
+		};
 	} catch (error) {
-		logger.warn(
-			{ error: error instanceof Error ? error.message : String(error) },
-			"registry_fetch_failed",
-		);
-	}
+		const message = error instanceof Error ? error.message : String(error);
+		logger.warn({ error: message }, "registry_fetch_failed");
+		const stale = await readStaleCache(cachePath);
+		if (stale) {
+			logger.info("registry_stale_cache_fallback");
+			return {
+				data: stale,
+				source: "stale-cache",
+				fetchError: message,
+			};
+		}
 
-	// 3. Fall back to stale cache
-	const stale = await readStaleCache(cachePath);
-	if (stale) {
-		logger.info("registry_stale_cache_fallback");
-		return stale;
+		logger.warn("registry_unavailable");
+		return {
+			data: null,
+			source: "unavailable",
+			fetchError: message,
+		};
 	}
+};
 
-	// 4. No data available
-	logger.warn("registry_unavailable");
-	return null;
+export const getRegistry = async (
+	opts: RegistryClientOptions,
+): Promise<RegistryData | null> => {
+	const result = await loadRegistry(opts);
+	return result.data;
 };

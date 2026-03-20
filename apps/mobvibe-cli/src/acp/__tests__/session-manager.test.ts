@@ -142,6 +142,8 @@ const createMockConfig = (): CliConfig => ({
 		},
 	],
 	registryAgents: [],
+	detectedBackends: [],
+	registrySource: "fresh-cache",
 	homePath: "/tmp/mobvibe-test",
 	logPath: "/tmp/mobvibe-test/logs",
 	pidFile: "/tmp/mobvibe-test/daemon.pid",
