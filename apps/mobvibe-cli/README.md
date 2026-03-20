@@ -22,6 +22,24 @@ mobvibe start
 
 After login, copy the displayed master secret and paste it into WebUI Settings > End-to-End Encryption > Pair.
 
+## No Backends Available
+
+`mobvibe start` now fails fast with exit code `1` when it resolves zero usable ACP backends. This happens before foreground startup, background daemon spawn, or PID file creation.
+
+If startup aborts, edit `~/.mobvibe/.config.json` and set `enabledAgents` manually:
+
+```json
+{
+  "enabledAgents": ["claude-acp", "codex-acp", "opencode"]
+}
+```
+
+When registry data was fetched from the network or loaded from cache, the CLI prints the exact selectable agent IDs from that registry. Use those printed IDs as the authoritative list for your current machine and registry snapshot.
+
+When the registry is unavailable and no cache exists, the CLI prints example IDs such as `claude-acp`, `codex-acp`, and `opencode`. Those are examples only, not a guaranteed complete or authoritative offline list.
+
+Editing `enabledAgents` alone is not always sufficient offline. If the registry cannot be fetched and there is no cached copy, or if required launchers are missing, fix connectivity and/or make sure `npx`, `uvx`, or the agent binary is available in `PATH`, then retry `mobvibe start`.
+
 ## Commands
 
 | Command | Description |

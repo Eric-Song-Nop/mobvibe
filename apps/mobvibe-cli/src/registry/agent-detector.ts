@@ -26,7 +26,7 @@ export const resolveAgentCommand = (
 			// Bun.which() cannot resolve names with path separators; fall back to basename
 			const baseName =
 				cmdName.includes("/") || cmdName.includes("\\")
-					? cmdName.split(/[/\\]/).pop()!
+					? (cmdName.split(/[/\\]/).pop() ?? cmdName)
 					: cmdName;
 			const binPath = Bun.which(baseName);
 			if (binPath) {
