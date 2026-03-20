@@ -44,6 +44,7 @@ export type AppHeaderProps = {
 	executionMode?: "local" | "worktree";
 	branchLabel?: string;
 	subdirectoryLabel?: string;
+	contextLeftPercent?: number;
 	statusMessage?: string;
 	warningMessage?: string;
 	streamError?: ChatSession["streamError"];
@@ -90,6 +91,7 @@ export const AppHeader = memo(function AppHeader({
 	executionMode,
 	branchLabel,
 	subdirectoryLabel,
+	contextLeftPercent,
 	statusMessage,
 	warningMessage,
 	streamError,
@@ -111,6 +113,9 @@ export const AppHeader = memo(function AppHeader({
 	const isMobile = useIsMobile();
 	const [detailsOpen, setDetailsOpen] = useState(false);
 	const summaryLabel = workspaceLabel ?? backendLabel;
+	const hasContextLeftPercent =
+		typeof contextLeftPercent === "number" &&
+		Number.isFinite(contextLeftPercent);
 	const detailItems: SessionDetailItem[] = [
 		backendLabel
 			? {
@@ -147,13 +152,21 @@ export const AppHeader = memo(function AppHeader({
 					value: subdirectoryLabel,
 				}
 			: null,
+		hasContextLeftPercent
+			? {
+					key: "contextLeft",
+					label: t("session.context.contextLeftLabel"),
+					value: `${contextLeftPercent}%`,
+				}
+			: null,
 	].filter((item): item is SessionDetailItem => item !== null);
 	const showDetailsTrigger = Boolean(
 		(backendLabel && backendLabel !== summaryLabel) ||
 			workspacePath ||
 			executionMode ||
 			branchLabel ||
-			subdirectoryLabel,
+			subdirectoryLabel ||
+			hasContextLeftPercent,
 	);
 	const detailsTitle = t("session.context.details");
 	const detailsTrigger = showDetailsTrigger ? (
