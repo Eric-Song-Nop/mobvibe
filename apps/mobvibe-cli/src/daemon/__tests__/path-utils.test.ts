@@ -40,6 +40,49 @@ describe("resolveWithinCwd", () => {
 		});
 	});
 
+	describe("windows paths", () => {
+		const windowsCwd = "C:\\repo";
+
+		test("accepts relative child path", () => {
+			expect(resolveWithinCwd(windowsCwd, "src\\main.ts")).toBe(
+				"C:\\repo\\src\\main.ts",
+			);
+		});
+
+		test("accepts absolute child path with normalized separators", () => {
+			expect(resolveWithinCwd(windowsCwd, "C:/repo/src/main.ts")).toBe(
+				"C:\\repo\\src\\main.ts",
+			);
+		});
+
+		test("accepts absolute child path with different casing", () => {
+			expect(resolveWithinCwd("c:\\repo", "C:\\Repo\\src\\main.ts")).toBe(
+				"C:\\Repo\\src\\main.ts",
+			);
+		});
+
+		test("rejects prefix spoof on windows", () => {
+			expect(() =>
+				resolveWithinCwd(windowsCwd, "C:\\repo-evil\\secret.txt"),
+			).toThrow("Path escapes working directory");
+		});
+
+		test("rejects cross-drive path", () => {
+			expect(() => resolveWithinCwd(windowsCwd, "D:\\other\\file.ts")).toThrow(
+				"Path escapes working directory",
+			);
+		});
+
+		test("rejects UNC path outside UNC cwd", () => {
+			expect(() =>
+				resolveWithinCwd(
+					"\\\\server\\share\\repo",
+					"\\\\server\\other-share\\repo\\file.ts",
+				),
+			).toThrow("Path escapes working directory");
+		});
+	});
+
 	describe("escaping paths rejected", () => {
 		test("rejects relative path escaping cwd", () => {
 			expect(() => resolveWithinCwd(CWD, "../../etc/passwd")).toThrow(
