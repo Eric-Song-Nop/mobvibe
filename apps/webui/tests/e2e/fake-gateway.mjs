@@ -949,6 +949,27 @@ const server = http.createServer(async (req, res) => {
 		return;
 	}
 
+	if (req.method === "GET" && url.pathname === "/acp/sessions/discover") {
+		json(req, res, 200, {
+			sessions: state.sessions.map((session) => ({
+				sessionId: session.sessionId,
+				cwd: session.cwd,
+				title: session.title,
+				updatedAt: session.updatedAt,
+			})),
+			capabilities: {
+				list: true,
+				load: true,
+				prompt: {
+					image: true,
+					audio: false,
+					embeddedContext: false,
+				},
+			},
+		});
+		return;
+	}
+
 	if (req.method === "GET" && url.pathname === "/api/auth/get-session") {
 		json(req, res, 200, {
 			user: E2E_USER,

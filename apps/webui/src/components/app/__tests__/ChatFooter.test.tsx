@@ -153,6 +153,53 @@ const setEditorValue = (editor: HTMLElement, text: string) => {
 	fireEvent.input(editor);
 };
 
+const setEditorSelectionToEnd = (editor: HTMLElement) => {
+	editor.focus();
+	const selection = window.getSelection();
+	const range = document.createRange();
+	range.selectNodeContents(editor);
+	range.collapse(false);
+	selection?.removeAllRanges();
+	selection?.addRange(range);
+};
+
+const getFileInput = () => {
+	const fileInput = document.querySelector(
+		'input[type="file"]',
+	) as HTMLInputElement | null;
+	if (!fileInput) {
+		throw new Error("file input not found");
+	}
+	return fileInput;
+};
+
+const createImageFile = (name = "demo.png", type = "image/png") =>
+	new File([name], name, { type });
+
+const createImageAttachment = (
+	overrides: Partial<{
+		data: string;
+		mimeType: string;
+		uri: string | null;
+	}> = {},
+) => ({
+	type: "image" as const,
+	data: "dGVzdA==",
+	mimeType: "image/png",
+	uri: null,
+	...overrides,
+});
+
+const createDeferred = <T,>() => {
+	let resolve!: (value: T) => void;
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<T>((promiseResolve, promiseReject) => {
+		resolve = promiseResolve;
+		reject = promiseReject;
+	});
+	return { promise, resolve, reject };
+};
+
 describe("ChatFooter", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -181,12 +228,7 @@ describe("ChatFooter", () => {
 			rootPath: "/repo",
 			entries: [],
 		});
-		normalizeImageFileForPrompt.mockResolvedValue({
-			type: "image",
-			data: "dGVzdA==",
-			mimeType: "image/png",
-			uri: null,
-		});
+		normalizeImageFileForPrompt.mockResolvedValue(createImageAttachment());
 		HTMLElement.prototype.scrollIntoView = vi.fn();
 	});
 
@@ -320,12 +362,7 @@ describe("ChatFooter", () => {
 		const session = buildSession();
 		renderFooter(session);
 		const uploadButton = screen.getByRole("button", { name: "Upload image" });
-		const fileInput = document.querySelector(
-			'input[type="file"]',
-		) as HTMLInputElement | null;
-		if (!fileInput) {
-			throw new Error("file input not found");
-		}
+		const fileInput = getFileInput();
 		const clickSpy = vi.spyOn(fileInput, "click");
 
 		await user.click(uploadButton);
@@ -333,10 +370,7 @@ describe("ChatFooter", () => {
 		expect(fileInput).toBeInTheDocument();
 		expect(clickSpy).toHaveBeenCalledOnce();
 
-		await user.upload(
-			fileInput,
-			new File(["png"], "demo.png", { type: "image/png" }),
-		);
+		await user.upload(fileInput, createImageFile());
 
 		await waitFor(() => {
 			expect(normalizeImageFileForPrompt).toHaveBeenCalledTimes(1);
@@ -362,6 +396,244 @@ describe("ChatFooter", () => {
 						(block) => block.type === "image",
 					),
 			).toBe(false);
+		});
+	});
+
+	it("attaches multiple images from a single selection", async () => {
+		const user = userEvent.setup();
+		const session = buildSession();
+		normalizeImageFileForPrompt.mockImplementation(async (file: File) =>
+			createImageAttachment({ data: btoa(file.name) }),
+		);
+
+		renderFooter(session);
+
+		await user.upload(getFileInput(), [
+			createImageFile("first.png"),
+			createImageFile("second.png"),
+		]);
+
+		await waitFor(() => {
+			const imageBlocks = useUiStore
+				.getState()
+				.chatDrafts[session.sessionId]?.inputContents.filter(
+					(block) => block.type === "image",
+				);
+			expect(normalizeImageFileForPrompt).toHaveBeenCalledTimes(2);
+			expect(imageBlocks).toHaveLength(2);
+		});
+
+		expect(screen.getByAltText("Attached image 1")).toBeInTheDocument();
+		expect(screen.getByAltText("Attached image 2")).toBeInTheDocument();
+	});
+
+	it("shows a validation error when merged attachments exceed shared limits", async () => {
+		const user = userEvent.setup();
+		const session = buildSession();
+		useUiStore.getState().setChatDraft(session.sessionId, {
+			input: "",
+			inputContents: [
+				createImageAttachment({ data: "MQ==" }),
+				createImageAttachment({ data: "Mg==" }),
+				createImageAttachment({ data: "Mw==" }),
+			],
+		});
+
+		renderFooter(session);
+
+		await user.upload(getFileInput(), createImageFile("fourth.png"));
+
+		await waitFor(() => {
+			expect(
+				screen.getByText("Prompt supports up to 3 images"),
+			).toBeInTheDocument();
+		});
+
+		const imageBlocks = useUiStore
+			.getState()
+			.chatDrafts[session.sessionId]?.inputContents.filter(
+				(block) => block.type === "image",
+			);
+		expect(imageBlocks).toHaveLength(3);
+		expect(screen.getAllByRole("button", { name: "Remove" })).toHaveLength(3);
+	});
+
+	it("shows a normalization error and leaves the draft untouched when one file fails", async () => {
+		const user = userEvent.setup();
+		const session = buildSession();
+		normalizeImageFileForPrompt.mockResolvedValueOnce(createImageAttachment());
+		normalizeImageFileForPrompt.mockRejectedValueOnce(
+			new Error("Failed to decode image"),
+		);
+
+		renderFooter(session);
+
+		await user.upload(getFileInput(), [
+			createImageFile("good.png"),
+			createImageFile("bad.png"),
+		]);
+
+		await waitFor(() => {
+			expect(screen.getByText("Failed to decode image")).toBeInTheDocument();
+		});
+
+		expect(
+			useUiStore.getState().chatDrafts[session.sessionId]?.inputContents,
+		).toBeUndefined();
+		expect(screen.queryByAltText("Attached image 1")).not.toBeInTheDocument();
+	});
+
+	it("clears attachment errors after a successful attach", async () => {
+		const user = userEvent.setup();
+		const session = buildSession();
+		normalizeImageFileForPrompt.mockRejectedValueOnce(new Error("bad image"));
+		normalizeImageFileForPrompt.mockResolvedValueOnce(createImageAttachment());
+
+		renderFooter(session);
+
+		await user.upload(getFileInput(), createImageFile("broken.png"));
+		await waitFor(() => {
+			expect(screen.getByText("bad image")).toBeInTheDocument();
+		});
+
+		await user.upload(getFileInput(), createImageFile("good.png"));
+
+		await waitFor(() => {
+			expect(screen.queryByText("bad image")).not.toBeInTheDocument();
+		});
+		expect(screen.getByAltText("Attached image 1")).toBeInTheDocument();
+	});
+
+	it("clears attachment errors after removing an image", async () => {
+		const user = userEvent.setup();
+		const session = buildSession();
+		useUiStore.getState().setChatDraft(session.sessionId, {
+			input: "",
+			inputContents: [createImageAttachment()],
+		});
+		normalizeImageFileForPrompt.mockRejectedValueOnce(new Error("bad image"));
+
+		renderFooter(session);
+
+		await user.upload(getFileInput(), createImageFile("broken.png"));
+		await waitFor(() => {
+			expect(screen.getByText("bad image")).toBeInTheDocument();
+		});
+
+		await user.click(screen.getByRole("button", { name: "Remove" }));
+
+		await waitFor(() => {
+			expect(screen.queryByText("bad image")).not.toBeInTheDocument();
+		});
+		expect(screen.queryByAltText("Attached image 1")).not.toBeInTheDocument();
+	});
+
+	it("attaches pasted images from the editor", async () => {
+		const session = buildSession();
+		renderFooter(session);
+
+		const editor = screen.getByRole("textbox", { name: "chat.placeholder" });
+		setEditorSelectionToEnd(editor);
+		const pastedImage = createImageFile("pasted.png");
+
+		fireEvent.paste(editor, {
+			clipboardData: {
+				items: [
+					{
+						kind: "file",
+						getAsFile: () => pastedImage,
+					},
+				],
+				getData: vi.fn(() => ""),
+			},
+		});
+
+		await waitFor(() => {
+			expect(normalizeImageFileForPrompt).toHaveBeenCalledWith(pastedImage);
+		});
+		expect(screen.getByAltText("Attached image 1")).toBeInTheDocument();
+	});
+
+	it("ignores non-image clipboard files and continues text paste", async () => {
+		const session = buildSession();
+		renderFooter(session);
+
+		const editor = screen.getByRole("textbox", { name: "chat.placeholder" });
+		setEditorSelectionToEnd(editor);
+		const pastedFile = new File(["pdf"], "spec.pdf", {
+			type: "application/pdf",
+		});
+
+		fireEvent.paste(editor, {
+			clipboardData: {
+				items: [
+					{
+						kind: "file",
+						getAsFile: () => pastedFile,
+					},
+				],
+				getData: vi.fn(() => "pasted text"),
+			},
+		});
+
+		await waitFor(() => {
+			expect(useUiStore.getState().chatDrafts[session.sessionId]).toEqual({
+				input: "pasted text",
+				inputContents: createDefaultContentBlocks("pasted text"),
+			});
+		});
+		expect(normalizeImageFileForPrompt).not.toHaveBeenCalled();
+	});
+
+	it("disables upload clicks while images are attaching", async () => {
+		const user = userEvent.setup();
+		const session = buildSession();
+		const deferred = createDeferred<ReturnType<typeof createImageAttachment>>();
+		normalizeImageFileForPrompt.mockReturnValue(deferred.promise);
+
+		renderFooter(session);
+
+		const uploadButton = screen.getByRole("button", { name: "Upload image" });
+		const fileInput = getFileInput();
+		const clickSpy = vi.spyOn(fileInput, "click");
+
+		await user.click(uploadButton);
+		expect(clickSpy).toHaveBeenCalledOnce();
+		clickSpy.mockClear();
+
+		await user.upload(fileInput, createImageFile("slow.png"));
+
+		await waitFor(() => {
+			expect(uploadButton).toBeDisabled();
+		});
+
+		await user.click(uploadButton);
+		expect(clickSpy).not.toHaveBeenCalled();
+
+		deferred.resolve(createImageAttachment());
+
+		await waitFor(() => {
+			expect(uploadButton).toBeEnabled();
+		});
+	});
+
+	it("resets the file input so the same file can be uploaded again", async () => {
+		const user = userEvent.setup();
+		const session = buildSession();
+		const repeatedFile = createImageFile("repeat.png");
+
+		renderFooter(session);
+
+		const fileInput = getFileInput();
+		await user.upload(fileInput, repeatedFile);
+		await waitFor(() => {
+			expect(normalizeImageFileForPrompt).toHaveBeenCalledTimes(1);
+		});
+		expect(fileInput.value).toBe("");
+
+		await user.upload(fileInput, repeatedFile);
+		await waitFor(() => {
+			expect(normalizeImageFileForPrompt).toHaveBeenCalledTimes(2);
 		});
 	});
 

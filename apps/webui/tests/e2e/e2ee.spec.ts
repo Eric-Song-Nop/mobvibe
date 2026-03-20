@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import {
 	base64ToUint8,
 	deriveAuthKeyPair,
@@ -12,6 +13,10 @@ import {
 	preloadState,
 	wrongMasterSecret,
 } from "./test-helpers";
+
+const pngFixturePath = fileURLToPath(
+	new URL("../../src-tauri/icons/32x32.png", import.meta.url),
+);
 
 const addDevice = async (page: Page, secret: string) => {
 	await page
@@ -28,6 +33,14 @@ const clickSend = async (page: Page) => {
 const computeFingerprint = (base64Secret: string) => {
 	const authKeyPair = deriveAuthKeyPair(base64ToUint8(base64Secret));
 	return uint8ToBase64(authKeyPair.publicKey).slice(0, 8);
+};
+
+const attachImage = async (page: Page, imagePath = pngFixturePath) => {
+	await expect(
+		page.getByRole("button", { name: "Upload image" }),
+	).toBeEnabled();
+	await page.locator('input[type="file"]').setInputFiles(imagePath);
+	await expect(page.getByAltText("Attached image 1")).toBeVisible();
 };
 
 test("shows missing-key state and keeps encrypted history hidden on load", async ({
@@ -330,6 +343,114 @@ test("sends encrypted prompts and renders the encrypted round-trip response", as
 	expect(payload.messages[0]?.decryptedPrompt).toEqual([
 		{ type: "text", text: "Top secret prompt" },
 	]);
+});
+
+test("sends encrypted image-only prompts after a real upload", async ({
+	page,
+	request,
+}) => {
+	const reset = await request.post(`${gatewayUrl}/__test__/reset`, {
+		data: { scenario: "encrypted-send" },
+	});
+	const { masterSecret } = (await reset.json()) as { masterSecret: string };
+
+	await preloadState(page, {
+		activeSessionId: "session-1",
+		sessions: [
+			{
+				sessionId: "session-1",
+				title: "Encrypted Send Session",
+				revision: 1,
+				isAttached: true,
+			},
+		],
+		masterSecret,
+	});
+
+	await page.goto("/");
+	await attachImage(page);
+	await clickSend(page);
+
+	await expect(page.getByText("Encrypted assistant reply")).toBeVisible();
+
+	const response = await request.get(`${gatewayUrl}/__test__/messages`);
+	const payload = (await response.json()) as {
+		messages: Array<{
+			prompt: { t: string; c: string };
+			decryptedPrompt: Array<{
+				type: string;
+				data?: string;
+				mimeType?: string;
+				uri?: string | null;
+			}>;
+		}>;
+	};
+
+	expect(payload.messages).toHaveLength(1);
+	expect(payload.messages[0]?.prompt.t).toBe("encrypted");
+	expect(payload.messages[0]?.decryptedPrompt).toHaveLength(1);
+	expect(payload.messages[0]?.decryptedPrompt[0]).toMatchObject({
+		type: "image",
+		mimeType: "image/png",
+		uri: null,
+	});
+	expect(payload.messages[0]?.decryptedPrompt[0]?.data).toBeTruthy();
+});
+
+test("preserves text and image blocks in encrypted mixed prompts", async ({
+	page,
+	request,
+}) => {
+	const reset = await request.post(`${gatewayUrl}/__test__/reset`, {
+		data: { scenario: "encrypted-send" },
+	});
+	const { masterSecret } = (await reset.json()) as { masterSecret: string };
+
+	await preloadState(page, {
+		activeSessionId: "session-1",
+		sessions: [
+			{
+				sessionId: "session-1",
+				title: "Encrypted Send Session",
+				revision: 1,
+				isAttached: true,
+			},
+		],
+		masterSecret,
+	});
+
+	await page.goto("/");
+	await fillComposer(page, "Top secret prompt with image");
+	await attachImage(page);
+	await clickSend(page);
+
+	await expect(page.getByText("Encrypted assistant reply")).toBeVisible();
+
+	const response = await request.get(`${gatewayUrl}/__test__/messages`);
+	const payload = (await response.json()) as {
+		messages: Array<{
+			decryptedPrompt: Array<{
+				type: string;
+				text?: string;
+				data?: string;
+				mimeType?: string;
+				uri?: string | null;
+			}>;
+		}>;
+	};
+
+	expect(payload.messages).toHaveLength(1);
+	expect(payload.messages[0]?.decryptedPrompt).toHaveLength(2);
+	expect(payload.messages[0]?.decryptedPrompt[0]).toEqual({
+		type: "text",
+		text: "Top secret prompt with image",
+	});
+	expect(payload.messages[0]?.decryptedPrompt[1]).toMatchObject({
+		type: "image",
+		mimeType: "image/png",
+		uri: null,
+	});
+	expect(payload.messages[0]?.decryptedPrompt[1]?.data).toBeTruthy();
 });
 
 test("fails closed before sending when the session key is missing", async ({

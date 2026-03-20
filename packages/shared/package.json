@@ -37,7 +37,9 @@
 		"lint": "biome check --write .",
 		"lint:check": "biome check .",
 		"format": "biome format --write .",
-		"format:check": "biome format ."
+		"format:check": "biome format .",
+		"test": "vitest",
+		"test:run": "vitest run"
 	},
 	"dependencies": {
 		"@agentclientprotocol/sdk": "^0.16.1",
@@ -48,6 +50,7 @@
 	"devDependencies": {
 		"@biomejs/biome": "2.3.11",
 		"@types/node": "^24.10.1",
-		"typescript": "~5.9.3"
+		"typescript": "~5.9.3",
+		"vitest": "^2.1.8"
 	}
 }
