@@ -120,7 +120,7 @@ describe("WorkspaceList validation effect", () => {
 		// fetchFsEntries: valid project succeeds, deleted project fails
 		vi.mocked(fetchFsEntries).mockImplementation(async (payload) => {
 			if (payload.path === validCwd) {
-				return { entries: [] };
+				return { path: payload.path, entries: [] };
 			}
 			throw new Error("ENOENT: no such file or directory");
 		});
@@ -193,7 +193,10 @@ describe("WorkspaceList validation effect", () => {
 			selectedWorkspaceByMachine: { [MACHINE_ID]: validCwd },
 		});
 
-		vi.mocked(fetchFsEntries).mockResolvedValue({ entries: [] });
+		vi.mocked(fetchFsEntries).mockImplementation(async (payload) => ({
+			path: payload.path,
+			entries: [],
+		}));
 
 		render(
 			<Wrapper>
@@ -247,7 +250,10 @@ describe("WorkspaceList validation effect", () => {
 			selectedWorkspaceByMachine: { [MACHINE_ID]: cwdB },
 		});
 
-		vi.mocked(fetchFsEntries).mockResolvedValue({ entries: [] });
+		vi.mocked(fetchFsEntries).mockImplementation(async (payload) => ({
+			path: payload.path,
+			entries: [],
+		}));
 
 		render(
 			<Wrapper>

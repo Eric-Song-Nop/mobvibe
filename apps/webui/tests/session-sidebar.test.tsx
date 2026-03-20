@@ -6,6 +6,7 @@ import { SessionSidebar } from "../src/components/session/SessionSidebar";
 import { ThemeProvider } from "../src/components/theme-provider";
 import i18n from "../src/i18n";
 import type { ChatSession } from "../src/lib/chat-store";
+import { createDefaultContentBlocks } from "../src/lib/content-block-utils";
 import type { SessionMutationsSnapshot } from "../src/lib/session-utils";
 import { useUiStore } from "../src/lib/ui-store";
 
@@ -76,6 +77,7 @@ const buildSession = (overrides?: Partial<ChatSession>): ChatSession => ({
 	sessionId: "session-1",
 	title: i18n.t("session.newTitle", { count: 1 }),
 	input: "",
+	inputContents: createDefaultContentBlocks(""),
 	messages: [],
 	terminalOutputs: {},
 	sending: false,
@@ -378,7 +380,12 @@ describe("SessionSidebar", () => {
 			buildSession({
 				sessionId: "session-err",
 				title: "Error Session",
-				error: { message: "connection lost", code: "ERR" },
+				error: {
+					message: "connection lost",
+					code: "INTERNAL_ERROR",
+					retryable: true,
+					scope: "session",
+				},
 			}),
 		]);
 

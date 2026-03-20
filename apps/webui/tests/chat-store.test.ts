@@ -1,6 +1,11 @@
 import type {
+	ErrorDetail,
+	PermissionOption,
+	PermissionOutcome,
 	SessionSummary,
 	SessionsChangedPayload,
+	ToolCallContent,
+	ToolCallLocation,
 	ToolCallUpdate,
 } from "@mobvibe/shared";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -25,6 +30,39 @@ const createMockSessionSummary = (
 	backendLabel: "Claude Code",
 	createdAt: new Date().toISOString(),
 	updatedAt: new Date().toISOString(),
+	...overrides,
+});
+
+const createPermissionOption = (
+	overrides: Partial<PermissionOption> = {},
+): PermissionOption => ({
+	kind: "allow_once",
+	name: "Allow",
+	optionId: "allow",
+	...overrides,
+});
+
+const createPermissionOutcome = (
+	overrides: Partial<PermissionOutcome> = {},
+): PermissionOutcome => ({
+	outcome: "selected",
+	optionId: "allow",
+	...overrides,
+});
+
+const createToolCallTextContent = (text: string): ToolCallContent => ({
+	type: "content",
+	content: {
+		type: "text",
+		text,
+	},
+});
+
+const createToolCallLocation = (
+	overrides: Partial<ToolCallLocation> = {},
+): ToolCallLocation => ({
+	path: "/src/foo.ts",
+	line: 10,
 	...overrides,
 });
 
@@ -263,11 +301,11 @@ describe("useChatStore", () => {
 		});
 
 		it("removes sessions even if they had errors", () => {
-			const customError = {
-				code: "CUSTOM_ERROR",
+			const customError: ErrorDetail = {
+				code: "INTERNAL_ERROR",
 				message: "Session crashed",
 				retryable: false,
-				scope: "session" as const,
+				scope: "session",
 			};
 
 			useChatStore.getState().createLocalSession("session-1", {
@@ -905,20 +943,16 @@ describe("useChatStore", () => {
 					requestId: "req-1",
 					toolCall: {
 						toolCallId: "tc-1",
-						status: "running",
+						status: "in_progress",
 						title: "Write file",
 					},
 					options: [
-						{
-							id: "allow",
-							label: "Allow",
-							isRecommended: true,
-						},
-						{
-							id: "deny",
-							label: "Deny",
-							isRecommended: false,
-						},
+						createPermissionOption(),
+						createPermissionOption({
+							kind: "reject_once",
+							name: "Deny",
+							optionId: "deny",
+						}),
 					],
 				});
 
@@ -942,7 +976,7 @@ describe("useChatStore", () => {
 
 				const payload = {
 					requestId: "req-1",
-					options: [{ id: "allow", label: "Allow", isRecommended: true }],
+					options: [createPermissionOption()],
 				};
 
 				store.addPermissionRequest("session-1", payload);
@@ -958,11 +992,17 @@ describe("useChatStore", () => {
 
 				store.addPermissionRequest("session-1", {
 					requestId: "req-1",
-					options: [{ id: "allow", label: "Allow", isRecommended: true }],
+					options: [createPermissionOption()],
 				});
 				store.addPermissionRequest("session-1", {
 					requestId: "req-2",
-					options: [{ id: "deny", label: "Deny", isRecommended: false }],
+					options: [
+						createPermissionOption({
+							kind: "reject_once",
+							name: "Deny",
+							optionId: "deny",
+						}),
+					],
 				});
 
 				const session = useChatStore.getState().sessions["session-1"];
@@ -983,7 +1023,7 @@ describe("useChatStore", () => {
 				store.createLocalSession("session-1", { title: "Test" });
 				store.addPermissionRequest("session-1", {
 					requestId: "req-1",
-					options: [{ id: "allow", label: "Allow", isRecommended: true }],
+					options: [createPermissionOption()],
 				});
 
 				store.setPermissionDecisionState("session-1", "req-1", "submitting");
@@ -1008,7 +1048,7 @@ describe("useChatStore", () => {
 				store.createLocalSession("session-1", { title: "Test" });
 				store.addPermissionRequest("session-1", {
 					requestId: "req-1",
-					options: [{ id: "allow", label: "Allow", isRecommended: true }],
+					options: [createPermissionOption()],
 				});
 
 				store.setPermissionDecisionState(
@@ -1030,13 +1070,10 @@ describe("useChatStore", () => {
 				store.createLocalSession("session-1", { title: "Test" });
 				store.addPermissionRequest("session-1", {
 					requestId: "req-1",
-					options: [{ id: "allow", label: "Allow", isRecommended: true }],
+					options: [createPermissionOption()],
 				});
 
-				const outcome = {
-					outcome: "selected" as const,
-					selectedOptionId: "allow",
-				};
+				const outcome = createPermissionOutcome();
 				store.setPermissionOutcome("session-1", "req-1", outcome);
 
 				const session = useChatStore.getState().sessions["session-1"];
@@ -1075,7 +1112,7 @@ describe("useChatStore", () => {
 				store.addToolCall(
 					"session-1",
 					makeToolCallPayload({
-						status: "running",
+						status: "in_progress",
 						title: "Reading file",
 						rawInput: { name: "Read", command: "cat foo.ts" },
 					}),
@@ -1087,7 +1124,7 @@ describe("useChatStore", () => {
 				expect(msg.kind).toBe("tool_call");
 				if (msg.kind === "tool_call") {
 					expect(msg.toolCallId).toBe("tc-1");
-					expect(msg.status).toBe("running");
+					expect(msg.status).toBe("in_progress");
 					expect(msg.title).toBe("Reading file");
 					expect(msg.name).toBe("Read");
 					expect(msg.command).toBe("cat foo.ts");
@@ -1101,7 +1138,7 @@ describe("useChatStore", () => {
 				store.addToolCall(
 					"session-1",
 					makeToolCallPayload({
-						status: "running",
+						status: "in_progress",
 						title: "First",
 					}),
 				);
@@ -1162,7 +1199,7 @@ describe("useChatStore", () => {
 				store.createLocalSession("session-1", { title: "Test" });
 				store.addToolCall(
 					"session-1",
-					makeToolCallPayload({ status: "running", title: "Running" }),
+					makeToolCallPayload({ status: "in_progress", title: "Running" }),
 				);
 				store.updateToolCall(
 					"session-1",
@@ -1207,7 +1244,7 @@ describe("useChatStore", () => {
 				store.addToolCall(
 					"session-1",
 					makeToolCallPayload({
-						status: "running",
+						status: "in_progress",
 						title: "Original",
 					}),
 				);
@@ -1218,8 +1255,8 @@ describe("useChatStore", () => {
 						sessionUpdate: "tool_call_update",
 						status: "completed",
 						title: "Updated Title",
-						content: [{ type: "text", text: "output result" }],
-						locations: [{ path: "/src/foo.ts", startLine: 10 }],
+						content: [createToolCallTextContent("output result")],
+						locations: [createToolCallLocation()],
 					}),
 				);
 
@@ -1228,10 +1265,10 @@ describe("useChatStore", () => {
 					expect(session.messages[0].status).toBe("completed");
 					expect(session.messages[0].title).toBe("Updated Title");
 					expect(session.messages[0].content).toEqual([
-						{ type: "text", text: "output result" },
+						createToolCallTextContent("output result"),
 					]);
 					expect(session.messages[0].locations).toEqual([
-						{ path: "/src/foo.ts", startLine: 10 },
+						createToolCallLocation(),
 					]);
 				}
 			});
