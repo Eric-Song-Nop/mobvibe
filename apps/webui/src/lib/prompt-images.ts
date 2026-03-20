@@ -3,7 +3,6 @@ import {
 	PROMPT_IMAGE_MAX_BYTES,
 	PROMPT_IMAGE_MAX_EDGE,
 	type PromptImageMimeType,
-	resolvePromptImageMimeTypeFromPath,
 	validatePromptImageBlocks,
 } from "@mobvibe/shared";
 import type { ContentBlock } from "@/lib/acp";
@@ -163,25 +162,4 @@ export const normalizeImageFileForPrompt = async (
 		);
 	}
 	return normalizeRasterImage(file, file.type);
-};
-
-export const parseWorkspaceImageForPrompt = (
-	dataUrl: string,
-	filePath: string,
-	mimeType?: string,
-): ImageContent => {
-	const resolvedMimeType =
-		mimeType && isPromptImageMimeType(mimeType)
-			? mimeType
-			: resolvePromptImageMimeTypeFromPath(filePath);
-	if (!resolvedMimeType) {
-		throw new Error("Unsupported workspace image type");
-	}
-	const image = dataUrlToImageContent(dataUrl, {
-		uri: `file://${filePath.split("/").map(encodeURIComponent).join("/")}`,
-	});
-	if (image.mimeType !== resolvedMimeType) {
-		throw new Error("Workspace image MIME type does not match file path");
-	}
-	return validateSingleImage(image);
 };

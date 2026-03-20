@@ -21,6 +21,7 @@ vi.mock("@hugeicons/react", () => ({
 
 vi.mock("@hugeicons/core-free-icons", () => ({
 	ArrowUp01Icon: {},
+	Image01Icon: {},
 	StopIcon: {},
 	File01Icon: {},
 }));
@@ -75,22 +76,18 @@ vi.mock("@/components/ui/select", () => ({
 }));
 
 const fetchSessionFsResources = vi.hoisted(() => vi.fn());
-const fetchSessionFsFile = vi.hoisted(() => vi.fn());
 const normalizeImageFileForPrompt = vi.hoisted(() => vi.fn());
-const parseWorkspaceImageForPrompt = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/lib/api")>();
 	return {
 		...actual,
 		fetchSessionFsResources: fetchSessionFsResources,
-		fetchSessionFsFile: fetchSessionFsFile,
 	};
 });
 
 vi.mock("@/lib/prompt-images", () => ({
 	normalizeImageFileForPrompt,
-	parseWorkspaceImageForPrompt,
 }));
 
 const buildSession = (overrides: Partial<ChatSession> = {}): ChatSession =>
@@ -184,23 +181,11 @@ describe("ChatFooter", () => {
 			rootPath: "/repo",
 			entries: [],
 		});
-		fetchSessionFsFile.mockResolvedValue({
-			path: "/repo/image.png",
-			previewType: "image",
-			content: "data:image/png;base64,dGVzdA==",
-			mimeType: "image/png",
-		});
 		normalizeImageFileForPrompt.mockResolvedValue({
 			type: "image",
 			data: "dGVzdA==",
 			mimeType: "image/png",
 			uri: null,
-		});
-		parseWorkspaceImageForPrompt.mockReturnValue({
-			type: "image",
-			data: "dGVzdA==",
-			mimeType: "image/png",
-			uri: "file:///repo/image.png",
 		});
 		HTMLElement.prototype.scrollIntoView = vi.fn();
 	});
@@ -333,16 +318,23 @@ describe("ChatFooter", () => {
 	it("attaches and removes uploaded images", async () => {
 		const user = userEvent.setup();
 		const session = buildSession();
-		const { container } = renderFooter(session);
-		const input = container.querySelector(
+		renderFooter(session);
+		const uploadButton = screen.getByRole("button", { name: "Upload image" });
+		const fileInput = document.querySelector(
 			'input[type="file"]',
 		) as HTMLInputElement | null;
-		if (!input) {
+		if (!fileInput) {
 			throw new Error("file input not found");
 		}
+		const clickSpy = vi.spyOn(fileInput, "click");
+
+		await user.click(uploadButton);
+
+		expect(fileInput).toBeInTheDocument();
+		expect(clickSpy).toHaveBeenCalledOnce();
 
 		await user.upload(
-			input,
+			fileInput,
 			new File(["png"], "demo.png", { type: "image/png" }),
 		);
 
@@ -370,49 +362,6 @@ describe("ChatFooter", () => {
 						(block) => block.type === "image",
 					),
 			).toBe(false);
-		});
-	});
-
-	it("attaches workspace images through the explicit image flow", async () => {
-		const user = userEvent.setup();
-		const session = buildSession();
-		fetchSessionFsResources.mockResolvedValue({
-			rootPath: "/repo",
-			entries: [
-				{
-					name: "image.png",
-					path: "/repo/image.png",
-					relativePath: "image.png",
-				},
-			],
-		});
-
-		renderFooter(session);
-
-		await user.click(screen.getByRole("button", { name: "From workspace" }));
-		const option = await screen.findByRole("option", { name: /image\.png/i });
-		await user.click(option);
-
-		await waitFor(() => {
-			expect(fetchSessionFsFile).toHaveBeenCalledWith({
-				sessionId: session.sessionId,
-				path: "/repo/image.png",
-			});
-			expect(parseWorkspaceImageForPrompt).toHaveBeenCalledWith(
-				"data:image/png;base64,dGVzdA==",
-				"/repo/image.png",
-				"image/png",
-			);
-			expect(
-				useUiStore.getState().chatDrafts[session.sessionId]?.inputContents,
-			).toEqual(
-				expect.arrayContaining([
-					expect.objectContaining({
-						type: "image",
-						uri: "file:///repo/image.png",
-					}),
-				]),
-			);
 		});
 	});
 
@@ -470,9 +419,18 @@ describe("ChatFooter", () => {
 		renderFooter(buildSession());
 
 		expect(screen.getByRole("button", { name: "Upload image" })).toBeDisabled();
+	});
+
+	it("places the upload image button before send in the bottom toolbar", () => {
+		renderFooter(buildSession());
+
+		const uploadButton = screen.getByRole("button", { name: "Upload image" });
+		const sendButton = screen.getByRole("button", { name: "chat.send" });
+
 		expect(
-			screen.getByRole("button", { name: "From workspace" }),
-		).toBeDisabled();
+			uploadButton.compareDocumentPosition(sendButton) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
 	});
 
 	it("keeps send disabled until restored session E2EE status is hydrated", () => {

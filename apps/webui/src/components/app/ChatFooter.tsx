@@ -1,8 +1,11 @@
-import { ArrowUp01Icon, StopIcon } from "@hugeicons/core-free-icons";
+import {
+	ArrowUp01Icon,
+	Image01Icon,
+	StopIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
 	PROMPT_IMAGE_MIME_TYPES,
-	resolvePromptImageMimeTypeFromPath,
 	validatePromptImageBlocks,
 } from "@mobvibe/shared";
 import { useQuery } from "@tanstack/react-query";
@@ -30,7 +33,6 @@ import {
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { AvailableCommand, ContentBlock, ResourceLink } from "@/lib/acp";
 import {
-	fetchSessionFsFile,
 	fetchSessionFsResources,
 	type SessionFsResourceEntry,
 } from "@/lib/api";
@@ -39,10 +41,7 @@ import { filterCommandItems } from "@/lib/command-utils";
 import { createDefaultContentBlocks } from "@/lib/content-block-utils";
 import type { FuzzySearchResult } from "@/lib/fuzzy-search";
 import { useMachinesStore } from "@/lib/machines-store";
-import {
-	normalizeImageFileForPrompt,
-	parseWorkspaceImageForPrompt,
-} from "@/lib/prompt-images";
+import { normalizeImageFileForPrompt } from "@/lib/prompt-images";
 import { filterResourceItems } from "@/lib/resource-utils";
 import { createEmptyChatDraft, useUiStore } from "@/lib/ui-store";
 import { cn } from "@/lib/utils";
@@ -486,7 +485,6 @@ export function ChatFooter({
 	const canAttachImages = Boolean(
 		activeSessionId && canMutateSession && imageCapability === true,
 	);
-	const canAttachWorkspaceImages = Boolean(canAttachImages && isReady);
 	const hasSlashPrefix = rawInput.startsWith("/");
 	const slashInput = hasSlashPrefix ? rawInput.slice(1) : "";
 	const commandQuery = hasSlashPrefix
@@ -515,13 +513,6 @@ export function ChatFooter({
 		enabled: Boolean(activeSessionId && isReady),
 	});
 	const resourceEntries = resourcesQuery.data?.entries ?? [];
-	const imageResourceEntries = useMemo(
-		() =>
-			resourceEntries.filter((entry) =>
-				Boolean(resolvePromptImageMimeTypeFromPath(entry.path)),
-			),
-		[resourceEntries],
-	);
 	const resourceTokens = useMemo(
 		() => buildResourceTokens(editorContentBlocks),
 		[editorContentBlocks],
@@ -559,20 +550,8 @@ export function ChatFooter({
 		commandHighlight >= commandMatches.length ? 0 : commandHighlight;
 	const effectiveResourceHighlight =
 		resourceHighlight >= resourceMatches.length ? 0 : resourceHighlight;
-	const [workspaceImagePickerOpen, setWorkspaceImagePickerOpen] =
-		useState(false);
-	const [workspaceImageQuery, setWorkspaceImageQuery] = useState("");
-	const [workspaceImageHighlight, setWorkspaceImageHighlight] = useState(0);
 	const [attachmentError, setAttachmentError] = useState<string | null>(null);
 	const [isAttachingImages, setIsAttachingImages] = useState(false);
-	const workspaceImageMatches = useMemo(
-		() => filterResourceItems(imageResourceEntries, workspaceImageQuery),
-		[imageResourceEntries, workspaceImageQuery],
-	);
-	const effectiveWorkspaceImageHighlight =
-		workspaceImageHighlight >= workspaceImageMatches.length
-			? 0
-			: workspaceImageHighlight;
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
 	const previousSessionId = useRef(activeSessionId);
 
@@ -785,41 +764,6 @@ export function ChatFooter({
 		[appendImageAttachments, canAttachImages],
 	);
 
-	const handleWorkspaceImageClick = useCallback(
-		async (result: FuzzySearchResult<SessionFsResourceEntry>) => {
-			if (!activeSessionId || !canAttachWorkspaceImages) {
-				return;
-			}
-			setIsAttachingImages(true);
-			try {
-				const preview = await fetchSessionFsFile({
-					sessionId: activeSessionId,
-					path: result.item.path,
-				});
-				if (preview.previewType !== "image") {
-					throw new Error("Selected workspace file is not an image");
-				}
-				await appendImageAttachments([
-					parseWorkspaceImageForPrompt(
-						preview.content,
-						preview.path,
-						preview.mimeType,
-					),
-				]);
-				setWorkspaceImagePickerOpen(false);
-				setWorkspaceImageQuery("");
-				setWorkspaceImageHighlight(0);
-			} catch (error) {
-				setAttachmentError(
-					error instanceof Error ? error.message : "Failed to attach image",
-				);
-			} finally {
-				setIsAttachingImages(false);
-			}
-		},
-		[activeSessionId, appendImageAttachments, canAttachWorkspaceImages],
-	);
-
 	const handleRemoveImageAttachment = useCallback(
 		(index: number) => {
 			updateImageAttachments(
@@ -864,22 +808,11 @@ export function ChatFooter({
 	}, [hasSlashPrefix, rawInput]);
 
 	useEffect(() => {
-		if (canAttachImages) {
-			return;
-		}
-		setWorkspaceImagePickerOpen(false);
-		setWorkspaceImageQuery("");
-	}, [canAttachImages]);
-
-	useEffect(() => {
 		if (previousSessionId.current === activeSessionId) {
 			return;
 		}
 		previousSessionId.current = activeSessionId;
 		setAttachmentError(null);
-		setWorkspaceImagePickerOpen(false);
-		setWorkspaceImageQuery("");
-		setWorkspaceImageHighlight(0);
 	}, [activeSessionId]);
 
 	const handleCommandNavigate = useCallback(
@@ -1326,63 +1259,6 @@ export function ChatFooter({
 						</div>
 					) : null}
 
-					<div className="flex flex-wrap items-center gap-2 border-b border-input px-2.5 py-2">
-						<Button
-							type="button"
-							variant="outline"
-							size="xs"
-							onClick={handleUploadButtonClick}
-							disabled={!canAttachImages || isAttachingImages}
-						>
-							Upload image
-						</Button>
-						<Button
-							type="button"
-							variant="outline"
-							size="xs"
-							onClick={() =>
-								setWorkspaceImagePickerOpen((previous) => !previous)
-							}
-							disabled={!canAttachWorkspaceImages || isAttachingImages}
-						>
-							From workspace
-						</Button>
-						{imageCapability !== true ? (
-							<span className="text-[11px] text-muted-foreground">
-								Image prompts unavailable
-							</span>
-						) : null}
-						{isAttachingImages ? (
-							<span className="text-[11px] text-muted-foreground">
-								Attaching image...
-							</span>
-						) : null}
-					</div>
-
-					{workspaceImagePickerOpen ? (
-						<div className="border-b border-input px-2.5 py-2">
-							<input
-								type="text"
-								value={workspaceImageQuery}
-								onChange={(event) => {
-									setWorkspaceImageQuery(event.target.value);
-									setWorkspaceImageHighlight(0);
-								}}
-								placeholder="Search workspace images"
-								className="mb-2 h-8 w-full border border-input bg-background px-2 text-xs outline-none"
-							/>
-							<ResourceCombobox
-								results={workspaceImageMatches}
-								open={workspaceImagePickerOpen}
-								highlightedIndex={effectiveWorkspaceImageHighlight}
-								onHighlightChange={setWorkspaceImageHighlight}
-								onSelect={(result) => {
-									void handleWorkspaceImageClick(result);
-								}}
-							/>
-						</div>
-					) : null}
-
 					{attachmentError ? (
 						<div className="border-b border-input px-2.5 py-2 text-[11px] text-destructive">
 							{attachmentError}
@@ -1466,6 +1342,22 @@ export function ChatFooter({
 						) : null}
 
 						<div className="flex-1" />
+
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-sm"
+							aria-label="Upload image"
+							onClick={handleUploadButtonClick}
+							disabled={!canAttachImages || isAttachingImages}
+						>
+							<HugeiconsIcon
+								icon={Image01Icon}
+								strokeWidth={2}
+								className="size-4"
+								aria-hidden="true"
+							/>
+						</Button>
 
 						{/* Combined Send/Stop button */}
 						<Button
