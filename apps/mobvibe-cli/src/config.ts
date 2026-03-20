@@ -5,7 +5,10 @@ import { getGatewayUrl } from "./auth/credentials.js";
 import { loadUserConfig } from "./config-loader.js";
 import { logger } from "./lib/logger.js";
 import { detectAgents } from "./registry/agent-detector.js";
-import { getRegistry } from "./registry/registry-client.js";
+import {
+	loadRegistry,
+	type RegistryLoadSource,
+} from "./registry/registry-client.js";
 
 export type AcpBackendConfig = {
 	id: AcpBackendId;
@@ -73,6 +76,10 @@ export type CliConfig = {
 	worktreeBaseDir: string;
 	/** Full registry agent list (for first-run selection UI) */
 	registryAgents: RegistryAgent[];
+	/** All runnable backends detected from the current registry before enabledAgents filtering */
+	detectedBackends: AcpBackendConfig[];
+	registrySource: RegistryLoadSource;
+	registryFetchError?: string;
 	/** undefined = not yet configured (first run); string[] = user's selection */
 	enabledAgents?: string[];
 };
@@ -103,11 +110,13 @@ export const getCliConfig = async (): Promise<CliConfig> => {
 
 	// Load registry and detect backends
 	let backends: AcpBackendConfig[] = [];
+	let detectedBackends: AcpBackendConfig[] = [];
 	let registryAgents: RegistryAgent[] = [];
-	const registry = await getRegistry({ homePath });
-	if (registry) {
-		registryAgents = registry.agents;
-		backends = await detectAgents(registry);
+	const registry = await loadRegistry({ homePath });
+	if (registry.data) {
+		registryAgents = registry.data.agents;
+		detectedBackends = await detectAgents(registry.data);
+		backends = detectedBackends;
 	}
 
 	// Resolve enabled agents: env var > user config > undefined (first run)
@@ -127,6 +136,9 @@ export const getCliConfig = async (): Promise<CliConfig> => {
 		gatewayUrl,
 		acpBackends: backends,
 		registryAgents,
+		detectedBackends,
+		registrySource: registry.source,
+		registryFetchError: registry.fetchError,
 		enabledAgents,
 		clientName: env.MOBVIBE_ACP_CLIENT_NAME ?? "mobvibe-cli",
 		clientVersion: env.MOBVIBE_ACP_CLIENT_VERSION ?? "0.0.0",

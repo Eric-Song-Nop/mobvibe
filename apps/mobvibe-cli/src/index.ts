@@ -1,20 +1,12 @@
 import { Database } from "bun:sqlite";
-import {
-	cancel,
-	intro,
-	isCancel,
-	log,
-	multiselect,
-	outro,
-} from "@clack/prompts";
 import { Command } from "commander";
 import { loadCredentials } from "./auth/credentials.js";
 import { login, loginStatus, logout } from "./auth/login.js";
 import { getCliConfig } from "./config.js";
-import { saveUserConfig } from "./config-loader.js";
 import { DaemonManager } from "./daemon/daemon.js";
 import { logger } from "./lib/logger.js";
-import { resolveSelectedAgents } from "./registry/agent-detector.js";
+import { runStartCommand } from "./start-command.js";
+import { ReportedCliError } from "./startup-preflight.js";
 import { WalCompactor, WalStore } from "./wal/index.js";
 
 const program = new Command();
@@ -30,64 +22,7 @@ program
 	.option("--gateway <url>", "Gateway URL", process.env.MOBVIBE_GATEWAY_URL)
 	.option("--foreground", "Run in foreground instead of detaching")
 	.option("--no-e2ee", "Disable end-to-end encryption for this daemon run")
-	.action(async (options) => {
-		if (options.gateway) {
-			process.env.MOBVIBE_GATEWAY_URL = options.gateway;
-		}
-		const config = await getCliConfig();
-
-		// First run with interactive terminal → prompt user to select agents
-		if (config.enabledAgents === undefined && process.stdout.isTTY) {
-			if (config.registryAgents.length > 0) {
-				intro("Welcome to Mobvibe!");
-				const selected = await multiselect({
-					message: "Which agents do you want to enable?",
-					options: config.registryAgents.map((a) => ({
-						value: a.id,
-						label: a.name,
-						hint: a.description,
-					})),
-					required: false,
-				});
-				if (isCancel(selected)) {
-					cancel("Setup cancelled.");
-					process.exit(0);
-				}
-
-				// Resolve selected agents — check PATH/npx/uvx availability
-				const { resolved, failed } = resolveSelectedAgents(
-					config.registryAgents,
-					selected as string[],
-				);
-
-				if (failed.length > 0) {
-					for (const agent of failed) {
-						log.warn(
-							`Agent "${agent.name}" cannot be resolved — binary not in PATH, or npx/uvx unavailable. Skipping.`,
-						);
-					}
-				}
-
-				// Only save successfully resolved agent IDs
-				const enabledIds = resolved.map((b) => b.id);
-				await saveUserConfig(config.homePath, {
-					enabledAgents: enabledIds,
-				});
-				config.acpBackends = resolved;
-				config.enabledAgents = enabledIds;
-				outro(
-					`Enabled ${resolved.length} agent(s). Config saved to ${config.homePath}/.config.json`,
-				);
-			}
-		}
-		// Non-TTY + not configured → use all backends (backwards-compatible for CI/scripts)
-
-		const daemon = new DaemonManager(config);
-		await daemon.start({
-			foreground: options.foreground,
-			noE2ee: options.noE2ee,
-		});
-	});
+	.action((options) => runStartCommand(options));
 
 program
 	.command("stop")
@@ -306,6 +241,9 @@ export async function run() {
 
 if (import.meta.main) {
 	run().catch((error) => {
+		if (error instanceof ReportedCliError) {
+			process.exit(error.exitCode);
+		}
 		logger.error({ err: error }, "cli_run_error");
 		console.error("Error:", error.message);
 		process.exit(1);
