@@ -242,7 +242,7 @@ Mobvibe can be self-hosted. The infrastructure is defined in `render.yaml` at th
 
 ### Prerequisites
 
-- Node.js >= 22
+- Node.js >= 22.12.0
 - [pnpm](https://pnpm.io/) >= 9
 - [Bun](https://bun.sh/) (for mobvibe-cli)
 
