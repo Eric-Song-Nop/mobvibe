@@ -15,18 +15,24 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { sendVerificationEmail } from "@/lib/auth";
+import { Separator } from "@/components/ui/separator";
+import { getSafeAuthReturnPath, sendVerificationEmail } from "@/lib/auth";
 
 type LoginPageProps = {
 	onSuccess?: () => void;
 };
 
+type OAuthLoginProvider = "apple" | "github" | "linux-do";
+
 export function LoginPage({ onSuccess }: LoginPageProps) {
 	const { t } = useTranslation();
 	const { signIn, signUp } = useAuth();
 	const [searchParams] = useSearchParams();
+	const returnPath = getSafeAuthReturnPath(searchParams.get("returnUrl"));
 	const [mode, setMode] = useState<"login" | "register">("login");
 	const [isLoading, setIsLoading] = useState(false);
+	const [providerLoading, setProviderLoading] =
+		useState<OAuthLoginProvider | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [showVerificationMessage, setShowVerificationMessage] = useState(false);
 	const [resendingEmail, setResendingEmail] = useState(false);
@@ -37,6 +43,22 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 		password: "",
 		name: "",
 	});
+	const isBusy = isLoading || providerLoading !== null;
+
+	const oauthProviders: Array<{ id: OAuthLoginProvider; label: string }> = [
+		{
+			id: "apple",
+			label: t("auth.providers.apple"),
+		},
+		{
+			id: "github",
+			label: t("auth.providers.github"),
+		},
+		{
+			id: "linux-do",
+			label: t("auth.providers.linuxDo"),
+		},
+	];
 
 	// Handle ?verified=1 URL param
 	useEffect(() => {
@@ -97,6 +119,32 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 		}
 	};
 
+	const handleOAuthSignIn = async (provider: OAuthLoginProvider) => {
+		setError(null);
+		setShowVerificationMessage(false);
+		setProviderLoading(provider);
+
+		try {
+			const result =
+				provider === "linux-do"
+					? await signIn.oauth2({
+							providerId: "linux-do",
+							returnPath,
+						})
+					: await signIn.social({
+							provider,
+							returnPath,
+						});
+			if (result.error) {
+				setError(result.error.message ?? t("auth.loginFailed"));
+			}
+		} catch (err) {
+			setError(err instanceof Error ? err.message : t("auth.errorOccurred"));
+		} finally {
+			setProviderLoading(null);
+		}
+	};
+
 	const handleResendVerification = async () => {
 		setResendingEmail(true);
 		setError(null);
@@ -136,7 +184,32 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 							: t("auth.createAccountDescription")}
 					</CardDescription>
 				</CardHeader>
-				<CardContent>
+				<CardContent className="space-y-5">
+					<div className="space-y-3">
+						<div className="grid gap-2 sm:grid-cols-3">
+							{oauthProviders.map((provider) => (
+								<Button
+									key={provider.id}
+									type="button"
+									variant="outline"
+									className="w-full justify-center"
+									disabled={isBusy}
+									onClick={() => handleOAuthSignIn(provider.id)}
+								>
+									{providerLoading === provider.id
+										? t("auth.loading")
+										: t("auth.continueWithProvider", {
+												provider: provider.label,
+											})}
+								</Button>
+							))}
+						</div>
+						<div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+							<Separator className="flex-1" />
+							<span>{t("auth.orContinueWith")}</span>
+							<Separator className="flex-1" />
+						</div>
+					</div>
 					<form onSubmit={handleSubmit} className="space-y-4">
 						{mode === "register" && (
 							<div className="space-y-2">
@@ -151,7 +224,7 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 									onChange={(e) =>
 										setFormData({ ...formData, name: e.target.value })
 									}
-									disabled={isLoading}
+									disabled={isBusy}
 								/>
 							</div>
 						)}
@@ -161,6 +234,7 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 								id="email"
 								name="email"
 								autoComplete="email"
+								spellCheck={false}
 								type="email"
 								placeholder={t("auth.emailPlaceholder")}
 								value={formData.email}
@@ -168,7 +242,7 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 									setFormData({ ...formData, email: e.target.value })
 								}
 								required
-								disabled={isLoading}
+								disabled={isBusy}
 							/>
 						</div>
 						<div className="space-y-2">
@@ -186,7 +260,7 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 									setFormData({ ...formData, password: e.target.value })
 								}
 								required
-								disabled={isLoading}
+								disabled={isBusy}
 								minLength={8}
 							/>
 						</div>
@@ -223,7 +297,7 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 									size="sm"
 									className="h-auto p-0 ml-1"
 									onClick={handleResendVerification}
-									disabled={resendingEmail || resendCooldown > 0}
+									disabled={isBusy || resendingEmail || resendCooldown > 0}
 								>
 									{resendingEmail
 										? t("auth.resending")
@@ -234,7 +308,7 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 							</output>
 						)}
 
-						<Button type="submit" className="w-full" disabled={isLoading}>
+						<Button type="submit" className="w-full" disabled={isBusy}>
 							{isLoading
 								? t("auth.loading")
 								: mode === "login"
