@@ -1,5 +1,3 @@
-// @ts-nocheck - Disable type checking due to vite version mismatch between @tailwindcss/vite and main vite
-
 import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
