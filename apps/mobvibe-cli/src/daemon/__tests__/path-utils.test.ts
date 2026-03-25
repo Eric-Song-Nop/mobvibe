@@ -55,10 +55,16 @@ describe("resolveWithinCwd", () => {
 			);
 		});
 
-		test("accepts absolute child path with different casing", () => {
-			expect(resolveWithinCwd("c:\\repo", "C:\\Repo\\src\\main.ts")).toBe(
-				"C:\\Repo\\src\\main.ts",
+		test("accepts absolute child path with different drive-letter casing", () => {
+			expect(resolveWithinCwd("c:\\repo", "C:\\repo\\src\\main.ts")).toBe(
+				"C:\\repo\\src\\main.ts",
 			);
+		});
+
+		test("rejects absolute child path with different directory casing", () => {
+			expect(() =>
+				resolveWithinCwd("c:\\repo", "C:\\Repo\\src\\main.ts"),
+			).toThrow("Path escapes working directory");
 		});
 
 		test("rejects prefix spoof on windows", () => {
