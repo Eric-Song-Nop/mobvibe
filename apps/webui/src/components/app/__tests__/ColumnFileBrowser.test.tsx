@@ -1,4 +1,10 @@
-import { render, renderHook, screen, waitFor } from "@testing-library/react";
+import {
+	act,
+	render,
+	renderHook,
+	screen,
+	waitFor,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { FsEntriesResponse, FsEntry } from "@/lib/api";
 import { ColumnFileBrowser, useColumnFileBrowser } from "../ColumnFileBrowser";
@@ -151,6 +157,64 @@ describe("useColumnFileBrowser", () => {
 		});
 		expect(onChange).toHaveBeenCalledWith("C:\\Users\\tester");
 		expect(onChange).not.toHaveBeenCalledWith(WINDOWS_HOST_ROOT_PATH);
+	});
+
+	it("appends a child column when Windows session entries omit segments", async () => {
+		const fetchEntries = vi.fn(
+			async ({ path }: { path: string }): Promise<FsEntriesResponse> => {
+				switch (path) {
+					case "C:\\repo":
+						return {
+							path,
+							entries: [createDirectoryEntry("src", "C:\\repo\\src")],
+						};
+					case "C:\\repo\\src":
+						return {
+							path,
+							entries: [
+								createDirectoryEntry("nested", "C:\\repo\\src\\nested"),
+							],
+						};
+					default:
+						throw new Error(`Unexpected path: ${path}`);
+				}
+			},
+		);
+		const onChange = vi.fn();
+
+		const { result } = renderHook(() =>
+			useColumnFileBrowser({
+				open: true,
+				rootPath: "C:\\repo",
+				rootLabel: "repo",
+				value: "C:\\repo",
+				onChange,
+				fetchEntries,
+				errorMessage: "failed",
+			}),
+		);
+
+		await waitFor(() => {
+			expect(result.current.columns).toHaveLength(1);
+		});
+
+		await act(async () => {
+			await result.current.handleEntrySelect(
+				createDirectoryEntry("src", "C:\\repo\\src"),
+				0,
+			);
+		});
+
+		await waitFor(() => {
+			expect(result.current.columns).toHaveLength(2);
+		});
+
+		expect(result.current.columns.map((column) => column.name)).toEqual([
+			"repo",
+			"src",
+		]);
+		expect(result.current.columns[1]?.path).toBe("C:\\repo\\src");
+		expect(onChange).toHaveBeenCalledWith("C:\\repo\\src");
 	});
 });
 

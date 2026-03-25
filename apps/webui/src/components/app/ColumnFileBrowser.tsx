@@ -196,7 +196,7 @@ export function useColumnFileBrowser({
 	);
 
 	const handleEntrySelect = useCallback(
-		async (entry: FsEntry, _columnIndex: number) => {
+		async (entry: FsEntry, columnIndex: number) => {
 			if (entry.type === "file") {
 				onFileSelect?.(entry);
 				return;
@@ -205,7 +205,17 @@ export function useColumnFileBrowser({
 			setPathError(undefined);
 			try {
 				const response = await fetchEntries({ path: entry.path });
-				const nextColumns = await buildColumnsFromResponse(response);
+				const nextColumns =
+					response.segments && response.segments.length > 0
+						? await buildColumnsFromResponse(response)
+						: [
+								...columns.slice(0, columnIndex + 1),
+								{
+									name: entry.name,
+									path: response.path,
+									entries: response.entries,
+								},
+							];
 				setColumns(nextColumns);
 				if (response.path !== value) {
 					onChange(response.path);
@@ -219,6 +229,7 @@ export function useColumnFileBrowser({
 		},
 		[
 			buildColumnsFromResponse,
+			columns,
 			fetchEntries,
 			normalizeErrorMessage,
 			onChange,
