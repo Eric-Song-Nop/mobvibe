@@ -53,7 +53,6 @@
 		"@clack/prompts": "^1.0.1",
 		"commander": "^13.1.0",
 		"ignore": "^7.0.4",
-		"open": "^10.1.0",
 		"pino": "^9.6.0",
 		"pino-pretty": "^13.1.1",
 		"qrcode": "^1.5.4",
