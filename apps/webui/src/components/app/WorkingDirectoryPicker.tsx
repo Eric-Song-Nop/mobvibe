@@ -53,7 +53,8 @@ export function WorkingDirectoryPicker({
 	});
 
 	const homePath = rootsQuery.data?.homePath;
-	const homeLabel =
+	const rootPath = rootsQuery.data?.roots[0]?.path ?? homePath;
+	const rootLabel =
 		rootsQuery.data?.roots[0]?.name ??
 		t("workingDirectory.homeLabel", {
 			defaultValue: HOME_LABEL_FALLBACK,
@@ -80,8 +81,9 @@ export function WorkingDirectoryPicker({
 		columnRefs,
 	} = useColumnFileBrowser({
 		open,
-		rootPath: homePath,
-		rootLabel: homeLabel,
+		rootPath,
+		rootLabel,
+		defaultPath: homePath,
 		value,
 		onChange,
 		onSelect,

@@ -6,6 +6,7 @@ export type {
 	ErrorDetail,
 	FsEntriesResponse,
 	FsEntry,
+	FsPathSegment,
 	GitFileStatus,
 	HostFsRootsResponse,
 	MachinesResponse,

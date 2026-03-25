@@ -1,6 +1,5 @@
 import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
-import { homedir } from "node:os";
 import path from "node:path";
 import type {
 	CliToGatewayEvents,
@@ -10,7 +9,6 @@ import type {
 	FsRoot,
 	GatewayToCliEvents,
 	GitBranchesForCwdResponse,
-	HostFsRootsResponse,
 	RpcResponse,
 	SessionEventsResponse,
 	SessionFsFilePreview,
@@ -45,6 +43,7 @@ import {
 	searchGitLog,
 } from "../lib/git-utils.js";
 import { logger } from "../lib/logger.js";
+import { buildHostFsEntries, buildHostFsRoots } from "./host-fs.js";
 import { resolveWithinCwd } from "./path-utils.js";
 
 type SocketClientOptions = {
@@ -157,14 +156,6 @@ const readDirectoryEntries = async (dirPath: string): Promise<FsEntry[]> => {
 
 const filterVisibleEntries = (entries: FsEntry[]) =>
 	entries.filter((entry) => !entry.hidden);
-
-const buildHostFsRoots = async (): Promise<HostFsRootsResponse> => {
-	const homePath = homedir();
-	return {
-		homePath,
-		roots: [{ name: "Home", path: homePath }],
-	};
-};
 
 /** Minimum interval between automatic discover calls (ms) */
 const DISCOVER_THROTTLE_MS = 60_000;
@@ -570,11 +561,10 @@ export class SocketClient extends EventEmitter {
 					{ requestId: request.requestId, machineId, path: requestPath },
 					"rpc_hostfs_entries",
 				);
-				const entries = await readDirectoryEntries(requestPath);
-				this.sendRpcResponse(request.requestId, {
-					path: requestPath,
-					entries: filterVisibleEntries(entries),
-				});
+				const result = await buildHostFsEntries(requestPath, async (dirPath) =>
+					filterVisibleEntries(await readDirectoryEntries(dirPath)),
+				);
+				this.sendRpcResponse(request.requestId, result);
 			} catch (error) {
 				logger.error(
 					{

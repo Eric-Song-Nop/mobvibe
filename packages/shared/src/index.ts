@@ -174,6 +174,7 @@ export type {
 	FsEntriesParams,
 	FsEntriesResponse,
 	FsFileParams,
+	FsPathSegment,
 	FsResourcesParams,
 	FsResourcesResponse,
 	FsRootsResponse,

@@ -85,7 +85,7 @@
 		"backendEmpty": "暂无可用后端",
 		"backendPlaceholder": "选择后端",
 		"cwdLabel": "工作目录",
-		"cwdPlaceholder": "输入或粘贴 Home 内路径",
+		"cwdPlaceholder": "输入或粘贴路径",
 		"browse": "浏览",
 		"targetMachine": "目标机器：{{name}}",
 		"projectDetection": {
