@@ -212,9 +212,16 @@ export type FsRootsResponse = {
 	root: FsRoot;
 };
 
+export type FsPathSegment = {
+	name: string;
+	path: string;
+	selectable?: boolean;
+};
+
 export type FsEntriesResponse = {
 	path: string;
 	entries: FsEntry[];
+	segments?: FsPathSegment[];
 };
 
 export type FsResourcesResponse = {

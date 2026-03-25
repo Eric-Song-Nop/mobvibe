@@ -16,26 +16,28 @@ import {
 import { useTranslation } from "react-i18next";
 import { FileTypeLabel } from "@/components/app/file-type-label";
 import { GitStatusIndicator } from "@/components/app/git-status-indicator";
-import type { FsEntriesResponse, FsEntry, GitFileStatus } from "@/lib/api";
+import type {
+	FsEntriesResponse,
+	FsEntry,
+	FsPathSegment,
+	GitFileStatus,
+} from "@/lib/api";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { FuzzyHighlight, fuzzySearch } from "@/lib/fuzzy-search";
 import { cn } from "@/lib/utils";
 
 const normalizePath = (value: string) => value.replace(/\/+$/, "");
 
-type PathSegment = {
-	name: string;
-	path: string;
-};
-
 const buildPathSegments = (
 	rootPath: string,
 	targetPath: string,
 	rootLabel: string,
-): PathSegment[] => {
+): FsPathSegment[] => {
 	const normalizedRoot = normalizePath(rootPath);
 	const normalizedTarget = normalizePath(targetPath);
-	const segments: PathSegment[] = [{ name: rootLabel, path: normalizedRoot }];
+	const segments: FsPathSegment[] = [
+		{ name: rootLabel, path: normalizedRoot, selectable: true },
+	];
 	if (normalizedTarget === normalizedRoot) {
 		return segments;
 	}
@@ -56,12 +58,14 @@ export type ColumnFileBrowserColumn = {
 	name: string;
 	path: string;
 	entries: FsEntry[];
+	selectable?: boolean;
 };
 
 export type UseColumnFileBrowserOptions = {
 	open: boolean;
 	rootPath?: string;
 	rootLabel: string;
+	defaultPath?: string;
 	value: string | undefined;
 	onChange: (nextPath: string) => void;
 	onSelect?: (nextPath: string) => void;
@@ -89,6 +93,7 @@ export function useColumnFileBrowser({
 	open,
 	rootPath,
 	rootLabel,
+	defaultPath,
 	value,
 	onChange,
 	onSelect,
@@ -111,6 +116,34 @@ export function useColumnFileBrowser({
 		[errorMessage],
 	);
 
+	const buildColumnsFromResponse = useCallback(
+		async (
+			targetResponse: FsEntriesResponse,
+		): Promise<ColumnFileBrowserColumn[]> => {
+			if (!rootPath) {
+				return [];
+			}
+			const segments =
+				targetResponse.segments && targetResponse.segments.length > 0
+					? targetResponse.segments
+					: buildPathSegments(rootPath, targetResponse.path, rootLabel);
+			const responses = await Promise.all(
+				segments.map((segment) =>
+					segment.path === targetResponse.path
+						? Promise.resolve(targetResponse)
+						: fetchEntries({ path: segment.path }),
+				),
+			);
+			return segments.map((segment, index) => ({
+				name: segment.name,
+				path: responses[index].path,
+				entries: responses[index].entries,
+				selectable: segment.selectable,
+			}));
+		},
+		[fetchEntries, rootLabel, rootPath],
+	);
+
 	const buildColumnsForPath = useCallback(
 		async (targetPath: string, notifySelect = false, fallbackPath?: string) => {
 			if (!rootPath) {
@@ -120,23 +153,7 @@ export function useColumnFileBrowser({
 			setPathError(undefined);
 			try {
 				const targetResponse = await fetchEntries({ path: targetPath });
-				const segments = buildPathSegments(
-					rootPath,
-					targetResponse.path,
-					rootLabel,
-				);
-				const responses = await Promise.all(
-					segments.map((segment) =>
-						segment.path === targetResponse.path
-							? Promise.resolve(targetResponse)
-							: fetchEntries({ path: segment.path }),
-					),
-				);
-				const nextColumns = segments.map((segment, index) => ({
-					name: segment.name,
-					path: responses[index].path,
-					entries: responses[index].entries,
-				}));
+				const nextColumns = await buildColumnsFromResponse(targetResponse);
 				setColumns(nextColumns);
 				if (targetResponse.path !== value) {
 					onChange(targetResponse.path);
@@ -148,23 +165,7 @@ export function useColumnFileBrowser({
 				if (fallbackPath && fallbackPath !== targetPath) {
 					try {
 						const fbResponse = await fetchEntries({ path: fallbackPath });
-						const fbSegments = buildPathSegments(
-							rootPath,
-							fbResponse.path,
-							rootLabel,
-						);
-						const fbResponses = await Promise.all(
-							fbSegments.map((segment) =>
-								segment.path === fbResponse.path
-									? Promise.resolve(fbResponse)
-									: fetchEntries({ path: segment.path }),
-							),
-						);
-						const fbColumns = fbSegments.map((segment, index) => ({
-							name: segment.name,
-							path: fbResponses[index].path,
-							entries: fbResponses[index].entries,
-						}));
+						const fbColumns = await buildColumnsFromResponse(fbResponse);
 						setColumns(fbColumns);
 						if (fbResponse.path !== value) {
 							onChange(fbResponse.path);
@@ -184,18 +185,18 @@ export function useColumnFileBrowser({
 			}
 		},
 		[
+			buildColumnsFromResponse,
 			fetchEntries,
 			normalizeErrorMessage,
 			onChange,
 			onSelect,
-			rootLabel,
 			rootPath,
 			value,
 		],
 	);
 
 	const handleEntrySelect = useCallback(
-		async (entry: FsEntry, columnIndex: number) => {
+		async (entry: FsEntry, _columnIndex: number) => {
 			if (entry.type === "file") {
 				onFileSelect?.(entry);
 				return;
@@ -204,12 +205,7 @@ export function useColumnFileBrowser({
 			setPathError(undefined);
 			try {
 				const response = await fetchEntries({ path: entry.path });
-				const nextColumns = columns.slice(0, columnIndex + 1);
-				nextColumns.push({
-					name: entry.name,
-					path: response.path,
-					entries: response.entries,
-				});
+				const nextColumns = await buildColumnsFromResponse(response);
 				setColumns(nextColumns);
 				if (response.path !== value) {
 					onChange(response.path);
@@ -222,7 +218,7 @@ export function useColumnFileBrowser({
 			}
 		},
 		[
-			columns,
+			buildColumnsFromResponse,
 			fetchEntries,
 			normalizeErrorMessage,
 			onChange,
@@ -235,7 +231,7 @@ export function useColumnFileBrowser({
 	const handleColumnSelect = useCallback(
 		(columnIndex: number) => {
 			const column = columns[columnIndex];
-			if (!column) {
+			if (!column || column.selectable === false) {
 				return;
 			}
 			setColumns(columns.slice(0, columnIndex + 1));
@@ -295,14 +291,14 @@ export function useColumnFileBrowser({
 		if (!rootPath || initialized) {
 			return;
 		}
-		const initialPath = value ?? rootPath;
+		const initialPath = value ?? defaultPath ?? rootPath;
 		void buildColumnsForPath(
 			initialPath,
 			false,
 			initialPath !== rootPath ? rootPath : undefined,
 		);
 		setInitialized(true);
-	}, [buildColumnsForPath, initialized, open, rootPath, value]);
+	}, [buildColumnsForPath, defaultPath, initialized, open, rootPath, value]);
 
 	return {
 		columns,
@@ -509,9 +505,11 @@ function ColumnPanel({
 		>
 			<button
 				type="button"
+				disabled={column.selectable === false}
 				className={cn(
 					"text-muted-foreground border-input flex shrink-0 items-center gap-2 border-b px-2 py-1 text-xs",
 					isColumnSelected && "bg-muted text-foreground",
+					column.selectable === false && "cursor-default opacity-70",
 				)}
 				onClick={() => onColumnSelect(columnIndex)}
 			>
