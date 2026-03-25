@@ -18,11 +18,14 @@ mock.module("../git-io.js", () => ({
 }));
 
 const {
+	isGitRepo,
+	getGitRepoRoot,
 	getGitBranch,
 	getGitBranches,
 	getGitStatus,
 	getFileDiff,
 	aggregateDirStatus,
+	resolveGitProjectContext,
 	validateGitRef,
 } = await import("../git-utils.js");
 
@@ -31,6 +34,126 @@ describe("git-utils", () => {
 		mockExecFileAsync.mockClear();
 		execFileQueue.length = 0;
 		mockReadFile.mockClear();
+	});
+
+	describe("isGitRepo", () => {
+		it("returns true when directory is a git repo", async () => {
+			execFileQueue.push({ stdout: "true\n", stderr: "" });
+
+			const result = await isGitRepo("/home/user/project");
+
+			expect(result).toBe(true);
+			expect(mockExecFileAsync).toHaveBeenCalledWith(
+				"git",
+				["rev-parse", "--is-inside-work-tree"],
+				expect.objectContaining({ cwd: "/home/user/project" }),
+			);
+		});
+
+		it("returns false when directory is not a git repo", async () => {
+			execFileQueue.push(new Error("Not a git repository"));
+
+			const result = await isGitRepo("/home/user/not-a-repo");
+
+			expect(result).toBe(false);
+		});
+	});
+
+	describe("getGitRepoRoot", () => {
+		it("returns repo root for directories inside a git repo", async () => {
+			execFileQueue.push({
+				stdout: "/home/user/project\n",
+				stderr: "",
+			});
+
+			const result = await getGitRepoRoot("/home/user/project/apps/webui");
+
+			expect(result).toBe("/home/user/project");
+		});
+
+		it("returns undefined when cwd is not inside a git repo", async () => {
+			execFileQueue.push(new Error("not a git repo"));
+
+			const result = await getGitRepoRoot("/home/user/not-a-repo");
+
+			expect(result).toBeUndefined();
+		});
+	});
+
+	describe("resolveGitProjectContext", () => {
+		it("resolves repo root and relative cwd for subdirectories", async () => {
+			execFileQueue.push(
+				{
+					stdout: "/home/user/project\n",
+					stderr: "",
+				},
+				{
+					stdout: "worktree /home/user/project\n",
+					stderr: "",
+				},
+			);
+
+			const result = await resolveGitProjectContext(
+				"/home/user/project/apps/webui",
+			);
+
+			expect(result).toEqual({
+				isGitRepo: true,
+				repoRoot: "/home/user/project",
+				repoName: "project",
+				relativeCwd: "apps/webui",
+				isRepoRoot: false,
+			});
+		});
+
+		it("marks repo root directories correctly", async () => {
+			execFileQueue.push(
+				{
+					stdout: "/home/user/project\n",
+					stderr: "",
+				},
+				{
+					stdout: "worktree /home/user/project\n",
+					stderr: "",
+				},
+			);
+
+			const result = await resolveGitProjectContext("/home/user/project");
+
+			expect(result).toEqual({
+				isGitRepo: true,
+				repoRoot: "/home/user/project",
+				repoName: "project",
+				relativeCwd: undefined,
+				isRepoRoot: true,
+			});
+		});
+
+		it("normalizes linked worktrees back to the primary project root", async () => {
+			execFileQueue.push(
+				{
+					stdout: "/tmp/worktrees/project/feat-branch\n",
+					stderr: "",
+				},
+				{
+					stdout:
+						"worktree /home/user/project\nHEAD abc123\nbranch refs/heads/main\n\nworktree /tmp/worktrees/project/feat-branch\nHEAD def456\nbranch refs/heads/feat-branch\n",
+					stderr: "",
+				},
+			);
+
+			const result = await resolveGitProjectContext(
+				"/tmp/worktrees/project/feat-branch/apps/webui",
+			);
+
+			expect(result).toEqual({
+				isGitRepo: true,
+				repoRoot: "/home/user/project",
+				repoName: "project",
+				relativeCwd: "apps/webui",
+				isRepoRoot: false,
+			});
+		});
 	});
 
 	describe("getGitBranch", () => {
