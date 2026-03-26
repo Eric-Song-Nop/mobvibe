@@ -282,13 +282,14 @@
 		"createAccount": "创建账号",
 		"createAccountDescription": "创建账号开始使用",
 		"email": "邮箱",
-		"emailPlaceholder": "your@email.com",
+		"emailPlaceholder": "name@example.com…",
 		"password": "密码",
-		"passwordPlaceholder": "输入密码",
+		"passwordPlaceholder": "输入密码…",
 		"name": "姓名",
-		"namePlaceholder": "您的姓名（可选）",
-		"loading": "请稍候...",
+		"namePlaceholder": "您的姓名（可选）…",
+		"loading": "请稍候…",
 		"orContinueWith": "或使用以下方式",
+		"continueWithProvider": "使用{{provider}}继续",
 		"noAccount": "没有账号？",
 		"haveAccount": "已有账号？",
 		"signOut": "退出登录",
@@ -305,6 +306,11 @@
 		"registrationFailed": "注册失败",
 		"errorOccurred": "发生错误",
 		"emailVerified": "邮箱验证成功",
+		"providers": {
+			"apple": "Apple",
+			"github": "GitHub",
+			"linuxDo": "Linux.do"
+		},
 		"userMenuAriaLabel": "用户菜单"
 	},
 	"legal": {

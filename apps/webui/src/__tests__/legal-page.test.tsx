@@ -7,23 +7,36 @@ import { LegalPage } from "@/pages/LegalPage";
 import { LoginPage } from "@/pages/LoginPage";
 
 const signInEmail = vi.fn();
+const signInSocial = vi.fn();
+const signInOAuth2 = vi.fn();
 const signUpEmail = vi.fn();
 const sendVerificationEmail = vi.fn();
 
 vi.mock("@/components/auth/AuthProvider", () => ({
 	useAuth: () => ({
-		signIn: { email: signInEmail },
+		signIn: {
+			email: signInEmail,
+			social: signInSocial,
+			oauth2: signInOAuth2,
+		},
 		signUp: { email: signUpEmail },
 	}),
 }));
 
-vi.mock("@/lib/auth", () => ({
-	sendVerificationEmail: (...args: unknown[]) => sendVerificationEmail(...args),
-}));
+vi.mock("@/lib/auth", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/lib/auth")>();
+	return {
+		...actual,
+		sendVerificationEmail: (...args: unknown[]) =>
+			sendVerificationEmail(...args),
+	};
+});
 
 describe("Legal surfaces", () => {
 	beforeEach(() => {
 		signInEmail.mockReset();
+		signInSocial.mockReset();
+		signInOAuth2.mockReset();
 		signUpEmail.mockReset();
 		sendVerificationEmail.mockReset();
 	});
@@ -69,5 +82,14 @@ describe("Legal surfaces", () => {
 			"href",
 			"/refund",
 		);
+		expect(
+			screen.getByRole("button", { name: "Continue with Apple" }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Continue with GitHub" }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Continue with Linux.do" }),
+		).toBeInTheDocument();
 	});
 });

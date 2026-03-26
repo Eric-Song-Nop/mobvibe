@@ -73,6 +73,8 @@ By default, the gateway URL is auto-detected as `{protocol}://{hostname}:3005`.
 
 In Tauri (desktop/mobile), the webui uses Bearer token authentication. Login responses include a `set-auth-token` header, which is persisted to Tauri Store (`auth.json`). All REST and Socket.io requests include `Authorization: Bearer <token>`. In browser, standard cookie-based authentication is used (`credentials: "include"`).
 
+OAuth sign-in on Tauri uses the system browser plus deep-link callback handoff back into the app, so Better Auth callback state stays bound to the in-app session cookies.
+
 - `lib/auth.ts` - Auth client setup, `isInTauri()` detection, sign-in/out actions
 - `lib/auth-token.ts` - Bearer token cache and Tauri Store persistence (`getAuthToken`, `setAuthToken`, `clearAuthToken`, `loadAuthToken`)
 

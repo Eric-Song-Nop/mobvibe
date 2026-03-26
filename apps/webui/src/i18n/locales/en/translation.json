@@ -282,13 +282,14 @@
 		"createAccount": "Create account",
 		"createAccountDescription": "Create an account to get started",
 		"email": "Email",
-		"emailPlaceholder": "your@email.com",
+		"emailPlaceholder": "name@example.com…",
 		"password": "Password",
-		"passwordPlaceholder": "Enter your password",
+		"passwordPlaceholder": "Enter your password…",
 		"name": "Name",
-		"namePlaceholder": "Your name (optional)",
-		"loading": "Please wait...",
+		"namePlaceholder": "Your name (optional)…",
+		"loading": "Please wait…",
 		"orContinueWith": "Or continue with",
+		"continueWithProvider": "Continue with {{provider}}",
 		"noAccount": "Don't have an account?",
 		"haveAccount": "Already have an account?",
 		"signOut": "Sign out",
@@ -305,6 +306,11 @@
 		"registrationFailed": "Registration failed",
 		"errorOccurred": "An error occurred",
 		"emailVerified": "Email verified successfully",
+		"providers": {
+			"apple": "Apple",
+			"github": "GitHub",
+			"linuxDo": "Linux.do"
+		},
 		"userMenuAriaLabel": "User menu"
 	},
 	"legal": {

@@ -61,6 +61,13 @@ Environment variables:
 | `RESEND_API_KEY` | (empty) | Resend API key; unset = log to console |
 | `EMAIL_FROM` | (empty) | Sender address for emails |
 | `SKIP_EMAIL_VERIFICATION` | `false` | Skip email verification (dev only) |
+| `GITHUB_CLIENT_ID` | (empty) | GitHub OAuth app client ID |
+| `GITHUB_CLIENT_SECRET` | (empty) | GitHub OAuth app client secret |
+| `APPLE_CLIENT_ID` | (empty) | Apple Sign In Service ID client ID |
+| `APPLE_CLIENT_SECRET` | (empty) | Apple Sign In client secret JWT |
+| `APPLE_APP_BUNDLE_IDENTIFIER` | (empty) | Optional app bundle ID for native Apple ID token flows |
+| `LINUX_DO_CLIENT_ID` | (empty) | Linux.do Connect OAuth client ID |
+| `LINUX_DO_CLIENT_SECRET` | (empty) | Linux.do Connect OAuth client secret |
 | `REDIS_URL` | (empty) | Upstash Redis URL; enables multi-instance user affinity routing |
 | `WEB_PUSH_PUBLIC_KEY` | (empty) | Browser Web Push VAPID public key |
 | `WEB_PUSH_PRIVATE_KEY` | (empty) | Browser Web Push VAPID private key |
@@ -69,6 +76,24 @@ Environment variables:
 Private IPs (10.x.x.x, 192.168.x.x, 172.16-31.x.x) and localhost are always allowed.
 
 See `.env.example` for a fully commented template.
+
+## OAuth Callback URLs
+
+When OAuth is enabled, configure providers against the Gateway origin, not the web UI origin:
+
+- GitHub: `https://api.mobvibe.net/api/auth/callback/github`
+- Apple: `https://api.mobvibe.net/api/auth/callback/apple`
+- Linux.do: `https://api.mobvibe.net/api/auth/oauth2/callback/linux-do`
+
+Local development callback examples:
+
+- GitHub: `http://localhost:3005/api/auth/callback/github`
+- Linux.do: `http://localhost:3005/api/auth/oauth2/callback/linux-do`
+
+Notes:
+
+- GitHub apps must expose the `user:email` permission/scope so Better Auth can read an email address.
+- Apple Sign In requires `https://appleid.apple.com` in Better Auth `trustedOrigins`, and Apple does not allow `localhost` or any non-HTTPS callback URL.
 
 ## REST API Endpoints
 
