@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>opencode 与 mobvibe Web 前端对比报告</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f7f5;
+        --paper: #ffffff;
+        --ink: #1f2523;
+        --muted: #5d6763;
+        --line: #d9ded9;
+        --soft: #eef2ef;
+        --accent: #0f6f5c;
+        --accent-2: #8a5a00;
+        --bad: #9a3412;
+        --good: #166534;
+        --code: #12231f;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.58;
+      }
+
+      main {
+        max-width: 1160px;
+        margin: 0 auto;
+        padding: 40px 24px 72px;
+      }
+
+      header {
+        border: 1px solid var(--line);
+        background: var(--paper);
+        padding: 28px;
+      }
+
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+        line-height: 1.2;
+        text-wrap: balance;
+      }
+
+      h1 {
+        font-size: clamp(30px, 4vw, 48px);
+        letter-spacing: 0;
+      }
+
+      h2 {
+        margin-top: 34px;
+        margin-bottom: 14px;
+        font-size: 24px;
+      }
+
+      h3 {
+        margin-top: 22px;
+        margin-bottom: 8px;
+        font-size: 18px;
+      }
+
+      p {
+        margin: 8px 0 0;
+      }
+
+      a {
+        color: var(--accent);
+      }
+
+      code {
+        color: var(--code);
+        background: var(--soft);
+        border: 1px solid #dfe6e0;
+        padding: 1px 5px;
+        font-family:
+          "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 0.92em;
+      }
+
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 18px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .pill {
+        border: 1px solid var(--line);
+        background: var(--soft);
+        padding: 4px 9px;
+      }
+
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 22px;
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        background: var(--paper);
+        padding: 16px;
+      }
+
+      .card strong {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--accent);
+      }
+
+      .note {
+        border-left: 4px solid var(--accent);
+        background: var(--paper);
+        padding: 14px 16px;
+        margin-top: 16px;
+      }
+
+      .warning {
+        border-left-color: var(--accent-2);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--paper);
+        border: 1px solid var(--line);
+        margin-top: 12px;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        padding: 10px 12px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        background: var(--soft);
+        font-size: 13px;
+        color: #2f3834;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .score {
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
+      .good {
+        color: var(--good);
+        font-weight: 650;
+      }
+
+      .risk {
+        color: var(--bad);
+        font-weight: 650;
+      }
+
+      ul,
+      ol {
+        padding-left: 22px;
+        margin: 8px 0 0;
+      }
+
+      li + li {
+        margin-top: 6px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+      }
+
+      .evidence {
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .section {
+        border: 1px solid var(--line);
+        background: var(--paper);
+        padding: 20px;
+        margin-top: 16px;
+      }
+
+      @media (max-width: 860px) {
+        main {
+          padding: 24px 14px 48px;
+        }
+
+        header {
+          padding: 20px;
+        }
+
+        .summary,
+        .grid {
+          grid-template-columns: 1fr;
+        }
+
+        table {
+          display: block;
+          overflow-x: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>opencode 与 mobvibe Web 前端对比报告</h1>
+        <p>
+          结论：在当前代码状态下，opencode 的 Web 前端整体更成熟，优势主要体现在架构边界、共享 UI
+          系统、同步链路治理、国际化和文档站能力。mobvibe 并非低质量项目，它在 E2EE、Tauri/移动端入口、消息列表虚拟化和测试覆盖上有明确投入，但主应用前端仍有更强的耦合和重复实现。
+        </p>
+        <div class="meta">
+          <span class="pill">评审日期：2026-05-11</span>
+          <span class="pill">方法：本地静态代码审查 + Web Interface Guidelines 规则抽样</span>
+          <span class="pill">未运行浏览器视觉回归，结论以代码证据为主</span>
+        </div>
+      </header>
+
+      <section class="section">
+        <h2>评审范围</h2>
+        <div class="grid">
+          <div>
+            <h3>opencode</h3>
+            <ul>
+              <li><code>packages/app</code>：主要可交互 Web App。</li>
+              <li><code>packages/ui</code>：共享 UI 组件、主题、Markdown、消息渲染、文件与图标系统。</li>
+              <li><code>packages/web</code>：官网、文档站和分享页面。</li>
+            </ul>
+          </div>
+          <div>
+            <h3>mobvibe</h3>
+            <ul>
+              <li><code>../mobvibe/apps/webui</code>：主要 React Web UI，也是主比较对象。</li>
+              <li><code>../mobvibe/apps/website</code>：营销站、Pricing、Legal 页面。</li>
+              <li><code>../mobvibe/docs</code>：仓库内设计文档，未直接成为网站信息架构的一部分。</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>执行摘要</h2>
+        <div class="summary">
+          <div class="card">
+            <strong>1. 架构边界更清晰</strong>
+            opencode 的入口层薄，Provider、路由、连接健康检查、会话级依赖分层明确；mobvibe 的
+            <code>App.tsx</code> 同时处理认证、路由、机器选择、会话选择、Socket、UI 派生状态和布局。
+          </div>
+          <div class="card">
+            <strong>2. 设计系统更可复用</strong>
+            opencode 有独立 <code>@opencode-ai/ui</code> 包、主题 token、图标、弹窗、消息渲染和文件组件；mobvibe 的 webui 与 website 存在本地 UI 组件复制。
+          </div>
+          <div class="card">
+            <strong>3. 同步与缓存更工程化</strong>
+            opencode 把 SSE 事件、coalescing、刷新队列、目录子 store、会话缓存和事件 reducer 分拆；mobvibe 的同步也强，但主要集中在大型 hook/store。
+          </div>
+          <div class="card">
+            <strong>4. 国际化覆盖显著更广</strong>
+            opencode App 有 17 个 locale，文档站有 18 个 locale；mobvibe webui 和 website 当前各支持中英 2 种语言。
+          </div>
+          <div class="card">
+            <strong>5. 官网/文档能力更完整</strong>
+            opencode 使用 Astro + Starlight + Cloudflare，内置多语言文档、编辑链接、配置 schema 生成和分享页；mobvibe website 更偏营销 demo。
+          </div>
+          <div class="card">
+            <strong>6. mobvibe 的强项仍需保留</strong>
+            mobvibe 的 E2EE、Tauri 初始化、React Query、虚拟化列表和 E2E 测试是有效资产，后续改造不应推倒重来。
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>关键指标</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>维度</th>
+              <th>opencode</th>
+              <th>mobvibe</th>
+              <th>判断</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>主 App 入口复杂度</td>
+              <td><code>packages/app/src/app.tsx</code> 330 行</td>
+              <td><code>apps/webui/src/App.tsx</code> 953 行</td>
+              <td>opencode 入口职责更少，更符合单一职责。</td>
+            </tr>
+            <tr>
+              <td>同步核心复杂度</td>
+              <td>
+                <code>event-reducer.ts</code> 364 行，<code>global-sdk.tsx</code> 独立处理事件流，
+                <code>queue.ts</code>、<code>child-store.ts</code> 单独承担刷新与目录生命周期。
+              </td>
+              <td><code>useSocket.ts</code> 1061 行，<code>chat-store.ts</code> 1712 行。</td>
+              <td>mobvibe 功能完整，但职责更集中，长期维护风险更高。</td>
+            </tr>
+            <tr>
+              <td>可交互 App 源码规模</td>
+              <td><code>packages/app/src</code> + <code>packages/ui/src</code> 约 516 个 TS/TSX/CSS/JSON 文件。</td>
+              <td><code>apps/webui/src</code> 约 172 个 TS/TSX/CSS/JSON 文件。</td>
+              <td>opencode 的功能面和基础设施更厚。</td>
+            </tr>
+            <tr>
+              <td>测试文件</td>
+              <td><code>packages/app</code> 57 个，<code>packages/ui</code> 5 个。</td>
+              <td><code>apps/webui</code> 49 个。</td>
+              <td>数量接近；opencode 更偏基础设施单测，mobvibe 有更明显的 E2E 投入。</td>
+            </tr>
+            <tr>
+              <td>共享 UI 组件</td>
+              <td><code>packages/ui/src/components</code> 顶层 TSX 组件 118 个。</td>
+              <td><code>apps/webui/src/components/ui</code> 24 个；<code>apps/website/src/components/ui</code> 6 个，且存在复制。</td>
+              <td>opencode 的 UI 复用边界更成熟。</td>
+            </tr>
+            <tr>
+              <td>国际化</td>
+              <td>App 17 个 locale；文档站 18 个 locale；有 <code>i18n/parity.test.ts</code>。</td>
+              <td>webui 2 个 locale；website 2 个 locale。</td>
+              <td>opencode 面向全球用户的基础更完整。</td>
+            </tr>
+            <tr>
+              <td>文档站</td>
+              <td>Astro + Starlight，约 612 个本地化 MDX 文档页，18 个文档 i18n JSON。</td>
+              <td>Vite React 自定义 marketing demo，website 源码约 31 个文件，2 个 locale。</td>
+              <td>opencode 更适合作为开发者产品的长期入口。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>分项评审</h2>
+
+        <div class="section">
+          <h3>1. 应用架构与职责边界</h3>
+          <p>
+            opencode 的 <code>AppInterface</code> 只负责装配服务器连接、健康检查、SDK、全局同步与路由。会话页再进入
+            <code>SessionProviders</code>，只加载 Terminal、File、Prompt、Comments 等会话级依赖。这个结构让全局依赖和会话依赖隔离，减少无关状态对整个应用的影响。
+          </p>
+          <p>
+            mobvibe 的 <code>MainApp</code> 聚合了认证态、URL 参数、机器发现、Socket、会话列表、UI store、命令面板、文件浏览器、热键、派生 loading/error 状态和主布局。虽然它已经拆出了一些 hooks，但入口组件仍然是业务编排中心，修改任何主流程都更容易碰到无关状态。
+          </p>
+          <p class="evidence">
+            代码证据：<code>packages/app/src/app.tsx</code> 330 行；<code>../mobvibe/apps/webui/src/App.tsx</code> 953 行，并且在多个 route 分支中重复包裹 <code>ThemeProvider</code>。
+          </p>
+          <p>
+            工程判断：opencode 更符合 SOLID 的单一职责和依赖倒置。mobvibe 目前更像一个功能持续增长后的主控组件，短期能跑，长期更难稳定演进。
+          </p>
+        </div>
+
+        <div class="section">
+          <h3>2. 状态同步、事件流与缓存治理</h3>
+          <p>
+            opencode 把同步链路拆成几个相对独立的层：<code>GlobalSDKProvider</code> 负责 SSE 事件流、心跳、重连、coalescing 和批量 flush；<code>applyDirectoryEvent</code> 是可测试的事件 reducer；<code>createRefreshQueue</code> 控制刷新节奏；<code>createChildStoreManager</code> 管理目录级 store、pin/unpin 和空闲淘汰；<code>session-cache.ts</code> 与 <code>session-prefetch.ts</code> 单独处理会话缓存和预取。
+          </p>
+          <p>
+            mobvibe 的 <code>useSocket</code> 也处理了很多复杂问题，包括 WAL backfill、revision mismatch、pending event、encrypted event buffer、跨 tab cursor 合并和 reconnect resubscribe。问题不在能力，而在这些能力集中在 1000 多行 hook 中，且大量依赖 ref、store action 和外部 socket。后续修同步 bug 时，影响面更难隔离。
+          </p>
+          <p class="evidence">
+            代码证据：opencode 的 <code>event-reducer.ts</code>、<code>queue.ts</code>、<code>child-store.ts</code>、<code>session-cache.ts</code> 均有独立职责；mobvibe 的 <code>useSocket.ts</code> 同时处理事件应用、gap recovery、E2EE buffer、订阅管理和 reconnect。
+          </p>
+          <p>
+            工程判断：在高频 agent 消息流场景，opencode 的事件 coalescing、批量 flush、目录 store 生命周期和缓存淘汰更接近生产级 IDE 前端。mobvibe 的方案功能强，但需要继续拆分成纯 reducer、transport、backfill、subscription manager 四类模块。
+          </p>
+        </div>
+
+        <div class="section">
+          <h3>3. UI 系统与主题能力</h3>
+          <p>
+            opencode 的 <code>@opencode-ai/ui</code> 是真正的共享 UI 层，包含 Button、IconButton、Dialog、Popover、List、Tabs、ScrollView、MessagePart、SessionReview、FileSearch、ThemeProvider、Markdown provider、文件图标与 provider 图标等。主题系统支持 JSON theme、light/dark variant、OKLCH 颜色推导、CSS token 输出、主题预览、命令面板切换和首屏 preload。
+          </p>
+          <p>
+            mobvibe 使用 shadcn/Radix 风格的本地组件。这个选择本身没有问题，但 webui 与 website 各自维护 UI wrapper，已经出现重复和细微漂移。例如两个 <code>button.tsx</code> 基本相同，但 webui 版本仍使用 <code>transition-all</code>，website 版本改成 <code>transition-colors</code>。这类差异会让修复分散，违反 DRY。
+          </p>
+          <p class="evidence">
+            代码证据：<code>packages/ui/src/theme/context.tsx</code> 支持主题列表、预览、缓存和 storage 同步；<code>packages/app/public/oc-theme-preload.js</code> 有首屏主题注入；mobvibe 的 <code>apps/webui/src/components/theme-provider.tsx</code> 与 <code>apps/website/src/components/theme-provider.tsx</code> 是相近实现。
+          </p>
+          <p>
+            工程判断：opencode 的设计系统更适合长期维护、插件化功能和多入口复用。mobvibe 应优先抽出 <code>@mobvibe/ui</code>，再让 webui 和 website 共享同一套组件与 theme provider。
+          </p>
+        </div>
+
+        <div class="section">
+          <h3>4. 面向开发者工作流的功能完整度</h3>
+          <p>
+            opencode 的交互面更像完整的开发工具：会话布局、会话标题/分享/删除、父子会话、终端面板、文件 tab、review tab、文件树、provider/model 管理、MCP 选择、LSP/MCP 状态、命令面板、prompt 附件、slash popover、上下文统计、主题和语言命令都存在明确模块。
+          </p>
+          <p>
+            mobvibe 也有机器侧边栏、会话列表、命令面板、文件浏览器、Git changes、commit history、E2EE 设置和移动/Tauri 相关能力，但当前 Web UI 更聚焦“远程多机器聊天控制台”。从纯开发者 IDE-like 使用面看，opencode 的 Web 前端能力更完整。
+          </p>
+          <p class="evidence">
+            代码证据：opencode 的会话相关模块分布在 <code>pages/session</code>、<code>components/session</code>、<code>components/prompt-input</code>、<code>components/file-tree.tsx</code>、<code>context/terminal.tsx</code>；mobvibe 的对应核心集中在 <code>App.tsx</code>、<code>ChatMessageList.tsx</code>、<code>ChatFooter.tsx</code>、<code>FileExplorerDialog.tsx</code>。
+          </p>
+        </div>
+
+        <div class="section">
+          <h3>5. 性能策略</h3>
+          <p>
+            opencode 的性能策略偏系统级：Solid 的细粒度响应式减少组件树重渲染压力；事件流按 16ms flush，并对 <code>session.status</code>、<code>lsp.updated</code>、<code>message.part.updated</code> 做 coalescing；时间线使用 staged mounting，避免一次性挂载大量历史 turn；目录 store 和 session cache 都有淘汰策略。
+          </p>
+          <p>
+            mobvibe 在局部性能上做得不错：<code>ChatMessageList</code> 用 <code>@tanstack/react-virtual</code> 虚拟化消息项，<code>CommandPalette</code> 在文件模式下也使用 virtualizer。它的问题更多是 App/store/hook 的组合复杂度会推高全局状态变化的认知成本，而不是缺少性能意识。
+          </p>
+          <p class="evidence">
+            代码证据：opencode <code>GlobalSDKProvider</code> 有 <code>FLUSH_FRAME_MS</code>、<code>STREAM_YIELD_MS</code>、coalesced map；<code>MessageTimeline</code> 有 <code>createTimelineStaging</code>；mobvibe <code>ChatMessageList</code> 使用 <code>useVirtualizer</code>，overscan 为 8。
+          </p>
+          <p>
+            结论：opencode 在“全局事件吞吐和多目录资源治理”上更强；mobvibe 在“单个消息列表 DOM 数量控制”上也有优势，值得保留。
+          </p>
+        </div>
+
+        <div class="section">
+          <h3>6. 可访问性与交互细节</h3>
+          <p>
+            两个项目都使用 Kobalte/Radix/Base UI 这类可访问性基础组件，方向是正确的。opencode 的 Dialog、Popover、Toast、TextField 等共享组件内置 i18n label，IconButton 使用 Kobalte Button，并在大部分调用点传入 <code>aria-label</code>。mobvibe 也有大量 <code>aria-label</code>，但存在更多本地 hardcode 和 UI wrapper 漂移。
+          </p>
+          <p>
+            Web Interface Guidelines 抽样发现，mobvibe webui 的基础 Button 包含 <code>transition-all</code>，并且存在 <code>Upload image</code>、<code>Toggle Sidebar</code>、<code>Clear</code>、<code>Close</code> 等硬编码英文 label；相对时间格式 <code>just now</code>、<code>2h ago</code> 也是硬编码。opencode 也不是完美状态，仍能看到 <code>outline-none</code>、部分 <code>div/span onClick</code> 和个别 IconButton 需要复查 label，但共享层让修复路径更集中。
+          </p>
+          <p class="evidence">
+            代码证据：mobvibe <code>apps/webui/src/components/ui/button.tsx</code> 使用 <code>transition-all</code>；<code>apps/webui/src/lib/ui-utils.ts</code> 硬编码英文相对时间；opencode <code>packages/ui/src/components/dialog.tsx</code> 的关闭按钮使用 i18n 的 <code>ui.common.close</code>。
+          </p>
+        </div>
+
+        <div class="section">
+          <h3>7. 国际化、内容和文档站</h3>
+          <p>
+            opencode App 语言层使用 lazy loader 合并 App 与 UI 包字典，并维护 <code>INTL</code> locale 映射。数字、时间和 token 统计多处走 locale-aware formatter。文档站基于 Starlight，配置了 18 个 locale、sidebar translations、edit link、last updated、social links 和构建后的 config schema 生成。
+          </p>
+          <p>
+            mobvibe 当前 webui 和 website 都只支持 <code>zh</code>/<code>en</code>。它的仓库内 docs 有不少中文设计文档，但 website 没有把这些内容组织成可发现的开发者文档站。对于面向开发者的产品，opencode 的 public web surface 明显更完整。
+          </p>
+          <p class="evidence">
+            代码证据：opencode <code>packages/app/src/context/language.tsx</code> 支持 17 个 locale；<code>packages/web/astro.config.mjs</code> 配置 18 个 Starlight locale；mobvibe <code>apps/webui/src/i18n/index.ts</code> 的 <code>supportedLanguages</code> 为 <code>zh</code> 和 <code>en</code>。
+          </p>
+        </div>
+
+        <div class="section">
+          <h3>8. 测试策略</h3>
+          <p>
+            opencode 的测试覆盖了不少基础设施边界：global sync、event reducer、session prefetch/cache、terminal writer、prompt submit/history/attachments、file tree、theme preload、i18n parity、layout scroll 等。mobvibe 的测试数量也不弱，尤其覆盖了 useSocket、useSessionMutations、ChatFooter、CommandPalette、FileExplorer、E2EE 和 session restore E2E。
+          </p>
+          <p>
+            结论不是“mobvibe 没测试”，而是 opencode 的测试更贴近它拆分后的内部契约；mobvibe 的同步核心仍然太集中，测试再多也会因为模块边界偏厚而难以定位回归。
+          </p>
+          <p class="evidence">
+            代码证据：opencode <code>packages/app</code> 57 个测试文件、<code>packages/ui</code> 5 个；mobvibe <code>apps/webui</code> 49 个测试文件，包含 2 个 Playwright E2E spec。
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <h2>评分矩阵</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>维度</th>
+              <th>opencode</th>
+              <th>mobvibe</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>架构模块化</td>
+              <td class="score good">5 / 5</td>
+              <td class="score">3 / 5</td>
+              <td>mobvibe 已拆 hooks，但入口和同步核心仍偏胖。</td>
+            </tr>
+            <tr>
+              <td>共享 UI / DRY</td>
+              <td class="score good">5 / 5</td>
+              <td class="score">3 / 5</td>
+              <td>mobvibe webui/website UI wrapper 重复，应抽包。</td>
+            </tr>
+            <tr>
+              <td>实时同步鲁棒性</td>
+              <td class="score good">5 / 5</td>
+              <td class="score good">4 / 5</td>
+              <td>mobvibe 功能强，但实现集中；opencode 模块边界更好。</td>
+            </tr>
+            <tr>
+              <td>性能策略</td>
+              <td class="score good">4 / 5</td>
+              <td class="score good">4 / 5</td>
+              <td>opencode 强在全局事件治理；mobvibe 强在消息列表虚拟化。</td>
+            </tr>
+            <tr>
+              <td>可访问性一致性</td>
+              <td class="score good">4 / 5</td>
+              <td class="score">3 / 5</td>
+              <td>两者都有基础组件；mobvibe 硬编码 label 和 transition-all 更明显。</td>
+            </tr>
+            <tr>
+              <td>国际化</td>
+              <td class="score good">5 / 5</td>
+              <td class="score risk">2 / 5</td>
+              <td>opencode locale 覆盖和 formatter 更完整。</td>
+            </tr>
+            <tr>
+              <td>官网/文档站</td>
+              <td class="score good">5 / 5</td>
+              <td class="score">2.5 / 5</td>
+              <td>mobvibe website 是有效 demo，但不是完整开发者文档平台。</td>
+            </tr>
+            <tr>
+              <td>测试</td>
+              <td class="score good">4 / 5</td>
+              <td class="score good">4 / 5</td>
+              <td>两者都重视测试；opencode 的模块化让单测收益更高。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>mobvibe 的明确优势</h2>
+        <div class="note warning">
+          <p>
+            本报告的主结论是“opencode Web 前端整体更成熟”，不是“mobvibe 应该重写”。以下能力是 mobvibe 应保留并继续强化的资产。
+          </p>
+        </div>
+        <ul>
+          <li><strong>E2EE 与 Tauri/mobile 入口：</strong>mobvibe 对 encrypted payload、DEK bootstrap、Tauri storage、移动扫码和深链有明确设计，opencode Web App 不是同一个产品目标。</li>
+          <li><strong>消息列表虚拟化：</strong><code>ChatMessageList</code> 的 <code>@tanstack/react-virtual</code> 是正确方向，长历史会话下 DOM 压力更可控。</li>
+          <li><strong>React Query 使用：</strong>文件浏览器、分支选择、会话 mutation 等使用 Query/Mutation，有利于请求状态表达。</li>
+          <li><strong>E2E 覆盖：</strong>session restore 和 E2EE 的 Playwright 测试说明 mobvibe 已经开始保护关键业务链路。</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>mobvibe 追赶建议</h2>
+        <ol>
+          <li>
+            <strong>抽出共享 UI 包。</strong>
+            将 <code>apps/webui/src/components/ui</code> 与 <code>apps/website/src/components/ui</code> 收敛到 <code>packages/ui</code> 或 <code>@mobvibe/ui</code>，消除 button、theme provider、dialog 等重复。
+          </li>
+          <li>
+            <strong>拆薄 <code>App.tsx</code>。</strong>
+            保留路由入口，把主工作区拆成 <code>AppProviders</code>、<code>AppRoutes</code>、<code>SessionWorkspace</code>、<code>SessionShell</code>、<code>SessionDialogs</code>。不要在一个组件里同时派生所有 loading/error/action。
+          </li>
+          <li>
+            <strong>把 Socket ingest 做成纯模块。</strong>
+            将 <code>useSocket</code> 拆为 event reducer、cursor/backfill manager、encrypted buffer、subscription manager、notification adapter。React hook 只负责生命周期绑定。
+          </li>
+          <li>
+            <strong>补齐 i18n 和 formatter。</strong>
+            相对时间、aria label、toast、按钮文案统一走翻译表；日期数字走 <code>Intl.DateTimeFormat</code> 和 <code>Intl.NumberFormat</code>。
+          </li>
+          <li>
+            <strong>修复 Web Guidelines 抽样问题。</strong>
+            将 <code>transition-all</code> 改为明确属性；复查 <code>outline-none</code> 是否都有 focus-visible 替代；所有 icon-only button 使用本地化 <code>aria-label</code>。
+          </li>
+          <li>
+            <strong>把 docs 纳入 website 信息架构。</strong>
+            当前 <code>../mobvibe/docs</code> 有有价值的工程文档，但 website 没有文档导航。可以采用 Starlight、Mintlify 或自建 docs route，先把 E2EE、Gateway、WebUI 性能和 ACP SDK 文档发布出来。
+          </li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>最终判断</h2>
+        <div class="note">
+          <p>
+            opencode 的 Web 前端更好的核心原因不是“文件更多”，而是它把复杂度放在了更清晰的边界里：共享 UI 包承接视觉一致性，global SDK 和 reducer 承接同步复杂度，child store/cache 承接资源生命周期，language/theme/docs 承接公共体验。mobvibe 已经具备不少关键能力，但目前还缺少同等成熟的前端平台层。
+          </p>
+          <p>
+            如果 mobvibe 的目标是继续做多机器、E2EE、移动优先的 agent 控制台，它不需要复制 opencode 的所有功能；但需要学习 opencode 的边界拆分方式。优先级最高的是 DRY 的 UI 包、薄入口、纯同步 reducer、国际化 formatter 和文档站。
+          </p>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
