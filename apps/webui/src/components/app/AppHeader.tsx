@@ -5,10 +5,6 @@ import {
 	Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { memo, useState } from "react";
-import { useTranslation } from "react-i18next";
-import { UserMenu } from "@/components/auth/UserMenu";
-import PlanIndicator from "@/components/plan/plan-indicator";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -19,20 +15,20 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 	AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-	Popover,
-	PopoverContent,
-	PopoverTrigger,
-} from "@/components/ui/popover";
+} from "@mobvibe/ui/alert-dialog";
+import { Badge } from "@mobvibe/ui/badge";
+import { Button } from "@mobvibe/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@mobvibe/ui/popover";
 import {
 	Sheet,
 	SheetContent,
 	SheetHeader,
 	SheetTitle,
-} from "@/components/ui/sheet";
+} from "@mobvibe/ui/sheet";
+import { memo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { UserMenu } from "@/components/auth/UserMenu";
+import PlanIndicator from "@/components/plan/plan-indicator";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { PlanEntry } from "@/lib/acp";
 import type { ChatSession } from "@/lib/chat-store";

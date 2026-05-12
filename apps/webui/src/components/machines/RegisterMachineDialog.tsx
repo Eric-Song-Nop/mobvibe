@@ -1,5 +1,3 @@
-import { useState } from "react";
-import { useTranslation } from "react-i18next";
 import {
 	AlertDialog,
 	AlertDialogContent,
@@ -7,8 +5,10 @@ import {
 	AlertDialogFooter,
 	AlertDialogHeader,
 	AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+} from "@mobvibe/ui/alert-dialog";
+import { Button } from "@mobvibe/ui/button";
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNotificationStore } from "@/lib/notification-store";
 
 type RegisterMachineDialogProps = {

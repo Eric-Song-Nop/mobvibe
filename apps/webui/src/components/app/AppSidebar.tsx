@@ -1,10 +1,5 @@
 import { AddCircleIcon, Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useQueryClient } from "@tanstack/react-query";
-import { memo, useCallback, useState } from "react";
-import { useTranslation } from "react-i18next";
-import { RegisterMachineDialog } from "@/components/machines/RegisterMachineDialog";
-import { SessionSidebar } from "@/components/session/SessionSidebar";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -14,15 +9,20 @@ import {
 	AlertDialogFooter,
 	AlertDialogHeader,
 	AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import { ResizeHandle } from "@/components/ui/ResizeHandle";
+} from "@mobvibe/ui/alert-dialog";
+import { Button } from "@mobvibe/ui/button";
+import { ResizeHandle } from "@mobvibe/ui/resize-handle";
 import {
 	Tooltip,
 	TooltipContent,
 	TooltipProvider,
 	TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@mobvibe/ui/tooltip";
+import { useQueryClient } from "@tanstack/react-query";
+import { memo, useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { RegisterMachineDialog } from "@/components/machines/RegisterMachineDialog";
+import { SessionSidebar } from "@/components/session/SessionSidebar";
 import { useMachinesQuery } from "@/hooks/useMachinesQuery";
 import { useDiscoverSessionsMutation } from "@/hooks/useSessionQueries";
 import type { SessionListEntry } from "@/lib/chat-store";
@@ -176,6 +176,7 @@ export const AppSidebar = memo(function AppSidebar({
 			</aside>
 			<ResizeHandle
 				className="hidden md:block"
+				aria-label={t("layout.resizeSessionSidebar")}
 				onResize={(deltaX) =>
 					setSessionSidebarWidth(sessionSidebarWidth + deltaX)
 				}

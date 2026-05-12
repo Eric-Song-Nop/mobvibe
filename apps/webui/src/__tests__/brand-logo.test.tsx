@@ -1,6 +1,6 @@
+import { BrandLogo } from "@mobvibe/ui/brand-logo";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BrandLogo } from "@/components/brand-logo";
 import { THEME_STORAGE_KEY } from "@/lib/ui-config";
 
 const setMatchMedia = (matches: boolean) => {

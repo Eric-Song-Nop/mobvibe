@@ -88,7 +88,7 @@ vi.mock("web-tree-sitter", () => {
 	};
 });
 
-vi.mock("@/components/ui/button", () => ({
+vi.mock("@mobvibe/ui/button", () => ({
 	Button: ({ children, ...props }: { children: React.ReactNode }) => (
 		<button type="button" {...props}>
 			{children}

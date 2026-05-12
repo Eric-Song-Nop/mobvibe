@@ -1,9 +1,9 @@
+import { ThemeProvider } from "@mobvibe/ui/theme-provider";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import * as React from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ThemeProvider } from "@/components/theme-provider";
 import { AppHeader } from "../AppHeader";
 
 const mockUseIsMobile = vi.fn(() => false);
@@ -73,7 +73,7 @@ const PopoverContext = React.createContext<{
 	setOpen: React.Dispatch<React.SetStateAction<boolean>>;
 } | null>(null);
 
-vi.mock("@/components/ui/popover", () => ({
+vi.mock("@mobvibe/ui/popover", () => ({
 	Popover: ({
 		children,
 		open,
@@ -139,7 +139,7 @@ vi.mock("@/components/ui/popover", () => ({
 
 const SheetContext = React.createContext<{ open: boolean } | null>(null);
 
-vi.mock("@/components/ui/sheet", () => ({
+vi.mock("@mobvibe/ui/sheet", () => ({
 	Sheet: ({
 		children,
 		open = false,
@@ -166,7 +166,7 @@ vi.mock("@/components/ui/sheet", () => ({
 }));
 
 // Mock AlertDialog
-vi.mock("@/components/ui/alert-dialog", () => ({
+vi.mock("@mobvibe/ui/alert-dialog", () => ({
 	AlertDialog: ({
 		children,
 	}: {
@@ -216,7 +216,7 @@ vi.mock("@/components/ui/alert-dialog", () => ({
 }));
 
 // Mock Badge
-vi.mock("@/components/ui/badge", () => ({
+vi.mock("@mobvibe/ui/badge", () => ({
 	Badge: ({
 		children,
 		variant,
@@ -233,7 +233,7 @@ vi.mock("@/components/ui/badge", () => ({
 }));
 
 // Mock Button
-vi.mock("@/components/ui/button", () => ({
+vi.mock("@mobvibe/ui/button", () => ({
 	Button: ({
 		children,
 		onClick,

@@ -1,5 +1,12 @@
 import { ArrowDown01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Badge } from "@mobvibe/ui/badge";
+import { Card, CardContent, CardHeader } from "@mobvibe/ui/card";
+import {
+	Collapsible,
+	CollapsibleContent,
+	CollapsibleTrigger,
+} from "@mobvibe/ui/collapsible";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -7,13 +14,6 @@ import {
 	ThoughtItemContent,
 	ToolCallItemContent,
 } from "@/components/chat/MessageItem";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import {
-	Collapsible,
-	CollapsibleContent,
-	CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import type { ToolCallStatus } from "@/lib/acp";
 import type { ChatMessage } from "@/lib/chat-store";
 import type { ToolCallGroupDisplayItem } from "@/lib/group-tool-calls";

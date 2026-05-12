@@ -1,9 +1,9 @@
 import { ArrowLeft02Icon, Legal01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Button } from "@mobvibe/ui/button";
+import { Separator } from "@mobvibe/ui/separator";
 import type React from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import {
 	getLegalDocument,
 	type LegalDocumentId,

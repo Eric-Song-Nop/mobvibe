@@ -1,5 +1,3 @@
-import { useCallback, useRef } from "react";
-import { useTranslation } from "react-i18next";
 import {
 	AlertDialog,
 	AlertDialogCancel,
@@ -9,9 +7,11 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 	AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+} from "@mobvibe/ui/alert-dialog";
+import { Button } from "@mobvibe/ui/button";
+import { Separator } from "@mobvibe/ui/separator";
+import { useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 
 interface GetStartedDialogProps {
 	children: React.ReactNode;

@@ -1,5 +1,8 @@
 import { Add01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { BrandLogo } from "@mobvibe/ui/brand-logo";
+import { Button } from "@mobvibe/ui/button";
+import { Skeleton } from "@mobvibe/ui/skeleton";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
 	forwardRef,
@@ -11,12 +14,9 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { E2EEMissingBanner } from "@/components/app/E2EEMissingBanner";
-import { BrandLogo } from "@/components/brand-logo";
 import { MessageItem } from "@/components/chat/MessageItem";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { ToolCallGroup } from "@/components/chat/tool-call-group";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import type { PermissionResultNotification } from "@/lib/acp";
 import type { ChatSession } from "@/lib/chat-store";
 import { buildMessageIndexMap, groupMessages } from "@/lib/group-tool-calls";

@@ -1,5 +1,3 @@
-import { useTranslation } from "react-i18next";
-import { WorkingDirectoryPicker } from "@/components/app/WorkingDirectoryPicker";
 import {
 	AlertDialog,
 	AlertDialogCancel,
@@ -8,7 +6,9 @@ import {
 	AlertDialogFooter,
 	AlertDialogHeader,
 	AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+} from "@mobvibe/ui/alert-dialog";
+import { useTranslation } from "react-i18next";
+import { WorkingDirectoryPicker } from "@/components/app/WorkingDirectoryPicker";
 
 export type WorkingDirectoryDialogProps = {
 	open: boolean;

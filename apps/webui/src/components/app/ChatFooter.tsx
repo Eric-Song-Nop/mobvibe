@@ -8,6 +8,15 @@ import {
 	PROMPT_IMAGE_MIME_TYPES,
 	validatePromptImageBlocks,
 } from "@mobvibe/shared";
+import { badgeVariants } from "@mobvibe/ui/badge";
+import { Button } from "@mobvibe/ui/button";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@mobvibe/ui/select";
 import { useQuery } from "@tanstack/react-query";
 import type { ClipboardEvent, FormEvent, KeyboardEvent } from "react";
 import {
@@ -21,15 +30,6 @@ import {
 import { useTranslation } from "react-i18next";
 import { CommandCombobox } from "@/components/app/CommandCombobox";
 import { ResourceCombobox } from "@/components/app/ResourceCombobox";
-import { badgeVariants } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { AvailableCommand, ContentBlock, ResourceLink } from "@/lib/acp";
 import {
@@ -1347,7 +1347,7 @@ export function ChatFooter({
 							type="button"
 							variant="ghost"
 							size="icon-sm"
-							aria-label="Upload image"
+							aria-label={t("chat.uploadImage")}
 							onClick={handleUploadButtonClick}
 							disabled={!canAttachImages || isAttachingImages}
 						>

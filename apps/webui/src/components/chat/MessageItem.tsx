@@ -1,5 +1,8 @@
 import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Badge } from "@mobvibe/ui/badge";
+import { Button } from "@mobvibe/ui/button";
+import { Card, CardContent } from "@mobvibe/ui/card";
 import { memo, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -7,9 +10,6 @@ import {
 	UnifiedDiffView,
 } from "@/components/chat/DiffView";
 import { LazyStreamdown } from "@/components/chat/LazyStreamdown";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import i18n from "@/i18n";
 import type {
 	AudioContent,

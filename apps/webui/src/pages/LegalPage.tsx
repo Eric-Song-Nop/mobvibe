@@ -5,13 +5,12 @@ import {
 	type LegalDocumentId,
 	legalDocuments,
 } from "@mobvibe/shared";
+import { Button } from "@mobvibe/ui/button";
+import { Separator } from "@mobvibe/ui/separator";
+import { ThemeProvider } from "@mobvibe/ui/theme-provider";
 import type React from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-
-import { ThemeProvider } from "@/components/theme-provider";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
 type LegalPageProps = {

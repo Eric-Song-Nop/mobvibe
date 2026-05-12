@@ -8,7 +8,7 @@ import * as api from "@/lib/api";
 import type { FileExplorerDialogProps } from "../FileExplorerDialog";
 import { FileExplorerDialog } from "../FileExplorerDialog";
 
-vi.mock("@/components/ui/alert-dialog", () => ({
+vi.mock("@mobvibe/ui/alert-dialog", () => ({
 	AlertDialog: ({ children }: { children: React.ReactNode }) => (
 		<div>{children}</div>
 	),
@@ -43,7 +43,7 @@ vi.mock("@/components/app/file-preview-renderers", () => ({
 	},
 }));
 
-vi.mock("@/components/ui/button", () => ({
+vi.mock("@mobvibe/ui/button", () => ({
 	Button: ({ children, ...props }: { children: React.ReactNode }) => (
 		<button type="button" {...props}>
 			{children}

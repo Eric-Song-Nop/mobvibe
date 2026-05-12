@@ -9,25 +9,17 @@ import {
 	UserAccountIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useState, useSyncExternalStore } from "react";
-import { useTranslation } from "react-i18next";
-import { Navigate, useNavigate } from "react-router-dom";
-import { useAuth } from "@/components/auth/AuthProvider";
-import { UserMenu } from "@/components/auth/UserMenu";
-import { LegalLinks } from "@/components/legal/LegalLinks";
-import { E2EESettings } from "@/components/settings/E2EESettings";
-import { ThemeProvider, useTheme } from "@/components/theme-provider";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Button } from "@mobvibe/ui/button";
+import { Input } from "@mobvibe/ui/input";
+import { Label } from "@mobvibe/ui/label";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
+} from "@mobvibe/ui/select";
+import { Separator } from "@mobvibe/ui/separator";
 import {
 	Sidebar,
 	SidebarContent,
@@ -38,7 +30,15 @@ import {
 	SidebarMenuButton,
 	SidebarMenuItem,
 	SidebarProvider,
-} from "@/components/ui/sidebar";
+} from "@mobvibe/ui/sidebar";
+import { ThemeProvider, useTheme } from "@mobvibe/ui/theme-provider";
+import { useCallback, useState, useSyncExternalStore } from "react";
+import { useTranslation } from "react-i18next";
+import { Navigate, useNavigate } from "react-router-dom";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { UserMenu } from "@/components/auth/UserMenu";
+import { LegalLinks } from "@/components/legal/LegalLinks";
+import { E2EESettings } from "@/components/settings/E2EESettings";
 import i18n, { supportedLanguages } from "@/i18n";
 import { changePassword, isAuthEnabled } from "@/lib/auth";
 import { toThemePreference } from "@/lib/ui-config";

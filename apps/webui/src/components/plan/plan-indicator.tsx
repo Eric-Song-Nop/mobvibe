@@ -1,26 +1,22 @@
 import { ArrowDown01Icon, ArrowUp01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useState } from "react";
-import { useTranslation } from "react-i18next";
-import { LazyStreamdown } from "@/components/chat/LazyStreamdown";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@mobvibe/ui/badge";
+import { Button } from "@mobvibe/ui/button";
 import {
 	Collapsible,
 	CollapsibleContent,
 	CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import {
-	Popover,
-	PopoverContent,
-	PopoverTrigger,
-} from "@/components/ui/popover";
+} from "@mobvibe/ui/collapsible";
+import { Popover, PopoverContent, PopoverTrigger } from "@mobvibe/ui/popover";
 import {
 	Sheet,
 	SheetContent,
 	SheetHeader,
 	SheetTitle,
-} from "@/components/ui/sheet";
+} from "@mobvibe/ui/sheet";
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { LazyStreamdown } from "@/components/chat/LazyStreamdown";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { PlanEntry, PlanEntryPriority, PlanEntryStatus } from "@/lib/acp";
 import { cn } from "@/lib/utils";

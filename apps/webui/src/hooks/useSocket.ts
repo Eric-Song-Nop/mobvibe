@@ -1,34 +1,35 @@
 import { isEncryptedPayload, type SessionSummary } from "@mobvibe/shared";
 import { useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import {
+	applyContiguousPendingEvents,
+	createSessionSyncBackup,
+	restoreBackupIfSessionWasReset,
+	type SessionSyncBackup,
+} from "@/hooks/backfill-manager";
+import {
+	createEncryptedEventBuffer,
+	type EventSource,
+} from "@/hooks/encrypted-event-buffer";
+import {
+	applyPermissionRequest,
+	applySessionEvent,
+} from "@/hooks/session-event-reducer";
+import { createSubscriptionManager } from "@/hooks/subscription-manager";
 import { useSessionBackfill } from "@/hooks/use-session-backfill";
 import type { ChatStoreActions } from "@/hooks/useSessionMutations";
 import {
 	type CliStatusPayload,
-	extractAvailableCommandsUpdate,
-	extractPlanUpdate,
-	extractSessionInfoUpdate,
-	extractSessionModeUpdate,
-	extractTextChunk,
-	extractToolCallUpdate,
 	type PermissionDecisionPayload,
-	type PermissionOutcome,
 	type PermissionRequestPayload,
 	type SessionAttachedPayload,
 	type SessionDetachedPayload,
 	type SessionEvent,
-	type SessionNotification,
 	type SessionsChangedPayload,
-	type TerminalOutputEvent,
 } from "@/lib/acp";
-import {
-	type ChatMessage,
-	type ChatSession,
-	type SessionRestoreSnapshot,
-	useChatStore,
-} from "@/lib/chat-store";
+import { type ChatSession, useChatStore } from "@/lib/chat-store";
 import { bootstrapSessionE2EE, e2ee } from "@/lib/e2ee";
-import { createFallbackError, isErrorDetail } from "@/lib/error-utils";
+import { createFallbackError } from "@/lib/error-utils";
 import { useMachinesStore } from "@/lib/machines-store";
 import {
 	notifyPermissionRequest,
@@ -67,13 +68,6 @@ type UseSocketOptions = {
 	| "resetSessionForRevision"
 >;
 
-type EventSource = "live" | "backfill";
-
-type BufferedEncryptedEvent = {
-	event: SessionEvent;
-	source: EventSource;
-};
-
 // Helper to get cursor from store directly (unified source of truth)
 const getCursor = (sessionId: string) => {
 	const session = useChatStore.getState().sessions[sessionId];
@@ -82,27 +76,6 @@ const getCursor = (sessionId: string) => {
 		lastAppliedSeq: session?.lastAppliedSeq ?? 0,
 	};
 };
-
-/** Dedup-aware permission request handler — shared by WAL backfill and live socket paths. */
-function processPermissionRequest(
-	sessionId: string,
-	payload: PermissionRequestPayload,
-	sessionsRef: { current: Record<string, ChatSession> },
-	addPermissionRequest: ChatStoreActions["addPermissionRequest"],
-) {
-	const currentSession = useChatStore.getState().sessions[sessionId];
-	const alreadyExists = currentSession?.messages.some(
-		(m) => m.kind === "permission" && m.requestId === payload.requestId,
-	);
-	addPermissionRequest(sessionId, {
-		requestId: payload.requestId,
-		toolCall: payload.toolCall,
-		options: payload.options ?? [],
-	});
-	if (!alreadyExists) {
-		notifyPermissionRequest(payload, { sessions: sessionsRef.current });
-	}
-}
 
 export function useSocket({
 	syncSessions,
@@ -129,8 +102,14 @@ export function useSocket({
 	onReconnect,
 }: UseSocketOptions) {
 	const { t } = useTranslation();
-	const subscribedSessionsRef = useRef<Set<string>>(new Set());
-	const recoverableSessionsRef = useRef<Set<string>>(new Set());
+	const subscriptionManager = useRef(createSubscriptionManager()).current;
+	const {
+		clearSession: clearManagedSession,
+		initialBackfillTriggered,
+		recoverableSessions,
+		resetInitialBackfill,
+		subscribedSessions,
+	} = subscriptionManager;
 	const sessionsRef = useRef(useChatStore.getState().sessions);
 
 	useEffect(
@@ -145,21 +124,8 @@ export function useSocket({
 	const pendingEventsRef = useRef<Map<string, SessionEvent[]>>(new Map());
 
 	// Buffer for encrypted events received before DEK is ready
-	const encryptedBufferRef = useRef<Map<string, BufferedEncryptedEvent[]>>(
-		new Map(),
-	);
-	const syncBackupsRef = useRef<
-		Map<
-			string,
-			{
-				messages: ChatMessage[];
-				snapshot: SessionRestoreSnapshot;
-			}
-		>
-	>(new Map());
-
-	// Track which sessions have triggered initial backfill
-	const initialBackfillTriggeredRef = useRef<Set<string>>(new Set());
+	const encryptedBufferRef = useRef(createEncryptedEventBuffer());
+	const syncBackupsRef = useRef<Map<string, SessionSyncBackup>>(new Map());
 
 	// Max pending queue size before forcing reset
 	const MAX_PENDING_SIZE = 1000;
@@ -193,155 +159,32 @@ export function useSocket({
 		((event: SessionEvent) => void) | undefined
 	>(undefined);
 	applySessionEventRef.current = (event: SessionEvent) => {
-		const session = sessionsRef.current[event.sessionId];
-
-		switch (event.kind) {
-			case "user_message": {
-				const notification = event.payload as SessionNotification;
-				const textChunk = extractTextChunk(notification);
-				if (textChunk?.role === "user") {
-					confirmOrAppendUserMessage(event.sessionId, textChunk.text);
-				}
-				break;
-			}
-			case "agent_message_chunk": {
-				const notification = event.payload as SessionNotification;
-				const textChunk = extractTextChunk(notification);
-				if (textChunk?.role === "assistant") {
-					appendAssistantChunk(event.sessionId, textChunk.text);
-				}
-				break;
-			}
-			case "agent_thought_chunk": {
-				const notification = event.payload as SessionNotification;
-				const textChunk = extractTextChunk(notification);
-				if (textChunk) {
-					appendThoughtChunk(event.sessionId, textChunk.text);
-				}
-				break;
-			}
-			case "tool_call":
-			case "tool_call_update": {
-				const notification = event.payload as SessionNotification;
-				const toolCallUpdate = extractToolCallUpdate(notification);
-				if (toolCallUpdate) {
-					if (toolCallUpdate.sessionUpdate === "tool_call") {
-						addToolCall(event.sessionId, toolCallUpdate);
-					} else {
-						updateToolCall(event.sessionId, toolCallUpdate);
-					}
-				}
-				break;
-			}
-			case "session_info_update": {
-				const notification = event.payload as SessionNotification;
-				const modeUpdate = extractSessionModeUpdate(notification);
-				if (modeUpdate) {
-					const modeName = session?.availableModes?.find(
-						(mode) => mode.id === modeUpdate.modeId,
-					)?.name;
-					updateSessionMeta(event.sessionId, {
-						modeId: modeUpdate.modeId,
-						modeName,
-					});
-				}
-				const infoUpdate = extractSessionInfoUpdate(notification);
-				if (infoUpdate) {
-					// Protect pinned titles from agent auto-update
-					if (session?.isTitlePinned && infoUpdate.title !== undefined) {
-						const { title: _ignored, ...rest } = infoUpdate;
-						if (Object.keys(rest).length > 0) {
-							updateSessionMeta(event.sessionId, rest);
-						}
-					} else {
-						updateSessionMeta(event.sessionId, infoUpdate);
-					}
-				}
-				const availableCommands = extractAvailableCommandsUpdate(notification);
-				if (availableCommands !== null) {
-					updateSessionMeta(event.sessionId, { availableCommands });
-				}
-				const planUpdate = extractPlanUpdate(notification);
-				if (planUpdate) {
-					updateSessionMeta(event.sessionId, { plan: planUpdate.entries });
-				}
-				break;
-			}
-			case "terminal_output": {
-				const payload = event.payload as TerminalOutputEvent;
-				appendTerminalOutput(event.sessionId, {
-					terminalId: payload.terminalId,
-					delta: payload.delta,
-					truncated: payload.truncated,
-					output: payload.output,
-					exitStatus: payload.exitStatus ?? undefined,
-				});
-				break;
-			}
-			case "permission_request": {
-				const payload = event.payload as PermissionRequestPayload;
-				processPermissionRequest(
-					event.sessionId,
-					payload,
-					sessionsRef,
-					addPermissionRequest,
-				);
-				break;
-			}
-			case "permission_result": {
-				const payload = event.payload as {
-					sessionId: string;
-					requestId: string;
-					outcome: PermissionOutcome;
-				};
-				setPermissionOutcome(
-					event.sessionId,
-					payload.requestId,
-					payload.outcome,
-				);
-				setPermissionDecisionState(event.sessionId, payload.requestId, "idle");
-				break;
-			}
-			case "session_error": {
-				const payload = event.payload as { error: unknown };
-				if (isErrorDetail(payload.error)) {
-					setStreamError(event.sessionId, payload.error);
-					notifySessionError(
-						{ sessionId: event.sessionId, error: payload.error },
-						{ sessions: sessionsRef.current },
-					);
-				}
-				break;
-			}
-			case "usage_update": {
-				const notification = event.payload as SessionNotification;
-				const update = notification.update;
-				if (update.sessionUpdate === "usage_update") {
-					updateSessionMeta(event.sessionId, {
-						usage: {
-							used: update.used,
-							size: update.size,
-							cost: update.cost ?? undefined,
-						},
-					});
-				}
-				break;
-			}
-			case "turn_end": {
-				notifyResponseCompleted(
-					{ sessionId: event.sessionId },
-					{ sessions: sessionsRef.current },
-				);
-				finalizeAssistantMessage?.(event.sessionId);
-				setSending?.(event.sessionId, false);
-				setCanceling?.(event.sessionId, false);
-				break;
-			}
-			default:
-				// Forward-compatible: silently ignore unknown event kinds
-				// so the UI doesn't crash when SDK introduces new event types
-				break;
-		}
+		applySessionEvent({
+			event,
+			session: sessionsRef.current[event.sessionId],
+			sessions: sessionsRef.current,
+			actions: {
+				appendAssistantChunk,
+				appendThoughtChunk,
+				confirmOrAppendUserMessage,
+				updateSessionMeta,
+				setStreamError,
+				addPermissionRequest,
+				setPermissionDecisionState,
+				setPermissionOutcome,
+				addToolCall,
+				updateToolCall,
+				appendTerminalOutput,
+				finalizeAssistantMessage,
+				setSending,
+				setCanceling,
+			},
+			notifications: {
+				notifyPermissionRequest,
+				notifyResponseCompleted,
+				notifySessionError,
+			},
+		});
 	};
 
 	// Flush pending events that are now in order
@@ -430,39 +273,19 @@ export function useSocket({
 			const pending = pendingEventsRef.current.get(sessionId);
 			if (pending && pending.length > 0) {
 				const cursor = getCursor(sessionId);
-				const sorted = pending
-					.filter((e) =>
-						cursor.revision === undefined
-							? true
-							: e.revision === cursor.revision,
-					)
-					.sort((a, b) => a.seq - b.seq);
-
-				let lastSeq = cursor.lastAppliedSeq;
-				for (const event of sorted) {
-					if (event.seq <= lastSeq) continue;
-					if (event.seq !== lastSeq + 1) break;
-					applySessionEventRef.current?.(event);
-					lastSeq = event.seq;
-					updateSessionCursor(sessionId, event.revision, event.seq);
-				}
+				applyContiguousPendingEvents({
+					pending,
+					revision: cursor.revision,
+					lastAppliedSeq: cursor.lastAppliedSeq,
+					applyEvent: (event) => applySessionEventRef.current?.(event),
+					updateCursor: updateSessionCursor,
+				});
 				pendingEventsRef.current.delete(sessionId);
 			}
 
 			const backup = syncBackupsRef.current.get(sessionId);
 			if (backup) {
-				const failedSession = store.sessions[sessionId];
-				if (
-					failedSession &&
-					failedSession.messages.length === 0 &&
-					(failedSession.lastAppliedSeq ?? 0) === 0
-				) {
-					store.restoreSessionMessages(
-						sessionId,
-						backup.messages,
-						backup.snapshot,
-					);
-				}
+				restoreBackupIfSessionWasReset({ store, sessionId, backup });
 				syncBackupsRef.current.delete(sessionId);
 			}
 			store.setHistorySyncing(sessionId, false);
@@ -477,8 +300,8 @@ export function useSocket({
 			);
 			resetSessionForRevision(sessionId, newRevision);
 			pendingEventsRef.current.delete(sessionId);
-			encryptedBufferRef.current.delete(sessionId);
-			initialBackfillTriggeredRef.current.delete(sessionId);
+			encryptedBufferRef.current.clear(sessionId);
+			resetInitialBackfill(sessionId);
 
 			// Defer restart to avoid race conditions
 			queueMicrotask(() => {
@@ -508,13 +331,13 @@ export function useSocket({
 	const clearRevisionRuntimeState = useCallback(
 		(sessionId: string) => {
 			pendingEventsRef.current.delete(sessionId);
-			encryptedBufferRef.current.delete(sessionId);
+			encryptedBufferRef.current.clear(sessionId);
 			syncBackupsRef.current.delete(sessionId);
 			cancelBackfill(sessionId);
-			initialBackfillTriggeredRef.current.delete(sessionId);
+			resetInitialBackfill(sessionId);
 			setStreamError(sessionId, undefined);
 		},
-		[cancelBackfill, setStreamError],
+		[cancelBackfill, resetInitialBackfill, setStreamError],
 	);
 
 	const syncSessionSummaries = useCallback(
@@ -533,15 +356,13 @@ export function useSocket({
 			if (unsubscribe) {
 				gatewaySocket.unsubscribeFromSession(sessionId);
 			}
-			subscribedSessionsRef.current.delete(sessionId);
-			recoverableSessionsRef.current.delete(sessionId);
 			pendingEventsRef.current.delete(sessionId);
-			encryptedBufferRef.current.delete(sessionId);
+			encryptedBufferRef.current.clear(sessionId);
 			syncBackupsRef.current.delete(sessionId);
 			cancelBackfill(sessionId);
-			initialBackfillTriggeredRef.current.delete(sessionId);
+			clearManagedSession(sessionId);
 		},
-		[cancelBackfill],
+		[cancelBackfill, clearManagedSession],
 	);
 
 	const syncSessionHistory = useCallback(
@@ -552,21 +373,11 @@ export function useSocket({
 			useChatStore.getState().setHistorySyncing(sessionId, true);
 			useChatStore.getState().setHistorySyncWarning(sessionId, undefined);
 			const revision = session.revision ?? 1;
-			syncBackupsRef.current.set(sessionId, {
-				messages: [...session.messages],
-				snapshot: {
-					lastAppliedSeq: session.lastAppliedSeq,
-					revision: session.revision,
-					terminalOutputs: { ...session.terminalOutputs },
-					streamingMessageId: session.streamingMessageId,
-					streamingMessageRole: session.streamingMessageRole,
-					streamingThoughtId: session.streamingThoughtId,
-				},
-			});
+			syncBackupsRef.current.set(sessionId, createSessionSyncBackup(session));
 
 			// Full re-sync: clear all buffers, reset messages, replay from seq 0
 			pendingEventsRef.current.delete(sessionId);
-			encryptedBufferRef.current.delete(sessionId);
+			encryptedBufferRef.current.clear(sessionId);
 			resetSessionForRevision(sessionId, revision);
 			startBackfill(sessionId, revision, 0);
 		},
@@ -590,10 +401,10 @@ export function useSocket({
 			isEncryptedPayload(incomingEvent.payload) &&
 			!e2ee.hasSessionDek(incomingEvent.sessionId)
 		) {
-			const buffered =
-				encryptedBufferRef.current.get(incomingEvent.sessionId) ?? [];
-			buffered.push({ event: incomingEvent, source });
-			encryptedBufferRef.current.set(incomingEvent.sessionId, buffered);
+			encryptedBufferRef.current.push(incomingEvent.sessionId, {
+				event: incomingEvent,
+				source,
+			});
 			return;
 		}
 
@@ -652,7 +463,7 @@ export function useSocket({
 				`[socket] Pending overflow for ${event.sessionId}, forcing reset`,
 			);
 			pendingEventsRef.current.delete(event.sessionId);
-			encryptedBufferRef.current.delete(event.sessionId);
+			encryptedBufferRef.current.clear(event.sessionId);
 			resetSessionForRevision(event.sessionId, event.revision);
 			triggerBackfillRef.current?.(event.sessionId, event.revision, 0);
 			return;
@@ -677,7 +488,7 @@ export function useSocket({
 			payload.revision !== undefined &&
 			currentSession.revision !== payload.revision;
 
-		recoverableSessionsRef.current.add(payload.sessionId);
+		recoverableSessions.add(payload.sessionId);
 		markSessionAttached(payload);
 
 		if (shouldResetForRevision && payload.revision !== undefined) {
@@ -691,10 +502,10 @@ export function useSocket({
 				useChatStore.getState().sessions[payload.sessionId]?.isLoading;
 			if (
 				!isLoading &&
-				(!initialBackfillTriggeredRef.current.has(payload.sessionId) ||
+				(!initialBackfillTriggered.has(payload.sessionId) ||
 					shouldResetForRevision)
 			) {
-				initialBackfillTriggeredRef.current.add(payload.sessionId);
+				initialBackfillTriggered.add(payload.sessionId);
 				const afterSeq = shouldResetForRevision
 					? 0
 					: getCursor(payload.sessionId).lastAppliedSeq;
@@ -709,7 +520,7 @@ export function useSocket({
 
 	handleSessionDetachedRef.current = (payload: SessionDetachedPayload) => {
 		if (payload.reason === "gateway_disconnect") {
-			recoverableSessionsRef.current.add(payload.sessionId);
+			recoverableSessions.add(payload.sessionId);
 		} else {
 			clearTrackedSession(payload.sessionId);
 		}
@@ -717,12 +528,14 @@ export function useSocket({
 	};
 
 	handlePermissionRequestRef.current = (payload: PermissionRequestPayload) => {
-		processPermissionRequest(
-			payload.sessionId,
+		applyPermissionRequest({
+			sessionId: payload.sessionId,
 			payload,
-			sessionsRef,
-			addPermissionRequest,
-		);
+			session: sessionsRef.current[payload.sessionId],
+			sessions: sessionsRef.current,
+			actions: { addPermissionRequest },
+			notifications: { notifyPermissionRequest },
+		});
 	};
 
 	handlePermissionResultRef.current = (payload: PermissionDecisionPayload) => {
@@ -765,9 +578,8 @@ export function useSocket({
 	// Flush buffered encrypted events once a DEK becomes available
 	useEffect(() => {
 		const unsubDekReady = e2ee.onDekReady((sessionId) => {
-			const buffered = encryptedBufferRef.current.get(sessionId);
-			if (!buffered || buffered.length === 0) return;
-			encryptedBufferRef.current.delete(sessionId);
+			const buffered = encryptedBufferRef.current.drain(sessionId);
+			if (buffered.length === 0) return;
 
 			// Re-process each buffered event through the original ingest path.
 			for (const bufferedEvent of buffered) {
@@ -869,17 +681,17 @@ export function useSocket({
 	useEffect(() => {
 		const syncSubscribedSessions = (sessions: Record<string, ChatSession>) => {
 			for (const sessionId of gatewaySocket.getSubscribedSessions()) {
-				if (!subscribedSessionsRef.current.has(sessionId)) {
-					subscribedSessionsRef.current.add(sessionId);
+				if (!subscribedSessions.has(sessionId)) {
+					subscribedSessions.add(sessionId);
 				}
 				if (sessions[sessionId]) {
-					recoverableSessionsRef.current.add(sessionId);
+					recoverableSessions.add(sessionId);
 				}
 			}
 
-			for (const sessionId of Array.from(recoverableSessionsRef.current)) {
+			for (const sessionId of Array.from(recoverableSessions)) {
 				if (!sessions[sessionId]) {
-					recoverableSessionsRef.current.delete(sessionId);
+					recoverableSessions.delete(sessionId);
 				}
 			}
 
@@ -888,28 +700,28 @@ export function useSocket({
 				const isLiveSession =
 					session.isAttached || session.isLoading || session.sending;
 				if (isLiveSession) {
-					recoverableSessionsRef.current.add(sessionId);
+					recoverableSessions.add(sessionId);
 					subscribableIds.add(sessionId);
 					continue;
 				}
 
 				if (
 					session.detachedReason === "gateway_disconnect" &&
-					recoverableSessionsRef.current.has(sessionId)
+					recoverableSessions.has(sessionId)
 				) {
 					subscribableIds.add(sessionId);
 					continue;
 				}
 
-				recoverableSessionsRef.current.delete(sessionId);
+				recoverableSessions.delete(sessionId);
 			}
 
 			// Subscribe to new sessions
 			for (const sessionId of subscribableIds) {
-				if (!subscribedSessionsRef.current.has(sessionId)) {
+				if (!subscribedSessions.has(sessionId)) {
 					gatewaySocket.subscribeToSession(sessionId);
-					subscribedSessionsRef.current.add(sessionId);
-					recoverableSessionsRef.current.add(sessionId);
+					subscribedSessions.add(sessionId);
+					recoverableSessions.add(sessionId);
 					setStreamError(sessionId, undefined);
 
 					// Trigger initial backfill on subscription (skip if still loading)
@@ -918,9 +730,9 @@ export function useSocket({
 						session &&
 						gatewaySocket.isConnected() &&
 						!session.isLoading &&
-						!initialBackfillTriggeredRef.current.has(sessionId)
+						!initialBackfillTriggered.has(sessionId)
 					) {
-						initialBackfillTriggeredRef.current.add(sessionId);
+						initialBackfillTriggered.add(sessionId);
 						const cursor = getCursor(sessionId);
 						const revision = cursor.revision ?? 1;
 						triggerBackfillRef.current?.(
@@ -933,16 +745,16 @@ export function useSocket({
 			}
 
 			// Cancel backfill for sessions that entered loading state (re-activation)
-			for (const sessionId of subscribedSessionsRef.current) {
+			for (const sessionId of subscribedSessions) {
 				const session = sessions[sessionId];
 				if (session?.isLoading) {
 					cancelBackfill(sessionId);
-					initialBackfillTriggeredRef.current.delete(sessionId);
+					resetInitialBackfill(sessionId);
 				}
 			}
 
 			// Unsubscribe from sessions no longer streaming
-			for (const sessionId of Array.from(subscribedSessionsRef.current)) {
+			for (const sessionId of Array.from(subscribedSessions)) {
 				if (!subscribableIds.has(sessionId)) {
 					clearTrackedSession(sessionId);
 				}
@@ -950,16 +762,16 @@ export function useSocket({
 
 			// Compensate: trigger backfill for subscribed sessions that finished loading
 			// but haven't had their initial backfill yet (were skipped due to isLoading)
-			for (const sessionId of subscribedSessionsRef.current) {
+			for (const sessionId of subscribedSessions) {
 				if (!subscribableIds.has(sessionId)) continue;
 				const session = sessions[sessionId];
 				if (
 					session &&
 					gatewaySocket.isConnected() &&
 					!session.isLoading &&
-					!initialBackfillTriggeredRef.current.has(sessionId)
+					!initialBackfillTriggered.has(sessionId)
 				) {
-					initialBackfillTriggeredRef.current.add(sessionId);
+					initialBackfillTriggered.add(sessionId);
 					const cursor = getCursor(sessionId);
 					const revision = cursor.revision ?? 1;
 					triggerBackfillRef.current?.(
@@ -976,7 +788,15 @@ export function useSocket({
 			sessionsRef.current = state.sessions;
 			syncSubscribedSessions(state.sessions);
 		});
-	}, [setStreamError, cancelBackfill, clearTrackedSession]);
+	}, [
+		cancelBackfill,
+		clearTrackedSession,
+		initialBackfillTriggered,
+		recoverableSessions,
+		resetInitialBackfill,
+		setStreamError,
+		subscribedSessions,
+	]);
 
 	// Stable ref for onReconnect callback
 	const onReconnectRef = useRef(onReconnect);
@@ -987,8 +807,8 @@ export function useSocket({
 		let hasConnectedOnce = false;
 		const handleConnect = () => {
 			const connectedSessionIds = new Set([
-				...subscribedSessionsRef.current,
-				...recoverableSessionsRef.current,
+				...subscribedSessions,
+				...recoverableSessions,
 			]);
 
 			if (!hasConnectedOnce) {
@@ -1000,17 +820,14 @@ export function useSocket({
 						continue;
 					}
 
-					subscribedSessionsRef.current.add(sessionId);
-					recoverableSessionsRef.current.add(sessionId);
+					subscribedSessions.add(sessionId);
+					recoverableSessions.add(sessionId);
 					gatewaySocket.subscribeToSession(sessionId);
 
 					const isLoading =
 						useChatStore.getState().sessions[sessionId]?.isLoading;
-					if (
-						!isLoading &&
-						!initialBackfillTriggeredRef.current.has(sessionId)
-					) {
-						initialBackfillTriggeredRef.current.add(sessionId);
+					if (!isLoading && !initialBackfillTriggered.has(sessionId)) {
+						initialBackfillTriggered.add(sessionId);
 						const revision = session.revision ?? 1;
 						const afterSeq = session.lastAppliedSeq ?? 0;
 						triggerBackfillRef.current?.(sessionId, revision, afterSeq);
@@ -1022,7 +839,7 @@ export function useSocket({
 			// Reset backfill tracking — stale refs from previous connection
 			// would block session:attached from triggering fresh backfill
 			for (const sessionId of connectedSessionIds) {
-				initialBackfillTriggeredRef.current.delete(sessionId);
+				resetInitialBackfill(sessionId);
 			}
 
 			for (const sessionId of connectedSessionIds) {
@@ -1032,8 +849,8 @@ export function useSocket({
 					continue;
 				}
 
-				subscribedSessionsRef.current.add(sessionId);
-				recoverableSessionsRef.current.add(sessionId);
+				subscribedSessions.add(sessionId);
+				recoverableSessions.add(sessionId);
 				gatewaySocket.subscribeToSession(sessionId);
 
 				// Trigger backfill on reconnect (skip sessions currently loading)
@@ -1051,7 +868,13 @@ export function useSocket({
 
 		const unsubscribe = gatewaySocket.onConnect(handleConnect);
 		return unsubscribe;
-	}, [clearTrackedSession]);
+	}, [
+		clearTrackedSession,
+		initialBackfillTriggered,
+		recoverableSessions,
+		resetInitialBackfill,
+		subscribedSessions,
+	]);
 
 	return {
 		syncSessionSummaries,

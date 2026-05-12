@@ -33,7 +33,7 @@ vi.mock("@hugeicons/react", () => ({
 	HugeiconsIcon: () => <span data-testid="icon" />,
 }));
 
-vi.mock("@/components/ui/button", () => ({
+vi.mock("@mobvibe/ui/button", () => ({
 	Button: ({
 		children,
 		onClick,
@@ -49,7 +49,7 @@ vi.mock("@/components/ui/button", () => ({
 	),
 }));
 
-vi.mock("@/components/ui/tooltip", () => ({
+vi.mock("@mobvibe/ui/tooltip", () => ({
 	Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
 	TooltipTrigger: ({
 		children,
@@ -61,7 +61,7 @@ vi.mock("@/components/ui/tooltip", () => ({
 	TooltipProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
-vi.mock("@/components/ui/ResizeHandle", () => ({
+vi.mock("@mobvibe/ui/resize-handle", () => ({
 	ResizeHandle: () => null,
 }));
 
@@ -107,7 +107,7 @@ vi.mock("@/components/session/SessionSidebar", () => ({
 	),
 }));
 
-vi.mock("@/components/ui/alert-dialog", () => ({
+vi.mock("@mobvibe/ui/alert-dialog", () => ({
 	AlertDialog: ({
 		children,
 		open,

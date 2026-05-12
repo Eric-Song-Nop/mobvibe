@@ -28,11 +28,14 @@ vi.mock("@hugeicons/core-free-icons", () => ({
 
 vi.mock("react-i18next", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("react-i18next")>();
+	const translations: Record<string, string> = {
+		"chat.uploadImage": "Upload image",
+	};
 	return {
 		...actual,
 		useTranslation: () => ({
 			t: (key: string, options?: Record<string, string>) =>
-				options?.value ? `${key}:${options.value}` : key,
+				options?.value ? `${key}:${options.value}` : (translations[key] ?? key),
 		}),
 	};
 });
@@ -41,7 +44,7 @@ vi.mock("@/hooks/use-mobile", () => ({
 	useIsMobile: () => false,
 }));
 
-vi.mock("@/components/ui/button", () => ({
+vi.mock("@mobvibe/ui/button", () => ({
 	Button: ({
 		children,
 		size: _size,
@@ -53,7 +56,7 @@ vi.mock("@/components/ui/button", () => ({
 	),
 }));
 
-vi.mock("@/components/ui/select", () => ({
+vi.mock("@mobvibe/ui/select", () => ({
 	Select: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 	SelectTrigger: ({
 		children,

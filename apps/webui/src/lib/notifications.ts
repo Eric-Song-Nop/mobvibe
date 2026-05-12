@@ -1,4 +1,4 @@
-import type { ToastVariant } from "@/components/ui/toast";
+import type { ToastVariant } from "@mobvibe/ui/toast";
 import i18n from "@/i18n";
 import type { PermissionToolCall } from "@/lib/acp";
 import {

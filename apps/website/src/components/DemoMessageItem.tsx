@@ -1,5 +1,5 @@
+import { Card, CardContent } from "@mobvibe/ui/card";
 import { Streamdown } from "streamdown";
-import { Card, CardContent } from "@/components/ui/card";
 import type { DisplayMessage } from "@/hooks/use-streaming-demo";
 import { cn } from "@/lib/utils";
 

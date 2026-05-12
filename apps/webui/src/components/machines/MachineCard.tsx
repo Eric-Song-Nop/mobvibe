@@ -1,4 +1,3 @@
-import { useTranslation } from "react-i18next";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -9,10 +8,11 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 	AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+} from "@mobvibe/ui/alert-dialog";
+import { Badge } from "@mobvibe/ui/badge";
+import { Button } from "@mobvibe/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@mobvibe/ui/card";
+import { useTranslation } from "react-i18next";
 import type { Machine } from "@/lib/machines-store";
 import { cn } from "@/lib/utils";
 

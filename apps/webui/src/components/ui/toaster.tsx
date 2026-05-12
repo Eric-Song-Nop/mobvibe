@@ -5,7 +5,7 @@ import {
 	ToastProvider,
 	ToastTitle,
 	ToastViewport,
-} from "@/components/ui/toast";
+} from "@mobvibe/ui/toast";
 import { useNotificationStore } from "@/lib/notification-store";
 
 export function Toaster() {

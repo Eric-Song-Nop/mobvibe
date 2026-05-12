@@ -4,15 +4,15 @@ import {
 	Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
 import {
 	Sheet,
 	SheetContent,
 	SheetHeader,
 	SheetTitle,
-} from "@/components/ui/sheet";
+} from "@mobvibe/ui/sheet";
+import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { fetchSessionGitBranches } from "@/lib/api";
 import {
 	FuzzyHighlight,

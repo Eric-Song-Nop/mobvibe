@@ -140,7 +140,7 @@ vi.mock("@/components/app/WorkingDirectoryDialog", () => ({
 	WorkingDirectoryDialog: () => null,
 }));
 
-vi.mock("@/components/ui/dialog", () => ({
+vi.mock("@mobvibe/ui/dialog", () => ({
 	Dialog: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 	DialogContent: ({ children }: { children: ReactNode }) => (
 		<div>{children}</div>
@@ -151,7 +151,7 @@ vi.mock("@/components/ui/dialog", () => ({
 	),
 }));
 
-vi.mock("@/components/ui/button", () => ({
+vi.mock("@mobvibe/ui/button", () => ({
 	Button: ({
 		children,
 		disabled,
@@ -167,7 +167,7 @@ vi.mock("@/components/ui/button", () => ({
 	),
 }));
 
-vi.mock("@/components/ui/checkbox", () => ({
+vi.mock("@mobvibe/ui/checkbox", () => ({
 	Checkbox: ({
 		checked,
 		onCheckedChange,
@@ -186,11 +186,11 @@ vi.mock("@/components/ui/checkbox", () => ({
 	),
 }));
 
-vi.mock("@/components/ui/input", () => ({
+vi.mock("@mobvibe/ui/input", () => ({
 	Input: (props: InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
 }));
 
-vi.mock("@/components/ui/input-group", () => ({
+vi.mock("@mobvibe/ui/input-group", () => ({
 	InputGroup: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 	InputGroupAddon: ({ children }: { children: ReactNode }) => (
 		<div>{children}</div>
@@ -203,13 +203,13 @@ vi.mock("@/components/ui/input-group", () => ({
 	),
 }));
 
-vi.mock("@/components/ui/label", () => ({
+vi.mock("@mobvibe/ui/label", () => ({
 	Label: ({ children, htmlFor }: { children: ReactNode; htmlFor?: string }) => (
 		<label htmlFor={htmlFor}>{children}</label>
 	),
 }));
 
-vi.mock("@/components/ui/select", () => ({
+vi.mock("@mobvibe/ui/select", () => ({
 	Select: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 	SelectTrigger: ({ children }: { children: ReactNode }) => (
 		<div>{children}</div>
@@ -225,7 +225,7 @@ vi.mock("@/components/ui/select", () => ({
 	),
 }));
 
-vi.mock("@/components/ui/skeleton", () => ({
+vi.mock("@mobvibe/ui/skeleton", () => ({
 	Skeleton: () => <div data-testid="skeleton" />,
 }));
 

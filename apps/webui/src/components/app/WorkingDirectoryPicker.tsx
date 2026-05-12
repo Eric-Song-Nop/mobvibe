@@ -1,3 +1,5 @@
+import { InputGroup, InputGroupInput } from "@mobvibe/ui/input-group";
+import { Label } from "@mobvibe/ui/label";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -5,8 +7,6 @@ import {
 	ColumnFileBrowser,
 	useColumnFileBrowser,
 } from "@/components/app/ColumnFileBrowser";
-import { InputGroup, InputGroupInput } from "@/components/ui/input-group";
-import { Label } from "@/components/ui/label";
 import {
 	fetchFsEntries,
 	fetchFsRoots,
