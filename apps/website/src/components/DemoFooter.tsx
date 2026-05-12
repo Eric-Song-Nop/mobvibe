@@ -1,7 +1,7 @@
+import { Button } from "@mobvibe/ui/button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { GetStartedDialog } from "@/components/GetStartedDialog";
-import { Button } from "@/components/ui/button";
 
 export function DemoFooter() {
 	const { t } = useTranslation();

@@ -4,6 +4,15 @@ import {
 	Loading03Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import {
+	AlertDialog,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@mobvibe/ui/alert-dialog";
+import { Button } from "@mobvibe/ui/button";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -16,15 +25,6 @@ import { previewRenderers } from "@/components/app/file-preview-renderers";
 import { GitChangesView } from "@/components/app/GitChangesView";
 import { UnifiedDiffView } from "@/components/chat/DiffView";
 import { CommitHistoryPanel } from "@/components/git/CommitHistoryPanel";
-import {
-	AlertDialog,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
 import type { FsEntry, GitFileStatus } from "@/lib/api";
 import {
 	fetchSessionFsEntries,

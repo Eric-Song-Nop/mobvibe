@@ -1,7 +1,7 @@
+import { ThemeProvider } from "@mobvibe/ui/theme-provider";
 import { StrictMode } from "react";
 import { hydrateRoot } from "react-dom/client";
 import App from "@/App";
-import { ThemeProvider } from "@/components/theme-provider";
 import "@/i18n";
 import "@/index.css";
 

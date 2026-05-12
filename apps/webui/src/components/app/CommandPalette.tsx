@@ -15,6 +15,14 @@ import {
 	Sun02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Button } from "@mobvibe/ui/button";
+import {
+	Dialog,
+	DialogClose,
+	DialogContent,
+	DialogTitle,
+} from "@mobvibe/ui/dialog";
+import { ThemeProvider, useTheme } from "@mobvibe/ui/theme-provider";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -23,14 +31,6 @@ import { useNavigate } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
 import { GitStatusIndicator } from "@/components/app/git-status-indicator";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { ThemeProvider, useTheme } from "@/components/theme-provider";
-import { Button } from "@/components/ui/button";
-import {
-	Dialog,
-	DialogClose,
-	DialogContent,
-	DialogTitle,
-} from "@/components/ui/dialog";
 import { fetchSessionFsResources, fetchSessionGitStatus } from "@/lib/api";
 import { useChatStore } from "@/lib/chat-store";
 import { createFallbackError } from "@/lib/error-utils";

@@ -10,17 +10,38 @@ export const buildSessionTitle = (
 		count: sessions.length + 1,
 	});
 
-/** Format an ISO date string as a relative time (e.g. "2h ago"). */
-export const formatRelativeTime = (isoString: string): string => {
-	const diff = Date.now() - new Date(isoString).getTime();
-	const minutes = Math.floor(diff / 60000);
-	if (minutes < 1) return "just now";
-	if (minutes < 60) return `${minutes}m ago`;
-	const hours = Math.floor(minutes / 60);
-	if (hours < 24) return `${hours}h ago`;
-	const days = Math.floor(hours / 24);
-	if (days < 30) return `${days}d ago`;
-	return `${Math.floor(days / 30)}mo ago`;
+/** Format an ISO date string as localized relative time. */
+export const formatRelativeTime = (
+	isoString: string,
+	{
+		locale,
+		justNow,
+	}: {
+		locale: string;
+		justNow: string;
+	},
+): string => {
+	const diffMs = Date.now() - new Date(isoString).getTime();
+	const absMinutes = Math.floor(Math.abs(diffMs) / 60000);
+	if (absMinutes < 1) return justNow;
+
+	const direction = diffMs >= 0 ? -1 : 1;
+	const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+	if (absMinutes < 60) {
+		return formatter.format(direction * absMinutes, "minute");
+	}
+
+	const absHours = Math.floor(absMinutes / 60);
+	if (absHours < 24) {
+		return formatter.format(direction * absHours, "hour");
+	}
+
+	const absDays = Math.floor(absHours / 24);
+	if (absDays < 30) {
+		return formatter.format(direction * absDays, "day");
+	}
+
+	return formatter.format(direction * Math.floor(absDays / 30), "month");
 };
 
 /** Extract the last segment from a file path (cross-platform). */

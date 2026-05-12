@@ -4,10 +4,10 @@ import {
 	Menu01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { BrandLogo } from "@mobvibe/ui/brand-logo";
+import { Button } from "@mobvibe/ui/button";
 import { useTranslation } from "react-i18next";
-import { BrandLogo } from "@/components/brand-logo";
 import { GetStartedDialog } from "@/components/GetStartedDialog";
-import { Button } from "@/components/ui/button";
 import { supportedLanguages } from "@/i18n";
 import { cn } from "@/lib/utils";
 

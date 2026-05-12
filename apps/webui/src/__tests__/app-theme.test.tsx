@@ -1,7 +1,7 @@
+import { ThemeProvider, useTheme } from "@mobvibe/ui/theme-provider";
 import { render, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ThemeProvider, useTheme } from "@/components/theme-provider";
 import { THEME_STORAGE_KEY } from "@/lib/ui-config";
 
 const ThemeSetter = ({ theme }: { theme: "light" | "dark" | "system" }) => {

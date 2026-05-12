@@ -5,12 +5,12 @@ import {
 	Loading03Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Button } from "@mobvibe/ui/button";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileTypeLabel } from "@/components/app/file-type-label";
-import { Button } from "@/components/ui/button";
 import { fetchSessionGitLog, fetchSessionGitShow } from "@/lib/api";
 import { getCodeAccentTextClass } from "@/lib/code-highlight";
 import { cn } from "@/lib/utils";

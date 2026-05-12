@@ -1,17 +1,17 @@
 import { AddCircleIcon, Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useQueryClient } from "@tanstack/react-query";
-import { memo, useState } from "react";
-import { useTranslation } from "react-i18next";
-import { RegisterMachineDialog } from "@/components/machines/RegisterMachineDialog";
-import { Button } from "@/components/ui/button";
-import { ResizeHandle } from "@/components/ui/ResizeHandle";
+import { Button } from "@mobvibe/ui/button";
+import { ResizeHandle } from "@mobvibe/ui/resize-handle";
 import {
 	Tooltip,
 	TooltipContent,
 	TooltipProvider,
 	TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@mobvibe/ui/tooltip";
+import { useQueryClient } from "@tanstack/react-query";
+import { memo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { RegisterMachineDialog } from "@/components/machines/RegisterMachineDialog";
 import { useMachinesQuery } from "@/hooks/useMachinesQuery";
 import { useDiscoverSessionsMutation } from "@/hooks/useSessionQueries";
 import { type Machine, useMachinesStore } from "@/lib/machines-store";
@@ -158,6 +158,7 @@ export const MachinesSidebar = memo(function MachinesSidebar({
 			</aside>
 			<ResizeHandle
 				className="hidden md:block"
+				aria-label={t("layout.resizeMachineSidebar")}
 				onResize={(deltaX) =>
 					setMachineSidebarWidth(machineSidebarWidth + deltaX)
 				}

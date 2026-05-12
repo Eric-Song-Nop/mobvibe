@@ -54,7 +54,15 @@
 		"copied": "Copied",
 		"messagePending": "Sending…",
 		"messageFailed": "Send failed",
-		"messageFailedHint": "Draft restored below."
+		"messageFailedHint": "Draft restored below.",
+		"uploadImage": "Upload image"
+	},
+	"time": {
+		"justNow": "just now"
+	},
+	"layout": {
+		"resizeMachineSidebar": "Resize machine sidebar",
+		"resizeSessionSidebar": "Resize session sidebar"
 	},
 	"session": {
 		"title": "Sessions",
@@ -205,6 +213,16 @@
 	"fileBrowser": {
 		"loading": "Loading...",
 		"empty": "No items"
+	},
+	"gitStatus": {
+		"modified": "Modified",
+		"added": "Added",
+		"deleted": "Deleted",
+		"untracked": "Untracked",
+		"renamed": "Renamed",
+		"copied": "Copied",
+		"unmerged": "Unmerged",
+		"ignored": "Ignored"
 	},
 	"codePreview": {
 		"expand": "Expand",

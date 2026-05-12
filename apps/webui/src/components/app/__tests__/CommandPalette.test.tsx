@@ -114,7 +114,7 @@ vi.mock("@/components/auth/AuthProvider", () => ({
 
 // Mock theme
 const mockSetTheme = vi.fn();
-vi.mock("@/components/theme-provider", () => ({
+vi.mock("@mobvibe/ui/theme-provider", () => ({
 	useTheme: () => ({
 		theme: "light",
 		setTheme: mockSetTheme,
@@ -149,7 +149,7 @@ vi.mock("@tanstack/react-virtual", () => ({
 }));
 
 // Mock Dialog
-vi.mock("@/components/ui/dialog", () => ({
+vi.mock("@mobvibe/ui/dialog", () => ({
 	Dialog: ({
 		children,
 		open,

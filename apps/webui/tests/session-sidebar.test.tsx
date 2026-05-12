@@ -1,9 +1,9 @@
+import { ThemeProvider } from "@mobvibe/ui/theme-provider";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionSidebar } from "../src/components/session/SessionSidebar";
-import { ThemeProvider } from "../src/components/theme-provider";
 import i18n from "../src/i18n";
 import type { ChatSession } from "../src/lib/chat-store";
 import { createDefaultContentBlocks } from "../src/lib/content-block-utils";
@@ -19,7 +19,7 @@ const defaultMutations: SessionMutationsSnapshot = {
 
 // --- mocks ---
 
-vi.mock("../src/components/ui/dropdown-menu", () => ({
+vi.mock("@mobvibe/ui/dropdown-menu", () => ({
 	DropdownMenu: ({ children }: { children: React.ReactNode }) => (
 		<div>{children}</div>
 	),
@@ -43,7 +43,7 @@ vi.mock("../src/components/ui/dropdown-menu", () => ({
 	),
 }));
 
-vi.mock("../src/components/ui/tooltip", () => ({
+vi.mock("@mobvibe/ui/tooltip", () => ({
 	Tooltip: ({ children }: { children: React.ReactNode }) => (
 		<div>{children}</div>
 	),

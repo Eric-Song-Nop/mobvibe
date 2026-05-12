@@ -1,10 +1,5 @@
-import { useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router-dom";
-import { useAuth } from "@/components/auth/AuthProvider";
-import { BrandLogo } from "@/components/brand-logo";
-import { LegalLinks } from "@/components/legal/LegalLinks";
-import { Button } from "@/components/ui/button";
+import { BrandLogo } from "@mobvibe/ui/brand-logo";
+import { Button } from "@mobvibe/ui/button";
 import {
 	Card,
 	CardContent,
@@ -12,9 +7,14 @@ import {
 	CardFooter,
 	CardHeader,
 	CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from "@mobvibe/ui/card";
+import { Input } from "@mobvibe/ui/input";
+import { Label } from "@mobvibe/ui/label";
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { LegalLinks } from "@/components/legal/LegalLinks";
 import { sendVerificationEmail } from "@/lib/auth";
 
 type LoginPageProps = {

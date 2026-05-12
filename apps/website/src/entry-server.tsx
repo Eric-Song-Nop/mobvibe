@@ -1,9 +1,9 @@
+import { ThemeProvider } from "@mobvibe/ui/theme-provider";
 import i18n from "i18next";
 import { StrictMode } from "react";
 import { renderToString } from "react-dom/server";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import App from "@/App";
-import { ThemeProvider } from "@/components/theme-provider";
 import en from "@/i18n/locales/en/translation.json";
 import zh from "@/i18n/locales/zh/translation.json";
 import {

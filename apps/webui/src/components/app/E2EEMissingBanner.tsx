@@ -1,8 +1,8 @@
 import { Alert01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Button } from "@mobvibe/ui/button";
 import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/button";
 
 export function E2EEMissingBanner() {
 	const { t } = useTranslation();

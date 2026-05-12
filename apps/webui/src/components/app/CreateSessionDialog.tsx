@@ -4,34 +4,34 @@ import {
 	generateDefaultWorktreeBranchName,
 	sanitizeWorktreeBranchForPath,
 } from "@mobvibe/shared";
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
-import { WorkingDirectoryDialog } from "@/components/app/WorkingDirectoryDialog";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@mobvibe/ui/button";
+import { Checkbox } from "@mobvibe/ui/checkbox";
 import {
 	Dialog,
 	DialogContent,
 	DialogDescription,
 	DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+} from "@mobvibe/ui/dialog";
+import { Input } from "@mobvibe/ui/input";
 import {
 	InputGroup,
 	InputGroupAddon,
 	InputGroupButton,
 	InputGroupInput,
-} from "@/components/ui/input-group";
-import { Label } from "@/components/ui/label";
+} from "@mobvibe/ui/input-group";
+import { Label } from "@mobvibe/ui/label";
 import {
 	Select,
 	SelectContent,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-} from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
+} from "@mobvibe/ui/select";
+import { Skeleton } from "@mobvibe/ui/skeleton";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { WorkingDirectoryDialog } from "@/components/app/WorkingDirectoryDialog";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
 	type AcpBackendSummary,

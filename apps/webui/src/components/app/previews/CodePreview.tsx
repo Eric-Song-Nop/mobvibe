@@ -5,6 +5,7 @@ import {
 	Minimize01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Button } from "@mobvibe/ui/button";
 import { useQuery } from "@tanstack/react-query";
 import type { Language, RenderProps, Token } from "prism-react-renderer";
 import { Highlight } from "prism-react-renderer";
@@ -13,7 +14,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Node, QueryCapture, QueryMatch } from "web-tree-sitter";
 import { Parser, Query, Language as TreeSitterLanguage } from "web-tree-sitter";
-import { Button } from "@/components/ui/button";
 import type { SessionFsFilePreviewResponse } from "@/lib/api";
 import { fetchSessionGitDiff } from "@/lib/api";
 import {

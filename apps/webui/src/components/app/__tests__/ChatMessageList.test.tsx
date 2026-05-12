@@ -39,7 +39,7 @@ vi.mock("@/components/app/E2EEMissingBanner", () => ({
 	E2EEMissingBanner: () => <div data-testid="e2ee-banner" />,
 }));
 
-vi.mock("@/components/brand-logo", () => ({
+vi.mock("@mobvibe/ui/brand-logo", () => ({
 	BrandLogo: () => <div data-testid="brand-logo" />,
 }));
 

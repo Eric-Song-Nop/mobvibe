@@ -1,8 +1,5 @@
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -12,9 +9,12 @@ import {
 	AlertDialogFooter,
 	AlertDialogHeader,
 	AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+} from "@mobvibe/ui/alert-dialog";
+import { Button } from "@mobvibe/ui/button";
+import { Input } from "@mobvibe/ui/input";
+import { useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQrScanner } from "@/hooks/use-qr-scanner";
 import type { SessionsResponse } from "@/lib/api";
 import { isInTauri } from "@/lib/auth";

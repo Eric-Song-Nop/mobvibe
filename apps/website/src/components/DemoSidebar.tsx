@@ -8,19 +8,19 @@ import {
 	Sun03Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useTranslation } from "react-i18next";
-import { BrandLogo } from "@/components/brand-logo";
-import { LegalLinks } from "@/components/legal/LegalLinks";
-import { useTheme } from "@/components/theme-provider";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@mobvibe/ui/badge";
+import { BrandLogo } from "@mobvibe/ui/brand-logo";
+import { Button } from "@mobvibe/ui/button";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Separator } from "@/components/ui/separator";
+} from "@mobvibe/ui/dropdown-menu";
+import { Separator } from "@mobvibe/ui/separator";
+import { useTheme } from "@mobvibe/ui/theme-provider";
+import { useTranslation } from "react-i18next";
+import { LegalLinks } from "@/components/legal/LegalLinks";
 import type { FeatureGroup } from "@/data/features";
 import { supportedLanguages } from "@/i18n";
 import { cn } from "@/lib/utils";

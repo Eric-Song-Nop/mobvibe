@@ -6,22 +6,22 @@ import {
 	MoreHorizontalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMemo, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
+import { Button } from "@mobvibe/ui/button";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+} from "@mobvibe/ui/dropdown-menu";
+import { Input } from "@mobvibe/ui/input";
 import {
 	Tooltip,
 	TooltipContent,
 	TooltipProvider,
 	TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@mobvibe/ui/tooltip";
+import { useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { WorkspaceList } from "@/components/workspace/WorkspaceList";
 import { type SessionListEntry } from "@/lib/chat-store";
 import { useMachinesStore } from "@/lib/machines-store";
@@ -401,7 +401,7 @@ const SessionListItem = ({
 	onEditingTitleChange,
 	onArchive,
 }: SessionListItemProps) => {
-	const { t } = useTranslation();
+	const { t, i18n } = useTranslation();
 	const inputRef = useRef<HTMLInputElement>(null);
 	const handleSelect = () => onSelect(session.sessionId);
 
@@ -409,7 +409,12 @@ const SessionListItem = ({
 
 	// Relative time from session timestamp
 	const stamp = getSessionStamp(session);
-	const relativeTime = stamp ? formatRelativeTime(stamp) : null;
+	const relativeTime = stamp
+		? formatRelativeTime(stamp, {
+				locale: i18n.resolvedLanguage ?? i18n.language,
+				justNow: t("time.justNow"),
+			})
+		: null;
 
 	const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
 		event.stopPropagation();
@@ -462,7 +467,7 @@ const SessionListItem = ({
 				{isEditing ? (
 					<Input
 						ref={inputRef}
-						aria-label="Session title"
+						aria-label={t("session.titleLabel")}
 						name="session-title"
 						autoComplete="off"
 						autoFocus
