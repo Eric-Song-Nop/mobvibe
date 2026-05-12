@@ -13,7 +13,7 @@
 	justify-content: space-between;
 	gap: 0.5rem;
 	font-size: 0.75rem;
-	color: hsl(var(--muted-foreground));
+	color: var(--muted-foreground);
 }
 
 .file-preview-code--fullscreen {
@@ -21,13 +21,13 @@
 	inset: 0;
 	z-index: 60;
 	padding: 1rem;
-	background: hsl(var(--background));
+	background: var(--background);
 }
 
 .file-preview-code__badge {
-	border: 1px solid hsl(var(--border));
-	background: hsl(var(--muted));
-	color: hsl(var(--foreground));
+	border: 1px solid var(--border);
+	background: var(--muted);
+	color: var(--foreground);
 	font-size: 0.7rem;
 	padding: 0.1rem 0.45rem;
 	border-radius: 0.25rem;
@@ -37,7 +37,7 @@
 
 .file-preview-code__meta {
 	font-size: 0.7rem;
-	color: hsl(var(--muted-foreground));
+	color: var(--muted-foreground);
 }
 
 .file-preview-code__body {
@@ -75,15 +75,15 @@
 	min-height: 0;
 	min-width: 0;
 	flex: 1;
-	border: 1px solid hsl(var(--border));
-	background: color-mix(in oklab, hsl(var(--muted)) 35%, transparent);
+	border: 1px solid var(--border);
+	background: color-mix(in oklab, var(--muted) 35%, transparent);
 	border-radius: 0.25rem;
 	padding: 0.75rem 0.5rem;
 }
 
 .file-preview-code__panel[data-fullscreen="true"] {
 	border-color: transparent;
-	background: hsl(var(--background));
+	background: var(--background);
 	padding: 0;
 }
 
@@ -102,7 +102,7 @@
 	overflow: auto;
 	font-size: 11px;
 	line-height: 1.25rem;
-	color: hsl(var(--foreground));
+	color: var(--foreground);
 	flex: 1;
 }
 
@@ -155,7 +155,7 @@
 .file-preview-code__line-number {
 	display: inline-flex;
 	justify-content: flex-end;
-	color: hsl(var(--muted-foreground));
+	color: var(--muted-foreground);
 	font-variant-numeric: tabular-nums;
 	font-feature-settings: "tnum";
 	user-select: none;
@@ -190,7 +190,7 @@
 	align-items: center;
 	justify-content: space-between;
 	font-size: 0.75rem;
-	color: hsl(var(--muted-foreground));
+	color: var(--muted-foreground);
 }
 
 .file-preview-outline__title {
@@ -209,12 +209,12 @@
 }
 
 .file-preview-outline__empty {
-	border: 1px dashed hsl(var(--border));
+	border: 1px dashed var(--border);
 	border-radius: 0.25rem;
 	padding: 0.75rem;
 	text-align: center;
 	font-size: 0.75rem;
-	color: hsl(var(--muted-foreground));
+	color: var(--muted-foreground);
 }
 
 .file-preview-outline__list {
@@ -283,11 +283,11 @@
 	padding: 0.35rem 0.5rem;
 	text-align: left;
 	border-radius: 0.25rem;
-	background: color-mix(in oklab, hsl(var(--background)) 85%, transparent);
+	background: color-mix(in oklab, var(--background) 85%, transparent);
 }
 
 .file-preview-outline__item[data-copied="true"] {
-	background: color-mix(in oklab, hsl(var(--secondary)) 70%, transparent);
+	background: color-mix(in oklab, var(--secondary) 70%, transparent);
 }
 
 .file-preview-outline__label,
@@ -300,7 +300,7 @@
 	flex: 1;
 	justify-content: flex-start;
 	font-size: 0.75rem;
-	color: hsl(var(--foreground));
+	color: var(--foreground);
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -309,11 +309,11 @@
 .file-preview-outline__kind {
 	flex: 0 0 auto;
 	font-size: 0.65rem;
-	color: hsl(var(--muted-foreground));
+	color: var(--muted-foreground);
 }
 
 .file-preview-outline__item[data-copied="true"] .file-preview-outline__kind {
-	color: hsl(var(--foreground));
+	color: var(--foreground);
 }
 
 .file-preview-outline__kind[data-kind="class"],
@@ -391,8 +391,8 @@
 	align-items: center;
 	justify-content: center;
 	padding: 1rem;
-	background: color-mix(in oklab, hsl(var(--muted)) 35%, transparent);
-	border: 1px solid hsl(var(--border));
+	background: color-mix(in oklab, var(--muted) 35%, transparent);
+	border: 1px solid var(--border);
 	border-radius: 0.25rem;
 }
 

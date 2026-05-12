@@ -1,6 +1,5 @@
 import { useBetterAuthTauri } from "@daveyplate/better-auth-tauri/react";
 import { BrandLogo } from "@mobvibe/ui/brand-logo";
-import { ThemeProvider } from "@mobvibe/ui/theme-provider";
 import { useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -132,11 +131,7 @@ export function AppRoutes() {
 	const shouldSetupTauriPair = isInTauri();
 
 	if (isLoading) {
-		return (
-			<ThemeProvider>
-				<LoadingState />
-			</ThemeProvider>
-		);
+		return <LoadingState />;
 	}
 
 	return (
@@ -186,26 +181,22 @@ export function AppRoutes() {
 						isAuthenticated || !isAuthEnabled ? (
 							<Navigate to="/" replace />
 						) : (
-							<ThemeProvider>
-								<Suspense fallback={<RoutePending />}>
-									<LoginPage
-										onSuccess={() => {
-											const params = new URLSearchParams(
-												window.location.search,
-											);
-											const returnUrl = params.get("returnUrl");
-											if (
-												returnUrl?.startsWith("/") &&
-												!returnUrl.startsWith("//")
-											) {
-												navigate(returnUrl);
-											} else {
-												navigate("/");
-											}
-										}}
-									/>
-								</Suspense>
-							</ThemeProvider>
+							<Suspense fallback={<RoutePending />}>
+								<LoginPage
+									onSuccess={() => {
+										const params = new URLSearchParams(window.location.search);
+										const returnUrl = params.get("returnUrl");
+										if (
+											returnUrl?.startsWith("/") &&
+											!returnUrl.startsWith("//")
+										) {
+											navigate(returnUrl);
+										} else {
+											navigate("/");
+										}
+									}}
+								/>
+							</Suspense>
 						)
 					}
 				/>

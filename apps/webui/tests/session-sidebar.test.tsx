@@ -256,7 +256,7 @@ describe("SessionSidebar", () => {
 			}),
 		]);
 
-		expect(screen.getByText(/1h ago/)).toBeInTheDocument();
+		expect(screen.getByText(/1 hour ago/)).toBeInTheDocument();
 	});
 
 	it("limits the default visible session count and expands on demand", async () => {
@@ -426,7 +426,9 @@ describe("SessionSidebar", () => {
 		await user.click(screen.getByText(i18n.t("common.rename")));
 
 		// Should now be in editing mode with an input
-		const input = screen.getByRole("textbox", { name: "Session title" });
+		const input = screen.getByRole("textbox", {
+			name: i18n.t("session.titleLabel"),
+		});
 		expect(input).toBeInTheDocument();
 	});
 

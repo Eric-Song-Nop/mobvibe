@@ -7,7 +7,6 @@ import {
 } from "@mobvibe/shared";
 import { Button } from "@mobvibe/ui/button";
 import { Separator } from "@mobvibe/ui/separator";
-import { ThemeProvider } from "@mobvibe/ui/theme-provider";
 import type React from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -22,124 +21,122 @@ export function LegalPage({ documentId }: LegalPageProps) {
 	const document = getLegalDocument(documentId);
 
 	return (
-		<ThemeProvider>
-			<div className="min-h-dvh bg-muted/35">
-				<div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top,_color-mix(in_oklch,var(--primary)_15%,transparent),transparent_48%),linear-gradient(180deg,color-mix(in_oklch,var(--muted)_78%,transparent),transparent_42%)]" />
-				<div className="relative mx-auto flex min-h-dvh w-full max-w-6xl flex-col px-4 py-5 sm:px-6 lg:px-8">
-					<a
-						href="#legal-content"
-						className="sr-only absolute left-4 top-4 z-10 bg-background px-3 py-2 text-xs focus:not-sr-only focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-					>
-						{t("legal.skipToContent")}
-					</a>
-					<header className="mb-8 flex flex-col gap-4 border bg-background/96 p-4 shadow-sm backdrop-blur sm:flex-row sm:items-start sm:justify-between">
-						<div className="space-y-3">
-							<Button variant="ghost" size="sm" asChild>
-								<Link to="/">
-									<HugeiconsIcon
-										icon={ArrowLeft02Icon}
-										className="mr-2 size-4"
-										aria-hidden="true"
-									/>
-									{t("legal.backApp")}
-								</Link>
-							</Button>
-							<div className="space-y-2">
-								<div className="inline-flex items-center gap-2 rounded-none border border-primary/30 bg-primary/10 px-2 py-1 text-[10px] uppercase tracking-[0.24em] text-primary">
-									<HugeiconsIcon
-										icon={Legal01Icon}
-										className="size-3"
-										aria-hidden="true"
-									/>
-									{t("legal.pageBadge")}
-								</div>
-								<div>
-									<h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-										{document.locales.en.title}
-									</h1>
-									<p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">
-										{document.locales.en.summary}
-									</p>
-									<p className="mt-3 text-xs uppercase tracking-[0.24em] text-muted-foreground">
-										{t("legal.bilingual")}
-									</p>
-								</div>
+		<div className="min-h-dvh bg-muted/35">
+			<div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top,_color-mix(in_oklch,var(--primary)_15%,transparent),transparent_48%),linear-gradient(180deg,color-mix(in_oklch,var(--muted)_78%,transparent),transparent_42%)]" />
+			<div className="relative mx-auto flex min-h-dvh w-full max-w-6xl flex-col px-4 py-5 sm:px-6 lg:px-8">
+				<a
+					href="#legal-content"
+					className="sr-only absolute left-4 top-4 z-10 bg-background px-3 py-2 text-xs focus:not-sr-only focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+				>
+					{t("legal.skipToContent")}
+				</a>
+				<header className="mb-8 flex flex-col gap-4 border bg-background/96 p-4 shadow-sm backdrop-blur sm:flex-row sm:items-start sm:justify-between">
+					<div className="space-y-3">
+						<Button variant="ghost" size="sm" asChild>
+							<Link to="/">
+								<HugeiconsIcon
+									icon={ArrowLeft02Icon}
+									className="mr-2 size-4"
+									aria-hidden="true"
+								/>
+								{t("legal.backApp")}
+							</Link>
+						</Button>
+						<div className="space-y-2">
+							<div className="inline-flex items-center gap-2 rounded-none border border-primary/30 bg-primary/10 px-2 py-1 text-[10px] uppercase tracking-[0.24em] text-primary">
+								<HugeiconsIcon
+									icon={Legal01Icon}
+									className="size-3"
+									aria-hidden="true"
+								/>
+								{t("legal.pageBadge")}
+							</div>
+							<div>
+								<h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+									{document.locales.en.title}
+								</h1>
+								<p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground sm:text-base">
+									{document.locales.en.summary}
+								</p>
+								<p className="mt-3 text-xs uppercase tracking-[0.24em] text-muted-foreground">
+									{t("legal.bilingual")}
+								</p>
 							</div>
 						</div>
-
-						<div className="grid min-w-0 gap-3 rounded-none border bg-muted/35 p-3 text-xs sm:w-[22rem]">
-							<MetaRow label={t("legal.effectiveDate")}>
-								<span>{document.effectiveDate.en}</span>
-								<span className="text-muted-foreground">
-									{document.effectiveDate.zh}
-								</span>
-							</MetaRow>
-							<MetaRow label={t("legal.operator")}>
-								<span>{document.operatorName}</span>
-							</MetaRow>
-							<MetaRow label={t("legal.contact")}>
-								<a
-									href={`mailto:${document.contactEmail}`}
-									className="text-foreground underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-								>
-									{document.contactEmail}
-								</a>
-							</MetaRow>
-						</div>
-					</header>
-
-					<div className="mb-8 grid gap-4 lg:grid-cols-[1.5fr_1fr]">
-						<section className="border bg-background/96 p-4 shadow-sm backdrop-blur">
-							<p className="mb-3 text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
-								{t("legal.otherPolicies")}
-							</p>
-							<div className="flex flex-wrap gap-2">
-								{legalDocuments.map((item) => (
-									<Button
-										key={item.id}
-										variant={item.id === document.id ? "default" : "outline"}
-										size="sm"
-										asChild
-									>
-										<Link to={item.slug}>{t(`legal.links.${item.id}`)}</Link>
-									</Button>
-								))}
-							</div>
-						</section>
-
-						<section className="grid gap-4 border bg-background/96 p-4 shadow-sm backdrop-blur sm:grid-cols-2 lg:grid-cols-1">
-							<TableOfContents
-								title={t("legal.english")}
-								sections={document.locales.en.sections}
-								prefix="en"
-							/>
-							<TableOfContents
-								title={t("legal.chinese")}
-								sections={document.locales.zh.sections}
-								prefix="zh"
-							/>
-						</section>
 					</div>
 
-					<main id="legal-content" className="grid gap-6">
-						<LocaleArticle
-							localeLabel={t("legal.english")}
-							title={document.locales.en.title}
-							summary={document.locales.en.summary}
+					<div className="grid min-w-0 gap-3 rounded-none border bg-muted/35 p-3 text-xs sm:w-[22rem]">
+						<MetaRow label={t("legal.effectiveDate")}>
+							<span>{document.effectiveDate.en}</span>
+							<span className="text-muted-foreground">
+								{document.effectiveDate.zh}
+							</span>
+						</MetaRow>
+						<MetaRow label={t("legal.operator")}>
+							<span>{document.operatorName}</span>
+						</MetaRow>
+						<MetaRow label={t("legal.contact")}>
+							<a
+								href={`mailto:${document.contactEmail}`}
+								className="text-foreground underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+							>
+								{document.contactEmail}
+							</a>
+						</MetaRow>
+					</div>
+				</header>
+
+				<div className="mb-8 grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+					<section className="border bg-background/96 p-4 shadow-sm backdrop-blur">
+						<p className="mb-3 text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
+							{t("legal.otherPolicies")}
+						</p>
+						<div className="flex flex-wrap gap-2">
+							{legalDocuments.map((item) => (
+								<Button
+									key={item.id}
+									variant={item.id === document.id ? "default" : "outline"}
+									size="sm"
+									asChild
+								>
+									<Link to={item.slug}>{t(`legal.links.${item.id}`)}</Link>
+								</Button>
+							))}
+						</div>
+					</section>
+
+					<section className="grid gap-4 border bg-background/96 p-4 shadow-sm backdrop-blur sm:grid-cols-2 lg:grid-cols-1">
+						<TableOfContents
+							title={t("legal.english")}
 							sections={document.locales.en.sections}
 							prefix="en"
 						/>
-						<LocaleArticle
-							localeLabel={t("legal.chinese")}
-							title={document.locales.zh.title}
-							summary={document.locales.zh.summary}
+						<TableOfContents
+							title={t("legal.chinese")}
 							sections={document.locales.zh.sections}
 							prefix="zh"
 						/>
-					</main>
+					</section>
 				</div>
+
+				<main id="legal-content" className="grid gap-6">
+					<LocaleArticle
+						localeLabel={t("legal.english")}
+						title={document.locales.en.title}
+						summary={document.locales.en.summary}
+						sections={document.locales.en.sections}
+						prefix="en"
+					/>
+					<LocaleArticle
+						localeLabel={t("legal.chinese")}
+						title={document.locales.zh.title}
+						summary={document.locales.zh.summary}
+						sections={document.locales.zh.sections}
+						prefix="zh"
+					/>
+				</main>
 			</div>
-		</ThemeProvider>
+		</div>
 	);
 }
 

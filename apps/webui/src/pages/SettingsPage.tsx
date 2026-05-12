@@ -31,7 +31,7 @@ import {
 	SidebarMenuItem,
 	SidebarProvider,
 } from "@mobvibe/ui/sidebar";
-import { ThemeProvider, useTheme } from "@mobvibe/ui/theme-provider";
+import { useTheme } from "@mobvibe/ui/theme-provider";
 import { useCallback, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useNavigate } from "react-router-dom";
@@ -97,11 +97,9 @@ export function SettingsPage() {
 
 	if (authLoading) {
 		return (
-			<ThemeProvider>
-				<div className="flex min-h-dvh items-center justify-center bg-muted/40 p-4">
-					<div className="text-muted-foreground">{t("common.loading")}</div>
-				</div>
-			</ThemeProvider>
+			<div className="flex min-h-dvh items-center justify-center bg-muted/40 p-4">
+				<div className="text-muted-foreground">{t("common.loading")}</div>
+			</div>
 		);
 	}
 
@@ -109,11 +107,7 @@ export function SettingsPage() {
 		return <Navigate to="/login" replace />;
 	}
 
-	return (
-		<ThemeProvider>
-			<SettingsContent />
-		</ThemeProvider>
-	);
+	return <SettingsContent />;
 }
 
 /* ------------------------------------------------------------------ */
