@@ -1,58 +1,53 @@
----
-last_mapped_commit: 7e89508dcca9477698c5e492fe7b8fdf9195f9af
-mapping_date: 2026-05-11
----
-
 # Testing Patterns
 
-**Analysis Date:** 2026-05-11
+**Analysis Date:** 2026-05-12
 
 ## Test Framework
 
 **Runner:**
-- Vitest `^2.1.8` for `apps/gateway`, `apps/webui`, and `packages/shared`; scripts live in `apps/gateway/package.json`, `apps/webui/package.json`, and `packages/shared/package.json`.
-- Bun test for `apps/mobvibe-cli`; scripts live in `apps/mobvibe-cli/package.json`.
-- Playwright `^1.58.2` for WebUI E2E tests under `apps/webui/tests/e2e/`; config is `apps/webui/playwright.config.ts`.
+- Vitest 2.1.8 for `apps/gateway`, `apps/webui`, and `packages/shared`, declared in `apps/gateway/package.json`, `apps/webui/package.json`, and `packages/shared/package.json`.
+- Bun test for `apps/mobvibe-cli`, declared as `bun test` in `apps/mobvibe-cli/package.json`.
+- Playwright 1.58.2 for WebUI E2E tests under `apps/webui/tests/e2e`, configured in `apps/webui/playwright.config.ts`.
 
 **Assertion Library:**
-- Vitest `expect` for gateway, webui unit/integration tests, and shared tests.
-- Bun `expect` from `bun:test` for CLI tests.
-- `@testing-library/jest-dom/vitest` for DOM assertions in WebUI; setup is `apps/webui/src/setup-tests.ts` and some legacy tests import it directly from `apps/webui/tests/*.test.tsx`.
-- Playwright `expect` from `@playwright/test` for browser E2E specs in `apps/webui/tests/e2e/*.spec.ts`.
+- Vitest `expect` for gateway, shared, and WebUI unit tests.
+- `@testing-library/jest-dom/vitest` for WebUI DOM matchers, loaded by `apps/webui/src/setup-tests.ts` and directly in some `apps/webui/tests/*.test.tsx` files.
+- Bun's `expect` from `bun:test` for CLI tests, e.g. `apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts`.
+- Playwright `expect` for E2E assertions, e.g. `apps/webui/tests/e2e/session-restore.spec.ts`.
 
 **Run Commands:**
 ```bash
-pnpm test:run                                      # Run all repo tests once, including WebUI E2E via Turbo
-pnpm -C apps/gateway test:run                     # Run gateway Vitest tests once
-pnpm -C apps/webui test:run                       # Run WebUI Vitest tests once
-pnpm -C apps/webui test:e2e                       # Run WebUI Playwright E2E tests
-pnpm -C apps/mobvibe-cli test                     # Run CLI Bun tests
-pnpm -C packages/shared test:run                  # Run shared Vitest tests once
+pnpm test:run                                      # Run full repo one-shot tests, including WebUI E2E via turbo
+pnpm -C apps/gateway test:run                      # Run gateway Vitest tests once
+pnpm -C apps/webui test:run                        # Run WebUI Vitest tests once
+pnpm -C apps/webui test:e2e                        # Run WebUI Playwright E2E tests
+pnpm -C apps/mobvibe-cli test                      # Run CLI Bun tests
+pnpm -C packages/shared test:run                   # Run shared package Vitest tests once
+pnpm -C apps/webui test:run -- -t "session list"   # Run a named Vitest test subset
 ```
 
 ## Test File Organization
 
 **Location:**
-- Gateway tests are colocated under `apps/gateway/src/**/__tests__/*.test.ts`, e.g. `apps/gateway/src/services/__tests__/session-router.test.ts` and `apps/gateway/src/socket/__tests__/webui-handlers.test.ts`.
-- CLI tests are colocated under `apps/mobvibe-cli/src/**/__tests__/*.test.ts`, e.g. `apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts` and `apps/mobvibe-cli/src/lib/__tests__/git-utils.test.ts`.
-- WebUI unit and component tests live in both `apps/webui/src/**/__tests__/*.test.ts(x)` and `apps/webui/tests/*.test.tsx`, e.g. `apps/webui/src/lib/__tests__/api.test.ts` and `apps/webui/tests/session-sidebar.test.tsx`.
-- WebUI E2E specs live under `apps/webui/tests/e2e/*.spec.ts`, and are excluded from Vitest by `apps/webui/vitest.config.ts`.
-- Shared package tests live under `packages/shared/tests/*.test.ts`, e.g. `packages/shared/tests/prompt-images.test.ts`.
+- Gateway tests are colocated under `apps/gateway/src/**/__tests__/`, e.g. `apps/gateway/src/services/__tests__/session-router.test.ts` and `apps/gateway/src/socket/__tests__/webui-handlers.test.ts`.
+- CLI tests are colocated under `apps/mobvibe-cli/src/**/__tests__/`, e.g. `apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts` and `apps/mobvibe-cli/src/lib/__tests__/git-utils.test.ts`.
+- WebUI tests are split between colocated `apps/webui/src/**/__tests__/` and integration-style `apps/webui/tests/`, e.g. `apps/webui/src/components/app/__tests__/ChatFooter.test.tsx` and `apps/webui/tests/session-sidebar.test.tsx`.
+- Shared package tests live in `packages/shared/tests/`, e.g. `packages/shared/tests/prompt-images.test.ts`.
+- WebUI E2E specs live in `apps/webui/tests/e2e/`, e.g. `apps/webui/tests/e2e/session-restore.spec.ts`.
 
 **Naming:**
-- Use `*.test.ts` for TypeScript logic tests.
-- Use `*.test.tsx` for React component/hook tests.
-- Use `*.spec.ts` only for Playwright E2E specs under `apps/webui/tests/e2e/`.
-- Keep test names behavior-focused: `"throws error when no CLI connected for machine"` in `apps/gateway/src/services/__tests__/session-router.test.ts`, `"sends requests with Bearer token when token exists"` in `apps/webui/src/lib/__tests__/api.test.ts`.
+- Unit/component tests use `*.test.ts` or `*.test.tsx`.
+- Playwright E2E tests use `*.spec.ts`.
+- Test helper modules do not use test suffixes, e.g. `apps/webui/tests/e2e/test-helpers.ts` and `apps/webui/tests/e2e/fake-gateway.mjs`.
 
 **Structure:**
 ```
-apps/gateway/src/<area>/__tests__/<module>.test.ts
-apps/mobvibe-cli/src/<area>/__tests__/<module>.test.ts
-apps/webui/src/<area>/__tests__/<module>.test.ts(x)
-apps/webui/tests/<feature>.test.tsx
-apps/webui/tests/e2e/<flow>.spec.ts
-packages/shared/tests/<module>.test.ts
+apps/gateway/src/**/__tests__/*.test.ts
+apps/mobvibe-cli/src/**/__tests__/*.test.ts
+apps/webui/src/**/__tests__/*.test.ts(x)
+apps/webui/tests/*.test.ts(x)
+apps/webui/tests/e2e/*.spec.ts
+packages/shared/tests/*.test.ts
 ```
 
 ## Test Structure
@@ -61,87 +56,105 @@ packages/shared/tests/<module>.test.ts
 ```typescript
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const createMockSocket = () => ({ emit: vi.fn(), on: vi.fn() });
-
-describe("SessionRouter", () => {
-	let sessionRouter: SessionRouter;
-
+describe("useSessionQueries", () => {
 	beforeEach(() => {
-		sessionRouter = new SessionRouter(new CliRegistry());
+		vi.clearAllMocks();
 	});
 
-	describe("discoverSessions", () => {
-		it("routes discover request to CLI and returns result", async () => {
-			await expect(sessionRouter.discoverSessions("machine-1", undefined, "user-1"))
-				.resolves.toBeDefined();
+	it("should fetch sessions successfully", async () => {
+		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
+
+		const { result } = renderHook(() => useSessionQueries(), { wrapper });
+
+		await waitFor(() => {
+			expect(result.current.sessionsQuery.isSuccess).toBe(true);
 		});
 	});
 });
 ```
+Use this Vitest pattern for WebUI hooks/components and gateway service tests, as shown in `apps/webui/src/hooks/__tests__/useSessionQueries.test.tsx` and `apps/gateway/src/services/__tests__/session-router.test.ts`.
 
 **Patterns:**
-- Group by module, then by method/flow with nested `describe` blocks, as in `apps/gateway/src/services/__tests__/session-router.test.ts` and `apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts`.
-- Put factories above suites for repeated data: `createMockSocket`, `createMockRegistrationInfo`, and `createMockSessionSummary` in `apps/gateway/src/services/__tests__/session-router.test.ts`.
-- Reset module state and mocks in `beforeEach`/`afterEach`: `vi.resetModules`, `vi.restoreAllMocks`, and `mockFetch.mockReset` in `apps/webui/src/lib/__tests__/api.test.ts`.
-- Test async failures with `await expect(promise).rejects.toThrow(...)`, as used in gateway and CLI session tests.
-- Use Testing Library queries (`screen`, `getByRole`, `getByText`) and `userEvent.setup()` for React UI interactions in `apps/webui/src/components/app/__tests__/AppHeader.test.tsx` and `apps/webui/tests/session-sidebar.test.tsx`.
+- Use nested `describe` blocks around feature areas or methods, e.g. `describe("discoverSessions")` inside `apps/gateway/src/services/__tests__/session-router.test.ts`.
+- Put reusable builders near the top of the test file, e.g. `createMockSocket`, `createMockRegistrationInfo`, and `createMockSessionSummary` in `apps/gateway/src/services/__tests__/session-router.test.ts`.
+- Reset mocks and stores in `beforeEach`, e.g. `vi.clearAllMocks()`, `useUiStore.setState(...)`, and `useMachinesStore.setState(...)` in `apps/webui/src/components/app/__tests__/ChatFooter.test.tsx`.
+- For React Query tests, create a fresh `QueryClient` per test with retries disabled, e.g. `apps/webui/src/hooks/__tests__/useSessionQueries.test.tsx` and `apps/webui/src/components/app/__tests__/ChatFooter.test.tsx`.
+- For async UI assertions, use Testing Library `findBy*` queries and `waitFor`, e.g. `apps/webui/src/components/app/__tests__/ChatFooter.test.tsx`.
+- For promise rejection behavior, use `await expect(...).rejects.toThrow(...)`, e.g. `apps/gateway/src/services/__tests__/session-router.test.ts` and `apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts`.
 
 ## Mocking
 
-**Framework:**
-- Vitest `vi.fn`, `vi.mock`, `vi.doMock`, `vi.stubEnv`, and `vi.mocked` for `apps/gateway`, `apps/webui`, and `packages/shared`.
-- Bun `mock` and `mock.module` for `apps/mobvibe-cli`.
-- Playwright fake services are started through `apps/webui/playwright.config.ts`, including `apps/webui/tests/e2e/fake-gateway.mjs`.
+**Framework:** Vitest `vi` for gateway/shared/webui tests; Bun `mock` for CLI tests; Playwright fake HTTP/WebSocket gateway for E2E tests.
 
 **Patterns:**
 ```typescript
-// Vitest module mocking before dynamic import.
-vi.resetModules();
-vi.stubEnv("VITE_GATEWAY_URL", "http://localhost:3005");
-vi.doMock("../auth", () => ({ isInTauri: () => true }));
-const { fetchSessions } = await import("../api");
-
-// Bun module mocking before dynamic import.
-mock.module("../../lib/logger.js", () => ({
-	logger: { info: mock(() => {}), warn: mock(() => {}), error: mock(() => {}) },
+const { mockGetSession } = vi.hoisted(() => ({
+	mockGetSession: vi.fn(),
 }));
+
+vi.mock("../../lib/auth.js", () => ({
+	auth: {
+		api: {
+			getSession: mockGetSession,
+		},
+	},
+}));
+```
+Use hoisted Vitest mocks when a module mock needs shared mutable mock functions before import evaluation, as in `apps/gateway/src/socket/__tests__/webui-handlers.test.ts` and `apps/webui/src/components/app/__tests__/ChatFooter.test.tsx`.
+
+```typescript
+mock.module("node:fs/promises", () => ({
+	default: {
+		stat: mock(() => Promise.resolve({ isDirectory: () => true })),
+		readFile: mock(() => Promise.resolve("")),
+	},
+	stat: mock(() => Promise.resolve({ isDirectory: () => true })),
+	readFile: mock(() => Promise.resolve("")),
+}));
+
 const { SessionManager } = await import("../session-manager.js");
 ```
+Use Bun `mock.module` before dynamic imports in CLI tests, as in `apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts`.
 
 **What to Mock:**
-- Mock network and platform boundaries: `global.fetch` and `platformFetch` in `apps/webui/src/lib/__tests__/api.test.ts`, `socket.io-client` in `apps/mobvibe-cli/src/daemon/__tests__/socket-client.test.ts`.
-- Mock filesystem, git, and process-like boundaries in CLI tests: `node:fs/promises` and `../../lib/git-utils.js` in `apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts`.
-- Mock UI infrastructure components when the test target is higher-level behavior: popover, sheet, alert dialog, badge, and button mocks in `apps/webui/src/components/app/__tests__/AppHeader.test.tsx`.
-- Mock i18n in component tests when text stability matters: `react-i18next` mocks in `apps/webui/src/components/app/__tests__/AppHeader.test.tsx`.
+- Mock network/API modules at component and hook boundaries, e.g. `@/lib/api` in `apps/webui/src/hooks/__tests__/useSessionQueries.test.tsx` and `apps/webui/src/components/app/__tests__/ChatFooter.test.tsx`.
+- Mock browser or native APIs missing in jsdom through setup files, e.g. `crypto.randomUUID`, `ResizeObserver`, `DOMRect`, `scrollIntoView`, `localStorage`, and `sessionStorage` in `apps/webui/src/setup-tests.ts`.
+- Mock UI component libraries when the test targets app logic rather than library behavior, e.g. `@mobvibe/ui/button`, `@mobvibe/ui/select`, and icon packages in `apps/webui/src/components/app/__tests__/ChatFooter.test.tsx`.
+- Mock loggers in unit tests to avoid noisy output and assert behavior separately, e.g. `../../lib/logger.js` in `apps/gateway/src/socket/__tests__/webui-handlers.test.ts` and `apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts`.
+- For gateway socket/service tests, use lightweight typed fakes for sockets and registries, e.g. `createMockSocket` in `apps/gateway/src/services/__tests__/session-router.test.ts`.
 
 **What NOT to Mock:**
-- Do not mock the class or function under test; instantiate real `SessionRouter` with a real `CliRegistry` in `apps/gateway/src/services/__tests__/session-router.test.ts`.
-- Do not mock shared contracts from `@mobvibe/shared` unless a test targets a boundary failure; use real shared types in `apps/gateway/src/services/__tests__/session-router.test.ts` and `apps/mobvibe-cli/src/daemon/__tests__/host-fs.test.ts`.
-- Do not mock DOM behavior that Testing Library can exercise directly; use `render`, `screen`, and `userEvent` in `apps/webui/src/components/app/__tests__/AppHeader.test.tsx`.
+- Do not mock the unit under test or its pure transformation helpers; shared validators are tested directly in `packages/shared/tests/prompt-images.test.ts`.
+- Do not mock Zustand stores when the test verifies store interaction; reset actual store state instead, as in `apps/webui/src/components/app/__tests__/ChatFooter.test.tsx`.
+- Do not mock React Query itself; wrap the hook/component in `QueryClientProvider` with a fresh client, as in `apps/webui/src/hooks/__tests__/useSessionQueries.test.tsx`.
+- E2E tests should not mock the browser UI; use the fake gateway configured by `apps/webui/playwright.config.ts` and interact through user-visible roles/text in `apps/webui/tests/e2e/session-restore.spec.ts`.
 
 ## Fixtures and Factories
 
 **Test Data:**
 ```typescript
-const createMockRegistrationInfo = (
-	overrides: Partial<CliRegistrationInfo> = {},
-): CliRegistrationInfo => ({
-	machineId: "machine-1",
-	hostname: "test-host",
-	version: "1.0.0",
-	backends: [{ backendId: "backend-1", backendLabel: "Claude Code" }],
-	...overrides,
-});
+const buildSession = (overrides: Partial<ChatSession> = {}): ChatSession =>
+	({
+		sessionId: "session-1",
+		title: "Session 1",
+		input: "",
+		messages: [],
+		terminalOutputs: {},
+		sending: false,
+		canceling: false,
+		...overrides,
+	}) as ChatSession;
 ```
+This override-friendly factory pattern is used in `apps/webui/src/components/app/__tests__/ChatFooter.test.tsx`, `apps/gateway/src/services/__tests__/session-router.test.ts`, and `apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts`.
 
 **Location:**
-- Keep small factories in the test file that uses them, as in `apps/gateway/src/services/__tests__/session-router.test.ts` and `apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts`.
-- Use WebUI setup polyfills in `apps/webui/src/setup-tests.ts` for global browser APIs such as `crypto.randomUUID`, `ResizeObserver`, `DOMRect`, `scrollIntoView`, `localStorage`, and `sessionStorage`.
-- Use package-level fake servers for E2E flows under `apps/webui/tests/e2e/`, configured by `apps/webui/playwright.config.ts`.
+- Keep factories local to the test file when they only serve that suite, e.g. `buildSession` in `apps/webui/src/components/app/__tests__/ChatFooter.test.tsx` and `createMockConfig` in `apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts`.
+- Put cross-spec Playwright helpers in `apps/webui/tests/e2e/test-helpers.ts`, e.g. `preloadState`, `expectTextOrder`, `expectTranscript`, and `fillComposer`.
+- Shared package tests define simple local data builders, e.g. `createBase64OfSize` and `createImageBlock` in `packages/shared/tests/prompt-images.test.ts`.
 
 ## Coverage
 
-**Requirements:** None enforced in package scripts or config. No coverage thresholds are detected in `apps/webui/vitest.config.ts`, package `package.json` scripts, or root `package.json`.
+**Requirements:** None enforced in repository scripts. `apps/webui/AGENTS.md` documents `pnpm test --coverage`, but no coverage threshold is configured in `apps/webui/vitest.config.ts` or package scripts.
 
 **View Coverage:**
 ```bash
@@ -153,57 +166,37 @@ pnpm -C packages/shared test -- --coverage
 ## Test Types
 
 **Unit Tests:**
-- Pure utilities and parsing logic are tested directly, e.g. `apps/mobvibe-cli/src/lib/__tests__/git-utils.test.ts`, `apps/webui/src/lib/__tests__/error-utils.test.ts`, `packages/shared/tests/prompt-images.test.ts`.
-- Config parsing is tested with env/module reset patterns in `apps/gateway/src/__tests__/config.test.ts` and `apps/mobvibe-cli/src/__tests__/config-loader.test.ts`.
+- Use Vitest for pure functions, stores, API helpers, and gateway services, e.g. `apps/webui/src/lib/__tests__/error-utils.test.ts`, `apps/webui/src/lib/__tests__/chat-store.test.ts`, `apps/gateway/src/services/__tests__/crypto.test.ts`, and `packages/shared/tests/prompt-images.test.ts`.
+- Use Bun test for CLI logic and filesystem/process integration seams, e.g. `apps/mobvibe-cli/src/lib/__tests__/shell.test.ts`, `apps/mobvibe-cli/src/daemon/__tests__/host-fs.test.ts`, and `apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts`.
 
 **Integration Tests:**
-- In-process service/socket integration tests wire real service instances to mocked sockets, e.g. `apps/gateway/src/services/__tests__/session-router.test.ts`, `apps/gateway/src/socket/__tests__/webui-handlers.test.ts`, and `apps/gateway/src/socket/__tests__/cli-handlers.test.ts`.
-- WebUI hook/store tests combine stores, mocked API modules, and React hooks under Testing Library: `apps/webui/src/hooks/__tests__/useSessionMutations.test.tsx`, `apps/webui/src/lib/__tests__/chat-store.test.ts`.
-- CLI daemon/session tests combine mocked IO with real session manager behavior: `apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts` and `apps/mobvibe-cli/src/daemon/__tests__/socket-client.test.ts`.
+- WebUI component and hook tests use Testing Library with providers and store state, e.g. `apps/webui/src/components/app/__tests__/ChatFooter.test.tsx` and `apps/webui/src/hooks/__tests__/useSessionQueries.test.tsx`.
+- Gateway socket tests exercise middleware setup and auth flows with mocked Better Auth and socket namespaces, e.g. `apps/gateway/src/socket/__tests__/webui-handlers.test.ts`.
 
 **E2E Tests:**
-- Playwright is used for WebUI E2E flows under `apps/webui/tests/e2e/`.
-- `apps/webui/playwright.config.ts` starts a fake gateway and a Vite server on per-run ports, runs headless with one worker, and uses `tests/e2e` as `testDir`.
-- Root `pnpm test:run` runs `turbo test:run && turbo test:e2e` from `package.json`.
+- WebUI uses Playwright with `testDir: "./tests/e2e"`, one worker, jsdom-independent browser execution, and a fake gateway web server configured in `apps/webui/playwright.config.ts`.
+- E2E tests preload persisted app state and interact through visible UI, e.g. `preloadState(page, ...)`, `page.goto("/")`, `page.getByLabel("Sync history").click()`, and transcript assertions in `apps/webui/tests/e2e/session-restore.spec.ts`.
 
 ## Common Patterns
 
 **Async Testing:**
 ```typescript
-socket.emit.mockImplementation((event, request) => {
-	if (event === "rpc:sessions:discover") {
-		setTimeout(() => {
-			sessionRouter.handleRpcResponse({ requestId: request.requestId, result: mockResult });
-		}, 0);
-	}
-});
+const { result } = renderHook(() => useSessionQueries(), { wrapper });
 
-const result = await sessionRouter.discoverSessions("machine-1", undefined, "user-1");
-expect(result.sessions).toHaveLength(2);
+await waitFor(() => {
+	expect(result.current.backendsQuery.isSuccess).toBe(true);
+});
 ```
+Use `waitFor` for asynchronous React state, as in `apps/webui/src/hooks/__tests__/useSessionQueries.test.tsx`. Use `setTimeout(..., 0)` to simulate async socket replies when testing RPC routing, as in `apps/gateway/src/services/__tests__/session-router.test.ts`.
 
 **Error Testing:**
 ```typescript
 await expect(
 	sessionRouter.discoverSessions("unknown-machine", undefined, "user-1"),
 ).rejects.toThrow("Machine not found");
-
-await expect(fetchSessions()).rejects.toThrow(ApiError);
 ```
-
-**React Interaction Testing:**
-```typescript
-render(
-	<MemoryRouter>
-		<ThemeProvider defaultTheme="light">
-			<AppHeader />
-		</ThemeProvider>
-	</MemoryRouter>,
-);
-const user = userEvent.setup();
-await user.click(screen.getByRole("button", { name: /open/i }));
-```
+Use rejection assertions for async service errors, as in `apps/gateway/src/services/__tests__/session-router.test.ts` and `apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts`. For UI error states, mock rejected API calls and assert visible state or store error updates, as in `apps/webui/src/hooks/__tests__/useSessionQueries.test.tsx` and `apps/webui/src/components/app/__tests__/ChatFooter.test.tsx`.
 
 ---
 
-*Testing analysis: 2026-05-11*
+*Testing analysis: 2026-05-12*

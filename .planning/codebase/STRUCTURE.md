@@ -1,323 +1,340 @@
----
-last_mapped_commit: 7e89508dcca9477698c5e492fe7b8fdf9195f9af
-mapping_date: 2026-05-11
----
 # Codebase Structure
 
-**Analysis Date:** 2026-05-11
+**Analysis Date:** 2026-05-12
 
 ## Directory Layout
 
-```text
+```
 mobvibe/
-├── apps/                         # Deployable/runtime applications
-│   ├── gateway/                  # Express + Socket.io gateway service
-│   │   ├── src/                  # Gateway TypeScript source
-│   │   │   ├── db/               # Drizzle database schema/client
-│   │   │   ├── lib/              # Auth, email, logger utilities
-│   │   │   ├── middleware/       # Express middleware
-│   │   │   ├── routes/           # REST route modules
-│   │   │   ├── services/         # Gateway business/routing services
-│   │   │   └── socket/           # Socket.io namespace handlers
-│   │   └── drizzle.config.ts     # Drizzle configuration
-│   ├── mobvibe-cli/              # Bun-powered CLI daemon package
-│   │   ├── src/                  # CLI TypeScript source
-│   │   │   ├── acp/              # ACP backend/session integration
-│   │   │   ├── auth/             # CLI credential/login handling
-│   │   │   ├── daemon/           # Daemon lifecycle and gateway socket client
-│   │   │   ├── e2ee/             # CLI runtime crypto service
-│   │   │   ├── lib/              # CLI local helpers
-│   │   │   ├── registry/         # Agent registry/detection
-│   │   │   └── wal/              # Local SQLite WAL storage
-│   │   ├── bin/                  # Published CLI binary wrapper
-│   │   └── npm/                  # Platform package manifests for binary distribution
-│   ├── webui/                    # React + Vite + Tauri authenticated app
-│   │   ├── src/                  # WebUI React source
-│   │   │   ├── components/       # UI and feature components
-│   │   │   ├── hooks/            # React hooks for sessions/socket/data
-│   │   │   ├── i18n/             # WebUI translations
-│   │   │   ├── lib/              # API, socket, stores, utils, E2EE
-│   │   │   └── pages/            # Route-level pages
-│   │   ├── src-tauri/            # Tauri native wrapper and Rust source
-│   │   ├── tests/                # WebUI E2E/integration tests
-│   │   └── public/               # Static web assets and copied WASM assets
-│   └── website/                  # Public marketing site
-│       ├── src/                  # Website React source
-│       │   ├── components/       # Marketing/legal/UI components
-│       │   ├── data/             # Marketing content data
+├── apps/                         # Runtime applications
+│   ├── gateway/                  # Express + Socket.io gateway server
+│   │   ├── src/
+│   │   │   ├── db/               # Drizzle PostgreSQL schema/connection
+│   │   │   ├── lib/              # Auth, email, logger helpers
+│   │   │   ├── middleware/       # Auth and Fly Replay middleware
+│   │   │   ├── routes/           # Express REST route setup modules
+│   │   │   ├── services/         # Business services, registries, Redis/DB access
+│   │   │   ├── socket/           # Socket.io namespace handlers
+│   │   │   └── index.ts          # Gateway process entrypoint
+│   │   └── drizzle/              # Generated/applied DB migrations
+│   ├── mobvibe-cli/              # Bun CLI daemon and ACP adapter
+│   │   ├── src/
+│   │   │   ├── acp/              # ACP connection/session manager
+│   │   │   ├── auth/             # CLI login and credentials
+│   │   │   ├── daemon/           # Daemon lifecycle, socket, host filesystem
+│   │   │   ├── e2ee/             # CLI crypto runtime service
+│   │   │   ├── lib/              # Git, shell, child process, logger helpers
+│   │   │   ├── registry/         # ACP registry loading and agent detection
+│   │   │   ├── wal/              # SQLite WAL store, migrations, compaction
+│   │   │   └── index.ts          # Commander CLI entrypoint
+│   │   ├── bin/                  # Published CLI executable wrapper
+│   │   └── build*.ts             # Bun build scripts
+│   ├── webui/                    # React 19 + Vite WebUI and Tauri app
+│   │   ├── src/
+│   │   │   ├── app/              # App shell, routes, layout, controller
+│   │   │   ├── components/       # Feature and UI components
+│   │   │   ├── hooks/            # React hooks for sessions, sockets, machines
+│   │   │   ├── i18n/             # Frontend translations/config
+│   │   │   ├── lib/              # API, stores, socket, E2EE, utilities
+│   │   │   ├── pages/            # Route-level pages
+│   │   │   └── main.tsx          # Frontend entrypoint
+│   │   ├── src-tauri/            # Tauri v2 desktop/mobile wrapper
+│   │   ├── public/               # Static assets and copied WASM assets
+│   │   └── tests/                # WebUI integration/component tests
+│   └── website/                  # Marketing/pricing/legal website
+│       ├── src/
+│       │   ├── components/       # Marketing and legal components
+│       │   ├── data/             # Feature/demo data
 │       │   ├── hooks/            # Website-specific hooks
-│       │   ├── i18n/             # Website translations
-│       │   └── lib/              # Page metadata and utilities
-│       └── scripts/              # Website build/prerender helpers
-├── packages/                     # Workspace libraries
-│   ├── shared/                   # Shared TypeScript contracts/helpers
+│       │   ├── i18n/             # Website translations/config
+│       │   ├── lib/              # Page routing/utilities
+│       │   └── main.tsx          # Website browser entrypoint
+│       └── scripts/              # Prerender/postinstall scripts
+├── packages/                     # Shared workspace packages
+│   ├── shared/                   # Protocol types, crypto, validation, legal data
 │   │   └── src/
-│   │       ├── crypto/           # Shared crypto/E2EE helpers
-│   │       ├── legal/            # Legal document data/helpers
-│   │       ├── types/            # Cross-app API/socket/session/error types
-│   │       └── validation/       # Shared validators
-│   └── core/                     # Build output only in current checkout
-├── docs/                         # Project documentation
-├── brand/                        # Brand/design assets
-├── packaging/                    # Packaging/distribution assets
-├── public/                       # Root-level static assets
-├── .github/workflows/            # CI/CD workflows
-├── .planning/codebase/           # Generated codebase maps
+│   │       ├── crypto/           # E2EE and signed-token helpers
+│   │       ├── legal/            # Legal document data/types
+│   │       ├── types/            # ACP/session/socket/error/registry types
+│   │       ├── validation/       # Shared schemas
+│   │       └── index.ts          # Package export surface
+│   ├── ui/                       # Reusable React UI primitives
+│   │   └── src/                  # Component modules and theme utilities
+│   └── core/                     # Empty/stale workspace shell; no package.json detected
+├── docs/                         # Project design, audits, migration notes
+├── packaging/                    # Distribution packaging assets (AUR)
+├── public/                       # Root public/static assets
+├── brand/                        # Brand assets
+├── .agents/                      # Project-local agent skill placeholders
+├── .github/                      # GitHub workflows
+├── .planning/codebase/           # GSD codebase map documents
 ├── package.json                  # Root scripts and package manager metadata
 ├── pnpm-workspace.yaml           # Workspace package globs
 ├── turbo.json                    # Turborepo task graph
-├── biome.json                    # Formatting/lint configuration
-├── fly.toml                      # Gateway Fly deployment config
+├── biome.json                    # Root formatter/linter configuration
+├── fly.toml                      # Gateway Fly.io deployment
 └── render.yaml                   # Legacy/transition deployment config
 ```
 
 ## Directory Purposes
 
-**`apps/gateway`:**
-- Purpose: Run the hosted gateway service that authenticates users/devices, exposes REST APIs, handles WebSocket traffic, and routes session RPCs to connected CLIs.
-- Contains: `apps/gateway/src/index.ts`, route modules in `apps/gateway/src/routes`, socket modules in `apps/gateway/src/socket`, services in `apps/gateway/src/services`, Drizzle schema in `apps/gateway/src/db/schema.ts`, Better Auth setup in `apps/gateway/src/lib/auth.ts`.
-- Key files: `apps/gateway/src/index.ts`, `apps/gateway/src/services/session-router.ts`, `apps/gateway/src/services/cli-registry.ts`, `apps/gateway/src/socket/cli-handlers.ts`, `apps/gateway/src/socket/webui-handlers.ts`, `apps/gateway/src/routes/sessions.ts`, `apps/gateway/src/db/schema.ts`.
+**`apps/gateway/`:**
+- Purpose: Central relay server for WebUI/CLI connections, auth, REST APIs, Socket.io event routing, database-backed user/device/machine metadata, notifications, and Fly/Redis affinity.
+- Contains: TypeScript source in `apps/gateway/src`, Drizzle migrations in `apps/gateway/drizzle`, gateway config in `apps/gateway/drizzle.config.ts`, Docker/deploy helpers in `apps/gateway/Dockerfile`.
+- Key files: `apps/gateway/src/index.ts`, `apps/gateway/src/config.ts`, `apps/gateway/src/env.ts`, `apps/gateway/src/db/schema.ts`, `apps/gateway/src/services/session-router.ts`, `apps/gateway/src/socket/cli-handlers.ts`, `apps/gateway/src/socket/webui-handlers.ts`.
 
-**`apps/webui`:**
-- Purpose: Run the authenticated chat UI in browser/Tauri and interact with the gateway over REST and Socket.io.
-- Contains: React app source in `apps/webui/src`, Tauri wrapper in `apps/webui/src-tauri`, tests in `apps/webui/src/__tests__` and `apps/webui/tests`, Vite/Tailwind/Playwright/Vitest configs.
-- Key files: `apps/webui/src/main.tsx`, `apps/webui/src/App.tsx`, `apps/webui/src/lib/api.ts`, `apps/webui/src/lib/socket.ts`, `apps/webui/src/lib/chat-store.ts`, `apps/webui/src/hooks/useSocket.ts`, `apps/webui/src/components/auth/AuthProvider.tsx`.
+**`apps/gateway/src/routes/`:**
+- Purpose: Express route setup modules mounted by `apps/gateway/src/index.ts`.
+- Contains: session routes, filesystem proxy routes, machine routes, notification routes, device-key routes, health routes.
+- Key files: `apps/gateway/src/routes/sessions.ts`, `apps/gateway/src/routes/fs.ts`, `apps/gateway/src/routes/machines.ts`, `apps/gateway/src/routes/device.ts`, `apps/gateway/src/routes/health.ts`.
 
-**`apps/mobvibe-cli`:**
-- Purpose: Provide the local `mobvibe` CLI and daemon that run ACP agents, maintain local session WAL history, and connect to the gateway.
-- Contains: CLI commands in `apps/mobvibe-cli/src/index.ts`, startup flow in `apps/mobvibe-cli/src/start-command.ts`, daemon/runtime code in `apps/mobvibe-cli/src/daemon`, ACP session code in `apps/mobvibe-cli/src/acp`, WAL code in `apps/mobvibe-cli/src/wal`, auth and E2EE code in `apps/mobvibe-cli/src/auth` and `apps/mobvibe-cli/src/e2ee`.
-- Key files: `apps/mobvibe-cli/src/index.ts`, `apps/mobvibe-cli/src/start-command.ts`, `apps/mobvibe-cli/src/daemon/daemon.ts`, `apps/mobvibe-cli/src/daemon/socket-client.ts`, `apps/mobvibe-cli/src/acp/session-manager.ts`, `apps/mobvibe-cli/src/acp/acp-connection.ts`, `apps/mobvibe-cli/src/wal/wal-store.ts`.
+**`apps/gateway/src/services/`:**
+- Purpose: Gateway business logic and integration services.
+- Contains: in-memory CLI registry, RPC router, DB service functions, notification sender, Redis connection, instance registry, user affinity.
+- Key files: `apps/gateway/src/services/cli-registry.ts`, `apps/gateway/src/services/session-router.ts`, `apps/gateway/src/services/db-service.ts`, `apps/gateway/src/services/user-affinity.ts`, `apps/gateway/src/services/redis.ts`.
 
-**`apps/website`:**
-- Purpose: Build the public marketing/pricing/legal website with client and SSR/prerender entries.
-- Contains: React source in `apps/website/src`, website build scripts in `apps/website/scripts`, Netlify config in `apps/website/netlify.toml`, Vite/TypeScript configs.
-- Key files: `apps/website/src/main.tsx`, `apps/website/src/entry-server.tsx`, `apps/website/src/App.tsx`, `apps/website/src/lib/page-info.ts`, `apps/website/src/data/features.ts`, `apps/website/src/components/PricingPage.tsx`.
+**`apps/gateway/src/socket/`:**
+- Purpose: Socket.io namespace handlers for CLI and WebUI transports.
+- Contains: `/cli` authentication/registration/RPC/event handlers and `/webui` authentication/subscription/emitters.
+- Key files: `apps/gateway/src/socket/cli-handlers.ts`, `apps/gateway/src/socket/webui-handlers.ts`.
 
-**`packages/shared`:**
-- Purpose: Share typed API/socket contracts, ACP SDK aliases/extensions, crypto helpers, legal data, validators, and reusable constants across apps.
-- Contains: Public export surface in `packages/shared/src/index.ts`, socket/API contracts in `packages/shared/src/types/socket-events.ts`, ACP type re-exports in `packages/shared/src/types/acp.ts`, session/error/registry types, crypto helpers in `packages/shared/src/crypto`, validation in `packages/shared/src/validation`.
+**`apps/mobvibe-cli/`:**
+- Purpose: Published CLI and local daemon that bridges gateway RPC/events to ACP-compatible local agents.
+- Contains: Bun/TypeScript source in `apps/mobvibe-cli/src`, published bin wrapper in `apps/mobvibe-cli/bin`, build scripts in `apps/mobvibe-cli/build.ts` and `apps/mobvibe-cli/build-bin.ts`.
+- Key files: `apps/mobvibe-cli/src/index.ts`, `apps/mobvibe-cli/src/start-command.ts`, `apps/mobvibe-cli/src/config.ts`, `apps/mobvibe-cli/src/daemon/daemon.ts`, `apps/mobvibe-cli/src/daemon/socket-client.ts`, `apps/mobvibe-cli/src/acp/session-manager.ts`.
+
+**`apps/mobvibe-cli/src/acp/`:**
+- Purpose: ACP session and process integration layer.
+- Contains: ACP connection adapter, session manager, and colocated Bun tests.
+- Key files: `apps/mobvibe-cli/src/acp/acp-connection.ts`, `apps/mobvibe-cli/src/acp/session-manager.ts`, `apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts`.
+
+**`apps/mobvibe-cli/src/daemon/`:**
+- Purpose: Long-running daemon runtime and gateway/local-machine IO.
+- Contains: daemon lifecycle, socket client, host filesystem browsing, path/spawn helpers, tests.
+- Key files: `apps/mobvibe-cli/src/daemon/daemon.ts`, `apps/mobvibe-cli/src/daemon/socket-client.ts`, `apps/mobvibe-cli/src/daemon/host-fs.ts`, `apps/mobvibe-cli/src/daemon/path-utils.ts`, `apps/mobvibe-cli/src/daemon/spawn-utils.ts`.
+
+**`apps/mobvibe-cli/src/wal/`:**
+- Purpose: Local durable session event store and compaction/consolidation logic.
+- Contains: SQLite store, migrations, sequence generator, compactor, event consolidator, package barrel.
+- Key files: `apps/mobvibe-cli/src/wal/wal-store.ts`, `apps/mobvibe-cli/src/wal/migrations.ts`, `apps/mobvibe-cli/src/wal/consolidator.ts`, `apps/mobvibe-cli/src/wal/seq-generator.ts`, `apps/mobvibe-cli/src/wal/index.ts`.
+
+**`apps/webui/`:**
+- Purpose: Main authenticated client for chat/session control across browser, desktop, and mobile Tauri targets.
+- Contains: React source in `apps/webui/src`, Tauri wrapper in `apps/webui/src-tauri`, Vite/Vitest/Playwright config, static assets in `apps/webui/public`, tests in `apps/webui/tests` and `apps/webui/src/__tests__`.
+- Key files: `apps/webui/src/main.tsx`, `apps/webui/src/App.tsx`, `apps/webui/src/app/AppRoutes.tsx`, `apps/webui/src/app/use-main-app-controller.tsx`, `apps/webui/src/lib/api.ts`, `apps/webui/src/lib/socket.ts`, `apps/webui/src/lib/chat-store.ts`.
+
+**`apps/webui/src/app/`:**
+- Purpose: App-level composition, routing, layout, dialogs, and controller hook.
+- Contains: provider wrapper, route tree, main app/layout/workspace components, controller hook.
+- Key files: `apps/webui/src/app/AppProviders.tsx`, `apps/webui/src/app/AppRoutes.tsx`, `apps/webui/src/app/MainApp.tsx`, `apps/webui/src/app/MainLayout.tsx`, `apps/webui/src/app/use-main-app-controller.tsx`.
+
+**`apps/webui/src/components/`:**
+- Purpose: Feature components and local UI composition.
+- Contains: `app`, `auth`, `chat`, `git`, `legal`, `machines`, `plan`, `session`, `settings`, `ui`, and `workspace` subtrees.
+- Key files: `apps/webui/src/components/auth/AuthProvider.tsx`, `apps/webui/src/components/app/AppSidebar.tsx`, `apps/webui/src/components/session/SessionSidebar.tsx`, `apps/webui/src/components/settings/E2EESettings.tsx`.
+
+**`apps/webui/src/hooks/`:**
+- Purpose: Domain hooks for fetching, socket handling, session activation/mutations/list composition, and machine discovery.
+- Contains: hooks consumed by `apps/webui/src/app/use-main-app-controller.tsx`.
+- Key files: `apps/webui/src/hooks/useSocket.ts`, `apps/webui/src/hooks/useSessionQueries.ts`, `apps/webui/src/hooks/useSessionMutations.ts`, `apps/webui/src/hooks/useSessionHandlers.ts`, `apps/webui/src/hooks/useMachineDiscovery.ts`.
+
+**`apps/webui/src/lib/`:**
+- Purpose: Client-side service layer, stores, E2EE, socket wrapper, API wrapper, platform abstractions, and pure utilities.
+- Contains: Zustand stores, REST client, Socket.io singleton, auth helpers, E2EE helpers, Tree-sitter/file/git utilities.
+- Key files: `apps/webui/src/lib/api.ts`, `apps/webui/src/lib/socket.ts`, `apps/webui/src/lib/chat-store.ts`, `apps/webui/src/lib/machines-store.ts`, `apps/webui/src/lib/ui-store.ts`, `apps/webui/src/lib/e2ee.ts`.
+
+**`apps/webui/src-tauri/`:**
+- Purpose: Native desktop/mobile shell for the WebUI.
+- Contains: Rust/Tauri config, capabilities, generated native folders, icons, and native source.
+- Key files: `apps/webui/src-tauri/tauri.conf.json`, `apps/webui/src-tauri/Cargo.toml`, `apps/webui/src-tauri/src`.
+
+**`apps/website/`:**
+- Purpose: Public marketing/pricing/legal website with Vite build and prerender support.
+- Contains: React source in `apps/website/src`, Netlify config, scripts for prerender/postinstall.
+- Key files: `apps/website/src/main.tsx`, `apps/website/src/entry-server.tsx`, `apps/website/src/App.tsx`, `apps/website/src/lib/page-info.ts`, `apps/website/netlify.toml`.
+
+**`packages/shared/`:**
+- Purpose: Shared protocol/type/crypto/legal package for all apps.
+- Contains: public export surface, crypto helpers, ACP/session/socket/error/registry types, legal content, validation utilities.
 - Key files: `packages/shared/src/index.ts`, `packages/shared/src/types/socket-events.ts`, `packages/shared/src/types/session.ts`, `packages/shared/src/types/errors.ts`, `packages/shared/src/crypto/index.ts`, `packages/shared/src/validation/acp-schemas.ts`.
 
-**`packages/core`:**
-- Purpose: Reserved/shared package location; current checkout contains build output and installed dependencies only.
-- Contains: `packages/core/dist`, `packages/core/node_modules`, `packages/core/.turbo`.
-- Key files: Not applicable for source additions unless `packages/core/src` is introduced with a package manifest update.
+**`packages/ui/`:**
+- Purpose: Shared React design system primitives for WebUI and Website.
+- Contains: individual component modules, theme provider, utilities, CSS export.
+- Key files: `packages/ui/src/index.ts`, `packages/ui/src/button.tsx`, `packages/ui/src/sidebar.tsx`, `packages/ui/src/theme-provider.tsx`, `packages/ui/src/utils.ts`, `packages/ui/package.json`.
 
-**`docs`:**
-- Purpose: Human-facing architecture, deployment, feature, and implementation notes.
-- Contains: Markdown project documentation.
-- Key files: Use existing docs under `docs/` for feature/background context; update relevant docs when changing behavior or environment requirements.
+**`packages/core/`:**
+- Purpose: Not an active source package in the current tree.
+- Contains: `.turbo/`, `dist/`, and `node_modules/`; no `package.json` or source files detected.
+- Key files: Not applicable.
 
-**`brand`, `public`, `packaging`:**
-- Purpose: Asset and distribution support directories.
-- Contains: Brand assets in `brand/`, root static assets in `public/`, release/package assets in `packaging/`.
-- Key files: Use only for assets or packaging metadata, not runtime application logic.
-
-**`.github/workflows`:**
-- Purpose: CI/CD automation.
-- Contains: GitHub Actions workflows including gateway deployment.
-- Key files: `.github/workflows/deploy-fly.yml`.
-
-**`.planning/codebase`:**
-- Purpose: Generated GSD codebase maps consumed by planning/execution commands.
-- Contains: `ARCHITECTURE.md`, `STRUCTURE.md`, and other focus-specific mapping docs.
-- Key files: `.planning/codebase/ARCHITECTURE.md`, `.planning/codebase/STRUCTURE.md`.
+**`docs/`:**
+- Purpose: Human-readable design, implementation, audit, and migration notes.
+- Contains: architecture/security/performance/e2ee/chat-sync/gateway-scaling documents.
+- Key files: `docs/e2ee-implementation.md`, `docs/gateway-horizontal-scaling.md`, `docs/state-management-refactor.md`, `docs/chat-sync-rewrite.md`, `docs/security-audit-2026-02-09.zh.md`.
 
 ## Key File Locations
 
 **Entry Points:**
-- `apps/gateway/src/index.ts`: Gateway server entrypoint for Express, Socket.io, routes, auth, affinity, and shutdown.
-- `apps/webui/src/main.tsx`: WebUI React root, providers, Tauri gateway setup, and E2EE bootstrap.
-- `apps/webui/src/App.tsx`: Main authenticated app composition, route declarations, store wiring, and feature dialogs.
-- `apps/mobvibe-cli/src/index.ts`: CLI command tree for `start`, `stop`, `status`, `login`, `logout`, `e2ee`, and `compact`.
-- `apps/mobvibe-cli/src/start-command.ts`: `mobvibe start` orchestration before daemon startup.
+- `apps/gateway/src/index.ts`: Express + Socket.io gateway process entrypoint.
+- `apps/mobvibe-cli/src/index.ts`: Commander CLI command entrypoint.
+- `apps/mobvibe-cli/src/start-command.ts`: `mobvibe start` orchestration.
+- `apps/webui/src/main.tsx`: WebUI browser/Tauri React entrypoint.
+- `apps/webui/src/App.tsx`: WebUI root component delegating to routes.
 - `apps/website/src/main.tsx`: Website browser entrypoint.
 - `apps/website/src/entry-server.tsx`: Website SSR/prerender entrypoint.
-- `packages/shared/src/index.ts`: Public export surface for shared package consumers.
 
 **Configuration:**
-- `package.json`: Root pnpm/Turbo scripts and Node/pnpm version expectations.
-- `pnpm-workspace.yaml`: Workspace package includes for `apps/*` and `packages/*`.
-- `turbo.json`: Task dependency graph and build/test/lint cache behavior.
-- `biome.json`: Repository formatting and lint rules.
-- `apps/gateway/package.json`: Gateway scripts and dependencies.
-- `apps/gateway/drizzle.config.ts`: Drizzle migration/schema configuration.
-- `apps/gateway/src/config.ts`: Gateway runtime configuration and env parsing.
-- `apps/gateway/src/env.ts`: Gateway environment loading.
-- `apps/webui/vite.config.ts`: WebUI Vite build config.
-- `apps/webui/vitest.config.ts`: WebUI Vitest config.
-- `apps/webui/playwright.config.ts`: WebUI E2E config.
-- `apps/webui/src-tauri/tauri.conf.json`: Tauri desktop/mobile shell config.
-- `apps/mobvibe-cli/package.json`: CLI package/bin/scripts/dependencies.
-- `apps/mobvibe-cli/src/config.ts`: CLI resolved runtime config.
-- `apps/mobvibe-cli/src/config-loader.ts`: CLI user config loading/saving.
-- `apps/website/vite.config.ts`: Website Vite build config.
-- `packages/shared/tsconfig.json`: Shared package TypeScript build config.
+- `package.json`: Root package manager, engine, and Turbo scripts.
+- `pnpm-workspace.yaml`: Workspace globs for `apps/*` and `packages/*`.
+- `turbo.json`: Build/test/lint/format task graph.
+- `biome.json`: Root Biome formatting/linting rules.
+- `apps/gateway/src/config.ts`: Gateway runtime config derivation.
+- `apps/gateway/src/env.ts`: Gateway environment loading side effect.
+- `apps/gateway/drizzle.config.ts`: Drizzle migration config.
+- `apps/webui/vite.config.ts`: WebUI Vite config and `@` alias.
+- `apps/webui/tsconfig.app.json`: WebUI TypeScript compiler options and path alias.
+- `apps/website/vite.config.ts`: Website Vite config and `@` alias.
+- `apps/mobvibe-cli/src/config.ts`: CLI runtime config, agent registry resolution, compaction settings, local paths.
 - `fly.toml`: Gateway Fly.io deployment config.
 - `apps/webui/netlify.toml`: WebUI Netlify deployment config.
 - `apps/website/netlify.toml`: Website Netlify deployment config.
-- `render.yaml`: Legacy/transition deployment config.
 
 **Core Logic:**
-- `apps/gateway/src/services/session-router.ts`: User-scoped gateway-to-CLI RPC routing.
-- `apps/gateway/src/services/cli-registry.ts`: In-memory connected CLI/session/backend index.
-- `apps/gateway/src/services/db-service.ts`: Gateway database operations around devices and machines.
-- `apps/gateway/src/services/notification-service.ts`: Web push notification service.
-- `apps/gateway/src/services/instance-registry.ts`: Redis-backed instance heartbeat/registry.
-- `apps/gateway/src/services/user-affinity.ts`: Redis-backed user-to-instance affinity.
-- `apps/gateway/src/routes/sessions.ts`: `/acp` session/backends/message/permission REST API.
-- `apps/gateway/src/routes/fs.ts`: `/fs` host/session filesystem and git REST API.
-- `apps/gateway/src/routes/machines.ts`: `/api/machines` list route.
-- `apps/gateway/src/routes/device.ts`: Device registration/key routes.
-- `apps/gateway/src/routes/notifications.ts`: Web push subscription routes.
-- `apps/gateway/src/socket/cli-handlers.ts`: `/cli` namespace auth, registration, RPC/event handling.
-- `apps/gateway/src/socket/webui-handlers.ts`: `/webui` namespace auth, subscription, emit helpers.
-- `apps/webui/src/lib/api.ts`: WebUI REST client.
+- `apps/gateway/src/services/session-router.ts`: Gateway-to-CLI RPC router.
+- `apps/gateway/src/services/cli-registry.ts`: Connected CLI/session/capability index.
+- `apps/gateway/src/socket/cli-handlers.ts`: CLI socket auth, machine registration, and event intake.
+- `apps/gateway/src/socket/webui-handlers.ts`: WebUI socket auth, subscriptions, and event emission.
+- `apps/gateway/src/routes/sessions.ts`: Session REST API surface.
+- `apps/gateway/src/routes/fs.ts`: Filesystem/git REST proxy surface.
+- `apps/gateway/src/db/schema.ts`: Gateway PostgreSQL schema.
+- `apps/mobvibe-cli/src/daemon/socket-client.ts`: CLI side gateway socket and local RPC handling.
+- `apps/mobvibe-cli/src/acp/session-manager.ts`: ACP session lifecycle, permissions, events, worktrees.
+- `apps/mobvibe-cli/src/acp/acp-connection.ts`: ACP process/client connection abstraction.
+- `apps/mobvibe-cli/src/wal/wal-store.ts`: Local SQLite WAL persistence.
+- `apps/webui/src/app/use-main-app-controller.tsx`: WebUI top-level orchestration.
+- `apps/webui/src/lib/api.ts`: WebUI REST API client.
 - `apps/webui/src/lib/socket.ts`: WebUI Socket.io singleton.
 - `apps/webui/src/lib/chat-store.ts`: WebUI chat/session Zustand store.
-- `apps/webui/src/lib/machines-store.ts`: WebUI machine/backend Zustand store.
-- `apps/webui/src/lib/ui-store.ts`: WebUI UI/draft Zustand store.
-- `apps/webui/src/hooks/useSocket.ts`: Live event and WAL backfill application hook.
-- `apps/webui/src/hooks/useSessionQueries.ts`: Session/backend React Query hooks.
-- `apps/webui/src/hooks/useSessionMutations.ts`: Session mutation action hooks.
-- `apps/mobvibe-cli/src/daemon/daemon.ts`: CLI daemon process lifecycle.
-- `apps/mobvibe-cli/src/daemon/socket-client.ts`: CLI Socket.io gateway client and RPC handlers.
-- `apps/mobvibe-cli/src/acp/session-manager.ts`: Local ACP session lifecycle and event persistence.
-- `apps/mobvibe-cli/src/acp/acp-connection.ts`: ACP process/client adapter.
-- `apps/mobvibe-cli/src/wal/wal-store.ts`: SQLite WAL persistence.
-- `apps/mobvibe-cli/src/wal/compactor.ts`: WAL compaction.
-- `packages/shared/src/types/socket-events.ts`: Socket and HTTP API contract types.
-- `packages/shared/src/types/session.ts`: Session and backend contract types.
-- `packages/shared/src/types/errors.ts`: Shared `ErrorDetail` and `AppError` helpers.
-- `packages/shared/src/crypto/index.ts`: Shared crypto/E2EE public surface.
+- `packages/shared/src/types/socket-events.ts`: Cross-process REST/RPC/socket payload types.
+- `packages/shared/src/crypto/index.ts`: Shared E2EE/signature API.
 
 **Testing:**
-- `apps/gateway/src/__tests__`: Gateway package-level tests.
-- `apps/gateway/src/services/__tests__`: Gateway service tests.
-- `apps/gateway/src/socket/__tests__`: Gateway socket handler tests.
-- `apps/gateway/src/lib/__tests__`: Gateway library tests.
-- `apps/webui/src/__tests__`: WebUI Vitest tests.
-- `apps/webui/src/lib/__tests__`: WebUI utility/store tests.
-- `apps/webui/tests`: WebUI Playwright/E2E tests.
-- `apps/mobvibe-cli/src/**/__tests__`: CLI Bun tests colocated by feature folder.
-- `packages/shared/tests`: Shared package Vitest tests.
+- `apps/gateway/src/services/__tests__/session-router.test.ts`: Gateway session router tests.
+- `apps/gateway/src/services/__tests__/cli-registry.test.ts`: Gateway registry tests.
+- `apps/gateway/src/services/__tests__/crypto.test.ts`: Gateway/shared crypto tests.
+- `apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts`: CLI session manager tests.
+- `apps/mobvibe-cli/src/daemon/__tests__/socket-client.test.ts`: CLI socket client tests.
+- `apps/mobvibe-cli/src/lib/__tests__/git-utils.test.ts`: CLI git utilities tests.
+- `apps/webui/src/__tests__/`: WebUI colocated Vitest tests.
+- `apps/webui/tests/session-sidebar.test.tsx`: WebUI higher-level component test.
+- `packages/shared/tests/prompt-images.test.ts`: Shared prompt image validation tests.
 
 ## Naming Conventions
 
 **Files:**
-- Use `kebab-case` for normal TypeScript files: `apps/gateway/src/services/session-router.ts`, `apps/mobvibe-cli/src/config-loader.ts`, `packages/shared/src/types/socket-events.ts`.
-- Use `PascalCase.tsx` for React components and route pages: `apps/webui/src/components/app/AppHeader.tsx`, `apps/webui/src/pages/SettingsPage.tsx`, `apps/website/src/components/PricingPage.tsx`.
-- Use `useX.ts` or `use-kebab-name.ts` for hooks according to local folder style: `apps/webui/src/hooks/useSocket.ts`, `apps/webui/src/hooks/use-session-backfill.ts`, `apps/website/src/hooks/use-streaming-demo.ts`.
-- Use `*.test.ts` or `*.test.tsx` for tests: `apps/gateway/src/socket/__tests__/cli-handlers.test.ts`, `apps/webui/src/__tests__/app.test.tsx`, `apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts`.
-- Use `*-store.ts` for Zustand stores in WebUI: `apps/webui/src/lib/chat-store.ts`, `apps/webui/src/lib/machines-store.ts`, `apps/webui/src/lib/ui-store.ts`.
+- `kebab-case.ts` / `kebab-case.tsx` for most modules: `apps/gateway/src/services/session-router.ts`, `apps/webui/src/lib/chat-store.ts`, `apps/mobvibe-cli/src/daemon/socket-client.ts`.
+- `PascalCase.tsx` for React component modules in WebUI/Website: `apps/webui/src/pages/SettingsPage.tsx`, `apps/webui/src/components/session/SessionSidebar.tsx`, `apps/website/src/components/DemoHeader.tsx`.
+- `use-*.ts` / `use-*.tsx` or `useX.ts` for hooks depending on package convention: `apps/webui/src/app/use-main-app-controller.tsx`, `apps/website/src/hooks/use-streaming-demo.ts`.
+- `*.test.ts` / `*.test.tsx` for tests: `apps/gateway/src/services/__tests__/session-router.test.ts`, `apps/webui/tests/session-sidebar.test.tsx`.
 
 **Directories:**
-- Use domain folders under app `src`: `routes`, `services`, `socket`, `middleware`, `lib`, `db` in `apps/gateway/src`; `components`, `hooks`, `lib`, `pages`, `i18n` in `apps/webui/src`; `acp`, `daemon`, `auth`, `e2ee`, `wal`, `registry`, `lib` in `apps/mobvibe-cli/src`.
-- Keep colocated tests under `__tests__` beside the code they cover: `apps/gateway/src/services/__tests__`, `apps/mobvibe-cli/src/wal/__tests__`.
-- Use feature folders under WebUI components: `apps/webui/src/components/app`, `apps/webui/src/components/chat`, `apps/webui/src/components/machines`, `apps/webui/src/components/settings`, `apps/webui/src/components/ui`.
-- Use `types`, `crypto`, `validation`, and data-focused directories in `packages/shared/src`; do not add app-specific directories there.
+- App/package roots live under workspace globs `apps/*` and `packages/*` from `pnpm-workspace.yaml`.
+- Feature/domain directories are singular/plural by domain: `apps/webui/src/components/session`, `apps/webui/src/components/machines`, `apps/gateway/src/services`, `apps/mobvibe-cli/src/wal`.
+- Tests are colocated in `__tests__/` for gateway/CLI/shared internals and in `apps/webui/tests/` for some WebUI integration/component tests.
 
 ## Where to Add New Code
 
-**New Gateway REST endpoint:**
-- Primary code: Add a route module or extend an existing route under `apps/gateway/src/routes`; mount it from `apps/gateway/src/index.ts` if it is a new router.
-- Shared types: Add request/response payload types to `packages/shared/src/types/socket-events.ts` or a focused shared type file, then export from `packages/shared/src/index.ts`.
-- Auth: Use `requireAuth` from `apps/gateway/src/middleware/auth.ts` and user-scoped lookup methods in `apps/gateway/src/services/session-router.ts` or `apps/gateway/src/services/cli-registry.ts`.
-- Tests: Add Vitest tests under `apps/gateway/src/routes/__tests__` if a new folder exists, or the closest existing `apps/gateway/src/**/__tests__` folder.
+**New Gateway REST Endpoint:**
+- Primary code: add a setup module in `apps/gateway/src/routes/<domain>.ts` and mount it from `apps/gateway/src/index.ts`.
+- Business logic: put reusable service logic in `apps/gateway/src/services/<domain>.ts`.
+- Auth: reuse `apps/gateway/src/middleware/auth.ts` and route-level `requireAuth` patterns from `apps/gateway/src/routes/sessions.ts`.
+- Tests: add `apps/gateway/src/routes/__tests__/<domain>.test.ts` or `apps/gateway/src/services/__tests__/<domain>.test.ts`.
 
-**New Gateway Socket.io event:**
-- Primary code: Add event contracts to `packages/shared/src/types/socket-events.ts`.
-- CLI side: Add `/cli` handling or emission in `apps/gateway/src/socket/cli-handlers.ts` and `apps/mobvibe-cli/src/daemon/socket-client.ts`.
-- WebUI side: Add `/webui` handling or emission in `apps/gateway/src/socket/webui-handlers.ts`, `apps/webui/src/lib/socket.ts`, and `apps/webui/src/hooks/useSocket.ts`.
-- Tests: Add socket tests under `apps/gateway/src/socket/__tests__` and WebUI/CLI tests near changed hooks or daemon code.
+**New Gateway Socket Event or RPC:**
+- Shared types: define payload/RPC types in `packages/shared/src/types/socket-events.ts` and export from `packages/shared/src/index.ts`.
+- Gateway handling: update `apps/gateway/src/socket/cli-handlers.ts`, `apps/gateway/src/socket/webui-handlers.ts`, or `apps/gateway/src/services/session-router.ts`.
+- CLI handling: update `apps/mobvibe-cli/src/daemon/socket-client.ts` and/or `apps/mobvibe-cli/src/acp/session-manager.ts`.
+- WebUI handling: update `apps/webui/src/lib/socket.ts`, relevant hook in `apps/webui/src/hooks/`, and store actions in `apps/webui/src/lib/chat-store.ts` if UI state changes.
 
-**New WebUI route/page:**
-- Primary code: Add page component to `apps/webui/src/pages` and route it from `apps/webui/src/App.tsx`.
-- Components: Add reusable UI to `apps/webui/src/components/ui`; add feature components to `apps/webui/src/components/<feature>`.
-- Data/API: Add REST calls to `apps/webui/src/lib/api.ts`; add query/mutation wrappers to `apps/webui/src/hooks`.
-- Tests: Add Vitest tests in `apps/webui/src/__tests__` or `apps/webui/src/<feature>/__tests__`; add Playwright coverage in `apps/webui/tests` for user flows.
+**New WebUI Feature:**
+- Primary code: place route-level screens in `apps/webui/src/pages`, feature components in `apps/webui/src/components/<feature>/`, and app orchestration in `apps/webui/src/app/use-main-app-controller.tsx` only when global coordination is required.
+- Data access: add REST calls to `apps/webui/src/lib/api.ts`; add React Query hooks to `apps/webui/src/hooks/` if reused.
+- State: use existing stores in `apps/webui/src/lib/chat-store.ts`, `apps/webui/src/lib/machines-store.ts`, or `apps/webui/src/lib/ui-store.ts`; create a new `*-store.ts` in `apps/webui/src/lib/` only for durable cross-component state.
+- Tests: add `apps/webui/src/__tests__/<feature>.test.tsx` for unit/component tests or `apps/webui/tests/<feature>.test.tsx` for broader integration tests.
 
-**New WebUI store state:**
-- Primary code: Extend an existing store in `apps/webui/src/lib/chat-store.ts`, `apps/webui/src/lib/machines-store.ts`, `apps/webui/src/lib/ui-store.ts`, or create a new `apps/webui/src/lib/<feature>-store.ts`.
-- Consumers: Read state with selectors and `useShallow` in components/hooks, following `apps/webui/src/App.tsx`.
-- Persistence: Use existing storage adapters in `apps/webui/src/lib/storage-adapter.ts` and `apps/webui/src/lib/tauri-storage-adapter.ts` when state must persist.
-- Tests: Place store tests under `apps/webui/src/lib/__tests__`.
+**New WebUI Component:**
+- Implementation: put app-specific components under `apps/webui/src/components/<feature>/ComponentName.tsx`.
+- Shared primitive: put reusable design-system component in `packages/ui/src/<component>.tsx`, export it from `packages/ui/src/index.ts`, and add a subpath export in `packages/ui/package.json` when consumers import `@mobvibe/ui/<component>`.
+- Styling: use Tailwind classes and shared `cn` helpers from `packages/ui/src/utils.ts` or `apps/webui/src/lib/utils.ts`.
 
-**New CLI command:**
-- Primary code: Register the command in `apps/mobvibe-cli/src/index.ts`.
-- Implementation: Put reusable command logic in a focused file under `apps/mobvibe-cli/src` or the relevant domain folder (`auth`, `daemon`, `wal`, `registry`, `acp`).
-- Tests: Add Bun tests under the relevant `apps/mobvibe-cli/src/**/__tests__` folder.
+**New CLI Capability:**
+- Command surface: add user-facing commands/options in `apps/mobvibe-cli/src/index.ts` or start-specific behavior in `apps/mobvibe-cli/src/start-command.ts`.
+- Daemon behavior: add runtime logic under `apps/mobvibe-cli/src/daemon/`.
+- ACP/session behavior: add session lifecycle logic to `apps/mobvibe-cli/src/acp/session-manager.ts` or connection logic to `apps/mobvibe-cli/src/acp/acp-connection.ts`.
+- Filesystem/git helpers: place helpers in `apps/mobvibe-cli/src/lib/` or `apps/mobvibe-cli/src/daemon/host-fs.ts` for host filesystem APIs.
+- Tests: add Bun tests under `apps/mobvibe-cli/src/**/__tests__/*.test.ts`.
 
-**New ACP/session capability:**
-- Shared types: Add contracts to `packages/shared/src/types/socket-events.ts` or `packages/shared/src/types/session.ts` and export from `packages/shared/src/index.ts`.
-- CLI runtime: Implement ACP/backend behavior in `apps/mobvibe-cli/src/acp/session-manager.ts` and `apps/mobvibe-cli/src/acp/acp-connection.ts`.
-- Gateway routing: Add user-scoped proxy methods to `apps/gateway/src/services/session-router.ts` and expose REST/socket surfaces through `apps/gateway/src/routes` or `apps/gateway/src/socket`.
-- WebUI UI/state: Add API calls to `apps/webui/src/lib/api.ts`, store updates to `apps/webui/src/lib/chat-store.ts`, and event application in `apps/webui/src/hooks/useSocket.ts`.
+**New Shared Type or Utility:**
+- Protocol/session/socket types: add to `packages/shared/src/types/` and export from `packages/shared/src/index.ts`.
+- Crypto helpers: add to `packages/shared/src/crypto/` and export from `packages/shared/src/crypto/index.ts` plus `packages/shared/src/index.ts`.
+- Validation: add schemas/utilities to `packages/shared/src/validation/` or a focused module under `packages/shared/src/`.
+- Tests: add `packages/shared/tests/<name>.test.ts` when runtime behavior exists.
 
-**New WAL persistence behavior:**
-- Primary code: Add schema/migrations/statements to `apps/mobvibe-cli/src/wal/migrations.ts` and `apps/mobvibe-cli/src/wal/wal-store.ts`.
-- Compaction/read behavior: Update `apps/mobvibe-cli/src/wal/consolidator.ts` or `apps/mobvibe-cli/src/wal/compactor.ts` when event lifecycle changes.
-- Tests: Add Bun tests under `apps/mobvibe-cli/src/wal/__tests__`.
-
-**New shared type/helper:**
-- Primary code: Add domain file under `packages/shared/src/types`, `packages/shared/src/crypto`, `packages/shared/src/validation`, or root `packages/shared/src` if it is a small generic helper.
-- Public export: Update `packages/shared/src/index.ts`.
-- Tests: Add Vitest tests under `packages/shared/tests` for runtime helpers; type-only contracts usually need consuming package tests.
-
-**New marketing website page:**
-- Primary code: Add page/component under `apps/website/src/components` or `apps/website/src/lib`.
-- Routing/meta: Update `apps/website/src/lib/page-info.ts` and branch in `apps/website/src/App.tsx`.
-- Content: Add static marketing data to `apps/website/src/data` or legal/shared content to `packages/shared/src/legal` when reused.
-- Build: Keep SSR compatibility with `apps/website/src/entry-server.tsx`.
+**New Website Page/Section:**
+- Page routing: update `apps/website/src/lib/page-info.ts` and render path handling in `apps/website/src/App.tsx`.
+- Components: add to `apps/website/src/components/`.
+- Data-driven content: add to `apps/website/src/data/`.
+- Shared legal content: add legal data/types in `packages/shared/src/legal/` if it must be reused by WebUI and Website.
 
 **Utilities:**
-- Gateway-only helpers: `apps/gateway/src/lib`.
-- WebUI-only helpers: `apps/webui/src/lib`.
-- CLI-only helpers: `apps/mobvibe-cli/src/lib`.
-- Cross-app helpers/contracts: `packages/shared/src`, then export from `packages/shared/src/index.ts`.
+- WebUI-only helpers: `apps/webui/src/lib/<name>.ts`.
+- Gateway-only helpers: `apps/gateway/src/lib/<name>.ts`.
+- CLI-only helpers: `apps/mobvibe-cli/src/lib/<name>.ts`.
+- Cross-package helpers: `packages/shared/src/<name>.ts` for protocol/runtime utilities or `packages/ui/src/<name>.tsx` for UI utilities.
 
 ## Special Directories
 
-**`apps/webui/src-tauri`:**
-- Purpose: Tauri desktop/mobile wrapper, native Rust entrypoints, generated native projects, capabilities, and icons.
-- Generated: Partially. `apps/webui/src-tauri/gen` is Tauri-generated native project output; `apps/webui/src-tauri/src`, `apps/webui/src-tauri/tauri.conf.json`, and capability/config files are source/config.
-- Committed: Yes for wrapper/config/native source; generated subtrees follow Tauri project policy.
+**`apps/webui/src-tauri/`:**
+- Purpose: Tauri v2 native wrapper for WebUI desktop/mobile builds.
+- Generated: Partially; `apps/webui/src-tauri/gen/` and platform native artifacts are generated/managed by Tauri.
+- Committed: Yes, source/config/capabilities are committed.
 
-**`apps/mobvibe-cli/npm`:**
-- Purpose: Platform-specific npm package manifests for CLI binary distribution.
-- Generated: Distribution-support metadata.
+**`apps/gateway/drizzle/`:**
+- Purpose: Database migration artifacts for gateway PostgreSQL schema.
+- Generated: Yes, via Drizzle commands from `apps/gateway/package.json`.
 - Committed: Yes.
 
-**`dist`, `dist-bin`, `.turbo`, `node_modules`:**
-- Purpose: Build outputs, task cache, and installed dependencies.
+**`dist/`, `dist-bin/`, `.turbo/`, `node_modules/`:**
+- Purpose: Build outputs, binary outputs, Turbo cache, package installs.
 - Generated: Yes.
-- Committed: No for generated dependency/build/cache contents; do not place source changes here.
+- Committed: No; do not place source changes here.
 
-**`packages/core`:**
-- Purpose: Current checkout contains `dist`, `node_modules`, and `.turbo` only.
-- Generated: Current contents are generated/build/dependency artifacts.
-- Committed: Source additions require introducing source/package files intentionally rather than editing generated output.
+**`apps/webui/public/`:**
+- Purpose: Static frontend assets; Tree-sitter WASM files are copied here by WebUI postinstall scripts.
+- Generated: Partially.
+- Committed: Static assets yes; generated copied artifacts follow project conventions.
 
-**`packages/shared/dist`:**
-- Purpose: Compiled shared package output.
-- Generated: Yes.
-- Committed: Package policy dependent; source changes belong in `packages/shared/src`.
-
-**`.planning/codebase`:**
-- Purpose: GSD-generated architecture, structure, stack, testing, convention, integration, and concern maps.
-- Generated: Yes.
-- Committed: Project workflow dependent; update through mapping commands rather than hand-maintaining during feature work.
-
-**`.agents/skills`:**
-- Purpose: Project-local skill lookup directory.
+**`docs/`:**
+- Purpose: Design notes, implementation plans, audits, and migration references.
 - Generated: No.
-- Committed: Directory exists with `web-design-guidelines/` but no `SKILL.md` content in current checkout.
+- Committed: Yes.
 
-**`.env`, `.env.*`, `.npmrc`, credential files:**
-- Purpose: Environment and authentication configuration.
-- Generated: Local/deployment-specific.
-- Committed: Do not commit secrets. Note existence only and never read or quote values.
+**`.planning/codebase/`:**
+- Purpose: GSD codebase mapping outputs consumed by planning/execution workflows.
+- Generated: Yes, by mapping agents.
+- Committed: Project-dependent; contents should not include secrets.
+
+**`.agents/skills/`:**
+- Purpose: Project-local skill directory; currently contains an empty `web-design-guidelines/` placeholder.
+- Generated: No.
+- Committed: Yes if project-specific skills are added.
+
+**`packages/core/`:**
+- Purpose: Stale/empty package shell in current tree.
+- Generated: Contains generated/cache/install directories only.
+- Committed: No source package files detected.
 
 ---
 
-*Structure analysis: 2026-05-11*
+*Structure analysis: 2026-05-12*

@@ -1,43 +1,34 @@
----
-last_mapped_commit: 7e89508dcca9477698c5e492fe7b8fdf9195f9af
-mapping_date: 2026-05-11
----
-<!-- refreshed: 2026-05-11 -->
 # Architecture
 
-**Analysis Date:** 2026-05-11
+**Analysis Date:** 2026-05-12
 
 ## System Overview
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│                    Client and Agent Layer                    │
-├──────────────────────┬────────────────────┬─────────────────┤
-│ React WebUI / Tauri  │ Marketing Website  │ Local CLI Daemon │
-│ `apps/webui/src`     │ `apps/website/src` │ `apps/mobvibe-cli/src` │
-└──────────┬───────────┴──────────┬─────────┴────────┬────────┘
-           │ REST + Socket.io     │ static/SSR       │ ACP stdio
-           ▼                      ▼                  ▼
+│                 Clients and Presentation Layer               │
+├──────────────────┬──────────────────┬───────────────────────┤
+│      WebUI       │     Website      │     Tauri Shell       │
+│ `apps/webui/src` │ `apps/website`   │ `apps/webui/src-tauri`│
+└────────┬─────────┴──────────────────┴──────────┬────────────┘
+         │ HTTP REST + Socket.io `/webui`          │ native storage/deep links
+         ▼                                         ▼
 ┌─────────────────────────────────────────────────────────────┐
-│              Gateway API and Real-Time Router                │
-│              `apps/gateway/src/index.ts`                     │
-├──────────────────────┬────────────────────┬─────────────────┤
-│ REST routes          │ Socket namespaces  │ Auth/affinity   │
-│ `apps/gateway/src/routes` │ `apps/gateway/src/socket` │ `apps/gateway/src/lib/auth.ts` │
-└──────────┬───────────┴──────────┬─────────┴────────┬────────┘
-           │                      │                  │
-           ▼                      ▼                  ▼
+│                    Gateway Relay Layer                       │
+│ `apps/gateway/src/index.ts`                                  │
+│ Express routes + Better Auth + Socket.io `/cli` and `/webui` │
+└────────┬───────────────────────┬────────────────────────────┘
+         │ RPC over Socket.io     │ PostgreSQL / Redis
+         ▼                       ▼
+┌─────────────────────────────┐ ┌─────────────────────────────┐
+│       Local CLI Daemon      │ │       Gateway Storage       │
+│ `apps/mobvibe-cli/src`      │ │ `apps/gateway/src/db`       │
+└────────┬────────────────────┘ └─────────────────────────────┘
+         │ ACP stdio + local filesystem/git + SQLite WAL
+         ▼
 ┌─────────────────────────────────────────────────────────────┐
-│               Shared Contracts and Persistence               │
-├──────────────────────┬────────────────────┬─────────────────┤
-│ Shared TS types/E2EE │ PostgreSQL/Drizzle │ Redis affinity  │
-│ `packages/shared/src`│ `apps/gateway/src/db` │ `apps/gateway/src/services/redis.ts` │
-└──────────────────────┴────────────────────┴─────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────────────────────────┐
-│               Local Agent Runtime and WAL Store              │
-│ `apps/mobvibe-cli/src/acp`, `apps/mobvibe-cli/src/wal`        │
+│                    ACP Agent Processes                       │
+│ configured by `apps/mobvibe-cli/src/config.ts`               │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -45,248 +36,264 @@ mapping_date: 2026-05-11
 
 | Component | Responsibility | File |
 |-----------|----------------|------|
-| Gateway entrypoint | Creates Express, HTTP server, Socket.io namespaces, Better Auth mount, REST routers, affinity services, and graceful shutdown. | `apps/gateway/src/index.ts` |
-| Session router | Bridges authenticated REST operations to the correct CLI socket via typed RPC requests and response correlation. | `apps/gateway/src/services/session-router.ts` |
-| CLI registry | Tracks connected CLI machines, user ownership, backend capabilities, live sessions, and session-change events in memory. | `apps/gateway/src/services/cli-registry.ts` |
-| WebUI socket handlers | Authenticates WebUI sockets, maintains session subscriptions, and emits user-scoped live events. | `apps/gateway/src/socket/webui-handlers.ts` |
-| CLI socket handlers | Authenticates CLI sockets with signed device tokens, registers machines, receives session events, and forwards payloads to WebUI. | `apps/gateway/src/socket/cli-handlers.ts` |
-| Gateway auth | Configures Better Auth with Drizzle PostgreSQL storage, email/password auth, bearer tokens, Tauri callback support, and OpenAPI plugin. | `apps/gateway/src/lib/auth.ts` |
-| Gateway database schema | Defines Better Auth tables plus app tables for machines, device keys, and web push subscriptions. | `apps/gateway/src/db/schema.ts` |
-| WebUI application shell | Composes auth, routing, Zustand stores, React Query hooks, socket handlers, and feature dialogs into the chat UI. | `apps/webui/src/App.tsx` |
-| WebUI socket client | Maintains the `/webui` Socket.io connection, bearer-token handling for Tauri, reconnect subscriptions, and typed event registration. | `apps/webui/src/lib/socket.ts` |
-| WebUI API client | Wrap REST calls to `/acp`, `/fs`, `/api/machines`, and `/api/notifications`, including Tauri fetch and auth behavior. | `apps/webui/src/lib/api.ts` |
-| WebUI chat store | Holds session list, chat messages, streaming state, WAL cursors, terminal snapshots, permissions, and UI-facing session metadata. | `apps/webui/src/lib/chat-store.ts` |
-| CLI command entrypoint | Defines `mobvibe` commands for daemon lifecycle, login/logout, E2EE status, and WAL compaction. | `apps/mobvibe-cli/src/index.ts` |
-| CLI daemon manager | Starts foreground/background daemon process, initializes crypto, creates `SessionManager`, connects Socket.io client, and schedules WAL compaction. | `apps/mobvibe-cli/src/daemon/daemon.ts` |
-| CLI gateway client | Connects to gateway `/cli`, signs auth payloads, registers machine/backends, and handles gateway RPC events. | `apps/mobvibe-cli/src/daemon/socket-client.ts` |
-| ACP connection | Spawns ACP backend processes, builds ACP client handlers, and maps protocol-level notifications/terminal calls to Mobvibe events. | `apps/mobvibe-cli/src/acp/acp-connection.ts` |
-| Session manager | Owns local session records, ACP backend connections, permission request coordination, E2EE integration, worktree creation, and WAL emission. | `apps/mobvibe-cli/src/acp/session-manager.ts` |
-| WAL store | Persists local session metadata and ordered session events in Bun SQLite with prepared statements and migrations. | `apps/mobvibe-cli/src/wal/wal-store.ts` |
-| Shared contracts | Re-exports SDK types, project-specific socket/API contracts, error helpers, crypto helpers, and legal/shared utilities. | `packages/shared/src/index.ts` |
-| Website app | Renders marketing, pricing, and legal pages with client entry and SSR/prerender entry. | `apps/website/src/App.tsx`, `apps/website/src/entry-server.tsx` |
+| WebUI app shell | Boots React, loads E2EE state, configures Tauri/browser gateway URL, and renders providers. | `apps/webui/src/main.tsx` |
+| WebUI routing | Defines auth-gated routes, lazy settings/login/legal pages, and Tauri deep-link handlers. | `apps/webui/src/app/AppRoutes.tsx` |
+| WebUI controller | Composes queries, socket subscriptions, session mutations, machine discovery, hotkeys, and UI state into one controller for layout components. | `apps/webui/src/app/use-main-app-controller.tsx` |
+| WebUI API client | Centralizes REST calls to `/acp`, `/fs`, `/api/machines`, and `/api/notifications`; adds auth headers for Tauri. | `apps/webui/src/lib/api.ts` |
+| WebUI socket client | Owns the singleton Socket.io connection to `/webui`, session subscriptions, reconnect handling, and typed event listeners. | `apps/webui/src/lib/socket.ts` |
+| WebUI chat state | Stores sessions, chat messages, streaming state, WAL cursors, E2EE runtime status, and session list projections. | `apps/webui/src/lib/chat-store.ts` |
+| Gateway bootstrap | Wires Express, Better Auth, routes, Socket.io namespaces, affinity services, logging middleware, and shutdown. | `apps/gateway/src/index.ts` |
+| Gateway WebUI socket handlers | Authenticates `/webui` sockets and routes session events only to owning users/subscribers. | `apps/gateway/src/socket/webui-handlers.ts` |
+| Gateway CLI socket handlers | Authenticates `/cli` sockets with signed device tokens, registers machines, receives events, and forwards RPC responses. | `apps/gateway/src/socket/cli-handlers.ts` |
+| Gateway session router | Converts HTTP/WebUI intent into typed RPC calls to the correct CLI and tracks pending RPC timeouts. | `apps/gateway/src/services/session-router.ts` |
+| Gateway CLI registry | Maintains in-memory connected CLI records, session summaries, backend capabilities, and user-scoped indexes. | `apps/gateway/src/services/cli-registry.ts` |
+| Gateway database access | Encapsulates Drizzle operations for devices, machines, and web-push subscriptions. | `apps/gateway/src/services/db-service.ts` |
+| CLI command entry | Defines `mobvibe` commands (`start`, `stop`, `login`, `e2ee`, `compact`) with Commander. | `apps/mobvibe-cli/src/index.ts` |
+| CLI start flow | Resolves user config, optional first-run agent selection, preflight, and daemon startup. | `apps/mobvibe-cli/src/start-command.ts` |
+| CLI daemon manager | Manages background/foreground daemon lifecycle, PID files, logs, crypto setup, WAL compaction, and graceful shutdown. | `apps/mobvibe-cli/src/daemon/daemon.ts` |
+| CLI gateway socket | Connects to `/cli`, registers the machine, maps gateway RPC events to local operations, and emits session changes. | `apps/mobvibe-cli/src/daemon/socket-client.ts` |
+| CLI ACP sessions | Manages ACP connections, active/discovered sessions, permissions, WAL persistence, worktrees, and E2EE wrapping. | `apps/mobvibe-cli/src/acp/session-manager.ts` |
+| CLI WAL store | Persists local session events and discovered sessions in SQLite with prepared statements. | `apps/mobvibe-cli/src/wal/wal-store.ts` |
+| Shared protocol package | Exports common ACP, session, socket, error, crypto, registry, legal, and prompt-image types. | `packages/shared/src/index.ts` |
+| Shared UI package | Publishes reusable React UI primitives and theme utilities. | `packages/ui/src/index.ts` |
+| Marketing website | Provides the public landing/pricing/legal experience using shared UI components. | `apps/website/src/App.tsx` |
 
 ## Pattern Overview
 
-**Overall:** Monorepo with gateway-mediated, typed event/RPC architecture.
+**Overall:** Distributed relay architecture with a stateless-ish gateway, local stateful daemon, typed shared protocol package, and React state/query composition on the client.
 
 **Key Characteristics:**
-- Use `@mobvibe/shared` as the boundary contract between gateway, web UI, CLI daemon, and website; add new cross-package types in `packages/shared/src` and export them from `packages/shared/src/index.ts`.
-- Use the gateway as the only remote coordination point: WebUI talks to `apps/gateway/src/routes/*` over REST and `apps/gateway/src/socket/webui-handlers.ts` over Socket.io; CLI talks to `apps/gateway/src/socket/cli-handlers.ts` over Socket.io.
-- Keep authoritative agent/session runtime local to the CLI daemon in `apps/mobvibe-cli/src/acp/session-manager.ts`; gateway session state is an in-memory routing/index layer in `apps/gateway/src/services/cli-registry.ts`.
-- Persist durable user and machine identity in PostgreSQL via `apps/gateway/src/db/schema.ts`; persist chat event history locally in the CLI WAL via `apps/mobvibe-cli/src/wal/wal-store.ts`.
-- Use user-scoped routing everywhere: REST routes call `getUserId()` from `apps/gateway/src/middleware/auth.ts`, `SessionRouter` resolves CLI ownership by user, and socket handlers emit only to a user’s sockets.
+- Use `packages/shared/src/index.ts` as the protocol boundary between `apps/webui`, `apps/gateway`, and `apps/mobvibe-cli`; add new cross-process payloads to `packages/shared/src/types/socket-events.ts` or `packages/shared/src/types/session.ts` before consuming them.
+- Keep session content end-to-end encrypted through gateway routing: WebUI and CLI use crypto helpers from `packages/shared/src/crypto/index.ts`; gateway routes `EncryptedPayload` without decrypting content.
+- Treat `apps/gateway/src/services/cli-registry.ts` as ephemeral connection/session index and `apps/mobvibe-cli/src/wal/wal-store.ts` as durable chat/event history.
+- Use HTTP for request/response actions and Socket.io for realtime status/event streams: WebUI REST functions live in `apps/webui/src/lib/api.ts`, realtime subscriptions in `apps/webui/src/lib/socket.ts`.
+- Keep UI orchestration in hooks and stores: `apps/webui/src/app/use-main-app-controller.tsx` composes domain hooks from `apps/webui/src/hooks/` and renders through layout/components in `apps/webui/src/components/`.
 
 ## Layers
 
-**Workspace orchestration:**
-- Purpose: Define packages, task graph, and root commands.
+**Workspace Orchestration:**
+- Purpose: Coordinates builds, scripts, and package boundaries across apps and packages.
 - Location: `package.json`, `pnpm-workspace.yaml`, `turbo.json`
-- Contains: Turbo tasks for build/dev/lint/test, pnpm workspace package globs, root scripts.
-- Depends on: Package scripts in `apps/*/package.json` and `packages/*/package.json`.
-- Used by: CI, local development, and repo-level commands.
+- Contains: pnpm workspace declarations, Turbo task graph, root scripts.
+- Depends on: package-level `package.json` scripts.
+- Used by: every app/package under `apps/*` and `packages/*`.
 
-**Shared contract layer:**
-- Purpose: Provide stable TypeScript contracts and helpers shared across app boundaries.
+**Shared Protocol and Utilities:**
+- Purpose: Defines stable types, error shapes, crypto helpers, legal content, registry types, and prompt-image validation shared across runtime boundaries.
 - Location: `packages/shared/src`
-- Contains: Socket event types in `packages/shared/src/types/socket-events.ts`, ACP SDK re-exports in `packages/shared/src/types/acp.ts`, session/error/registry types, crypto helpers, prompt image helpers, and legal content exports.
-- Depends on: `@agentclientprotocol/sdk`, `zod`, `tweetnacl`, `@noble/hashes` via `packages/shared/package.json`.
-- Used by: `apps/gateway/src`, `apps/webui/src`, and `apps/mobvibe-cli/src`.
+- Contains: `packages/shared/src/types/socket-events.ts`, `packages/shared/src/types/session.ts`, `packages/shared/src/types/errors.ts`, `packages/shared/src/crypto/*`.
+- Depends on: ACP SDK, Zod, `tweetnacl`, Noble hashes.
+- Used by: `apps/webui/src/lib/api.ts`, `apps/gateway/src/socket/cli-handlers.ts`, `apps/mobvibe-cli/src/acp/session-manager.ts`.
 
-**Gateway HTTP and WebSocket layer:**
-- Purpose: Authenticate users/devices, expose REST APIs, maintain Socket.io namespaces, and route RPCs between WebUI and CLI.
-- Location: `apps/gateway/src`
-- Contains: Entrypoint `apps/gateway/src/index.ts`, routes in `apps/gateway/src/routes`, socket handlers in `apps/gateway/src/socket`, in-memory services in `apps/gateway/src/services`, auth/db/logging in `apps/gateway/src/lib` and `apps/gateway/src/db`.
-- Depends on: Express, Socket.io, Better Auth, Drizzle, PostgreSQL, optional Redis, `@mobvibe/shared`.
-- Used by: WebUI REST/socket clients and CLI socket client.
+**Reusable UI System:**
+- Purpose: Provides shared React primitives, theme provider, and utility class merging for WebUI and Website.
+- Location: `packages/ui/src`
+- Contains: component modules such as `packages/ui/src/button.tsx`, `packages/ui/src/sidebar.tsx`, `packages/ui/src/theme-provider.tsx`.
+- Depends on: React, Radix/Base UI, Hugeicons, class-variance-authority, Tailwind merge.
+- Used by: `apps/webui/src/app/AppProviders.tsx`, `apps/website/src/main.tsx`, route/component files importing `@mobvibe/ui/*`.
 
-**WebUI application layer:**
-- Purpose: Render the authenticated chat/machine/session UI and synchronize live session events into local state.
+**WebUI Presentation:**
+- Purpose: Renders authenticated session management, chat, settings, machine selection, file explorer, git views, and app dialogs.
 - Location: `apps/webui/src`
-- Contains: App shell `apps/webui/src/App.tsx`, route pages in `apps/webui/src/pages`, feature components in `apps/webui/src/components`, hooks in `apps/webui/src/hooks`, stores/API/socket/utilities in `apps/webui/src/lib`, Tauri wrapper in `apps/webui/src-tauri`.
-- Depends on: React 19, React Router, React Query, Zustand, Socket.io client, Better Auth client, Tauri plugins, Tailwind.
-- Used by: Browser and Tauri desktop/mobile shell.
+- Contains: app shell in `apps/webui/src/app`, reusable/feature components in `apps/webui/src/components`, route pages in `apps/webui/src/pages`, stores/API/socket utilities in `apps/webui/src/lib`.
+- Depends on: `@mobvibe/shared`, `@mobvibe/ui`, React Query, Zustand, React Router, Socket.io client, Tauri plugins.
+- Used by: browser deployment and Tauri wrapper in `apps/webui/src-tauri`.
 
-**CLI daemon and ACP adapter layer:**
-- Purpose: Run local ACP backends, manage sessions, persist WAL events, serve host FS/git RPCs, and maintain gateway connection.
+**Gateway HTTP and Realtime Relay:**
+- Purpose: Authenticates users/devices, routes REST requests, proxies RPC to the owning CLI, forwards realtime session events, and manages multi-instance affinity.
+- Location: `apps/gateway/src`
+- Contains: `apps/gateway/src/index.ts`, `apps/gateway/src/routes`, `apps/gateway/src/socket`, `apps/gateway/src/services`, `apps/gateway/src/middleware`, `apps/gateway/src/db`.
+- Depends on: Express, Socket.io, Better Auth, Drizzle, PostgreSQL, Redis, pino.
+- Used by: WebUI clients and CLI daemons over HTTP/WebSocket.
+
+**CLI Daemon and ACP Adapter:**
+- Purpose: Runs on the user's machine, discovers configured ACP agents, starts/loads sessions, handles filesystem/git RPCs, stores session WAL history, and streams encrypted events to the gateway.
 - Location: `apps/mobvibe-cli/src`
-- Contains: CLI entry `apps/mobvibe-cli/src/index.ts`, daemon lifecycle in `apps/mobvibe-cli/src/daemon`, ACP integration in `apps/mobvibe-cli/src/acp`, auth credentials in `apps/mobvibe-cli/src/auth`, E2EE in `apps/mobvibe-cli/src/e2ee`, WAL in `apps/mobvibe-cli/src/wal`, shared local helpers in `apps/mobvibe-cli/src/lib`.
-- Depends on: Bun runtime, Commander, Socket.io client, ACP SDK, pino, Bun SQLite, `@mobvibe/shared`.
-- Used by: End users running the `mobvibe` binary and the gateway `/cli` namespace.
+- Contains: command entry in `apps/mobvibe-cli/src/index.ts`, daemon lifecycle in `apps/mobvibe-cli/src/daemon`, ACP session management in `apps/mobvibe-cli/src/acp`, auth in `apps/mobvibe-cli/src/auth`, WAL persistence in `apps/mobvibe-cli/src/wal`, registry discovery in `apps/mobvibe-cli/src/registry`.
+- Depends on: Bun runtime, ACP SDK, Socket.io client, local filesystem/git commands, SQLite, pino.
+- Used by: installed `mobvibe` CLI binary and gateway RPC/event flows.
 
-**Marketing website layer:**
-- Purpose: Render static/SSR marketing, pricing, and legal pages.
+**Gateway Persistence and Affinity:**
+- Purpose: Stores auth/users/machines/device keys/push subscriptions in PostgreSQL and coordinates sticky routing with Redis/Fly Replay.
+- Location: `apps/gateway/src/db`, `apps/gateway/src/services/redis.ts`, `apps/gateway/src/services/instance-registry.ts`, `apps/gateway/src/services/user-affinity.ts`, `apps/gateway/src/middleware/fly-replay.ts`
+- Contains: Drizzle schema, pooled DB connection, Redis-backed instance/user affinity managers, Fly Replay middleware.
+- Depends on: `DATABASE_URL`, optional `REDIS_URL`, Fly instance metadata.
+- Used by: gateway bootstrap and route/socket handlers in `apps/gateway/src/index.ts`.
+
+**Marketing Website:**
+- Purpose: Static/SSR-prerendered landing, pricing, demo, and legal pages.
 - Location: `apps/website/src`
-- Contains: Client entry `apps/website/src/main.tsx`, SSR entry `apps/website/src/entry-server.tsx`, page resolver `apps/website/src/lib/page-info.ts`, marketing components in `apps/website/src/components`, feature data in `apps/website/src/data/features.ts`.
-- Depends on: React, Vite, Tailwind, i18next, shared legal documents from `@mobvibe/shared`.
-- Used by: Netlify static hosting/prerender build.
+- Contains: route resolver in `apps/website/src/lib/page-info.ts`, app in `apps/website/src/App.tsx`, SSR entry in `apps/website/src/entry-server.tsx`, browser entry in `apps/website/src/main.tsx`.
+- Depends on: React, Vite, Tailwind, `@mobvibe/ui`, legal documents from `@mobvibe/shared`.
+- Used by: Netlify website deployment.
 
 ## Data Flow
 
 ### Primary Request Path
 
-1. WebUI initializes providers and gateway settings in `apps/webui/src/main.tsx:17`, `apps/webui/src/main.tsx:40`, and renders `App` inside `AuthProvider` at `apps/webui/src/main.tsx:31`.
-2. Authenticated UI actions call REST helpers from `apps/webui/src/lib/api.ts:155` and socket handlers from `apps/webui/src/hooks/useSocket.ts:107`.
-3. Gateway mounts auth, session, FS, machine, device, and notification routes in `apps/gateway/src/index.ts:319`, `apps/gateway/src/index.ts:335`, and `apps/gateway/src/index.ts:360`.
-4. Session REST routes require Better Auth middleware in `apps/gateway/src/routes/sessions.ts:83` and validate `userId` before calling `SessionRouter` at `apps/gateway/src/routes/sessions.ts:117`.
-5. `SessionRouter` resolves a user-owned CLI and sends a typed Socket.io RPC in `apps/gateway/src/services/session-router.ts:138` and `apps/gateway/src/services/session-router.ts:161`.
-6. CLI `SocketClient` receives gateway RPCs and delegates to `SessionManager` from `apps/mobvibe-cli/src/daemon/socket-client.ts:163`.
-7. `SessionManager` creates or reuses `AcpConnection` instances and writes ordered session events through `WalStore` in `apps/mobvibe-cli/src/acp/session-manager.ts:222` and `apps/mobvibe-cli/src/wal/wal-store.ts:69`.
-8. CLI emits `session:event` and related updates back to gateway; gateway forwards user-scoped events through `apps/gateway/src/index.ts:221` and `apps/gateway/src/socket/webui-handlers.ts:59`.
-9. WebUI applies live/backfilled events to Zustand state in `apps/webui/src/hooks/useSocket.ts:191` and displays sessions/messages from `apps/webui/src/lib/chat-store.ts:122`.
+1. WebUI initializes providers and app routes (`apps/webui/src/main.tsx:15`, `apps/webui/src/app/AppProviders.tsx:20`, `apps/webui/src/app/AppRoutes.tsx:125`).
+2. Authenticated WebUI controller fetches sessions/backends and connects Socket.io through `useSocket` (`apps/webui/src/app/use-main-app-controller.tsx:146`).
+3. REST session operations call gateway endpoints through `requestJson` (`apps/webui/src/lib/api.ts:72`, `apps/webui/src/lib/api.ts:155`, `apps/webui/src/lib/api.ts:158`).
+4. Gateway mounts Better Auth, `/acp`, `/fs`, `/api/machines`, and `/api/notifications` routes (`apps/gateway/src/index.ts:319`, `apps/gateway/src/index.ts:360`).
+5. Session routes authenticate requests and delegate to `SessionRouter` (`apps/gateway/src/routes/sessions.ts:83`, `apps/gateway/src/routes/sessions.ts:173`).
+6. `SessionRouter` resolves the user-owned CLI and sends an RPC over Socket.io (`apps/gateway/src/services/session-router.ts:81`, `apps/gateway/src/services/session-router.ts:161`).
+7. CLI `SocketClient` receives gateway RPCs and invokes `SessionManager`/filesystem/git handlers (`apps/mobvibe-cli/src/daemon/socket-client.ts:183`, `apps/mobvibe-cli/src/acp/session-manager.ts:222`).
+8. `SessionManager` talks to ACP agent processes and persists events in WAL (`apps/mobvibe-cli/src/acp/session-manager.ts:252`, `apps/mobvibe-cli/src/wal/wal-store.ts:69`).
+9. CLI emits session events to gateway; gateway forwards `session:event` only to subscribed WebUI sockets (`apps/gateway/src/index.ts:259`, `apps/gateway/src/socket/webui-handlers.ts:242`).
 
-### CLI Startup and Registration Flow
+### CLI Registration and Affinity Flow
 
-1. `mobvibe start` is registered in `apps/mobvibe-cli/src/index.ts:19` and calls `runStartCommand()` in `apps/mobvibe-cli/src/start-command.ts:72`.
-2. Start command loads config, optionally prompts for enabled agents, runs preflight, and starts `DaemonManager` in `apps/mobvibe-cli/src/start-command.ts:84`, `apps/mobvibe-cli/src/start-command.ts:131`, and `apps/mobvibe-cli/src/start-command.ts:133`.
-3. Foreground daemon initializes crypto, `SessionManager`, and `SocketClient` in `apps/mobvibe-cli/src/daemon/daemon.ts:184` and `apps/mobvibe-cli/src/daemon/daemon.ts:193`.
-4. `SocketClient` connects to `${gatewayUrl}/cli`, signs a token using the auth key pair, and registers handlers in `apps/mobvibe-cli/src/daemon/socket-client.ts:170`.
-5. Gateway `/cli` namespace verifies signed tokens and registered device keys in `apps/gateway/src/socket/cli-handlers.ts:72` and `apps/gateway/src/socket/cli-handlers.ts:93`.
-6. Gateway upserts machine records and adds the CLI to `CliRegistry` in `apps/gateway/src/socket/cli-handlers.ts:153` and `apps/gateway/src/socket/cli-handlers.ts:184`.
+1. `mobvibe start` resolves config and starts daemon (`apps/mobvibe-cli/src/index.ts:20`, `apps/mobvibe-cli/src/start-command.ts:72`).
+2. Daemon creates crypto, `SessionManager`, and `SocketClient` (`apps/mobvibe-cli/src/daemon/daemon.ts:193`, `apps/mobvibe-cli/src/daemon/daemon.ts:196`).
+3. CLI socket signs auth payload using content from credentials/crypto service (`apps/mobvibe-cli/src/daemon/socket-client.ts:173`).
+4. Gateway `/cli` namespace verifies signed token and resolves a registered device key (`apps/gateway/src/socket/cli-handlers.ts:72`, `apps/gateway/src/socket/cli-handlers.ts:93`).
+5. Gateway upserts machine rows and registers the in-memory CLI record (`apps/gateway/src/socket/cli-handlers.ts:160`, `apps/gateway/src/socket/cli-handlers.ts:184`).
+6. When Redis affinity exists, WebUI/CLI user ownership is claimed and wrong-instance connections use Fly Replay/redirects (`apps/gateway/src/index.ts:73`, `apps/gateway/src/socket/cli-handlers.ts:112`, `apps/gateway/src/socket/webui-handlers.ts:138`).
 
-### Live Event and Backfill Flow
+### Realtime Session Event Flow
 
-1. ACP backend notifications enter through `AcpConnection` client handlers in `apps/mobvibe-cli/src/acp/acp-connection.ts:115`.
-2. `SessionManager` owns local session records and event emitters in `apps/mobvibe-cli/src/acp/session-manager.ts:222` and stores WAL events via `WalStore` in `apps/mobvibe-cli/src/wal/wal-store.ts:133`.
-3. CLI `SocketClient` sends ordered session events to gateway using `SessionEvent` contracts from `packages/shared/src/types/socket-events.ts:39`.
-4. Gateway forwards `session:event` to WebUI via `apps/gateway/src/index.ts:259` and subscriber/user emitters in `apps/gateway/src/socket/webui-handlers.ts:40`.
-5. WebUI `useSocket` applies events by kind and tracks cursors for gap recovery in `apps/webui/src/hooks/useSocket.ts:77`, `apps/webui/src/hooks/useSocket.ts:145`, and `apps/webui/src/hooks/useSocket.ts:191`.
-
-### Website Render Flow
-
-1. Browser render starts in `apps/website/src/main.tsx:8` and wraps `App` in `ThemeProvider` at `apps/website/src/main.tsx:11`.
-2. Static/SSR render uses `render()` in `apps/website/src/entry-server.tsx:29`, resolves page metadata through `apps/website/src/lib/page-info.ts`, and renders `App` with a pathname at `apps/website/src/entry-server.tsx:36`.
-3. `App` selects legal, pricing, or marketing home by `resolveWebsitePage()` in `apps/website/src/App.tsx:16`.
+1. WebUI subscribes to one session through the socket singleton (`apps/webui/src/lib/socket.ts:107`).
+2. Gateway stores the subscription in `sessionSubscriptions` (`apps/gateway/src/socket/webui-handlers.ts:31`, `apps/gateway/src/socket/webui-handlers.ts:178`).
+3. ACP notifications are transformed by `SessionManager` into sequenced `SessionEvent` records (`apps/mobvibe-cli/src/acp/session-manager.ts:222`, `packages/shared/src/types/socket-events.ts:39`).
+4. Events are appended to SQLite WAL (`apps/mobvibe-cli/src/wal/wal-store.ts:133`).
+5. CLI sends events to gateway, gateway emits `session:event` to subscribers (`apps/gateway/src/index.ts:259`, `apps/gateway/src/socket/webui-handlers.ts:242`).
+6. WebUI socket handlers feed events into Zustand actions selected by `useMainAppController` (`apps/webui/src/app/use-main-app-controller.tsx:146`, `apps/webui/src/lib/chat-store.ts:122`).
 
 **State Management:**
-- Gateway connection/session routing state is in-memory in `apps/gateway/src/services/cli-registry.ts` and `apps/gateway/src/socket/webui-handlers.ts`; use it only for connected machines and live subscriptions.
-- Gateway identity and app account state is PostgreSQL-backed through `apps/gateway/src/db/schema.ts` and Better Auth in `apps/gateway/src/lib/auth.ts`.
-- Multi-instance affinity is optional Redis-backed through `apps/gateway/src/services/redis.ts`, `apps/gateway/src/services/instance-registry.ts`, and `apps/gateway/src/services/user-affinity.ts`.
-- WebUI client state lives in Zustand stores such as `apps/webui/src/lib/chat-store.ts`, `apps/webui/src/lib/machines-store.ts`, `apps/webui/src/lib/ui-store.ts`, and `apps/webui/src/lib/notification-store.ts`; React Query owns server-cache state in hooks under `apps/webui/src/hooks`.
-- CLI durable session history lives in Bun SQLite WAL through `apps/mobvibe-cli/src/wal/wal-store.ts`; active ACP connection/session objects live in `apps/mobvibe-cli/src/acp/session-manager.ts`.
+- Gateway state is in memory for live connections/sessions (`apps/gateway/src/services/cli-registry.ts`) plus PostgreSQL for durable auth/device/machine/push rows (`apps/gateway/src/db/schema.ts`) and optional Redis for affinity (`apps/gateway/src/services/redis.ts`).
+- CLI state is local filesystem config and PID/log files (`apps/mobvibe-cli/src/config.ts`), SQLite WAL/discovered sessions (`apps/mobvibe-cli/src/wal/wal-store.ts`), and in-memory ACP session maps (`apps/mobvibe-cli/src/acp/session-manager.ts:222`).
+- WebUI state uses React Query for server snapshots (`apps/webui/src/app/AppProviders.tsx:7`), Zustand for chat/machines/UI (`apps/webui/src/lib/chat-store.ts`, `apps/webui/src/lib/machines-store.ts`, `apps/webui/src/lib/ui-store.ts`), and a Socket.io singleton for realtime transport (`apps/webui/src/lib/socket.ts:21`).
 
 ## Key Abstractions
 
-**SessionEvent / WAL cursor:**
-- Purpose: Represent ordered, revisioned chat/session updates that can be live-streamed and backfilled.
-- Examples: `packages/shared/src/types/socket-events.ts`, `apps/mobvibe-cli/src/wal/wal-store.ts`, `apps/webui/src/hooks/useSocket.ts`
-- Pattern: Append locally in CLI, forward through gateway, apply idempotently in WebUI with `revision` and `seq` cursors.
+**SessionEvent / WAL Cursor:**
+- Purpose: Represents ordered, replayable session updates with `revision` and `seq` for backfill and reconnection.
+- Examples: `packages/shared/src/types/socket-events.ts`, `apps/mobvibe-cli/src/wal/wal-store.ts`, `apps/webui/src/lib/chat-store.ts`
+- Pattern: append-only local event log at CLI; gateway forwards current events; WebUI applies events idempotently using cursor fields.
 
-**RpcRequest / RpcResponse:**
-- Purpose: Correlate WebUI-initiated gateway REST operations to CLI-owned ACP actions.
-- Examples: `packages/shared/src/types/socket-events.ts`, `apps/gateway/src/services/session-router.ts`, `apps/mobvibe-cli/src/daemon/socket-client.ts`
-- Pattern: Gateway creates request IDs and pending promises; CLI emits `rpc:response`; gateway resolves/rejects with timeout.
+**SessionRouter RPC Bridge:**
+- Purpose: Converts authenticated HTTP actions into typed RPC requests to the owning CLI socket and resolves/rejects pending promises by `requestId`.
+- Examples: `apps/gateway/src/services/session-router.ts`, `packages/shared/src/types/socket-events.ts`
+- Pattern: gateway-side request broker with user-scoped CLI resolution and timeout map.
 
 **CliRegistry:**
-- Purpose: Keep the gateway’s connected-machine index and user-scoped session lookup.
-- Examples: `apps/gateway/src/services/cli-registry.ts`, `apps/gateway/src/socket/cli-handlers.ts`, `apps/gateway/src/routes/machines.ts`
-- Pattern: Register on `cli:register`, update sessions from CLI payloads, resolve machines/sessions by `userId` for auth safety.
+- Purpose: Tracks live CLI machines, sessions, capabilities, and user indexes for authorization and routing.
+- Examples: `apps/gateway/src/services/cli-registry.ts`, `apps/gateway/src/socket/webui-handlers.ts`, `apps/gateway/src/routes/sessions.ts`
+- Pattern: process-local EventEmitter registry; do not treat it as durable storage.
 
-**SessionManager:**
-- Purpose: Own the local ACP session lifecycle and bridge backend protocol details to Mobvibe concepts.
-- Examples: `apps/mobvibe-cli/src/acp/session-manager.ts`, `apps/mobvibe-cli/src/acp/acp-connection.ts`, `apps/mobvibe-cli/src/daemon/socket-client.ts`
-- Pattern: Keep session records in maps, use event emitters for gateway-facing updates, persist ordered events in `WalStore`.
+**GatewaySocket Singleton:**
+- Purpose: Shares one WebUI Socket.io connection across hooks/components and preserves subscriptions across reconnects.
+- Examples: `apps/webui/src/lib/socket.ts`
+- Pattern: class singleton exported as `gatewaySocket`; new realtime APIs should add typed methods on this class.
 
-**GatewaySocket singleton:**
-- Purpose: Provide a single typed WebUI socket connection with subscription persistence across reconnects.
-- Examples: `apps/webui/src/lib/socket.ts`, `apps/webui/src/hooks/useSocket.ts`
-- Pattern: Export a singleton, register event handlers through methods, keep subscribed session IDs in memory, reconnect to the configured gateway URL.
+**React Controller Hook:**
+- Purpose: Keeps high-level application orchestration outside JSX layout components.
+- Examples: `apps/webui/src/app/use-main-app-controller.tsx`, `apps/webui/src/app/MainApp.tsx`, `apps/webui/src/app/MainLayout.tsx`
+- Pattern: `MainApp` invokes a controller hook and passes an object to `MainLayout`.
 
-**Better Auth context:**
-- Purpose: Unify browser/Tauri authentication across REST and socket calls.
-- Examples: `apps/gateway/src/lib/auth.ts`, `apps/gateway/src/middleware/auth.ts`, `apps/webui/src/components/auth/AuthProvider.tsx`, `apps/webui/src/lib/auth.ts`
-- Pattern: Server validates sessions via `auth.api.getSession`; WebUI exposes auth state through `AuthProvider`; Tauri uses bearer tokens where cookies are unavailable.
+**Shared Package Exports:**
+- Purpose: Stabilizes public import surface for workspace consumers.
+- Examples: `packages/shared/src/index.ts`, `packages/ui/src/index.ts`, `packages/ui/package.json`
+- Pattern: add new public cross-package modules to `src/index.ts` and package `exports` where consumers import subpaths.
+
+**E2EE Crypto Helpers:**
+- Purpose: Generate/derive keys, wrap DEKs, encrypt/decrypt payloads, and sign CLI auth tokens.
+- Examples: `packages/shared/src/crypto/index.ts`, `apps/mobvibe-cli/src/daemon/socket-client.ts`, `apps/webui/src/lib/e2ee.ts`
+- Pattern: gateway validates auth signatures but does not decrypt message content.
 
 ## Entry Points
 
-**Gateway server:**
-- Location: `apps/gateway/src/index.ts`
-- Triggers: `pnpm -C apps/gateway dev`, `pnpm -C apps/gateway start`, Fly deployment.
-- Responsibilities: Initialize config, Express, Socket.io, Better Auth, route modules, Redis affinity, services, and shutdown handlers.
-
 **WebUI browser/Tauri app:**
 - Location: `apps/webui/src/main.tsx`
-- Triggers: Vite dev/build, Tauri dev/build, browser page load.
-- Responsibilities: Configure React Query, router, auth provider, Tauri storage/gateway initialization, E2EE loading, and React root rendering.
+- Triggers: Vite bundle loaded by `apps/webui/index.html` and Tauri webview.
+- Responsibilities: initialize i18n/styles, Tauri storage/gateway URL/auth token/E2EE, then render `AppProviders` and `App`.
 
-**CLI binary:**
+**WebUI routes:**
+- Location: `apps/webui/src/app/AppRoutes.tsx`
+- Triggers: React Router after provider setup.
+- Responsibilities: lazy-load pages, enforce login redirect, handle Tauri auth/deep-link pairing.
+
+**Gateway server:**
+- Location: `apps/gateway/src/index.ts`
+- Triggers: `pnpm -C apps/gateway dev`, `pnpm -C apps/gateway start`, or Docker/Fly process start.
+- Responsibilities: configure HTTP server, routes, Better Auth, Socket.io namespaces, Redis affinity, and graceful shutdown.
+
+**CLI command:**
 - Location: `apps/mobvibe-cli/src/index.ts`
-- Triggers: `mobvibe` binary, `bun dist/index.js`, package `bin/mobvibe.mjs`.
-- Responsibilities: Register command tree and delegate daemon/auth/E2EE/compaction operations.
+- Triggers: `mobvibe` binary / `bun dist/index.js`.
+- Responsibilities: parse commands, start/stop/status/logs/login/e2ee/compact workflows.
 
-**CLI daemon startup:**
-- Location: `apps/mobvibe-cli/src/start-command.ts`, `apps/mobvibe-cli/src/daemon/daemon.ts`
-- Triggers: `mobvibe start` command.
-- Responsibilities: Resolve config and agents, run preflight, start foreground/background daemon, initialize crypto/session/socket runtime.
+**CLI daemon runtime:**
+- Location: `apps/mobvibe-cli/src/daemon/daemon.ts`
+- Triggers: `mobvibe start --foreground` directly or background child process from `DaemonManager.spawnBackground`.
+- Responsibilities: initialize local runtime, connect to gateway, manage ACP sessions and WAL lifecycle.
 
 **Website browser app:**
 - Location: `apps/website/src/main.tsx`
-- Triggers: Vite client bundle load.
-- Responsibilities: Render marketing/pricing/legal UI.
+- Triggers: Vite website bundle.
+- Responsibilities: mount marketing app with theme provider.
 
 **Website SSR/prerender:**
 - Location: `apps/website/src/entry-server.tsx`
-- Triggers: `apps/website` build script and prerender script.
-- Responsibilities: Render static HTML and metadata for prerendered routes.
-
-**Shared package public surface:**
-- Location: `packages/shared/src/index.ts`
-- Triggers: TypeScript imports from workspace packages.
-- Responsibilities: Export stable types/helpers; every new shared contract belongs here.
+- Triggers: website build script in `apps/website/package.json`.
+- Responsibilities: render routes for prerendering/static output.
 
 ## Architectural Constraints
 
-- **Threading:** Gateway and WebUI run on the Node/browser event loop; CLI daemon runs on Bun/Node-compatible event loop and spawns child ACP/backend processes from `apps/mobvibe-cli/src/acp/acp-connection.ts` and background daemon process from `apps/mobvibe-cli/src/daemon/daemon.ts`.
-- **Global state:** Gateway creates module-level `app`, `httpServer`, `io`, `cliRegistry`, and `sessionRouter` in `apps/gateway/src/index.ts`; WebUI uses singleton `gatewaySocket` in `apps/webui/src/lib/socket.ts`; gateway Redis connection is module-level in `apps/gateway/src/services/redis.ts`; CLI WAL and sessions are instance state in `apps/mobvibe-cli/src/acp/session-manager.ts` and `apps/mobvibe-cli/src/wal/wal-store.ts`.
-- **Circular imports:** No circular dependency chain is documented in code comments; keep dependency direction from UI/CLI/Gateway toward `packages/shared/src`, not from shared back into apps.
-- **Transport limits:** Gateway Socket.io sets `maxHttpBufferSize` to 4 MiB in `apps/gateway/src/index.ts:136`; WebUI and CLI prompt/file/image payload flows must stay within shared validation such as `packages/shared/src/prompt-images.ts`.
-- **Multi-instance routing:** Redis affinity is optional; when `REDIS_URL` is unavailable, `apps/gateway/src/services/redis.ts` returns `null` and gateway runs without affinity, so new stateful gateway behavior must work in single-instance mode and respect replay middleware when affinity exists.
-- **Auth boundary:** REST routes under `/acp` and `/fs` call `requireAuth` in `apps/gateway/src/routes/sessions.ts` and `apps/gateway/src/routes/fs.ts`; socket namespaces authenticate separately in `apps/gateway/src/socket/webui-handlers.ts` and `apps/gateway/src/socket/cli-handlers.ts`.
+- **Threading:** Node gateway uses a single event loop with async DB/Redis/socket I/O in `apps/gateway/src/index.ts`; CLI uses Bun/Node APIs with child ACP processes and local SQLite in `apps/mobvibe-cli/src/daemon/daemon.ts` and `apps/mobvibe-cli/src/acp/session-manager.ts`.
+- **Global state:** Gateway creates module-level `app`, `httpServer`, `io`, `cliRegistry`, `sessionRouter`, `instanceRegistry`, `userAffinity`, and timers in `apps/gateway/src/index.ts`; WebUI creates singleton `queryClient` in `apps/webui/src/app/AppProviders.tsx` and singleton `gatewaySocket` in `apps/webui/src/lib/socket.ts`.
+- **Circular imports:** Not detected during mapping; maintain shared type definitions in `packages/shared/src` to prevent app-to-app imports.
+- **State locality:** Do not persist chat history in gateway DB; session history belongs in CLI WAL at `apps/mobvibe-cli/src/wal/wal-store.ts`.
+- **Authentication split:** Browser WebUI authenticates through Better Auth cookies; Tauri WebUI passes bearer tokens in `apps/webui/src/lib/api.ts` and `apps/webui/src/lib/socket.ts`; CLI authenticates with signed device tokens in `apps/gateway/src/socket/cli-handlers.ts`.
+- **Package boundaries:** Apps may import `@mobvibe/shared` and `@mobvibe/ui`; avoid direct imports from another app's `src` tree.
 
 ## Anti-Patterns
 
-### Bypassing Shared Contracts
+### Bypassing Shared Protocol Types
 
-**What happens:** Defining socket/API payload shapes locally in an app instead of in `packages/shared/src/types/socket-events.ts` creates mismatches between WebUI, gateway, and CLI.
-**Why it's wrong:** The same event crosses `apps/webui/src/lib/socket.ts`, `apps/gateway/src/socket/*`, and `apps/mobvibe-cli/src/daemon/socket-client.ts`; local-only types make runtime drift likely.
-**Do this instead:** Add or update the shared type in `packages/shared/src/types/socket-events.ts` and re-export it from `packages/shared/src/index.ts` before using it in app code.
+**What happens:** New socket/REST payloads are defined ad hoc inside an app file instead of `packages/shared/src/types/socket-events.ts` or `packages/shared/src/types/session.ts`.
+**Why it's wrong:** WebUI, gateway, and CLI drift apart and runtime payload mismatches become invisible to TypeScript.
+**Do this instead:** Add or update the shared type in `packages/shared/src/types/socket-events.ts`, export it from `packages/shared/src/index.ts`, and consume it from `apps/webui/src/lib/api.ts`, `apps/gateway/src/services/session-router.ts`, and `apps/mobvibe-cli/src/daemon/socket-client.ts`.
 
-### Storing Durable Session History in Gateway Memory
+### Treating Gateway Registry as Durable Storage
 
-**What happens:** Treating `CliRegistry` in `apps/gateway/src/services/cli-registry.ts` as durable session storage loses data on gateway restart or CLI disconnect.
-**Why it's wrong:** Gateway registry is an in-memory connected-client index; ordered event history belongs to the CLI WAL.
-**Do this instead:** Persist session events through `apps/mobvibe-cli/src/wal/wal-store.ts` and expose recovery through `SessionManager`/`SessionRouter` RPC paths.
+**What happens:** Business logic assumes `CliRegistry.sessions` in `apps/gateway/src/services/cli-registry.ts` contains complete historical session data.
+**Why it's wrong:** The registry is process-local and rebuilt from connected CLIs; it can be empty after restarts or disconnects.
+**Do this instead:** Ask the CLI for history via RPC/backfill through `apps/gateway/src/services/session-router.ts` and persist/replay from `apps/mobvibe-cli/src/wal/wal-store.ts`.
 
-### Emitting Cross-User Events Broadly
+### Direct Component-Level Socket Creation
 
-**What happens:** Emitting WebUI socket events without `userId` filtering can leak session metadata across users.
-**Why it's wrong:** WebUI sockets are authenticated per user in `apps/gateway/src/socket/webui-handlers.ts`, and CLI sessions are indexed by `userId` in `apps/gateway/src/services/cli-registry.ts`.
-**Do this instead:** Use `emitToUser()` or subscription ownership checks in `apps/gateway/src/socket/webui-handlers.ts` and user-scoped lookup methods in `apps/gateway/src/services/session-router.ts`.
+**What happens:** Components or hooks instantiate `io()` directly instead of using `gatewaySocket`.
+**Why it's wrong:** Duplicate sockets break subscription tracking, reconnect behavior, and auth handling.
+**Do this instead:** Add typed event helpers to `apps/webui/src/lib/socket.ts` and consume them through hooks like `apps/webui/src/hooks/useSocket.ts`.
 
-### Adding App-Specific Logic to `packages/shared`
+### Decrypting Session Content in Gateway
 
-**What happens:** Putting runtime behavior that depends on Express, React, Bun, Socket.io, or Tauri into `packages/shared/src` couples all packages to app-specific environments.
-**Why it's wrong:** Shared is consumed by Node gateway, browser/Tauri WebUI, and Bun CLI; platform-specific imports can break one target.
-**Do this instead:** Keep `packages/shared/src` to platform-neutral types, validators, crypto helpers, and constants; place runtime adapters in `apps/gateway/src/lib`, `apps/webui/src/lib`, or `apps/mobvibe-cli/src/lib`.
+**What happens:** Gateway route/socket code inspects plaintext user prompts or assistant responses.
+**Why it's wrong:** The architecture promises E2EE; gateway should only authenticate, route, and persist non-content metadata.
+**Do this instead:** Keep payload encryption/decryption in WebUI/CLI crypto flows (`apps/webui/src/lib/e2ee.ts`, `apps/mobvibe-cli/src/e2ee/crypto-service.ts`, `packages/shared/src/crypto/index.ts`) and route `EncryptedPayload` through gateway unchanged.
 
 ## Error Handling
 
-**Strategy:** Use typed `ErrorDetail` for API/RPC-facing errors, structured pino logs for gateway/CLI runtime errors, and UI normalization in WebUI.
+**Strategy:** Use typed error payloads at protocol boundaries, structured pino logs on gateway/CLI, and normalized `ApiError` objects in WebUI.
 
 **Patterns:**
-- REST routes build request/authorization/internal errors with helpers from `@mobvibe/shared` in `apps/gateway/src/routes/sessions.ts` and `apps/gateway/src/routes/fs.ts`.
-- Gateway logs request lifecycle with a generated `x-request-id` in `apps/gateway/src/index.ts:273`.
-- `SessionRouter` maps RPC errors into rejected promises and logs code/scope/detail in `apps/gateway/src/services/session-router.ts:103`.
-- CLI ACP errors become `ErrorDetail` through helpers in `apps/mobvibe-cli/src/acp/acp-connection.ts:177`.
-- WebUI wraps failed REST responses in `ApiError` and `ErrorDetail` in `apps/webui/src/lib/api.ts:63`.
+- Shared error shape is defined and exported from `packages/shared/src/types/errors.ts` via `packages/shared/src/index.ts`.
+- Gateway routes respond with `{ error: ErrorDetail }` through helpers like `respondError` in `apps/gateway/src/routes/sessions.ts:28`.
+- Gateway RPC errors from CLI reject pending promises with logged structured details in `apps/gateway/src/services/session-router.ts:111`.
+- WebUI REST failures throw `ApiError` from `apps/webui/src/lib/api.ts:63` and fallback errors from `apps/webui/src/lib/error-utils.ts`.
+- CLI logs daemon/session/socket failures through pino logger imports such as `apps/mobvibe-cli/src/daemon/daemon.ts:10` and `apps/mobvibe-cli/src/daemon/socket-client.ts:45`.
 
 ## Cross-Cutting Concerns
 
-**Logging:** Gateway and CLI use pino loggers from `apps/gateway/src/lib/logger.ts` and `apps/mobvibe-cli/src/lib/logger.ts`; WebUI uses browser console in socket/bootstrap paths such as `apps/webui/src/lib/socket.ts` and `apps/webui/src/main.tsx`.
-**Validation:** Gateway validates request bodies/queries inline in route modules such as `apps/gateway/src/routes/sessions.ts`; shared validation exists for ACP schemas and prompt images in `packages/shared/src/validation/acp-schemas.ts` and `packages/shared/src/prompt-images.ts`.
-**Authentication:** Gateway Better Auth config lives in `apps/gateway/src/lib/auth.ts`; REST auth middleware lives in `apps/gateway/src/middleware/auth.ts`; WebUI auth provider lives in `apps/webui/src/components/auth/AuthProvider.tsx`; CLI auth uses signed device tokens from shared crypto in `apps/gateway/src/socket/cli-handlers.ts` and `apps/mobvibe-cli/src/daemon/socket-client.ts`.
-**E2EE:** Shared crypto helpers are exported from `packages/shared/src/crypto`; CLI runtime service lives in `apps/mobvibe-cli/src/e2ee/crypto-service.ts`; WebUI E2EE client logic lives in `apps/webui/src/lib/e2ee.ts`.
-**Persistence:** Gateway uses Drizzle/PostgreSQL in `apps/gateway/src/db`; CLI uses Bun SQLite WAL in `apps/mobvibe-cli/src/wal`; WebUI persisted client state uses storage adapters in `apps/webui/src/lib/storage-adapter.ts`, `apps/webui/src/lib/tauri-storage-adapter.ts`, and Zustand persist in `apps/webui/src/lib/chat-store.ts`.
+**Logging:** Gateway and CLI use pino loggers (`apps/gateway/src/lib/logger.ts`, `apps/mobvibe-cli/src/lib/logger.ts`); WebUI currently uses console diagnostics in browser-facing transport/bootstrap files (`apps/webui/src/main.tsx`, `apps/webui/src/lib/socket.ts`).
+**Validation:** Gateway validates route payloads before RPC calls (`apps/gateway/src/routes/sessions.ts`); CLI validates paths, prompt images, worktree paths, and agent capabilities (`apps/mobvibe-cli/src/acp/session-manager.ts`, `apps/mobvibe-cli/src/daemon/socket-client.ts`); shared validation utilities live in `packages/shared/src/validation/acp-schemas.ts` and `packages/shared/src/prompt-images.ts`.
+**Authentication:** Better Auth handles WebUI/user sessions (`apps/gateway/src/lib/auth.ts`, `apps/gateway/src/index.ts:322`); WebUI supports cookie auth and Tauri bearer tokens (`apps/webui/src/lib/api.ts`, `apps/webui/src/lib/socket.ts`); CLI device auth uses signed tokens verified by gateway (`apps/gateway/src/socket/cli-handlers.ts:72`).
+**Authorization:** Gateway scopes session/machine lookups to user IDs in route handlers and `SessionRouter` (`apps/gateway/src/routes/sessions.ts:96`, `apps/gateway/src/services/session-router.ts:81`).
+**Internationalization:** WebUI and website initialize i18n from `apps/webui/src/i18n` and `apps/website/src/i18n`; route/components use `react-i18next`.
+**Styling:** WebUI/website use Tailwind CSS and shared `@mobvibe/ui` primitives; Vite aliases `@` to each app's `src` (`apps/webui/vite.config.ts`, `apps/website/vite.config.ts`).
+**Deployment:** Gateway deployment config is at `fly.toml` and legacy `render.yaml`; WebUI/Website Netlify configs are `apps/webui/netlify.toml` and `apps/website/netlify.toml`.
 
 ---
 
-*Architecture analysis: 2026-05-11*
+*Architecture analysis: 2026-05-12*
