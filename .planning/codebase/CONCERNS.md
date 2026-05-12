@@ -1,217 +1,200 @@
----
-last_mapped_commit: 7e89508dcca9477698c5e492fe7b8fdf9195f9af
-mapping_date: 2026-05-11
----
-
 # Codebase Concerns
 
-**Analysis Date:** 2026-05-11
+**Analysis Date:** 2026-05-12
 
 ## Tech Debt
 
-**Large stateful modules concentrate unrelated responsibilities:**
-- Issue: Several files combine protocol handling, persistence coordination, UI state transitions, and edge-case recovery in single modules. `apps/mobvibe-cli/src/acp/session-manager.ts` is 1,856 lines, `apps/mobvibe-cli/src/daemon/socket-client.ts` is 1,581 lines, `apps/webui/src/lib/chat-store.ts` is 1,712 lines, `apps/webui/src/hooks/useSocket.ts` is 1,061 lines, `apps/gateway/src/services/session-router.ts` is 1,157 lines, and `apps/gateway/src/routes/fs.ts` is 797 lines.
-- Files: `apps/mobvibe-cli/src/acp/session-manager.ts`, `apps/mobvibe-cli/src/daemon/socket-client.ts`, `apps/webui/src/lib/chat-store.ts`, `apps/webui/src/hooks/useSocket.ts`, `apps/gateway/src/services/session-router.ts`, `apps/gateway/src/routes/fs.ts`
-- Impact: Changes to session sync, filesystem browsing, git operations, or E2EE have high blast radius. Future agents must read large files to make narrow changes, and regression risk is concentrated around reconnect/backfill and session lifecycle code.
-- Fix approach: Extract vertical submodules by responsibility. Move filesystem RPC handlers from `apps/mobvibe-cli/src/daemon/socket-client.ts` into `apps/mobvibe-cli/src/daemon/fs-rpc-handlers.ts`; move git RPC handlers into `apps/mobvibe-cli/src/daemon/git-rpc-handlers.ts`; split `apps/webui/src/lib/chat-store.ts` into message reducers, session metadata reducers, and persistence adapters while preserving Zustand public actions.
+**Large session orchestration modules:**
+- Issue: Core session, socket, and chat behavior is concentrated in very large files with many responsibilities.
+- Files: `apps/mobvibe-cli/src/acp/session-manager.ts` (1856 lines), `apps/mobvibe-cli/src/daemon/socket-client.ts` (1581 lines), `apps/webui/src/lib/chat-store.ts` (1712 lines), `apps/webui/src/hooks/useSocket.ts` (884 lines), `apps/gateway/src/services/session-router.ts` (1157 lines), `apps/gateway/src/routes/sessions.ts` (925 lines), `apps/gateway/src/routes/fs.ts` (797 lines).
+- Impact: Small behavior changes require understanding transport, state management, persistence, and UI synchronization together; regression risk is high around reconnects, replay, permissions, and history backfill.
+- Fix approach: Split by responsibility while preserving public contracts: route validation helpers in `apps/gateway/src/routes/*`, RPC dispatch in `apps/gateway/src/services/session-router.ts`, CLI filesystem/git handlers in `apps/mobvibe-cli/src/daemon/`, and web session-event reducers/hooks in `apps/webui/src/hooks/` and `apps/webui/src/lib/`.
 
-**Gateway route files duplicate validation and error mapping:**
-- Issue: `apps/gateway/src/routes/sessions.ts` and `apps/gateway/src/routes/fs.ts` each define local `getErrorMessage`, `respondError`, `buildRequestValidationError`, and `buildAuthorizationError` helpers, then repeat `getUserId` checks and string-matching on error messages for each endpoint.
-- Files: `apps/gateway/src/routes/sessions.ts`, `apps/gateway/src/routes/fs.ts`
-- Impact: New REST endpoints can drift in response shape, status codes, and authorization semantics. String matching such as `message.includes("Session not found")` couples route behavior to exact service error text.
-- Fix approach: Move shared route helpers to `apps/gateway/src/routes/route-errors.ts` and return typed `AppError` instances from `apps/gateway/src/services/session-router.ts` instead of relying on message text.
+**Duplicated request validation and error response plumbing:**
+- Issue: REST route modules define repeated `getErrorMessage`, `respondError`, `buildRequestValidationError`, and `buildAuthorizationError` helpers instead of a shared route utility.
+- Files: `apps/gateway/src/routes/fs.ts`, `apps/gateway/src/routes/sessions.ts`.
+- Impact: Error shape, status mapping, and authorization leak behavior can drift when new endpoints are added.
+- Fix approach: Move shared helpers to `apps/gateway/src/routes/route-errors.ts` or `apps/gateway/src/lib/http-errors.ts`; keep route handlers focused on parsing, authorization, and service calls.
 
-**Compaction is present but disabled because history retention is unsafe:**
-- Issue: The default compaction config disables automatic compaction because acked events are the only history source. The config comments also document removed consolidation fields and note that chunk consolidation is not implemented as a config-controlled feature.
-- Files: `apps/mobvibe-cli/src/config.ts`, `apps/mobvibe-cli/src/wal/wal-store.ts`, `apps/mobvibe-cli/src/wal/consolidator.ts`
-- Impact: Long-running CLI installations accumulate local SQLite WAL data indefinitely unless the user manually runs compaction. Re-enabling compaction without a durable history source risks deleting the only replayable session history.
-- Fix approach: Add a tested retention model before enabling automatic compaction. Keep a minimum durable snapshot per session in `apps/mobvibe-cli/src/wal/wal-store.ts`, then make `apps/mobvibe-cli/src/config.ts` enable compaction only after backfill can recover from snapshots and unacked events.
+**Mixed production logging patterns in web UI:**
+- Issue: Browser socket and backfill code uses `console.log`, `console.warn`, and `console.error` directly.
+- Files: `apps/webui/src/lib/socket.ts`, `apps/webui/src/hooks/useSocket.ts`, `apps/webui/src/lib/e2ee.ts`.
+- Impact: Logs are noisy in production, cannot be leveled consistently, and may expose operational details in user consoles.
+- Fix approach: Add a small web logger in `apps/webui/src/lib/` with environment-aware levels; route socket, E2EE, and backfill diagnostics through it.
 
-**Registry and first-run agent selection failures degrade into empty backend lists:**
-- Issue: `apps/mobvibe-cli/src/config.ts` records `registryFetchError` but still returns `acpBackends: []` when registry loading or detection fails. `enabledAgents` filtering can also produce no backends if IDs do not match the current registry.
-- Files: `apps/mobvibe-cli/src/config.ts`, `apps/mobvibe-cli/src/startup-preflight.ts`, `apps/mobvibe-cli/src/registry/registry-client.ts`, `apps/mobvibe-cli/src/registry/agent-detector.ts`
-- Impact: The daemon can appear connected while no agents are runnable. Users see empty backend lists in WebUI instead of a direct recovery path.
-- Fix approach: Keep the current graceful config loading, but surface a typed startup health issue through the gateway registration payload and WebUI machine status. Use `apps/mobvibe-cli/src/startup-preflight.ts` as the single source for actionable remediation text.
+**Silent storage and crypto fallback failures:**
+- Issue: Several storage paths swallow errors and continue with degraded state.
+- Files: `apps/webui/src/lib/storage-adapter.ts`, `apps/webui/src/lib/auth-token.ts`, `apps/webui/src/lib/e2ee.ts`.
+- Impact: Users can lose persisted auth/E2EE state or fall back from Tauri storage to `localStorage` without visible diagnostics; support/debugging is difficult.
+- Fix approach: Return explicit status from storage helpers and show recoverable warnings in settings/login flows; log non-secret failure metadata through a web logger.
+
+**Documentation drift around package layout:**
+- Issue: The root guide describes `packages/core/`, while the current package list includes `packages/core/`, `packages/shared/`, and `packages/ui/`; `packages/ui/` is not documented in the root structure overview.
+- Files: `AGENTS.md`, `packages/ui/src/index.ts`, `packages/core/`, `packages/shared/`.
+- Impact: New agents may place shared UI components in app-local folders instead of `packages/ui/src/`, or miss the UI package during refactors.
+- Fix approach: Update `AGENTS.md` and related docs to include `packages/ui/` placement and package-level responsibilities.
 
 ## Known Bugs
 
-**Socket affinity is initialized after WebUI handlers are registered:**
-- Symptoms: `setupWebuiHandlers` receives the current `userAffinity` value before `initAffinity()` assigns it. Since `userAffinity` is `null` at module initialization time, WebUI socket handlers that depend on the passed argument can run without the affinity manager even when Redis later connects.
-- Files: `apps/gateway/src/index.ts`, `apps/gateway/src/socket/webui-handlers.ts`, `apps/gateway/src/services/user-affinity.ts`
-- Trigger: Start the gateway with `REDIS_URL` configured and multiple Fly.io instances. WebUI socket handler setup happens before async affinity initialization completes.
-- Workaround: HTTP REST and manual WebSocket upgrade checks still reference the module-level `userAffinity` variable in `apps/gateway/src/index.ts`; however, socket namespace logic that captures the initial argument remains fragile.
+**Potential stale session synchronization after backfill errors:**
+- Symptoms: A session can display a warning and best-effort pending events after backfill failure, but message history may remain stale.
+- Files: `apps/webui/src/hooks/useSocket.ts` lines 269-295, `apps/webui/src/hooks/backfill-manager.ts`.
+- Trigger: Event gap, revision change, or reconnect occurs while `/events` backfill fails.
+- Workaround: User-triggered history sync or reconnect can replay from sequence 0.
 
-**Unbounded encrypted-event buffering can grow memory for missing keys:**
-- Symptoms: Live or backfilled encrypted events are stored in `encryptedBufferRef` while the device lacks a DEK. Unlike `pendingEventsRef`, the encrypted buffer has no max size or forced reset threshold.
-- Files: `apps/webui/src/hooks/useSocket.ts`, `apps/webui/src/lib/e2ee.ts`
-- Trigger: Open a session with `wrappedDek` metadata that the current device cannot unwrap, then receive large encrypted backfills or reconnect streams.
-- Workaround: The buffer is cleared when a session resets, detaches non-recoverably, or a DEK becomes available. There is no cap for sustained missing-key sessions.
+**Machine placeholder tokens are deterministic:**
+- Symptoms: New machine records receive `machineToken` values derived from the machine ID instead of random tokens.
+- Files: `apps/gateway/src/services/db-service.ts` lines 103-112, `apps/gateway/src/db/schema.ts` lines 87-105.
+- Trigger: `upsertMachine` creates a new machine record during CLI registration.
+- Workaround: CLI authentication currently uses device public-key signatures in `apps/gateway/src/socket/cli-handlers.ts`, so the placeholder token is not the active auth mechanism.
 
-**Image and text file preview reads entire files into memory:**
-- Symptoms: The CLI reads file previews with `fs.readFile(resolved)` for images and `fs.readFile(resolved, "utf8")` for code, then returns the full content over Socket.io.
-- Files: `apps/mobvibe-cli/src/daemon/socket-client.ts`, `apps/gateway/src/routes/fs.ts`, `apps/gateway/src/services/session-router.ts`
-- Trigger: Request `/fs/session/file` for a large image, binary file with a text extension, generated file, or log file under a session working directory.
-- Workaround: Socket.io has `maxHttpBufferSize: 4 * 1024 * 1024` in `apps/gateway/src/index.ts`, but the CLI still loads the file before the transport limit applies.
+**Host filesystem browsing exposes broad local machine paths after device auth:**
+- Symptoms: The web UI can request host filesystem roots and entries for a paired machine, starting at the user's home directory on POSIX or drive roots on Windows.
+- Files: `apps/gateway/src/routes/fs.ts` lines 45-120, `apps/mobvibe-cli/src/daemon/host-fs.ts`, `apps/mobvibe-cli/src/daemon/socket-client.ts` lines 533-579.
+- Trigger: Authenticated web user opens host filesystem selection for a connected machine.
+- Workaround: Hidden files are filtered for host entries in `apps/mobvibe-cli/src/daemon/socket-client.ts` lines 557-566; no allowlist is enforced.
 
 ## Security Considerations
 
-**Pairing secrets are persisted in browser localStorage as raw secrets:**
-- Risk: E2EE master secrets are stored in `localStorage` under `mobvibe_e2ee_secrets` when Tauri secure store access is unavailable or fails. Any XSS or browser-extension compromise can read the long-lived pairing secret and decrypt session DEKs for paired sessions.
-- Files: `apps/webui/src/lib/e2ee.ts`, `apps/webui/src/App.tsx`, `packages/shared/src/crypto/keys.ts`
-- Current mitigation: Tauri attempts to use `tauriStoreSet("app-state.json", STORAGE_KEY, secrets)` before falling back to localStorage. Secret fingerprints shown to users are derived from public auth keys, not the raw secret.
-- Recommendations: Prefer Web Crypto non-extractable keys or IndexedDB-wrapped secrets for web, make the localStorage fallback explicit in UI, and avoid silent fallback from Tauri store failures in `apps/webui/src/lib/e2ee.ts`.
+**Bearer token in WebSocket query string:**
+- Risk: Tauri WebUI mirrors the bearer token into the Engine.IO query for Fly affinity, which can appear in URL logs, proxies, and telemetry.
+- Files: `apps/webui/src/lib/socket.ts` lines 44-50, `apps/gateway/src/index.ts` lines 34-49, `apps/gateway/src/socket/webui-handlers.ts` lines 95-114.
+- Current mitigation: The token is also sent through Socket.io auth/Authorization and validated by Better Auth before connection is accepted.
+- Recommendations: Prefer upgrade headers or short-lived affinity-only tokens; if query transport remains, redact `bearerToken` in all HTTP/proxy logs and keep token TTL short.
 
-**Bearer token can be supplied in WebSocket query string:**
-- Risk: `extractUpgradeBearerToken` accepts `bearerToken` from the Socket.io upgrade URL. Query-string tokens can be captured in access logs, browser history, reverse-proxy logs, or monitoring traces.
-- Files: `apps/gateway/src/index.ts`, `apps/gateway/src/socket/webui-handlers.ts`, `apps/webui/src/lib/socket.ts`
-- Current mitigation: Standard `Authorization: Bearer` headers and cookies are supported. The query-token path appears to exist as a fallback for environments that cannot set auth headers during WebSocket upgrade.
-- Recommendations: Prefer auth payload or headers for WebSocket auth, phase out `bearerToken` query support, and redact query strings from `http_request` logs in `apps/gateway/src/index.ts`.
+**E2EE master secrets persisted in browser storage:**
+- Risk: Pairing secrets are stored in Tauri app-state storage or browser `localStorage`; any XSS or local profile compromise can extract long-lived secrets.
+- Files: `apps/webui/src/lib/e2ee.ts` lines 23-30 and 217-294, `apps/webui/src/components/settings/E2EESettings.tsx`.
+- Current mitigation: Secrets are not committed and are only stored client-side; E2EE payloads remain encrypted when keys are absent.
+- Recommendations: Use platform keychain/secure storage for Tauri, encrypt persisted web secrets with a user passphrase or WebAuthn-bound key, and add a visible device-secret rotation flow.
 
-**Wildcard trusted origins weaken auth and CORS protections:**
-- Risk: If `GATEWAY_CORS_ORIGINS` includes `*`, `apps/gateway/src/lib/auth.ts` passes `trustedOrigins: ["*"]` to Better Auth and `apps/gateway/src/index.ts` allows all origins. This is risky for credentialed browser requests and auth callbacks.
-- Files: `apps/gateway/src/config.ts`, `apps/gateway/src/index.ts`, `apps/gateway/src/lib/auth.ts`
-- Current mitigation: Origins are configured via environment variable and rejected origins are logged when wildcard is not used.
-- Recommendations: Disallow `*` outside development or preview deployments. Validate `GATEWAY_CORS_ORIGINS` in `apps/gateway/src/config.ts` and fail startup in production when credentials are enabled with a wildcard origin.
+**Unauthenticated-origin allowance for no-Origin requests:**
+- Risk: CORS accepts requests without an Origin header, and WebSocket connections rely on auth instead of rejecting missing origins.
+- Files: `apps/gateway/src/index.ts` lines 120-134, `apps/gateway/src/socket/webui-handlers.ts` lines 92-126, `apps/gateway/src/socket/cli-handlers.ts` lines 72-133.
+- Current mitigation: REST routes use Better Auth in `apps/gateway/src/middleware/auth.ts`; CLI sockets require signed device tokens.
+- Recommendations: Keep this behavior only for trusted native/CLI clients; add explicit comments/tests for allowed no-Origin clients and ensure browser-sensitive endpoints remain authenticated.
 
-**REST and Socket.io lack explicit rate limiting:**
-- Risk: The gateway uses Express, Better Auth, Socket.io, and JSON body limits but no `rate-limit`/`helmet`-style middleware is detected in `apps/gateway/src/index.ts`. Auth endpoints, session creation, filesystem RPCs, git grep/log, and notification registration can be spammed by authenticated or unauthenticated clients depending on route.
-- Files: `apps/gateway/src/index.ts`, `apps/gateway/src/routes/sessions.ts`, `apps/gateway/src/routes/fs.ts`, `apps/gateway/src/socket/webui-handlers.ts`, `apps/gateway/src/socket/cli-handlers.ts`
-- Current mitigation: `express.json({ limit: "4mb" })` and Socket.io `maxHttpBufferSize` restrict payload size. Most application routes use `requireAuth`.
-- Recommendations: Add per-IP unauthenticated limits around `/api/auth/*` and per-user limits for expensive RPC routes in `apps/gateway/src/routes/fs.ts` and `apps/gateway/src/routes/sessions.ts`.
-
-**OAuth and session tokens are stored as plain text in application tables:**
-- Risk: Better Auth account tokens, session tokens, machine tokens, and web push auth secrets are stored in text columns. A database leak exposes active tokens unless Better Auth or the caller hashes/encrypts them before insertion.
-- Files: `apps/gateway/src/db/schema.ts`, `apps/gateway/src/lib/auth.ts`, `apps/gateway/src/routes/machines.ts`, `apps/gateway/src/routes/notifications.ts`
-- Current mitigation: Database access is centralized through Drizzle and Better Auth, and token columns have indexes/uniqueness where needed.
-- Recommendations: Confirm Better Auth token hashing behavior for `session.token`; hash machine tokens before storage; encrypt OAuth refresh tokens and web push secrets with an application KMS key before persistence.
+**Filesystem and git RPCs trust connected CLI as local authority:**
+- Risk: Gateway routes forward file, git, and history requests to the CLI; authorization is user-scoped but local path policy is enforced only by CLI-side helpers.
+- Files: `apps/gateway/src/routes/fs.ts`, `apps/gateway/src/services/session-router.ts`, `apps/mobvibe-cli/src/daemon/socket-client.ts` lines 581-681 and 763-839, `apps/mobvibe-cli/src/daemon/path-utils.ts`.
+- Current mitigation: Session file requests use `resolveWithinCwd` in `apps/mobvibe-cli/src/daemon/path-utils.ts`; gateway session lookup is user-scoped in `apps/gateway/src/services/session-router.ts` lines 75-101.
+- Recommendations: Keep path validation at the CLI boundary, add maximum file-size checks before `fs.readFile`, and test symlink/absolute-path behavior for POSIX and Windows.
 
 ## Performance Bottlenecks
 
-**Recursive resource listing walks the working tree on demand:**
-- Problem: `listSessionResources` recursively traverses the session working directory and collects up to `MAX_RESOURCE_FILES = 2000` files for each `rpc:fs:resources` request.
-- Files: `apps/mobvibe-cli/src/daemon/socket-client.ts`, `apps/gateway/src/routes/fs.ts`
-- Cause: The traversal calls `fs.readdir` recursively, applies `.gitignore`, and stops at a hard file count. There is no cache, cursor, depth limit, or cancellation signal.
-- Improvement path: Return paginated directory/resource results from `apps/mobvibe-cli/src/daemon/socket-client.ts`, add a short-lived cache keyed by `sessionId` + cwd + gitignore mtime, and expose cursor parameters through `apps/gateway/src/routes/fs.ts`.
+**Unbounded full-file previews:**
+- Problem: File preview RPC reads whole text/image files into memory and returns base64 data for images.
+- Files: `apps/mobvibe-cli/src/daemon/socket-client.ts` lines 610-640, `apps/webui/src/components/app/previews/CodePreview.tsx`.
+- Cause: No file-size cap, streaming, or partial-read path exists before `fs.readFile`.
+- Improvement path: Add stat-based limits in `apps/mobvibe-cli/src/daemon/socket-client.ts`; return metadata plus a truncated preview and require explicit download/open for large files.
 
-**Git operations rely on subprocess output buffers and broad queries:**
-- Problem: Git helpers use `execFileAsync("git", ...)` with `MAX_BUFFER = 10 * 1024 * 1024`, then parse complete stdout in memory for status, grep, log, show, stash, blame, and diff operations.
-- Files: `apps/mobvibe-cli/src/lib/git-utils.ts`, `apps/mobvibe-cli/src/daemon/socket-client.ts`, `apps/gateway/src/routes/fs.ts`
-- Cause: The implementation favors simple full-output subprocess calls over streaming/pagination. Large repositories or binary-heavy diffs can exceed buffers or block the CLI event loop while parsing.
-- Improvement path: Keep `execFile` for bounded metadata calls, but stream or paginate `git log`, `git grep`, `git show`, and large diffs. Enforce route-level limits and explicit max counts in `apps/gateway/src/routes/fs.ts` before forwarding RPCs.
+**Large resource scans per session:**
+- Problem: Resource discovery walks session trees until `MAX_RESOURCE_FILES` is reached.
+- Files: `apps/mobvibe-cli/src/daemon/socket-client.ts` lines 57 and 1407-1412, `apps/webui/src/components/app/CommandPalette.tsx`, `apps/webui/src/components/app/ChatFooter.tsx`.
+- Cause: The CLI scans filesystem entries and applies ignore rules on demand.
+- Improvement path: Cache resource listings per session cwd with invalidation, paginate results, and keep search/filtering incremental in web UI.
 
-**Chat state persistence stores full sanitized message history:**
-- Problem: `partializeChatState` persists every session and maps every message through `sanitizeMessageForPersist`. Large histories, terminal outputs, and tool-call content can make localStorage writes expensive and quota-prone.
-- Files: `apps/webui/src/lib/chat-store.ts`, `apps/webui/src/hooks/useSocket.ts`
-- Cause: Zustand persistence uses full-object snapshots. Backfill cursor state and local message history share the same persisted store.
-- Improvement path: Persist lightweight session metadata and cursors in `apps/webui/src/lib/chat-store.ts`; store large message histories in IndexedDB or rely on WAL backfill from the CLI.
+**In-memory registry scans for user/session operations:**
+- Problem: Connected sockets and session arrays are scanned for status, subscription, and affinity operations.
+- Files: `apps/gateway/src/socket/webui-handlers.ts` lines 59-67 and 204-218, `apps/gateway/src/index.ts` lines 88-111, `apps/gateway/src/services/cli-registry.ts`.
+- Cause: Maps are indexed primarily by machine/socket, while many operations need user/session views.
+- Improvement path: Maintain explicit `userId -> web socket ids` and `sessionId -> owner userId` indexes; update them on connect/disconnect and session changes.
 
-**WAL read-time consolidation reprocesses every queried batch:**
-- Problem: `consolidateEventsForRead` filters stubs and merges chunks on every read. It is linear in the queried batch and handles text, terminal output, usage, and tool-call merging in application memory.
-- Files: `apps/mobvibe-cli/src/wal/consolidator.ts`, `apps/mobvibe-cli/src/wal/wal-store.ts`, `apps/mobvibe-cli/src/acp/session-manager.ts`
-- Cause: Consolidation is deliberately read-time for correctness/backward compatibility, and `apps/mobvibe-cli/src/config.ts` notes write-time chunk consolidation is not implemented.
-- Improvement path: Keep read-time consolidation for legacy data, but add optional write-time coalescing for new terminal/text chunks with tests in `apps/mobvibe-cli/src/wal/__tests__/consolidator.test.ts`.
+**Git commands use fixed 10MB process buffers:**
+- Problem: Large diffs/logs/grep results can exceed buffers or consume memory.
+- Files: `apps/mobvibe-cli/src/lib/git-utils.ts` lines 14, 479-507, 584-665, 899-950.
+- Cause: `execFileAsync` collects stdout in memory for git operations.
+- Improvement path: Add pagination/limits to every git RPC, stream large outputs, and return explicit truncation flags to the web UI.
 
 ## Fragile Areas
 
-**Session event ordering and recovery is complex and cross-cutting:**
-- Files: `apps/mobvibe-cli/src/wal/wal-store.ts`, `apps/mobvibe-cli/src/wal/seq-generator.ts`, `apps/mobvibe-cli/src/daemon/socket-client.ts`, `apps/webui/src/hooks/useSocket.ts`, `apps/webui/src/lib/chat-store.ts`
-- Why fragile: Sequence numbers are generated per session/revision in memory, persisted to SQLite, replayed after reconnect, buffered in WebUI, and reset on revision mismatch. Bugs can duplicate messages, drop chunks, or force full backfills.
-- Safe modification: Keep changes vertical and test both CLI WAL behavior and WebUI ingestion. Add or update tests near `apps/mobvibe-cli/src/wal/__tests__/wal-store.test.ts`, `apps/webui/src/hooks/__tests__/useSocket.test.tsx`, and `apps/webui/src/lib/__tests__/chat-store.test.ts` for every cursor/revision change.
-- Test coverage: Good unit coverage exists for WAL, WebUI socket buffering, and chat-store behavior, but multi-process reconnect behavior still relies on mocked unit boundaries.
+**WAL replay, cursor, and backfill ordering:**
+- Files: `apps/mobvibe-cli/src/wal/wal-store.ts`, `apps/webui/src/hooks/useSocket.ts`, `apps/webui/src/hooks/use-session-backfill.ts`, `apps/webui/src/hooks/backfill-manager.ts`.
+- Why fragile: Correctness depends on revision, sequence, pending queues, encrypted event buffering, and reconnect timing staying in sync.
+- Safe modification: Add tests before changing event ingestion; preserve `lastAppliedSeq`, revision reset, and pending overflow behavior in `apps/webui/src/hooks/useSocket.ts` lines 420-480.
+- Test coverage: Strong hook tests exist in `apps/webui/src/hooks/__tests__/useSocket.test.tsx`, but cross-process gateway/CLI/WebUI reconnect behavior still depends on integration/e2e coverage.
 
-**Multi-instance affinity has graceful degradation that can hide routing defects:**
-- Files: `apps/gateway/src/index.ts`, `apps/gateway/src/services/redis.ts`, `apps/gateway/src/services/user-affinity.ts`, `apps/gateway/src/middleware/fly-replay.ts`, `apps/gateway/src/socket/webui-handlers.ts`
-- Why fragile: Redis init failure returns `null`, Fly replay middleware catches errors and passes through, and WebSocket upgrade affinity catches errors and proceeds. This preserves availability but can route stateful REST/RPC calls to an instance without the needed in-memory CLI connection.
-- Safe modification: Preserve graceful degradation for single-instance local dev, but make production affinity state visible in `/health` and tests. Treat Redis-required deployment modes differently from local mode.
-- Test coverage: Unit-level tests cover config and service behavior; multi-instance Fly replay and Redis failure modes need integration tests around `apps/gateway/src/index.ts` and `apps/gateway/src/middleware/fly-replay.ts`.
+**Permission decision lifecycle:**
+- Files: `apps/mobvibe-cli/src/acp/session-manager.ts`, `apps/mobvibe-cli/src/daemon/socket-client.ts` lines 479-501, `apps/gateway/src/socket/cli-handlers.ts`, `apps/webui/src/hooks/useSocket.ts` lines 530-543.
+- Why fragile: Permission requests cross ACP, CLI socket, gateway socket, WebUI store, and back to CLI; request ID mismatches can leave unresolved promises.
+- Safe modification: Keep request IDs stable end-to-end and add timeout/cancellation tests around disconnects.
+- Test coverage: Unit tests exist under `apps/mobvibe-cli/src/acp/__tests__/session-manager.test.ts` and `apps/gateway/src/socket/__tests__/cli-handlers.test.ts`; UI decision state tests should accompany UI changes.
 
-**Filesystem and git RPCs cross trust boundaries:**
-- Files: `apps/gateway/src/routes/fs.ts`, `apps/gateway/src/services/session-router.ts`, `apps/mobvibe-cli/src/daemon/socket-client.ts`, `apps/mobvibe-cli/src/daemon/path-utils.ts`, `apps/mobvibe-cli/src/lib/git-utils.ts`
-- Why fragile: Authenticated WebUI requests can make the user’s local CLI read files and execute git subprocesses under session cwd. `resolveWithinCwd` protects session file reads, but route-level numeric parameters, path sizes, and expensive git operations remain loosely bounded.
-- Safe modification: Validate request schemas before RPC forwarding, keep `resolveWithinCwd` as the final guard before local file access, and add negative tests for traversal, symlinks, huge files, and unbounded git queries.
-- Test coverage: `apps/mobvibe-cli/src/daemon/__tests__/path-utils.test.ts` covers path escaping. Additional integration tests should cover `apps/gateway/src/routes/fs.ts` request validation and CLI file preview limits.
+**E2EE bootstrap and encrypted event buffering:**
+- Files: `apps/webui/src/lib/e2ee.ts`, `apps/webui/src/hooks/encrypted-event-buffer.ts`, `apps/webui/src/hooks/useSocket.ts`, `packages/shared/src/crypto/`.
+- Why fragile: Events received before DEK availability are buffered; failures can silently keep encrypted payloads visible to reducers.
+- Safe modification: Preserve `e2ee.hasSessionDek`, `bootstrapSessionE2EE`, and buffer flush behavior; add tests for missing/rotated secrets.
+- Test coverage: `apps/webui/src/__tests__/e2ee.test.ts` covers E2EE manager behavior; integration tests should cover real socket event ordering.
 
-**E2EE behavior depends on silent fallback and runtime-only maps:**
-- Files: `apps/webui/src/lib/e2ee.ts`, `apps/webui/src/hooks/useSocket.ts`, `apps/mobvibe-cli/src/e2ee/crypto-service.ts`, `packages/shared/src/crypto/envelope.ts`
-- Why fragile: Session DEKs live in runtime maps, pairing secrets can fall back to localStorage, decryption failures return the original encrypted event, and WebUI buffers encrypted events until `onDekReady` fires.
-- Safe modification: Treat missing-key, decrypt-failed, and storage-fallback as explicit UI states. Do not add new encryption paths without tests in `apps/webui/src/__tests__/e2ee.test.ts`, `apps/webui/src/hooks/__tests__/useSocket.test.tsx`, and `apps/mobvibe-cli/src/e2ee/__tests__/crypto-service.test.ts`.
-- Test coverage: E2EE unit tests exist for shared and WebUI logic; browser storage security and Tauri-store fallback behavior need targeted tests.
+**Contenteditable composer DOM reconciliation:**
+- Files: `apps/webui/src/components/app/ChatFooter.tsx` lines 575-608 and 658-939.
+- Why fragile: The component manually rebuilds DOM, tracks selection offsets, token chips, image attachments, and command/resource pickers.
+- Safe modification: Prefer small targeted changes with browser interaction tests; avoid mixing DOM mutation and React-rendered children in the same editable region.
+- Test coverage: `apps/webui/src/components/app/__tests__/ChatFooter.test.tsx` exists; add tests for selection preservation and IME/paste behavior when changing composer logic.
 
 ## Scaling Limits
 
-**Gateway keeps CLI/session routing state in memory:**
-- Current capacity: One `CliRegistry` stores connected CLIs and session summaries in process memory; RPC routing depends on active Socket.io sockets.
-- Limit: Without Redis affinity or if affinity is misconfigured, REST and WebUI sockets can hit an instance that does not own the user’s CLI sockets.
-- Scaling path: Make Redis affinity mandatory in multi-instance production, expose affinity health from `apps/gateway/src/routes/health.ts`, and persist enough routing metadata to recover when instances restart.
+**Gateway in-memory session registry:**
+- Current capacity: Active CLI/session state lives in process memory.
+- Limit: Multi-instance deployments require affinity; instance restarts lose in-memory session lists until CLIs reconnect.
+- Scaling path: Persist session presence metadata or use Redis-backed presence in `apps/gateway/src/services/cli-registry.ts`; keep Fly affinity in `apps/gateway/src/services/user-affinity.ts` as a routing optimization, not the only state bridge.
 
-**Socket.io payloads are capped at 4 MiB:**
-- Current capacity: Gateway config uses `maxHttpBufferSize: 4 * 1024 * 1024`.
-- Limit: Large prompt images, file previews, terminal chunks, or consolidated backfills can exceed the transport cap.
-- Scaling path: Use object storage or chunked transfer for large previews and prompt images; add explicit client-side and CLI-side size checks before `socket.emit`.
+**Local SQLite WAL growth:**
+- Current capacity: Events persist locally in Bun SQLite per CLI.
+- Limit: Long-running sessions with terminal output and tool payloads can grow the local DB until compaction/archive runs.
+- Scaling path: Keep compaction commands in `apps/mobvibe-cli/src/index.ts` documented and automate retention in `apps/mobvibe-cli/src/wal/`; expose DB size/retention status in CLI health output.
 
-**Local WAL storage is per-machine SQLite:**
-- Current capacity: WAL persistence uses Bun SQLite in `apps/mobvibe-cli/src/wal/wal-store.ts` under `~/.mobvibe/events.db`.
-- Limit: History is local to each CLI machine, compaction is disabled by default, and other devices depend on the owning CLI being online for backfill.
-- Scaling path: Add durable encrypted history snapshots or server-side metadata indexes while keeping plaintext event payloads local/encrypted.
+**Web UI persisted Zustand state:**
+- Current capacity: Chat/session state persists through a local storage adapter.
+- Limit: Large message histories, terminal output, and session metadata can exceed browser storage quota or slow hydration.
+- Scaling path: Persist only session summaries/cursors in `apps/webui/src/lib/chat-store.ts`; fetch history through backfill on demand and cap terminal snapshots.
 
 ## Dependencies at Risk
 
-**Bun-specific CLI persistence and tests constrain runtime portability:**
-- Risk: The CLI imports `Database` from `bun:sqlite` and uses Bun test conventions. Running the CLI under Node without Bun-compatible SQLite support is not viable.
-- Impact: Packaging or distribution outside Bun requires extra runtime assumptions, and shared code that imports CLI internals inherits Bun constraints.
-- Migration plan: Keep Bun as the CLI runtime if intentional. If Node portability is required, isolate `bun:sqlite` behind an adapter in `apps/mobvibe-cli/src/wal/` and provide a Node SQLite implementation.
+**Bun-specific CLI runtime:**
+- Risk: CLI uses `bun:sqlite`, Bun test, and Bun build scripts.
+- Impact: Runtime and packaging behavior differs from Node packages in the same monorepo.
+- Migration plan: Keep Bun-specific code isolated under `apps/mobvibe-cli/src/`; wrap SQLite access behind `apps/mobvibe-cli/src/wal/` interfaces before introducing alternative runtimes.
 
-**Better Auth schema stores sensitive auth state:**
-- Risk: Auth behavior depends on Better Auth table semantics and plugin behavior for bearer tokens, Tauri callbacks, and OpenAPI exposure.
-- Impact: Better Auth upgrades can change token storage, cookie defaults, endpoint behavior, or schema expectations.
-- Migration plan: Pin upgrade tests around `apps/gateway/src/lib/auth.ts`, `apps/gateway/src/db/schema.ts`, and `apps/gateway/src/socket/webui-handlers.ts`; review Better Auth changelogs before major upgrades.
+**Tauri/web storage split:**
+- Risk: Auth and E2EE storage behavior diverges between browser and Tauri.
+- Impact: Bugs can reproduce only on desktop/mobile wrappers.
+- Migration plan: Keep `apps/webui/src/lib/tauri-store.ts`, `apps/webui/src/lib/auth-token.ts`, and `apps/webui/src/lib/e2ee.ts` covered with adapter tests; document platform storage guarantees.
 
 ## Missing Critical Features
 
-**Production rate limiting and abuse controls are not present:**
-- Problem: No explicit rate limiting middleware or per-user RPC quotas are detected for gateway REST routes, auth endpoints, or Socket.io namespaces.
-- Blocks: Safe public exposure of auth endpoints, git search, filesystem preview, and session creation under hostile traffic.
+**Explicit file preview size limits:**
+- Problem: The CLI reads requested files fully for preview.
+- Blocks: Safe use against large binaries, generated files, or accidental multi-MB images.
 
-**Large file preview safety is incomplete:**
-- Problem: File previews have path containment but no size checks, content sniffing, binary detection, range requests, or streaming.
-- Blocks: Reliable use in large repositories and safe previewing of user-controlled files.
+**Centralized redaction policy:**
+- Problem: Logs include request IDs, paths, user IDs, public keys, and error details across gateway/CLI/web.
+- Blocks: Confident production diagnostics without reviewing each logger call.
 
-**Operational visibility for degraded affinity and registry state is limited:**
-- Problem: Redis affinity can degrade to null and registry loading can return empty backends while the app continues to run.
-- Blocks: Fast diagnosis of “connected but no sessions/backends” or multi-instance routing issues.
+**Secure E2EE secret rotation UX:**
+- Problem: Users can add/remove paired secrets, but the code does not expose a full rotation/recovery workflow.
+- Blocks: Practical response to leaked browser/Tauri local storage.
 
 ## Test Coverage Gaps
 
-**Gateway production hardening paths:**
-- What's not tested: CORS wildcard rejection, rate-limit behavior, query-token redaction, Redis-required production mode, and Better Auth trusted-origin failure cases.
-- Files: `apps/gateway/src/index.ts`, `apps/gateway/src/config.ts`, `apps/gateway/src/lib/auth.ts`, `apps/gateway/src/services/redis.ts`
-- Risk: Security regressions ship through config-only changes.
-- Priority: High
-
-**Filesystem preview limits and symlink behavior:**
-- What's not tested: Huge file preview, binary-as-text preview, symlink traversal under session cwd, and resource-list recursion on deep trees.
-- Files: `apps/mobvibe-cli/src/daemon/socket-client.ts`, `apps/mobvibe-cli/src/daemon/path-utils.ts`, `apps/gateway/src/routes/fs.ts`
-- Risk: CLI memory spikes, leaked local file content within broad cwd scopes, or poor UX on large repositories.
-- Priority: High
-
-**Multi-instance Fly.io routing integration:**
-- What's not tested: End-to-end replay from wrong gateway instance to owning instance for REST and WebSocket flows.
-- Files: `apps/gateway/src/index.ts`, `apps/gateway/src/middleware/fly-replay.ts`, `apps/gateway/src/services/user-affinity.ts`, `apps/gateway/src/socket/webui-handlers.ts`
-- Risk: Users on multi-instance deployments see intermittent 404/503 responses for valid sessions.
-- Priority: High
-
-**E2EE storage fallback and missing-key UX:**
-- What's not tested: Tauri store failure fallback, localStorage secret persistence warnings, encrypted buffer caps, and decrypt-failed UI states.
-- Files: `apps/webui/src/lib/e2ee.ts`, `apps/webui/src/hooks/useSocket.ts`, `apps/webui/src/components/settings/E2EESettings.tsx`
-- Risk: Users lose access to encrypted sessions or unknowingly store secrets in weaker browser storage.
+**Gateway REST route validation consistency:**
+- What's not tested: All invalid query/body permutations across `apps/gateway/src/routes/fs.ts` and `apps/gateway/src/routes/sessions.ts`.
+- Files: `apps/gateway/src/routes/fs.ts`, `apps/gateway/src/routes/sessions.ts`.
+- Risk: New endpoints drift in error shape or status code.
 - Priority: Medium
 
-**CLI registry and agent detection recovery:**
-- What's not tested: Registry fetch failure with stale cache, mismatched `enabledAgents`, and first-run no-backend UI recovery across CLI + gateway + WebUI.
-- Files: `apps/mobvibe-cli/src/config.ts`, `apps/mobvibe-cli/src/startup-preflight.ts`, `apps/mobvibe-cli/src/registry/registry-client.ts`, `apps/webui/src/components/settings/`
-- Risk: Empty agent lists appear as product failure instead of recoverable configuration state.
+**Website and shared UI package behavior:**
+- What's not tested: No matching tests were detected for `apps/website/src/` or `packages/ui/src/` components.
+- Files: `apps/website/src/App.tsx`, `apps/website/src/components/`, `packages/ui/src/`.
+- Risk: Marketing/legal/UI package regressions can ship without automated detection.
 - Priority: Medium
+
+**Large-file and filesystem boundary cases:**
+- What's not tested: Size caps, symlink traversal, image preview memory behavior, and host filesystem access policy.
+- Files: `apps/mobvibe-cli/src/daemon/socket-client.ts`, `apps/mobvibe-cli/src/daemon/host-fs.ts`, `apps/mobvibe-cli/src/daemon/path-utils.ts`.
+- Risk: Performance and local file exposure issues are missed.
+- Priority: High
 
 ---
 
-*Concerns audit: 2026-05-11*
+*Concerns audit: 2026-05-12*
