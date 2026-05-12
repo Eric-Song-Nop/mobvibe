@@ -1,7 +1,7 @@
 [build]
   publish = "apps/webui/dist"
-  command = "pnpm install --frozen-lockfile && pnpm --filter @mobvibe/shared build && pnpm --filter webui build"
-  ignore = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- apps/webui/ packages/shared/ brand/"
+  command = "pnpm install --frozen-lockfile && pnpm --filter webui... build"
+  ignore = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- apps/webui/ packages/shared/ packages/ui/ brand/"
 
 [build.environment]
   NODE_VERSION = "22"
