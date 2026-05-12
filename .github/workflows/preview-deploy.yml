@@ -98,13 +98,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build shared packages
-        run: pnpm --filter @mobvibe/shared build
-
       - name: Build webui
         env:
           VITE_GATEWAY_URL: https://${{ env.FLY_APP_NAME }}.fly.dev
-        run: pnpm --filter webui build
+        run: pnpm --filter webui... build
 
       - name: Deploy webui to Netlify
         id: netlify
