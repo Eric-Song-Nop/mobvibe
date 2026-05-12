@@ -59,7 +59,7 @@ export function ResizeHandle({
 			onPointerDown={handlePointerDown}
 			onKeyDown={handleKeyDown}
 			className={cn(
-				"w-1.5 cursor-col-resize border-0 bg-transparent hover:bg-border/60 active:bg-border/80",
+				"h-auto w-1.5 cursor-col-resize self-stretch border-0 bg-transparent hover:bg-border/60 active:bg-border/80",
 				className,
 			)}
 			{...props}
