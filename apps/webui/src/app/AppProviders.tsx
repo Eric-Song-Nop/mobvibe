@@ -1,3 +1,4 @@
+import { ThemeProvider } from "@mobvibe/ui/theme-provider";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { BrowserRouter } from "react-router-dom";
@@ -19,9 +20,11 @@ type AppProvidersProps = {
 export function AppProviders({ children }: AppProvidersProps) {
 	return (
 		<BrowserRouter>
-			<QueryClientProvider client={queryClient}>
-				<AuthProvider>{children}</AuthProvider>
-			</QueryClientProvider>
+			<ThemeProvider>
+				<QueryClientProvider client={queryClient}>
+					<AuthProvider>{children}</AuthProvider>
+				</QueryClientProvider>
+			</ThemeProvider>
 		</BrowserRouter>
 	);
 }

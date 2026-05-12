@@ -22,7 +22,7 @@ import {
 	DialogContent,
 	DialogTitle,
 } from "@mobvibe/ui/dialog";
-import { ThemeProvider, useTheme } from "@mobvibe/ui/theme-provider";
+import { useTheme } from "@mobvibe/ui/theme-provider";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -668,11 +668,6 @@ function CommandPaletteContent({ open, onOpenChange }: CommandPaletteProps) {
 	);
 }
 
-// Wrap with ThemeProvider to ensure useTheme works
 export function CommandPalette(props: CommandPaletteProps) {
-	return (
-		<ThemeProvider>
-			<CommandPaletteContent {...props} />
-		</ThemeProvider>
-	);
+	return <CommandPaletteContent {...props} />;
 }
