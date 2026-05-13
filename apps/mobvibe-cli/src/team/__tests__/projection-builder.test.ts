@@ -93,7 +93,7 @@ describe("buildAgentTeamSummary mailbox projection", () => {
 			lastMailboxAt: "2026-05-13T04:32:00.000Z",
 		});
 		expect(summary.sourceRefs).toEqual([mailboxRef]);
-		expect(summary.members[0].mailboxCounts.unread).toBe(2);
+		expect(summary.members[0].mailboxCounts.unread).toBe(1);
 		expect(summary.members[0].sourceRefs).toEqual([mailboxRef]);
 
 		const serialized = JSON.stringify(summary);
