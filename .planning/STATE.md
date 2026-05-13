@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-05-13T13:11:52.176Z"
+last_updated: "2026-05-13T13:31:55.737Z"
 last_activity: 2026-05-13
 progress:
   total_phases: 5
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 02 (CLI Team MCP、Mailbox 与 Task Board) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-05-13
 
@@ -58,6 +58,7 @@ Progress: [██████░░░░] 55%
 | Phase 01 P04 | 5 min | 3 tasks | 4 files |
 | Phase 01 P05 | 10 min | 3 tasks | 8 files |
 | Phase 02 P01 | 9 min | 2 tasks | 6 files |
+| Phase 02 P02 | 35 min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -93,6 +94,9 @@ Recent decisions affecting current work:
 - [Phase 01-05]: Persisted WebUI Agent Team state includes projections, active id, and last sync timestamp only; runtime appError and content/secret-like keys are excluded.
 - [Phase 02]: [Phase 02-01]: ACP SDK 0.21.x still lacks generated MCP-over-ACP acp schema, so Mobvibe keeps RFD-only declarations behind team-capability.ts. — Plan execution verified SDK schema after upgrade and localized RFD-only declarations.
 - [Phase 02]: [Phase 02-01]: Team MCP capability resolution prefers native mcp.acp and only allows stdio bridge when perSessionBridge is true. — This enforces MCP-04/MCP-05 safe bridge eligibility before autonomous team tools are exposed.
+- [Phase 02]: [Phase 02-02]: Team MCP caller identity is bound from per-member ACP server ids and tool arguments cannot override it. — Transport-derived caller binding prevents agent-controlled fromMemberId/memberId args from spoofing identity.
+- [Phase 02]: [Phase 02-02]: tools_ready requires all five expected mobvibe_team_* tools from list-tools; mcp/connect alone only reaches tools_waiting. — This preserves MCP readiness as a verified tools-list state instead of a connection-only state.
+- [Phase 02]: [Phase 02-02]: spawn/rename/shutdown remain CLI-local durable request facts in Phase 2 and do not execute session lifecycle side effects. — Full member orchestration and lifecycle execution stay deferred to Phase 3/4 boundaries.
 
 ### Pending Todos
 
@@ -112,6 +116,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-13T13:11:52.169Z
+Last session: 2026-05-13T13:31:25.369Z
 Stopped at: Completed 02-01-PLAN.md
 Resume file: None
