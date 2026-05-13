@@ -1,5 +1,6 @@
 import { io, type Socket } from "socket.io-client";
 import type {
+	AgentTeamsChangedPayload,
 	CliStatusPayload,
 	GatewayToWebuiEvents,
 	PermissionDecisionPayload,
@@ -151,6 +152,10 @@ class GatewaySocket {
 
 	onSessionsChanged(handler: (payload: SessionsChangedPayload) => void) {
 		return this.registerHandler("sessions:changed", handler);
+	}
+
+	onAgentTeamsChanged(handler: (payload: AgentTeamsChangedPayload) => void) {
+		return this.registerHandler("agent-teams:changed", handler);
 	}
 
 	onSessionEvent(handler: (event: SessionEvent) => void) {

@@ -62,6 +62,18 @@ describe("gatewaySocket", () => {
 			expect.any(Function),
 		);
 	});
+
+	it("registers and unregisters Agent Team change handler", () => {
+		gatewaySocket.destroy();
+		gatewaySocket.connect();
+		const handler = vi.fn();
+		const unsubscribe = gatewaySocket.onAgentTeamsChanged(handler);
+
+		expect(socketMock.on).toHaveBeenCalledWith("agent-teams:changed", handler);
+
+		unsubscribe();
+		expect(socketMock.off).toHaveBeenCalledWith("agent-teams:changed", handler);
+	});
 });
 
 describe("gatewaySocket connect() auth branches", () => {
