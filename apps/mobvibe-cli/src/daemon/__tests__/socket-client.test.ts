@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import type { SessionEvent } from "@mobvibe/shared";
+import type { AgentTeamSummary, SessionEvent } from "@mobvibe/shared";
 import type { CliConfig } from "../../config.js";
 
 const socketHandlers = new Map<string, (...args: Array<unknown>) => void>();
@@ -18,6 +18,35 @@ const socketMock = {
 	},
 };
 
+const createdTeam: AgentTeamSummary = {
+	agentTeamId: "team-1",
+	machineId: "machine-1",
+	title: "Team One",
+	workspaceRootCwd: "/tmp/project",
+	workspaceMode: "shared_workspace",
+	leaderMemberId: "member-1",
+	lifecycle: "pending",
+	members: [],
+	mailboxCounts: { unread: 0, wakePending: 0, wakeFailed: 0 },
+	taskCounts: {
+		todo: 0,
+		inProgress: 0,
+		blocked: 0,
+		completed: 0,
+		failed: 0,
+		cancelled: 0,
+	},
+	createdAt: "2026-05-13T00:00:00.000Z",
+	updatedAt: "2026-05-13T00:00:00.000Z",
+};
+
+const agentTeamStoreMock = {
+	createAgentTeam: mock(() => ({ team: createdTeam })),
+	listAgentTeams: mock(() => ({ teams: [createdTeam] })),
+	getAgentTeam: mock(() => ({ team: createdTeam })),
+	close: mock(() => {}),
+};
+
 mock.module("socket.io-client", () => ({
 	io: mock((_url: string, _options: unknown) => socketMock),
 }));
@@ -29,6 +58,10 @@ mock.module("../../lib/logger.js", () => ({
 		warn: mock(() => {}),
 		error: mock(() => {}),
 	},
+}));
+
+mock.module("../../team/agent-team-store.js", () => ({
+	AgentTeamStore: mock(() => agentTeamStoreMock),
 }));
 
 const { SocketClient } = await import("../socket-client.js");
@@ -125,6 +158,10 @@ describe("SocketClient restore semantics", () => {
 		socketMock.emit.mockClear();
 		socketMock.connect.mockClear();
 		socketMock.disconnect.mockClear();
+		agentTeamStoreMock.createAgentTeam.mockClear();
+		agentTeamStoreMock.listAgentTeams.mockClear();
+		agentTeamStoreMock.getAgentTeam.mockClear();
+		agentTeamStoreMock.close.mockClear();
 		socketMock.io.opts.extraHeaders = {};
 		sessionEventListener = undefined;
 		promptConnection = {
@@ -393,5 +430,81 @@ describe("SocketClient restore semantics", () => {
 
 		expect(cryptoService.encryptEvent).toHaveBeenCalledWith(event);
 		expect(socketMock.emit).toHaveBeenCalledWith("session:event", event);
+	});
+
+	test("handles rpc:agent-team:create and emits changed projection", async () => {
+		const handler = socketHandlers.get("rpc:agent-team:create");
+		if (!handler) {
+			throw new Error("rpc:agent-team:create handler not registered");
+		}
+
+		await handler({
+			requestId: "team-create-1",
+			params: {
+				machineId: "machine-1",
+				backendId: "backend-1",
+				workspaceRootCwd: "/tmp/project",
+				title: "Team One",
+			},
+		});
+
+		expect(agentTeamStoreMock.createAgentTeam).toHaveBeenCalledWith({
+			machineId: "machine-1",
+			backendId: "backend-1",
+			workspaceRootCwd: "/tmp/project",
+			title: "Team One",
+		});
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "team-create-1",
+			result: { team: createdTeam },
+		});
+		expect(socketMock.emit).toHaveBeenCalledWith("agent-teams:changed", {
+			added: [createdTeam],
+			updated: [],
+			removed: [],
+			machineId: "machine-1",
+		});
+	});
+
+	test("handles rpc:agent-teams:list with requested machine context", async () => {
+		const handler = socketHandlers.get("rpc:agent-teams:list");
+		if (!handler) {
+			throw new Error("rpc:agent-teams:list handler not registered");
+		}
+
+		await handler({
+			requestId: "team-list-1",
+			params: { machineId: "machine-1" },
+		});
+
+		expect(agentTeamStoreMock.listAgentTeams).toHaveBeenCalledWith({
+			machineId: "machine-1",
+		});
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "team-list-1",
+			result: { teams: [createdTeam] },
+		});
+	});
+
+	test("handles rpc:agent-team:get not found as typed empty result", async () => {
+		agentTeamStoreMock.getAgentTeam.mockReturnValueOnce({});
+		const handler = socketHandlers.get("rpc:agent-team:get");
+		if (!handler) {
+			throw new Error("rpc:agent-team:get handler not registered");
+		}
+
+		await handler({
+			requestId: "team-get-1",
+			params: { agentTeamId: "missing-team", machineId: "machine-1" },
+		});
+
+		expect(agentTeamStoreMock.getAgentTeam).toHaveBeenCalledWith({
+			agentTeamId: "missing-team",
+			machineId: "machine-1",
+		});
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "team-get-1",
+			result: {},
+		});
 	});
 });
