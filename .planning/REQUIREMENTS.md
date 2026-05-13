@@ -11,7 +11,7 @@ Requirements for the first agent team release. Each requirement must map to exac
 
 - [x] **TEAM-01**: 用户可以拥有一个稳定的 team run 对象，包含 `teamRunId`、title、machine、workspace、leader、状态和创建/更新时间。
 - [x] **TEAM-02**: Team run 可以包含 leader 和 member；每个成员包含 `memberId`、role、backendId、sessionId 关联、MCP phase、worktree 策略和状态。
-- [ ] **TEAM-03**: CLI 可以本地持久化 team run、member 映射、MCP readiness、mailbox、task board 和 summary source refs，并在 CLI 重启后恢复。
+- [x] **TEAM-03**: CLI 可以本地持久化 team run、member 映射、MCP readiness、mailbox、task board 和 summary source refs，并在 CLI 重启后恢复。
 - [x] **TEAM-04**: WebUI、Gateway 和 CLI 使用 `packages/shared` 中统一的 team、MCP、mailbox、task、RPC payload、状态枚举和错误结构。
 - [x] **TEAM-05**: Team metadata、mailbox metadata、task metadata 和 summary refs 明确区分 Gateway-facing 非内容字段、加密 payload、CLI-local 内容和 source refs。
 
@@ -114,7 +114,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | TEAM-01 | Phase 1 | Complete |
 | TEAM-02 | Phase 1 | Complete |
-| TEAM-03 | Phase 1 | Pending |
+| TEAM-03 | Phase 1 | Complete |
 | TEAM-04 | Phase 1 | Complete |
 | TEAM-05 | Phase 1 | Complete |
 | MCP-01 | Phase 2 | Pending |
