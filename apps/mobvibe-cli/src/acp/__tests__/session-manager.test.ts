@@ -323,6 +323,87 @@ describe("SessionManager", () => {
 	});
 
 	describe("listSessions", () => {
+		it("rejects unsupported team MCP capability before creating a team session", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValueOnce({
+				list: true,
+				load: true,
+				mcp: { acp: false, stdio: false, perSessionBridge: false },
+			});
+
+			await expect(
+				sessionManager.createTeamSession({
+					cwd: "/home/user/project",
+					backendId: "backend-1",
+					agentTeamId: "team-1",
+					memberId: "member-1",
+				}),
+			).rejects.toMatchObject({
+				status: 409,
+				detail: expect.objectContaining({
+					code: "CAPABILITY_NOT_SUPPORTED",
+				}),
+			});
+			expect(mockConnection.createSession).not.toHaveBeenCalled();
+		});
+
+		it("creates a team session with exactly one mobvibe-team MCP declaration", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValueOnce({
+				list: true,
+				load: true,
+				mcp: { acp: true },
+			});
+
+			await sessionManager.createTeamSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+				agentTeamId: "team-1",
+				memberId: "member-1",
+			});
+
+			expect(mockConnection.createSession).toHaveBeenCalledWith({
+				cwd: "/home/user/project",
+				teamMcpDeclaration: {
+					type: "acp",
+					name: "mobvibe-team",
+					id: "mobvibe-team:team-1:member-1",
+				},
+			});
+		});
+
+		it("keeps ordinary ACP permission request handling unchanged", async () => {
+			const permissionListener = mock(() => {});
+			sessionManager.onPermissionRequest(permissionListener);
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const handler = mockConnection.setPermissionHandler.mock.calls[0]?.[0] as
+				| ((params: {
+						toolCall?: { toolCallId?: string };
+						options: unknown[];
+				  }) => Promise<unknown>)
+				| undefined;
+			expect(handler).toBeDefined();
+
+			const responsePromise = handler?.({
+				toolCall: { toolCallId: "perm-1" },
+				options: [],
+			});
+
+			expect(permissionListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId: created.sessionId,
+					requestId: "perm-1",
+				}),
+			);
+			sessionManager.resolvePermissionRequest(created.sessionId, "perm-1", {
+				outcome: "cancelled",
+			});
+			await expect(responsePromise).resolves.toEqual({
+				outcome: { outcome: "cancelled" },
+			});
+		});
+
 		it("returns empty array initially", () => {
 			const sessions = sessionManager.listSessions();
 			expect(sessions).toEqual([]);

@@ -32,6 +32,7 @@ mock.module("node:stream", () => ({
 
 import type { AcpBackendConfig } from "../../config.js";
 import { AcpConnection } from "../acp-connection.js";
+import { buildTeamMcpDeclaration } from "../../team/team-capability.js";
 
 const createMockBackendConfig = (): AcpBackendConfig => ({
 	id: "test-backend",
@@ -259,6 +260,32 @@ describe("AcpConnection", () => {
 				mcpServers: [],
 			});
 		});
+
+		it("passes a single team MCP declaration for team session/load", async () => {
+			const loadSession = mock(() =>
+				Promise.resolve({ modes: null, models: null }),
+			);
+			// @ts-expect-error - accessing private properties to test team ACP payload isolation
+			connection.state = "ready";
+			// @ts-expect-error - accessing private properties to test team ACP payload isolation
+			connection.connection = { loadSession };
+			// @ts-expect-error - accessing private property for testing
+			connection.agentCapabilities = { loadSession: true };
+			const declaration = buildTeamMcpDeclaration({
+				agentTeamId: "team-1",
+				memberId: "member-1",
+			});
+
+			await connection.loadSession("session-1", "/home/user/project", {
+				teamMcpDeclaration: declaration,
+			});
+
+			expect(loadSession).toHaveBeenCalledWith({
+				sessionId: "session-1",
+				cwd: "/home/user/project",
+				mcpServers: [declaration],
+			});
+		});
 	});
 
 	describe("createSession", () => {
@@ -276,6 +303,30 @@ describe("AcpConnection", () => {
 			expect(newSession).toHaveBeenCalledWith({
 				cwd: "/home/user/project",
 				mcpServers: [],
+			});
+		});
+
+		it("passes a single team MCP declaration for team session/new", async () => {
+			const newSession = mock(() =>
+				Promise.resolve({ sessionId: "session-1", modes: null, models: null }),
+			);
+			// @ts-expect-error - accessing private properties to test team ACP payload isolation
+			connection.state = "ready";
+			// @ts-expect-error - accessing private properties to test team ACP payload isolation
+			connection.connection = { newSession };
+			const declaration = buildTeamMcpDeclaration({
+				agentTeamId: "team-1",
+				memberId: "member-1",
+			});
+
+			await connection.createSession({
+				cwd: "/home/user/project",
+				teamMcpDeclaration: declaration,
+			});
+
+			expect(newSession).toHaveBeenCalledWith({
+				cwd: "/home/user/project",
+				mcpServers: [declaration],
 			});
 		});
 	});
