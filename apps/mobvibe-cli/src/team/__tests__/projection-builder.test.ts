@@ -107,3 +107,124 @@ describe("buildAgentTeamSummary mailbox projection", () => {
 		expect(serialized).not.toContain("agentOutput");
 	});
 });
+
+describe("buildAgentTeamSummary task projection", () => {
+	test("projects task status and dependency counts without local task content", () => {
+		const taskRef = {
+			type: "task" as const,
+			agentTeamId: "team-1",
+			taskId: "task-blocked-by-dependency",
+			ownerMemberId: "member-1",
+		};
+		const summary = buildAgentTeamSummary({
+			team: baseTeam,
+			members: [baseMember],
+			mcpStatuses: [baseMcpStatus],
+			mailboxMessages: [],
+			tasks: [
+				{
+					task_id: "task-todo",
+					agent_team_id: "team-1",
+					owner_member_id: "member-1",
+					status: "todo",
+					source_refs_json: null,
+					blocked_by_json: JSON.stringify([]),
+					blocks_json: JSON.stringify(["task-blocked-by-dependency"]),
+					created_at: "2026-05-13T04:31:00.000Z",
+					updated_at: "2026-05-13T04:31:00.000Z",
+					body_local_json: JSON.stringify({
+						title: "local task title",
+						description: "local task description",
+					}),
+				} as never,
+				{
+					task_id: "task-progress",
+					agent_team_id: "team-1",
+					owner_member_id: "member-1",
+					status: "in_progress",
+					source_refs_json: null,
+					blocked_by_json: JSON.stringify([]),
+					blocks_json: JSON.stringify([]),
+					created_at: "2026-05-13T04:32:00.000Z",
+					updated_at: "2026-05-13T04:32:00.000Z",
+				} as never,
+				{
+					task_id: "task-blocked",
+					agent_team_id: "team-1",
+					owner_member_id: "member-1",
+					status: "blocked",
+					source_refs_json: null,
+					blocked_by_json: JSON.stringify([]),
+					blocks_json: JSON.stringify([]),
+					created_at: "2026-05-13T04:33:00.000Z",
+					updated_at: "2026-05-13T04:33:00.000Z",
+				} as never,
+				{
+					task_id: "task-blocked-by-dependency",
+					agent_team_id: "team-1",
+					owner_member_id: "member-1",
+					status: "in_progress",
+					source_refs_json: JSON.stringify([taskRef]),
+					blocked_by_json: JSON.stringify(["task-todo"]),
+					blocks_json: JSON.stringify([]),
+					created_at: "2026-05-13T04:34:00.000Z",
+					updated_at: "2026-05-13T04:34:00.000Z",
+				} as never,
+				{
+					task_id: "task-completed",
+					agent_team_id: "team-1",
+					owner_member_id: "member-1",
+					status: "completed",
+					source_refs_json: null,
+					blocked_by_json: JSON.stringify([]),
+					blocks_json: JSON.stringify([]),
+					created_at: "2026-05-13T04:35:00.000Z",
+					updated_at: "2026-05-13T04:35:00.000Z",
+				} as never,
+				{
+					task_id: "task-failed",
+					agent_team_id: "team-1",
+					owner_member_id: "member-1",
+					status: "failed",
+					source_refs_json: null,
+					blocked_by_json: JSON.stringify([]),
+					blocks_json: JSON.stringify([]),
+					created_at: "2026-05-13T04:36:00.000Z",
+					updated_at: "2026-05-13T04:36:00.000Z",
+				} as never,
+				{
+					task_id: "task-cancelled",
+					agent_team_id: "team-1",
+					owner_member_id: "member-1",
+					status: "cancelled",
+					source_refs_json: null,
+					blocked_by_json: "not-json",
+					blocks_json: "not-json",
+					created_at: "2026-05-13T04:37:00.000Z",
+					updated_at: "2026-05-13T04:37:00.000Z",
+				} as never,
+			],
+			summaryRefs: [],
+		});
+
+		expect(summary.taskCounts).toEqual({
+			todo: 1,
+			inProgress: 2,
+			blocked: 2,
+			completed: 1,
+			failed: 1,
+			cancelled: 1,
+			lastTaskUpdatedAt: "2026-05-13T04:37:00.000Z",
+		});
+		expect(summary.sourceRefs).toEqual([taskRef]);
+		expect(summary.members[0].sourceRefs).toEqual([taskRef]);
+
+		const serialized = JSON.stringify(summary);
+		expect(serialized).not.toContain("local task title");
+		expect(serialized).not.toContain("local task description");
+		expect(serialized).not.toContain("body_local_json");
+		expect(serialized).not.toContain("title");
+		expect(serialized).not.toContain("description");
+		expect(serialized).not.toContain("agentOutput");
+	});
+});
