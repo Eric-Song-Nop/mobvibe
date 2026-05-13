@@ -37,7 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 - [x] 01-01-PLAN.md — Shared Agent Team contract and typed RPC/event payloads
 - [x] 01-02-PLAN.md — CLI durable Agent Team store and base non-content projection
-- [ ] 01-03-PLAN.md — Gateway `/acp/agent-teams` routes, typed CLI RPC, and user-scoped projection relay
+- [x] 01-03-PLAN.md — Gateway `/acp/agent-teams` routes, typed CLI RPC, and user-scoped projection relay
 - [ ] 01-04-PLAN.md — CLI mailbox/task/MCP/summary metadata recovery and non-content projection hardening
 - [ ] 01-05-PLAN.md — WebUI API/store/socket projection boundary and Chinese implementation documentation
 **UI hint**: no
@@ -108,7 +108,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. 协议、状态模型与持久化边界 | 1/5 | In Progress | - |
+| 1. 协议、状态模型与持久化边界 | 3/5 | In Progress | - |
 | 2. CLI Team MCP、Mailbox 与 Task Board | 0/TBD | Not started | - |
 | 3. 最小端到端 Team Run | 0/TBD | Not started | - |
 | 4. 生命周期、权限、E2EE 与恢复 | 0/TBD | Not started | - |
