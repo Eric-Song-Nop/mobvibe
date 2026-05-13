@@ -11,6 +11,11 @@ import {
 import i18n from "../src/i18n";
 import { createDefaultContentBlocks } from "../src/lib/content-block-utils";
 
+vi.mock("@pierre/diffs/react", () => ({
+	FileDiff: () => <div data-testid="file-diff" />,
+	MultiFileDiff: () => <div data-testid="multi-file-diff" />,
+}));
+
 type TextChatMessage = Extract<ChatMessage, { kind: "text" }>;
 type ToolCallChatMessage = Extract<ChatMessage, { kind: "tool_call" }>;
 

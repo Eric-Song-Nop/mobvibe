@@ -5,10 +5,7 @@ import { Button } from "@mobvibe/ui/button";
 import { Card, CardContent } from "@mobvibe/ui/card";
 import { memo, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-	buildUnifiedDiffString,
-	UnifiedDiffView,
-} from "@/components/chat/DiffView";
+import { UnifiedDiffView } from "@/components/chat/DiffView";
 import { LazyStreamdown } from "@/components/chat/LazyStreamdown";
 import i18n from "@/i18n";
 import type {
@@ -483,18 +480,14 @@ const renderDiffBlock = (
 	getLabel: (key: string, options?: Record<string, unknown>) => string,
 	onOpenFilePreview?: (path: string) => void,
 ) => {
-	const diff = buildUnifiedDiffString(
-		content.oldText,
-		content.newText,
-		content.path,
-	);
-	if (!diff) {
+	if ((content.oldText ?? "") === content.newText) {
 		return null;
 	}
 	return (
 		<UnifiedDiffView
 			key={key}
-			diff={diff}
+			oldText={content.oldText}
+			newText={content.newText}
 			path={content.path}
 			getLabel={getLabel}
 			onOpenFilePreview={onOpenFilePreview}
