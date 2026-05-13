@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
@@ -11,6 +12,7 @@ import {
 
 describe("TeamMcpRouter", () => {
 	let tempDir: string;
+	let dbPath: string;
 	let store: AgentTeamStore;
 	let agentTeamId: string;
 	let leaderMemberId: string;
@@ -20,10 +22,12 @@ describe("TeamMcpRouter", () => {
 	let renameSession: ReturnType<typeof mock>;
 	let shutdownSession: ReturnType<typeof mock>;
 	let requestPermission: ReturnType<typeof mock>;
+	let onAgentTeamChanged: ReturnType<typeof mock>;
 
 	beforeEach(() => {
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "team-mcp-router-"));
-		store = new AgentTeamStore(path.join(tempDir, "events.db"));
+		dbPath = path.join(tempDir, "events.db");
+		store = new AgentTeamStore(dbPath);
 		const created = store.createAgentTeam({
 			machineId: "machine-1",
 			workspaceRootCwd: "/workspace",
@@ -43,9 +47,11 @@ describe("TeamMcpRouter", () => {
 		renameSession = mock(() => Promise.resolve(undefined));
 		shutdownSession = mock(() => Promise.resolve(undefined));
 		requestPermission = mock(() => Promise.resolve(undefined));
+		onAgentTeamChanged = mock(() => {});
 		const handlers = new TeamToolHandlers({
 			store,
 			requestPermission,
+			onAgentTeamChanged,
 		});
 		router = new TeamMcpRouter({ store, handlers });
 	});
@@ -108,6 +114,96 @@ describe("TeamMcpRouter", () => {
 		expect(result.caller.memberId).toBe(leaderMemberId);
 	});
 
+	test("send_message persists from router-bound caller and ignores spoofed args", async () => {
+		const serverId = `mobvibe-team:${agentTeamId}:${leaderMemberId}`;
+		router.handleConnect({ serverId });
+
+		const result = await router.handleToolCall({
+			serverId,
+			toolName: "mobvibe_team_send_message",
+			args: {
+				to: memberId,
+				message: "hello from leader",
+				fromMemberId: memberId,
+			},
+		});
+
+		expect(result.caller.memberId).toBe(leaderMemberId);
+		expect(result.data).toEqual(
+			expect.objectContaining({
+				ok: true,
+				deliveries: [
+					expect.objectContaining({
+						fromMemberId: leaderMemberId,
+						toMemberId: memberId,
+					}),
+				],
+			}),
+		);
+		expect(readMailboxRows(dbPath)[0].from_member_id).toBe(leaderMemberId);
+	});
+
+	test("send_message emits updated projection without plaintext body", async () => {
+		const serverId = `mobvibe-team:${agentTeamId}:${leaderMemberId}`;
+		router.handleConnect({ serverId });
+
+		const result = await router.handleToolCall({
+			serverId,
+			toolName: "mobvibe_team_send_message",
+			args: { to: "Worker", message: "plaintext should stay local" },
+		});
+
+		expect(result.data).toEqual(
+			expect.objectContaining({
+				ok: true,
+				deliveries: [
+					expect.objectContaining({ messageId: expect.any(String) }),
+				],
+			}),
+		);
+		expect(JSON.stringify(result.data)).not.toContain(
+			"plaintext should stay local",
+		);
+		expect(onAgentTeamChanged).toHaveBeenCalledWith(
+			expect.objectContaining({
+				agentTeamId,
+				sourceRefs: [
+					expect.objectContaining({
+						type: "mailbox_message",
+						fromMemberId: leaderMemberId,
+						toMemberId: memberId,
+					}),
+				],
+			}),
+		);
+		expect(JSON.stringify(onAgentTeamChanged.mock.calls[0][0])).not.toContain(
+			"plaintext should stay local",
+		);
+	});
+
+	test("unknown recipient returns structured tool error and creates no source ref", async () => {
+		const serverId = `mobvibe-team:${agentTeamId}:${leaderMemberId}`;
+		router.handleConnect({ serverId });
+
+		const result = await router.handleToolCall({
+			serverId,
+			toolName: "mobvibe_team_send_message",
+			args: { to: "Missing", message: "do not store" },
+		});
+
+		expect(result.data).toEqual(
+			expect.objectContaining({
+				ok: false,
+				deliveries: [],
+				error: expect.objectContaining({
+					code: "REQUEST_VALIDATION_FAILED",
+				}),
+			}),
+		);
+		expect(readMailboxRows(dbPath)).toHaveLength(0);
+		expect(onAgentTeamChanged).not.toHaveBeenCalled();
+	});
+
 	test("lifecycle requests are durable intents only", async () => {
 		const serverId = `mobvibe-team:${agentTeamId}:${memberId}`;
 		router.handleConnect({ serverId });
@@ -126,18 +222,43 @@ describe("TeamMcpRouter", () => {
 		expect(shutdownSession).not.toHaveBeenCalled();
 	});
 
-	test("leader and non-leader can dispatch every registered team tool without confirmation", async () => {
+	test("leader and non-leader can send messages without confirmation", async () => {
 		const leaderServerId = `mobvibe-team:${agentTeamId}:${leaderMemberId}`;
 		const memberServerId = `mobvibe-team:${agentTeamId}:${memberId}`;
 		router.handleConnect({ serverId: leaderServerId });
 		router.handleConnect({ serverId: memberServerId });
 
-		for (const serverId of [leaderServerId, memberServerId]) {
-			for (const toolName of EXPECTED_TEAM_TOOL_NAMES) {
-				await router.handleToolCall({ serverId, toolName, args: {} });
-			}
-		}
+		await router.handleToolCall({
+			serverId: leaderServerId,
+			toolName: "mobvibe_team_send_message",
+			args: { to: memberId, message: "from leader" },
+		});
+		await router.handleToolCall({
+			serverId: memberServerId,
+			toolName: "mobvibe_team_send_message",
+			args: { to: leaderMemberId, message: "from member" },
+		});
 
 		expect(requestPermission).not.toHaveBeenCalled();
+		expect(readMailboxRows(dbPath)).toHaveLength(2);
 	});
 });
+
+type MailboxRow = {
+	from_member_id: string;
+	to_member_id: string | null;
+	source_refs_json: string | null;
+};
+
+function readMailboxRows(dbPath: string): MailboxRow[] {
+	const db = new Database(dbPath, { readonly: true });
+	try {
+		return db
+			.query(
+				"SELECT from_member_id, to_member_id, source_refs_json FROM agent_team_mailbox_messages ORDER BY created_at ASC",
+			)
+			.all() as MailboxRow[];
+	} finally {
+		db.close();
+	}
+}

@@ -206,7 +206,9 @@ function readMailboxRows(dbPath: string): MailboxRow[] {
 	const db = new Database(dbPath, { readonly: true });
 	try {
 		return db
-			.query("SELECT * FROM agent_team_mailbox_messages ORDER BY created_at ASC")
+			.query(
+				"SELECT * FROM agent_team_mailbox_messages ORDER BY created_at ASC",
+			)
 			.all() as MailboxRow[];
 	} finally {
 		db.close();

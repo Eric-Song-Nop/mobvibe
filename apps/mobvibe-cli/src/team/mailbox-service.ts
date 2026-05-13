@@ -1,4 +1,8 @@
-import { createErrorDetail, type ErrorDetail, type TeamSourceRef } from "@mobvibe/shared";
+import {
+	createErrorDetail,
+	type ErrorDetail,
+	type TeamSourceRef,
+} from "@mobvibe/shared";
 import type { AgentTeamStore } from "./agent-team-store.js";
 import type { AgentTeamMemberRow } from "./projection-builder.js";
 import type { TeamToolCaller } from "./team-tool-handlers.js";
@@ -33,7 +37,10 @@ export type MailboxSendResult =
 export class MailboxService {
 	constructor(private readonly store: AgentTeamStore) {}
 
-	sendMessage(caller: TeamToolCaller, args: MailboxSendArgs): MailboxSendResult {
+	sendMessage(
+		caller: TeamToolCaller,
+		args: MailboxSendArgs,
+	): MailboxSendResult {
 		const members = this.store.listTeamMembers(caller.agentTeamId);
 		const recipients = this.resolveRecipients(members, caller, args.to);
 		if (!recipients.ok) {
@@ -67,14 +74,17 @@ export class MailboxService {
 		if (trimmed === "*") {
 			return {
 				ok: true,
-				members: members.filter((member) => member.member_id !== caller.memberId),
+				members: members.filter(
+					(member) => member.member_id !== caller.memberId,
+				),
 			};
 		}
 
 		const normalized = normalizeName(trimmed);
 		const member = members.find(
 			(candidate) =>
-				candidate.member_id === trimmed || normalizeName(candidate.name) === normalized,
+				candidate.member_id === trimmed ||
+				normalizeName(candidate.name) === normalized,
 		);
 
 		if (!member) {

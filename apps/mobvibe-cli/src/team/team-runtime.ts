@@ -17,6 +17,7 @@ export class TeamRuntime {
 		this.toolHandlers = new TeamToolHandlers({
 			store: options.store,
 			requestPermission: options.requestPermission,
+			onAgentTeamChanged: options.onAgentTeamChanged,
 			services: options.services,
 		});
 		this.mcpRouter = new TeamMcpRouter({

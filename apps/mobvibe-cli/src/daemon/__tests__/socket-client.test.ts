@@ -463,6 +463,36 @@ describe("SocketClient restore semantics", () => {
 		});
 	});
 
+	test("emits updated Agent Team projection without mailbox plaintext", () => {
+		const updatedTeam: AgentTeamSummary = {
+			...createdTeam,
+			sourceRefs: [
+				{
+					type: "mailbox_message",
+					agentTeamId: "team-1",
+					messageId: "message-1",
+					fromMemberId: "member-1",
+					toMemberId: "member-2",
+				},
+			],
+		};
+
+		client.emitUpdatedAgentTeamProjection(updatedTeam);
+
+		expect(socketMock.emit).toHaveBeenCalledWith("agent-teams:changed", {
+			added: [],
+			updated: [updatedTeam],
+			removed: [],
+			machineId: "machine-1",
+		});
+		expect(JSON.stringify(socketMock.emit.mock.calls)).not.toContain(
+			"plaintext mailbox body",
+		);
+		expect(JSON.stringify(socketMock.emit.mock.calls)).not.toContain(
+			"body_local_json",
+		);
+	});
+
 	test("handles rpc:agent-teams:list with requested machine context", async () => {
 		const handler = socketHandlers.get("rpc:agent-teams:list");
 		if (!handler) {

@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type {
+	AgentTeamSummary,
 	CliToGatewayEvents,
 	ContentBlock,
 	EventsAckPayload,
@@ -1668,6 +1669,15 @@ export class SocketClient extends EventEmitter {
 		this.stopHeartbeat();
 		this.agentTeamStore.close();
 		this.socket.disconnect();
+	}
+
+	emitUpdatedAgentTeamProjection(team: AgentTeamSummary): void {
+		this.socket.emit("agent-teams:changed", {
+			added: [],
+			updated: [team],
+			removed: [],
+			machineId: team.machineId,
+		});
 	}
 
 	isConnected() {
