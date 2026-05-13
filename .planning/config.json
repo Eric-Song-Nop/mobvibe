@@ -1,18 +1,18 @@
 {
-	"mode": "yolo",
-	"granularity": "coarse",
-	"parallelization": true,
-	"commit_docs": true,
-	"model_profile": "inherit",
-	"workflow": {
-		"research": true,
-		"plan_check": true,
-		"verifier": true,
-		"nyquist_validation": false,
-		"auto_advance": true,
-		"_auto_chain_active": true
-	},
-	"planning": {
-		"project_mode": "mvp"
-	}
+  "mode": "yolo",
+  "granularity": "coarse",
+  "parallelization": true,
+  "commit_docs": true,
+  "model_profile": "inherit",
+  "workflow": {
+    "research": true,
+    "plan_check": true,
+    "verifier": true,
+    "nyquist_validation": false,
+    "auto_advance": true,
+    "_auto_chain_active": false
+  },
+  "planning": {
+    "project_mode": "mvp"
+  }
 }

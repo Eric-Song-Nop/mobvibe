@@ -1,0 +1,89 @@
+{
+	"phase": "1",
+	"phase_name": "协议、状态模型与持久化边界",
+	"timestamp": "2026-05-13T00:00:00Z",
+	"areas_completed": ["内容边界", "状态模型粒度", "Source refs", "恢复事实来源"],
+	"areas_remaining": [],
+	"decisions": {
+		"概念模型": [
+			{
+				"question": "基于本地 AionUi 源码，Mobvibe v1 的产品对象是否应锁定为一个可命名、可恢复的 Agent Team？",
+				"answer": "锁定 AionUI 模型。产品语言使用 Agent Team，不把 team run 作为主要用户概念。Agent Team 有 Leader、可动态加入/移除/重命名的 teammates、共享 workspace、mailbox、task board 和 per-agent session 链接。",
+				"options_presented": ["锁定 AionUI 模型", "调整一点", "重新说明"]
+			},
+			{
+				"question": "用户是否需要在 WebUI 明确区分 Agent Team 与普通 session？AionUI 是怎么做的？",
+				"answer": "按 AionUI 方向锁定。Agent Team 是独立一级对象，不是普通 session 的一种 kind；team-owned member sessions 仍是 ordinary sessions，但普通 session 列表默认隐藏或折叠它们，用户通过 Agent Team detail 查看 leader/member 并进入对应 session history。",
+				"options_presented": ["按 AionUI 方向", "把 team 当普通 session kind", "重新讨论"]
+			},
+			{
+				"question": "Gateway 对 Agent Team 应该暴露显式资源 API，还是只提供 machine-scoped RPC 转发？",
+				"answer": "采用混合方案。WebUI/Gateway 使用 `/acp/agent-teams` 显式资源 API；Gateway 内部把请求转换为 typed CLI RPC 转发；CLI AgentTeamStore 仍是 durable truth，Gateway 不持久化 Agent Team state 或正文。",
+				"options_presented": ["显式资源 API", "Machine RPC", "混合方案"]
+			}
+		],
+		"内容边界": [
+			{
+				"question": "AionUi 把 mailbox/task 正文放在本地 SQLite。Mobvibe 有 Gateway/E2EE 边界，Phase 1 应该锁定哪条红线？",
+				"answer": "Local content, projected metadata。CLI 本地可保存 mailbox/task 正文供 agents 使用；Gateway/WebUI team snapshot 只传 ids/status/counts/refs，不传正文明文。",
+				"options_presented": ["Local content, projected metadata", "Encrypted content payloads", "No persisted content"]
+			},
+			{
+				"question": "用户从远程 WebUI 看 Agent Team 时，mailbox/task 详情在 v1 应该怎么处理？",
+				"answer": "用户必须能切换到任意 agent/session 并查看其完整历史；team projection 不承载正文，正文可见性复用成员普通 session 的 E2EE history 链路。",
+				"options_presented": ["Counts first, jump to sessions", "Encrypted detail fetch", "CLI-only detail"]
+			},
+			{
+				"question": "Agent Team 的用户初始目标和后续用户给团队的消息，应该在哪里形成可审计历史？",
+				"answer": "每个成员都是一等可交互 session；用户可以切到任意 agent 直接聊天、看完整历史、继续使用该 session 的权限/文件/Git 能力。Agent Team 负责协调视图和 mailbox/task board，不替代普通 session。",
+				"options_presented": ["Leader session history", "Team-only mailbox", "Both team and all agents"]
+			},
+			{
+				"question": "Agent 之间通过 mailbox 发送的消息，是否也要在目标 agent 的普通 session 历史中可见？",
+				"answer": "Visible in target session。Mailbox 是 durable delivery；投递给某 agent 后，也在该 agent session 里显示为来自 teammate 的消息，便于用户审计完整上下文。",
+				"options_presented": ["Visible in target session", "Mailbox-only hidden", "Visible in both sides"]
+			}
+		],
+		"状态模型粒度": [
+			{
+				"question": "Phase 1 状态模型是否应保留 idle/ready 这类 lifecycle 状态？",
+				"answer": "按拆分维度锁定。不再保留 idle/ready 作为 lifecycle 状态；member lifecycle 只表达创建、运行、完成、失败、取消、分离、归档。是否等待权限、MCP 是否 ready、是否有 unread mailbox 或 running task 都放到独立维度或 projection。",
+				"options_presented": ["按此锁定", "保留 waiting", "重新讨论"]
+			}
+		],
+		"Source refs": [
+			{
+				"question": "Summary/mailbox/task projection 的 source refs 应该如何携带来源？",
+				"answer": "按强类型引用锁定，不带正文。可以携带 agentTeamId、memberId、sessionId、revision/seq、messageId、taskId 等跳转定位字段；WebUI 跳正文时优先跳到成员普通 session history，mailbox/task 详情仍走 CLI-local 或加密内容路径，Gateway 不拿正文。",
+				"options_presented": ["按此锁定", "只引用 session", "重新讨论"]
+			}
+		],
+		"恢复事实来源": [
+			{
+				"question": "Team run/member/MCP/mailbox/task/source refs 的 durable truth 应该在哪里？",
+				"answer": "按 CLI SQLite 当前事实表 + 派生 projection 锁定。agent_teams/agent_team_members/agent_team_mcp_status/mailbox/task/source_refs 是 durable truth；Gateway 只保在线 presence 和转发 snapshot；成员 transcript 继续由普通 session WAL 拥有。Phase 1 不新增 team append-only WAL，后续如需审计再加事件表。",
+				"options_presented": ["按此锁定", "事件流优先", "混合从一开始", "重新讨论"]
+			}
+		]
+	},
+	"deferred_ideas": ["完整 Agent Team UI/UX 视觉与移动端 polish 属于 Phase 3/5；Phase 1 只锁定 UI 所需 projection 和状态字段。"],
+	"canonical_refs": [
+		".planning/ROADMAP.md",
+		".planning/REQUIREMENTS.md",
+		".planning/PROJECT.md",
+		".planning/research/AIONUI-ACP-TEAM.md",
+		".planning/research/ARCHITECTURE.md",
+		".planning/research/SUMMARY.md",
+		"../AionUi/src/common/types/teamTypes.ts",
+		"../AionUi/src/process/team/TeamSession.ts",
+		"../AionUi/src/process/team/TeamSessionService.ts",
+		"../AionUi/src/process/team/TeammateManager.ts",
+		"../AionUi/src/process/team/Mailbox.ts",
+		"../AionUi/src/process/team/TaskManager.ts",
+		"../AionUi/src/process/team/mcp/team/TeamMcpServer.ts",
+		"../AionUi/src/process/services/database/schema.ts",
+		"../AionUi/src/process/team/prompts/leadPrompt.ts",
+		"../AionUi/src/process/team/prompts/teammatePrompt.ts",
+		"https://agentclientprotocol.com/rfds/mcp-over-acp"
+	]
+}
