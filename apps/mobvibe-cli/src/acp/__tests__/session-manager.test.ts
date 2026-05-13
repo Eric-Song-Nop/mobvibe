@@ -373,6 +373,40 @@ describe("SessionManager", () => {
 			});
 		});
 
+		it("creates a bridge team session with per-session stdio declaration", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValueOnce({
+				list: true,
+				load: true,
+				mcp: { stdio: true, perSessionBridge: true },
+			});
+
+			await sessionManager.createTeamSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+				agentTeamId: "team-1",
+				memberId: "member-1",
+			});
+
+			expect(mockConnection.createSession).toHaveBeenCalledWith({
+				cwd: "/home/user/project",
+				teamMcpDeclaration: expect.objectContaining({
+					type: "stdio",
+					name: "mobvibe-team",
+					command: process.execPath,
+					args: expect.arrayContaining([
+						"--agent-team-id",
+						"team-1",
+						"--member-id",
+						"member-1",
+					]),
+					env: [
+						{ name: "MOBVIBE_TEAM_AGENT_TEAM_ID", value: "team-1" },
+						{ name: "MOBVIBE_TEAM_MEMBER_ID", value: "member-1" },
+					],
+				}),
+			});
+		});
+
 		it("keeps ordinary ACP permission request handling unchanged", async () => {
 			const permissionListener = mock(() => {});
 			sessionManager.onPermissionRequest(permissionListener);
