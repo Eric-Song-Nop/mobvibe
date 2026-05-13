@@ -35,7 +35,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   5. Gateway-facing 字段与 CLI-local/encrypted/source-ref 内容边界被类型化，避免后续误把 prompt、mailbox、task 或 summary 正文放进 Gateway payload。
 **Plans**: 5 plans
 Plans:
-- [ ] 01-01-PLAN.md — Shared Agent Team contract and typed RPC/event payloads
+- [x] 01-01-PLAN.md — Shared Agent Team contract and typed RPC/event payloads
 - [ ] 01-02-PLAN.md — CLI durable Agent Team store and base non-content projection
 - [ ] 01-03-PLAN.md — Gateway `/acp/agent-teams` routes, typed CLI RPC, and user-scoped projection relay
 - [ ] 01-04-PLAN.md — CLI mailbox/task/MCP/summary metadata recovery and non-content projection hardening
