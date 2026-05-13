@@ -903,6 +903,9 @@ describe("SessionManager", () => {
 					revision: 1,
 				}),
 			);
+			if (ref.type !== "session_event") {
+				throw new Error("Expected session_event source ref");
+			}
 			expect(ref.seq).toBeNumber();
 			expect(eventListener).toHaveBeenCalledWith(
 				expect.objectContaining({

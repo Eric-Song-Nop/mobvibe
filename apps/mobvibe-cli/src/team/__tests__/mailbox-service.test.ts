@@ -235,7 +235,9 @@ describe("MailboxService durable delivery", () => {
 		]);
 		expect(unread[0].body).toEqual({ message: "third unread" });
 		const rows = readMailboxRows(dbPath);
-		expect(rows.find((row) => row.message_id === alreadyReadId)?.read_at).toBeString();
+		expect(
+			rows.find((row) => row.message_id === alreadyReadId)?.read_at,
+		).toBeString();
 		expect(
 			rows.find((row) => row.message_id === third.deliveries[0].messageId)
 				?.read_at,
@@ -322,7 +324,7 @@ describe("MailboxService durable delivery", () => {
 			]),
 		);
 		expect(JSON.stringify(failedRefs)).not.toContain("deliveredSessionId");
-	expect(readMailboxRows(dbPath)).toHaveLength(2);
+		expect(readMailboxRows(dbPath)).toHaveLength(2);
 	});
 
 	test("runtime wake injects unread mailbox messages into attached ordinary session", async () => {
@@ -460,7 +462,9 @@ describe("MailboxService durable delivery", () => {
 		const rows = readMailboxRows(dbPath);
 		expect(rows).toHaveLength(2);
 		expect(rows.every((row) => row.to_member_id === leaderMemberId)).toBe(true);
-		expect(rows.every((row) => row.body_local_json.includes("idle_notification"))).toBe(true);
+		expect(
+			rows.every((row) => row.body_local_json.includes("idle_notification")),
+		).toBe(true);
 		expect(injected).toHaveLength(1);
 		expect(injected[0]).toContain("Turn completed");
 		const projection = JSON.stringify(store.getAgentTeam({ agentTeamId }).team);

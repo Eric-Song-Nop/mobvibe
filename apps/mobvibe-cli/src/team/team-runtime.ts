@@ -1,8 +1,5 @@
 import type { TeamSourceRef } from "@mobvibe/shared";
-import type {
-	AgentTeamStore,
-	MailboxWakeMessage,
-} from "./agent-team-store.js";
+import type { AgentTeamStore, MailboxWakeMessage } from "./agent-team-store.js";
 import { MailboxService } from "./mailbox-service.js";
 import { TeamMcpRouter } from "./team-mcp-router.js";
 import {
@@ -63,7 +60,10 @@ export class TeamRuntime {
 		if (messages.length === 0) {
 			return;
 		}
-		const promptText = buildMailboxPrompt(messages, this.store.listTeamMembers(agentTeamId));
+		const promptText = buildMailboxPrompt(
+			messages,
+			this.store.listTeamMembers(agentTeamId),
+		);
 		try {
 			const sessionRef = await this.sessionManager.injectTeamMailboxPrompt({
 				agentTeamId,
@@ -96,7 +96,9 @@ export class TeamRuntime {
 		memberId: string,
 	): Promise<void> {
 		const members = this.store.listTeamMembers(agentTeamId);
-		const member = members.find((candidate) => candidate.member_id === memberId);
+		const member = members.find(
+			(candidate) => candidate.member_id === memberId,
+		);
 		if (!member || member.role === "leader") {
 			return;
 		}
@@ -124,7 +126,11 @@ export class TeamRuntime {
 	}
 
 	private async sendMessageAndWake(
-		caller: { agentTeamId: string; memberId: string; role: "leader" | "member" },
+		caller: {
+			agentTeamId: string;
+			memberId: string;
+			role: "leader" | "member";
+		},
 		args: { to: string; message: string; summary?: string },
 	) {
 		const result = this.mailboxService.sendMessage(caller, args);
@@ -156,7 +162,9 @@ function buildMailboxPrompt(
 	messages: MailboxWakeMessage[],
 	members: Array<{ member_id: string; name: string }>,
 ): string {
-	const names = new Map(members.map((member) => [member.member_id, member.name]));
+	const names = new Map(
+		members.map((member) => [member.member_id, member.name]),
+	);
 	const lines = messages.map((message) => {
 		const senderName = names.get(message.fromMemberId) ?? message.fromMemberId;
 		return `- From ${senderName} (${message.fromMemberId}): ${message.body.message}`;
@@ -171,6 +179,7 @@ function buildMailboxPrompt(
 function toSafeWakeError(error: unknown): { code: string; message: string } {
 	return {
 		code: "PROMPT_FAILED",
-		message: error instanceof Error ? error.message.slice(0, 200) : "Wake failed",
+		message:
+			error instanceof Error ? error.message.slice(0, 200) : "Wake failed",
 	};
 }

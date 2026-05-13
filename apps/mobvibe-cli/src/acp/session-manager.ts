@@ -27,8 +27,8 @@ import {
 	type SessionSummary,
 	type SessionsChangedPayload,
 	type StopReason,
-	type TeamSourceRef,
 	sanitizeWorktreeBranchForPath,
+	type TeamSourceRef,
 } from "@mobvibe/shared";
 import type { AcpBackendConfig, CliConfig } from "../config.js";
 import type { CliCryptoService } from "../e2ee/crypto-service.js";
