@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-06-PLAN.md
-last_updated: "2026-05-13T14:34:40.736Z"
+stopped_at: Completed 02-04-PLAN.md
+last_updated: "2026-05-13T14:35:07.885Z"
 last_activity: 2026-05-13
 progress:
   total_phases: 5
@@ -61,6 +61,7 @@ Progress: [█████████░] 91%
 | Phase 02 P02 | 35 min | 2 tasks | 9 files |
 | Phase 02 P03 | 14 min | 2 tasks | 8 files |
 | Phase 02 P06 | 9 min | 2 tasks | 7 files |
+| Phase 02 P04 | 12 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -105,6 +106,9 @@ Recent decisions affecting current work:
 - [Phase 02-06]: Bridge fallback is represented as a per-session stdio declaration, not as global agent MCP configuration.
 - [Phase 02-06]: Team session creation now uses native ACP first and safe stdio bridge second; unsupported backends still fail before ACP session creation.
 - [Phase 02-06]: Bridge readiness uses the same tool-list gate as native ACP and records transport stdio_bridge when fallback is active.
+- [Phase ?]: [Phase 02-04]: Wake success and failure are durable metadata updates on accepted mailbox rows, not part of delivery acceptance. — This preserves accepted delivery when wake injection fails.
+- [Phase ?]: [Phase 02-04]: Mailbox plaintext enters recipient visibility only via ordinary ACP session prompt/WAL semantics, never via Agent Team projection. — This keeps Gateway-facing Agent Team metadata plaintext-free while preserving ordinary session auditability.
+- [Phase ?]: [Phase 02-04]: Member completion sends idle_notification to the leader, but leader wake waits until all non-leader members are not running. — This follows AionUI idle notification semantics without wake loops.
 
 ### Pending Todos
 
@@ -124,6 +128,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-13T14:34:40.726Z
-Stopped at: Completed 02-06-PLAN.md
+Last session: 2026-05-13T14:35:07.876Z
+Stopped at: Completed 02-04-PLAN.md
 Resume file: None
