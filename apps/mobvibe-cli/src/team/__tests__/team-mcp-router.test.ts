@@ -306,9 +306,9 @@ describe("TeamMcpRouter", () => {
 				taskCounts: expect.objectContaining({ completed: 1 }),
 			}),
 		);
-		expect(JSON.stringify(onAgentTeamChanged.mock.calls.at(-1)?.[0])).not.toContain(
-			"Local task details",
-		);
+		expect(
+			JSON.stringify(onAgentTeamChanged.mock.calls.at(-1)?.[0]),
+		).not.toContain("Local task details");
 	});
 
 	test("task tools reject pending and deleted statuses", async () => {

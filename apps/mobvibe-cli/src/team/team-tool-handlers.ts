@@ -9,6 +9,10 @@ import type {
 	TeamToolIntentKind,
 } from "./agent-team-store.js";
 import { type MailboxSendResult, MailboxService } from "./mailbox-service.js";
+import {
+	type TaskBoardResult,
+	TaskBoardService,
+} from "./task-board-service.js";
 
 export const EXPECTED_TEAM_TOOL_NAMES = [
 	"mobvibe_team_send_message",
@@ -61,10 +65,12 @@ const forbiddenPayloadKeys = new Set([
 export class TeamToolHandlers {
 	private readonly options: TeamToolHandlersOptions;
 	private readonly mailboxService: MailboxService;
+	private readonly taskBoardService: TaskBoardService;
 
 	constructor(options: TeamToolHandlersOptions) {
 		this.options = options;
 		this.mailboxService = new MailboxService(options.store);
+		this.taskBoardService = new TaskBoardService(options.store);
 	}
 
 	getToolNames(): TeamToolName[] {
@@ -118,20 +124,42 @@ export class TeamToolHandlers {
 			case "mobvibe_team_send_message":
 				return this.handleSendMessage(caller, args);
 			case "mobvibe_team_task_create":
-				return (
-					this.options.services?.createTask?.(caller, args) ?? {
-						accepted: true,
-					}
-				);
+				return this.handleCreateTask(caller, args);
 			case "mobvibe_team_task_list":
-				return this.options.services?.listTasks?.(caller, args) ?? [];
+				return this.handleListTasks(caller, args);
 			case "mobvibe_team_task_update":
-				return (
-					this.options.services?.updateTask?.(caller, args) ?? {
-						accepted: true,
-					}
-				);
+				return this.handleUpdateTask(caller, args);
 		}
+	}
+
+	private async handleCreateTask(
+		caller: TeamToolCaller,
+		args: unknown,
+	): Promise<TaskBoardResult | unknown> {
+		const result = await (this.options.services?.createTask?.(caller, args) ??
+			this.taskBoardService.createTaskResult(caller, args));
+		this.emitProjectionChanged(caller.agentTeamId, result);
+		return result;
+	}
+
+	private async handleListTasks(
+		caller: TeamToolCaller,
+		args: unknown,
+	): Promise<TaskBoardResult | unknown> {
+		return (
+			this.options.services?.listTasks?.(caller, args) ??
+			this.taskBoardService.listTasksResult(caller)
+		);
+	}
+
+	private async handleUpdateTask(
+		caller: TeamToolCaller,
+		args: unknown,
+	): Promise<TaskBoardResult | unknown> {
+		const result = await (this.options.services?.updateTask?.(caller, args) ??
+			this.taskBoardService.updateTaskResult(caller, args));
+		this.emitProjectionChanged(caller.agentTeamId, result);
+		return result;
 	}
 
 	private async handleSendMessage(
@@ -150,7 +178,7 @@ export class TeamToolHandlers {
 	}
 
 	private emitProjectionChanged(agentTeamId: string, result: unknown): void {
-		if (!isSuccessfulMailboxResult(result)) return;
+		if (!isSuccessfulToolResult(result)) return;
 		const team = this.options.store.getAgentTeam({ agentTeamId }).team;
 		if (team) this.options.onAgentTeamChanged?.(team);
 	}
@@ -211,9 +239,9 @@ function validationError(message: string): MailboxSendResult {
 	};
 }
 
-function isSuccessfulMailboxResult(
+function isSuccessfulToolResult(
 	value: unknown,
-): value is MailboxSendResult & { ok: true } {
+): value is (MailboxSendResult | TaskBoardResult) & { ok: true } {
 	return (
 		typeof value === "object" &&
 		value !== null &&
