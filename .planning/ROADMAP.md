@@ -60,7 +60,7 @@ Plans:
 - [x] 02-02-PLAN.md — Team MCP runtime, per-session injection, caller binding, and tools readiness
 - [x] 02-03-PLAN.md — Durable mailbox `send_message` tool path and projection-safe delivery metadata
 - [x] 02-04-PLAN.md — Mailbox wake/injection semantics and idle notification guard
-- [ ] 02-05-PLAN.md — Durable task board tools and dependency mutation
+- [x] 02-05-PLAN.md — Durable task board tools and dependency mutation
 - [x] 02-06-PLAN.md — Per-session bridge fallback or explicit team-capable validation error
 **UI hint**: no
 

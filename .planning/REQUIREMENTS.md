@@ -29,7 +29,7 @@ Requirements for the first agent team release. Each requirement must map to exac
 
 - [x] **COORD-01**: Agent 可以通过 `mobvibe_team_send_message` 向 leader、指定 member 或全体发送 durable mailbox message。
 - [x] **COORD-02**: Mailbox message 记录 sender、recipient、read/unread、createdAt、wake status 和 source refs；消息持久化与 wake 结果分离。
-- [ ] **COORD-03**: Agent 可以通过 task tools 创建、列出和更新 durable task board；任务包含 owner、status、blockedBy/blocks 和更新时间。
+- [x] **COORD-03**: Agent 可以通过 task tools 创建、列出和更新 durable task board；任务包含 owner、status、blockedBy/blocks 和更新时间。
 - [x] **COORD-04**: Mailbox 正文、task 正文和 agent 输出不得作为 Gateway-facing 明文字段传输或存储。
 
 ### Team Creation And Orchestration
@@ -126,7 +126,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MCP-07 | Phase 2 | Complete |
 | COORD-01 | Phase 2 | Complete |
 | COORD-02 | Phase 2 | Complete |
-| COORD-03 | Phase 2 | Pending |
+| COORD-03 | Phase 2 | Complete |
 | COORD-04 | Phase 2 | Complete |
 | ORCH-01 | Phase 3 | Pending |
 | ORCH-02 | Phase 3 | Pending |
