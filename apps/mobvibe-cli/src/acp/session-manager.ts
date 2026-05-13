@@ -38,14 +38,14 @@ import {
 } from "../lib/git-utils.js";
 import { logger } from "../lib/logger.js";
 import {
+	buildTeamMcpDeclaration,
+	resolveTeamMcpTransport,
+} from "../team/team-capability.js";
+import {
 	consolidateEventsForRead,
 	isStubPayload,
 } from "../wal/consolidator.js";
 import { WalStore } from "../wal/index.js";
-import {
-	buildTeamMcpDeclaration,
-	resolveTeamMcpTransport,
-} from "../team/team-capability.js";
 import { AcpConnection } from "./acp-connection.js";
 
 type SessionRecord = {
@@ -1068,9 +1068,14 @@ export class SessionManager {
 			});
 			connection.onStatusChange((status) => {
 				if (status.error) {
-					this.writeAndEmitEvent(record.sessionId, record.revision, "session_error", {
-						error: status.error,
-					});
+					this.writeAndEmitEvent(
+						record.sessionId,
+						record.revision,
+						"session_error",
+						{
+							error: status.error,
+						},
+					);
 					this.emitSessionDetached(session.sessionId, "agent_exit");
 				}
 			});

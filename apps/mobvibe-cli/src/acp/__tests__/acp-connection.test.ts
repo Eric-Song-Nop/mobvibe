@@ -31,8 +31,8 @@ mock.module("node:stream", () => ({
 }));
 
 import type { AcpBackendConfig } from "../../config.js";
-import { AcpConnection } from "../acp-connection.js";
 import { buildTeamMcpDeclaration } from "../../team/team-capability.js";
+import { AcpConnection } from "../acp-connection.js";
 
 const createMockBackendConfig = (): AcpBackendConfig => ({
 	id: "test-backend",

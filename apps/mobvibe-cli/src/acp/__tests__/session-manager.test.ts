@@ -89,10 +89,12 @@ const createMockConnection = () => ({
 		name: "claude-code",
 		title: "Claude Code",
 	})),
-	getSessionCapabilities: mock((): AgentSessionCapabilities => ({
-		list: true,
-		load: true,
-	})),
+	getSessionCapabilities: mock(
+		(): AgentSessionCapabilities => ({
+			list: true,
+			load: true,
+		}),
+	),
 	supportsSessionList: mock(() => true),
 	supportsSessionLoad: mock(() => true),
 	listSessions: mock(() =>
@@ -378,9 +380,10 @@ describe("SessionManager", () => {
 				cwd: "/home/user/project",
 				backendId: "backend-1",
 			});
-			const setPermissionHandlerMock = mockConnection.setPermissionHandler as unknown as {
-				mock: { calls: Array<[unknown?]> };
-			};
+			const setPermissionHandlerMock =
+				mockConnection.setPermissionHandler as unknown as {
+					mock: { calls: Array<[unknown?]> };
+				};
 			const handler = setPermissionHandlerMock.mock.calls[0]?.[0] as
 				| ((params: {
 						toolCall?: { toolCallId?: string };

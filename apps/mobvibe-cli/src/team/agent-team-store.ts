@@ -249,7 +249,9 @@ export class AgentTeamStore {
 	}
 
 	listTeamMembers(agentTeamId: string): AgentTeamMemberRow[] {
-		return this.stmtListMembers.all({ $agentTeamId: agentTeamId }) as AgentTeamMemberRow[];
+		return this.stmtListMembers.all({
+			$agentTeamId: agentTeamId,
+		}) as AgentTeamMemberRow[];
 	}
 
 	updateMcpStatus(params: {

@@ -1,6 +1,9 @@
 import type { AgentTeamStore } from "./agent-team-store.js";
 import { TeamMcpRouter } from "./team-mcp-router.js";
-import { TeamToolHandlers, type TeamToolHandlersOptions } from "./team-tool-handlers.js";
+import {
+	TeamToolHandlers,
+	type TeamToolHandlersOptions,
+} from "./team-tool-handlers.js";
 
 export type TeamRuntimeOptions = Omit<TeamToolHandlersOptions, "store"> & {
 	store: AgentTeamStore;

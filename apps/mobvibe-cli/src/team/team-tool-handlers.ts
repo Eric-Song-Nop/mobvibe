@@ -61,7 +61,11 @@ export class TeamToolHandlers {
 		toolName: TeamToolName;
 		args: unknown;
 	}): Promise<TeamToolResult> {
-		const data = await this.dispatchData(input.caller, input.toolName, input.args);
+		const data = await this.dispatchData(
+			input.caller,
+			input.toolName,
+			input.args,
+		);
 		return { caller: input.caller, toolName: input.toolName, data };
 	}
 
@@ -97,13 +101,25 @@ export class TeamToolHandlers {
 						lifecycle: member.lifecycle,
 					}));
 			case "mobvibe_team_send_message":
-				return this.options.services?.sendMessage?.(caller, args) ?? { accepted: true };
+				return (
+					this.options.services?.sendMessage?.(caller, args) ?? {
+						accepted: true,
+					}
+				);
 			case "mobvibe_team_task_create":
-				return this.options.services?.createTask?.(caller, args) ?? { accepted: true };
+				return (
+					this.options.services?.createTask?.(caller, args) ?? {
+						accepted: true,
+					}
+				);
 			case "mobvibe_team_task_list":
 				return this.options.services?.listTasks?.(caller, args) ?? [];
 			case "mobvibe_team_task_update":
-				return this.options.services?.updateTask?.(caller, args) ?? { accepted: true };
+				return (
+					this.options.services?.updateTask?.(caller, args) ?? {
+						accepted: true,
+					}
+				);
 		}
 	}
 }

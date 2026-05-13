@@ -70,7 +70,10 @@ describe("TeamMcpRouter", () => {
 		const serverId = `mobvibe-team:${agentTeamId}:${leaderMemberId}`;
 		router.handleConnect({ serverId });
 
-		router.handleListTools({ serverId, toolNames: [...EXPECTED_TEAM_TOOL_NAMES] });
+		router.handleListTools({
+			serverId,
+			toolNames: [...EXPECTED_TEAM_TOOL_NAMES],
+		});
 
 		const team = store.getAgentTeam({ agentTeamId }).team;
 		expect(team?.members[0].mcp?.phase).toBe("tools_ready");

@@ -1,9 +1,13 @@
 import { createErrorDetail, type TeamSourceRef } from "@mobvibe/shared";
-import type { AgentTeamStore, TeamToolIntent, TeamToolIntentKind } from "./agent-team-store.js";
+import type {
+	AgentTeamStore,
+	TeamToolIntent,
+	TeamToolIntentKind,
+} from "./agent-team-store.js";
 import {
 	EXPECTED_TEAM_TOOL_NAMES,
 	type TeamToolCaller,
-	TeamToolHandlers,
+	type TeamToolHandlers,
 	type TeamToolName,
 	type TeamToolResult,
 } from "./team-tool-handlers.js";
@@ -116,7 +120,10 @@ export class TeamMcpRouter {
 	}
 }
 
-function parseServerId(serverId: string): { agentTeamId: string; memberId: string } {
+function parseServerId(serverId: string): {
+	agentTeamId: string;
+	memberId: string;
+} {
 	const parts = serverId.split(":");
 	if (parts.length !== 3 || parts[0] !== "mobvibe-team") {
 		throw new Error("Invalid Team MCP server id");
