@@ -113,14 +113,15 @@ describe("AcpConnection", () => {
 		});
 
 		it("maps native and bridge MCP capabilities behind Mobvibe-owned narrow fields", () => {
-			// @ts-expect-error - accessing private property for testing an RFD-only SDK extension
-			connection.agentCapabilities = {
+			const capabilitiesWithRfdMcp = {
 				mcpCapabilities: {
 					acp: true,
 					stdio: true,
 					perSessionBridge: true,
 				},
-			};
+			} as unknown;
+			// @ts-expect-error - accessing private property for testing an RFD-only SDK extension
+			connection.agentCapabilities = capabilitiesWithRfdMcp;
 
 			const capabilities = connection.getSessionCapabilities();
 
