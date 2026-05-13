@@ -43,6 +43,7 @@ import {
 	searchGitLog,
 } from "../lib/git-utils.js";
 import { logger } from "../lib/logger.js";
+import { AgentTeamStore } from "../team/agent-team-store.js";
 import { buildHostFsEntries, buildHostFsRoots } from "./host-fs.js";
 import { resolveWithinCwd } from "./path-utils.js";
 
@@ -166,10 +167,12 @@ export class SocketClient extends EventEmitter {
 	private reconnectAttempts = 0;
 	private heartbeatInterval?: NodeJS.Timeout;
 	private lastDiscoverAt = 0;
+	private readonly agentTeamStore: AgentTeamStore;
 
 	constructor(private readonly options: SocketClientOptions) {
 		super();
 		const { cryptoService } = options;
+		this.agentTeamStore = new AgentTeamStore(options.config.walDbPath);
 		this.socket = io(`${options.config.gatewayUrl}/cli`, {
 			path: "/socket.io",
 			reconnection: true,
@@ -298,6 +301,7 @@ export class SocketClient extends EventEmitter {
 
 	private setupRpcHandlers() {
 		const { sessionManager } = this.options;
+		const { agentTeamStore } = this;
 
 		// Session create
 		this.socket.on("rpc:session:create", async (request) => {
@@ -309,6 +313,94 @@ export class SocketClient extends EventEmitter {
 				logger.error(
 					{ err: error, requestId: request.requestId },
 					"rpc_session_create_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		this.socket.on("rpc:agent-team:create", async (request) => {
+			try {
+				logger.info(
+					{
+						requestId: request.requestId,
+						machineId: request.params.machineId,
+					},
+					"rpc_agent_team_create",
+				);
+				const result = agentTeamStore.createAgentTeam(request.params);
+				this.sendRpcResponse(request.requestId, result);
+				this.socket.emit("agent-teams:changed", {
+					added: [result.team],
+					updated: [],
+					removed: [],
+					machineId: result.team.machineId,
+				});
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						machineId: request.params.machineId,
+					},
+					"rpc_agent_team_create_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		this.socket.on("rpc:agent-teams:list", async (request) => {
+			try {
+				logger.info(
+					{
+						requestId: request.requestId,
+						machineId: request.params.machineId,
+					},
+					"rpc_agent_teams_list",
+				);
+				const result = agentTeamStore.listAgentTeams(request.params);
+				logger.info(
+					{
+						requestId: request.requestId,
+						machineId: request.params.machineId,
+						count: result.teams.length,
+					},
+					"rpc_agent_teams_list_complete",
+				);
+				this.sendRpcResponse(request.requestId, result);
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						machineId: request.params.machineId,
+					},
+					"rpc_agent_teams_list_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		this.socket.on("rpc:agent-team:get", async (request) => {
+			try {
+				logger.info(
+					{
+						requestId: request.requestId,
+						agentTeamId: request.params.agentTeamId,
+						machineId: request.params.machineId,
+					},
+					"rpc_agent_team_get",
+				);
+				const result = agentTeamStore.getAgentTeam(request.params);
+				this.sendRpcResponse(request.requestId, result);
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						agentTeamId: request.params.agentTeamId,
+						machineId: request.params.machineId,
+					},
+					"rpc_agent_team_get_error",
 				);
 				this.sendRpcError(request.requestId, error);
 			}
@@ -1572,6 +1664,7 @@ export class SocketClient extends EventEmitter {
 
 	disconnect() {
 		this.stopHeartbeat();
+		this.agentTeamStore.close();
 		this.socket.disconnect();
 	}
 
