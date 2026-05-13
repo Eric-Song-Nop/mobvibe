@@ -61,7 +61,7 @@ Plans:
 - [x] 02-03-PLAN.md — Durable mailbox `send_message` tool path and projection-safe delivery metadata
 - [ ] 02-04-PLAN.md — Mailbox wake/injection semantics and idle notification guard
 - [ ] 02-05-PLAN.md — Durable task board tools and dependency mutation
-- [ ] 02-06-PLAN.md — Per-session bridge fallback or explicit team-capable validation error
+- [x] 02-06-PLAN.md — Per-session bridge fallback or explicit team-capable validation error
 **UI hint**: no
 
 ### Phase 3: 最小端到端 Team Run
@@ -116,7 +116,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. 协议、状态模型与持久化边界 | 5/5 | Completed | 2026-05-13 |
-| 2. CLI Team MCP、Mailbox 与 Task Board | 3/6 | In Progress | - |
+| 2. CLI Team MCP、Mailbox 与 Task Board | 4/6 | In Progress | - |
 | 3. 最小端到端 Team Run | 0/TBD | Not started | - |
 | 4. 生命周期、权限、E2EE 与恢复 | 0/TBD | Not started | - |
 | 5. UI 规模化与 v1 Polish | 0/TBD | Not started | - |

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-03-PLAN.md
-last_updated: "2026-05-13T13:58:51.514Z"
+stopped_at: Completed 02-06-PLAN.md
+last_updated: "2026-05-13T14:14:13.728Z"
 last_activity: 2026-05-13
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 11
-  completed_plans: 8
-  percent: 73
+  completed_plans: 9
+  percent: 82
 ---
 
 # Project State
@@ -26,33 +26,33 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 02 (CLI Team MCP、Mailbox 与 Task Board) — EXECUTING
-Plan: 4 of 6
+Plan: 5 of 6
 Status: Ready to execute
 Last activity: 2026-05-13
 
-Progress: [███████░░░] 73%
+Progress: [████████░░] 82%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 8
-- Average duration: 12 min
-- Total execution time: 1.7 hours
+- Total plans completed: 9
+- Average duration: 11 min
+- Total execution time: 1.8 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1. 协议、状态模型与持久化边界 | 5 | 41 min | 8 min |
-| 2. CLI Team MCP、Mailbox 与 Task Board | 3 | 58 min | 19 min |
+| 2. CLI Team MCP、Mailbox 与 Task Board | 4 | 67 min | 17 min |
 | 3. 最小端到端 Team Run | 0 | TBD | N/A |
 | 4. 生命周期、权限、E2EE 与恢复 | 0 | TBD | N/A |
 | 5. UI 规模化与 v1 Polish | 0 | TBD | N/A |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-04 (5 min), 01-05 (10 min), 02-01 (9 min), 02-02 (35 min), 02-03 (14 min)
+- Last 5 plans: 01-05 (10 min), 02-01 (9 min), 02-02 (35 min), 02-03 (14 min), 02-06 (9 min)
 - Trend: variable due to deeper CLI MCP runtime and mailbox implementation plans
 
 | Phase 01 P04 | 5 min | 3 tasks | 4 files |
@@ -60,6 +60,7 @@ Progress: [███████░░░] 73%
 | Phase 02 P01 | 9 min | 2 tasks | 6 files |
 | Phase 02 P02 | 35 min | 2 tasks | 9 files |
 | Phase 02 P03 | 14 min | 2 tasks | 8 files |
+| Phase 02 P06 | 9 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -101,6 +102,9 @@ Recent decisions affecting current work:
 - [Phase 02-03]: Mailbox delivery success is the durable SQLite row; wake metadata starts as pending and remains separate for Plan 02-04.
 - [Phase 02-03]: mobvibe_team_send_message sender identity comes only from TeamMcpRouter caller binding; fromMemberId args are ignored.
 - [Phase 02-03]: Gateway-facing Agent Team projections receive mailbox counts/source refs only, never mailbox plaintext or body_local_json.
+- [Phase 02-06]: Bridge fallback is represented as a per-session stdio declaration, not as global agent MCP configuration.
+- [Phase 02-06]: Team session creation now uses native ACP first and safe stdio bridge second; unsupported backends still fail before ACP session creation.
+- [Phase 02-06]: Bridge readiness uses the same tool-list gate as native ACP and records transport stdio_bridge when fallback is active.
 
 ### Pending Todos
 
@@ -120,6 +124,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-13T13:58:51.504Z
-Stopped at: Completed 02-03-PLAN.md
+Last session: 2026-05-13T14:14:13.719Z
+Stopped at: Completed 02-06-PLAN.md
 Resume file: None
