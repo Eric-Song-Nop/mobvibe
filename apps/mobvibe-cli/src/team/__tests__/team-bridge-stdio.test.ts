@@ -4,13 +4,15 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AgentTeamStore } from "../agent-team-store.js";
-import { TeamMcpRouter } from "../team-mcp-router.js";
-import { EXPECTED_TEAM_TOOL_NAMES } from "../team-tool-handlers.js";
 import {
 	buildPerSessionTeamStdioBridge,
 	buildTeamStdioBridgeToolManifest,
 } from "../team-bridge-stdio.js";
-import { TeamToolHandlers } from "../team-tool-handlers.js";
+import { TeamMcpRouter } from "../team-mcp-router.js";
+import {
+	EXPECTED_TEAM_TOOL_NAMES,
+	TeamToolHandlers,
+} from "../team-tool-handlers.js";
 
 describe("per-session stdio bridge fallback", () => {
 	let tempDir: string;
@@ -90,7 +92,10 @@ describe("per-session stdio bridge fallback", () => {
 		const serverId = `mobvibe-team:${agentTeamId}:${memberId}`;
 
 		router.handleConnect({ serverId, transport: "stdio_bridge" });
-		router.handleListTools({ serverId, toolNames: [...EXPECTED_TEAM_TOOL_NAMES] });
+		router.handleListTools({
+			serverId,
+			toolNames: [...EXPECTED_TEAM_TOOL_NAMES],
+		});
 
 		const team = store.getAgentTeam({ agentTeamId }).team;
 		expect(team?.members[0].mcp?.transport).toBe("stdio_bridge");

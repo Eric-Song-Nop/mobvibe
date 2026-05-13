@@ -1,5 +1,8 @@
-import { EXPECTED_TEAM_TOOL_NAMES, type TeamToolName } from "./team-tool-handlers.js";
 import type { TeamMcpIdentityInput } from "./team-capability.js";
+import {
+	EXPECTED_TEAM_TOOL_NAMES,
+	type TeamToolName,
+} from "./team-tool-handlers.js";
 
 export type TeamStdioBridgeEnv = Array<{ name: string; value: string }>;
 

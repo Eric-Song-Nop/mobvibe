@@ -37,9 +37,7 @@ import {
 	resolveGitProjectContext,
 } from "../lib/git-utils.js";
 import { logger } from "../lib/logger.js";
-import {
-	buildTeamMcpSessionSelection,
-} from "../team/team-capability.js";
+import { buildTeamMcpSessionSelection } from "../team/team-capability.js";
 import {
 	consolidateEventsForRead,
 	isStubPayload,

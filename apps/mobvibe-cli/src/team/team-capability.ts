@@ -1,10 +1,10 @@
+import { fileURLToPath } from "node:url";
 import {
 	type AgentSessionCapabilities,
 	AppError,
 	createErrorDetail,
 	type TeamMcpTransport,
 } from "@mobvibe/shared";
-import { fileURLToPath } from "node:url";
 import {
 	buildPerSessionTeamStdioBridge,
 	type PerSessionTeamStdioBridgeDeclaration,
