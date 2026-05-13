@@ -350,7 +350,7 @@ describe("SessionManager", () => {
 			expect(mockConnection.createSession).not.toHaveBeenCalled();
 		});
 
-		it("creates a team session with exactly one mobvibe-team MCP declaration", async () => {
+		it("creates a team session with exactly one mobvibe-team MCP declaration and router callbacks", async () => {
 			mockConnection.getSessionCapabilities.mockReturnValueOnce({
 				list: true,
 				load: true,
@@ -364,48 +364,46 @@ describe("SessionManager", () => {
 				memberId: "member-1",
 			});
 
-			expect(mockConnection.createSession).toHaveBeenCalledWith({
-				cwd: "/home/user/project",
-				teamMcpDeclaration: {
-					type: "acp",
-					name: "mobvibe-team",
-					id: "mobvibe-team:team-1:member-1",
-				},
-			});
+			expect(mockConnection.createSession).toHaveBeenCalledWith(
+				expect.objectContaining({
+					cwd: "/home/user/project",
+					teamMcpDeclaration: {
+						type: "acp",
+						name: "mobvibe-team",
+						id: "mobvibe-team:team-1:member-1",
+					},
+					teamMcpTransport: "acp",
+					teamMcpHandlers: expect.objectContaining({
+						handleConnect: expect.any(Function),
+						handleListTools: expect.any(Function),
+						handleToolCall: expect.any(Function),
+						handleDisconnect: expect.any(Function),
+					}),
+				}),
+			);
 		});
 
-		it("creates a bridge team session with per-session stdio declaration", async () => {
+		it("rejects bridge-only team sessions until stdio bridge is executable", async () => {
 			mockConnection.getSessionCapabilities.mockReturnValueOnce({
 				list: true,
 				load: true,
 				mcp: { stdio: true, perSessionBridge: true },
 			});
 
-			await sessionManager.createTeamSession({
-				cwd: "/home/user/project",
-				backendId: "backend-1",
-				agentTeamId: "team-1",
-				memberId: "member-1",
-			});
-
-			expect(mockConnection.createSession).toHaveBeenCalledWith({
-				cwd: "/home/user/project",
-				teamMcpDeclaration: expect.objectContaining({
-					type: "stdio",
-					name: "mobvibe-team",
-					command: process.execPath,
-					args: expect.arrayContaining([
-						"--agent-team-id",
-						"team-1",
-						"--member-id",
-						"member-1",
-					]),
-					env: [
-						{ name: "MOBVIBE_TEAM_AGENT_TEAM_ID", value: "team-1" },
-						{ name: "MOBVIBE_TEAM_MEMBER_ID", value: "member-1" },
-					],
+			await expect(
+				sessionManager.createTeamSession({
+					cwd: "/home/user/project",
+					backendId: "backend-1",
+					agentTeamId: "team-1",
+					memberId: "member-1",
+				}),
+			).rejects.toMatchObject({
+				status: 409,
+				detail: expect.objectContaining({
+					code: "CAPABILITY_NOT_SUPPORTED",
 				}),
 			});
+			expect(mockConnection.createSession).not.toHaveBeenCalled();
 		});
 
 		it("keeps ordinary ACP permission request handling unchanged", async () => {

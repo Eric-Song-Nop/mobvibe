@@ -30,14 +30,21 @@ const SAFE_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 const toolInputKeys: Record<TeamToolName, string[]> = {
 	mobvibe_team_send_message: ["to", "message", "summary"],
 	mobvibe_team_members: [],
-	mobvibe_team_task_create: ["title", "description", "owner", "blockedBy"],
-	mobvibe_team_task_list: ["status", "owner"],
+	mobvibe_team_task_create: [
+		"title",
+		"description",
+		"owner",
+		"status",
+		"blockedBy",
+	],
+	mobvibe_team_task_list: [],
 	mobvibe_team_task_update: [
 		"taskId",
 		"status",
 		"owner",
+		"title",
+		"description",
 		"blockedBy",
-		"blocks",
 	],
 };
 

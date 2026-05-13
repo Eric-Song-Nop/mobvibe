@@ -3,6 +3,7 @@ import { AppError } from "@mobvibe/shared";
 import {
 	buildTeamMcpDeclaration,
 	buildTeamMcpServerId,
+	buildTeamMcpSessionSelection,
 	resolveTeamMcpTransport,
 	type TeamMcpIdentityInput,
 } from "../team-capability.js";
@@ -31,14 +32,39 @@ describe("team MCP capability resolution", () => {
 		).toBe("acp");
 	});
 
-	test("resolves stdio bridge only when backend exposes per-session bridge eligibility", () => {
-		expect(
+	test("rejects stdio bridge fallback until an executable bridge server exists", () => {
+		expect(() =>
 			resolveTeamMcpTransport({
 				list: true,
 				load: true,
 				mcp: { stdio: true, perSessionBridge: true },
 			}),
-		).toBe("stdio_bridge");
+		).toThrow(AppError);
+
+		try {
+			buildTeamMcpSessionSelection({
+				capabilities: {
+					list: true,
+					load: true,
+					mcp: { stdio: true, perSessionBridge: true },
+				},
+				agentTeamId: "team-1",
+				memberId: "member-1",
+			});
+		} catch (error) {
+			expect(error).toBeInstanceOf(AppError);
+			if (error instanceof AppError) {
+				expect(error.status).toBe(409);
+				expect(error.detail).toMatchObject({
+					code: "CAPABILITY_NOT_SUPPORTED",
+					retryable: false,
+					scope: "session",
+				});
+				expect(error.detail.message).toContain(
+					"stdio bridge fallback is not executable yet",
+				);
+			}
+		}
 	});
 
 	test("rejects unsupported autonomous team backends with ErrorDetail semantics", () => {

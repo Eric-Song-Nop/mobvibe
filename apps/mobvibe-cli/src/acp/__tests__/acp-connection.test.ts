@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 // Mock the SDK
@@ -31,7 +32,10 @@ mock.module("node:stream", () => ({
 }));
 
 import type { AcpBackendConfig } from "../../config.js";
+import { AgentTeamStore } from "../../team/agent-team-store.js";
 import { buildTeamMcpDeclaration } from "../../team/team-capability.js";
+import { TeamRuntime } from "../../team/team-runtime.js";
+import { EXPECTED_TEAM_TOOL_NAMES } from "../../team/team-tool-handlers.js";
 import { AcpConnection } from "../acp-connection.js";
 
 const createMockBackendConfig = (): AcpBackendConfig => ({
@@ -331,6 +335,141 @@ describe("AcpConnection", () => {
 		});
 	});
 
+	describe("team MCP callback adapter", () => {
+		it("routes MCP callbacks to durable mailbox and task handlers", async () => {
+			const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "acp-team-mcp-"));
+			const store = new AgentTeamStore(path.join(tempDir, "events.db"));
+			try {
+				const runtime = new TeamRuntime({ store });
+				const created = store.createAgentTeam({
+					machineId: "machine-1",
+					workspaceRootCwd: "/workspace",
+					backendId: "backend-1",
+					title: "Callback Team",
+					leaderName: "Leader",
+				});
+				const agentTeamId = created.team.agentTeamId;
+				const leaderMemberId = created.team.leaderMemberId;
+				const memberId = store.addTeamMember({
+					agentTeamId,
+					backendId: "backend-1",
+					name: "Worker",
+					role: "member",
+				}).memberId;
+				const serverId = `mobvibe-team:${agentTeamId}:${leaderMemberId}`;
+				const declaration = buildTeamMcpDeclaration({
+					agentTeamId,
+					memberId: leaderMemberId,
+				});
+				const newSession = mock(() =>
+					Promise.resolve({
+						sessionId: "session-1",
+						modes: null,
+						models: null,
+					}),
+				);
+				// @ts-expect-error - configuring private connection state for adapter-level test
+				connection.state = "ready";
+				// @ts-expect-error - configuring private connection state for adapter-level test
+				connection.connection = { newSession };
+
+				await connection.createSession({
+					cwd: "/workspace",
+					teamMcpDeclaration: declaration,
+					teamMcpTransport: "acp",
+					teamMcpHandlers: runtime.mcpRouter,
+				});
+				// @ts-expect-error - exercise the private ACP extension adapter directly
+				await connection.handleTeamMcpExtensionMethod("mcp/connect", {
+					serverId,
+				});
+				// @ts-expect-error - exercise the private ACP extension adapter directly
+				await connection.handleTeamMcpExtensionMethod("mcp/message", {
+					serverId,
+					type: "list-tools",
+					tools: EXPECTED_TEAM_TOOL_NAMES.map((name) => ({ name })),
+				});
+
+				const afterListTools = store.getAgentTeam({ agentTeamId }).team;
+				expect(afterListTools?.members[0].mcp?.phase).toBe("tools_ready");
+
+				// @ts-expect-error - exercise the private ACP extension adapter directly
+				const mailboxResult = await connection.handleTeamMcpExtensionMethod(
+					"mcp/message",
+					{
+						serverId,
+						type: "tool-call",
+						toolName: "mobvibe_team_send_message",
+						args: {
+							to: "Worker",
+							message: "plaintext stays local",
+							fromMemberId: memberId,
+						},
+					},
+				);
+				expect(mailboxResult.caller).toEqual(
+					expect.objectContaining({ memberId: leaderMemberId }),
+				);
+
+				// @ts-expect-error - exercise the private ACP extension adapter directly
+				const createdTask = await connection.handleTeamMcpExtensionMethod(
+					"mcp/message",
+					{
+						serverId,
+						type: "tool-call",
+						toolName: "mobvibe_team_task_create",
+						args: {
+							title: "Callback task",
+							description: "task detail stays local",
+							owner: "Worker",
+						},
+					},
+				);
+				const taskId = readCreatedTaskId(createdTask);
+				// @ts-expect-error - exercise the private ACP extension adapter directly
+				const listedTasks = await connection.handleTeamMcpExtensionMethod(
+					"mcp/message",
+					{
+						serverId,
+						type: "tool-call",
+						toolName: "mobvibe_team_task_list",
+						args: {},
+					},
+				);
+				expect(readListedTaskIds(listedTasks)).toContain(taskId);
+				// @ts-expect-error - exercise the private ACP extension adapter directly
+				await connection.handleTeamMcpExtensionMethod("mcp/message", {
+					serverId,
+					type: "tool-call",
+					toolName: "mobvibe_team_task_update",
+					args: { taskId, status: "completed" },
+				});
+
+				const summary = store.getAgentTeam({ agentTeamId }).team;
+				expect(summary?.mailboxCounts.unread).toBe(1);
+				expect(summary?.taskCounts.completed).toBe(1);
+				expect(summary?.sourceRefs).toContainEqual(
+					expect.objectContaining({
+						type: "mailbox_message",
+						fromMemberId: leaderMemberId,
+						toMemberId: memberId,
+					}),
+				);
+				expect(JSON.stringify(summary)).not.toContain("plaintext stays local");
+				expect(JSON.stringify(summary)).not.toContain(
+					"task detail stays local",
+				);
+				// @ts-expect-error - exercise the private ACP extension adapter directly
+				await connection.handleTeamMcpExtensionMethod("mcp/disconnect", {
+					serverId,
+				});
+			} finally {
+				store.close();
+				fs.rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	});
+
 	describe("getStatus", () => {
 		it("returns backend info in status", () => {
 			const status = connection.getStatus();
@@ -343,3 +482,23 @@ describe("AcpConnection", () => {
 		});
 	});
 });
+
+function readCreatedTaskId(value: unknown): string {
+	const response = value as {
+		data?: { task?: { taskId?: unknown } };
+	};
+	const taskId = response.data?.task?.taskId;
+	if (typeof taskId !== "string") {
+		throw new Error("Expected created task id");
+	}
+	return taskId;
+}
+
+function readListedTaskIds(value: unknown): string[] {
+	const response = value as {
+		data?: { tasks?: Array<{ taskId?: unknown }> };
+	};
+	return (response.data?.tasks ?? []).flatMap((task) =>
+		typeof task.taskId === "string" ? [task.taskId] : [],
+	);
+}

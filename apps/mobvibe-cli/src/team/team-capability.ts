@@ -1,14 +1,10 @@
-import { fileURLToPath } from "node:url";
 import {
 	type AgentSessionCapabilities,
 	AppError,
 	createErrorDetail,
 	type TeamMcpTransport,
 } from "@mobvibe/shared";
-import {
-	buildPerSessionTeamStdioBridge,
-	type PerSessionTeamStdioBridgeDeclaration,
-} from "./team-bridge-stdio.js";
+import type { PerSessionTeamStdioBridgeDeclaration } from "./team-bridge-stdio.js";
 
 const TEAM_MCP_SERVER_NAME = "mobvibe-team";
 const TEAM_MCP_SERVER_ID_PREFIX = "mobvibe-team";
@@ -39,7 +35,7 @@ const createCapabilityNotSupportedError = () =>
 		createErrorDetail({
 			code: "CAPABILITY_NOT_SUPPORTED",
 			message:
-				"Backend does not support native MCP-over-ACP or safe per-session bridge",
+				"Team MCP stdio bridge fallback is not executable yet; native MCP-over-ACP is required",
 			retryable: false,
 			scope: "session",
 		}),
@@ -86,12 +82,6 @@ export const resolveTeamMcpTransport = (
 	if (capabilities.mcp?.acp === true) {
 		return "acp";
 	}
-	if (
-		capabilities.mcp?.stdio === true &&
-		capabilities.mcp.perSessionBridge === true
-	) {
-		return "stdio_bridge";
-	}
 	throw createCapabilityNotSupportedError();
 };
 
@@ -106,18 +96,6 @@ export const buildTeamMcpSessionSelection = (input: {
 		return {
 			transport,
 			declaration: buildTeamMcpDeclaration(input),
-		};
-	}
-	if (transport === "stdio_bridge") {
-		return {
-			transport,
-			declaration: buildPerSessionTeamStdioBridge({
-				agentTeamId: input.agentTeamId,
-				memberId: input.memberId,
-				bridgeScriptPath:
-					input.bridgeScriptPath ??
-					fileURLToPath(new URL("./team-bridge-stdio.js", import.meta.url)),
-			}),
 		};
 	}
 	throw createCapabilityNotSupportedError();

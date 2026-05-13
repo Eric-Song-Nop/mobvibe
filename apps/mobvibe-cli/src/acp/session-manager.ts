@@ -38,7 +38,9 @@ import {
 	resolveGitProjectContext,
 } from "../lib/git-utils.js";
 import { logger } from "../lib/logger.js";
+import { AgentTeamStore } from "../team/agent-team-store.js";
 import { buildTeamMcpSessionSelection } from "../team/team-capability.js";
+import { TeamRuntime } from "../team/team-runtime.js";
 import {
 	consolidateEventsForRead,
 	isStubPayload,
@@ -233,6 +235,8 @@ export class SessionManager {
 	private readonly sessionDetachedEmitter = new EventEmitter();
 	private readonly sessionEventEmitter = new EventEmitter();
 	private readonly walStore: WalStore;
+	private readonly agentTeamStore: AgentTeamStore;
+	private readonly teamRuntime: TeamRuntime;
 	private readonly cryptoService?: CliCryptoService;
 	/** Per-backend idle connections (initialized but no session bound) */
 	private idleConnections = new Map<string, AcpConnection>();
@@ -248,6 +252,11 @@ export class SessionManager {
 			config.acpBackends.map((backend) => [backend.id, backend]),
 		);
 		this.walStore = new WalStore(config.walDbPath);
+		this.agentTeamStore = new AgentTeamStore(config.walDbPath);
+		this.teamRuntime = new TeamRuntime({
+			store: this.agentTeamStore,
+			sessionManager: this,
+		});
 		this.cryptoService = cryptoService;
 	}
 
@@ -1041,6 +1050,8 @@ export class SessionManager {
 			const session = await connection.createSession({
 				cwd: effectiveCwd,
 				teamMcpDeclaration: selection.declaration,
+				teamMcpTransport: selection.transport,
+				teamMcpHandlers: this.teamRuntime.mcpRouter,
 			});
 			connection.setPermissionHandler((params) =>
 				this.handlePermissionRequest(session.sessionId, params),
@@ -1420,6 +1431,7 @@ export class SessionManager {
 	 */
 	async shutdown(): Promise<void> {
 		await this.closeAll();
+		this.agentTeamStore.close();
 		this.walStore.close();
 	}
 

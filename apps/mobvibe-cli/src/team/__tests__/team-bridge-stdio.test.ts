@@ -61,6 +61,33 @@ describe("per-session stdio bridge fallback", () => {
 		expect(toolNames).toEqual([...EXPECTED_TEAM_TOOL_NAMES]);
 	});
 
+	test("bridge manifest matches the durable task tool argument surface", () => {
+		const manifest = new Map(
+			buildTeamStdioBridgeToolManifest().map((tool) => [
+				tool.name,
+				tool.inputKeys,
+			]),
+		);
+
+		expect(manifest.get("mobvibe_team_task_create")).toEqual([
+			"title",
+			"description",
+			"owner",
+			"status",
+			"blockedBy",
+		]);
+		expect(manifest.get("mobvibe_team_task_list")).toEqual([]);
+		expect(manifest.get("mobvibe_team_task_update")).toEqual([
+			"taskId",
+			"status",
+			"owner",
+			"title",
+			"description",
+			"blockedBy",
+		]);
+		expect(manifest.get("mobvibe_team_task_update")).not.toContain("blocks");
+	});
+
 	test("source does not write global MCP configuration or use primary TCP bridge", () => {
 		const sourcePath = path.join(
 			path.dirname(fileURLToPath(import.meta.url)),

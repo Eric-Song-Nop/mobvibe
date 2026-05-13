@@ -19,6 +19,7 @@ import {
 	type PromptResponse,
 	type ReleaseTerminalRequest,
 	type ReleaseTerminalResponse,
+	RequestError,
 	type RequestPermissionRequest,
 	type RequestPermissionResponse,
 	type SessionInfo,
@@ -35,6 +36,7 @@ import {
 	createErrorDetail,
 	type ErrorDetail,
 	isProtocolMismatch,
+	type TeamMcpTransport,
 	type TerminalOutputEvent,
 } from "@mobvibe/shared";
 import type { AcpBackendConfig } from "../config.js";
@@ -45,6 +47,10 @@ import {
 import { logger } from "../lib/logger.js";
 import { buildShellCommand, resolveShell } from "../lib/shell.js";
 import type { TeamMcpSessionDeclaration } from "../team/team-capability.js";
+import {
+	EXPECTED_TEAM_TOOL_NAMES,
+	type TeamToolName,
+} from "../team/team-tool-handlers.js";
 
 type ClientInfo = {
 	name: string;
@@ -82,6 +88,22 @@ type SessionUpdateListener = (notification: SessionNotification) => void;
 
 export type TeamMcpSessionOptions = {
 	teamMcpDeclaration?: TeamMcpSessionDeclaration;
+	teamMcpTransport?: TeamMcpTransport;
+	teamMcpHandlers?: TeamMcpCallbackHandlers;
+};
+
+export type TeamMcpCallbackHandlers = {
+	handleConnect(input: {
+		serverId: string;
+		transport?: TeamMcpTransport;
+	}): unknown;
+	handleListTools(input: { serverId: string; toolNames: string[] }): unknown;
+	handleToolCall(input: {
+		serverId: string;
+		toolName: TeamToolName;
+		args: unknown;
+	}): Promise<unknown> | unknown;
+	handleDisconnect(input: { serverId: string }): unknown;
 };
 
 type TerminalOutputSnapshot = {
@@ -121,6 +143,14 @@ type ClientHandlers = {
 	onReleaseTerminal?: (
 		params: ReleaseTerminalRequest,
 	) => Promise<ReleaseTerminalResponse>;
+	onExtMethod?: (
+		method: string,
+		params: Record<string, unknown>,
+	) => Promise<Record<string, unknown>>;
+	onExtNotification?: (
+		method: string,
+		params: Record<string, unknown>,
+	) => Promise<void>;
 };
 
 const buildClient = (handlers: ClientHandlers): Client => ({
@@ -162,6 +192,18 @@ const buildClient = (handlers: ClientHandlers): Client => ({
 			return {};
 		}
 		return handlers.onReleaseTerminal(params);
+	},
+	async extMethod(method: string, params: Record<string, unknown>) {
+		if (!handlers.onExtMethod) {
+			throw RequestError.methodNotFound(method);
+		}
+		return handlers.onExtMethod(method, params);
+	},
+	async extNotification(method: string, params: Record<string, unknown>) {
+		if (!handlers.onExtNotification) {
+			throw RequestError.methodNotFound(method);
+		}
+		return handlers.onExtNotification(method, params);
 	},
 });
 
@@ -273,6 +315,159 @@ const sliceOutputToLimit = (value: string, limit: number) => {
 	return sliced.subarray(start).toString("utf8");
 };
 
+type ParsedTeamMcpMessage =
+	| { kind: "list_tools"; serverId: string; toolNames: string[] }
+	| {
+			kind: "tool_call";
+			serverId: string;
+			toolName: TeamToolName;
+			args: unknown;
+	  };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+const requireRecord = (
+	value: unknown,
+	message: string,
+): Record<string, unknown> => {
+	if (!isRecord(value)) {
+		throw RequestError.invalidParams(undefined, message);
+	}
+	return value;
+};
+
+const readStringField = (
+	record: Record<string, unknown> | undefined,
+	key: string,
+): string | undefined => {
+	const value = record?.[key];
+	return typeof value === "string" && value.trim() ? value.trim() : undefined;
+};
+
+const readRecordField = (
+	record: Record<string, unknown> | undefined,
+	key: string,
+): Record<string, unknown> | undefined => {
+	const value = record?.[key];
+	return isRecord(value) ? value : undefined;
+};
+
+const hasField = (record: Record<string, unknown>, key: string): boolean =>
+	Object.hasOwn(record, key);
+
+const readTeamMcpServerId = (params: unknown): string => {
+	const record = requireRecord(params, "Team MCP params must be an object");
+	const server = readRecordField(record, "server");
+	const serverId =
+		readStringField(record, "serverId") ??
+		readStringField(record, "server_id") ??
+		readStringField(server, "id") ??
+		readStringField(server, "serverId");
+	if (!serverId) {
+		throw RequestError.invalidParams(
+			undefined,
+			"Team MCP serverId is required",
+		);
+	}
+	return serverId;
+};
+
+const readToolNames = (value: unknown): string[] | undefined => {
+	if (!Array.isArray(value)) {
+		return undefined;
+	}
+	const names = value
+		.map((item) => {
+			if (typeof item === "string") return item.trim();
+			if (isRecord(item)) return readStringField(item, "name") ?? "";
+			return "";
+		})
+		.filter(Boolean);
+	return names.length === value.length ? names : undefined;
+};
+
+const readToolNamesFromRecords = (
+	...records: Array<Record<string, unknown> | undefined>
+): string[] | undefined => {
+	for (const record of records) {
+		const names =
+			readToolNames(record?.toolNames) ?? readToolNames(record?.tools);
+		if (names) return names;
+	}
+	return undefined;
+};
+
+const readTeamToolName = (
+	value: string | undefined,
+): TeamToolName | undefined => {
+	if (!value) {
+		return undefined;
+	}
+	if (EXPECTED_TEAM_TOOL_NAMES.includes(value as TeamToolName)) {
+		return value as TeamToolName;
+	}
+	throw RequestError.invalidParams(undefined, "Unsupported Team MCP tool name");
+};
+
+const readToolCallArgs = (
+	...records: Array<Record<string, unknown> | undefined>
+): unknown => {
+	for (const record of records) {
+		if (!record) continue;
+		if (hasField(record, "args")) return record.args;
+		if (hasField(record, "arguments")) return record.arguments;
+	}
+	return {};
+};
+
+const parseTeamMcpMessage = (params: unknown): ParsedTeamMcpMessage => {
+	const record = requireRecord(params, "Team MCP message must be an object");
+	const message =
+		readRecordField(record, "message") ??
+		readRecordField(record, "data") ??
+		record;
+	const rpcParams = readRecordField(message, "params");
+	const result = readRecordField(message, "result");
+	const serverId = readTeamMcpServerId(record);
+	const toolNames = readToolNamesFromRecords(
+		record,
+		message,
+		rpcParams,
+		result,
+	);
+	if (toolNames) {
+		return { kind: "list_tools", serverId, toolNames };
+	}
+
+	const toolName = readTeamToolName(
+		readStringField(record, "toolName") ??
+			readStringField(record, "name") ??
+			readStringField(message, "toolName") ??
+			readStringField(message, "name") ??
+			readStringField(rpcParams, "toolName") ??
+			readStringField(rpcParams, "name"),
+	);
+	if (toolName) {
+		return {
+			kind: "tool_call",
+			serverId,
+			toolName,
+			args: readToolCallArgs(record, message, rpcParams),
+		};
+	}
+
+	throw RequestError.invalidParams(
+		undefined,
+		"Unsupported Team MCP message shape",
+	);
+};
+
+const toRecordResponse = (value: unknown): Record<string, unknown> => {
+	if (isRecord(value)) return value;
+	return { value };
+};
+
 export class AcpConnection {
 	private connection?: ClientSideConnection;
 	private process?: ChildProcessWithoutNullStreams;
@@ -289,6 +484,8 @@ export class AcpConnection {
 	private permissionHandler?: (
 		params: RequestPermissionRequest,
 	) => Promise<RequestPermissionResponse>;
+	private teamMcpHandlers?: TeamMcpCallbackHandlers;
+	private teamMcpTransport?: TeamMcpTransport;
 	private terminals = new Map<string, TerminalRecord>();
 	private recentStderr: string[] = [];
 
@@ -386,6 +583,7 @@ export class AcpConnection {
 			throw new Error("Agent does not support session/load capability");
 		}
 		const connection = await this.ensureReady();
+		this.configureTeamMcp(options);
 		const response = await connection.loadSession({
 			sessionId,
 			cwd,
@@ -529,6 +727,11 @@ export class AcpConnection {
 						onWaitForTerminalExit: (params) => this.waitForTerminalExit(params),
 						onKillTerminal: (params) => this.killTerminal(params),
 						onReleaseTerminal: (params) => this.releaseTerminal(params),
+						onExtMethod: (method, params) =>
+							this.handleTeamMcpExtensionMethod(method, params),
+						onExtNotification: async (method, params) => {
+							await this.handleTeamMcpExtensionMethod(method, params);
+						},
 					}),
 				stream,
 			);
@@ -829,6 +1032,7 @@ export class AcpConnection {
 			return;
 		}
 
+		this.configureTeamMcp(undefined);
 		this.updateStatus("stopped");
 		this.sessionId = undefined;
 		this.agentInfo = undefined;
@@ -854,11 +1058,65 @@ export class AcpConnection {
 		cwd: string,
 		options?: TeamMcpSessionOptions,
 	): Promise<NewSessionResponse> {
+		this.configureTeamMcp(options);
 		const session = await connection.newSession({
 			cwd,
 			mcpServers: this.buildMcpServers(options),
 		});
 		return session;
+	}
+
+	private configureTeamMcp(options?: TeamMcpSessionOptions): void {
+		this.teamMcpHandlers = options?.teamMcpHandlers;
+		this.teamMcpTransport = options?.teamMcpTransport;
+	}
+
+	private async handleTeamMcpExtensionMethod(
+		method: string,
+		params: unknown,
+	): Promise<Record<string, unknown>> {
+		switch (method) {
+			case "mcp/connect": {
+				const handlers = this.requireTeamMcpHandlers(method);
+				handlers.handleConnect({
+					serverId: readTeamMcpServerId(params),
+					transport: this.teamMcpTransport ?? "acp",
+				});
+				return { ok: true };
+			}
+			case "mcp/message": {
+				const handlers = this.requireTeamMcpHandlers(method);
+				const message = parseTeamMcpMessage(params);
+				if (message.kind === "list_tools") {
+					handlers.handleListTools({
+						serverId: message.serverId,
+						toolNames: message.toolNames,
+					});
+					return { ok: true };
+				}
+				return toRecordResponse(
+					await handlers.handleToolCall({
+						serverId: message.serverId,
+						toolName: message.toolName,
+						args: message.args,
+					}),
+				);
+			}
+			case "mcp/disconnect": {
+				const handlers = this.requireTeamMcpHandlers(method);
+				handlers.handleDisconnect({ serverId: readTeamMcpServerId(params) });
+				return { ok: true };
+			}
+			default:
+				throw RequestError.methodNotFound(method);
+		}
+	}
+
+	private requireTeamMcpHandlers(method: string): TeamMcpCallbackHandlers {
+		if (!this.teamMcpHandlers) {
+			throw RequestError.methodNotFound(method);
+		}
+		return this.teamMcpHandlers;
 	}
 
 	private buildMcpServers(options?: TeamMcpSessionOptions): unknown[] {
