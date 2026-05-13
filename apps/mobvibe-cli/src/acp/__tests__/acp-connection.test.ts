@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
+import fs from "node:fs";
+import path from "node:path";
 
 // Mock the SDK
 mock.module("@agentclientprotocol/sdk", () => ({
@@ -109,6 +111,49 @@ describe("AcpConnection", () => {
 				embeddedContext: true,
 			});
 		});
+
+		it("maps native and bridge MCP capabilities behind Mobvibe-owned narrow fields", () => {
+			// @ts-expect-error - accessing private property for testing an RFD-only SDK extension
+			connection.agentCapabilities = {
+				mcpCapabilities: {
+					acp: true,
+					stdio: true,
+					perSessionBridge: true,
+				},
+			};
+
+			const capabilities = connection.getSessionCapabilities();
+
+			expect(capabilities.mcp).toEqual({
+				acp: true,
+				stdio: true,
+				perSessionBridge: true,
+			});
+		});
+	});
+
+	describe("SDK MCP-over-ACP probe", () => {
+		it("records that SDK 0.21.x still requires the local acp adapter boundary", () => {
+			const packageJson = JSON.parse(
+				fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+			) as { dependencies?: Record<string, string> };
+			const schema = JSON.parse(
+				fs.readFileSync(
+					path.join(
+						process.cwd(),
+						"../../node_modules/@agentclientprotocol/sdk/schema/schema.json",
+					),
+					"utf8",
+				),
+			) as { $defs?: Record<string, unknown> };
+			const mcpServer = schema.$defs?.McpServer;
+			const serializedMcpServer = JSON.stringify(mcpServer);
+
+			expect(packageJson.dependencies?.["@agentclientprotocol/sdk"]).toBe(
+				"^0.21.0",
+			);
+			expect(serializedMcpServer).not.toContain('"const":"acp"');
+		});
 	});
 
 	describe("supportsSessionList", () => {
@@ -192,6 +237,45 @@ describe("AcpConnection", () => {
 			await expect(
 				connection.loadSession("session-1", "/home/user/project"),
 			).rejects.toThrow("Agent does not support session/load capability");
+		});
+
+		it("passes an empty mcpServers array for ordinary non-team session/load", async () => {
+			const loadSession = mock(() =>
+				Promise.resolve({ modes: null, models: null }),
+			);
+			// @ts-expect-error - accessing private properties to test ordinary ACP payload isolation
+			connection.state = "ready";
+			// @ts-expect-error - accessing private properties to test ordinary ACP payload isolation
+			connection.connection = { loadSession };
+			// @ts-expect-error - accessing private property for testing
+			connection.agentCapabilities = { loadSession: true };
+
+			await connection.loadSession("session-1", "/home/user/project");
+
+			expect(loadSession).toHaveBeenCalledWith({
+				sessionId: "session-1",
+				cwd: "/home/user/project",
+				mcpServers: [],
+			});
+		});
+	});
+
+	describe("createSession", () => {
+		it("passes an empty mcpServers array for ordinary non-team session/new", async () => {
+			const newSession = mock(() =>
+				Promise.resolve({ sessionId: "session-1", modes: null, models: null }),
+			);
+			// @ts-expect-error - accessing private properties to test ordinary ACP payload isolation
+			connection.state = "ready";
+			// @ts-expect-error - accessing private properties to test ordinary ACP payload isolation
+			connection.connection = { newSession };
+
+			await connection.createSession({ cwd: "/home/user/project" });
+
+			expect(newSession).toHaveBeenCalledWith({
+				cwd: "/home/user/project",
+				mcpServers: [],
+			});
 		});
 	});
 

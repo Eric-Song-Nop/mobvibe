@@ -50,6 +50,12 @@ type ClientInfo = {
 	version: string;
 };
 
+type RfdMcpCapabilities = {
+	acp?: boolean;
+	stdio?: boolean;
+	perSessionBridge?: boolean;
+};
+
 const MAX_STDERR_LINES = 20;
 
 export type AcpBackendStatus = {
@@ -223,6 +229,29 @@ const buildConnectionClosedError = (
 
 const normalizeOutputText = (value: string) => value.normalize("NFC");
 
+const readBooleanFlag = (value: unknown, key: keyof RfdMcpCapabilities) => {
+	if (!value || typeof value !== "object") {
+		return false;
+	}
+	const candidate = value as Record<keyof RfdMcpCapabilities, unknown>;
+	return candidate[key] === true;
+};
+
+const mapRfdMcpCapabilities = (
+	agentCapabilities?: AgentCapabilities,
+): RfdMcpCapabilities | undefined => {
+	const mcpCapabilities = agentCapabilities?.mcpCapabilities as unknown;
+	const mapped = {
+		acp: readBooleanFlag(mcpCapabilities, "acp"),
+		stdio: readBooleanFlag(mcpCapabilities, "stdio"),
+		perSessionBridge: readBooleanFlag(mcpCapabilities, "perSessionBridge"),
+	};
+	if (!mapped.acp && !mapped.stdio && !mapped.perSessionBridge) {
+		return undefined;
+	}
+	return mapped;
+};
+
 const isOutputOverLimit = (value: string, limit: number) =>
 	Buffer.byteLength(value, "utf8") > limit;
 
@@ -296,6 +325,7 @@ export class AcpConnection {
 				embeddedContext:
 					this.agentCapabilities?.promptCapabilities?.embeddedContext === true,
 			},
+			mcp: mapRfdMcpCapabilities(this.agentCapabilities),
 		};
 	}
 
