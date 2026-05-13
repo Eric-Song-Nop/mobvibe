@@ -36,7 +36,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 5 plans
 Plans:
 - [x] 01-01-PLAN.md — Shared Agent Team contract and typed RPC/event payloads
-- [ ] 01-02-PLAN.md — CLI durable Agent Team store and base non-content projection
+- [x] 01-02-PLAN.md — CLI durable Agent Team store and base non-content projection
 - [ ] 01-03-PLAN.md — Gateway `/acp/agent-teams` routes, typed CLI RPC, and user-scoped projection relay
 - [ ] 01-04-PLAN.md — CLI mailbox/task/MCP/summary metadata recovery and non-content projection hardening
 - [ ] 01-05-PLAN.md — WebUI API/store/socket projection boundary and Chinese implementation documentation
