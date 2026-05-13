@@ -110,6 +110,36 @@ export type {
 	MobvibeUserConfig,
 	UserAgentConfig,
 } from "./types/agent-config.js";
+// Agent Team types
+export type {
+	AgentTeamId,
+	AgentTeamLifecycle,
+	AgentTeamSummary,
+	AgentTeamsChangedPayload,
+	CreateAgentTeamRpcParams,
+	CreateAgentTeamRpcResult,
+	GetAgentTeamRpcParams,
+	GetAgentTeamRpcResult,
+	ListAgentTeamsRpcParams,
+	ListAgentTeamsRpcResult,
+	TeamMailboxCounts,
+	TeamMailboxMessageId,
+	TeamMailboxWakeStatus,
+	TeamMcpPhase,
+	TeamMcpStatusSummary,
+	TeamMcpTransport,
+	TeamMemberHealth,
+	TeamMemberId,
+	TeamMemberLifecycle,
+	TeamMemberSummary,
+	TeamSourceRef,
+	TeamSummaryRef,
+	TeamSummaryRefId,
+	TeamTaskCounts,
+	TeamTaskId,
+	TeamTaskStatus,
+	TeamWorkspaceMode,
+} from "./types/agent-team.js";
 // Error types
 export type {
 	ErrorCode,
@@ -140,6 +170,7 @@ export type {
 	AcpBackendSummary,
 	AcpConnectionState,
 	AcpSessionInfo,
+	AgentMcpCapabilities,
 	AgentPromptCapabilities,
 	AgentSessionCapabilities,
 	DiscoverSessionsResult,
@@ -157,6 +188,7 @@ export type {
 export type {
 	// HTTP API response types
 	AcpBackendsResponse,
+	AgentTeamRpcResult,
 	ArchiveSessionParams,
 	BulkArchiveSessionsParams,
 	CancelSessionParams,

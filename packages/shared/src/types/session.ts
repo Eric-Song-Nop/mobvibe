@@ -126,10 +126,17 @@ export type AgentPromptCapabilities = {
 	embeddedContext?: boolean;
 };
 
+export type AgentMcpCapabilities = {
+	acp?: boolean;
+	stdio?: boolean;
+	perSessionBridge?: boolean;
+};
+
 export type AgentSessionCapabilities = {
 	list: boolean;
 	load: boolean;
 	prompt?: AgentPromptCapabilities;
+	mcp?: AgentMcpCapabilities;
 };
 
 /** Result of discovering sessions */
