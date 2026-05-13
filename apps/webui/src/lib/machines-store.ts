@@ -118,11 +118,13 @@ export const useMachinesStore = create<MachinesState>((set) => ({
 		}),
 }));
 
-/** Check capability for a specific backend. Returns undefined if unknown. */
+type BooleanBackendCapability = "list" | "load";
+
+/** Check boolean capability for a specific backend. Returns undefined if unknown. */
 export const getBackendCapability = (
 	machine: Machine | undefined,
 	backendId: string | undefined,
-	capability: Exclude<keyof AgentSessionCapabilities, "prompt">,
+	capability: BooleanBackendCapability,
 ): boolean | undefined => {
 	if (!machine?.backendCapabilities || !backendId) return undefined;
 	return machine.backendCapabilities[backendId]?.[capability];
