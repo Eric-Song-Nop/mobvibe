@@ -15,7 +15,7 @@ Mobvibe Agent Team v1 以“CLI-hosted team MCP server + durable mailbox + task 
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: 协议、状态模型与持久化边界** - 用户拥有可恢复的 team/member/MCP/mailbox/task 元数据模型，但还不启动 agent。
-- [ ] **Phase 2: CLI Team MCP、Mailbox 与 Task Board** - CLI 本地具备 per-session team tools、durable mailbox 和 durable task board 的协作闭环。
+- [x] **Phase 2: CLI Team MCP、Mailbox 与 Task Board** - CLI 本地具备 per-session team tools、durable mailbox 和 durable task board 的协作闭环。
 - [ ] **Phase 3: 最小端到端 Team Run** - 用户可以从 WebUI 创建 team run，leader/member 普通 ACP session 被创建、注入 MCP 并可跳转。
 - [ ] **Phase 4: 生命周期、权限、E2EE 与恢复** - 用户可以安全取消、重试、归档、处理权限，并在重连后恢复 team 状态。
 - [ ] **Phase 5: UI 规模化与 v1 Polish** - 用户可以在桌面和移动端完成 v1 关键 team 流程。
@@ -54,7 +54,7 @@ Plans:
   4. Agent tool call 可以写入 durable mailbox；message 持久化、read/unread 和 wake status 被分开记录。
   5. Agent tool call 可以创建、列出和更新 durable task board，包含 owner、status 和 blockedBy/blocks。
   6. Team MCP tools 携带 caller identity，并按 leader-only、用户确认和 workspace policy 执行。
-**Plans**: 6 plans
+**Plans**: 7 plans
 Plans:
 - [x] 02-01-PLAN.md — SDK/capability foundation and narrow MCP-over-ACP adapter boundary
 - [x] 02-02-PLAN.md — Team MCP runtime, per-session injection, caller binding, and tools readiness
@@ -62,6 +62,7 @@ Plans:
 - [x] 02-04-PLAN.md — Mailbox wake/injection semantics and idle notification guard
 - [x] 02-05-PLAN.md — Durable task board tools and dependency mutation
 - [x] 02-06-PLAN.md — Per-session bridge fallback or explicit team-capable validation error
+- [x] 02-07-PLAN.md — Production ACP callback wiring and verification gap closure
 **UI hint**: no
 
 ### Phase 3: 最小端到端 Team Run
@@ -116,7 +117,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. 协议、状态模型与持久化边界 | 5/5 | Completed | 2026-05-13 |
-| 2. CLI Team MCP、Mailbox 与 Task Board | 6/6 | Verification Gaps | - |
+| 2. CLI Team MCP、Mailbox 与 Task Board | 7/7 | Completed | 2026-05-13 |
 | 3. 最小端到端 Team Run | 0/TBD | Not started | - |
 | 4. 生命周期、权限、E2EE 与恢复 | 0/TBD | Not started | - |
 | 5. UI 规模化与 v1 Polish | 0/TBD | Not started | - |

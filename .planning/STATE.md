@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 02 gap closure planned
-last_updated: "2026-05-13T16:47:56.088Z"
-last_activity: 2026-05-13 -- Phase 02 gap closure planning complete
+stopped_at: Phase 02 verified; ready for Phase 03 planning
+last_updated: "2026-05-13T17:33:27.000Z"
+last_activity: 2026-05-13 -- Phase 02 gap closure executed and verified
 progress:
   total_phases: 5
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 12
-  completed_plans: 11
-  percent: 92
+  completed_plans: 12
+  percent: 100
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-12)
 
 **Core value:** 用户可以在一个 Mobvibe 团队任务中安全地协调多个不同 ACP agent，让它们围绕同一代码目标协作，并清楚看到每个 agent 的进展、任务、消息、产出和最终汇总。
-**Current focus:** Phase 02 — CLI Team MCP、Mailbox 与 Task Board
+**Current focus:** Phase 03 — 最小端到端 Team Run
 
 ## Current Position
 
-Phase: 02 (CLI Team MCP、Mailbox 与 Task Board) — GAP CLOSURE READY
-Plan: 7 of 7
-Status: Ready to execute gap closure plan
-Last activity: 2026-05-13 -- Phase 02 gap closure planning complete
+Phase: 03 (最小端到端 Team Run) — READY TO PLAN
+Plan: TBD
+Status: Phase 02 verified passed; ready to plan Phase 03
+Last activity: 2026-05-13 -- Phase 02 gap closure executed and verified
 
-Progress: [█████████░] 92%
+Progress: [██████████] 100% of planned Phase 1-2 plans
 
 ## Performance Metrics
 
@@ -109,14 +109,18 @@ Recent decisions affecting current work:
 - [Phase 02-04]: Wake success and failure are durable metadata updates on accepted mailbox rows, not part of delivery acceptance.
 - [Phase 02-04]: Mailbox plaintext enters recipient visibility only via ordinary ACP session prompt/WAL semantics, never via Agent Team projection.
 - [Phase 02-04]: Member completion sends idle_notification to the leader, but leader wake waits until all non-leader members are not running.
+- [Phase 02-07]: Production ACP MCP callbacks now enter the SessionManager-owned TeamRuntime through AcpConnection extension method routing.
+- [Phase 02-07]: stdio_bridge is rejected until a real executable MCP stdio server exists; native MCP-over-ACP is required for team sessions in the current implementation.
+- [Phase 02-07]: Callback-path tests prove mailbox/task tools mutate durable AgentTeamStore facts while projection payloads remain plaintext-safe.
 
 ### Pending Todos
 
-- 为 Phase 2 verification gaps 编写 gap-closure plans。
+- 为 Phase 3（最小端到端 Team Run）编写计划。
 
 ### Blockers/Concerns
 
-- Phase 2 verification found blocking gaps: production Team MCP runtime is not wired into ACP MCP callbacks, stdio bridge fallback is not an executable MCP stdio server, and agent-originated mailbox/task tool calls cannot yet reach durable handlers in production.
+- No blocking gaps. Phase 02 verification passed 6/6 after 02-07 gap closure.
+- Non-blocking warning carried forward: mailbox wake retry semantics still mark rows read before successful injection; address in a later reliability slice.
 
 ## Deferred Items
 
