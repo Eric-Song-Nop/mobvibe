@@ -487,7 +487,7 @@ describe("SocketClient restore semantics", () => {
 	});
 
 	test("handles rpc:agent-team:get not found as typed empty result", async () => {
-		agentTeamStoreMock.getAgentTeam.mockReturnValueOnce({});
+		agentTeamStoreMock.getAgentTeam.mockReturnValueOnce({} as never);
 		const handler = socketHandlers.get("rpc:agent-team:get");
 		if (!handler) {
 			throw new Error("rpc:agent-team:get handler not registered");
