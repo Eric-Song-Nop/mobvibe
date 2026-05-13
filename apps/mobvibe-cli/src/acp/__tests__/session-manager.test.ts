@@ -121,6 +121,7 @@ const createMockConnection = () => ({
 			models: null,
 		}),
 	),
+	prompt: mock(() => Promise.resolve({ stopReason: "end_turn" })),
 	setPermissionHandler: mock(() => {}),
 	onSessionUpdate: mock((cb: (n: SessionNotification) => void) => {
 		sessionUpdateCallback = cb;
@@ -867,6 +868,52 @@ describe("SessionManager", () => {
 			});
 			expect(events.events.some((event) => event.kind === "turn_end")).toBe(
 				true,
+			);
+		});
+	});
+
+	describe("injectTeamMailboxPrompt", () => {
+		it("calls ordinary session prompt and records a session_event source ref", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const eventListener = mock(() => {});
+			sessionManager.onSessionEvent(eventListener);
+
+			const ref = await sessionManager.injectTeamMailboxPrompt({
+				agentTeamId: "team-1",
+				memberId: "member-1",
+				sessionId: created.sessionId,
+				text: "Mobvibe Agent Team mailbox delivery\nhello teammate",
+			});
+
+			expect(mockConnection.prompt).toHaveBeenCalledWith(created.sessionId, [
+				{
+					type: "text",
+					text: "Mobvibe Agent Team mailbox delivery\nhello teammate",
+				},
+			]);
+			expect(ref).toEqual(
+				expect.objectContaining({
+					type: "session_event",
+					agentTeamId: "team-1",
+					memberId: "member-1",
+					sessionId: created.sessionId,
+					revision: 1,
+				}),
+			);
+			expect(ref.seq).toBeNumber();
+			expect(eventListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId: created.sessionId,
+					kind: "user_message",
+					payload: expect.objectContaining({
+						source: "mobvibe_team_mailbox",
+						agentTeamId: "team-1",
+						memberId: "member-1",
+					}),
+				}),
 			);
 		});
 	});

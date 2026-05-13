@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { AgentTeamStore } from "../agent-team-store.js";
 import { MailboxService } from "../mailbox-service.js";
+import { TeamRuntime } from "../team-runtime.js";
 
 type MailboxRow = {
 	message_id: string;
@@ -321,7 +322,150 @@ describe("MailboxService durable delivery", () => {
 			]),
 		);
 		expect(JSON.stringify(failedRefs)).not.toContain("deliveredSessionId");
-		expect(readMailboxRows(dbPath)).toHaveLength(2);
+	expect(readMailboxRows(dbPath)).toHaveLength(2);
+	});
+
+	test("runtime wake injects unread mailbox messages into attached ordinary session", async () => {
+		setMemberState(dbPath, workerMemberId, {
+			sessionId: "session-worker",
+			lifecycle: "running",
+		});
+		const sent = service.sendMessage(
+			{ agentTeamId, memberId: leaderMemberId, role: "leader" },
+			{ to: workerMemberId, message: "please review", summary: "review" },
+		);
+		if (!sent.ok) {
+			throw new Error("Expected setup delivery to succeed");
+		}
+		const injected: string[] = [];
+		const runtime = new TeamRuntime({
+			store,
+			sessionManager: {
+				injectTeamMailboxPrompt: async (input) => {
+					injected.push(input.text);
+					return {
+						type: "session_event",
+						agentTeamId: input.agentTeamId,
+						memberId: input.memberId,
+						sessionId: input.sessionId,
+						revision: 1,
+						seq: 7,
+					};
+				},
+			},
+		});
+
+		await runtime.wakeMember(agentTeamId, workerMemberId);
+
+		expect(injected).toHaveLength(1);
+		expect(injected[0]).toContain("Mobvibe Agent Team mailbox delivery");
+		expect(injected[0]).toContain("Leader");
+		expect(injected[0]).toContain("please review");
+		const [row] = readMailboxRows(dbPath);
+		expect(row.read_at).toBeString();
+		expect(row.wake_status).toBe("sent");
+		const refs = JSON.parse(row.source_refs_json ?? "[]");
+		expect(refs).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					type: "mailbox_message",
+					deliveredSessionId: "session-worker",
+				}),
+				expect.objectContaining({
+					type: "session_event",
+					sessionId: "session-worker",
+					seq: 7,
+				}),
+			]),
+		);
+		const projection = JSON.stringify(store.getAgentTeam({ agentTeamId }).team);
+		expect(projection).not.toContain("please review");
+	});
+
+	test("runtime wake failure preserves accepted message without delivered ref", async () => {
+		setMemberState(dbPath, workerMemberId, {
+			sessionId: "session-worker",
+			lifecycle: "running",
+		});
+		const sent = service.sendMessage(
+			{ agentTeamId, memberId: leaderMemberId, role: "leader" },
+			{ to: workerMemberId, message: "still durable" },
+		);
+		if (!sent.ok) {
+			throw new Error("Expected setup delivery to succeed");
+		}
+		const runtime = new TeamRuntime({
+			store,
+			sessionManager: {
+				injectTeamMailboxPrompt: async () => {
+					throw new Error("prompt unavailable");
+				},
+			},
+		});
+
+		await runtime.wakeMember(agentTeamId, workerMemberId);
+
+		const [row] = readMailboxRows(dbPath);
+		expect(row.body_local_json).toContain("still durable");
+		expect(row.wake_status).toBe("failed");
+		const refs = JSON.parse(row.source_refs_json ?? "[]");
+		expect(refs).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					type: "mailbox_message",
+					messageId: sent.deliveries[0].messageId,
+				}),
+			]),
+		);
+		expect(JSON.stringify(refs)).not.toContain("deliveredSessionId");
+	});
+
+	test("member turn completion writes idle notification and wakes leader only when settled", async () => {
+		setMemberState(dbPath, leaderMemberId, {
+			sessionId: "session-leader",
+			lifecycle: "running",
+		});
+		setMemberState(dbPath, workerMemberId, {
+			sessionId: "session-worker",
+			lifecycle: "running",
+		});
+		setMemberState(dbPath, reviewerMemberId, {
+			sessionId: "session-reviewer",
+			lifecycle: "running",
+		});
+		const injected: string[] = [];
+		const runtime = new TeamRuntime({
+			store,
+			sessionManager: {
+				injectTeamMailboxPrompt: async (input) => {
+					injected.push(input.text);
+					return {
+						type: "session_event",
+						agentTeamId: input.agentTeamId,
+						memberId: input.memberId,
+						sessionId: input.sessionId,
+						revision: 1,
+						seq: injected.length,
+					};
+				},
+			},
+		});
+
+		await runtime.onMemberTurnCompleted(agentTeamId, workerMemberId);
+		expect(readMailboxRows(dbPath)).toHaveLength(1);
+		expect(injected).toHaveLength(0);
+
+		await runtime.onMemberTurnCompleted(agentTeamId, reviewerMemberId);
+
+		const rows = readMailboxRows(dbPath);
+		expect(rows).toHaveLength(2);
+		expect(rows.every((row) => row.to_member_id === leaderMemberId)).toBe(true);
+		expect(rows.every((row) => row.body_local_json.includes("idle_notification"))).toBe(true);
+		expect(injected).toHaveLength(1);
+		expect(injected[0]).toContain("Turn completed");
+		const projection = JSON.stringify(store.getAgentTeam({ agentTeamId }).team);
+		expect(projection).not.toContain("Turn completed");
+		expect(projection).not.toContain("idle_notification");
 	});
 });
 
@@ -333,6 +477,28 @@ function readMailboxRows(dbPath: string): MailboxRow[] {
 				"SELECT * FROM agent_team_mailbox_messages ORDER BY created_at ASC",
 			)
 			.all() as MailboxRow[];
+	} finally {
+		db.close();
+	}
+}
+
+function setMemberState(
+	dbPath: string,
+	memberId: string,
+	params: { sessionId: string; lifecycle: string },
+): void {
+	const db = new Database(dbPath);
+	try {
+		db.query(
+			`UPDATE agent_team_members
+			 SET session_id = $sessionId, lifecycle = $lifecycle, updated_at = $updatedAt
+			 WHERE member_id = $memberId`,
+		).run({
+			$sessionId: params.sessionId,
+			$lifecycle: params.lifecycle,
+			$updatedAt: new Date().toISOString(),
+			$memberId: memberId,
+		});
 	} finally {
 		db.close();
 	}
