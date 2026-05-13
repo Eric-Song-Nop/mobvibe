@@ -242,6 +242,134 @@ describe("TeamMcpRouter", () => {
 		expect(requestPermission).not.toHaveBeenCalled();
 		expect(readMailboxRows(dbPath)).toHaveLength(2);
 	});
+
+	test("task tools create, list, update, and emit projection without local task body", async () => {
+		const serverId = `mobvibe-team:${agentTeamId}:${leaderMemberId}`;
+		router.handleConnect({ serverId });
+
+		const created = await router.handleToolCall({
+			serverId,
+			toolName: "mobvibe_team_task_create",
+			args: {
+				title: "Write implementation",
+				description: "Local task details",
+				owner: "Worker",
+			},
+		});
+
+		expect(created.data).toEqual(
+			expect.objectContaining({
+				ok: true,
+				task: expect.objectContaining({
+					title: "Write implementation",
+					description: "Local task details",
+					ownerMemberId: memberId,
+					status: "todo",
+				}),
+			}),
+		);
+
+		const taskId = readTaskIds(dbPath)[0];
+		const listed = await router.handleToolCall({
+			serverId,
+			toolName: "mobvibe_team_task_list",
+			args: {},
+		});
+		expect(listed.data).toEqual(
+			expect.objectContaining({
+				ok: true,
+				tasks: [
+					expect.objectContaining({
+						taskId,
+						title: "Write implementation",
+						description: "Local task details",
+					}),
+				],
+			}),
+		);
+
+		const updated = await router.handleToolCall({
+			serverId,
+			toolName: "mobvibe_team_task_update",
+			args: { taskId, status: "completed" },
+		});
+
+		expect(updated.data).toEqual(
+			expect.objectContaining({
+				ok: true,
+				task: expect.objectContaining({ status: "completed" }),
+			}),
+		);
+		expect(onAgentTeamChanged).toHaveBeenCalledWith(
+			expect.objectContaining({
+				agentTeamId,
+				taskCounts: expect.objectContaining({ completed: 1 }),
+			}),
+		);
+		expect(JSON.stringify(onAgentTeamChanged.mock.calls.at(-1)?.[0])).not.toContain(
+			"Local task details",
+		);
+	});
+
+	test("task tools reject pending and deleted statuses", async () => {
+		const serverId = `mobvibe-team:${agentTeamId}:${leaderMemberId}`;
+		router.handleConnect({ serverId });
+
+		const pending = await router.handleToolCall({
+			serverId,
+			toolName: "mobvibe_team_task_create",
+			args: { title: "Bad", status: "pending" },
+		});
+		expect(pending.data).toEqual(
+			expect.objectContaining({
+				ok: false,
+				error: expect.objectContaining({ code: "REQUEST_VALIDATION_FAILED" }),
+			}),
+		);
+
+		const created = await router.handleToolCall({
+			serverId,
+			toolName: "mobvibe_team_task_create",
+			args: { title: "Valid" },
+		});
+		const taskId = (created.data as { task: { taskId: string } }).task.taskId;
+		const deleted = await router.handleToolCall({
+			serverId,
+			toolName: "mobvibe_team_task_update",
+			args: { taskId, status: "deleted" },
+		});
+		expect(deleted.data).toEqual(
+			expect.objectContaining({
+				ok: false,
+				error: expect.objectContaining({ code: "REQUEST_VALIDATION_FAILED" }),
+			}),
+		);
+	});
+
+	test("leader and non-leader can call task tools without permission confirmation", async () => {
+		const leaderServerId = `mobvibe-team:${agentTeamId}:${leaderMemberId}`;
+		const memberServerId = `mobvibe-team:${agentTeamId}:${memberId}`;
+		router.handleConnect({ serverId: leaderServerId });
+		router.handleConnect({ serverId: memberServerId });
+
+		await router.handleToolCall({
+			serverId: leaderServerId,
+			toolName: "mobvibe_team_task_create",
+			args: { title: "Leader task" },
+		});
+		await router.handleToolCall({
+			serverId: memberServerId,
+			toolName: "mobvibe_team_task_list",
+			args: {},
+		});
+		await router.handleToolCall({
+			serverId: memberServerId,
+			toolName: "mobvibe_team_task_update",
+			args: { taskId: readTaskIds(dbPath)[0], status: "in_progress" },
+		});
+
+		expect(requestPermission).not.toHaveBeenCalled();
+	});
 });
 
 type MailboxRow = {
@@ -258,6 +386,18 @@ function readMailboxRows(dbPath: string): MailboxRow[] {
 				"SELECT from_member_id, to_member_id, source_refs_json FROM agent_team_mailbox_messages ORDER BY created_at ASC",
 			)
 			.all() as MailboxRow[];
+	} finally {
+		db.close();
+	}
+}
+
+function readTaskIds(dbPath: string): string[] {
+	const db = new Database(dbPath, { readonly: true });
+	try {
+		const rows = db
+			.query("SELECT task_id FROM agent_team_tasks ORDER BY created_at ASC")
+			.all() as Array<{ task_id: string }>;
+		return rows.map((row) => row.task_id);
 	} finally {
 		db.close();
 	}
