@@ -106,9 +106,9 @@ Recent decisions affecting current work:
 - [Phase 02-06]: Bridge fallback is represented as a per-session stdio declaration, not as global agent MCP configuration.
 - [Phase 02-06]: Team session creation now uses native ACP first and safe stdio bridge second; unsupported backends still fail before ACP session creation.
 - [Phase 02-06]: Bridge readiness uses the same tool-list gate as native ACP and records transport stdio_bridge when fallback is active.
-- [Phase ?]: [Phase 02-04]: Wake success and failure are durable metadata updates on accepted mailbox rows, not part of delivery acceptance. — This preserves accepted delivery when wake injection fails.
-- [Phase ?]: [Phase 02-04]: Mailbox plaintext enters recipient visibility only via ordinary ACP session prompt/WAL semantics, never via Agent Team projection. — This keeps Gateway-facing Agent Team metadata plaintext-free while preserving ordinary session auditability.
-- [Phase ?]: [Phase 02-04]: Member completion sends idle_notification to the leader, but leader wake waits until all non-leader members are not running. — This follows AionUI idle notification semantics without wake loops.
+- [Phase 02-04]: Wake success and failure are durable metadata updates on accepted mailbox rows, not part of delivery acceptance.
+- [Phase 02-04]: Mailbox plaintext enters recipient visibility only via ordinary ACP session prompt/WAL semantics, never via Agent Team projection.
+- [Phase 02-04]: Member completion sends idle_notification to the leader, but leader wake waits until all non-leader members are not running.
 
 ### Pending Todos
 
