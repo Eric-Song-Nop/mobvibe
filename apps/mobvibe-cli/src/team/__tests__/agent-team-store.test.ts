@@ -114,7 +114,9 @@ describe("AgentTeamStore durable metadata", () => {
 
 describe("Agent Team migrations", () => {
 	test("run from an empty database and preserve existing WAL session tables", () => {
-		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-team-migrate-"));
+		const tempDir = fs.mkdtempSync(
+			path.join(os.tmpdir(), "agent-team-migrate-"),
+		);
 		const dbPath = path.join(tempDir, "events.db");
 		const db = new Database(dbPath);
 
