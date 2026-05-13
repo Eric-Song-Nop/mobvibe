@@ -211,6 +211,27 @@ const MIGRATIONS = [
         ON agent_team_mailbox_messages (agent_team_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_agent_team_tasks_team
         ON agent_team_tasks (agent_team_id, updated_at);
+		`,
+	},
+	{
+		version: 8,
+		up: `
+      CREATE TABLE IF NOT EXISTS agent_team_tool_intents (
+        intent_id TEXT PRIMARY KEY,
+        agent_team_id TEXT NOT NULL,
+        requested_by_member_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        payload_local_json TEXT NOT NULL,
+        status TEXT NOT NULL,
+        source_refs_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (agent_team_id) REFERENCES agent_teams(agent_team_id),
+        FOREIGN KEY (requested_by_member_id) REFERENCES agent_team_members(member_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_agent_team_tool_intents_team
+        ON agent_team_tool_intents (agent_team_id, created_at);
     `,
 	},
 ];

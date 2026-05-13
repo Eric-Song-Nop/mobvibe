@@ -9,6 +9,9 @@ import type {
 	GetAgentTeamRpcResult,
 	ListAgentTeamsRpcParams,
 	ListAgentTeamsRpcResult,
+	TeamMcpPhase,
+	TeamMcpTransport,
+	TeamSourceRef,
 } from "@mobvibe/shared";
 import { runMigrations } from "../wal/migrations.js";
 import { assertGatewayFacingAgentTeamPayload } from "./content-boundary.js";
@@ -35,6 +38,8 @@ export class AgentTeamStore {
 	private stmtListMailboxMessages: ReturnType<Database["query"]>;
 	private stmtListTasks: ReturnType<Database["query"]>;
 	private stmtListSummaryRefs: ReturnType<Database["query"]>;
+	private stmtUpdateMcpStatus: ReturnType<Database["query"]>;
+	private stmtInsertToolIntent: ReturnType<Database["query"]>;
 
 	constructor(dbPath: string) {
 		const dir = path.dirname(dbPath);
@@ -104,6 +109,28 @@ export class AgentTeamStore {
       FROM agent_team_summary_refs
       WHERE agent_team_id = $agentTeamId
       ORDER BY updated_at ASC
+    `);
+		this.stmtUpdateMcpStatus = this.db.query(`
+      INSERT INTO agent_team_mcp_status (
+        agent_team_id, member_id, transport, server_id, phase, last_error_json, updated_at
+      ) VALUES (
+        $agentTeamId, $memberId, $transport, $serverId, $phase, $lastErrorJson, $updatedAt
+      )
+      ON CONFLICT(agent_team_id, member_id) DO UPDATE SET
+        transport = excluded.transport,
+        server_id = excluded.server_id,
+        phase = excluded.phase,
+        last_error_json = excluded.last_error_json,
+        updated_at = excluded.updated_at
+    `);
+		this.stmtInsertToolIntent = this.db.query(`
+      INSERT INTO agent_team_tool_intents (
+        intent_id, agent_team_id, requested_by_member_id, kind, payload_local_json,
+        status, source_refs_json, created_at, updated_at
+      ) VALUES (
+        $intentId, $agentTeamId, $requestedByMemberId, $kind, $payloadLocalJson,
+        $status, $sourceRefsJson, $createdAt, $updatedAt
+      )
     `);
 	}
 
@@ -184,6 +211,101 @@ export class AgentTeamStore {
 		return { team: this.projectTeam(row) };
 	}
 
+	addTeamMember(params: {
+		agentTeamId: string;
+		backendId: string;
+		name: string;
+		role?: "leader" | "member";
+	}): { memberId: string } {
+		const now = new Date().toISOString();
+		const memberId = randomUUID();
+		this.db.transaction(() => {
+			this.stmtInsertMember.run({
+				$memberId: memberId,
+				$agentTeamId: params.agentTeamId,
+				$role: params.role ?? "member",
+				$name: params.name,
+				$backendId: params.backendId,
+				$sessionId: null,
+				$lifecycle: "pending",
+				$health: "healthy",
+				$worktreeSourceCwd: null,
+				$worktreeBranch: null,
+				$errorJson: null,
+				$createdAt: now,
+				$updatedAt: now,
+			});
+			this.stmtInsertMcpStatus.run({
+				$agentTeamId: params.agentTeamId,
+				$memberId: memberId,
+				$transport: "acp",
+				$serverId: null,
+				$phase: "not_started",
+				$lastErrorJson: null,
+				$updatedAt: now,
+			});
+		})();
+		return { memberId };
+	}
+
+	listTeamMembers(agentTeamId: string): AgentTeamMemberRow[] {
+		return this.stmtListMembers.all({ $agentTeamId: agentTeamId }) as AgentTeamMemberRow[];
+	}
+
+	updateMcpStatus(params: {
+		agentTeamId: string;
+		memberId: string;
+		transport: TeamMcpTransport;
+		serverId?: string;
+		phase: TeamMcpPhase;
+		lastError?: unknown;
+	}): void {
+		this.stmtUpdateMcpStatus.run({
+			$agentTeamId: params.agentTeamId,
+			$memberId: params.memberId,
+			$transport: params.transport,
+			$serverId: params.serverId ?? null,
+			$phase: params.phase,
+			$lastErrorJson: params.lastError
+				? JSON.stringify(params.lastError)
+				: null,
+			$updatedAt: new Date().toISOString(),
+		});
+	}
+
+	createTeamToolIntent(params: {
+		agentTeamId: string;
+		requestedByMemberId: string;
+		kind: TeamToolIntentKind;
+		payload: Record<string, unknown>;
+		sourceRefs: TeamSourceRef[];
+	}): TeamToolIntent {
+		const now = new Date().toISOString();
+		const intent: TeamToolIntent = {
+			intentId: randomUUID(),
+			agentTeamId: params.agentTeamId,
+			requestedByMemberId: params.requestedByMemberId,
+			kind: params.kind,
+			payload: params.payload,
+			status: "requested",
+			sourceRefs: params.sourceRefs,
+			createdAt: now,
+			updatedAt: now,
+		};
+		this.stmtInsertToolIntent.run({
+			$intentId: intent.intentId,
+			$agentTeamId: intent.agentTeamId,
+			$requestedByMemberId: intent.requestedByMemberId,
+			$kind: intent.kind,
+			$payloadLocalJson: JSON.stringify(intent.payload),
+			$status: intent.status,
+			$sourceRefsJson: JSON.stringify(intent.sourceRefs),
+			$createdAt: intent.createdAt,
+			$updatedAt: intent.updatedAt,
+		});
+		return intent;
+	}
+
 	close(): void {
 		this.db.close();
 	}
@@ -212,3 +334,20 @@ export class AgentTeamStore {
 		return team;
 	}
 }
+
+export type TeamToolIntentKind =
+	| "spawn_member"
+	| "rename_team"
+	| "shutdown_team";
+
+export type TeamToolIntent = {
+	intentId: string;
+	agentTeamId: string;
+	requestedByMemberId: string;
+	kind: TeamToolIntentKind;
+	payload: Record<string, unknown>;
+	status: "requested";
+	sourceRefs: TeamSourceRef[];
+	createdAt: string;
+	updatedAt: string;
+};
