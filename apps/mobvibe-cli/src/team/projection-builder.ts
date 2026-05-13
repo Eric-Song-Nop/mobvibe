@@ -47,10 +47,7 @@ export function buildAgentTeamSummary(
 		mailboxCounts: buildMailboxCounts(input.mailboxMessages),
 		taskCounts: buildTaskCounts(input.tasks),
 		summaryRefs: buildSummaryRefs(input.summaryRefs),
-		sourceRefs: collectSourceRefs([
-			...input.mailboxMessages,
-			...input.tasks,
-		]),
+		sourceRefs: collectSourceRefs([...input.mailboxMessages, ...input.tasks]),
 		createdAt: input.team.created_at,
 		updatedAt: input.team.updated_at,
 		archivedAt: input.team.archived_at ?? undefined,
@@ -209,7 +206,9 @@ function collectSourceRefs(
 }
 
 function isBlockedTask(row: AgentTeamTaskRow): boolean {
-	return row.status === "blocked" || parseStringArray(row.blocked_by_json).length > 0;
+	return (
+		row.status === "blocked" || parseStringArray(row.blocked_by_json).length > 0
+	);
 }
 
 function parseStringArray(value: string | null): string[] {
