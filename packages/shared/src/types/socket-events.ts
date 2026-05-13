@@ -5,6 +5,15 @@ import type {
 	PermissionToolCall,
 	StopReason,
 } from "./acp.js";
+import type {
+	AgentTeamsChangedPayload,
+	CreateAgentTeamRpcParams,
+	CreateAgentTeamRpcResult,
+	GetAgentTeamRpcParams,
+	GetAgentTeamRpcResult,
+	ListAgentTeamsRpcParams,
+	ListAgentTeamsRpcResult,
+} from "./agent-team.js";
 import type { ErrorDetail } from "./errors.js";
 import type {
 	AcpBackendId,
@@ -300,6 +309,7 @@ export interface CliToGatewayEvents {
 	"sessions:list": (sessions: SessionSummary[]) => void;
 	"sessions:changed": (payload: SessionsChangedPayload) => void;
 	"sessions:discovered": (payload: SessionsDiscoveredPayload) => void;
+	"agent-teams:changed": (payload: AgentTeamsChangedPayload) => void;
 
 	// RPC responses
 	"rpc:response": (response: RpcResponse<unknown>) => void;
@@ -336,6 +346,13 @@ export interface GatewayToCliEvents {
 	) => void;
 	"rpc:session:load": (request: RpcRequest<LoadSessionRpcParams>) => void;
 	"rpc:session:reload": (request: RpcRequest<ReloadSessionRpcParams>) => void;
+	"rpc:agent-team:create": (
+		request: RpcRequest<CreateAgentTeamRpcParams>,
+	) => void;
+	"rpc:agent-teams:list": (
+		request: RpcRequest<ListAgentTeamsRpcParams>,
+	) => void;
+	"rpc:agent-team:get": (request: RpcRequest<GetAgentTeamRpcParams>) => void;
 
 	// Rename RPC request
 	"rpc:session:rename": (request: RpcRequest<RenameSessionParams>) => void;
@@ -382,7 +399,13 @@ export interface GatewayToWebuiEvents {
 	"permission:result": (payload: PermissionDecisionPayload) => void;
 	"cli:status": (payload: CliStatusPayload) => void;
 	"sessions:changed": (payload: SessionsChangedPayload) => void;
+	"agent-teams:changed": (payload: AgentTeamsChangedPayload) => void;
 }
+
+export type AgentTeamRpcResult =
+	| CreateAgentTeamRpcResult
+	| ListAgentTeamsRpcResult
+	| GetAgentTeamRpcResult;
 
 // Rename session RPC params
 export type RenameSessionParams = { sessionId: string; title: string };
