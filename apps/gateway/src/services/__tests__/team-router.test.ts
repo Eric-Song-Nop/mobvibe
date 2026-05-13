@@ -20,7 +20,9 @@ const createRegistration = (machineId: string): CliRegistrationInfo => ({
 	backends: [{ backendId: "backend-1", backendLabel: "Claude Code" }],
 });
 
-const createTeam = (overrides: Partial<AgentTeamSummary> = {}): AgentTeamSummary => ({
+const createTeam = (
+	overrides: Partial<AgentTeamSummary> = {},
+): AgentTeamSummary => ({
 	agentTeamId: "team-1",
 	machineId: "machine-1",
 	title: "Team One",
@@ -116,7 +118,11 @@ describe("TeamRouter", () => {
 				setTimeout(() => {
 					teamRouter.handleRpcResponse({
 						requestId: request.requestId,
-						result: { teams: [createTeam({ agentTeamId: "team-2", machineId: "machine-2" })] },
+						result: {
+							teams: [
+								createTeam({ agentTeamId: "team-2", machineId: "machine-2" }),
+							],
+						},
 					});
 				}, 0);
 			}
@@ -142,7 +148,10 @@ describe("TeamRouter", () => {
 		socket.emit.mockImplementation((event, request) => {
 			if (event === "rpc:agent-team:get") {
 				setTimeout(() => {
-					teamRouter.handleRpcResponse({ requestId: request.requestId, result: {} });
+					teamRouter.handleRpcResponse({
+						requestId: request.requestId,
+						result: {},
+					});
 				}, 0);
 			}
 		});

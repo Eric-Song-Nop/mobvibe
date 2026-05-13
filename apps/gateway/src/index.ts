@@ -13,6 +13,7 @@ import { closeDb } from "./db/index.js";
 import { auth } from "./lib/auth.js";
 import { logger } from "./lib/logger.js";
 import { createFlyReplayMiddleware } from "./middleware/fly-replay.js";
+import { setupAgentTeamRoutes } from "./routes/agent-teams.js";
 import { setupDeviceRoutes } from "./routes/device.js";
 import { setupFsRoutes } from "./routes/fs.js";
 import { setupHealthRoutes } from "./routes/health.js";
@@ -24,6 +25,7 @@ import { InstanceRegistry } from "./services/instance-registry.js";
 import { NotificationService } from "./services/notification-service.js";
 import { closeRedis, initRedis } from "./services/redis.js";
 import { SessionRouter } from "./services/session-router.js";
+import { TeamRouter } from "./services/team-router.js";
 import { UserAffinityManager } from "./services/user-affinity.js";
 import { setupCliHandlers } from "./socket/cli-handlers.js";
 import { setupWebuiHandlers } from "./socket/webui-handlers.js";
@@ -204,6 +206,7 @@ httpServer.on(
 // Services
 const cliRegistry = new CliRegistry();
 const sessionRouter = new SessionRouter(cliRegistry);
+const teamRouter = new TeamRouter(cliRegistry);
 
 // Setup webui handlers first to get the emitter function
 const webuiEmitter = setupWebuiHandlers(io, cliRegistry, userAffinity);
@@ -360,6 +363,7 @@ if (userAffinity) {
 // Routes
 const acpRouter = express.Router();
 setupSessionRoutes(acpRouter, cliRegistry, sessionRouter);
+setupAgentTeamRoutes(acpRouter, cliRegistry, teamRouter);
 app.use("/acp", acpRouter);
 
 const fsRouter = express.Router();
