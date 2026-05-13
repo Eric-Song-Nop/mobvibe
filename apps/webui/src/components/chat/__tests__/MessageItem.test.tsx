@@ -27,7 +27,6 @@ vi.mock("@hugeicons/react", () => ({
 
 vi.mock("@/components/chat/DiffView", () => ({
 	UnifiedDiffView: () => <div data-testid="diff-view" />,
-	buildUnifiedDiffString: () => "",
 }));
 
 vi.mock("@/components/chat/LazyStreamdown", () => ({
