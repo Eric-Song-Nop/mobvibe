@@ -1,4 +1,5 @@
 import type {
+	AgentTeamsChangedPayload,
 	CliRegistrationInfo,
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
@@ -22,6 +23,7 @@ import {
 } from "../services/db-service.js";
 import type { NotificationService } from "../services/notification-service.js";
 import type { SessionRouter } from "../services/session-router.js";
+import type { TeamRouter } from "../services/team-router.js";
 import type { UserAffinityManager } from "../services/user-affinity.js";
 
 /**
@@ -36,6 +38,7 @@ export type CliHandlersDeps = {
 	io: Server;
 	cliRegistry: CliRegistry;
 	sessionRouter: SessionRouter;
+	teamRouter: TeamRouter;
 	emitToWebui: (event: string, payload: unknown, userId?: string) => void;
 	userAffinity: UserAffinityManager | null;
 	config: GatewayConfig;
@@ -46,6 +49,7 @@ export function setupCliHandlers(
 	io: Server,
 	cliRegistry: CliRegistry,
 	sessionRouter: SessionRouter,
+	teamRouter: TeamRouter,
 	emitToWebui: (event: string, payload: unknown, userId?: string) => void,
 	userAffinity: UserAffinityManager | null = null,
 	config?: GatewayConfig,
@@ -306,6 +310,31 @@ export function setupCliHandlers(
 		// Note: session:update and session:error are deprecated - all content updates
 		// now go through session:event (WAL-persisted events with seq/revision)
 
+		socket.on("agent-teams:changed", (payload: AgentTeamsChangedPayload) => {
+			const record = cliRegistry.getCliBySocketId(socket.id);
+			if (!record) {
+				logger.warn(
+					{ socketId: socket.id },
+					"agent_teams_changed_unregistered_cli",
+				);
+				return;
+			}
+			const payloadWithMachineId: AgentTeamsChangedPayload = {
+				...payload,
+				machineId: payload.machineId ?? record.machineId,
+			};
+			logger.info(
+				{
+					machineId: payloadWithMachineId.machineId,
+					added: payload.added.length,
+					updated: payload.updated.length,
+					removed: payload.removed.length,
+				},
+				"agent_teams_changed_received",
+			);
+			emitToWebui("agent-teams:changed", payloadWithMachineId, record.userId);
+		});
+
 		// Session attached
 		socket.on("session:attached", (payload: SessionAttachedPayload) => {
 			const record = cliRegistry.getCliBySocketId(socket.id);
@@ -443,6 +472,7 @@ export function setupCliHandlers(
 				"rpc_response_received",
 			);
 			sessionRouter.handleRpcResponse(response);
+			teamRouter.handleRpcResponse(response);
 		});
 
 		// Disconnect
