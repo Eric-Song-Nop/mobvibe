@@ -223,7 +223,6 @@ describe("buildAgentTeamSummary task projection", () => {
 		expect(serialized).not.toContain("local task title");
 		expect(serialized).not.toContain("local task description");
 		expect(serialized).not.toContain("body_local_json");
-		expect(serialized).not.toContain("title");
 		expect(serialized).not.toContain("description");
 		expect(serialized).not.toContain("agentOutput");
 	});

@@ -46,7 +46,10 @@ export function buildAgentTeamSummary(
 		mailboxCounts: buildMailboxCounts(input.mailboxMessages),
 		taskCounts: buildTaskCounts(input.tasks),
 		summaryRefs: buildSummaryRefs(input.summaryRefs),
-		sourceRefs: collectSourceRefs(input.mailboxMessages),
+		sourceRefs: collectSourceRefs([
+			...input.mailboxMessages,
+			...input.tasks,
+		]),
 		createdAt: input.team.created_at,
 		updatedAt: input.team.updated_at,
 		archivedAt: input.team.archived_at ?? undefined,
@@ -69,7 +72,7 @@ function buildMemberSummary(
 	const memberTasks = tasks.filter(
 		(task) => task.owner_member_id === row.member_id,
 	);
-	const sourceRefs = collectSourceRefs(memberMessages);
+	const sourceRefs = collectSourceRefs([...memberMessages, ...memberTasks]);
 	return {
 		memberId: row.member_id,
 		agentTeamId: row.agent_team_id,
@@ -130,7 +133,7 @@ function buildTaskCounts(rows: AgentTeamTaskRow[]): TeamTaskCounts {
 		(result, row) => ({
 			todo: result.todo + (row.status === "todo" ? 1 : 0),
 			inProgress: result.inProgress + (row.status === "in_progress" ? 1 : 0),
-			blocked: result.blocked + (row.status === "blocked" ? 1 : 0),
+			blocked: result.blocked + (isBlockedTask(row) ? 1 : 0),
 			completed: result.completed + (row.status === "completed" ? 1 : 0),
 			failed: result.failed + (row.status === "failed" ? 1 : 0),
 			cancelled: result.cancelled + (row.status === "cancelled" ? 1 : 0),
@@ -180,8 +183,24 @@ function parseErrorDetail(value: string | null): ErrorDetail | undefined {
 	return isErrorDetail(parsed) ? parsed : undefined;
 }
 
-function collectSourceRefs(rows: AgentTeamMailboxMessageRow[]): TeamSourceRef[] {
+function collectSourceRefs(
+	rows: Array<AgentTeamMailboxMessageRow | AgentTeamTaskRow>,
+): TeamSourceRef[] {
 	return rows.flatMap((row) => parseSourceRefs(row.source_refs_json));
+}
+
+function isBlockedTask(row: AgentTeamTaskRow): boolean {
+	return row.status === "blocked" || parseStringArray(row.blocked_by_json).length > 0;
+}
+
+function parseStringArray(value: string | null): string[] {
+	if (!value) return [];
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		return Array.isArray(parsed) ? parsed.filter(isString) : [];
+	} catch {
+		return [];
+	}
 }
 
 function withoutEmptyCollections(summary: AgentTeamSummary): AgentTeamSummary {
@@ -300,6 +319,8 @@ export type AgentTeamTaskRow = {
 	owner_member_id: string | null;
 	status: string;
 	source_refs_json: string | null;
+	blocked_by_json: string | null;
+	blocks_json: string | null;
 	created_at: string;
 	updated_at: string;
 };
