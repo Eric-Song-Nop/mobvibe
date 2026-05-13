@@ -200,6 +200,129 @@ describe("MailboxService durable delivery", () => {
 			}),
 		);
 	});
+
+	test("readUnreadAndMark returns unread rows in creation order and marks exactly once", () => {
+		const first = service.sendMessage(
+			{ agentTeamId, memberId: leaderMemberId, role: "leader" },
+			{ to: workerMemberId, message: "first unread" },
+		);
+		const otherRecipient = service.sendMessage(
+			{ agentTeamId, memberId: leaderMemberId, role: "leader" },
+			{ to: reviewerMemberId, message: "other recipient" },
+		);
+		const second = service.sendMessage(
+			{ agentTeamId, memberId: reviewerMemberId, role: "member" },
+			{ to: workerMemberId, message: "second unread" },
+		);
+		if (!first.ok || !second.ok || !otherRecipient.ok) {
+			throw new Error("Expected setup delivery to succeed");
+		}
+		const alreadyReadId = first.deliveries[0].messageId;
+		store.readUnreadAndMark(agentTeamId, workerMemberId);
+		const third = service.sendMessage(
+			{ agentTeamId, memberId: leaderMemberId, role: "leader" },
+			{ to: workerMemberId, message: "third unread" },
+		);
+		if (!third.ok) {
+			throw new Error("Expected third delivery to succeed");
+		}
+
+		const unread = store.readUnreadAndMark(agentTeamId, workerMemberId);
+
+		expect(unread.map((message) => message.messageId)).toEqual([
+			third.deliveries[0].messageId,
+		]);
+		expect(unread[0].body).toEqual({ message: "third unread" });
+		const rows = readMailboxRows(dbPath);
+		expect(rows.find((row) => row.message_id === alreadyReadId)?.read_at).toBeString();
+		expect(
+			rows.find((row) => row.message_id === third.deliveries[0].messageId)
+				?.read_at,
+		).toBeString();
+		expect(
+			rows.find(
+				(row) => row.message_id === otherRecipient.deliveries[0].messageId,
+			)?.read_at,
+		).toBeNull();
+
+		expect(store.readUnreadAndMark(agentTeamId, workerMemberId)).toEqual([]);
+	});
+
+	test("updateWakeMetadata preserves delivery refs and appends audit refs", () => {
+		const sent = service.sendMessage(
+			{ agentTeamId, memberId: leaderMemberId, role: "leader" },
+			{ to: workerMemberId, message: "wake success" },
+		);
+		const failed = service.sendMessage(
+			{ agentTeamId, memberId: leaderMemberId, role: "leader" },
+			{ to: reviewerMemberId, message: "wake failure" },
+		);
+		if (!sent.ok || !failed.ok) {
+			throw new Error("Expected setup delivery to succeed");
+		}
+		const sessionRef = {
+			type: "session_event" as const,
+			agentTeamId,
+			memberId: workerMemberId,
+			sessionId: "session-worker",
+			revision: 1,
+			seq: 3,
+		};
+
+		store.updateWakeMetadata({
+			messageId: sent.deliveries[0].messageId,
+			wakeStatus: "sent",
+			deliveredSessionId: "session-worker",
+			sourceRefs: [sessionRef],
+		});
+		store.updateWakeMetadata({
+			messageId: failed.deliveries[0].messageId,
+			wakeStatus: "failed",
+			error: { code: "PROMPT_FAILED", message: "prompt failed" },
+			sourceRefs: [
+				{
+					type: "mailbox_message",
+					agentTeamId,
+					messageId: failed.deliveries[0].messageId,
+					fromMemberId: leaderMemberId,
+					toMemberId: reviewerMemberId,
+				},
+			],
+		});
+
+		const rows = readMailboxRows(dbPath);
+		const sentRow = rows.find(
+			(row) => row.message_id === sent.deliveries[0].messageId,
+		);
+		const failedRow = rows.find(
+			(row) => row.message_id === failed.deliveries[0].messageId,
+		);
+		expect(sentRow?.wake_status).toBe("sent");
+		expect(failedRow?.wake_status).toBe("failed");
+		expect(sentRow?.body_local_json).toContain("wake success");
+		expect(failedRow?.body_local_json).toContain("wake failure");
+		const sentRefs = JSON.parse(sentRow?.source_refs_json ?? "[]");
+		const failedRefs = JSON.parse(failedRow?.source_refs_json ?? "[]");
+		expect(sentRefs).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					type: "mailbox_message",
+					deliveredSessionId: "session-worker",
+				}),
+				sessionRef,
+			]),
+		);
+		expect(failedRefs).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					type: "mailbox_message",
+					messageId: failed.deliveries[0].messageId,
+				}),
+			]),
+		);
+		expect(JSON.stringify(failedRefs)).not.toContain("deliveredSessionId");
+		expect(readMailboxRows(dbPath)).toHaveLength(2);
+	});
 });
 
 function readMailboxRows(dbPath: string): MailboxRow[] {
