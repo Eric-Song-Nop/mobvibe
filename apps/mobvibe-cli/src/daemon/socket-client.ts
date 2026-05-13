@@ -52,6 +52,7 @@ type SocketClientOptions = {
 	sessionManager: SessionManager;
 	/** Crypto service for E2EE */
 	cryptoService: CliCryptoService;
+	agentTeamStore?: AgentTeamStore;
 };
 
 const SESSION_ROOT_NAME = "Working Directory";
@@ -172,7 +173,8 @@ export class SocketClient extends EventEmitter {
 	constructor(private readonly options: SocketClientOptions) {
 		super();
 		const { cryptoService } = options;
-		this.agentTeamStore = new AgentTeamStore(options.config.walDbPath);
+		this.agentTeamStore =
+			options.agentTeamStore ?? new AgentTeamStore(options.config.walDbPath);
 		this.socket = io(`${options.config.gatewayUrl}/cli`, {
 			path: "/socket.io",
 			reconnection: true,

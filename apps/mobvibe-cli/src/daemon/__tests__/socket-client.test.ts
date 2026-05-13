@@ -60,10 +60,6 @@ mock.module("../../lib/logger.js", () => ({
 	},
 }));
 
-mock.module("../../team/agent-team-store.js", () => ({
-	AgentTeamStore: mock(() => agentTeamStoreMock),
-}));
-
 const { SocketClient } = await import("../socket-client.js");
 
 const createConfig = (): CliConfig => ({
@@ -220,6 +216,7 @@ describe("SocketClient restore semantics", () => {
 			config: createConfig(),
 			sessionManager: sessionManager as never,
 			cryptoService: cryptoService as never,
+			agentTeamStore: agentTeamStoreMock as never,
 		});
 	});
 
