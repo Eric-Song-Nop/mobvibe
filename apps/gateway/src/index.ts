@@ -225,9 +225,17 @@ setupCliHandlers(
 	io,
 	cliRegistry,
 	sessionRouter,
+	teamRouter,
 	(event, payload, userId) => {
 		// Route events to the appropriate user's webui connections
 		switch (event) {
+			case "agent-teams:changed":
+				if (userId) {
+					webuiEmitter.emitToUser(userId, "agent-teams:changed", payload);
+				} else {
+					logger.warn({ event }, "emitToWebui_missing_userId");
+				}
+				break;
 			case "session:attached":
 				if (userId) {
 					webuiEmitter.emitToUser(userId, "session:attached", payload);
