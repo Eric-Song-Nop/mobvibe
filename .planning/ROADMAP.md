@@ -54,7 +54,14 @@ Plans:
   4. Agent tool call 可以写入 durable mailbox；message 持久化、read/unread 和 wake status 被分开记录。
   5. Agent tool call 可以创建、列出和更新 durable task board，包含 owner、status 和 blockedBy/blocks。
   6. Team MCP tools 携带 caller identity，并按 leader-only、用户确认和 workspace policy 执行。
-**Plans**: TBD
+**Plans**: 6 plans
+Plans:
+- [ ] 02-01-PLAN.md — SDK/capability foundation and narrow MCP-over-ACP adapter boundary
+- [ ] 02-02-PLAN.md — Team MCP runtime, per-session injection, caller binding, and tools readiness
+- [ ] 02-03-PLAN.md — Durable mailbox `send_message` tool path and projection-safe delivery metadata
+- [ ] 02-04-PLAN.md — Mailbox wake/injection semantics and idle notification guard
+- [ ] 02-05-PLAN.md — Durable task board tools and dependency mutation
+- [ ] 02-06-PLAN.md — Per-session bridge fallback or explicit team-capable validation error
 **UI hint**: no
 
 ### Phase 3: 最小端到端 Team Run
