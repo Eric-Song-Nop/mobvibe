@@ -63,14 +63,28 @@ const flattenPatchFiles = (diff: string): FileDiffMetadata[] =>
 				: fileDiff.prevName,
 		}));
 
-const createFileContents = (
-	path: string,
-	contents: string,
-	cacheKey: string,
-): FileContents => ({
+const FNV_1A_64_OFFSET_BASIS = 0xcbf29ce484222325n;
+const FNV_1A_64_PRIME = 0x100000001b3n;
+const UINT64_MASK = 0xffffffffffffffffn;
+
+const createStableContentHash = (contents: string): string => {
+	let hash = FNV_1A_64_OFFSET_BASIS;
+
+	for (let index = 0; index < contents.length; index += 1) {
+		hash ^= BigInt(contents.charCodeAt(index));
+		hash = (hash * FNV_1A_64_PRIME) & UINT64_MASK;
+	}
+
+	return hash.toString(16).padStart(16, "0");
+};
+
+const createFileContentsCacheKey = (path: string, contents: string): string =>
+	`file:${path.length}:${path}:${contents.length}:${createStableContentHash(contents)}`;
+
+const createFileContents = (path: string, contents: string): FileContents => ({
 	name: path || "diff",
 	contents,
-	cacheKey,
+	cacheKey: createFileContentsCacheKey(path, contents),
 	lang: resolveLanguageFromPath(path) as SupportedLanguages,
 });
 
@@ -88,17 +102,11 @@ export const UnifiedDiffView = (props: UnifiedDiffViewProps) => {
 		[diff],
 	);
 	const oldFile = useMemo(
-		() =>
-			isContentDiff
-				? createFileContents(path, oldText ?? "", `old:${path}`)
-				: null,
+		() => (isContentDiff ? createFileContents(path, oldText ?? "") : null),
 		[isContentDiff, oldText, path],
 	);
 	const newFile = useMemo(
-		() =>
-			isContentDiff
-				? createFileContents(path, newText ?? "", `new:${path}`)
-				: null,
+		() => (isContentDiff ? createFileContents(path, newText ?? "") : null),
 		[isContentDiff, newText, path],
 	);
 
