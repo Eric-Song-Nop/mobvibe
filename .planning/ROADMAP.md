@@ -56,7 +56,7 @@ Plans:
   6. Team MCP tools 携带 caller identity，并按 leader-only、用户确认和 workspace policy 执行。
 **Plans**: 6 plans
 Plans:
-- [ ] 02-01-PLAN.md — SDK/capability foundation and narrow MCP-over-ACP adapter boundary
+- [x] 02-01-PLAN.md — SDK/capability foundation and narrow MCP-over-ACP adapter boundary
 - [ ] 02-02-PLAN.md — Team MCP runtime, per-session injection, caller binding, and tools readiness
 - [ ] 02-03-PLAN.md — Durable mailbox `send_message` tool path and projection-safe delivery metadata
 - [ ] 02-04-PLAN.md — Mailbox wake/injection semantics and idle notification guard

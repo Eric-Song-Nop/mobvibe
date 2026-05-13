@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 2 context gathered
-last_updated: "2026-05-13T12:39:46.295Z"
-last_activity: 2026-05-13 -- Phase 02 planning complete
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-05-13T13:11:52.176Z"
+last_activity: 2026-05-13
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 11
-  completed_plans: 5
-  percent: 45
+  completed_plans: 6
+  percent: 55
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 ## Current Position
 
-Phase: 02 (CLI Team MCP、Mailbox 与 Task Board) — NOT STARTED
-Plan: TBD
+Phase: 02 (CLI Team MCP、Mailbox 与 Task Board) — EXECUTING
+Plan: 2 of 6
 Status: Ready to execute
-Last activity: 2026-05-13 -- Phase 02 planning complete
+Last activity: 2026-05-13
 
-Progress: [██████████] 100%
+Progress: [██████░░░░] 55%
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Progress: [██████████] 100%
 
 | Phase 01 P04 | 5 min | 3 tasks | 4 files |
 | Phase 01 P05 | 10 min | 3 tasks | 8 files |
+| Phase 02 P01 | 9 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -90,6 +91,8 @@ Recent decisions affecting current work:
 - [Phase 01-05]: WebUI createAgentTeam allowlists metadata fields instead of serializing caller objects wholesale.
 - [Phase 01-05]: WebUI Agent Team projection state lives in `team-store.ts`, separate from ordinary session transcript state.
 - [Phase 01-05]: Persisted WebUI Agent Team state includes projections, active id, and last sync timestamp only; runtime appError and content/secret-like keys are excluded.
+- [Phase 02]: [Phase 02-01]: ACP SDK 0.21.x still lacks generated MCP-over-ACP acp schema, so Mobvibe keeps RFD-only declarations behind team-capability.ts. — Plan execution verified SDK schema after upgrade and localized RFD-only declarations.
+- [Phase 02]: [Phase 02-01]: Team MCP capability resolution prefers native mcp.acp and only allows stdio bridge when perSessionBridge is true. — This enforces MCP-04/MCP-05 safe bridge eligibility before autonomous team tools are exposed.
 
 ### Pending Todos
 
@@ -109,6 +112,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-13T10:58:22.175Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-cli-team-mcp-mailbox-task-board/02-CONTEXT.md
+Last session: 2026-05-13T13:11:52.169Z
+Stopped at: Completed 02-01-PLAN.md
+Resume file: None

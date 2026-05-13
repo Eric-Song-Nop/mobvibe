@@ -18,10 +18,10 @@ Requirements for the first agent team release. Each requirement must map to exac
 ### MCP Isolation And Capabilities
 
 - [ ] **MCP-01**: CLI 可以为每个 team run 启动或恢复一个 team MCP server，并暴露 `mobvibe_team_*` 工具给该 team 的 leader/member session。
-- [ ] **MCP-02**: Team tools 优先通过 ACP 官方 MCP-over-ACP per-session transport 注入：只在 team `session/new` 的 `tools.mcpServers` 中声明 team MCP server。
+- [x] **MCP-02**: Team tools 优先通过 ACP 官方 MCP-over-ACP per-session transport 注入：只在 team `session/new` 的 `tools.mcpServers` 中声明 team MCP server。
 - [ ] **MCP-03**: 普通非 team session 不包含 `mobvibe-team` MCP server declaration，不能看到或调用 team tools。
-- [ ] **MCP-04**: 如果 backend 不支持 native `mcpCapabilities.acp`，系统只能使用仅作用于该 team session 的 stdio/HTTP bridge；不得修改 agent 全局 MCP 配置。
-- [ ] **MCP-05**: 创建 leader/member 或 spawn member 前，系统必须校验 backend 支持 native MCP-over-ACP 或安全 per-session bridge；否则阻止或降级为非自治成员。
+- [x] **MCP-04**: 如果 backend 不支持 native `mcpCapabilities.acp`，系统只能使用仅作用于该 team session 的 stdio/HTTP bridge；不得修改 agent 全局 MCP 配置。
+- [x] **MCP-05**: 创建 leader/member 或 spawn member 前，系统必须校验 backend 支持 native MCP-over-ACP 或安全 per-session bridge；否则阻止或降级为非自治成员。
 - [ ] **MCP-06**: 系统持久化并展示 MCP readiness phase，例如 server_ready、session_injecting、tools_ready、degraded 和 error。
 - [ ] **MCP-07**: Team MCP tools 必须携带可验证的 team/member caller identity，并按 tool policy 执行 leader-only、用户确认和 workspace 限制。
 
@@ -118,10 +118,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TEAM-04 | Phase 1 | Complete |
 | TEAM-05 | Phase 1 | Complete |
 | MCP-01 | Phase 2 | Pending |
-| MCP-02 | Phase 2 | Pending |
+| MCP-02 | Phase 2 | Complete |
 | MCP-03 | Phase 2 | Pending |
-| MCP-04 | Phase 2 | Pending |
-| MCP-05 | Phase 2 | Pending |
+| MCP-04 | Phase 2 | Complete |
+| MCP-05 | Phase 2 | Complete |
 | MCP-06 | Phase 2 | Pending |
 | MCP-07 | Phase 2 | Pending |
 | COORD-01 | Phase 2 | Pending |
