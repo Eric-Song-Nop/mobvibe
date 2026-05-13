@@ -120,6 +120,99 @@ const MIGRATIONS = [
       WHERE workspace_root_cwd IS NULL;
     `,
 	},
+	{
+		version: 7,
+		up: `
+      CREATE TABLE IF NOT EXISTS agent_teams (
+        agent_team_id TEXT PRIMARY KEY,
+        machine_id TEXT NOT NULL,
+        workspace_root_cwd TEXT NOT NULL,
+        title TEXT NOT NULL,
+        lifecycle TEXT NOT NULL,
+        leader_member_id TEXT NOT NULL,
+        workspace_mode TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        archived_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_team_members (
+        member_id TEXT PRIMARY KEY,
+        agent_team_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        name TEXT NOT NULL,
+        backend_id TEXT NOT NULL,
+        session_id TEXT,
+        lifecycle TEXT NOT NULL,
+        health TEXT NOT NULL,
+        worktree_source_cwd TEXT,
+        worktree_branch TEXT,
+        error_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (agent_team_id) REFERENCES agent_teams(agent_team_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_team_mcp_status (
+        agent_team_id TEXT NOT NULL,
+        member_id TEXT NOT NULL,
+        transport TEXT NOT NULL,
+        server_id TEXT,
+        phase TEXT NOT NULL,
+        last_error_json TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (agent_team_id, member_id),
+        FOREIGN KEY (agent_team_id) REFERENCES agent_teams(agent_team_id),
+        FOREIGN KEY (member_id) REFERENCES agent_team_members(member_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_team_mailbox_messages (
+        message_id TEXT PRIMARY KEY,
+        agent_team_id TEXT NOT NULL,
+        from_member_id TEXT NOT NULL,
+        to_member_id TEXT,
+        body_local_json TEXT NOT NULL,
+        source_refs_json TEXT,
+        read_at TEXT,
+        wake_status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (agent_team_id) REFERENCES agent_teams(agent_team_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_team_tasks (
+        task_id TEXT PRIMARY KEY,
+        agent_team_id TEXT NOT NULL,
+        owner_member_id TEXT,
+        status TEXT NOT NULL,
+        body_local_json TEXT NOT NULL,
+        blocked_by_json TEXT,
+        blocks_json TEXT,
+        source_refs_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (agent_team_id) REFERENCES agent_teams(agent_team_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_team_summary_refs (
+        summary_ref_id TEXT PRIMARY KEY,
+        agent_team_id TEXT NOT NULL,
+        source_refs_json TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (agent_team_id) REFERENCES agent_teams(agent_team_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_agent_teams_machine_lifecycle
+        ON agent_teams (machine_id, lifecycle);
+      CREATE INDEX IF NOT EXISTS idx_agent_team_members_team
+        ON agent_team_members (agent_team_id);
+      CREATE INDEX IF NOT EXISTS idx_agent_team_mailbox_team
+        ON agent_team_mailbox_messages (agent_team_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_agent_team_tasks_team
+        ON agent_team_tasks (agent_team_id, updated_at);
+    `,
+	},
 ];
 
 export function runMigrations(db: Database): void {
