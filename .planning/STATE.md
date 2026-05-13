@@ -1,24 +1,41 @@
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+status: executing
+stopped_at: Phase 1 实现计划已起草，等待确认。
+last_updated: "2026-05-13T03:27:40.374Z"
+last_activity: 2026-05-13 -- Phase 01 planning complete
+progress:
+  total_phases: 5
+  completed_phases: 0
+  total_plans: 5
+  completed_plans: 0
+  percent: 0
+---
+
 # Project State
 
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-05-12)
 
-**Core value:** 用户可以在一个 Mobvibe 团队任务中安全地协调多个不同 ACP agent，让它们围绕同一代码目标并行或顺序协作，并清楚看到每个 agent 的进展、产出和最终汇总。
+**Core value:** 用户可以在一个 Mobvibe 团队任务中安全地协调多个不同 ACP agent，让它们围绕同一代码目标协作，并清楚看到每个 agent 的进展、任务、消息、产出和最终汇总。
 **Current focus:** Phase 1 — 协议、状态模型与持久化边界
 
 ## Current Position
 
 Phase: 1 of 5 (协议、状态模型与持久化边界)
 Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-05-12 — 创建 Mobvibe Agent Team MVP roadmap，并完成 26/26 v1 requirements phase mapping。
+Status: Ready to execute
+Last activity: 2026-05-13 -- Phase 01 planning complete
 
 Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
 **Velocity:**
+
 - Total plans completed: 0
 - Average duration: N/A
 - Total execution time: 0.0 hours
@@ -28,12 +45,13 @@ Progress: [░░░░░░░░░░] 0%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1. 协议、状态模型与持久化边界 | 0 | TBD | N/A |
-| 2. 最小端到端 Team Run | 0 | TBD | N/A |
-| 3. 生命周期、部分失败与恢复 | 0 | TBD | N/A |
-| 4. 权限与 E2EE 加固 | 0 | TBD | N/A |
+| 2. CLI Team MCP、Mailbox 与 Task Board | 0 | TBD | N/A |
+| 3. 最小端到端 Team Run | 0 | TBD | N/A |
+| 4. 生命周期、权限、E2EE 与恢复 | 0 | TBD | N/A |
 | 5. UI 规模化与 v1 Polish | 0 | TBD | N/A |
 
 **Recent Trend:**
+
 - Last 5 plans: N/A
 - Trend: N/A
 
@@ -43,20 +61,29 @@ Progress: [░░░░░░░░░░] 0%
 
 ### Decisions
 
-Decisions are logged in PROJECT.md Key Decisions table.
+决策记录在 PROJECT.md 的 Key Decisions 表和当前 phase context 文档中。
 Recent decisions affecting current work:
 
 - [Roadmap]: v1 按 research 推荐使用 5 个 coarse MVP phase。
-- [Roadmap]: Team member 继续展开为普通 ACP session；team run 只承担跨 session 元数据、生命周期和 UI 聚合。
-- [Roadmap]: Phase 1 优先锁定 shared 类型、状态模型、CLI durable owner 和持久化恢复边界。
+- [Roadmap]: Team member 继续展开为普通 ACP session；team coordination 由 CLI-hosted team MCP server、durable mailbox 和 task board 提供。
+- [Roadmap]: ACP MCP-over-ACP RFD 是首选隔离机制；team tools 只注入 team session，普通 session 不受影响。
+- [Roadmap]: Phase 1 优先锁定 shared 类型、状态模型、CLI durable owner、MCP readiness、mailbox/task 和内容边界。
+- [Phase 1]: 产品语言锁定为 Agent Team；每个 leader/member 都是一等 ordinary ACP session。
+- [Phase 1]: WebUI 按 AionUI 方向展示：Agent Team 是独立一级对象，team-owned member sessions 默认从普通 session 列表隐藏或折叠。
+- [Phase 1]: Gateway 采用混合方案：对 WebUI 暴露 `/acp/agent-teams`，内部只转发 typed CLI RPC，不持久化 Agent Team truth。
+- [Phase 1]: Gateway-facing team projection 不携带 mailbox/task/summary 正文；CLI-local store 可以保存协作正文。
+- [Phase 1]: lifecycle 不使用 `idle`/`ready`；MCP readiness、permission waiting、activity counts 和 health 独立表达。
+- [Phase 1]: source refs 是强类型定位引用，不承载正文；优先跳转到 member ordinary session history。
+- [Phase 1]: CLI SQLite 当前事实表是 team durable truth；Gateway 只做 presence 与 snapshot 转发。
 
 ### Pending Todos
 
-None yet.
+- 确认 `.planning/phases/01-protocol-state-model-persistence-boundary/PLAN.md` 后开始 Phase 1 代码实现。
 
 ### Blockers/Concerns
 
-- [Phase 1]: 需要确认 team metadata source of truth 是否采用 CLI SQLite/WAL 域，以及 prompt/summary 明文边界。
+- [Phase 1]: 实现仍需扩展当前 ACP capability discovery，表达 native `mcpCapabilities.acp` 与安全的 per-session bridge fallback。
+- [Phase 1]: 实现仍需测试证明 Gateway-facing payload 会拒绝或省略 mailbox/task/summary 明文。
 
 ## Deferred Items
 
@@ -64,10 +91,10 @@ Items acknowledged and carried forward from previous milestone close:
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
-| v2 | 模板、角色库、自动合并、复杂 DAG、跨 machine team、多用户协作 | Deferred | Project initialization |
+| v2 | 模板、角色库、自动合并、复杂自动 DAG 调度、跨 machine team、多用户协作 | Deferred | Project initialization |
 
 ## Session Continuity
 
-Last session: 2026-05-12
-Stopped at: Roadmap created and ready for `/gsd-plan-phase 1`
-Resume file: None
+Last session: 2026-05-13
+Stopped at: Phase 1 实现计划已起草，等待确认。
+Resume file: .planning/phases/01-protocol-state-model-persistence-boundary/PLAN.md
