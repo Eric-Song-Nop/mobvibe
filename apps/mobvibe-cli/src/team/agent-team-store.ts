@@ -41,6 +41,9 @@ export class AgentTeamStore {
 	private stmtListSummaryRefs: ReturnType<Database["query"]>;
 	private stmtInsertMailboxMessage: ReturnType<Database["query"]>;
 	private stmtUpdateMailboxWake: ReturnType<Database["query"]>;
+	private stmtReadUnreadMailboxMessages: ReturnType<Database["query"]>;
+	private stmtGetMailboxMessage: ReturnType<Database["query"]>;
+	private stmtUpdateMailboxWakeMetadata: ReturnType<Database["query"]>;
 	private stmtTouchTeam: ReturnType<Database["query"]>;
 	private stmtUpdateMcpStatus: ReturnType<Database["query"]>;
 	private stmtInsertToolIntent: ReturnType<Database["query"]>;
@@ -117,15 +120,37 @@ export class AgentTeamStore {
 		this.stmtInsertMailboxMessage = this.db.query(`
       INSERT INTO agent_team_mailbox_messages (
         message_id, agent_team_id, from_member_id, to_member_id, body_local_json,
-        source_refs_json, read_at, wake_status, created_at
+        source_refs_json, read_at, wake_status, wake_error_json, created_at
       ) VALUES (
         $messageId, $agentTeamId, $fromMemberId, $toMemberId, $bodyLocalJson,
-        $sourceRefsJson, $readAt, $wakeStatus, $createdAt
+        $sourceRefsJson, $readAt, $wakeStatus, $wakeErrorJson, $createdAt
       )
     `);
 		this.stmtUpdateMailboxWake = this.db.query(`
       UPDATE agent_team_mailbox_messages
       SET wake_status = $wakeStatus
+      WHERE message_id = $messageId
+    `);
+		this.stmtReadUnreadMailboxMessages = this.db.query(`
+      SELECT message_id, agent_team_id, from_member_id, to_member_id, body_local_json,
+             source_refs_json, read_at, wake_status, wake_error_json, created_at
+      FROM agent_team_mailbox_messages
+      WHERE agent_team_id = $agentTeamId
+        AND to_member_id = $memberId
+        AND read_at IS NULL
+      ORDER BY created_at ASC
+    `);
+		this.stmtGetMailboxMessage = this.db.query(`
+      SELECT message_id, agent_team_id, from_member_id, to_member_id, body_local_json,
+             source_refs_json, read_at, wake_status, wake_error_json, created_at
+      FROM agent_team_mailbox_messages
+      WHERE message_id = $messageId
+    `);
+		this.stmtUpdateMailboxWakeMetadata = this.db.query(`
+      UPDATE agent_team_mailbox_messages
+      SET wake_status = $wakeStatus,
+          wake_error_json = $wakeErrorJson,
+          source_refs_json = $sourceRefsJson
       WHERE message_id = $messageId
     `);
 		this.stmtTouchTeam = this.db.query(`
@@ -323,6 +348,7 @@ export class AgentTeamStore {
 					$sourceRefsJson: JSON.stringify(delivery.sourceRefs),
 					$readAt: null,
 					$wakeStatus: delivery.wakeStatus,
+					$wakeErrorJson: null,
 					$createdAt: now,
 				});
 			}
@@ -343,6 +369,69 @@ export class AgentTeamStore {
 			$messageId: params.messageId,
 			$wakeStatus: params.wakeStatus,
 		});
+	}
+
+	readUnreadAndMark(
+		agentTeamId: string,
+		memberId: string,
+	): MailboxWakeMessage[] {
+		const readAt = new Date().toISOString();
+		return this.db.transaction(() => {
+			const rows = this.stmtReadUnreadMailboxMessages.all({
+				$agentTeamId: agentTeamId,
+				$memberId: memberId,
+			}) as AgentTeamMailboxMessageLocalRow[];
+			if (rows.length === 0) {
+				return [];
+			}
+			const placeholders = rows.map(() => "?").join(", ");
+			this.db
+				.query(
+					`UPDATE agent_team_mailbox_messages SET read_at = ? WHERE message_id IN (${placeholders})`,
+				)
+				.run(readAt, ...rows.map((row) => row.message_id));
+			return rows.map(rowToWakeMessage);
+		})();
+	}
+
+	updateWakeMetadata(params: {
+		messageId: string;
+		wakeStatus: "sent" | "failed";
+		deliveredSessionId?: string;
+		error?: { code: string; message: string };
+		sourceRefs?: TeamSourceRef[];
+	}): void {
+		this.db.transaction(() => {
+			const row = this.stmtGetMailboxMessage.get({
+				$messageId: params.messageId,
+			}) as AgentTeamMailboxMessageLocalRow | null;
+			if (!row) {
+				throw new Error(`Mailbox message not found: ${params.messageId}`);
+			}
+			const existingRefs = parseSourceRefs(row.source_refs_json);
+			const updatedRefs = mergeSourceRefs(
+				existingRefs.map((ref) =>
+					ref.type === "mailbox_message" && ref.messageId === params.messageId
+						? {
+								...ref,
+								deliveredSessionId:
+									params.deliveredSessionId ?? ref.deliveredSessionId,
+							}
+						: ref,
+				),
+				params.sourceRefs ?? [],
+			);
+			this.stmtUpdateMailboxWakeMetadata.run({
+				$messageId: params.messageId,
+				$wakeStatus: params.wakeStatus,
+				$wakeErrorJson: params.error ? JSON.stringify(params.error) : null,
+				$sourceRefsJson: JSON.stringify(updatedRefs),
+			});
+			this.stmtTouchTeam.run({
+				$agentTeamId: row.agent_team_id,
+				$updatedAt: new Date().toISOString(),
+			});
+		})();
 	}
 
 	updateMcpStatus(params: {
@@ -444,3 +533,74 @@ export type TeamToolIntent = {
 	createdAt: string;
 	updatedAt: string;
 };
+
+export type MailboxWakeMessage = {
+	messageId: string;
+	agentTeamId: string;
+	fromMemberId: string;
+	toMemberId?: string;
+	body: { message: string; summary?: string; type?: string };
+	sourceRefs: TeamSourceRef[];
+	readAt?: string;
+	wakeStatus: TeamMailboxWakeStatus;
+	createdAt: string;
+};
+
+type AgentTeamMailboxMessageLocalRow = AgentTeamMailboxMessageRow & {
+	body_local_json: string;
+	wake_error_json: string | null;
+};
+
+function rowToWakeMessage(
+	row: AgentTeamMailboxMessageLocalRow,
+): MailboxWakeMessage {
+	return {
+		messageId: row.message_id,
+		agentTeamId: row.agent_team_id,
+		fromMemberId: row.from_member_id,
+		toMemberId: row.to_member_id ?? undefined,
+		body: parseMailboxBody(row.body_local_json),
+		sourceRefs: parseSourceRefs(row.source_refs_json),
+		readAt: row.read_at ?? undefined,
+		wakeStatus: row.wake_status as TeamMailboxWakeStatus,
+		createdAt: row.created_at,
+	};
+}
+
+function parseMailboxBody(value: string): MailboxWakeMessage["body"] {
+	const parsed = JSON.parse(value) as unknown;
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return { message: "" };
+	}
+	const record = parsed as Record<string, unknown>;
+	return {
+		message: typeof record.message === "string" ? record.message : "",
+		summary: typeof record.summary === "string" ? record.summary : undefined,
+		type: typeof record.type === "string" ? record.type : undefined,
+	};
+}
+
+function parseSourceRefs(value: string | null): TeamSourceRef[] {
+	if (!value) {
+		return [];
+	}
+	const parsed = JSON.parse(value) as unknown;
+	return Array.isArray(parsed) ? (parsed as TeamSourceRef[]) : [];
+}
+
+function mergeSourceRefs(
+	existingRefs: TeamSourceRef[],
+	newRefs: TeamSourceRef[],
+): TeamSourceRef[] {
+	const merged: TeamSourceRef[] = [];
+	const seen = new Set<string>();
+	for (const ref of [...existingRefs, ...newRefs]) {
+		const key = JSON.stringify(ref);
+		if (seen.has(key)) {
+			continue;
+		}
+		seen.add(key);
+		merged.push(ref);
+	}
+	return merged;
+}

@@ -234,6 +234,15 @@ const MIGRATIONS = [
         ON agent_team_tool_intents (agent_team_id, created_at);
     `,
 	},
+	{
+		version: 9,
+		up: `
+      ALTER TABLE agent_team_mailbox_messages ADD COLUMN wake_error_json TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_agent_team_mailbox_unread
+        ON agent_team_mailbox_messages (agent_team_id, to_member_id, read_at, created_at);
+    `,
+	},
 ];
 
 export function runMigrations(db: Database): void {
