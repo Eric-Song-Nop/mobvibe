@@ -1,9 +1,15 @@
-import type { CliRegistrationInfo, SessionSummary } from "@mobvibe/shared";
+import type {
+	AgentTeamSummary,
+	AgentTeamsChangedPayload,
+	CliRegistrationInfo,
+	SessionSummary,
+} from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CliRegistry } from "../../services/cli-registry.js";
 import type { NotificationService } from "../../services/notification-service.js";
 import type { SessionRouter } from "../../services/session-router.js";
+import type { TeamRouter } from "../../services/team-router.js";
 import { setupCliHandlers } from "../cli-handlers.js";
 
 vi.mock("@mobvibe/shared", () => ({
@@ -47,6 +53,31 @@ const createMockRegistrationInfo = (
 	...overrides,
 });
 
+const createMockAgentTeam = (
+	overrides: Partial<AgentTeamSummary> = {},
+): AgentTeamSummary => ({
+	agentTeamId: "team-1",
+	machineId: "machine-1",
+	title: "Team One",
+	workspaceRootCwd: "/repo",
+	workspaceMode: "shared_workspace",
+	leaderMemberId: "member-1",
+	lifecycle: "pending",
+	members: [],
+	mailboxCounts: { unread: 0, wakePending: 0, wakeFailed: 0 },
+	taskCounts: {
+		todo: 0,
+		inProgress: 0,
+		blocked: 0,
+		completed: 0,
+		failed: 0,
+		cancelled: 0,
+	},
+	createdAt: "2026-05-13T00:00:00.000Z",
+	updatedAt: "2026-05-13T00:00:00.000Z",
+	...overrides,
+});
+
 describe("setupCliHandlers", () => {
 	let registry: CliRegistry;
 	let emitToWebui: ReturnType<typeof vi.fn>;
@@ -54,6 +85,8 @@ describe("setupCliHandlers", () => {
 		notifyPermissionRequest: ReturnType<typeof vi.fn>;
 		notifySessionEvent: ReturnType<typeof vi.fn>;
 	};
+	let sessionRouter: { handleRpcResponse: ReturnType<typeof vi.fn> };
+	let teamRouter: { handleRpcResponse: ReturnType<typeof vi.fn> };
 	let connectionHandler: ((socket: Socket) => void) | undefined;
 	let socketHandlers: Record<string, (payload?: unknown) => void>;
 	let socket: Socket;
@@ -65,6 +98,8 @@ describe("setupCliHandlers", () => {
 			notifyPermissionRequest: vi.fn(),
 			notifySessionEvent: vi.fn(),
 		};
+		sessionRouter = { handleRpcResponse: vi.fn() };
+		teamRouter = { handleRpcResponse: vi.fn() };
 		socketHandlers = {};
 		socket = {
 			id: "socket-1",
@@ -93,7 +128,8 @@ describe("setupCliHandlers", () => {
 		setupCliHandlers(
 			io,
 			registry,
-			{ handleRpcResponse: vi.fn() } as unknown as SessionRouter,
+			sessionRouter as unknown as SessionRouter,
+			teamRouter as unknown as TeamRouter,
 			emitToWebui,
 			null,
 			undefined,
@@ -101,6 +137,55 @@ describe("setupCliHandlers", () => {
 		);
 
 		connectionHandler?.(socket);
+	});
+
+	it("relays agent team changed events only to the owning user", () => {
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+		const payload: AgentTeamsChangedPayload = {
+			added: [createMockAgentTeam({ machineId: "machine-1" })],
+			updated: [],
+			removed: [],
+		};
+
+		socketHandlers["agent-teams:changed"]?.(payload);
+
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"agent-teams:changed",
+			{
+				...payload,
+				machineId: "machine-1",
+			},
+			"user-1",
+		);
+	});
+
+	it("does not broadcast agent team changes from unknown CLI sockets", () => {
+		const payload: AgentTeamsChangedPayload = {
+			added: [createMockAgentTeam()],
+			updated: [],
+			removed: [],
+		};
+
+		socketHandlers["agent-teams:changed"]?.(payload);
+
+		expect(emitToWebui).not.toHaveBeenCalledWith(
+			"agent-teams:changed",
+			expect.anything(),
+			expect.anything(),
+		);
+	});
+
+	it("routes rpc responses to session and team routers", () => {
+		const response = { requestId: "rpc-1", result: { ok: true } };
+
+		socketHandlers["rpc:response"]?.(response);
+
+		expect(sessionRouter.handleRpcResponse).toHaveBeenCalledWith(response);
+		expect(teamRouter.handleRpcResponse).toHaveBeenCalledWith(response);
 	});
 
 	it("forwards session:attached events to webui", () => {
