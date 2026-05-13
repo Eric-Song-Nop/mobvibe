@@ -9,6 +9,7 @@ import type {
 	GetAgentTeamRpcResult,
 	ListAgentTeamsRpcParams,
 	ListAgentTeamsRpcResult,
+	TeamMailboxWakeStatus,
 	TeamMcpPhase,
 	TeamMcpTransport,
 	TeamSourceRef,
@@ -38,6 +39,9 @@ export class AgentTeamStore {
 	private stmtListMailboxMessages: ReturnType<Database["query"]>;
 	private stmtListTasks: ReturnType<Database["query"]>;
 	private stmtListSummaryRefs: ReturnType<Database["query"]>;
+	private stmtInsertMailboxMessage: ReturnType<Database["query"]>;
+	private stmtUpdateMailboxWake: ReturnType<Database["query"]>;
+	private stmtTouchTeam: ReturnType<Database["query"]>;
 	private stmtUpdateMcpStatus: ReturnType<Database["query"]>;
 	private stmtInsertToolIntent: ReturnType<Database["query"]>;
 
@@ -109,6 +113,25 @@ export class AgentTeamStore {
       FROM agent_team_summary_refs
       WHERE agent_team_id = $agentTeamId
       ORDER BY updated_at ASC
+    `);
+		this.stmtInsertMailboxMessage = this.db.query(`
+      INSERT INTO agent_team_mailbox_messages (
+        message_id, agent_team_id, from_member_id, to_member_id, body_local_json,
+        source_refs_json, read_at, wake_status, created_at
+      ) VALUES (
+        $messageId, $agentTeamId, $fromMemberId, $toMemberId, $bodyLocalJson,
+        $sourceRefsJson, $readAt, $wakeStatus, $createdAt
+      )
+    `);
+		this.stmtUpdateMailboxWake = this.db.query(`
+      UPDATE agent_team_mailbox_messages
+      SET wake_status = $wakeStatus
+      WHERE message_id = $messageId
+    `);
+		this.stmtTouchTeam = this.db.query(`
+      UPDATE agent_teams
+      SET updated_at = $updatedAt
+      WHERE agent_team_id = $agentTeamId
     `);
 		this.stmtUpdateMcpStatus = this.db.query(`
       INSERT INTO agent_team_mcp_status (
@@ -252,6 +275,74 @@ export class AgentTeamStore {
 		return this.stmtListMembers.all({
 			$agentTeamId: agentTeamId,
 		}) as AgentTeamMemberRow[];
+	}
+
+	createMailboxMessages(params: {
+		agentTeamId: string;
+		fromMemberId: string;
+		recipients: Array<{ memberId: string; name: string }>;
+		body: { message: string; summary?: string };
+	}): Array<{
+		messageId: string;
+		fromMemberId: string;
+		toMemberId: string;
+		toName: string;
+		wakeStatus: "pending";
+		sourceRefs: TeamSourceRef[];
+	}> {
+		const now = new Date().toISOString();
+		const deliveries = params.recipients.map((recipient) => {
+			const messageId = randomUUID();
+			const sourceRefs: TeamSourceRef[] = [
+				{
+					type: "mailbox_message",
+					agentTeamId: params.agentTeamId,
+					messageId,
+					fromMemberId: params.fromMemberId,
+					toMemberId: recipient.memberId,
+				},
+			];
+			return {
+				messageId,
+				fromMemberId: params.fromMemberId,
+				toMemberId: recipient.memberId,
+				toName: recipient.name,
+				wakeStatus: "pending" as const,
+				sourceRefs,
+			};
+		});
+
+		this.db.transaction(() => {
+			for (const delivery of deliveries) {
+				this.stmtInsertMailboxMessage.run({
+					$messageId: delivery.messageId,
+					$agentTeamId: params.agentTeamId,
+					$fromMemberId: params.fromMemberId,
+					$toMemberId: delivery.toMemberId,
+					$bodyLocalJson: JSON.stringify(params.body),
+					$sourceRefsJson: JSON.stringify(delivery.sourceRefs),
+					$readAt: null,
+					$wakeStatus: delivery.wakeStatus,
+					$createdAt: now,
+				});
+			}
+			this.stmtTouchTeam.run({
+				$agentTeamId: params.agentTeamId,
+				$updatedAt: now,
+			});
+		})();
+
+		return deliveries;
+	}
+
+	updateMailboxWake(params: {
+		messageId: string;
+		wakeStatus: TeamMailboxWakeStatus;
+	}): void {
+		this.stmtUpdateMailboxWake.run({
+			$messageId: params.messageId,
+			$wakeStatus: params.wakeStatus,
+		});
 	}
 
 	updateMcpStatus(params: {
