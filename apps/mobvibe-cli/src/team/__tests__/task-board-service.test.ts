@@ -87,12 +87,15 @@ describe("TaskBoardService durable task graph", () => {
 			blockedBy: [upstream.taskId],
 		});
 
-		service.updateTask(caller, { taskId: upstream.taskId, status: "completed" });
+		service.updateTask(caller, {
+			taskId: upstream.taskId,
+			status: "completed",
+		});
 
 		const tasks = service.listTasks(caller);
-		expect(tasks.find((task) => task.taskId === upstream.taskId)?.blocks).toEqual(
-			[],
-		);
+		expect(
+			tasks.find((task) => task.taskId === upstream.taskId)?.blocks,
+		).toEqual([]);
 		expect(tasks.find((task) => task.taskId === downstream.taskId)).toEqual(
 			expect.objectContaining({ status: "todo", blockedBy: [] }),
 		);

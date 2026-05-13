@@ -39,6 +39,7 @@ export class AgentTeamStore {
 	private stmtListMcpStatuses: ReturnType<Database["query"]>;
 	private stmtListMailboxMessages: ReturnType<Database["query"]>;
 	private stmtListTasks: ReturnType<Database["query"]>;
+	private stmtListLocalTasks: ReturnType<Database["query"]>;
 	private stmtListSummaryRefs: ReturnType<Database["query"]>;
 	private stmtInsertMailboxMessage: ReturnType<Database["query"]>;
 	private stmtUpdateMailboxWake: ReturnType<Database["query"]>;
@@ -48,6 +49,9 @@ export class AgentTeamStore {
 	private stmtTouchTeam: ReturnType<Database["query"]>;
 	private stmtUpdateMcpStatus: ReturnType<Database["query"]>;
 	private stmtInsertToolIntent: ReturnType<Database["query"]>;
+	private stmtInsertTask: ReturnType<Database["query"]>;
+	private stmtGetTask: ReturnType<Database["query"]>;
+	private stmtUpdateTask: ReturnType<Database["query"]>;
 
 	constructor(dbPath: string) {
 		const dir = path.dirname(dbPath);
@@ -120,6 +124,13 @@ export class AgentTeamStore {
       WHERE agent_team_id = $agentTeamId
       ORDER BY updated_at ASC
     `);
+		this.stmtListLocalTasks = this.db.query(`
+      SELECT task_id, agent_team_id, owner_member_id, status, body_local_json,
+             blocked_by_json, blocks_json, source_refs_json, created_at, updated_at
+      FROM agent_team_tasks
+      WHERE agent_team_id = $agentTeamId
+      ORDER BY created_at ASC
+    `);
 		this.stmtListSummaryRefs = this.db.query(`
       SELECT summary_ref_id, agent_team_id, source_refs_json, status, created_at, updated_at
       FROM agent_team_summary_refs
@@ -188,6 +199,32 @@ export class AgentTeamStore {
         $intentId, $agentTeamId, $requestedByMemberId, $kind, $payloadLocalJson,
         $status, $sourceRefsJson, $createdAt, $updatedAt
       )
+    `);
+		this.stmtInsertTask = this.db.query(`
+      INSERT INTO agent_team_tasks (
+        task_id, agent_team_id, owner_member_id, status, body_local_json,
+        blocked_by_json, blocks_json, source_refs_json, created_at, updated_at
+      ) VALUES (
+        $taskId, $agentTeamId, $ownerMemberId, $status, $bodyLocalJson,
+        $blockedByJson, $blocksJson, $sourceRefsJson, $createdAt, $updatedAt
+      )
+    `);
+		this.stmtGetTask = this.db.query(`
+      SELECT task_id, agent_team_id, owner_member_id, status, body_local_json,
+             blocked_by_json, blocks_json, source_refs_json, created_at, updated_at
+      FROM agent_team_tasks
+      WHERE agent_team_id = $agentTeamId AND task_id = $taskId
+    `);
+		this.stmtUpdateTask = this.db.query(`
+      UPDATE agent_team_tasks
+      SET owner_member_id = $ownerMemberId,
+          status = $status,
+          body_local_json = $bodyLocalJson,
+          blocked_by_json = $blockedByJson,
+	          blocks_json = $blocksJson,
+          source_refs_json = $sourceRefsJson,
+          updated_at = $updatedAt
+      WHERE agent_team_id = $agentTeamId AND task_id = $taskId
     `);
 	}
 
@@ -309,6 +346,125 @@ export class AgentTeamStore {
 		return this.stmtListMembers.all({
 			$agentTeamId: agentTeamId,
 		}) as AgentTeamMemberRow[];
+	}
+
+	listLocalTasks(agentTeamId: string): AgentTeamTaskLocalRow[] {
+		return this.stmtListLocalTasks.all({
+			$agentTeamId: agentTeamId,
+		}) as AgentTeamTaskLocalRow[];
+	}
+
+	createTeamTask(params: {
+		agentTeamId: string;
+		ownerMemberId: string | null;
+		status: string;
+		body: TeamTaskLocalBody;
+		blockedBy: string[];
+	}): AgentTeamTaskLocalRow {
+		const now = new Date().toISOString();
+		const taskId = randomUUID();
+		const sourceRefs: TeamSourceRef[] = [
+			{
+				type: "task",
+				agentTeamId: params.agentTeamId,
+				taskId,
+				ownerMemberId: params.ownerMemberId ?? undefined,
+			},
+		];
+
+		return this.db.transaction(() => {
+			const existingTasks = this.listLocalTasks(params.agentTeamId);
+			assertTaskIdsExist(existingTasks, params.blockedBy);
+			this.stmtInsertTask.run({
+				$taskId: taskId,
+				$agentTeamId: params.agentTeamId,
+				$ownerMemberId: params.ownerMemberId,
+				$status: params.status,
+				$bodyLocalJson: JSON.stringify(params.body),
+				$blockedByJson: JSON.stringify(params.blockedBy),
+				$blocksJson: JSON.stringify([]),
+				$sourceRefsJson: JSON.stringify(sourceRefs),
+				$createdAt: now,
+				$updatedAt: now,
+			});
+			for (const upstreamId of params.blockedBy) {
+				const upstream = this.getLocalTask(params.agentTeamId, upstreamId);
+				if (!upstream) continue;
+				const blocks = appendUnique(
+					parseJsonStringArray(upstream.blocks_json),
+					taskId,
+				);
+				this.updateTaskRow(upstream, { blocks, updatedAt: now });
+			}
+			this.touchTeam(params.agentTeamId, now);
+			return requireTask(this.getLocalTask(params.agentTeamId, taskId), taskId);
+		})();
+	}
+
+	updateTeamTask(params: {
+		agentTeamId: string;
+		taskId: string;
+		ownerMemberId?: string | null;
+		status?: string;
+		body?: Partial<TeamTaskLocalBody>;
+		blockedBy?: string[];
+	}): AgentTeamTaskLocalRow {
+		const now = new Date().toISOString();
+		return this.db.transaction(() => {
+			const current = requireTask(
+				this.getLocalTask(params.agentTeamId, params.taskId),
+				params.taskId,
+			);
+			const body = {
+				...parseTaskBody(current.body_local_json),
+				...params.body,
+			};
+			const oldBlockedBy = parseJsonStringArray(current.blocked_by_json);
+			const nextBlockedBy = params.blockedBy ?? oldBlockedBy;
+			assertTaskIdsExist(
+				this.listLocalTasks(params.agentTeamId),
+				nextBlockedBy,
+			);
+			let nextStatus = params.status ?? current.status;
+			if (!params.status && nextBlockedBy.length > 0) nextStatus = "blocked";
+			if (
+				!params.status &&
+				nextBlockedBy.length === 0 &&
+				current.status === "blocked"
+			) {
+				nextStatus = "todo";
+			}
+
+			let nextBlocks = parseJsonStringArray(current.blocks_json);
+			this.reconcileDependencyEdges({
+				agentTeamId: params.agentTeamId,
+				taskId: params.taskId,
+				oldBlockedBy,
+				nextBlockedBy,
+				now,
+			});
+			if (nextStatus === "completed") {
+				this.unblockDependents(params.agentTeamId, params.taskId, now);
+				nextBlocks = [];
+			}
+
+			this.updateTaskRow(current, {
+				ownerMemberId:
+					params.ownerMemberId === undefined
+						? current.owner_member_id
+						: params.ownerMemberId,
+				status: nextStatus,
+				body,
+				blockedBy: nextBlockedBy,
+				blocks: nextBlocks,
+				updatedAt: now,
+			});
+			this.touchTeam(params.agentTeamId, now);
+			return requireTask(
+				this.getLocalTask(params.agentTeamId, params.taskId),
+				params.taskId,
+			);
+		})();
 	}
 
 	createMailboxMessages(params: {
@@ -539,6 +695,106 @@ export class AgentTeamStore {
 		assertGatewayFacingAgentTeamPayload(team);
 		return team;
 	}
+
+	private getLocalTask(
+		agentTeamId: string,
+		taskId: string,
+	): AgentTeamTaskLocalRow | null {
+		return this.stmtGetTask.get({
+			$agentTeamId: agentTeamId,
+			$taskId: taskId,
+		}) as AgentTeamTaskLocalRow | null;
+	}
+
+	private updateTaskRow(
+		row: AgentTeamTaskLocalRow,
+		updates: {
+			ownerMemberId?: string | null;
+			status?: string;
+			body?: TeamTaskLocalBody;
+			blockedBy?: string[];
+			blocks?: string[];
+			updatedAt: string;
+		},
+	): void {
+		this.stmtUpdateTask.run({
+			$taskId: row.task_id,
+			$agentTeamId: row.agent_team_id,
+			$ownerMemberId: updates.ownerMemberId ?? row.owner_member_id,
+			$status: updates.status ?? row.status,
+			$bodyLocalJson: JSON.stringify(
+				updates.body ?? parseTaskBody(row.body_local_json),
+			),
+			$blockedByJson: JSON.stringify(
+				updates.blockedBy ?? parseJsonStringArray(row.blocked_by_json),
+			),
+			$blocksJson: JSON.stringify(
+				updates.blocks ?? parseJsonStringArray(row.blocks_json),
+			),
+			$sourceRefsJson: row.source_refs_json,
+			$updatedAt: updates.updatedAt,
+		});
+	}
+
+	private reconcileDependencyEdges(params: {
+		agentTeamId: string;
+		taskId: string;
+		oldBlockedBy: string[];
+		nextBlockedBy: string[];
+		now: string;
+	}): void {
+		for (const upstreamId of params.oldBlockedBy) {
+			if (params.nextBlockedBy.includes(upstreamId)) continue;
+			const upstream = this.getLocalTask(params.agentTeamId, upstreamId);
+			if (!upstream) continue;
+			this.updateTaskRow(upstream, {
+				blocks: parseJsonStringArray(upstream.blocks_json).filter(
+					(id) => id !== params.taskId,
+				),
+				updatedAt: params.now,
+			});
+		}
+		for (const upstreamId of params.nextBlockedBy) {
+			if (params.oldBlockedBy.includes(upstreamId)) continue;
+			const upstream = this.getLocalTask(params.agentTeamId, upstreamId);
+			if (!upstream) continue;
+			this.updateTaskRow(upstream, {
+				blocks: appendUnique(
+					parseJsonStringArray(upstream.blocks_json),
+					params.taskId,
+				),
+				updatedAt: params.now,
+			});
+		}
+	}
+
+	private unblockDependents(
+		agentTeamId: string,
+		completedTaskId: string,
+		now: string,
+	): void {
+		for (const task of this.listLocalTasks(agentTeamId)) {
+			const blockedBy = parseJsonStringArray(task.blocked_by_json);
+			if (!blockedBy.includes(completedTaskId)) continue;
+			const nextBlockedBy = blockedBy.filter((id) => id !== completedTaskId);
+			const canAutoTodo = !["completed", "failed", "cancelled"].includes(
+				task.status,
+			);
+			this.updateTaskRow(task, {
+				blockedBy: nextBlockedBy,
+				status:
+					nextBlockedBy.length === 0 && canAutoTodo ? "todo" : task.status,
+				updatedAt: now,
+			});
+		}
+	}
+
+	private touchTeam(agentTeamId: string, updatedAt: string): void {
+		this.stmtTouchTeam.run({
+			$agentTeamId: agentTeamId,
+			$updatedAt: updatedAt,
+		});
+	}
 }
 
 export type TeamToolIntentKind =
@@ -568,6 +824,15 @@ export type MailboxWakeMessage = {
 	readAt?: string;
 	wakeStatus: TeamMailboxWakeStatus;
 	createdAt: string;
+};
+
+export type TeamTaskLocalBody = {
+	title: string;
+	description?: string;
+};
+
+export type AgentTeamTaskLocalRow = AgentTeamTaskRow & {
+	body_local_json: string;
 };
 
 type AgentTeamMailboxMessageLocalRow = AgentTeamMailboxMessageRow & {
@@ -627,4 +892,54 @@ function mergeSourceRefs(
 		merged.push(ref);
 	}
 	return merged;
+}
+
+function parseTaskBody(value: string): TeamTaskLocalBody {
+	const parsed = JSON.parse(value) as unknown;
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return { title: "" };
+	}
+	const record = parsed as Record<string, unknown>;
+	return {
+		title: typeof record.title === "string" ? record.title : "",
+		description:
+			typeof record.description === "string" ? record.description : undefined,
+	};
+}
+
+function parseJsonStringArray(value: string | null): string[] {
+	if (!value) return [];
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		return Array.isArray(parsed)
+			? parsed.filter((item): item is string => typeof item === "string")
+			: [];
+	} catch {
+		return [];
+	}
+}
+
+function appendUnique(values: string[], value: string): string[] {
+	return values.includes(value) ? values : [...values, value];
+}
+
+function assertTaskIdsExist(
+	rows: AgentTeamTaskLocalRow[],
+	taskIds: string[],
+): void {
+	const known = new Set(rows.map((row) => row.task_id));
+	const missing = taskIds.find((taskId) => !known.has(taskId));
+	if (missing) {
+		throw new Error(`Unknown task dependency: ${missing}`);
+	}
+}
+
+function requireTask(
+	row: AgentTeamTaskLocalRow | null,
+	taskId: string,
+): AgentTeamTaskLocalRow {
+	if (!row) {
+		throw new Error(`Task not found: ${taskId}`);
+	}
+	return row;
 }
