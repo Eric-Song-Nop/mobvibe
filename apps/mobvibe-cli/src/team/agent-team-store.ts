@@ -3,38 +3,24 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type {
-	AgentTeamLifecycle,
-	AgentTeamSummary,
 	CreateAgentTeamRpcParams,
 	CreateAgentTeamRpcResult,
 	GetAgentTeamRpcParams,
 	GetAgentTeamRpcResult,
 	ListAgentTeamsRpcParams,
 	ListAgentTeamsRpcResult,
-	TeamMailboxCounts,
-	TeamMemberHealth,
-	TeamMemberLifecycle,
-	TeamMemberSummary,
-	TeamMcpStatusSummary,
-	TeamTaskCounts,
-	TeamWorkspaceMode,
 } from "@mobvibe/shared";
 import { runMigrations } from "../wal/migrations.js";
-
-const emptyMailboxCounts = (): TeamMailboxCounts => ({
-	unread: 0,
-	wakePending: 0,
-	wakeFailed: 0,
-});
-
-const emptyTaskCounts = (): TeamTaskCounts => ({
-	todo: 0,
-	inProgress: 0,
-	blocked: 0,
-	completed: 0,
-	failed: 0,
-	cancelled: 0,
-});
+import { assertGatewayFacingAgentTeamPayload } from "./content-boundary.js";
+import {
+	type AgentTeamMailboxMessageRow,
+	type AgentTeamMcpStatusRow,
+	type AgentTeamMemberRow,
+	type AgentTeamRow,
+	type AgentTeamSummaryRefRow,
+	type AgentTeamTaskRow,
+	buildAgentTeamSummary,
+} from "./projection-builder.js";
 
 export class AgentTeamStore {
 	private db: Database;
@@ -46,6 +32,9 @@ export class AgentTeamStore {
 	private stmtListActiveTeams: ReturnType<Database["query"]>;
 	private stmtListMembers: ReturnType<Database["query"]>;
 	private stmtListMcpStatuses: ReturnType<Database["query"]>;
+	private stmtListMailboxMessages: ReturnType<Database["query"]>;
+	private stmtListTasks: ReturnType<Database["query"]>;
+	private stmtListSummaryRefs: ReturnType<Database["query"]>;
 
 	constructor(dbPath: string) {
 		const dir = path.dirname(dbPath);
@@ -95,6 +84,25 @@ export class AgentTeamStore {
     `);
 		this.stmtListMcpStatuses = this.db.query(`
       SELECT * FROM agent_team_mcp_status WHERE agent_team_id = $agentTeamId
+    `);
+		this.stmtListMailboxMessages = this.db.query(`
+      SELECT message_id, agent_team_id, from_member_id, to_member_id, source_refs_json,
+             read_at, wake_status, created_at
+      FROM agent_team_mailbox_messages
+      WHERE agent_team_id = $agentTeamId
+      ORDER BY created_at ASC
+    `);
+		this.stmtListTasks = this.db.query(`
+      SELECT task_id, agent_team_id, owner_member_id, status, source_refs_json, created_at, updated_at
+      FROM agent_team_tasks
+      WHERE agent_team_id = $agentTeamId
+      ORDER BY updated_at ASC
+    `);
+		this.stmtListSummaryRefs = this.db.query(`
+      SELECT summary_ref_id, agent_team_id, source_refs_json, status, created_at, updated_at
+      FROM agent_team_summary_refs
+      WHERE agent_team_id = $agentTeamId
+      ORDER BY updated_at ASC
     `);
 	}
 
@@ -162,7 +170,7 @@ export class AgentTeamStore {
 		const filtered = params.machineId
 			? rows.filter((row) => row.machine_id === params.machineId)
 			: rows;
-		return { teams: filtered.map((row) => this.rowToSummary(row)) };
+		return { teams: filtered.map((row) => this.projectTeam(row)) };
 	}
 
 	getAgentTeam(params: GetAgentTeamRpcParams): GetAgentTeamRpcResult {
@@ -172,110 +180,34 @@ export class AgentTeamStore {
 		if (!row || (params.machineId && row.machine_id !== params.machineId)) {
 			return {};
 		}
-		return { team: this.rowToSummary(row) };
+		return { team: this.projectTeam(row) };
 	}
 
 	close(): void {
 		this.db.close();
 	}
 
-	private rowToSummary(row: AgentTeamRow): AgentTeamSummary {
-		const members = this.memberRows(row.agent_team_id);
-		return {
-			agentTeamId: row.agent_team_id,
-			machineId: row.machine_id,
-			title: row.title,
-			workspaceRootCwd: row.workspace_root_cwd,
-			workspaceMode: row.workspace_mode as TeamWorkspaceMode,
-			leaderMemberId: row.leader_member_id,
-			lifecycle: row.lifecycle as AgentTeamLifecycle,
-			members,
-			mailboxCounts: emptyMailboxCounts(),
-			taskCounts: emptyTaskCounts(),
-			createdAt: row.created_at,
-			updatedAt: row.updated_at,
-			archivedAt: row.archived_at ?? undefined,
-		};
-	}
-
-	private memberRows(agentTeamId: string): TeamMemberSummary[] {
-		const rows = this.stmtListMembers.all({
-			$agentTeamId: agentTeamId,
-		}) as AgentTeamMemberRow[];
-		const mcpByMemberId = new Map(
-			(
-				this.stmtListMcpStatuses.all({
-					$agentTeamId: agentTeamId,
-				}) as AgentTeamMcpStatusRow[]
-			).map((row) => [row.member_id, row]),
-		);
-
-		return rows.map((row) => ({
-			memberId: row.member_id,
-			agentTeamId: row.agent_team_id,
-			role: row.role as "leader" | "member",
-			name: row.name,
-			backendId: row.backend_id,
-			sessionId: row.session_id ?? undefined,
-			lifecycle: row.lifecycle as TeamMemberLifecycle,
-			health: row.health as TeamMemberHealth,
-			mcp: this.rowToMcpStatus(mcpByMemberId.get(row.member_id)),
-			mailboxCounts: emptyMailboxCounts(),
-			taskCounts: emptyTaskCounts(),
-			pendingPermissionCount: 0,
-			worktreeSourceCwd: row.worktree_source_cwd ?? undefined,
-			worktreeBranch: row.worktree_branch ?? undefined,
-			createdAt: row.created_at,
-			updatedAt: row.updated_at,
-		}));
-	}
-
-	private rowToMcpStatus(
-		row: AgentTeamMcpStatusRow | undefined,
-	): TeamMcpStatusSummary | undefined {
-		if (!row) return undefined;
-		return {
-			transport: row.transport as TeamMcpStatusSummary["transport"],
-			phase: row.phase as TeamMcpStatusSummary["phase"],
-			serverId: row.server_id ?? undefined,
-			updatedAt: row.updated_at,
-		};
+	private projectTeam(row: AgentTeamRow) {
+		const agentTeamId = row.agent_team_id;
+		const team = buildAgentTeamSummary({
+			team: row,
+			members: this.stmtListMembers.all({
+				$agentTeamId: agentTeamId,
+			}) as AgentTeamMemberRow[],
+			mcpStatuses: this.stmtListMcpStatuses.all({
+				$agentTeamId: agentTeamId,
+			}) as AgentTeamMcpStatusRow[],
+			mailboxMessages: this.stmtListMailboxMessages.all({
+				$agentTeamId: agentTeamId,
+			}) as AgentTeamMailboxMessageRow[],
+			tasks: this.stmtListTasks.all({
+				$agentTeamId: agentTeamId,
+			}) as AgentTeamTaskRow[],
+			summaryRefs: this.stmtListSummaryRefs.all({
+				$agentTeamId: agentTeamId,
+			}) as AgentTeamSummaryRefRow[],
+		});
+		assertGatewayFacingAgentTeamPayload(team);
+		return team;
 	}
 }
-
-type AgentTeamRow = {
-	agent_team_id: string;
-	machine_id: string;
-	workspace_root_cwd: string;
-	title: string;
-	lifecycle: string;
-	leader_member_id: string;
-	workspace_mode: string;
-	created_at: string;
-	updated_at: string;
-	archived_at: string | null;
-};
-
-type AgentTeamMemberRow = {
-	member_id: string;
-	agent_team_id: string;
-	role: string;
-	name: string;
-	backend_id: string;
-	session_id: string | null;
-	lifecycle: string;
-	health: string;
-	worktree_source_cwd: string | null;
-	worktree_branch: string | null;
-	created_at: string;
-	updated_at: string;
-};
-
-type AgentTeamMcpStatusRow = {
-	agent_team_id: string;
-	member_id: string;
-	transport: string;
-	server_id: string | null;
-	phase: string;
-	updated_at: string;
-};
