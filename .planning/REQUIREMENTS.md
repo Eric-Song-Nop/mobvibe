@@ -9,11 +9,11 @@ Requirements for the first agent team release. Each requirement must map to exac
 
 ### Team Model
 
-- [ ] **TEAM-01**: 用户可以拥有一个稳定的 team run 对象，包含 `teamRunId`、title、machine、workspace、leader、状态和创建/更新时间。
-- [ ] **TEAM-02**: Team run 可以包含 leader 和 member；每个成员包含 `memberId`、role、backendId、sessionId 关联、MCP phase、worktree 策略和状态。
+- [x] **TEAM-01**: 用户可以拥有一个稳定的 team run 对象，包含 `teamRunId`、title、machine、workspace、leader、状态和创建/更新时间。
+- [x] **TEAM-02**: Team run 可以包含 leader 和 member；每个成员包含 `memberId`、role、backendId、sessionId 关联、MCP phase、worktree 策略和状态。
 - [ ] **TEAM-03**: CLI 可以本地持久化 team run、member 映射、MCP readiness、mailbox、task board 和 summary source refs，并在 CLI 重启后恢复。
-- [ ] **TEAM-04**: WebUI、Gateway 和 CLI 使用 `packages/shared` 中统一的 team、MCP、mailbox、task、RPC payload、状态枚举和错误结构。
-- [ ] **TEAM-05**: Team metadata、mailbox metadata、task metadata 和 summary refs 明确区分 Gateway-facing 非内容字段、加密 payload、CLI-local 内容和 source refs。
+- [x] **TEAM-04**: WebUI、Gateway 和 CLI 使用 `packages/shared` 中统一的 team、MCP、mailbox、task、RPC payload、状态枚举和错误结构。
+- [x] **TEAM-05**: Team metadata、mailbox metadata、task metadata 和 summary refs 明确区分 Gateway-facing 非内容字段、加密 payload、CLI-local 内容和 source refs。
 
 ### MCP Isolation And Capabilities
 
@@ -43,7 +43,7 @@ Requirements for the first agent team release. Each requirement must map to exac
 
 ### Lifecycle And Recovery
 
-- [ ] **LIFE-01**: Team run 和 member 有明确的拆分维度状态模型：lifecycle 覆盖 pending、starting/creating_session、running、completed、failed、cancelled、detached 和 archived；MCP phase、permission waiting、degraded health 和 activity projection 独立表达，不把 idle/ready 作为 lifecycle 状态。
+- [x] **LIFE-01**: Team run 和 member 有明确的拆分维度状态模型：lifecycle 覆盖 pending、starting/creating_session、running、completed、failed、cancelled、detached 和 archived；MCP phase、permission waiting、degraded health 和 activity projection 独立表达，不把 idle/ready 作为 lifecycle 状态。
 - [ ] **LIFE-02**: 用户可以取消运行中的 team run，系统会处理 running members、MCP server/bridge、pending wake 和普通 session cancel。
 - [ ] **LIFE-03**: 用户可以只重试失败或 degraded member，重试会创建新的 member attempt/session 并重新注入 MCP，不会重跑已经成功的成员。
 - [ ] **LIFE-04**: 用户可以归档 team run；默认只隐藏/归档 team metadata，不删除成员 session WAL、mailbox 或 task history。
@@ -112,11 +112,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TEAM-01 | Phase 1 | Pending |
-| TEAM-02 | Phase 1 | Pending |
+| TEAM-01 | Phase 1 | Complete |
+| TEAM-02 | Phase 1 | Complete |
 | TEAM-03 | Phase 1 | Pending |
-| TEAM-04 | Phase 1 | Pending |
-| TEAM-05 | Phase 1 | Pending |
+| TEAM-04 | Phase 1 | Complete |
+| TEAM-05 | Phase 1 | Complete |
 | MCP-01 | Phase 2 | Pending |
 | MCP-02 | Phase 2 | Pending |
 | MCP-03 | Phase 2 | Pending |
@@ -134,7 +134,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ORCH-04 | Phase 3 | Pending |
 | ORCH-05 | Phase 3 | Pending |
 | ORCH-06 | Phase 3 | Pending |
-| LIFE-01 | Phase 1 | Pending |
+| LIFE-01 | Phase 1 | Complete |
 | LIFE-02 | Phase 4 | Pending |
 | LIFE-03 | Phase 4 | Pending |
 | LIFE-04 | Phase 4 | Pending |
