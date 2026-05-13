@@ -27,6 +27,7 @@ import {
 	type SessionSummary,
 	type SessionsChangedPayload,
 	type StopReason,
+	type TeamSourceRef,
 	sanitizeWorktreeBranchForPath,
 } from "@mobvibe/shared";
 import type { AcpBackendConfig, CliConfig } from "../config.js";
@@ -599,6 +600,54 @@ export class SessionManager {
 			updated: [summary],
 			removed: [],
 		});
+	}
+
+	async injectTeamMailboxPrompt(input: {
+		agentTeamId: string;
+		memberId: string;
+		sessionId: string;
+		text: string;
+	}): Promise<TeamSourceRef> {
+		const record = this.sessions.get(input.sessionId);
+		if (!record) {
+			throw new AppError(
+				createErrorDetail({
+					code: "SESSION_NOT_FOUND",
+					message: "Session not found for team mailbox injection",
+					retryable: true,
+					scope: "session",
+				}),
+				404,
+			);
+		}
+		await record.connection.prompt(input.sessionId, [
+			{ type: "text", text: input.text },
+		]);
+		record.updatedAt = new Date();
+		const event = this.writeAndEmitEvent(
+			input.sessionId,
+			record.revision,
+			"user_message",
+			{
+				source: "mobvibe_team_mailbox",
+				agentTeamId: input.agentTeamId,
+				memberId: input.memberId,
+				text: input.text,
+			},
+		);
+		this.emitSessionsChanged({
+			added: [],
+			updated: [this.buildSummary(record)],
+			removed: [],
+		});
+		return {
+			type: "session_event",
+			agentTeamId: input.agentTeamId,
+			memberId: input.memberId,
+			sessionId: input.sessionId,
+			revision: event.revision,
+			seq: event.seq,
+		};
 	}
 
 	/**

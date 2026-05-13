@@ -31,6 +31,7 @@ export class AgentTeamStore {
 	private stmtInsertTeam: ReturnType<Database["query"]>;
 	private stmtInsertMember: ReturnType<Database["query"]>;
 	private stmtInsertMcpStatus: ReturnType<Database["query"]>;
+	private stmtUpdateMemberRuntimeState: ReturnType<Database["query"]>;
 	private stmtGetTeam: ReturnType<Database["query"]>;
 	private stmtListTeams: ReturnType<Database["query"]>;
 	private stmtListActiveTeams: ReturnType<Database["query"]>;
@@ -81,6 +82,14 @@ export class AgentTeamStore {
       ) VALUES (
         $agentTeamId, $memberId, $transport, $serverId, $phase, $lastErrorJson, $updatedAt
       )
+    `);
+		this.stmtUpdateMemberRuntimeState = this.db.query(`
+      UPDATE agent_team_members
+      SET session_id = COALESCE($sessionId, session_id),
+          lifecycle = COALESCE($lifecycle, lifecycle),
+          updated_at = $updatedAt
+      WHERE member_id = $memberId
+        AND agent_team_id = $agentTeamId
     `);
 		this.stmtGetTeam = this.db.query(`
       SELECT * FROM agent_teams WHERE agent_team_id = $agentTeamId
@@ -306,7 +315,7 @@ export class AgentTeamStore {
 		agentTeamId: string;
 		fromMemberId: string;
 		recipients: Array<{ memberId: string; name: string }>;
-		body: { message: string; summary?: string };
+		body: { message: string; summary?: string; type?: string };
 	}): Array<{
 		messageId: string;
 		fromMemberId: string;
@@ -368,6 +377,21 @@ export class AgentTeamStore {
 		this.stmtUpdateMailboxWake.run({
 			$messageId: params.messageId,
 			$wakeStatus: params.wakeStatus,
+		});
+	}
+
+	updateTeamMemberRuntimeState(params: {
+		agentTeamId: string;
+		memberId: string;
+		sessionId?: string;
+		lifecycle?: string;
+	}): void {
+		this.stmtUpdateMemberRuntimeState.run({
+			$agentTeamId: params.agentTeamId,
+			$memberId: params.memberId,
+			$sessionId: params.sessionId ?? null,
+			$lifecycle: params.lifecycle ?? null,
+			$updatedAt: new Date().toISOString(),
 		});
 	}
 
