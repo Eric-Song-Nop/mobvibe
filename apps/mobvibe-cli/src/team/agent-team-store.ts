@@ -93,7 +93,8 @@ export class AgentTeamStore {
       ORDER BY created_at ASC
     `);
 		this.stmtListTasks = this.db.query(`
-      SELECT task_id, agent_team_id, owner_member_id, status, source_refs_json, created_at, updated_at
+      SELECT task_id, agent_team_id, owner_member_id, status, source_refs_json,
+             blocked_by_json, blocks_json, created_at, updated_at
       FROM agent_team_tasks
       WHERE agent_team_id = $agentTeamId
       ORDER BY updated_at ASC
