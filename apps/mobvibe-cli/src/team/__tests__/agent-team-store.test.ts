@@ -210,7 +210,9 @@ describe("AgentTeamStore durable metadata", () => {
 			db.close();
 		}
 
-		const projected = store.getAgentTeam({ agentTeamId: team.agentTeamId }).team;
+		const projected = store.getAgentTeam({
+			agentTeamId: team.agentTeamId,
+		}).team;
 		const serialized = JSON.stringify(projected);
 
 		expect(projected?.mailboxCounts).toEqual({
