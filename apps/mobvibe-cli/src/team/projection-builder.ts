@@ -46,14 +46,13 @@ export function buildAgentTeamSummary(
 		mailboxCounts: buildMailboxCounts(input.mailboxMessages),
 		taskCounts: buildTaskCounts(input.tasks),
 		summaryRefs: buildSummaryRefs(input.summaryRefs),
+		sourceRefs: collectSourceRefs(input.mailboxMessages),
 		createdAt: input.team.created_at,
 		updatedAt: input.team.updated_at,
 		archivedAt: input.team.archived_at ?? undefined,
 	};
 
-	return summary.summaryRefs?.length
-		? summary
-		: withoutEmptySummaryRefs(summary);
+	return withoutEmptyCollections(summary);
 }
 
 function buildMemberSummary(
@@ -70,6 +69,7 @@ function buildMemberSummary(
 	const memberTasks = tasks.filter(
 		(task) => task.owner_member_id === row.member_id,
 	);
+	const sourceRefs = collectSourceRefs(memberMessages);
 	return {
 		memberId: row.member_id,
 		agentTeamId: row.agent_team_id,
@@ -85,6 +85,7 @@ function buildMemberSummary(
 		mailboxCounts: buildMailboxCounts(memberMessages),
 		taskCounts: buildTaskCounts(memberTasks),
 		pendingPermissionCount: 0,
+		sourceRefs: sourceRefs.length ? sourceRefs : undefined,
 		worktreeSourceCwd: row.worktree_source_cwd ?? undefined,
 		worktreeBranch: row.worktree_branch ?? undefined,
 		error: parseErrorDetail(row.error_json),
@@ -165,8 +166,12 @@ function buildSummaryRefs(rows: AgentTeamSummaryRefRow[]): TeamSummaryRef[] {
 
 function parseSourceRefs(value: string | null): TeamSourceRef[] {
 	if (!value) return [];
-	const parsed = JSON.parse(value) as unknown;
-	return Array.isArray(parsed) ? (parsed as TeamSourceRef[]) : [];
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		return Array.isArray(parsed) ? parsed.filter(isTeamSourceRef) : [];
+	} catch {
+		return [];
+	}
 }
 
 function parseErrorDetail(value: string | null): ErrorDetail | undefined {
@@ -175,9 +180,68 @@ function parseErrorDetail(value: string | null): ErrorDetail | undefined {
 	return isErrorDetail(parsed) ? parsed : undefined;
 }
 
-function withoutEmptySummaryRefs(summary: AgentTeamSummary): AgentTeamSummary {
-	const { summaryRefs: _summaryRefs, ...rest } = summary;
-	return rest;
+function collectSourceRefs(rows: AgentTeamMailboxMessageRow[]): TeamSourceRef[] {
+	return rows.flatMap((row) => parseSourceRefs(row.source_refs_json));
+}
+
+function withoutEmptyCollections(summary: AgentTeamSummary): AgentTeamSummary {
+	const next = { ...summary };
+	if (!next.summaryRefs?.length) {
+		delete next.summaryRefs;
+	}
+	if (!next.sourceRefs?.length) {
+		delete next.sourceRefs;
+	}
+	return next;
+}
+
+function isTeamSourceRef(value: unknown): value is TeamSourceRef {
+	if (!isRecord(value) || !isString(value.type)) return false;
+	if (value.type === "session_event") {
+		return (
+			isString(value.agentTeamId) &&
+			isString(value.memberId) &&
+			isString(value.sessionId) &&
+			Number.isInteger(value.revision) &&
+			Number.isInteger(value.seq)
+		);
+	}
+	if (value.type === "member_session") {
+		return (
+			isString(value.agentTeamId) &&
+			isString(value.memberId) &&
+			isString(value.sessionId)
+		);
+	}
+	if (value.type === "mailbox_message") {
+		return (
+			isString(value.agentTeamId) &&
+			isString(value.messageId) &&
+			isString(value.fromMemberId) &&
+			isOptionalString(value.toMemberId) &&
+			isOptionalString(value.deliveredSessionId)
+		);
+	}
+	if (value.type === "task") {
+		return (
+			isString(value.agentTeamId) &&
+			isString(value.taskId) &&
+			isOptionalString(value.ownerMemberId)
+		);
+	}
+	return false;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function isString(value: unknown): value is string {
+	return typeof value === "string";
+}
+
+function isOptionalString(value: unknown): value is string | undefined {
+	return value === undefined || isString(value);
 }
 
 export type AgentTeamRow = {
