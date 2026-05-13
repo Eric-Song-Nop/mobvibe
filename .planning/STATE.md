@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-04-PLAN.md
-last_updated: "2026-05-13T04:27:25.470Z"
+stopped_at: Completed Phase 01 / 01-05-PLAN.md
+last_updated: "2026-05-13T04:45:45.000Z"
 last_activity: 2026-05-13
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 5
-  completed_plans: 4
-  percent: 80
+  completed_plans: 5
+  percent: 100
 ---
 
 # Project State
@@ -21,30 +21,30 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-12)
 
 **Core value:** 用户可以在一个 Mobvibe 团队任务中安全地协调多个不同 ACP agent，让它们围绕同一代码目标协作，并清楚看到每个 agent 的进展、任务、消息、产出和最终汇总。
-**Current focus:** Phase 01 — protocol-state-model-persistence-boundary
+**Current focus:** Phase 02 — CLI Team MCP、Mailbox 与 Task Board
 
 ## Current Position
 
-Phase: 01 (protocol-state-model-persistence-boundary) — EXECUTING
-Plan: 5 of 5
-Status: Ready to execute
+Phase: 02 (CLI Team MCP、Mailbox 与 Task Board) — NOT STARTED
+Plan: TBD
+Status: Ready to plan
 Last activity: 2026-05-13
 
-Progress: [████████░░] 80%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 3
-- Average duration: 9 min
-- Total execution time: 0.4 hours
+- Total plans completed: 5
+- Average duration: 8 min
+- Total execution time: 0.7 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1. 协议、状态模型与持久化边界 | 3 | 26 min | 9 min |
+| 1. 协议、状态模型与持久化边界 | 5 | 41 min | 8 min |
 | 2. CLI Team MCP、Mailbox 与 Task Board | 0 | TBD | N/A |
 | 3. 最小端到端 Team Run | 0 | TBD | N/A |
 | 4. 生命周期、权限、E2EE 与恢复 | 0 | TBD | N/A |
@@ -52,10 +52,11 @@ Progress: [████████░░] 80%
 
 **Recent Trend:**
 
-- Last 5 plans: 01-01 (7 min), 01-02 (8 min), 01-03 (11 min)
+- Last 5 plans: 01-01 (7 min), 01-02 (8 min), 01-03 (11 min), 01-04 (5 min), 01-05 (10 min)
 - Trend: stable
 
 | Phase 01 P04 | 5 min | 3 tasks | 4 files |
+| Phase 01 P05 | 10 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -86,14 +87,17 @@ Recent decisions affecting current work:
 - [Phase 01-04]: Lifecycle strings are validated at projection time — Persisted idle/ready values are rejected before reaching Gateway-facing summaries.
 - [Phase 01-04]: Dependency metadata contributes to blocked task count — Task blocked count includes explicit blocked status and non-empty blocked_by_json dependency metadata.
 - [Phase 01-04]: Source refs are metadata-only — Mailbox/task/summary source refs are projected as typed metadata only; body_local_json remains CLI-local.
+- [Phase 01-05]: WebUI createAgentTeam allowlists metadata fields instead of serializing caller objects wholesale.
+- [Phase 01-05]: WebUI Agent Team projection state lives in `team-store.ts`, separate from ordinary session transcript state.
+- [Phase 01-05]: Persisted WebUI Agent Team state includes projections, active id, and last sync timestamp only; runtime appError and content/secret-like keys are excluded.
 
 ### Pending Todos
 
-- 继续执行 01-04-PLAN.md：CLI mailbox/task/MCP/summary metadata recovery and non-content projection hardening。
+- 为 Phase 2「CLI Team MCP、Mailbox 与 Task Board」编写 executable plans。
 
 ### Blockers/Concerns
 
-- [Phase 1]: 后续计划仍需实现 Gateway/WebUI runtime validation，继续证明 Gateway-facing payload 会拒绝或省略 mailbox/task/summary 明文。
+- None for Phase 1 closure. Phase 2 must preserve the established content boundary when adding CLI-local mailbox/task bodies.
 
 ## Deferred Items
 
@@ -105,6 +109,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-13T04:27:08.495Z
-Stopped at: Completed 01-04-PLAN.md
+Last session: 2026-05-13T04:45:45.000Z
+Stopped at: Completed Phase 01 / 01-05-PLAN.md
 Resume file: None

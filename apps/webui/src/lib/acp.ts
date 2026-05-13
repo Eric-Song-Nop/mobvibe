@@ -1,6 +1,7 @@
 // Re-export ACP types from @mobvibe/shared
 export type {
 	AgentSessionCapabilities,
+	AgentTeamsChangedPayload,
 	AudioContent,
 	AvailableCommand,
 	CliStatusPayload,

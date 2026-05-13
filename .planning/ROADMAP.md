@@ -14,7 +14,7 @@ Mobvibe Agent Team v1 以“CLI-hosted team MCP server + durable mailbox + task 
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: 协议、状态模型与持久化边界** - 用户拥有可恢复的 team/member/MCP/mailbox/task 元数据模型，但还不启动 agent。
+- [x] **Phase 1: 协议、状态模型与持久化边界** - 用户拥有可恢复的 team/member/MCP/mailbox/task 元数据模型，但还不启动 agent。
 - [ ] **Phase 2: CLI Team MCP、Mailbox 与 Task Board** - CLI 本地具备 per-session team tools、durable mailbox 和 durable task board 的协作闭环。
 - [ ] **Phase 3: 最小端到端 Team Run** - 用户可以从 WebUI 创建 team run，leader/member 普通 ACP session 被创建、注入 MCP 并可跳转。
 - [ ] **Phase 4: 生命周期、权限、E2EE 与恢复** - 用户可以安全取消、重试、归档、处理权限，并在重连后恢复 team 状态。
@@ -39,7 +39,7 @@ Plans:
 - [x] 01-02-PLAN.md — CLI durable Agent Team store and base non-content projection
 - [x] 01-03-PLAN.md — Gateway `/acp/agent-teams` routes, typed CLI RPC, and user-scoped projection relay
 - [x] 01-04-PLAN.md — CLI mailbox/task/MCP/summary metadata recovery and non-content projection hardening
-- [ ] 01-05-PLAN.md — WebUI API/store/socket projection boundary and Chinese implementation documentation
+- [x] 01-05-PLAN.md — WebUI API/store/socket projection boundary and Chinese implementation documentation
 **UI hint**: no
 
 ### Phase 2: CLI Team MCP、Mailbox 与 Task Board
@@ -108,7 +108,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. 协议、状态模型与持久化边界 | 3/5 | In Progress | - |
+| 1. 协议、状态模型与持久化边界 | 5/5 | Completed | 2026-05-13 |
 | 2. CLI Team MCP、Mailbox 与 Task Board | 0/TBD | Not started | - |
 | 3. 最小端到端 Team Run | 0/TBD | Not started | - |
 | 4. 生命周期、权限、E2EE 与恢复 | 0/TBD | Not started | - |

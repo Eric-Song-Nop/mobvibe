@@ -2,19 +2,24 @@
 export type {
 	AcpBackendSummary,
 	AcpBackendsResponse,
+	AgentTeamSummary,
+	CreateAgentTeamRpcResult,
 	CreateSessionResponse,
 	ErrorDetail,
 	FsEntriesResponse,
 	FsEntry,
 	FsPathSegment,
+	GetAgentTeamRpcResult,
 	GitFileStatus,
 	HostFsRootsResponse,
+	ListAgentTeamsRpcResult,
 	MachinesResponse,
 	PermissionDecisionResponse,
 	SessionFsFilePreviewResponse,
 	SessionFsResourceEntry,
 	SessionSummary,
 	SessionsResponse,
+	TeamWorkspaceMode,
 } from "@mobvibe/shared";
 // Re-export isErrorDetail for local use
 export { isErrorDetail } from "@mobvibe/shared";
@@ -24,14 +29,17 @@ import type {
 	AcpBackendsResponse,
 	CancelSessionResponse,
 	ContentBlock,
+	CreateAgentTeamRpcResult,
 	CreateSessionResponse,
 	DiscoverSessionsResult,
 	ErrorDetail,
 	FsEntriesResponse,
 	FsResourcesResponse,
 	FsRootsResponse,
+	GetAgentTeamRpcResult,
 	GitBranchesForCwdResponse,
 	HostFsRootsResponse,
+	ListAgentTeamsRpcResult,
 	MachinesResponse,
 	PermissionDecisionPayload,
 	PermissionDecisionResponse,
@@ -39,6 +47,7 @@ import type {
 	SessionFsFilePreviewResponse,
 	SessionSummary,
 	SessionsResponse,
+	TeamWorkspaceMode,
 } from "@mobvibe/shared";
 import { isErrorDetail } from "@mobvibe/shared";
 import { isInTauri } from "./auth";
@@ -160,6 +169,62 @@ export const fetchSessions = async (): Promise<SessionsResponse> =>
 
 export const fetchMachines = async (): Promise<MachinesResponse> =>
 	requestJson<MachinesResponse>("/api/machines");
+
+const buildAgentTeamsPath = (machineId?: string) => {
+	if (!machineId) {
+		return "/acp/agent-teams";
+	}
+	const params = new URLSearchParams({ machineId });
+	return `/acp/agent-teams?${params.toString()}`;
+};
+
+const buildAgentTeamPath = (agentTeamId: string, machineId?: string) => {
+	const basePath = `/acp/agent-teams/${encodeURIComponent(agentTeamId)}`;
+	if (!machineId) {
+		return basePath;
+	}
+	const params = new URLSearchParams({ machineId });
+	return `${basePath}?${params.toString()}`;
+};
+
+export type CreateAgentTeamPayload = {
+	machineId: string;
+	title?: string;
+	workspaceRootCwd: string;
+	leaderBackendId: string;
+	workspaceMode?: TeamWorkspaceMode;
+	worktreeSourceCwd?: string;
+	worktreeBranch?: string;
+};
+
+export const fetchAgentTeams = async (
+	machineId?: string,
+): Promise<ListAgentTeamsRpcResult> =>
+	requestJson<ListAgentTeamsRpcResult>(buildAgentTeamsPath(machineId));
+
+export const fetchAgentTeam = async (
+	agentTeamId: string,
+	machineId?: string,
+): Promise<GetAgentTeamRpcResult> =>
+	requestJson<GetAgentTeamRpcResult>(
+		buildAgentTeamPath(agentTeamId, machineId),
+	);
+
+export const createAgentTeam = async (
+	payload: CreateAgentTeamPayload,
+): Promise<CreateAgentTeamRpcResult> =>
+	requestJson<CreateAgentTeamRpcResult>("/acp/agent-teams", {
+		method: "POST",
+		body: JSON.stringify({
+			machineId: payload.machineId,
+			title: payload.title,
+			workspaceRootCwd: payload.workspaceRootCwd,
+			leaderBackendId: payload.leaderBackendId,
+			workspaceMode: payload.workspaceMode,
+			worktreeSourceCwd: payload.worktreeSourceCwd,
+			worktreeBranch: payload.worktreeBranch,
+		}),
+	});
 
 export const fetchNotificationVapidPublicKey = async (): Promise<{
 	enabled: boolean;
