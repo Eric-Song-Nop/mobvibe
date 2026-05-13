@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-01-PLAN.md
+stopped_at: Completed 02-03-PLAN.md
 last_updated: "2026-05-13T13:58:51.514Z"
 last_activity: 2026-05-13
 progress:
@@ -36,29 +36,30 @@ Progress: [███████░░░] 73%
 
 **Velocity:**
 
-- Total plans completed: 5
-- Average duration: 8 min
-- Total execution time: 0.7 hours
+- Total plans completed: 8
+- Average duration: 12 min
+- Total execution time: 1.7 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1. 协议、状态模型与持久化边界 | 5 | 41 min | 8 min |
-| 2. CLI Team MCP、Mailbox 与 Task Board | 0 | TBD | N/A |
+| 2. CLI Team MCP、Mailbox 与 Task Board | 3 | 58 min | 19 min |
 | 3. 最小端到端 Team Run | 0 | TBD | N/A |
 | 4. 生命周期、权限、E2EE 与恢复 | 0 | TBD | N/A |
 | 5. UI 规模化与 v1 Polish | 0 | TBD | N/A |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-01 (7 min), 01-02 (8 min), 01-03 (11 min), 01-04 (5 min), 01-05 (10 min)
-- Trend: stable
+- Last 5 plans: 01-04 (5 min), 01-05 (10 min), 02-01 (9 min), 02-02 (35 min), 02-03 (14 min)
+- Trend: variable due to deeper CLI MCP runtime and mailbox implementation plans
 
 | Phase 01 P04 | 5 min | 3 tasks | 4 files |
 | Phase 01 P05 | 10 min | 3 tasks | 8 files |
 | Phase 02 P01 | 9 min | 2 tasks | 6 files |
 | Phase 02 P02 | 35 min | 2 tasks | 9 files |
+| Phase 02 P03 | 14 min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -97,6 +98,9 @@ Recent decisions affecting current work:
 - [Phase 02]: [Phase 02-02]: Team MCP caller identity is bound from per-member ACP server ids and tool arguments cannot override it. — Transport-derived caller binding prevents agent-controlled fromMemberId/memberId args from spoofing identity.
 - [Phase 02]: [Phase 02-02]: tools_ready requires all five expected mobvibe_team_* tools from list-tools; mcp/connect alone only reaches tools_waiting. — This preserves MCP readiness as a verified tools-list state instead of a connection-only state.
 - [Phase 02]: [Phase 02-02]: spawn/rename/shutdown remain CLI-local durable request facts in Phase 2 and do not execute session lifecycle side effects. — Full member orchestration and lifecycle execution stay deferred to Phase 3/4 boundaries.
+- [Phase 02-03]: Mailbox delivery success is the durable SQLite row; wake metadata starts as pending and remains separate for Plan 02-04.
+- [Phase 02-03]: mobvibe_team_send_message sender identity comes only from TeamMcpRouter caller binding; fromMemberId args are ignored.
+- [Phase 02-03]: Gateway-facing Agent Team projections receive mailbox counts/source refs only, never mailbox plaintext or body_local_json.
 
 ### Pending Todos
 
@@ -117,5 +121,5 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-05-13T13:58:51.504Z
-Stopped at: Completed 02-01-PLAN.md
+Stopped at: Completed 02-03-PLAN.md
 Resume file: None
