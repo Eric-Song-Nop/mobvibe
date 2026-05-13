@@ -44,6 +44,7 @@ import {
 } from "../lib/child-process.js";
 import { logger } from "../lib/logger.js";
 import { buildShellCommand, resolveShell } from "../lib/shell.js";
+import type { TeamAcpMcpDeclaration } from "../team/team-capability.js";
 
 type ClientInfo = {
 	name: string;
@@ -78,6 +79,10 @@ const getErrorMessage = (error: unknown) => {
 };
 
 type SessionUpdateListener = (notification: SessionNotification) => void;
+
+export type TeamMcpSessionOptions = {
+	teamMcpDeclaration?: TeamAcpMcpDeclaration;
+};
 
 type TerminalOutputSnapshot = {
 	output: string;
@@ -375,6 +380,7 @@ export class AcpConnection {
 	async loadSession(
 		sessionId: string,
 		cwd: string,
+		options?: TeamMcpSessionOptions,
 	): Promise<LoadSessionResponse> {
 		if (!this.supportsSessionLoad()) {
 			throw new Error("Agent does not support session/load capability");
@@ -383,7 +389,7 @@ export class AcpConnection {
 		const response = await connection.loadSession({
 			sessionId,
 			cwd,
-			mcpServers: [],
+			mcpServers: this.buildMcpServers(options),
 		});
 		this.sessionId = sessionId;
 		return response;
@@ -637,11 +643,14 @@ export class AcpConnection {
 		}
 	}
 
-	async createSession(options?: { cwd?: string }): Promise<NewSessionResponse> {
+	async createSession(
+		options?: { cwd?: string } & TeamMcpSessionOptions,
+	): Promise<NewSessionResponse> {
 		const connection = await this.ensureReady();
 		const response = await this.createSessionInternal(
 			connection,
 			options?.cwd ?? process.cwd(),
+			options,
 		);
 		this.sessionId = response.sessionId;
 		return response;
@@ -843,12 +852,20 @@ export class AcpConnection {
 	private async createSessionInternal(
 		connection: ClientSideConnection,
 		cwd: string,
+		options?: TeamMcpSessionOptions,
 	): Promise<NewSessionResponse> {
 		const session = await connection.newSession({
 			cwd,
-			mcpServers: [],
+			mcpServers: this.buildMcpServers(options),
 		});
 		return session;
+	}
+
+	private buildMcpServers(options?: TeamMcpSessionOptions): unknown[] {
+		if (!options?.teamMcpDeclaration) {
+			return [];
+		}
+		return [options.teamMcpDeclaration];
 	}
 
 	private emitSessionUpdate(notification: SessionNotification) {

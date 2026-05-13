@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
+import type { AgentSessionCapabilities } from "@mobvibe/shared";
 import type { CliConfig } from "../../config.js";
 import type { AcpConnection } from "../acp-connection.js";
 
@@ -88,7 +89,7 @@ const createMockConnection = () => ({
 		name: "claude-code",
 		title: "Claude Code",
 	})),
-	getSessionCapabilities: mock(() => ({
+	getSessionCapabilities: mock((): AgentSessionCapabilities => ({
 		list: true,
 		load: true,
 	})),
@@ -377,7 +378,10 @@ describe("SessionManager", () => {
 				cwd: "/home/user/project",
 				backendId: "backend-1",
 			});
-			const handler = mockConnection.setPermissionHandler.mock.calls[0]?.[0] as
+			const setPermissionHandlerMock = mockConnection.setPermissionHandler as unknown as {
+				mock: { calls: Array<[unknown?]> };
+			};
+			const handler = setPermissionHandlerMock.mock.calls[0]?.[0] as
 				| ((params: {
 						toolCall?: { toolCallId?: string };
 						options: unknown[];

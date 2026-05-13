@@ -42,6 +42,10 @@ import {
 	isStubPayload,
 } from "../wal/consolidator.js";
 import { WalStore } from "../wal/index.js";
+import {
+	buildTeamMcpDeclaration,
+	resolveTeamMcpTransport,
+} from "../team/team-capability.js";
 import { AcpConnection } from "./acp-connection.js";
 
 type SessionRecord = {
@@ -964,6 +968,119 @@ export class SessionManager {
 			if (status.error) {
 				throw new AppError(status.error, 500);
 			}
+			throw error;
+		}
+	}
+
+	async createTeamSession(options: {
+		cwd?: string;
+		title?: string;
+		backendId: string;
+		agentTeamId: string;
+		memberId: string;
+	}): Promise<SessionSummary> {
+		const backend = this.resolveBackend(options.backendId);
+		const effectiveCwd = options.cwd;
+		const workspaceRootCwd = options.cwd
+			? ((await resolveGitProjectContext(options.cwd)).repoRoot ?? options.cwd)
+			: undefined;
+		const connection = await this.acquireConnection(backend);
+
+		try {
+			const transport = resolveTeamMcpTransport(
+				connection.getSessionCapabilities(),
+			);
+			if (transport !== "acp") {
+				throw createCapabilityNotSupportedError(
+					"Team session creation requires native MCP-over-ACP in this phase",
+				);
+			}
+			const teamMcpDeclaration = buildTeamMcpDeclaration({
+				agentTeamId: options.agentTeamId,
+				memberId: options.memberId,
+			});
+			const session = await connection.createSession({
+				cwd: effectiveCwd,
+				teamMcpDeclaration,
+			});
+			connection.setPermissionHandler((params) =>
+				this.handlePermissionRequest(session.sessionId, params),
+			);
+
+			const now = new Date();
+			const agentInfo = connection.getAgentInfo();
+			const { modelId, modelName, availableModels } = resolveModelState(
+				session.models,
+			);
+			const { modeId, modeName, availableModes } = resolveModeState(
+				session.modes,
+			);
+			const hasExplicitTitle = !!options.title;
+			const sessionTitle = options.title ?? `Session ${this.sessions.size + 1}`;
+			const { revision } = this.walStore.ensureSession({
+				sessionId: session.sessionId,
+				machineId: this.config.machineId,
+				backendId: backend.id,
+				cwd: effectiveCwd,
+				title: sessionTitle,
+				isTitlePinned: hasExplicitTitle,
+			});
+
+			if (this.cryptoService) {
+				this.cryptoService.initSessionDek(session.sessionId);
+			}
+
+			const record: SessionRecord = {
+				sessionId: session.sessionId,
+				title: sessionTitle,
+				backendId: backend.id,
+				backendLabel: backend.label,
+				connection,
+				createdAt: now,
+				updatedAt: now,
+				cwd: effectiveCwd,
+				workspaceRootCwd,
+				agentName: agentInfo?.title ?? agentInfo?.name,
+				modelId,
+				modelName,
+				modeId,
+				modeName,
+				availableModes,
+				availableModels,
+				availableCommands: undefined,
+				revision,
+				isTitlePinned: hasExplicitTitle,
+			};
+			record.unsubscribe = connection.onSessionUpdate(
+				(notification: SessionNotification) => {
+					record.updatedAt = new Date();
+					this.writeSessionUpdateToWal(record, notification);
+					this.applySessionUpdateToRecord(record, notification);
+				},
+			);
+			record.unsubscribeTerminal = connection.onTerminalOutput((event) => {
+				this.writeAndEmitEvent(
+					record.sessionId,
+					record.revision,
+					"terminal_output",
+					event,
+				);
+			});
+			connection.onStatusChange((status) => {
+				if (status.error) {
+					this.writeAndEmitEvent(record.sessionId, record.revision, "session_error", {
+						error: status.error,
+					});
+					this.emitSessionDetached(session.sessionId, "agent_exit");
+				}
+			});
+			this.sessions.set(session.sessionId, record);
+			const summary = this.buildSummary(record);
+			this.emitSessionsChanged({ added: [summary], updated: [], removed: [] });
+			this.emitSessionAttached(session.sessionId);
+			return summary;
+		} catch (error) {
+			await connection.disconnect();
 			throw error;
 		}
 	}
