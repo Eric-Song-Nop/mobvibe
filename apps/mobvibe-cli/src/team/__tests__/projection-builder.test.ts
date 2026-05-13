@@ -227,3 +227,43 @@ describe("buildAgentTeamSummary task projection", () => {
 		expect(serialized).not.toContain("agentOutput");
 	});
 });
+
+describe("buildAgentTeamSummary lifecycle and MCP dimensions", () => {
+	test("keeps MCP readiness independent from member lifecycle", () => {
+		const summary = buildAgentTeamSummary({
+			team: baseTeam,
+			members: [baseMember],
+			mcpStatuses: [{ ...baseMcpStatus, phase: "tools_waiting" }],
+			mailboxMessages: [],
+			tasks: [],
+			summaryRefs: [],
+		});
+
+		expect(summary.lifecycle).toBe("running");
+		expect(summary.members[0].lifecycle).toBe("running");
+		expect(summary.members[0].mcp?.phase).toBe("tools_waiting");
+	});
+
+	test("rejects idle and ready as lifecycle values", () => {
+		expect(() =>
+			buildAgentTeamSummary({
+				team: { ...baseTeam, lifecycle: "ready" },
+				members: [baseMember],
+				mcpStatuses: [baseMcpStatus],
+				mailboxMessages: [],
+				tasks: [],
+				summaryRefs: [],
+			}),
+		).toThrow("Invalid Agent Team lifecycle");
+		expect(() =>
+			buildAgentTeamSummary({
+				team: baseTeam,
+				members: [{ ...baseMember, lifecycle: "idle" }],
+				mcpStatuses: [baseMcpStatus],
+				mailboxMessages: [],
+				tasks: [],
+				summaryRefs: [],
+			}),
+		).toThrow("Invalid Agent Team member lifecycle");
+	});
+});

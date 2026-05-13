@@ -240,6 +240,83 @@ describe("AgentTeamStore durable metadata", () => {
 		expect(serialized).not.toContain("local output");
 		expect(serialized).not.toContain("body_local_json");
 	});
+
+	test("recovers MCP readiness and summary refs independently from lifecycle", () => {
+		const created = store.createAgentTeam({
+			machineId: "machine-1",
+			backendId: "backend-claude",
+			workspaceRootCwd: "/workspace/project",
+			title: "MCP Recovery Team",
+		});
+		const team = created.team;
+		const member = team.members[0];
+		const updatedAt = "2026-05-13T04:40:00.000Z";
+		const summaryRefSource = {
+			type: "task" as const,
+			agentTeamId: team.agentTeamId,
+			taskId: "task-1",
+			ownerMemberId: member.memberId,
+		};
+		const db = new Database(dbPath);
+
+		try {
+			db.query(
+				`UPDATE agent_teams
+				 SET lifecycle = 'running', updated_at = $updatedAt
+				 WHERE agent_team_id = $agentTeamId`,
+			).run({ $agentTeamId: team.agentTeamId, $updatedAt: updatedAt });
+			db.query(
+				`UPDATE agent_team_members
+				 SET lifecycle = 'running', updated_at = $updatedAt
+				 WHERE member_id = $memberId`,
+			).run({ $memberId: member.memberId, $updatedAt: updatedAt });
+			db.query(
+				`UPDATE agent_team_mcp_status
+				 SET phase = 'tools_waiting', updated_at = $updatedAt
+				 WHERE agent_team_id = $agentTeamId AND member_id = $memberId`,
+			).run({
+				$agentTeamId: team.agentTeamId,
+				$memberId: member.memberId,
+				$updatedAt: updatedAt,
+			});
+			db.query(
+				`INSERT INTO agent_team_summary_refs (
+					summary_ref_id, agent_team_id, source_refs_json, status, created_at, updated_at
+				) VALUES (
+					$summaryRefId, $agentTeamId, $sourceRefsJson, $status, $createdAt, $updatedAt
+				)`,
+			).run({
+				$summaryRefId: "summary-ref-2",
+				$agentTeamId: team.agentTeamId,
+				$sourceRefsJson: JSON.stringify([summaryRefSource]),
+				$status: "ready",
+				$createdAt: updatedAt,
+				$updatedAt: updatedAt,
+			});
+		} finally {
+			db.close();
+		}
+
+		store.close();
+		store = new AgentTeamStore(dbPath);
+		const recovered = store.getAgentTeam({
+			agentTeamId: team.agentTeamId,
+		}).team;
+		const serialized = JSON.stringify(recovered);
+
+		expect(recovered?.lifecycle).toBe("running");
+		expect(recovered?.members[0].lifecycle).toBe("running");
+		expect(recovered?.members[0].mcp?.phase).toBe("tools_waiting");
+		expect(recovered?.summaryRefs?.[0]).toEqual(
+			expect.objectContaining({
+				summaryRefId: "summary-ref-2",
+				status: "ready",
+				sourceRefs: [summaryRefSource],
+			}),
+		);
+		expect(serialized).not.toContain("summaryText");
+		expect(serialized).not.toContain("local summary");
+	});
 });
 
 describe("Agent Team content boundary", () => {
