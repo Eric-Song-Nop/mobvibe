@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-03-PLAN.md
-last_updated: "2026-05-13T04:18:47.691Z"
+stopped_at: Completed 01-04-PLAN.md
+last_updated: "2026-05-13T04:27:25.470Z"
 last_activity: 2026-05-13
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 5
-  completed_plans: 3
-  percent: 60
+  completed_plans: 4
+  percent: 80
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 01 (protocol-state-model-persistence-boundary) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-05-13
 
-Progress: [██████░░░░] 60%
+Progress: [████████░░] 80%
 
 ## Performance Metrics
 
@@ -54,6 +54,8 @@ Progress: [██████░░░░] 60%
 
 - Last 5 plans: 01-01 (7 min), 01-02 (8 min), 01-03 (11 min)
 - Trend: stable
+
+| Phase 01 P04 | 5 min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -81,6 +83,9 @@ Recent decisions affecting current work:
 - [Phase 01-03]: Agent Team typed RPC responses are delivered to both SessionRouter and TeamRouter; each router consumes only matching pending requestIds.
 - [Phase 01-03]: Gateway rejects forbidden plaintext and secret-like keys recursively at the route boundary before CLI forwarding.
 - [Phase 01-03]: CLI `agent-teams:changed` projection events are relayed only to the owning `record.userId`, never globally.
+- [Phase 01-04]: Lifecycle strings are validated at projection time — Persisted idle/ready values are rejected before reaching Gateway-facing summaries.
+- [Phase 01-04]: Dependency metadata contributes to blocked task count — Task blocked count includes explicit blocked status and non-empty blocked_by_json dependency metadata.
+- [Phase 01-04]: Source refs are metadata-only — Mailbox/task/summary source refs are projected as typed metadata only; body_local_json remains CLI-local.
 
 ### Pending Todos
 
@@ -100,6 +105,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-13T04:18:47.682Z
-Stopped at: Completed 01-03-PLAN.md
+Last session: 2026-05-13T04:27:08.495Z
+Stopped at: Completed 01-04-PLAN.md
 Resume file: None
