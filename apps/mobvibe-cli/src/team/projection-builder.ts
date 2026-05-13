@@ -26,6 +26,7 @@ export type AgentTeamProjectionInput = {
 export function buildAgentTeamSummary(
 	input: AgentTeamProjectionInput,
 ): AgentTeamSummary {
+	const lifecycle = parseAgentTeamLifecycle(input.team.lifecycle);
 	const members = input.members.map((row) =>
 		buildMemberSummary(
 			row,
@@ -41,7 +42,7 @@ export function buildAgentTeamSummary(
 		workspaceRootCwd: input.team.workspace_root_cwd,
 		workspaceMode: input.team.workspace_mode as TeamWorkspaceMode,
 		leaderMemberId: input.team.leader_member_id,
-		lifecycle: input.team.lifecycle as AgentTeamLifecycle,
+		lifecycle,
 		members,
 		mailboxCounts: buildMailboxCounts(input.mailboxMessages),
 		taskCounts: buildTaskCounts(input.tasks),
@@ -80,7 +81,7 @@ function buildMemberSummary(
 		name: row.name,
 		backendId: row.backend_id,
 		sessionId: row.session_id ?? undefined,
-		lifecycle: row.lifecycle as TeamMemberLifecycle,
+		lifecycle: parseTeamMemberLifecycle(row.lifecycle),
 		health: row.health as TeamMemberHealth,
 		mcp: buildMcpStatus(
 			mcpStatuses.find((status) => status.member_id === row.member_id),
@@ -183,6 +184,24 @@ function parseErrorDetail(value: string | null): ErrorDetail | undefined {
 	return isErrorDetail(parsed) ? parsed : undefined;
 }
 
+function parseAgentTeamLifecycle(value: string): AgentTeamLifecycle {
+	if (isAgentTeamLifecycle(value)) return value;
+	throw new Error(`Invalid Agent Team lifecycle: ${value}`);
+}
+
+function parseTeamMemberLifecycle(value: string): TeamMemberLifecycle {
+	if (isTeamMemberLifecycle(value)) return value;
+	throw new Error(`Invalid Agent Team member lifecycle: ${value}`);
+}
+
+function isAgentTeamLifecycle(value: string): value is AgentTeamLifecycle {
+	return AGENT_TEAM_LIFECYCLES.includes(value as AgentTeamLifecycle);
+}
+
+function isTeamMemberLifecycle(value: string): value is TeamMemberLifecycle {
+	return TEAM_MEMBER_LIFECYCLES.includes(value as TeamMemberLifecycle);
+}
+
 function collectSourceRefs(
 	rows: Array<AgentTeamMailboxMessageRow | AgentTeamTaskRow>,
 ): TeamSourceRef[] {
@@ -262,6 +281,27 @@ function isString(value: unknown): value is string {
 function isOptionalString(value: unknown): value is string | undefined {
 	return value === undefined || isString(value);
 }
+
+const AGENT_TEAM_LIFECYCLES: AgentTeamLifecycle[] = [
+	"pending",
+	"starting",
+	"running",
+	"completed",
+	"failed",
+	"cancelled",
+	"archived",
+];
+
+const TEAM_MEMBER_LIFECYCLES: TeamMemberLifecycle[] = [
+	"pending",
+	"creating_session",
+	"running",
+	"completed",
+	"failed",
+	"cancelled",
+	"detached",
+	"archived",
+];
 
 export type AgentTeamRow = {
 	agent_team_id: string;
