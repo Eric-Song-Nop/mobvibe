@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-05-13T04:03:00.227Z"
-last_activity: 2026-05-13 -- Plan 01-02 completed
+stopped_at: Completed 01-03-PLAN.md
+last_updated: "2026-05-13T04:18:47.691Z"
+last_activity: 2026-05-13
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 5
-  completed_plans: 2
-  percent: 40
+  completed_plans: 3
+  percent: 60
 ---
 
 # Project State
@@ -26,25 +26,25 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 01 (protocol-state-model-persistence-boundary) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
-Last activity: 2026-05-13 -- Plan 01-02 completed
+Last activity: 2026-05-13
 
-Progress: [████░░░░░░] 40%
+Progress: [██████░░░░] 60%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 2
-- Average duration: 8 min
-- Total execution time: 0.3 hours
+- Total plans completed: 3
+- Average duration: 9 min
+- Total execution time: 0.4 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1. 协议、状态模型与持久化边界 | 2 | 15 min | 8 min |
+| 1. 协议、状态模型与持久化边界 | 3 | 26 min | 9 min |
 | 2. CLI Team MCP、Mailbox 与 Task Board | 0 | TBD | N/A |
 | 3. 最小端到端 Team Run | 0 | TBD | N/A |
 | 4. 生命周期、权限、E2EE 与恢复 | 0 | TBD | N/A |
@@ -52,7 +52,7 @@ Progress: [████░░░░░░] 40%
 
 **Recent Trend:**
 
-- Last 5 plans: 01-01 (7 min), 01-02 (8 min)
+- Last 5 plans: 01-01 (7 min), 01-02 (8 min), 01-03 (11 min)
 - Trend: stable
 
 ## Accumulated Context
@@ -77,10 +77,14 @@ Recent decisions affecting current work:
 - [Phase 01-02]: Agent Team durable truth reuses the existing CLI WAL SQLite database and schema_version migration path.
 - [Phase 01-02]: Phase 1 creates only leader metadata and MCP readiness defaults; it does not create an ordinary ACP session.
 - [Phase 01-02]: Gateway-facing Agent Team results are rebuilt projections and asserted against forbidden plaintext/secret keys before return.
+- [Phase 01-03]: Gateway exposes Agent Team create/list/get as authenticated metadata routes but remains a router, not a durable truth owner.
+- [Phase 01-03]: Agent Team typed RPC responses are delivered to both SessionRouter and TeamRouter; each router consumes only matching pending requestIds.
+- [Phase 01-03]: Gateway rejects forbidden plaintext and secret-like keys recursively at the route boundary before CLI forwarding.
+- [Phase 01-03]: CLI `agent-teams:changed` projection events are relayed only to the owning `record.userId`, never globally.
 
 ### Pending Todos
 
-- 继续执行 01-03-PLAN.md：Gateway `/acp/agent-teams` routes, typed CLI RPC, and user-scoped projection relay。
+- 继续执行 01-04-PLAN.md：CLI mailbox/task/MCP/summary metadata recovery and non-content projection hardening。
 
 ### Blockers/Concerns
 
@@ -96,6 +100,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-13T04:03:00.219Z
-Stopped at: Completed 01-02-PLAN.md
+Last session: 2026-05-13T04:18:47.682Z
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None
