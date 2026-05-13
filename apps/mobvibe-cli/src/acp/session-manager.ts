@@ -38,8 +38,7 @@ import {
 } from "../lib/git-utils.js";
 import { logger } from "../lib/logger.js";
 import {
-	buildTeamMcpDeclaration,
-	resolveTeamMcpTransport,
+	buildTeamMcpSessionSelection,
 } from "../team/team-capability.js";
 import {
 	consolidateEventsForRead,
@@ -987,21 +986,14 @@ export class SessionManager {
 		const connection = await this.acquireConnection(backend);
 
 		try {
-			const transport = resolveTeamMcpTransport(
-				connection.getSessionCapabilities(),
-			);
-			if (transport !== "acp") {
-				throw createCapabilityNotSupportedError(
-					"Team session creation requires native MCP-over-ACP in this phase",
-				);
-			}
-			const teamMcpDeclaration = buildTeamMcpDeclaration({
+			const selection = buildTeamMcpSessionSelection({
+				capabilities: connection.getSessionCapabilities(),
 				agentTeamId: options.agentTeamId,
 				memberId: options.memberId,
 			});
 			const session = await connection.createSession({
 				cwd: effectiveCwd,
-				teamMcpDeclaration,
+				teamMcpDeclaration: selection.declaration,
 			});
 			connection.setPermissionHandler((params) =>
 				this.handlePermissionRequest(session.sessionId, params),

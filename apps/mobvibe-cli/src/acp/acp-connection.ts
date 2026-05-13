@@ -44,7 +44,7 @@ import {
 } from "../lib/child-process.js";
 import { logger } from "../lib/logger.js";
 import { buildShellCommand, resolveShell } from "../lib/shell.js";
-import type { TeamAcpMcpDeclaration } from "../team/team-capability.js";
+import type { TeamMcpSessionDeclaration } from "../team/team-capability.js";
 
 type ClientInfo = {
 	name: string;
@@ -81,7 +81,7 @@ const getErrorMessage = (error: unknown) => {
 type SessionUpdateListener = (notification: SessionNotification) => void;
 
 export type TeamMcpSessionOptions = {
-	teamMcpDeclaration?: TeamAcpMcpDeclaration;
+	teamMcpDeclaration?: TeamMcpSessionDeclaration;
 };
 
 type TerminalOutputSnapshot = {

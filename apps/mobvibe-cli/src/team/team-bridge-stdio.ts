@@ -1,5 +1,5 @@
 import { EXPECTED_TEAM_TOOL_NAMES, type TeamToolName } from "./team-tool-handlers.js";
-import { buildTeamMcpServerId, type TeamMcpIdentityInput } from "./team-capability.js";
+import type { TeamMcpIdentityInput } from "./team-capability.js";
 
 export type TeamStdioBridgeEnv = Array<{ name: string; value: string }>;
 
@@ -22,6 +22,7 @@ export type TeamStdioBridgeToolManifestEntry = {
 };
 
 const TEAM_STDIN_BRIDGE_NAME = "mobvibe-team";
+const SAFE_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 const toolInputKeys: Record<TeamToolName, string[]> = {
 	mobvibe_team_send_message: ["to", "message", "summary"],
@@ -45,7 +46,8 @@ const toolInputKeys: Record<TeamToolName, string[]> = {
 export function buildPerSessionTeamStdioBridge(
 	input: PerSessionTeamStdioBridgeInput,
 ): PerSessionTeamStdioBridgeDeclaration {
-	buildTeamMcpServerId(input);
+	validateIdentityPart("agentTeamId", input.agentTeamId);
+	validateIdentityPart("memberId", input.memberId);
 	const scriptPath = input.bridgeScriptPath.trim();
 	if (!scriptPath) {
 		throw new Error("bridgeScriptPath is required for stdio bridge fallback");
@@ -74,4 +76,13 @@ export function buildTeamStdioBridgeToolManifest(): TeamStdioBridgeToolManifestE
 		name,
 		inputKeys: [...toolInputKeys[name]],
 	}));
+}
+
+function validateIdentityPart(
+	field: keyof TeamMcpIdentityInput,
+	value: string,
+): void {
+	if (!value || !SAFE_ID_PATTERN.test(value)) {
+		throw new Error(`${field} must be a non-empty safe identifier`);
+	}
 }

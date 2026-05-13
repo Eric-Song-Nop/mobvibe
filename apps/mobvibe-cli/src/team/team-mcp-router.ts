@@ -1,4 +1,8 @@
-import { createErrorDetail, type TeamSourceRef } from "@mobvibe/shared";
+import {
+	createErrorDetail,
+	type TeamMcpTransport,
+	type TeamSourceRef,
+} from "@mobvibe/shared";
 import type {
 	AgentTeamStore,
 	TeamToolIntent,
@@ -19,6 +23,7 @@ export type TeamMcpRouterOptions = {
 
 type ServerBinding = TeamToolCaller & {
 	serverId: string;
+	transport: TeamMcpTransport;
 };
 
 export class TeamMcpRouter {
@@ -26,12 +31,15 @@ export class TeamMcpRouter {
 
 	constructor(private readonly options: TeamMcpRouterOptions) {}
 
-	handleConnect(input: { serverId: string }): TeamToolCaller {
-		const binding = this.bindServer(input.serverId);
+	handleConnect(input: {
+		serverId: string;
+		transport?: TeamMcpTransport;
+	}): TeamToolCaller {
+		const binding = this.bindServer(input.serverId, input.transport ?? "acp");
 		this.options.store.updateMcpStatus({
 			agentTeamId: binding.agentTeamId,
 			memberId: binding.memberId,
-			transport: "acp",
+			transport: binding.transport,
 			serverId: input.serverId,
 			phase: "tools_waiting",
 		});
@@ -50,7 +58,7 @@ export class TeamMcpRouter {
 		this.options.store.updateMcpStatus({
 			agentTeamId: binding.agentTeamId,
 			memberId: binding.memberId,
-			transport: "acp",
+			transport: binding.transport,
 			serverId: input.serverId,
 			phase: missing.length === 0 ? "tools_ready" : "degraded",
 			lastError:
@@ -93,7 +101,10 @@ export class TeamMcpRouter {
 		});
 	}
 
-	private bindServer(serverId: string): ServerBinding {
+	private bindServer(
+		serverId: string,
+		transport: TeamMcpTransport,
+	): ServerBinding {
 		const parsed = parseServerId(serverId);
 		const member = this.options.store
 			.listTeamMembers(parsed.agentTeamId)
@@ -103,6 +114,7 @@ export class TeamMcpRouter {
 		}
 		const binding: ServerBinding = {
 			serverId,
+			transport,
 			agentTeamId: parsed.agentTeamId,
 			memberId: parsed.memberId,
 			role: member.role === "leader" ? "leader" : "member",
