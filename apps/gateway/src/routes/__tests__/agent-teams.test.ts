@@ -150,6 +150,90 @@ describe("agent team routes", () => {
 		);
 	});
 
+	it("forwards allowlisted worktree options for team-shared execution", async () => {
+		const { response } = await requestJson(baseUrl, "/acp/agent-teams", {
+			method: "POST",
+			headers: { authorization: "Bearer user-1" },
+			body: JSON.stringify({
+				machineId: "machine-1",
+				workspaceRootCwd: "/repo",
+				leaderBackendId: "backend-1",
+				worktree: {
+					sourceCwd: " /repo ",
+					branch: " team/one ",
+					baseBranch: " main ",
+					relativeCwd: " apps/gateway ",
+				},
+				target: undefined,
+			}),
+		});
+
+		expect(response.status).toBe(200);
+		expect(teamRouter.createAgentTeam).toHaveBeenCalledWith(
+			{
+				machineId: "machine-1",
+				backendId: "backend-1",
+				workspaceRootCwd: "/repo",
+				worktree: {
+					sourceCwd: "/repo",
+					branch: "team/one",
+					baseBranch: "main",
+					relativeCwd: "apps/gateway",
+				},
+			},
+			"user-1",
+		);
+	});
+
+	it("rejects unsafe worktree relative paths before forwarding", async () => {
+		for (const relativeCwd of ["/absolute", "../escape", "apps/../escape"]) {
+			const { response, payload } = await requestJson(
+				baseUrl,
+				"/acp/agent-teams",
+				{
+					method: "POST",
+					headers: { authorization: "Bearer user-1" },
+					body: JSON.stringify({
+						machineId: "machine-1",
+						workspaceRootCwd: "/repo",
+						leaderBackendId: "backend-1",
+						worktree: { sourceCwd: "/repo", relativeCwd },
+					}),
+				},
+			);
+
+			expect(response.status).toBe(400);
+			expect(payload.error?.code).toBe("REQUEST_VALIDATION_FAILED");
+		}
+		expect(teamRouter.createAgentTeam).not.toHaveBeenCalled();
+	});
+
+	it("rejects worktree branch values that could be parsed as flags", async () => {
+		for (const worktree of [
+			{ sourceCwd: "/repo", branch: "-bad" },
+			{ sourceCwd: "/repo", baseBranch: "-bad" },
+		]) {
+			const { response, payload } = await requestJson(
+				baseUrl,
+				"/acp/agent-teams",
+				{
+					method: "POST",
+					headers: { authorization: "Bearer user-1" },
+					body: JSON.stringify({
+						machineId: "machine-1",
+						workspaceRootCwd: "/repo",
+						leaderBackendId: "backend-1",
+						worktree,
+					}),
+				},
+			);
+
+			expect(response.status).toBe(400);
+			expect(payload.error?.code).toBe("REQUEST_VALIDATION_FAILED");
+		}
+		expect(teamRouter.createAgentTeam).not.toHaveBeenCalled();
+	});
+
 	it("lists and gets teams through TeamRouter", async () => {
 		const list = await requestJson(
 			baseUrl,
