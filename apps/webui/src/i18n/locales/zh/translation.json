@@ -69,7 +69,8 @@
 		"taskBadge": "任务 {{count}}",
 		"mailBadge": "消息 {{count}}",
 		"linked": "已链接",
-		"noSession": "未链接会话"
+		"noSession": "未链接会话",
+		"openMemberSession": "打开 {{name}} 会话"
 	},
 	"session": {
 		"title": "对话",

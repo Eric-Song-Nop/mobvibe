@@ -69,7 +69,8 @@
 		"taskBadge": "Tasks {{count}}",
 		"mailBadge": "Mail {{count}}",
 		"linked": "linked",
-		"noSession": "no session"
+		"noSession": "no session",
+		"openMemberSession": "Open {{name}} session"
 	},
 	"session": {
 		"title": "Sessions",

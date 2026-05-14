@@ -4,6 +4,7 @@ import { AppHeader } from "@/components/app/AppHeader";
 import { ChatFooter } from "@/components/app/ChatFooter";
 import { ChatMessageList } from "@/components/app/ChatMessageList";
 import { ChatSearchBar } from "@/components/chat/ChatSearchBar";
+import { AgentTeamOverview } from "@/components/team/AgentTeamOverview";
 
 type SessionWorkspaceProps = {
 	controller: MainAppController;
@@ -13,6 +14,7 @@ export function SessionWorkspace({ controller }: SessionWorkspaceProps) {
 	const {
 		activeSession,
 		activeSessionId,
+		activeAgentTeam,
 		backendLabel,
 		chatMessageListRef,
 		chatSearchOpen,
@@ -44,6 +46,41 @@ export function SessionWorkspace({ controller }: SessionWorkspaceProps) {
 		workspaceLabel,
 		workspaceRootCwd,
 	} = controller;
+
+	if (activeAgentTeam) {
+		return (
+			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+				<AppHeader
+					backendLabel={undefined}
+					workspaceLabel={activeAgentTeam.title}
+					workspacePath={activeAgentTeam.workspaceRootCwd}
+					executionMode={undefined}
+					branchLabel={undefined}
+					subdirectoryLabel={undefined}
+					contextLeftPercent={undefined}
+					statusMessage={activeAgentTeam.lifecycle}
+					warningMessage={undefined}
+					streamError={activeAgentTeam.error}
+					loadingMessage={undefined}
+					plan={undefined}
+					onOpenMobileMenu={() => uiActions.setMobileMenuOpen(true)}
+					onOpenFileExplorer={() => uiActions.setFileExplorerOpen(true)}
+					onOpenCommandPalette={() => uiActions.setCommandPaletteOpen(true)}
+					onSyncHistory={handleSyncHistory}
+					onForceReload={handleForceReload}
+					showFileExplorer={false}
+					showSyncHistory={false}
+					showForceReload={false}
+					syncHistoryDisabled={true}
+					forceReloadDisabled={true}
+				/>
+				<AgentTeamOverview
+					team={activeAgentTeam}
+					onSelectSession={controller.handleSelectSession}
+				/>
+			</div>
+		);
+	}
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col overflow-hidden">

@@ -27,6 +27,7 @@ import { getBackendCapability, useMachinesStore } from "@/lib/machines-store";
 import { ensureNotificationPermission } from "@/lib/notifications";
 import { shouldActivateSessionOnSelect } from "@/lib/session-selection";
 import { getContextLeftPercent } from "@/lib/session-usage";
+import { useTeamStore } from "@/lib/team-store";
 import { useUiStore } from "@/lib/ui-store";
 import { getPathBasename } from "@/lib/ui-utils";
 
@@ -55,6 +56,15 @@ export function useMainAppController() {
 			lastCreatedCwd: s.lastCreatedCwd,
 		})),
 	);
+	const { activeAgentTeamId, activeAgentTeam } = useTeamStore(
+		useShallow((s) => ({
+			activeAgentTeamId: s.activeAgentTeamId,
+			activeAgentTeam: s.activeAgentTeamId
+				? s.teams[s.activeAgentTeamId]
+				: undefined,
+		})),
+	);
+	const setActiveAgentTeamId = useTeamStore((s) => s.setActiveAgentTeamId);
 
 	// Actions — stable refs, never trigger re-renders
 	const chatActions = useChatStore(
@@ -423,6 +433,7 @@ export function useMainAppController() {
 
 	const handleSelectSession = useCallback(
 		(sessionId: string) => {
+			setActiveAgentTeamId(undefined);
 			const session = useChatStore.getState().sessions[sessionId];
 			if (!session) {
 				chatActions.setActiveSessionId(sessionId);
@@ -436,7 +447,15 @@ export function useMainAppController() {
 
 			chatActions.setActiveSessionId(sessionId);
 		},
-		[activateSession, chatActions.setActiveSessionId],
+		[activateSession, chatActions.setActiveSessionId, setActiveAgentTeamId],
+	);
+
+	const handleSelectAgentTeam = useCallback(
+		(agentTeamId: string) => {
+			setActiveAgentTeamId(agentTeamId);
+			chatActions.setActiveSessionId(undefined);
+		},
+		[chatActions.setActiveSessionId, setActiveAgentTeamId],
 	);
 
 	// --- Derived display state ---
@@ -610,6 +629,8 @@ export function useMainAppController() {
 	return {
 		activeSession,
 		activeSessionId,
+		activeAgentTeam,
+		activeAgentTeamId,
 		availableBackends,
 		backendLabel,
 		chatMessageListRef,
@@ -634,6 +655,7 @@ export function useMainAppController() {
 		handleRenameSubmit,
 		handleScrollToMessage,
 		handleSelectSession,
+		handleSelectAgentTeam,
 		handleSend,
 		handleSyncHistory,
 		isBulkArchiving,
