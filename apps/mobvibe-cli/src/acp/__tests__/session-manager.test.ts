@@ -390,6 +390,75 @@ describe("SessionManager", () => {
 			);
 		});
 
+		it("creates a leader team session in a shared worktree with source workspace metadata", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValueOnce({
+				list: true,
+				load: true,
+				mcp: { acp: true },
+			});
+			mockCreateGitWorktree.mockResolvedValueOnce({
+				path: "/tmp/mobvibe-test/worktrees/project/team-branch",
+				branch: "team-branch",
+			});
+
+			const created = await sessionManager.createTeamSession({
+				backendId: "backend-1",
+				agentTeamId: "team-1",
+				memberId: "leader-1",
+				worktree: {
+					sourceCwd: "/home/user/project",
+					branch: "team-branch",
+					relativeCwd: "apps/webui",
+				},
+			});
+
+			expect(mockCreateGitWorktree).toHaveBeenCalledTimes(1);
+			expect(mockConnection.createSession).toHaveBeenCalledWith(
+				expect.objectContaining({
+					cwd: "/tmp/mobvibe-test/worktrees/project/team-branch/apps/webui",
+				}),
+			);
+			expect(created.cwd).toBe(
+				"/tmp/mobvibe-test/worktrees/project/team-branch/apps/webui",
+			);
+			expect(created.workspaceRootCwd).toBe("/home/user/project");
+			expect(created.worktreeSourceCwd).toBe("/home/user/project");
+			expect(created.worktreeBranch).toBe("team-branch");
+		});
+
+		it("creates a member team session by reusing the leader execution context", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValueOnce({
+				list: true,
+				load: true,
+				mcp: { acp: true },
+			});
+
+			const created = await sessionManager.createTeamSession({
+				backendId: "backend-1",
+				agentTeamId: "team-1",
+				memberId: "member-1",
+				executionContext: {
+					cwd: "/tmp/mobvibe-test/worktrees/project/team-branch/apps/webui",
+					workspaceRootCwd: "/home/user/project",
+					worktreeSourceCwd: "/home/user/project",
+					worktreeBranch: "team-branch",
+				},
+			});
+
+			expect(mockCreateGitWorktree).not.toHaveBeenCalled();
+			expect(mockConnection.createSession).toHaveBeenCalledWith(
+				expect.objectContaining({
+					cwd: "/tmp/mobvibe-test/worktrees/project/team-branch/apps/webui",
+				}),
+			);
+			expect(created.cwd).toBe(
+				"/tmp/mobvibe-test/worktrees/project/team-branch/apps/webui",
+			);
+			expect(created.workspaceRootCwd).toBe("/home/user/project");
+			expect(created.worktreeSourceCwd).toBe("/home/user/project");
+			expect(created.worktreeBranch).toBe("team-branch");
+		});
+
 		it("persists the team member session binding so mailbox wake can inject messages", async () => {
 			const internals =
 				sessionManager as unknown as SessionManagerTeamInternals;
