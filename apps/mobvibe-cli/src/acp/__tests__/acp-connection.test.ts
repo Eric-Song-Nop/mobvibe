@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, mock } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Mock the SDK
 mock.module("@agentclientprotocol/sdk", () => ({
@@ -143,15 +144,12 @@ describe("AcpConnection", () => {
 			const packageJson = JSON.parse(
 				fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
 			) as { dependencies?: Record<string, string> };
-			const schema = JSON.parse(
-				fs.readFileSync(
-					path.join(
-						process.cwd(),
-						"../../node_modules/@agentclientprotocol/sdk/schema/schema.json",
-					),
-					"utf8",
-				),
-			) as { $defs?: Record<string, unknown> };
+			const sdkSchemaPath = fileURLToPath(
+				import.meta.resolve("@agentclientprotocol/sdk/schema/schema.json"),
+			);
+			const schema = JSON.parse(fs.readFileSync(sdkSchemaPath, "utf8")) as {
+				$defs?: Record<string, unknown>;
+			};
 			const mcpServer = schema.$defs?.McpServer;
 			const serializedMcpServer = JSON.stringify(mcpServer);
 
