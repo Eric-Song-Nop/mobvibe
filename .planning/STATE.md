@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-05-14T03:51:48.765Z"
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-05-14T04:19:18.366Z"
 last_activity: 2026-05-14
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 17
-  completed_plans: 13
-  percent: 76
+  completed_plans: 14
+  percent: 82
 ---
 
 # Project State
@@ -26,19 +26,19 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 03 (team-run) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-05-14
 
-Progress: [████████░░] 76%
+Progress: [████████░░] 82%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 12
-- Average duration: 11 min
-- Total execution time: 1.8 hours
+- Total plans completed: 14
+- Average duration: 12 min
+- Total execution time: 2.1 hours
 
 **By Phase:**
 
@@ -46,7 +46,7 @@ Progress: [████████░░] 76%
 |-------|-------|-------|----------|
 | 1. 协议、状态模型与持久化边界 | 5 | 41 min | 8 min |
 | 2. CLI Team MCP、Mailbox 与 Task Board | 7 | 67 min | 10 min |
-| 3. 最小端到端 Team Run | 5 planned / 0 completed | TBD | N/A |
+| 3. 最小端到端 Team Run | 5 planned / 2 completed | 25 min | 13 min |
 | 4. 生命周期、权限、E2EE 与恢复 | 0 | TBD | N/A |
 | 5. UI 规模化与 v1 Polish | 0 | TBD | N/A |
 
@@ -63,6 +63,7 @@ Progress: [████████░░] 76%
 | Phase 02 P06 | 9 min | 2 tasks | 7 files |
 | Phase 02 P04 | 12 min | 2 tasks | 6 files |
 | Phase 03-team-run P01 | 8 min | 3 tasks | 7 files |
+| Phase 03-team-run P02 | 17 min | 4 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -115,10 +116,13 @@ Recent decisions affecting current work:
 - [Phase 02-07]: Callback-path tests prove mailbox/task tools mutate durable AgentTeamStore facts while projection payloads remain plaintext-safe.
 - [Phase 03-team-run]: Agent Team create contract reuses ordinary session worktree metadata instead of introducing team-only worktree field names. — This preserves Phase 3 team-shared worktree semantics and avoids contract drift with ordinary session creation.
 - [Phase 03-team-run]: Target/plaintext delivery remains outside /acp/agent-teams; WebUI createAgentTeam serializes only metadata and nested worktree options. — This preserves the existing E2EE boundary: target delivery must use the ordinary encrypted message path.
+- [Phase 03-02]: SessionManager owns Agent Team create/start orchestration so durable store updates, ordinary session events, and Team MCP callbacks share one source of truth.
+- [Phase 03-02]: Team-shared worktree keeps workspaceRootCwd/worktreeSourceCwd pointed at the source repo root while cwd points at the execution checkout.
+- [Phase 03-02]: Team create failures use existing shared ErrorCode values while preserving safe failure metadata on the leader member projection.
 
 ### Pending Todos
 
-- 用户确认后执行 Phase 3 计划 03-01 至 03-05。
+- 继续执行 Phase 3 计划 03-03 至 03-05。
 
 ### Blockers/Concerns
 
@@ -135,6 +139,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-14T03:51:07.180Z
-Stopped at: Completed 03-01-PLAN.md
+Last session: 2026-05-14T04:19:18.356Z
+Stopped at: Completed 03-02-PLAN.md
 Resume file: None

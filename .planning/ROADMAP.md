@@ -80,7 +80,7 @@ Plans:
 **Plans**: 5 plans
 Plans:
 - [x] 03-01-PLAN.md — Shared/Gateway Agent Team create contract and safe worktree payload
-- [ ] 03-02-PLAN.md — CLI create/start leader session, team-shared worktree, and MCP readiness
+- [x] 03-02-PLAN.md — CLI create/start leader session, team-shared worktree, and MCP readiness
 - [ ] 03-03-PLAN.md — Real spawn member tool and ordinary member session orchestration
 - [ ] 03-04-PLAN.md — WebUI Agent Team create flow and encrypted target delivery
 - [ ] 03-05-PLAN.md — WebUI team sidebar, overview, projection badges, and member navigation
@@ -124,7 +124,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. 协议、状态模型与持久化边界 | 5/5 | Completed | 2026-05-13 |
 | 2. CLI Team MCP、Mailbox 与 Task Board | 7/7 | Completed | 2026-05-13 |
-| 3. 最小端到端 Team Run | 1/5 | In Progress | - |
+| 3. 最小端到端 Team Run | 2/5 | In Progress | - |
 | 4. 生命周期、权限、E2EE 与恢复 | 0/TBD | Not started | - |
 | 5. UI 规模化与 v1 Polish | 0/TBD | Not started | - |
 
