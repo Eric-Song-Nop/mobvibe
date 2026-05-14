@@ -18,7 +18,7 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-12)
+See: .planning/PROJECT.md (updated 2026-05-14)
 
 **Core value:** 用户可以在一个 Mobvibe 团队任务中安全地协调多个不同 ACP agent，让它们围绕同一代码目标协作，并清楚看到每个 agent 的进展、任务、消息、产出和最终汇总。
 **Current focus:** Phase 4 — 生命周期、权限、E2EE 与恢复
