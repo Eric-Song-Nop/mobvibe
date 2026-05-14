@@ -31,7 +31,8 @@ export class AgentTeamStore {
 	private stmtInsertTeam: ReturnType<Database["query"]>;
 	private stmtInsertMember: ReturnType<Database["query"]>;
 	private stmtInsertMcpStatus: ReturnType<Database["query"]>;
-	private stmtUpdateMemberRuntimeState: ReturnType<Database["query"]>;
+	private stmtUpdateTeamRuntimeState: ReturnType<Database["query"]>;
+	private stmtUpdateMemberRuntime: ReturnType<Database["query"]>;
 	private stmtGetTeam: ReturnType<Database["query"]>;
 	private stmtListTeams: ReturnType<Database["query"]>;
 	private stmtListActiveTeams: ReturnType<Database["query"]>;
@@ -87,10 +88,20 @@ export class AgentTeamStore {
         $agentTeamId, $memberId, $transport, $serverId, $phase, $lastErrorJson, $updatedAt
       )
     `);
-		this.stmtUpdateMemberRuntimeState = this.db.query(`
+		this.stmtUpdateTeamRuntimeState = this.db.query(`
+      UPDATE agent_teams
+      SET lifecycle = COALESCE($lifecycle, lifecycle),
+          updated_at = $updatedAt
+      WHERE agent_team_id = $agentTeamId
+    `);
+		this.stmtUpdateMemberRuntime = this.db.query(`
       UPDATE agent_team_members
       SET session_id = COALESCE($sessionId, session_id),
           lifecycle = COALESCE($lifecycle, lifecycle),
+          health = COALESCE($health, health),
+          error_json = COALESCE($errorJson, error_json),
+          worktree_source_cwd = COALESCE($worktreeSourceCwd, worktree_source_cwd),
+          worktree_branch = COALESCE($worktreeBranch, worktree_branch),
           updated_at = $updatedAt
       WHERE member_id = $memberId
         AND agent_team_id = $agentTeamId
@@ -542,13 +553,49 @@ export class AgentTeamStore {
 		sessionId?: string;
 		lifecycle?: string;
 	}): void {
-		this.stmtUpdateMemberRuntimeState.run({
+		this.updateTeamMemberRuntime(params);
+	}
+
+	updateTeamRuntimeState(params: {
+		agentTeamId: string;
+		lifecycle?: string;
+	}): void {
+		this.stmtUpdateTeamRuntimeState.run({
 			$agentTeamId: params.agentTeamId,
-			$memberId: params.memberId,
-			$sessionId: params.sessionId ?? null,
 			$lifecycle: params.lifecycle ?? null,
 			$updatedAt: new Date().toISOString(),
 		});
+	}
+
+	updateTeamMemberRuntime(params: {
+		agentTeamId: string;
+		memberId: string;
+		sessionId?: string;
+		lifecycle?: string;
+		health?: string;
+		error?: unknown;
+		worktreeSourceCwd?: string;
+		worktreeBranch?: string;
+	}): void {
+		const updatedAt = new Date().toISOString();
+		this.db.transaction(() => {
+			this.stmtUpdateMemberRuntime.run({
+				$agentTeamId: params.agentTeamId,
+				$memberId: params.memberId,
+				$sessionId: params.sessionId ?? null,
+				$lifecycle: params.lifecycle ?? null,
+				$health: params.health ?? null,
+				$errorJson:
+					params.error === undefined ? null : JSON.stringify(params.error),
+				$worktreeSourceCwd: params.worktreeSourceCwd ?? null,
+				$worktreeBranch: params.worktreeBranch ?? null,
+				$updatedAt: updatedAt,
+			});
+			this.stmtTouchTeam.run({
+				$agentTeamId: params.agentTeamId,
+				$updatedAt: updatedAt,
+			});
+		})();
 	}
 
 	readUnreadAndMark(
