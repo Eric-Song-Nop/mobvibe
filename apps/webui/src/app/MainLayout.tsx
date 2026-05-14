@@ -12,15 +12,18 @@ type MainLayoutProps = {
 export function MainLayout({ controller }: MainLayoutProps) {
 	const {
 		activeSessionId,
+		activeAgentTeamId,
 		handleArchiveSession,
 		handleBulkArchiveSessions,
 		handleOpenCreateDialog,
 		handleRenameSubmit,
 		handleSelectSession,
+		handleSelectAgentTeam,
 		isBulkArchiving,
 		isCreatingSession,
 		mutationsSnapshot,
 		sessionList,
+		sidebarSessionList,
 	} = controller;
 
 	return (
@@ -32,9 +35,12 @@ export function MainLayout({ controller }: MainLayoutProps) {
 
 			<AppSidebar
 				sessions={sessionList}
+				sidebarEntries={sidebarSessionList}
 				activeSessionId={activeSessionId}
+				activeAgentTeamId={activeAgentTeamId}
 				onCreateSession={handleOpenCreateDialog}
 				onSelectSession={handleSelectSession}
+				onSelectAgentTeam={handleSelectAgentTeam}
 				onEditSubmit={handleRenameSubmit}
 				onArchiveSession={(sessionId) => {
 					void handleArchiveSession(sessionId);

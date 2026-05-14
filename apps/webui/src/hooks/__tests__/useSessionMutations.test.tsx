@@ -46,6 +46,7 @@ vi.mock("@/lib/api", async () => {
 	return {
 		...actual,
 		createSession: vi.fn(),
+		createAgentTeam: vi.fn(),
 		renameSession: vi.fn(),
 		archiveSession: vi.fn(),
 		cancelSession: vi.fn(),
@@ -535,6 +536,102 @@ describe("useSessionMutations", () => {
 			const calls = vi.mocked(mockStore.setActiveSessionId).mock.calls;
 			expect(calls[0][0]).toMatch(/^creating-\d+$/);
 			expect(calls[1][0]).toBe("real-session");
+		});
+	});
+
+	describe("createAgentTeamRunMutation", () => {
+		it("creates metadata-only team, bootstraps leader E2EE, and sends target", async () => {
+			const leaderSession: apiModule.SessionSummary = {
+				sessionId: "leader-session-1",
+				title: "Team Leader",
+				backendId: "backend-1",
+				backendLabel: "Backend 1",
+				createdAt: "2025-01-01T00:00:00Z",
+				updatedAt: "2025-01-01T00:00:00Z",
+				cwd: "/repo",
+				machineId: "machine-1",
+				wrappedDek: "wrapped-leader-dek",
+			};
+			vi.mocked(apiModule.createAgentTeam).mockResolvedValue({
+				team: { agentTeamId: "team-1" } as apiModule.AgentTeamSummary,
+				leaderSession,
+			});
+			vi.mocked(apiModule.sendMessage).mockResolvedValue({
+				stopReason: "end_turn",
+			});
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.createAgentTeamRunMutation.mutateAsync({
+				machineId: "machine-1",
+				leaderBackendId: "backend-1",
+				workspaceRootCwd: "/repo",
+				title: "Team One",
+				target: "Ship the team run",
+				worktree: { sourceCwd: "/repo", branch: "team/run" },
+			});
+
+			expect(apiModule.createAgentTeam).toHaveBeenCalledWith({
+				machineId: "machine-1",
+				leaderBackendId: "backend-1",
+				workspaceRootCwd: "/repo",
+				title: "Team One",
+				worktree: { sourceCwd: "/repo", branch: "team/run" },
+			});
+			expect(
+				JSON.stringify(vi.mocked(apiModule.createAgentTeam).mock.calls[0][0]),
+			).not.toMatch(/target|prompt|content|body/i);
+			expect(mockBootstrapSessionE2EE).toHaveBeenCalledWith(
+				"leader-session-1",
+				"wrapped-leader-dek",
+			);
+			expect(apiModule.sendMessage).toHaveBeenCalledWith({
+				sessionId: "leader-session-1",
+				prompt: [{ type: "text", text: "Ship the team run" }],
+			});
+			expect(mockStore.createLocalSession).toHaveBeenCalledWith(
+				"leader-session-1",
+				expect.objectContaining({
+					title: "Team Leader",
+					backendId: "backend-1",
+				}),
+			);
+			expect(mockStore.setActiveSessionId).toHaveBeenCalledWith(
+				"leader-session-1",
+			);
+		});
+
+		it("fails before sending when leader E2EE bootstrap is not ok", async () => {
+			mockBootstrapSessionE2EE.mockReturnValueOnce("missing_key");
+			vi.mocked(apiModule.createAgentTeam).mockResolvedValue({
+				team: { agentTeamId: "team-1" } as apiModule.AgentTeamSummary,
+				leaderSession: {
+					sessionId: "leader-session-1",
+					title: "Team Leader",
+					backendId: "backend-1",
+					backendLabel: "Backend 1",
+					createdAt: "2025-01-01T00:00:00Z",
+					updatedAt: "2025-01-01T00:00:00Z",
+					wrappedDek: "wrapped-leader-dek",
+				},
+			});
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await expect(
+				result.current.createAgentTeamRunMutation.mutateAsync({
+					machineId: "machine-1",
+					leaderBackendId: "backend-1",
+					workspaceRootCwd: "/repo",
+					target: "Secret target",
+				}),
+			).rejects.toThrow("E2EE key missing");
+			expect(apiModule.sendMessage).not.toHaveBeenCalled();
+			expect(mockStore.setAppError).toHaveBeenCalled();
 		});
 	});
 

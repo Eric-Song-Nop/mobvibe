@@ -13,7 +13,10 @@ import type {
 import {
 	type AcpSessionInfo,
 	type AgentSessionCapabilities,
+	type AgentTeamsChangedPayload,
 	AppError,
+	type CreateAgentTeamRpcParams,
+	type CreateAgentTeamRpcResult,
 	type CreateSessionWorktreeOptions,
 	createErrorDetail,
 	type DiscoverSessionsRpcResult,
@@ -28,6 +31,7 @@ import {
 	type SessionsChangedPayload,
 	type StopReason,
 	sanitizeWorktreeBranchForPath,
+	type TeamSourceRef,
 } from "@mobvibe/shared";
 import type { AcpBackendConfig, CliConfig } from "../config.js";
 import type { CliCryptoService } from "../e2ee/crypto-service.js";
@@ -37,6 +41,10 @@ import {
 	resolveGitProjectContext,
 } from "../lib/git-utils.js";
 import { logger } from "../lib/logger.js";
+import { AgentTeamStore } from "../team/agent-team-store.js";
+import { buildTeamMcpSessionSelection } from "../team/team-capability.js";
+import { TeamRuntime } from "../team/team-runtime.js";
+import type { SpawnMemberResult } from "../team/team-tool-handlers.js";
 import {
 	consolidateEventsForRead,
 	isStubPayload,
@@ -81,6 +89,13 @@ type SessionRecord = {
 	worktreeBranch?: string;
 	/** Stable workspace/project root for grouping and navigation */
 	workspaceRootCwd?: string;
+};
+
+type SessionExecutionContext = {
+	cwd?: string;
+	workspaceRootCwd?: string;
+	worktreeSourceCwd?: string;
+	worktreeBranch?: string;
 };
 
 type PermissionRequestRecord = {
@@ -219,6 +234,19 @@ const isValidWorkspacePath = async (cwd: string): Promise<boolean> => {
 	}
 };
 
+const toTeamCreateErrorDetail = (error: unknown) => {
+	if (error instanceof AppError) {
+		return error.detail;
+	}
+	return createErrorDetail({
+		code: "INTERNAL_ERROR",
+		message:
+			error instanceof Error ? error.message : "Agent Team create failed",
+		retryable: true,
+		scope: "session",
+	});
+};
+
 export class SessionManager {
 	private sessions = new Map<string, SessionRecord>();
 	private discoveredSessions = new Map<string, AcpSessionInfo>();
@@ -230,7 +258,10 @@ export class SessionManager {
 	private readonly sessionAttachedEmitter = new EventEmitter();
 	private readonly sessionDetachedEmitter = new EventEmitter();
 	private readonly sessionEventEmitter = new EventEmitter();
+	private readonly agentTeamChangedEmitter = new EventEmitter();
 	private readonly walStore: WalStore;
+	private readonly agentTeamStore: AgentTeamStore;
+	private readonly teamRuntime: TeamRuntime;
 	private readonly cryptoService?: CliCryptoService;
 	/** Per-backend idle connections (initialized but no session bound) */
 	private idleConnections = new Map<string, AcpConnection>();
@@ -246,6 +277,19 @@ export class SessionManager {
 			config.acpBackends.map((backend) => [backend.id, backend]),
 		);
 		this.walStore = new WalStore(config.walDbPath);
+		this.agentTeamStore = new AgentTeamStore(config.walDbPath);
+		this.teamRuntime = new TeamRuntime({
+			store: this.agentTeamStore,
+			sessionManager: this,
+			onAgentTeamChanged: (team) => {
+				this.emitAgentTeamChanged({
+					added: [],
+					updated: [team],
+					removed: [],
+					machineId: team.machineId,
+				});
+			},
+		});
 		this.cryptoService = cryptoService;
 	}
 
@@ -482,6 +526,13 @@ export class SessionManager {
 		};
 	}
 
+	onAgentTeamChanged(listener: (payload: AgentTeamsChangedPayload) => void) {
+		this.agentTeamChangedEmitter.on("changed", listener);
+		return () => {
+			this.agentTeamChangedEmitter.off("changed", listener);
+		};
+	}
+
 	/**
 	 * Query session events from the WAL.
 	 */
@@ -598,6 +649,61 @@ export class SessionManager {
 			updated: [summary],
 			removed: [],
 		});
+		const teamMember = this.findTeamMemberBySessionId(sessionId);
+		if (teamMember && teamMember.role !== "leader") {
+			void this.teamRuntime.onMemberTurnCompleted(
+				teamMember.agentTeamId,
+				teamMember.memberId,
+			);
+		}
+	}
+
+	async injectTeamMailboxPrompt(input: {
+		agentTeamId: string;
+		memberId: string;
+		sessionId: string;
+		text: string;
+	}): Promise<TeamSourceRef> {
+		const record = this.sessions.get(input.sessionId);
+		if (!record) {
+			throw new AppError(
+				createErrorDetail({
+					code: "SESSION_NOT_FOUND",
+					message: "Session not found for team mailbox injection",
+					retryable: true,
+					scope: "session",
+				}),
+				404,
+			);
+		}
+		await record.connection.prompt(input.sessionId, [
+			{ type: "text", text: input.text },
+		]);
+		record.updatedAt = new Date();
+		const event = this.writeAndEmitEvent(
+			input.sessionId,
+			record.revision,
+			"user_message",
+			{
+				source: "mobvibe_team_mailbox",
+				agentTeamId: input.agentTeamId,
+				memberId: input.memberId,
+				text: input.text,
+			},
+		);
+		this.emitSessionsChanged({
+			added: [],
+			updated: [this.buildSummary(record)],
+			removed: [],
+		});
+		return {
+			type: "session_event",
+			agentTeamId: input.agentTeamId,
+			memberId: input.memberId,
+			sessionId: input.sessionId,
+			revision: event.revision,
+			seq: event.seq,
+		};
 	}
 
 	/**
@@ -653,6 +759,10 @@ export class SessionManager {
 
 	private emitSessionsChanged(payload: SessionsChangedPayload) {
 		this.sessionsChangedEmitter.emit("changed", payload);
+	}
+
+	private emitAgentTeamChanged(payload: AgentTeamsChangedPayload) {
+		this.agentTeamChangedEmitter.emit("changed", payload);
 	}
 
 	private emitSessionAttached(sessionId: string, force = false) {
@@ -764,6 +874,87 @@ export class SessionManager {
 		return backend;
 	}
 
+	private async resolveSessionExecutionContext(options: {
+		cwd?: string;
+		worktree?: CreateSessionWorktreeOptions;
+		executionContext?: SessionExecutionContext;
+	}): Promise<SessionExecutionContext> {
+		if (options.executionContext) {
+			return options.executionContext;
+		}
+		if (!options.worktree) {
+			if (!options.cwd) return {};
+			const projectContext = await resolveGitProjectContext(options.cwd);
+			return {
+				cwd: options.cwd,
+				workspaceRootCwd: projectContext.repoRoot ?? options.cwd,
+			};
+		}
+
+		const repoDir = options.worktree.sourceCwd;
+		if (!(await isGitRepo(repoDir))) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: `Not a git repository: ${repoDir}`,
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+
+		const branch = resolveWorktreeBranchName(options.worktree.branch);
+		const sanitizedBranch = sanitizeWorktreeBranchForPath(branch);
+		const repoName = path.basename(repoDir);
+		const targetPath = path.join(
+			this.config.worktreeBaseDir,
+			repoName,
+			sanitizedBranch,
+		);
+
+		logger.info(
+			{
+				repoDir,
+				branch,
+				baseBranch: options.worktree.baseBranch,
+				targetPath,
+			},
+			"creating_git_worktree",
+		);
+
+		try {
+			const result = await createGitWorktree(repoDir, {
+				branch,
+				targetPath,
+				baseBranch: options.worktree.baseBranch,
+			});
+			return {
+				cwd: resolveWorktreeExecutionCwd(
+					result.path,
+					options.worktree.relativeCwd,
+				),
+				workspaceRootCwd: repoDir,
+				worktreeSourceCwd: repoDir,
+				worktreeBranch: branch,
+			};
+		} catch (error) {
+			if (error instanceof AppError) {
+				throw error;
+			}
+			const message = error instanceof Error ? error.message : String(error);
+			throw new AppError(
+				createErrorDetail({
+					code: "GIT_WORKTREE_FAILED",
+					message: `Failed to create worktree: ${message}`,
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+	}
+
 	async createSession(options: {
 		cwd?: string;
 		title?: string;
@@ -771,79 +962,11 @@ export class SessionManager {
 		worktree?: CreateSessionWorktreeOptions;
 	}): Promise<SessionSummary> {
 		const backend = this.resolveBackend(options.backendId);
-
-		// Handle worktree creation before acquiring connection
-		let effectiveCwd = options.cwd;
-		let worktreeSourceCwd: string | undefined;
-		let worktreeBranch: string | undefined;
-		let workspaceRootCwd: string | undefined;
-
-		if (options.worktree) {
-			const repoDir = options.worktree.sourceCwd;
-			if (!(await isGitRepo(repoDir))) {
-				throw new AppError(
-					createErrorDetail({
-						code: "REQUEST_VALIDATION_FAILED",
-						message: `Not a git repository: ${repoDir}`,
-						retryable: false,
-						scope: "request",
-					}),
-					400,
-				);
-			}
-
-			const branch = resolveWorktreeBranchName(options.worktree.branch);
-			const sanitizedBranch = sanitizeWorktreeBranchForPath(branch);
-			const repoName = path.basename(repoDir);
-			const targetPath = path.join(
-				this.config.worktreeBaseDir,
-				repoName,
-				sanitizedBranch,
-			);
-
-			logger.info(
-				{
-					repoDir,
-					branch,
-					baseBranch: options.worktree.baseBranch,
-					targetPath,
-				},
-				"creating_git_worktree",
-			);
-
-			try {
-				const result = await createGitWorktree(repoDir, {
-					branch,
-					targetPath,
-					baseBranch: options.worktree.baseBranch,
-				});
-				effectiveCwd = resolveWorktreeExecutionCwd(
-					result.path,
-					options.worktree.relativeCwd,
-				);
-			} catch (error) {
-				if (error instanceof AppError) {
-					throw error;
-				}
-				const message = error instanceof Error ? error.message : String(error);
-				throw new AppError(
-					createErrorDetail({
-						code: "GIT_WORKTREE_FAILED",
-						message: `Failed to create worktree: ${message}`,
-						retryable: false,
-						scope: "request",
-					}),
-					400,
-				);
-			}
-
-			worktreeSourceCwd = repoDir;
-			worktreeBranch = branch;
-			workspaceRootCwd = repoDir;
-		} else if (options.cwd) {
-			const projectContext = await resolveGitProjectContext(options.cwd);
-			workspaceRootCwd = projectContext.repoRoot ?? options.cwd;
-		}
+		const executionContext = await this.resolveSessionExecutionContext(options);
+		const effectiveCwd = executionContext.cwd;
+		const worktreeSourceCwd = executionContext.worktreeSourceCwd;
+		const worktreeBranch = executionContext.worktreeBranch;
+		const workspaceRootCwd = executionContext.workspaceRootCwd;
 
 		const connection = await this.acquireConnection(backend);
 		try {
@@ -966,6 +1089,391 @@ export class SessionManager {
 			}
 			throw error;
 		}
+	}
+
+	async createTeamSession(options: {
+		cwd?: string;
+		title?: string;
+		backendId: string;
+		agentTeamId: string;
+		memberId: string;
+		worktree?: CreateSessionWorktreeOptions;
+		executionContext?: SessionExecutionContext;
+	}): Promise<SessionSummary> {
+		const backend = this.resolveBackend(options.backendId);
+		const executionContext = await this.resolveSessionExecutionContext(options);
+		const effectiveCwd = executionContext.cwd;
+		const workspaceRootCwd = executionContext.workspaceRootCwd;
+		const worktreeSourceCwd = executionContext.worktreeSourceCwd;
+		const worktreeBranch = executionContext.worktreeBranch;
+		const connection = await this.acquireConnection(backend);
+
+		try {
+			const selection = buildTeamMcpSessionSelection({
+				capabilities: connection.getSessionCapabilities(),
+				agentTeamId: options.agentTeamId,
+				memberId: options.memberId,
+			});
+			const session = await connection.createSession({
+				cwd: effectiveCwd,
+				teamMcpDeclaration: selection.declaration,
+				teamMcpTransport: selection.transport,
+				teamMcpHandlers: this.teamRuntime.mcpRouter,
+			});
+			connection.setPermissionHandler((params) =>
+				this.handlePermissionRequest(session.sessionId, params),
+			);
+
+			const now = new Date();
+			const agentInfo = connection.getAgentInfo();
+			const { modelId, modelName, availableModels } = resolveModelState(
+				session.models,
+			);
+			const { modeId, modeName, availableModes } = resolveModeState(
+				session.modes,
+			);
+			const hasExplicitTitle = !!options.title;
+			const sessionTitle = options.title ?? `Session ${this.sessions.size + 1}`;
+			const { revision } = this.walStore.ensureSession({
+				sessionId: session.sessionId,
+				machineId: this.config.machineId,
+				backendId: backend.id,
+				cwd: effectiveCwd,
+				title: sessionTitle,
+				isTitlePinned: hasExplicitTitle,
+			});
+
+			if (this.cryptoService) {
+				this.cryptoService.initSessionDek(session.sessionId);
+			}
+
+			const record: SessionRecord = {
+				sessionId: session.sessionId,
+				title: sessionTitle,
+				backendId: backend.id,
+				backendLabel: backend.label,
+				connection,
+				createdAt: now,
+				updatedAt: now,
+				cwd: effectiveCwd,
+				workspaceRootCwd,
+				worktreeSourceCwd,
+				worktreeBranch,
+				agentName: agentInfo?.title ?? agentInfo?.name,
+				modelId,
+				modelName,
+				modeId,
+				modeName,
+				availableModes,
+				availableModels,
+				availableCommands: undefined,
+				revision,
+				isTitlePinned: hasExplicitTitle,
+			};
+			record.unsubscribe = connection.onSessionUpdate(
+				(notification: SessionNotification) => {
+					record.updatedAt = new Date();
+					this.writeSessionUpdateToWal(record, notification);
+					this.applySessionUpdateToRecord(record, notification);
+				},
+			);
+			record.unsubscribeTerminal = connection.onTerminalOutput((event) => {
+				this.writeAndEmitEvent(
+					record.sessionId,
+					record.revision,
+					"terminal_output",
+					event,
+				);
+			});
+			connection.onStatusChange((status) => {
+				if (status.error) {
+					this.writeAndEmitEvent(
+						record.sessionId,
+						record.revision,
+						"session_error",
+						{
+							error: status.error,
+						},
+					);
+					this.emitSessionDetached(session.sessionId, "agent_exit");
+				}
+			});
+			this.agentTeamStore.updateTeamMemberRuntime({
+				agentTeamId: options.agentTeamId,
+				memberId: options.memberId,
+				sessionId: session.sessionId,
+				lifecycle: "running",
+				worktreeSourceCwd,
+				worktreeBranch,
+			});
+			this.sessions.set(session.sessionId, record);
+			const summary = this.buildSummary(record);
+			this.emitSessionsChanged({ added: [summary], updated: [], removed: [] });
+			this.emitSessionAttached(session.sessionId);
+			return summary;
+		} catch (error) {
+			await connection.disconnect();
+			throw error;
+		}
+	}
+
+	async createAgentTeamRun(
+		params: CreateAgentTeamRpcParams,
+	): Promise<CreateAgentTeamRpcResult> {
+		const created = this.agentTeamStore.createAgentTeam(params);
+		const { agentTeamId, leaderMemberId } = created.team;
+		this.agentTeamStore.updateTeamRuntimeState({
+			agentTeamId,
+			lifecycle: "starting",
+		});
+		this.agentTeamStore.updateTeamMemberRuntime({
+			agentTeamId,
+			memberId: leaderMemberId,
+			lifecycle: "creating_session",
+			health: "healthy",
+		});
+		this.emitCurrentAgentTeam(agentTeamId, "updated");
+
+		try {
+			const leaderSession = await this.createTeamSession({
+				backendId: params.backendId,
+				cwd: params.workspaceRootCwd,
+				title: params.title,
+				agentTeamId,
+				memberId: leaderMemberId,
+				worktree: params.worktree,
+			});
+			await this.waitForTeamToolsReady(agentTeamId, leaderMemberId);
+			this.agentTeamStore.updateTeamRuntimeState({
+				agentTeamId,
+				lifecycle: "running",
+			});
+			this.agentTeamStore.updateTeamMemberRuntime({
+				agentTeamId,
+				memberId: leaderMemberId,
+				sessionId: leaderSession.sessionId,
+				lifecycle: "running",
+				health: "healthy",
+				worktreeSourceCwd: leaderSession.worktreeSourceCwd,
+				worktreeBranch: leaderSession.worktreeBranch,
+			});
+
+			const team = this.requireAgentTeam(agentTeamId);
+			this.emitAgentTeamChanged({
+				added: [],
+				updated: [team],
+				removed: [],
+				machineId: team.machineId,
+			});
+			return { team, leaderSession };
+		} catch (error) {
+			const detail = toTeamCreateErrorDetail(error);
+			this.agentTeamStore.updateTeamRuntimeState({
+				agentTeamId,
+				lifecycle: "failed",
+			});
+			this.agentTeamStore.updateTeamMemberRuntime({
+				agentTeamId,
+				memberId: leaderMemberId,
+				lifecycle: "failed",
+				health: "error",
+				error: detail,
+			});
+			this.emitCurrentAgentTeam(agentTeamId, "updated");
+			throw error;
+		}
+	}
+
+	async spawnAgentTeamMember(input: {
+		agentTeamId: string;
+		requestedByMemberId: string;
+		name?: string;
+		backendId?: string;
+	}): Promise<SpawnMemberResult> {
+		const members = this.agentTeamStore.listTeamMembers(input.agentTeamId);
+		const leader = members.find((member) => member.role === "leader");
+		if (!leader) {
+			return {
+				ok: false,
+				error: createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Agent Team leader member not found",
+					retryable: false,
+					scope: "request",
+				}),
+			};
+		}
+		const backendId = input.backendId ?? leader.backend_id;
+		try {
+			this.resolveBackend(backendId);
+		} catch (error) {
+			return {
+				ok: false,
+				error:
+					error instanceof AppError
+						? error.detail
+						: createErrorDetail({
+								code: "REQUEST_VALIDATION_FAILED",
+								message: "Invalid backend ID",
+								retryable: false,
+								scope: "request",
+							}),
+			};
+		}
+		if (!leader.session_id) {
+			return {
+				ok: false,
+				error: createErrorDetail({
+					code: "SESSION_NOT_FOUND",
+					message: "Leader session is not available for member spawn",
+					retryable: true,
+					scope: "session",
+				}),
+			};
+		}
+		const leaderSession = this.sessions.get(leader.session_id);
+		if (!leaderSession) {
+			return {
+				ok: false,
+				error: createErrorDetail({
+					code: "SESSION_NOT_FOUND",
+					message: "Leader ordinary session is not active",
+					retryable: true,
+					scope: "session",
+				}),
+			};
+		}
+
+		const memberName = input.name ?? `Member ${members.length}`;
+		const { memberId } = this.agentTeamStore.addTeamMember({
+			agentTeamId: input.agentTeamId,
+			backendId,
+			name: memberName,
+			role: "member",
+		});
+		this.agentTeamStore.updateTeamMemberRuntime({
+			agentTeamId: input.agentTeamId,
+			memberId,
+			lifecycle: "creating_session",
+			health: "healthy",
+		});
+		this.emitCurrentAgentTeam(input.agentTeamId, "updated");
+
+		try {
+			const session = await this.createTeamSession({
+				backendId,
+				title: memberName,
+				agentTeamId: input.agentTeamId,
+				memberId,
+				executionContext: {
+					cwd: leaderSession.cwd,
+					workspaceRootCwd: leaderSession.workspaceRootCwd,
+					worktreeSourceCwd: leaderSession.worktreeSourceCwd,
+					worktreeBranch: leaderSession.worktreeBranch,
+				},
+			});
+			await this.waitForTeamToolsReady(input.agentTeamId, memberId);
+			return {
+				ok: true,
+				memberId,
+				sessionId: session.sessionId,
+				backendId,
+				name: memberName,
+				requestedByMemberId: input.requestedByMemberId,
+			};
+		} catch (error) {
+			const detail = toTeamCreateErrorDetail(error);
+			this.agentTeamStore.updateTeamMemberRuntime({
+				agentTeamId: input.agentTeamId,
+				memberId,
+				lifecycle: "failed",
+				health: "error",
+				error: detail,
+			});
+			this.emitCurrentAgentTeam(input.agentTeamId, "updated");
+			return { ok: false, memberId, error: detail };
+		}
+	}
+
+	private async waitForTeamToolsReady(
+		agentTeamId: string,
+		memberId: string,
+	): Promise<void> {
+		const timeoutMs = 5_000;
+		const startedAt = Date.now();
+		while (Date.now() - startedAt < timeoutMs) {
+			const team = this.requireAgentTeam(agentTeamId);
+			const member = team.members.find(
+				(candidate) => candidate.memberId === memberId,
+			);
+			if (member?.mcp?.phase === "tools_ready") {
+				return;
+			}
+			if (member?.mcp?.phase === "degraded") {
+				throw new AppError(
+					member.mcp.error ??
+						createErrorDetail({
+							code: "CAPABILITY_NOT_SUPPORTED",
+							message: "Team MCP tools are degraded",
+							retryable: true,
+							scope: "session",
+						}),
+					409,
+				);
+			}
+			await new Promise((resolve) => setTimeout(resolve, 25));
+		}
+		throw new AppError(
+			createErrorDetail({
+				code: "SESSION_NOT_READY",
+				message: "Timed out waiting for Team MCP tools readiness",
+				retryable: true,
+				scope: "session",
+			}),
+			504,
+		);
+	}
+
+	private requireAgentTeam(agentTeamId: string) {
+		const team = this.agentTeamStore.getAgentTeam({ agentTeamId }).team;
+		if (!team) {
+			throw new Error(`Agent Team not found: ${agentTeamId}`);
+		}
+		return team;
+	}
+
+	private emitCurrentAgentTeam(
+		agentTeamId: string,
+		mode: "added" | "updated",
+	): void {
+		const team = this.requireAgentTeam(agentTeamId);
+		this.emitAgentTeamChanged({
+			added: mode === "added" ? [team] : [],
+			updated: mode === "updated" ? [team] : [],
+			removed: [],
+			machineId: team.machineId,
+		});
+	}
+
+	private findTeamMemberBySessionId(sessionId: string):
+		| {
+				agentTeamId: string;
+				memberId: string;
+				role: "leader" | "member";
+		  }
+		| undefined {
+		for (const team of this.agentTeamStore.listAgentTeams().teams) {
+			const member = team.members.find(
+				(candidate) => candidate.sessionId === sessionId,
+			);
+			if (!member) continue;
+			return {
+				agentTeamId: team.agentTeamId,
+				memberId: member.memberId,
+				role: member.role,
+			};
+		}
+		return undefined;
 	}
 
 	private buildPermissionRequestPayload(
@@ -1259,6 +1767,7 @@ export class SessionManager {
 	 */
 	async shutdown(): Promise<void> {
 		await this.closeAll();
+		this.agentTeamStore.close();
 		this.walStore.close();
 	}
 

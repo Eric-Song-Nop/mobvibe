@@ -14,6 +14,7 @@ import { useMachineDiscovery } from "@/hooks/useMachineDiscovery";
 import { useMachinesQuery } from "@/hooks/useMachinesQuery";
 import { useSessionActivation } from "@/hooks/useSessionActivation";
 import { useSessionHandlers } from "@/hooks/useSessionHandlers";
+import type { SidebarSessionListEntry } from "@/hooks/useSessionList";
 import { useSessionList } from "@/hooks/useSessionList";
 import { useSessionMutations } from "@/hooks/useSessionMutations";
 import { useSessionQueries } from "@/hooks/useSessionQueries";
@@ -26,8 +27,19 @@ import { getBackendCapability, useMachinesStore } from "@/lib/machines-store";
 import { ensureNotificationPermission } from "@/lib/notifications";
 import { shouldActivateSessionOnSelect } from "@/lib/session-selection";
 import { getContextLeftPercent } from "@/lib/session-usage";
+import { useTeamStore } from "@/lib/team-store";
 import { useUiStore } from "@/lib/ui-store";
 import { getPathBasename } from "@/lib/ui-utils";
+
+const sidebarEntryContainsSession = (
+	entry: SidebarSessionListEntry,
+	sessionId: string,
+) => {
+	if (entry.kind === "session") {
+		return entry.session.sessionId === sessionId;
+	}
+	return entry.members.some((member) => member.sessionId === sessionId);
+};
 
 export function useMainAppController() {
 	const { t } = useTranslation();
@@ -44,6 +56,15 @@ export function useMainAppController() {
 			lastCreatedCwd: s.lastCreatedCwd,
 		})),
 	);
+	const { activeAgentTeamId, activeAgentTeam } = useTeamStore(
+		useShallow((s) => ({
+			activeAgentTeamId: s.activeAgentTeamId,
+			activeAgentTeam: s.activeAgentTeamId
+				? s.teams[s.activeAgentTeamId]
+				: undefined,
+		})),
+	);
+	const setActiveAgentTeamId = useTeamStore((s) => s.setActiveAgentTeamId);
 
 	// Actions — stable refs, never trigger re-renders
 	const chatActions = useChatStore(
@@ -121,6 +142,8 @@ export function useMainAppController() {
 			setDraftTitle: s.setDraftTitle,
 			setDraftBackendId: s.setDraftBackendId,
 			setDraftCwd: s.setDraftCwd,
+			setCreateDialogMode: s.setCreateDialogMode,
+			setDraftTeamTarget: s.setDraftTeamTarget,
 			resetDraftWorktree: s.resetDraftWorktree,
 			setSelectedWorkspace: s.setSelectedWorkspace,
 		})),
@@ -193,6 +216,7 @@ export function useMainAppController() {
 		selectedWorkspaceCwd,
 		effectiveWorkspaceCwd,
 		sessionList,
+		sidebarSessionList,
 	} = useSessionList({
 		activeSessionId,
 		selectedMachineId,
@@ -282,8 +306,8 @@ export function useMainAppController() {
 			// persisted active session can be cleared before machine selection syncs.
 			return;
 		}
-		const isActiveInList = sessionList.some(
-			(session) => session.sessionId === activeSessionId,
+		const isActiveInList = sidebarSessionList.some((entry) =>
+			sidebarEntryContainsSession(entry, activeSessionId),
 		);
 		if (!isActiveInList) {
 			chatActions.setActiveSessionId(undefined);
@@ -292,7 +316,7 @@ export function useMainAppController() {
 		activeSession,
 		activeSessionId,
 		selectedMachineId,
-		sessionList,
+		sidebarSessionList,
 		chatActions.setActiveSessionId,
 	]);
 
@@ -409,6 +433,7 @@ export function useMainAppController() {
 
 	const handleSelectSession = useCallback(
 		(sessionId: string) => {
+			setActiveAgentTeamId(undefined);
 			const session = useChatStore.getState().sessions[sessionId];
 			if (!session) {
 				chatActions.setActiveSessionId(sessionId);
@@ -422,7 +447,15 @@ export function useMainAppController() {
 
 			chatActions.setActiveSessionId(sessionId);
 		},
-		[activateSession, chatActions.setActiveSessionId],
+		[activateSession, chatActions.setActiveSessionId, setActiveAgentTeamId],
+	);
+
+	const handleSelectAgentTeam = useCallback(
+		(agentTeamId: string) => {
+			setActiveAgentTeamId(agentTeamId);
+			chatActions.setActiveSessionId(undefined);
+		},
+		[chatActions.setActiveSessionId, setActiveAgentTeamId],
 	);
 
 	// --- Derived display state ---
@@ -596,6 +629,8 @@ export function useMainAppController() {
 	return {
 		activeSession,
 		activeSessionId,
+		activeAgentTeam,
+		activeAgentTeamId,
 		availableBackends,
 		backendLabel,
 		chatMessageListRef,
@@ -620,10 +655,13 @@ export function useMainAppController() {
 		handleRenameSubmit,
 		handleScrollToMessage,
 		handleSelectSession,
+		handleSelectAgentTeam,
 		handleSend,
 		handleSyncHistory,
 		isBulkArchiving,
-		isCreatingSession: mutations.createSessionMutation.isPending,
+		isCreatingSession:
+			mutations.createSessionMutation.isPending ||
+			mutations.createAgentTeamRunMutation.isPending,
 		isModeSwitching,
 		isModelSwitching,
 		loadingMessage,
@@ -631,6 +669,7 @@ export function useMainAppController() {
 		plan: activeSession?.plan,
 		selectedMachineId,
 		sessionList,
+		sidebarSessionList,
 		statusMessage,
 		streamError,
 		subdirectoryLabel,

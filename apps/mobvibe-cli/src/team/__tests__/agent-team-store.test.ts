@@ -317,6 +317,101 @@ describe("AgentTeamStore durable metadata", () => {
 		expect(serialized).not.toContain("summaryText");
 		expect(serialized).not.toContain("local summary");
 	});
+
+	test("updates team and member runtime state without leaking forbidden content", () => {
+		const created = store.createAgentTeam({
+			machineId: "machine-1",
+			backendId: "backend-claude",
+			workspaceRootCwd: "/workspace/project",
+			title: "Runtime Team",
+		});
+		const team = created.team;
+		const leaderMemberId = team.leaderMemberId;
+
+		store.updateTeamRuntimeState({
+			agentTeamId: team.agentTeamId,
+			lifecycle: "running",
+		});
+		store.updateTeamMemberRuntime({
+			agentTeamId: team.agentTeamId,
+			memberId: leaderMemberId,
+			sessionId: "leader-session-1",
+			lifecycle: "running",
+			health: "healthy",
+			worktreeSourceCwd: "/workspace/project",
+			worktreeBranch: "agent-team-branch",
+		});
+
+		const projected = store.getAgentTeam({
+			agentTeamId: team.agentTeamId,
+		}).team;
+		const leader = projected?.members[0];
+		const serialized = JSON.stringify(projected);
+
+		expect(projected?.lifecycle).toBe("running");
+		expect(leader).toEqual(
+			expect.objectContaining({
+				memberId: leaderMemberId,
+				sessionId: "leader-session-1",
+				lifecycle: "running",
+				health: "healthy",
+				worktreeSourceCwd: "/workspace/project",
+				worktreeBranch: "agent-team-branch",
+			}),
+		);
+		expect(serialized).not.toContain("body_local_json");
+		expect(serialized).not.toContain("prompt");
+		expect(serialized).not.toContain("providerToken");
+	});
+
+	test("projects failed team and leader runtime state with safe error metadata", () => {
+		const created = store.createAgentTeam({
+			machineId: "machine-1",
+			backendId: "backend-claude",
+			workspaceRootCwd: "/workspace/project",
+			title: "Failed Runtime Team",
+		});
+		const team = created.team;
+
+		store.updateTeamRuntimeState({
+			agentTeamId: team.agentTeamId,
+			lifecycle: "failed",
+		});
+		store.updateTeamMemberRuntime({
+			agentTeamId: team.agentTeamId,
+			memberId: team.leaderMemberId,
+			lifecycle: "failed",
+			health: "error",
+			error: {
+				code: "TEAM_CREATE_FAILED",
+				message: "Leader session failed before MCP readiness",
+				retryable: false,
+				scope: "session",
+			},
+		});
+
+		const projected = store.getAgentTeam({
+			agentTeamId: team.agentTeamId,
+		}).team;
+		const leader = projected?.members[0];
+		const serialized = JSON.stringify(projected);
+
+		expect(projected?.lifecycle).toBe("failed");
+		expect(leader).toEqual(
+			expect.objectContaining({
+				memberId: team.leaderMemberId,
+				lifecycle: "failed",
+				health: "error",
+				error: expect.objectContaining({
+					code: "TEAM_CREATE_FAILED",
+					message: "Leader session failed before MCP readiness",
+				}),
+			}),
+		);
+		expect(serialized).not.toContain("body_local_json");
+		expect(serialized).not.toContain("prompt");
+		expect(serialized).not.toContain("providerToken");
+	});
 });
 
 describe("Agent Team content boundary", () => {

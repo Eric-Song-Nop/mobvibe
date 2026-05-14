@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
+import type { AgentSessionCapabilities } from "@mobvibe/shared";
 import type { CliConfig } from "../../config.js";
+import type { AgentTeamStore } from "../../team/agent-team-store.js";
+import type { TeamRuntime } from "../../team/team-runtime.js";
 import type { AcpConnection } from "../acp-connection.js";
 
 mock.module("node:fs/promises", () => ({
@@ -58,6 +61,11 @@ mock.module("../../lib/git-utils.js", () => ({
 // Dynamic import so that mock.module calls above are registered first
 const { SessionManager } = await import("../session-manager.js");
 
+type SessionManagerTeamInternals = {
+	agentTeamStore: AgentTeamStore;
+	teamRuntime: TeamRuntime;
+};
+
 /**
  * Captured callback from `onSessionUpdate`.
  * Allows tests to trigger session update notifications.
@@ -88,10 +96,12 @@ const createMockConnection = () => ({
 		name: "claude-code",
 		title: "Claude Code",
 	})),
-	getSessionCapabilities: mock(() => ({
-		list: true,
-		load: true,
-	})),
+	getSessionCapabilities: mock(
+		(): AgentSessionCapabilities => ({
+			list: true,
+			load: true,
+		}),
+	),
 	supportsSessionList: mock(() => true),
 	supportsSessionLoad: mock(() => true),
 	listSessions: mock(() =>
@@ -118,6 +128,7 @@ const createMockConnection = () => ({
 			models: null,
 		}),
 	),
+	prompt: mock(() => Promise.resolve({ stopReason: "end_turn" })),
 	setPermissionHandler: mock(() => {}),
 	onSessionUpdate: mock((cb: (n: SessionNotification) => void) => {
 		sessionUpdateCallback = cb;
@@ -323,6 +334,248 @@ describe("SessionManager", () => {
 	});
 
 	describe("listSessions", () => {
+		it("rejects unsupported team MCP capability before creating a team session", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValueOnce({
+				list: true,
+				load: true,
+				mcp: { acp: false, stdio: false, perSessionBridge: false },
+			});
+
+			await expect(
+				sessionManager.createTeamSession({
+					cwd: "/home/user/project",
+					backendId: "backend-1",
+					agentTeamId: "team-1",
+					memberId: "member-1",
+				}),
+			).rejects.toMatchObject({
+				status: 409,
+				detail: expect.objectContaining({
+					code: "CAPABILITY_NOT_SUPPORTED",
+				}),
+			});
+			expect(mockConnection.createSession).not.toHaveBeenCalled();
+		});
+
+		it("creates a team session with exactly one mobvibe-team MCP declaration and router callbacks", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValueOnce({
+				list: true,
+				load: true,
+				mcp: { acp: true },
+			});
+
+			await sessionManager.createTeamSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+				agentTeamId: "team-1",
+				memberId: "member-1",
+			});
+
+			expect(mockConnection.createSession).toHaveBeenCalledWith(
+				expect.objectContaining({
+					cwd: "/home/user/project",
+					teamMcpDeclaration: {
+						type: "acp",
+						name: "mobvibe-team",
+						id: "mobvibe-team:team-1:member-1",
+					},
+					teamMcpTransport: "acp",
+					teamMcpHandlers: expect.objectContaining({
+						handleConnect: expect.any(Function),
+						handleListTools: expect.any(Function),
+						handleToolCall: expect.any(Function),
+						handleDisconnect: expect.any(Function),
+					}),
+				}),
+			);
+		});
+
+		it("creates a leader team session in a shared worktree with source workspace metadata", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValueOnce({
+				list: true,
+				load: true,
+				mcp: { acp: true },
+			});
+			mockCreateGitWorktree.mockResolvedValueOnce({
+				path: "/tmp/mobvibe-test/worktrees/project/team-branch",
+				branch: "team-branch",
+			});
+
+			const created = await sessionManager.createTeamSession({
+				backendId: "backend-1",
+				agentTeamId: "team-1",
+				memberId: "leader-1",
+				worktree: {
+					sourceCwd: "/home/user/project",
+					branch: "team-branch",
+					relativeCwd: "apps/webui",
+				},
+			});
+
+			expect(mockCreateGitWorktree).toHaveBeenCalledTimes(1);
+			expect(mockConnection.createSession).toHaveBeenCalledWith(
+				expect.objectContaining({
+					cwd: "/tmp/mobvibe-test/worktrees/project/team-branch/apps/webui",
+				}),
+			);
+			expect(created.cwd).toBe(
+				"/tmp/mobvibe-test/worktrees/project/team-branch/apps/webui",
+			);
+			expect(created.workspaceRootCwd).toBe("/home/user/project");
+			expect(created.worktreeSourceCwd).toBe("/home/user/project");
+			expect(created.worktreeBranch).toBe("team-branch");
+		});
+
+		it("creates a member team session by reusing the leader execution context", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValueOnce({
+				list: true,
+				load: true,
+				mcp: { acp: true },
+			});
+
+			const created = await sessionManager.createTeamSession({
+				backendId: "backend-1",
+				agentTeamId: "team-1",
+				memberId: "member-1",
+				executionContext: {
+					cwd: "/tmp/mobvibe-test/worktrees/project/team-branch/apps/webui",
+					workspaceRootCwd: "/home/user/project",
+					worktreeSourceCwd: "/home/user/project",
+					worktreeBranch: "team-branch",
+				},
+			});
+
+			expect(mockCreateGitWorktree).not.toHaveBeenCalled();
+			expect(mockConnection.createSession).toHaveBeenCalledWith(
+				expect.objectContaining({
+					cwd: "/tmp/mobvibe-test/worktrees/project/team-branch/apps/webui",
+				}),
+			);
+			expect(created.cwd).toBe(
+				"/tmp/mobvibe-test/worktrees/project/team-branch/apps/webui",
+			);
+			expect(created.workspaceRootCwd).toBe("/home/user/project");
+			expect(created.worktreeSourceCwd).toBe("/home/user/project");
+			expect(created.worktreeBranch).toBe("team-branch");
+		});
+
+		it("persists the team member session binding so mailbox wake can inject messages", async () => {
+			const internals =
+				sessionManager as unknown as SessionManagerTeamInternals;
+			const createdTeam = internals.agentTeamStore.createAgentTeam({
+				machineId: mockConfig.machineId,
+				workspaceRootCwd: "/home/user/project",
+				backendId: "backend-1",
+				title: "Review Team",
+				leaderName: "Leader",
+			});
+			const agentTeamId = createdTeam.team.agentTeamId;
+			const workerMemberId = internals.agentTeamStore.addTeamMember({
+				agentTeamId,
+				backendId: "backend-1",
+				name: "Worker",
+				role: "member",
+			}).memberId;
+			mockConnection.getSessionCapabilities.mockReturnValueOnce({
+				list: true,
+				load: true,
+				mcp: { acp: true },
+			});
+
+			await sessionManager.createTeamSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+				agentTeamId,
+				memberId: workerMemberId,
+			});
+
+			const worker = internals.agentTeamStore
+				.listTeamMembers(agentTeamId)
+				.find((member) => member.member_id === workerMemberId);
+			expect(worker?.session_id).toBe("new-session-1");
+			expect(worker?.lifecycle).toBe("running");
+
+			internals.agentTeamStore.createMailboxMessages({
+				agentTeamId,
+				fromMemberId: createdTeam.team.leaderMemberId,
+				recipients: [{ memberId: workerMemberId, name: "Worker" }],
+				body: { message: "please review", summary: "review" },
+			});
+			await internals.teamRuntime.wakeMember(agentTeamId, workerMemberId);
+
+			const promptCalls = (
+				mockConnection.prompt as unknown as {
+					mock: {
+						calls: Array<[string, Array<{ type: string; text: string }>?]>;
+					};
+				}
+			).mock.calls;
+			expect(promptCalls).toHaveLength(1);
+			expect(promptCalls[0]?.[0]).toBe("new-session-1");
+			expect(promptCalls[0]?.[1]?.[0]?.text).toContain("please review");
+		});
+
+		it("rejects bridge-only team sessions until stdio bridge is executable", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValueOnce({
+				list: true,
+				load: true,
+				mcp: { stdio: true, perSessionBridge: true },
+			});
+
+			await expect(
+				sessionManager.createTeamSession({
+					cwd: "/home/user/project",
+					backendId: "backend-1",
+					agentTeamId: "team-1",
+					memberId: "member-1",
+				}),
+			).rejects.toMatchObject({
+				status: 409,
+				detail: expect.objectContaining({
+					code: "CAPABILITY_NOT_SUPPORTED",
+				}),
+			});
+			expect(mockConnection.createSession).not.toHaveBeenCalled();
+		});
+
+		it("keeps ordinary ACP permission request handling unchanged", async () => {
+			const permissionListener = mock(() => {});
+			sessionManager.onPermissionRequest(permissionListener);
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const setPermissionHandlerMock =
+				mockConnection.setPermissionHandler as unknown as {
+					mock: { calls: Array<[unknown?]> };
+				};
+			const handler = setPermissionHandlerMock.mock.calls[0]?.[0] as
+				| ((params: {
+						toolCall?: { toolCallId?: string };
+						options: unknown[];
+				  }) => Promise<unknown>)
+				| undefined;
+			expect(handler).toBeDefined();
+
+			const responsePromise = handler?.({
+				toolCall: { toolCallId: "perm-1" },
+				options: [],
+			});
+
+			expect(permissionListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId: created.sessionId,
+					requestId: "perm-1",
+				}),
+			);
+			sessionManager.resolvePermissionRequest(created.sessionId, "perm-1", {
+				outcome: "cancelled",
+			});
+			await expect(responsePromise).resolves.toEqual({
+				outcome: { outcome: "cancelled" },
+			});
+		});
+
 		it("returns empty array initially", () => {
 			const sessions = sessionManager.listSessions();
 			expect(sessions).toEqual([]);
@@ -745,6 +998,404 @@ describe("SessionManager", () => {
 			});
 			expect(events.events.some((event) => event.kind === "turn_end")).toBe(
 				true,
+			);
+		});
+
+		it("marks non-leader team member completed and emits team projection update", async () => {
+			const expectedTeamTools = [
+				"mobvibe_team_send_message",
+				"mobvibe_team_members",
+				"mobvibe_team_spawn_member",
+				"mobvibe_team_task_create",
+				"mobvibe_team_task_list",
+				"mobvibe_team_task_update",
+			];
+			mockConnection.getSessionCapabilities.mockReturnValue({
+				list: true,
+				load: true,
+				mcp: { acp: true },
+			});
+			let createdCount = 0;
+			mockConnection.createSession.mockImplementation(
+				async (...args: unknown[]) => {
+					createdCount += 1;
+					const params = args[0] as {
+						teamMcpDeclaration?: { id?: string };
+						teamMcpHandlers?: {
+							handleConnect(input: { serverId: string }): unknown;
+							handleListTools(input: {
+								serverId: string;
+								toolNames: string[];
+							}): void;
+						};
+					};
+					const serverId = params.teamMcpDeclaration?.id;
+					if (params.teamMcpHandlers && serverId) {
+						params.teamMcpHandlers.handleConnect({ serverId });
+						params.teamMcpHandlers.handleListTools({
+							serverId,
+							toolNames: expectedTeamTools,
+						});
+					}
+					return {
+						sessionId:
+							createdCount === 1 ? "leader-session-1" : "member-session-1",
+						modes: null,
+						models: null,
+					};
+				},
+			);
+			const created = await sessionManager.createAgentTeamRun({
+				machineId: mockConfig.machineId,
+				backendId: "backend-1",
+				workspaceRootCwd: "/home/user/project",
+			});
+			await sessionManager.spawnAgentTeamMember({
+				agentTeamId: created.team.agentTeamId,
+				requestedByMemberId: created.team.leaderMemberId,
+				name: "Worker",
+			});
+			const teamChanged = mock(() => {});
+			sessionManager.onAgentTeamChanged(teamChanged);
+
+			sessionManager.recordTurnEnd("member-session-1", "end_turn");
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			expect(teamChanged).toHaveBeenCalledWith(
+				expect.objectContaining({
+					updated: [
+						expect.objectContaining({
+							agentTeamId: created.team.agentTeamId,
+							members: expect.arrayContaining([
+								expect.objectContaining({
+									sessionId: "member-session-1",
+									lifecycle: "completed",
+								}),
+							]),
+						}),
+					],
+				}),
+			);
+		});
+	});
+
+	describe("injectTeamMailboxPrompt", () => {
+		it("calls ordinary session prompt and records a session_event source ref", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const eventListener = mock(() => {});
+			sessionManager.onSessionEvent(eventListener);
+
+			const ref = await sessionManager.injectTeamMailboxPrompt({
+				agentTeamId: "team-1",
+				memberId: "member-1",
+				sessionId: created.sessionId,
+				text: "Mobvibe Agent Team mailbox delivery\nhello teammate",
+			});
+
+			expect(mockConnection.prompt).toHaveBeenCalledWith(created.sessionId, [
+				{
+					type: "text",
+					text: "Mobvibe Agent Team mailbox delivery\nhello teammate",
+				},
+			]);
+			expect(ref).toEqual(
+				expect.objectContaining({
+					type: "session_event",
+					agentTeamId: "team-1",
+					memberId: "member-1",
+					sessionId: created.sessionId,
+					revision: 1,
+				}),
+			);
+			if (ref.type !== "session_event") {
+				throw new Error("Expected session_event source ref");
+			}
+			expect(ref.seq).toBeNumber();
+			expect(eventListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId: created.sessionId,
+					kind: "user_message",
+					payload: expect.objectContaining({
+						source: "mobvibe_team_mailbox",
+						agentTeamId: "team-1",
+						memberId: "member-1",
+					}),
+				}),
+			);
+		});
+	});
+
+	describe("createAgentTeamRun", () => {
+		const expectedTeamTools = [
+			"mobvibe_team_send_message",
+			"mobvibe_team_members",
+			"mobvibe_team_spawn_member",
+			"mobvibe_team_task_create",
+			"mobvibe_team_task_list",
+			"mobvibe_team_task_update",
+		];
+
+		it("creates durable team rows, starts the leader session, and waits for MCP tools readiness", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValueOnce({
+				list: true,
+				load: true,
+				mcp: { acp: true },
+			});
+			mockConnection.createSession.mockImplementationOnce(
+				async (...args: unknown[]) => {
+					const params = args[0];
+					const handlers = (
+						params as {
+							teamMcpHandlers?: {
+								handleConnect(input: { serverId: string }): unknown;
+								handleListTools(input: {
+									serverId: string;
+									toolNames: string[];
+								}): void;
+							};
+						}
+					).teamMcpHandlers;
+					const serverId = (params as { teamMcpDeclaration?: { id?: string } })
+						.teamMcpDeclaration?.id;
+					if (!handlers || !serverId) {
+						throw new Error("Expected team MCP handlers");
+					}
+					handlers.handleConnect({ serverId });
+					handlers.handleListTools({ serverId, toolNames: expectedTeamTools });
+					return { sessionId: "leader-session-1", modes: null, models: null };
+				},
+			);
+
+			const result = await sessionManager.createAgentTeamRun({
+				machineId: mockConfig.machineId,
+				backendId: "backend-1",
+				workspaceRootCwd: "/home/user/project",
+				title: "Launch Team",
+				leaderName: "Lead",
+			});
+
+			expect(result.leaderSession?.sessionId).toBe("leader-session-1");
+			expect(result.team.lifecycle).toBe("running");
+			expect(result.team.members[0]).toEqual(
+				expect.objectContaining({
+					role: "leader",
+					name: "Lead",
+					sessionId: "leader-session-1",
+					lifecycle: "running",
+					mcp: expect.objectContaining({ phase: "tools_ready" }),
+				}),
+			);
+		});
+
+		it("leaves failed team and leader projection when leader session creation fails", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValueOnce({
+				list: true,
+				load: true,
+				mcp: { acp: true },
+			});
+			mockConnection.createSession.mockRejectedValueOnce(
+				new Error("agent refused session"),
+			);
+
+			await expect(
+				sessionManager.createAgentTeamRun({
+					machineId: mockConfig.machineId,
+					backendId: "backend-1",
+					workspaceRootCwd: "/home/user/project",
+					title: "Broken Team",
+				}),
+			).rejects.toThrow("agent refused session");
+
+			const internals =
+				sessionManager as unknown as SessionManagerTeamInternals;
+			const [failedTeam] = internals.agentTeamStore.listAgentTeams().teams;
+
+			expect(failedTeam.lifecycle).toBe("failed");
+			expect(failedTeam.members[0]).toEqual(
+				expect.objectContaining({
+					role: "leader",
+					lifecycle: "failed",
+					health: "error",
+					error: expect.objectContaining({
+						code: "INTERNAL_ERROR",
+					}),
+				}),
+			);
+		});
+
+		it("rejects unsupported backend MCP before ACP session creation", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValueOnce({
+				list: true,
+				load: true,
+				mcp: { acp: false, stdio: false, perSessionBridge: false },
+			});
+
+			await expect(
+				sessionManager.createAgentTeamRun({
+					machineId: mockConfig.machineId,
+					backendId: "backend-1",
+					workspaceRootCwd: "/home/user/project",
+					title: "Unsupported Team",
+				}),
+			).rejects.toMatchObject({
+				status: 409,
+				detail: expect.objectContaining({
+					code: "CAPABILITY_NOT_SUPPORTED",
+				}),
+			});
+			expect(mockConnection.createSession).not.toHaveBeenCalled();
+		});
+
+		it("spawns a member ordinary session with leader shared checkout metadata", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValue({
+				list: true,
+				load: true,
+				mcp: { acp: true },
+			});
+			let createdCount = 0;
+			mockConnection.createSession.mockImplementation(
+				async (...args: unknown[]) => {
+					createdCount += 1;
+					const params = args[0] as {
+						cwd?: string;
+						teamMcpDeclaration?: { id?: string };
+						teamMcpHandlers?: {
+							handleConnect(input: { serverId: string }): unknown;
+							handleListTools(input: {
+								serverId: string;
+								toolNames: string[];
+							}): void;
+						};
+					};
+					const serverId = params.teamMcpDeclaration?.id;
+					if (params.teamMcpHandlers && serverId) {
+						params.teamMcpHandlers.handleConnect({ serverId });
+						params.teamMcpHandlers.handleListTools({
+							serverId,
+							toolNames: expectedTeamTools,
+						});
+					}
+					return {
+						sessionId:
+							createdCount === 1 ? "leader-session-1" : "member-session-1",
+						modes: null,
+						models: null,
+					};
+				},
+			);
+
+			const created = await sessionManager.createAgentTeamRun({
+				machineId: mockConfig.machineId,
+				backendId: "backend-1",
+				workspaceRootCwd: "/home/user/project",
+				title: "Shared Checkout Team",
+				worktree: {
+					sourceCwd: "/home/user/project",
+					branch: "team/run",
+					relativeCwd: "packages/cli",
+				},
+			});
+			const result = await sessionManager.spawnAgentTeamMember({
+				agentTeamId: created.team.agentTeamId,
+				requestedByMemberId: created.team.leaderMemberId,
+				name: "Worker",
+			});
+
+			expect(result).toEqual(
+				expect.objectContaining({
+					ok: true,
+					memberId: expect.any(String),
+					sessionId: "member-session-1",
+					backendId: "backend-1",
+				}),
+			);
+			expect(mockCreateGitWorktree).toHaveBeenCalledTimes(1);
+			const memberCreateCall = mockConnection.createSession.mock.calls[1] as
+				| unknown[]
+				| undefined;
+			if (!memberCreateCall) {
+				throw new Error("Expected member createSession call");
+			}
+			expect(memberCreateCall[0]).toEqual(
+				expect.objectContaining({
+					cwd: "/tmp/mobvibe-test/worktrees/project/team-run/packages/cli",
+				}),
+			);
+			const member = sessionManager
+				.listSessions()
+				.find((session) => session.sessionId === "member-session-1");
+			expect(member).toEqual(
+				expect.objectContaining({
+					workspaceRootCwd: "/home/user/project",
+					worktreeSourceCwd: "/home/user/project",
+					worktreeBranch: "team/run",
+				}),
+			);
+		});
+
+		it("leaves a failed member slot when spawned session creation fails", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValue({
+				list: true,
+				load: true,
+				mcp: { acp: true },
+			});
+			mockConnection.createSession
+				.mockImplementationOnce(async (...args: unknown[]) => {
+					const params = args[0] as {
+						teamMcpDeclaration?: { id?: string };
+						teamMcpHandlers?: {
+							handleConnect(input: { serverId: string }): unknown;
+							handleListTools(input: {
+								serverId: string;
+								toolNames: string[];
+							}): void;
+						};
+					};
+					const serverId = params.teamMcpDeclaration?.id;
+					if (params.teamMcpHandlers && serverId) {
+						params.teamMcpHandlers.handleConnect({ serverId });
+						params.teamMcpHandlers.handleListTools({
+							serverId,
+							toolNames: expectedTeamTools,
+						});
+					}
+					return { sessionId: "leader-session-1", modes: null, models: null };
+				})
+				.mockRejectedValueOnce(new Error("member backend refused"));
+
+			const created = await sessionManager.createAgentTeamRun({
+				machineId: mockConfig.machineId,
+				backendId: "backend-1",
+				workspaceRootCwd: "/home/user/project",
+			});
+			const result = await sessionManager.spawnAgentTeamMember({
+				agentTeamId: created.team.agentTeamId,
+				requestedByMemberId: created.team.leaderMemberId,
+				name: "Broken Worker",
+			});
+
+			expect(result).toEqual(
+				expect.objectContaining({
+					ok: false,
+					memberId: expect.any(String),
+					error: expect.objectContaining({ code: "INTERNAL_ERROR" }),
+				}),
+			);
+			const internals =
+				sessionManager as unknown as SessionManagerTeamInternals;
+			const team = internals.agentTeamStore.getAgentTeam({
+				agentTeamId: created.team.agentTeamId,
+			}).team;
+			expect(team?.members).toContainEqual(
+				expect.objectContaining({
+					name: "Broken Worker",
+					lifecycle: "failed",
+					health: "error",
+					error: expect.objectContaining({ code: "INTERNAL_ERROR" }),
+				}),
 			);
 		});
 	});

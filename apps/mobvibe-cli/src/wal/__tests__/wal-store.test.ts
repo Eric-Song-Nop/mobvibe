@@ -467,6 +467,13 @@ describe("WalStore", () => {
 
 			const db = new Database(dbPath);
 			db.exec(`
+				DROP TABLE IF EXISTS agent_team_tool_intents;
+				DROP TABLE IF EXISTS agent_team_mailbox_messages;
+				DROP TABLE IF EXISTS agent_team_tasks;
+				DROP TABLE IF EXISTS agent_team_summary_refs;
+				DROP TABLE IF EXISTS agent_team_mcp_status;
+				DROP TABLE IF EXISTS agent_team_members;
+				DROP TABLE IF EXISTS agent_teams;
 				DROP TABLE IF EXISTS schema_version;
 				CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
 				INSERT INTO schema_version (version) VALUES (5);

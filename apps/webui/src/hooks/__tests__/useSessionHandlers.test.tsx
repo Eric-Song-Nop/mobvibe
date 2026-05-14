@@ -28,6 +28,8 @@ const mockUiStoreState = vi.hoisted(() => ({
 	draftWorktreeBranch: "",
 	draftWorktreeSuggestedBranch: undefined as string | undefined,
 	draftWorktreeBaseBranch: undefined as string | undefined,
+	createDialogMode: "session" as "session" | "agent-team",
+	draftTeamTarget: "",
 	chatDrafts: {} as Record<
 		string,
 		{
@@ -71,6 +73,8 @@ const createMockUiActions = (): UseSessionHandlersParams["uiActions"] => ({
 	setDraftBackendId: vi.fn(),
 	setDraftCwd: vi.fn(),
 	resetDraftWorktree: vi.fn(),
+	setCreateDialogMode: vi.fn(),
+	setDraftTeamTarget: vi.fn(),
 	clearEditingSession: vi.fn(),
 });
 
@@ -85,6 +89,10 @@ const createMockChatActions = (): UseSessionHandlersParams["chatActions"] => ({
 
 const createMockMutations = (): UseSessionHandlersParams["mutations"] => ({
 	createSessionMutation: {
+		mutateAsync: vi.fn(),
+		isPending: false,
+	},
+	createAgentTeamRunMutation: {
 		mutateAsync: vi.fn(),
 		isPending: false,
 	},
@@ -174,6 +182,8 @@ describe("useSessionHandlers — handleOpenCreateDialog", () => {
 		mockUiStoreState.draftWorktreeBranch = "";
 		mockUiStoreState.draftWorktreeSuggestedBranch = undefined;
 		mockUiStoreState.draftWorktreeBaseBranch = undefined;
+		mockUiStoreState.createDialogMode = "session";
+		mockUiStoreState.draftTeamTarget = "";
 		mockUiStoreState.chatDrafts = {};
 		mockUiStoreState.clearChatDraft.mockReset();
 		mockUiStoreState.editingSessionId = undefined;
@@ -329,6 +339,21 @@ describe("useSessionHandlers — handleOpenCreateDialog", () => {
 		expect(uiActions.setDraftCwd).toHaveBeenCalledWith("/projects/bar");
 	});
 
+	it("opens the Agent Team create flow in the selected workspace", () => {
+		const { result } = renderHandlers({
+			lastCreatedCwd: { "machine-1": "/projects/last" },
+			effectiveWorkspaceCwd: "/projects/workspace-a",
+		});
+
+		result.current.handleOpenCreateDialog("agent-team");
+
+		expect(uiActions.setCreateDialogMode).toHaveBeenCalledWith("agent-team");
+		expect(uiActions.setDraftTeamTarget).toHaveBeenCalledWith("");
+		expect(uiActions.setDraftCwd).toHaveBeenCalledWith("/projects/workspace-a");
+		expect(uiActions.resetDraftWorktree).toHaveBeenCalled();
+		expect(uiActions.setCreateDialogOpen).toHaveBeenCalledWith(true);
+	});
+
 	it("prefills the active session cwd for non-worktree subdirectory sessions", () => {
 		const activeSession = createBaseSession({
 			machineId: "machine-1",
@@ -406,7 +431,65 @@ describe("useSessionHandlers — handleCreateSession", () => {
 		mockUiStoreState.draftWorktreeBranch = "feat/live-cwd";
 		mockUiStoreState.draftWorktreeSuggestedBranch = undefined;
 		mockUiStoreState.draftWorktreeBaseBranch = "main";
+		mockUiStoreState.createDialogMode = "session";
+		mockUiStoreState.draftTeamTarget = "";
 		vi.clearAllMocks();
+	});
+
+	it("validates that Agent Team target text is present", async () => {
+		mockUiStoreState.createDialogMode = "agent-team";
+		mockUiStoreState.draftTeamTarget = "   ";
+
+		const { result } = renderHandlers();
+
+		await result.current.handleCreateSession();
+
+		expect(
+			mutations.createAgentTeamRunMutation?.mutateAsync,
+		).not.toHaveBeenCalled();
+		expect(chatActions.setAppError).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				message: "Enter a target before creating an Agent Team",
+				scope: "request",
+			}),
+		);
+	});
+
+	it("builds Agent Team worktree requests with ordinary session parity", async () => {
+		mockUiStoreState.createDialogMode = "agent-team";
+		mockUiStoreState.draftTeamTarget = "Implement the dashboard";
+		vi.mocked(apiModule.fetchGitBranchesForCwd).mockResolvedValue({
+			isGitRepo: true,
+			branches: [],
+			repoRoot: "/projects/repo",
+			relativeCwd: "apps/webui",
+			repoName: "repo",
+			isRepoRoot: false,
+		});
+		vi.mocked(
+			mutations.createAgentTeamRunMutation!.mutateAsync,
+		).mockResolvedValue({});
+
+		const { result } = renderHandlers();
+
+		await result.current.handleCreateSession();
+
+		expect(
+			mutations.createAgentTeamRunMutation?.mutateAsync,
+		).toHaveBeenCalledWith({
+			leaderBackendId: "backend-1",
+			workspaceRootCwd: "/projects/repo",
+			title: "Feature Session",
+			machineId: "machine-1",
+			target: "Implement the dashboard",
+			worktree: {
+				branch: "feat/live-cwd",
+				baseBranch: "main",
+				sourceCwd: "/projects/repo",
+				relativeCwd: "apps/webui",
+			},
+		});
+		expect(uiActions.setCreateDialogOpen).toHaveBeenCalledWith(false);
 	});
 
 	it("refetches git metadata for the live draft cwd when worktree creation is enabled", async () => {

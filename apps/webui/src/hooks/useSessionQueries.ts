@@ -1,17 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import type { AgentSessionCapabilities } from "@/lib/acp";
 import {
 	type AcpBackendSummary,
 	type AcpBackendsResponse,
 	discoverSessions,
 	fetchAcpBackends,
+	fetchAgentTeams,
 	fetchSessions,
+	type ListAgentTeamsRpcResult,
 	type SessionsResponse,
 } from "@/lib/api";
+import { useTeamStore } from "@/lib/team-store";
 
 export interface UseSessionQueriesReturn {
 	sessionsQuery: ReturnType<typeof useQuery<SessionsResponse>>;
 	backendsQuery: ReturnType<typeof useQuery<AcpBackendsResponse>>;
+	agentTeamsQuery: ReturnType<typeof useQuery<ListAgentTeamsRpcResult>>;
 	availableBackends: AcpBackendSummary[];
 	discoverSessionsMutation: ReturnType<typeof useDiscoverSessionsMutation>;
 }
@@ -31,6 +36,7 @@ export type DiscoverSessionsMutationResult = {
 const queryKeys = {
 	sessions: ["sessions"] as const,
 	backends: ["acp-backends"] as const,
+	agentTeams: ["agent-teams"] as const,
 };
 
 const normalizeBackendIds = (
@@ -161,12 +167,25 @@ export function useSessionQueries(): UseSessionQueriesReturn {
 		staleTime: 5 * 60_000,
 	});
 
+	const agentTeamsQuery = useQuery({
+		queryKey: queryKeys.agentTeams,
+		queryFn: () => fetchAgentTeams(),
+		staleTime: Number.POSITIVE_INFINITY,
+	});
+
+	useEffect(() => {
+		if (agentTeamsQuery.data) {
+			useTeamStore.getState().replaceAgentTeams(agentTeamsQuery.data.teams);
+		}
+	}, [agentTeamsQuery.data]);
+
 	const availableBackends = backendsQuery.data?.backends ?? [];
 	const discoverSessionsMutation = useDiscoverSessionsMutation();
 
 	return {
 		sessionsQuery,
 		backendsQuery,
+		agentTeamsQuery,
 		availableBackends,
 		discoverSessionsMutation,
 	};

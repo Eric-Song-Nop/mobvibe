@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type {
+	AgentTeamSummary,
 	CliToGatewayEvents,
 	ContentBlock,
 	EventsAckPayload,
@@ -329,7 +330,7 @@ export class SocketClient extends EventEmitter {
 					},
 					"rpc_agent_team_create",
 				);
-				const result = agentTeamStore.createAgentTeam(request.params);
+				const result = await sessionManager.createAgentTeamRun(request.params);
 				this.sendRpcResponse(request.requestId, result);
 				this.socket.emit("agent-teams:changed", {
 					added: [result.team],
@@ -1422,6 +1423,12 @@ export class SocketClient extends EventEmitter {
 			}
 		});
 
+		sessionManager.onAgentTeamChanged((payload) => {
+			if (this.connected) {
+				this.socket.emit("agent-teams:changed", payload);
+			}
+		});
+
 		sessionManager.onSessionAttached((payload) => {
 			if (this.connected) {
 				this.socket.emit("session:attached", payload);
@@ -1668,6 +1675,15 @@ export class SocketClient extends EventEmitter {
 		this.stopHeartbeat();
 		this.agentTeamStore.close();
 		this.socket.disconnect();
+	}
+
+	emitUpdatedAgentTeamProjection(team: AgentTeamSummary): void {
+		this.socket.emit("agent-teams:changed", {
+			added: [],
+			updated: [team],
+			removed: [],
+			machineId: team.machineId,
+		});
 	}
 
 	isConnected() {

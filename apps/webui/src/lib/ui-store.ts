@@ -57,6 +57,8 @@ export type ChatDraft = {
 	inputContents: ContentBlock[];
 };
 
+export type CreateDialogMode = "session" | "agent-team";
+
 export const createEmptyChatDraft = (): ChatDraft => ({
 	input: "",
 	inputContents: createDefaultContentBlocks(""),
@@ -78,6 +80,8 @@ type UiState = {
 	draftWorktreeBranch: string;
 	draftWorktreeSuggestedBranch?: string;
 	draftWorktreeBaseBranch?: string;
+	createDialogMode: CreateDialogMode;
+	draftTeamTarget: string;
 	chatDrafts: Record<string, ChatDraft>;
 	selectedWorkspaceByMachine: Record<string, string>;
 	sidebarTab: "workspaces" | "sessions";
@@ -99,6 +103,8 @@ type UiState = {
 	setDraftWorktreeBranch: (value: string) => void;
 	setDraftWorktreeSuggestedBranch: (value?: string) => void;
 	setDraftWorktreeBaseBranch: (value?: string) => void;
+	setCreateDialogMode: (value: CreateDialogMode) => void;
+	setDraftTeamTarget: (value: string) => void;
 	resetDraftWorktree: () => void;
 	setChatDraft: (sessionId: string, draft: ChatDraft) => void;
 	clearChatDraft: (sessionId: string) => void;
@@ -124,6 +130,8 @@ export const useUiStore = create<UiState>((set) => ({
 	draftWorktreeBranch: "",
 	draftWorktreeSuggestedBranch: undefined,
 	draftWorktreeBaseBranch: undefined,
+	createDialogMode: "session",
+	draftTeamTarget: "",
 	chatDrafts: {},
 	selectedWorkspaceByMachine: {},
 	sidebarTab: "sessions",
@@ -158,6 +166,8 @@ export const useUiStore = create<UiState>((set) => ({
 		set({ draftWorktreeSuggestedBranch: value }),
 	setDraftWorktreeBaseBranch: (value) =>
 		set({ draftWorktreeBaseBranch: value }),
+	setCreateDialogMode: (value) => set({ createDialogMode: value }),
+	setDraftTeamTarget: (value) => set({ draftTeamTarget: value }),
 	resetDraftWorktree: () =>
 		set({
 			draftWorktreeEnabled: false,

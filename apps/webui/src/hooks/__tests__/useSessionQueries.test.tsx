@@ -1,3 +1,4 @@
+import type { AgentTeamSummary } from "@mobvibe/shared";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -9,7 +10,16 @@ import { useSessionQueries } from "../useSessionQueries";
 vi.mock("@/lib/api", () => ({
 	fetchSessions: vi.fn(),
 	fetchAcpBackends: vi.fn(),
+	fetchAgentTeams: vi.fn(),
 	discoverSessions: vi.fn(),
+}));
+
+const mockReplaceAgentTeams = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/team-store", () => ({
+	useTeamStore: {
+		getState: () => ({ replaceAgentTeams: mockReplaceAgentTeams }),
+	},
 }));
 
 describe("useSessionQueries", () => {
@@ -28,6 +38,42 @@ describe("useSessionQueries", () => {
 			},
 		});
 		vi.clearAllMocks();
+	});
+
+	it("fetches agent teams on startup and replaces the projection store", async () => {
+		const team: AgentTeamSummary = {
+			agentTeamId: "team-1",
+			machineId: "machine-1",
+			title: "Team One",
+			workspaceRootCwd: "/repo",
+			workspaceMode: "shared_workspace",
+			leaderMemberId: "leader-1",
+			lifecycle: "running",
+			members: [],
+			mailboxCounts: { unread: 0, wakePending: 0, wakeFailed: 0 },
+			taskCounts: {
+				todo: 0,
+				inProgress: 0,
+				blocked: 0,
+				completed: 0,
+				failed: 0,
+				cancelled: 0,
+			},
+			sourceRefs: [],
+			summaryRefs: [],
+			createdAt: "2026-05-14T00:00:00.000Z",
+			updatedAt: "2026-05-14T00:00:00.000Z",
+		};
+		vi.mocked(api.fetchSessions).mockResolvedValue({ sessions: [] });
+		vi.mocked(api.fetchAcpBackends).mockResolvedValue({ backends: [] });
+		vi.mocked(api.fetchAgentTeams).mockResolvedValue({ teams: [team] });
+
+		renderHook(() => useSessionQueries(), { wrapper });
+
+		await waitFor(() => {
+			expect(mockReplaceAgentTeams).toHaveBeenCalledWith([team]);
+		});
+		expect(api.fetchAgentTeams).toHaveBeenCalledTimes(1);
 	});
 
 	it("should initialize with loading state", () => {

@@ -24,6 +24,7 @@ import { useTranslation } from "react-i18next";
 import { RegisterMachineDialog } from "@/components/machines/RegisterMachineDialog";
 import { SessionSidebar } from "@/components/session/SessionSidebar";
 import { useMachinesQuery } from "@/hooks/useMachinesQuery";
+import type { SidebarSessionListEntry } from "@/hooks/useSessionList";
 import { useDiscoverSessionsMutation } from "@/hooks/useSessionQueries";
 import type { SessionListEntry } from "@/lib/chat-store";
 import { type Machine, useMachinesStore } from "@/lib/machines-store";
@@ -33,9 +34,12 @@ import { cn } from "@/lib/utils";
 
 export type AppSidebarProps = {
 	sessions: SessionListEntry[];
+	sidebarEntries?: SidebarSessionListEntry[];
 	activeSessionId: string | undefined;
+	activeAgentTeamId?: string;
 	onCreateSession: (mode: "workspace" | "session") => void;
 	onSelectSession: (sessionId: string) => void;
+	onSelectAgentTeam?: (agentTeamId: string) => void;
 	onEditSubmit: () => void;
 	onArchiveSession: (sessionId: string) => void;
 	onArchiveAllSessions: (sessionIds: string[]) => void;
@@ -57,9 +61,12 @@ type ArchiveTarget =
 
 export const AppSidebar = memo(function AppSidebar({
 	sessions,
+	sidebarEntries,
 	activeSessionId,
+	activeAgentTeamId,
 	onCreateSession,
 	onSelectSession,
+	onSelectAgentTeam,
 	onEditSubmit,
 	onArchiveSession,
 	onArchiveAllSessions,
@@ -163,9 +170,12 @@ export const AppSidebar = memo(function AppSidebar({
 			>
 				<SessionSidebar
 					sessions={sessions}
+					sidebarEntries={sidebarEntries}
 					activeSessionId={activeSessionId}
+					activeAgentTeamId={activeAgentTeamId}
 					onCreateSession={handleCreateSessionRequest}
 					onSelectSession={onSelectSession}
+					onSelectAgentTeam={onSelectAgentTeam}
 					onEditSubmit={onEditSubmit}
 					onArchiveSessionRequest={handleArchiveSessionRequest}
 					onArchiveAllSessionsRequest={handleArchiveAllSessionsRequest}
@@ -190,10 +200,16 @@ export const AppSidebar = memo(function AppSidebar({
 						<div className="flex-1 p-4 overflow-hidden flex flex-col min-w-0">
 							<SessionSidebar
 								sessions={sessions}
+								sidebarEntries={sidebarEntries}
 								activeSessionId={activeSessionId}
+								activeAgentTeamId={activeAgentTeamId}
 								onCreateSession={handleCreateSessionRequest}
 								onSelectSession={(sessionId) => {
 									onSelectSession(sessionId);
+									setMobileMenuOpen(false);
+								}}
+								onSelectAgentTeam={(agentTeamId) => {
+									onSelectAgentTeam?.(agentTeamId);
 									setMobileMenuOpen(false);
 								}}
 								onEditSubmit={onEditSubmit}

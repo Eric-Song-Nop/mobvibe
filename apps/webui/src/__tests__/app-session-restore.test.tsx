@@ -78,6 +78,7 @@ vi.mock("@/hooks/useSessionQueries", () => ({
 vi.mock("@/hooks/useSessionMutations", () => ({
 	useSessionMutations: () => ({
 		createSessionMutation: { isPending: false, mutateAsync: vi.fn() },
+		createAgentTeamRunMutation: { isPending: false, mutateAsync: vi.fn() },
 		renameSessionMutation: { mutate: vi.fn() },
 		archiveSessionMutation: { mutateAsync: vi.fn() },
 		bulkArchiveSessionsMutation: { mutateAsync: vi.fn() },
@@ -241,6 +242,12 @@ const mockGatewaySocket = vi.hoisted(() => ({
 		handlers.sessionsChanged = handler;
 		return () => {
 			handlers.sessionsChanged = undefined;
+		};
+	}),
+	onAgentTeamsChanged: vi.fn((handler: (payload: unknown) => void) => {
+		handlers.agentTeamsChanged = handler;
+		return () => {
+			handlers.agentTeamsChanged = undefined;
 		};
 	}),
 	onSessionAttached: vi.fn((handler: (payload: unknown) => void) => {

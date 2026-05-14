@@ -1,4 +1,6 @@
 import type { ErrorDetail } from "./errors.js";
+import type { SessionSummary } from "./session.js";
+import type { CreateSessionWorktreeOptions } from "./socket-events.js";
 
 export type AgentTeamId = string;
 export type TeamMemberId = string;
@@ -169,10 +171,12 @@ export type CreateAgentTeamRpcParams = {
 	title?: string;
 	workspaceMode?: TeamWorkspaceMode;
 	leaderName?: string;
+	worktree?: CreateSessionWorktreeOptions;
 };
 
 export type CreateAgentTeamRpcResult = {
 	team: AgentTeamSummary;
+	leaderSession?: SessionSummary;
 };
 
 export type ListAgentTeamsRpcParams = {

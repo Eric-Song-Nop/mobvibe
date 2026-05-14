@@ -263,8 +263,13 @@ describe("Agent Team API", () => {
 			workspaceRootCwd: "/repo",
 			leaderBackendId: "backend-1",
 			workspaceMode: "per_member_worktree",
-			worktreeSourceCwd: "/repo",
-			worktreeBranch: "team/one",
+			worktree: {
+				sourceCwd: "/repo",
+				branch: "team/one",
+				baseBranch: "main",
+				relativeCwd: "apps/webui",
+			},
+			target: "do not serialize",
 			prompt: "do not serialize",
 			content: "do not serialize",
 			body: "do not serialize",
@@ -290,11 +295,15 @@ describe("Agent Team API", () => {
 			workspaceRootCwd: "/repo",
 			leaderBackendId: "backend-1",
 			workspaceMode: "per_member_worktree",
-			worktreeSourceCwd: "/repo",
-			worktreeBranch: "team/one",
+			worktree: {
+				sourceCwd: "/repo",
+				branch: "team/one",
+				baseBranch: "main",
+				relativeCwd: "apps/webui",
+			},
 		});
 		expect(JSON.stringify(body)).not.toMatch(
-			/prompt|content|body|description|summaryText|agentOutput|providerToken|masterSecret|dek|secret/,
+			/target|prompt|content|body|description|summaryText|agentOutput|providerToken|masterSecret|dek|secret/,
 		);
 	});
 });

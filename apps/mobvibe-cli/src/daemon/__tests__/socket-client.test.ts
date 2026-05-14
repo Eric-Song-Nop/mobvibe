@@ -120,6 +120,14 @@ const createSessionEvent = (
 describe("SocketClient restore semantics", () => {
 	let client: InstanceType<typeof SocketClient>;
 	let sessionEventListener: ((event: SessionEvent) => void) | undefined;
+	let agentTeamChangedListener:
+		| ((payload: {
+				added: AgentTeamSummary[];
+				updated: AgentTeamSummary[];
+				removed: string[];
+				machineId?: string;
+		  }) => void)
+		| undefined;
 	let promptConnection: {
 		prompt: ReturnType<typeof mock>;
 		getSessionCapabilities: ReturnType<typeof mock>;
@@ -134,12 +142,14 @@ describe("SocketClient restore semantics", () => {
 		getSession: ReturnType<typeof mock>;
 		touchSession: ReturnType<typeof mock>;
 		recordTurnEnd: ReturnType<typeof mock>;
+		createAgentTeamRun: ReturnType<typeof mock>;
 		onSessionsChanged: ReturnType<typeof mock>;
 		onSessionAttached: ReturnType<typeof mock>;
 		onSessionDetached: ReturnType<typeof mock>;
 		onPermissionRequest: ReturnType<typeof mock>;
 		onPermissionResult: ReturnType<typeof mock>;
 		onSessionEvent: ReturnType<typeof mock>;
+		onAgentTeamChanged: ReturnType<typeof mock>;
 	};
 	let cryptoService: {
 		authKeyPair: { publicKey: Uint8Array; secretKey: Uint8Array };
@@ -160,6 +170,7 @@ describe("SocketClient restore semantics", () => {
 		agentTeamStoreMock.close.mockClear();
 		socketMock.io.opts.extraHeaders = {};
 		sessionEventListener = undefined;
+		agentTeamChangedListener = undefined;
 		promptConnection = {
 			prompt: mock(() => Promise.resolve({ stopReason: "end_turn" })),
 			getSessionCapabilities: mock(() => ({
@@ -186,6 +197,12 @@ describe("SocketClient restore semantics", () => {
 			})),
 			touchSession: mock(() => {}),
 			recordTurnEnd: mock(() => {}),
+			createAgentTeamRun: mock(() =>
+				Promise.resolve({
+					team: createdTeam,
+					leaderSession: { sessionId: "leader-session-1" },
+				}),
+			),
 			onSessionsChanged: mock(() => () => {}),
 			onSessionAttached: mock(() => () => {}),
 			onSessionDetached: mock(() => () => {}),
@@ -195,6 +212,12 @@ describe("SocketClient restore semantics", () => {
 				sessionEventListener = listener;
 				return () => {
 					sessionEventListener = undefined;
+				};
+			}),
+			onAgentTeamChanged: mock((listener) => {
+				agentTeamChangedListener = listener;
+				return () => {
+					agentTeamChangedListener = undefined;
 				};
 			}),
 		};
@@ -429,7 +452,7 @@ describe("SocketClient restore semantics", () => {
 		expect(socketMock.emit).toHaveBeenCalledWith("session:event", event);
 	});
 
-	test("handles rpc:agent-team:create and emits changed projection", async () => {
+	test("handles rpc:agent-team:create through SessionManager and emits changed projection", async () => {
 		const handler = socketHandlers.get("rpc:agent-team:create");
 		if (!handler) {
 			throw new Error("rpc:agent-team:create handler not registered");
@@ -445,7 +468,7 @@ describe("SocketClient restore semantics", () => {
 			},
 		});
 
-		expect(agentTeamStoreMock.createAgentTeam).toHaveBeenCalledWith({
+		expect(sessionManager.createAgentTeamRun).toHaveBeenCalledWith({
 			machineId: "machine-1",
 			backendId: "backend-1",
 			workspaceRootCwd: "/tmp/project",
@@ -453,7 +476,10 @@ describe("SocketClient restore semantics", () => {
 		});
 		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
 			requestId: "team-create-1",
-			result: { team: createdTeam },
+			result: {
+				team: createdTeam,
+				leaderSession: { sessionId: "leader-session-1" },
+			},
 		});
 		expect(socketMock.emit).toHaveBeenCalledWith("agent-teams:changed", {
 			added: [createdTeam],
@@ -461,6 +487,57 @@ describe("SocketClient restore semantics", () => {
 			removed: [],
 			machineId: "machine-1",
 		});
+	});
+
+	test("relays SessionManager Agent Team changed events", () => {
+		(client as unknown as { connected: boolean }).connected = true;
+		if (!agentTeamChangedListener) {
+			throw new Error("agent team changed listener not registered");
+		}
+
+		agentTeamChangedListener({
+			added: [],
+			updated: [createdTeam],
+			removed: [],
+			machineId: "machine-1",
+		});
+
+		expect(socketMock.emit).toHaveBeenCalledWith("agent-teams:changed", {
+			added: [],
+			updated: [createdTeam],
+			removed: [],
+			machineId: "machine-1",
+		});
+	});
+
+	test("emits updated Agent Team projection without mailbox plaintext", () => {
+		const updatedTeam: AgentTeamSummary = {
+			...createdTeam,
+			sourceRefs: [
+				{
+					type: "mailbox_message",
+					agentTeamId: "team-1",
+					messageId: "message-1",
+					fromMemberId: "member-1",
+					toMemberId: "member-2",
+				},
+			],
+		};
+
+		client.emitUpdatedAgentTeamProjection(updatedTeam);
+
+		expect(socketMock.emit).toHaveBeenCalledWith("agent-teams:changed", {
+			added: [],
+			updated: [updatedTeam],
+			removed: [],
+			machineId: "machine-1",
+		});
+		expect(JSON.stringify(socketMock.emit.mock.calls)).not.toContain(
+			"plaintext mailbox body",
+		);
+		expect(JSON.stringify(socketMock.emit.mock.calls)).not.toContain(
+			"body_local_json",
+		);
 	});
 
 	test("handles rpc:agent-teams:list with requested machine context", async () => {

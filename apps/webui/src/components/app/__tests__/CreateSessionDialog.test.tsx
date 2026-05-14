@@ -3,6 +3,7 @@ import type {
 	ButtonHTMLAttributes,
 	InputHTMLAttributes,
 	ReactNode,
+	TextareaHTMLAttributes,
 } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CreateSessionDialog } from "../CreateSessionDialog";
@@ -16,6 +17,8 @@ const mockUiState = vi.hoisted(() => ({
 	draftWorktreeBranch: "feat/live-cwd",
 	draftWorktreeSuggestedBranch: "brisk-comet-x7",
 	draftWorktreeBaseBranch: "main",
+	createDialogMode: "session" as "session" | "agent-team",
+	draftTeamTarget: "",
 	setDraftTitle: vi.fn(),
 	setDraftBackendId: vi.fn(),
 	setDraftCwd: vi.fn(),
@@ -23,6 +26,7 @@ const mockUiState = vi.hoisted(() => ({
 	setDraftWorktreeBranch: vi.fn(),
 	setDraftWorktreeSuggestedBranch: vi.fn(),
 	setDraftWorktreeBaseBranch: vi.fn(),
+	setDraftTeamTarget: vi.fn(),
 }));
 
 const mockMachinesState = vi.hoisted(() => ({
@@ -70,7 +74,14 @@ vi.mock("react-i18next", () => ({
 		t: (key: string, options?: Record<string, string>) => {
 			const translations: Record<string, string> = {
 				"session.createTitle": "New conversation",
+				"session.createTeamTitle": "Create Agent Team",
 				"session.createDescription": "Choose a backend and set the title.",
+				"session.createTeamDescription":
+					"Set the team target and leader backend.",
+				"session.teamTargetLabel": "Target",
+				"session.teamTargetPlaceholder":
+					"Describe what the Agent Team should do",
+				"session.teamTitleLabel": "Team title",
 				"session.targetMachine": `Target: ${options?.name ?? ""}`,
 				"session.titleLabel": "Title",
 				"session.titlePlaceholder": "Optional title",
@@ -190,6 +201,12 @@ vi.mock("@mobvibe/ui/input", () => ({
 	Input: (props: InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
 }));
 
+vi.mock("@mobvibe/ui/textarea", () => ({
+	Textarea: (props: TextareaHTMLAttributes<HTMLTextAreaElement>) => (
+		<textarea {...props} />
+	),
+}));
+
 vi.mock("@mobvibe/ui/input-group", () => ({
 	InputGroup: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 	InputGroupAddon: ({ children }: { children: ReactNode }) => (
@@ -250,6 +267,8 @@ describe("CreateSessionDialog", () => {
 		mockUiState.draftWorktreeBranch = "feat/live-cwd";
 		mockUiState.draftWorktreeSuggestedBranch = "brisk-comet-x7";
 		mockUiState.draftWorktreeBaseBranch = "main";
+		mockUiState.createDialogMode = "session";
+		mockUiState.draftTeamTarget = "";
 		mockDebouncedValue.cwd = "/repo/apps/webui";
 		mockQueryState.branches = {
 			data: {
@@ -265,6 +284,28 @@ describe("CreateSessionDialog", () => {
 			isError: false,
 		};
 		vi.clearAllMocks();
+	});
+
+	it("renders Agent Team mode with runtime-only target textarea and optional title", () => {
+		mockUiState.createDialogMode = "agent-team";
+		mockUiState.draftTeamTarget = "Build team run";
+
+		render(
+			<CreateSessionDialog
+				open
+				onOpenChange={vi.fn()}
+				availableBackends={[
+					{ backendId: "backend-1", backendLabel: "Backend 1" },
+				]}
+				isCreating={false}
+				onCreate={vi.fn()}
+			/>,
+		);
+
+		expect(screen.getByText("Create Agent Team")).toBeInTheDocument();
+		expect(screen.getByLabelText("Target")).toHaveValue("Build team run");
+		expect(screen.getByLabelText("Team title")).toHaveValue("Session 1");
+		expect(screen.getByRole("button", { name: "Create" })).toBeEnabled();
 	});
 
 	it("disables create for worktree mode while the current git context is stale", () => {
