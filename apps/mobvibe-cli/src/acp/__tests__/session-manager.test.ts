@@ -1066,28 +1066,30 @@ describe("SessionManager", () => {
 				load: true,
 				mcp: { acp: true },
 			});
-			mockConnection.createSession.mockImplementationOnce(async (params) => {
-				const handlers = (
-					params as {
-						teamMcpHandlers?: {
-							handleConnect(input: { serverId: string }): unknown;
-							handleListTools(input: {
-								serverId: string;
-								toolNames: string[];
-							}): void;
-						};
+			mockConnection.createSession.mockImplementationOnce(
+				async (...args: unknown[]) => {
+					const params = args[0];
+					const handlers = (
+						params as {
+							teamMcpHandlers?: {
+								handleConnect(input: { serverId: string }): unknown;
+								handleListTools(input: {
+									serverId: string;
+									toolNames: string[];
+								}): void;
+							};
+						}
+					).teamMcpHandlers;
+					const serverId = (params as { teamMcpDeclaration?: { id?: string } })
+						.teamMcpDeclaration?.id;
+					if (!handlers || !serverId) {
+						throw new Error("Expected team MCP handlers");
 					}
-				).teamMcpHandlers;
-				const serverId = (
-					params as { teamMcpDeclaration?: { id?: string } }
-				).teamMcpDeclaration?.id;
-				if (!handlers || !serverId) {
-					throw new Error("Expected team MCP handlers");
-				}
-				handlers.handleConnect({ serverId });
-				handlers.handleListTools({ serverId, toolNames: expectedTeamTools });
-				return { sessionId: "leader-session-1", modes: null, models: null };
-			});
+					handlers.handleConnect({ serverId });
+					handlers.handleListTools({ serverId, toolNames: expectedTeamTools });
+					return { sessionId: "leader-session-1", modes: null, models: null };
+				},
+			);
 
 			const result = await sessionManager.createAgentTeamRun({
 				machineId: mockConfig.machineId,
@@ -1140,7 +1142,7 @@ describe("SessionManager", () => {
 					lifecycle: "failed",
 					health: "error",
 					error: expect.objectContaining({
-						code: "TEAM_CREATE_FAILED",
+						code: "INTERNAL_ERROR",
 					}),
 				}),
 			);

@@ -126,7 +126,7 @@ describe("SocketClient restore semantics", () => {
 				updated: AgentTeamSummary[];
 				removed: string[];
 				machineId?: string;
-			}) => void)
+		  }) => void)
 		| undefined;
 	let promptConnection: {
 		prompt: ReturnType<typeof mock>;

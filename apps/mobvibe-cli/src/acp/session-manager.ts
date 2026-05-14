@@ -12,8 +12,8 @@ import type {
 } from "@agentclientprotocol/sdk";
 import {
 	type AcpSessionInfo,
-	type AgentTeamsChangedPayload,
 	type AgentSessionCapabilities,
+	type AgentTeamsChangedPayload,
 	AppError,
 	type CreateAgentTeamRpcParams,
 	type CreateAgentTeamRpcResult,
@@ -238,8 +238,9 @@ const toTeamCreateErrorDetail = (error: unknown) => {
 		return error.detail;
 	}
 	return createErrorDetail({
-		code: "TEAM_CREATE_FAILED",
-		message: error instanceof Error ? error.message : "Agent Team create failed",
+		code: "INTERNAL_ERROR",
+		message:
+			error instanceof Error ? error.message : "Agent Team create failed",
 		retryable: true,
 		scope: "session",
 	});
@@ -1305,7 +1306,7 @@ export class SessionManager {
 		}
 		throw new AppError(
 			createErrorDetail({
-				code: "TEAM_MCP_NOT_READY",
+				code: "SESSION_NOT_READY",
 				message: "Timed out waiting for Team MCP tools readiness",
 				retryable: true,
 				scope: "session",
