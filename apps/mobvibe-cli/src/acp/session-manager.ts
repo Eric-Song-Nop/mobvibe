@@ -12,8 +12,11 @@ import type {
 } from "@agentclientprotocol/sdk";
 import {
 	type AcpSessionInfo,
+	type AgentTeamsChangedPayload,
 	type AgentSessionCapabilities,
 	AppError,
+	type CreateAgentTeamRpcParams,
+	type CreateAgentTeamRpcResult,
 	type CreateSessionWorktreeOptions,
 	createErrorDetail,
 	type DiscoverSessionsRpcResult,
@@ -230,6 +233,18 @@ const isValidWorkspacePath = async (cwd: string): Promise<boolean> => {
 	}
 };
 
+const toTeamCreateErrorDetail = (error: unknown) => {
+	if (error instanceof AppError) {
+		return error.detail;
+	}
+	return createErrorDetail({
+		code: "TEAM_CREATE_FAILED",
+		message: error instanceof Error ? error.message : "Agent Team create failed",
+		retryable: true,
+		scope: "session",
+	});
+};
+
 export class SessionManager {
 	private sessions = new Map<string, SessionRecord>();
 	private discoveredSessions = new Map<string, AcpSessionInfo>();
@@ -241,6 +256,7 @@ export class SessionManager {
 	private readonly sessionAttachedEmitter = new EventEmitter();
 	private readonly sessionDetachedEmitter = new EventEmitter();
 	private readonly sessionEventEmitter = new EventEmitter();
+	private readonly agentTeamChangedEmitter = new EventEmitter();
 	private readonly walStore: WalStore;
 	private readonly agentTeamStore: AgentTeamStore;
 	private readonly teamRuntime: TeamRuntime;
@@ -263,6 +279,14 @@ export class SessionManager {
 		this.teamRuntime = new TeamRuntime({
 			store: this.agentTeamStore,
 			sessionManager: this,
+			onAgentTeamChanged: (team) => {
+				this.emitAgentTeamChanged({
+					added: [],
+					updated: [team],
+					removed: [],
+					machineId: team.machineId,
+				});
+			},
 		});
 		this.cryptoService = cryptoService;
 	}
@@ -500,6 +524,13 @@ export class SessionManager {
 		};
 	}
 
+	onAgentTeamChanged(listener: (payload: AgentTeamsChangedPayload) => void) {
+		this.agentTeamChangedEmitter.on("changed", listener);
+		return () => {
+			this.agentTeamChangedEmitter.off("changed", listener);
+		};
+	}
+
 	/**
 	 * Query session events from the WAL.
 	 */
@@ -719,6 +750,10 @@ export class SessionManager {
 
 	private emitSessionsChanged(payload: SessionsChangedPayload) {
 		this.sessionsChangedEmitter.emit("changed", payload);
+	}
+
+	private emitAgentTeamChanged(payload: AgentTeamsChangedPayload) {
+		this.agentTeamChangedEmitter.emit("changed", payload);
 	}
 
 	private emitSessionAttached(sessionId: string, force = false) {
@@ -1171,6 +1206,133 @@ export class SessionManager {
 			await connection.disconnect();
 			throw error;
 		}
+	}
+
+	async createAgentTeamRun(
+		params: CreateAgentTeamRpcParams,
+	): Promise<CreateAgentTeamRpcResult> {
+		const created = this.agentTeamStore.createAgentTeam(params);
+		const { agentTeamId, leaderMemberId } = created.team;
+		this.agentTeamStore.updateTeamRuntimeState({
+			agentTeamId,
+			lifecycle: "starting",
+		});
+		this.agentTeamStore.updateTeamMemberRuntime({
+			agentTeamId,
+			memberId: leaderMemberId,
+			lifecycle: "creating_session",
+			health: "healthy",
+		});
+		this.emitCurrentAgentTeam(agentTeamId, "updated");
+
+		try {
+			const leaderSession = await this.createTeamSession({
+				backendId: params.backendId,
+				cwd: params.workspaceRootCwd,
+				title: params.title,
+				agentTeamId,
+				memberId: leaderMemberId,
+				worktree: params.worktree,
+			});
+			await this.waitForTeamToolsReady(agentTeamId, leaderMemberId);
+			this.agentTeamStore.updateTeamRuntimeState({
+				agentTeamId,
+				lifecycle: "running",
+			});
+			this.agentTeamStore.updateTeamMemberRuntime({
+				agentTeamId,
+				memberId: leaderMemberId,
+				sessionId: leaderSession.sessionId,
+				lifecycle: "running",
+				health: "healthy",
+				worktreeSourceCwd: leaderSession.worktreeSourceCwd,
+				worktreeBranch: leaderSession.worktreeBranch,
+			});
+
+			const team = this.requireAgentTeam(agentTeamId);
+			this.emitAgentTeamChanged({
+				added: [],
+				updated: [team],
+				removed: [],
+				machineId: team.machineId,
+			});
+			return { team, leaderSession };
+		} catch (error) {
+			const detail = toTeamCreateErrorDetail(error);
+			this.agentTeamStore.updateTeamRuntimeState({
+				agentTeamId,
+				lifecycle: "failed",
+			});
+			this.agentTeamStore.updateTeamMemberRuntime({
+				agentTeamId,
+				memberId: leaderMemberId,
+				lifecycle: "failed",
+				health: "error",
+				error: detail,
+			});
+			this.emitCurrentAgentTeam(agentTeamId, "updated");
+			throw error;
+		}
+	}
+
+	private async waitForTeamToolsReady(
+		agentTeamId: string,
+		memberId: string,
+	): Promise<void> {
+		const timeoutMs = 5_000;
+		const startedAt = Date.now();
+		while (Date.now() - startedAt < timeoutMs) {
+			const team = this.requireAgentTeam(agentTeamId);
+			const member = team.members.find(
+				(candidate) => candidate.memberId === memberId,
+			);
+			if (member?.mcp?.phase === "tools_ready") {
+				return;
+			}
+			if (member?.mcp?.phase === "degraded") {
+				throw new AppError(
+					member.mcp.error ??
+						createErrorDetail({
+							code: "CAPABILITY_NOT_SUPPORTED",
+							message: "Team MCP tools are degraded",
+							retryable: true,
+							scope: "session",
+						}),
+					409,
+				);
+			}
+			await new Promise((resolve) => setTimeout(resolve, 25));
+		}
+		throw new AppError(
+			createErrorDetail({
+				code: "TEAM_MCP_NOT_READY",
+				message: "Timed out waiting for Team MCP tools readiness",
+				retryable: true,
+				scope: "session",
+			}),
+			504,
+		);
+	}
+
+	private requireAgentTeam(agentTeamId: string) {
+		const team = this.agentTeamStore.getAgentTeam({ agentTeamId }).team;
+		if (!team) {
+			throw new Error(`Agent Team not found: ${agentTeamId}`);
+		}
+		return team;
+	}
+
+	private emitCurrentAgentTeam(
+		agentTeamId: string,
+		mode: "added" | "updated",
+	): void {
+		const team = this.requireAgentTeam(agentTeamId);
+		this.emitAgentTeamChanged({
+			added: mode === "added" ? [team] : [],
+			updated: mode === "updated" ? [team] : [],
+			removed: [],
+			machineId: team.machineId,
+		});
 	}
 
 	private buildPermissionRequestPayload(
