@@ -337,7 +337,7 @@ export function useSessionHandlers({
 			if (isAgentTeamMode) {
 				await mutations.createAgentTeamRunMutation.mutateAsync({
 					leaderBackendId: draftBackendId,
-					workspaceRootCwd: draftCwd,
+					workspaceRootCwd: worktree?.sourceCwd ?? draftCwd,
 					title: isUserCustomTitle ? title : undefined,
 					machineId: selectedMachineId,
 					target,

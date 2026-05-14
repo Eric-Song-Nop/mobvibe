@@ -478,7 +478,7 @@ describe("useSessionHandlers — handleCreateSession", () => {
 			mutations.createAgentTeamRunMutation?.mutateAsync,
 		).toHaveBeenCalledWith({
 			leaderBackendId: "backend-1",
-			workspaceRootCwd: "/projects/repo/apps/webui",
+			workspaceRootCwd: "/projects/repo",
 			title: "Feature Session",
 			machineId: "machine-1",
 			target: "Implement the dashboard",
