@@ -50,7 +50,12 @@ const createTeam = (): AgentTeamSummary => ({
 			worktreeBranch: "team/ui",
 			createdAt: "2026-05-14T00:00:00.000Z",
 			updatedAt: "2026-05-14T00:02:00.000Z",
-			error: { message: "safe leader error", code: "service" },
+			error: {
+				message: "safe leader error",
+				code: "INTERNAL_ERROR",
+				retryable: true,
+				scope: "service",
+			},
 		},
 	],
 	summaryRefs: [
@@ -65,7 +70,12 @@ const createTeam = (): AgentTeamSummary => ({
 	],
 	createdAt: "2026-05-14T00:00:00.000Z",
 	updatedAt: "2026-05-14T00:03:00.000Z",
-	error: { message: "safe team error", code: "service" },
+	error: {
+		message: "safe team error",
+		code: "INTERNAL_ERROR",
+		retryable: true,
+		scope: "service",
+	},
 });
 
 describe("AgentTeamOverview", () => {
