@@ -85,6 +85,23 @@ describe("TeamMcpRouter", () => {
 		expect(team?.members[0].mcp?.phase).toBe("tools_ready");
 	});
 
+	test("spawn member is required before tools_ready", () => {
+		const serverId = `mobvibe-team:${agentTeamId}:${leaderMemberId}`;
+		router.handleConnect({ serverId });
+
+		router.handleListTools({
+			serverId,
+			toolNames: EXPECTED_TEAM_TOOL_NAMES.filter(
+				(name) => name !== "mobvibe_team_spawn_member",
+			),
+		});
+
+		const team = store.getAgentTeam({ agentTeamId }).team;
+		expect(EXPECTED_TEAM_TOOL_NAMES).toContain("mobvibe_team_spawn_member");
+		expect(team?.members[0].mcp?.phase).toBe("degraded");
+		expect(team?.members[0].mcp?.phase).not.toBe("tools_ready");
+	});
+
 	test("missing expected tool never sets tools_ready", () => {
 		const serverId = `mobvibe-team:${agentTeamId}:${leaderMemberId}`;
 		router.handleConnect({ serverId });
