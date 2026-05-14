@@ -649,6 +649,13 @@ export class SessionManager {
 			updated: [summary],
 			removed: [],
 		});
+		const teamMember = this.findTeamMemberBySessionId(sessionId);
+		if (teamMember && teamMember.role !== "leader") {
+			void this.teamRuntime.onMemberTurnCompleted(
+				teamMember.agentTeamId,
+				teamMember.memberId,
+			);
+		}
 	}
 
 	async injectTeamMailboxPrompt(input: {
@@ -1446,6 +1453,27 @@ export class SessionManager {
 			removed: [],
 			machineId: team.machineId,
 		});
+	}
+
+	private findTeamMemberBySessionId(sessionId: string):
+		| {
+				agentTeamId: string;
+				memberId: string;
+				role: "leader" | "member";
+		  }
+		| undefined {
+		for (const team of this.agentTeamStore.listAgentTeams().teams) {
+			const member = team.members.find(
+				(candidate) => candidate.sessionId === sessionId,
+			);
+			if (!member) continue;
+			return {
+				agentTeamId: team.agentTeamId,
+				memberId: member.memberId,
+				role: member.role,
+			};
+		}
+		return undefined;
 	}
 
 	private buildPermissionRequestPayload(

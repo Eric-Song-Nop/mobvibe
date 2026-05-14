@@ -1309,7 +1309,13 @@ describe("SessionManager", () => {
 				}),
 			);
 			expect(mockCreateGitWorktree).toHaveBeenCalledTimes(1);
-			expect(mockConnection.createSession.mock.calls[1][0]).toEqual(
+			const memberCreateCall = mockConnection.createSession.mock.calls[1] as
+				| unknown[]
+				| undefined;
+			if (!memberCreateCall) {
+				throw new Error("Expected member createSession call");
+			}
+			expect(memberCreateCall[0]).toEqual(
 				expect.objectContaining({
 					cwd: "/tmp/mobvibe-test/worktrees/project/team-run/packages/cli",
 				}),

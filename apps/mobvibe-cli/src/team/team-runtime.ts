@@ -20,7 +20,7 @@ export type TeamSessionInjector = {
 		sessionId: string;
 		text: string;
 	}): Promise<TeamSourceRef>;
-	spawnAgentTeamMember(input: {
+	spawnAgentTeamMember?(input: {
 		agentTeamId: string;
 		requestedByMemberId: string;
 		name?: string;
@@ -135,6 +135,7 @@ export class TeamRuntime {
 		if (this.areNonLeaderMembersSettled(agentTeamId)) {
 			await this.wakeMember(agentTeamId, leader.member_id);
 		}
+		this.emitCurrentTeam(agentTeamId);
 	}
 
 	private async sendMessageAndWake(
@@ -162,7 +163,7 @@ export class TeamRuntime {
 		},
 		args: { name?: string; backendId?: string },
 	): Promise<SpawnMemberResult> {
-		if (!this.sessionManager) {
+		if (!this.sessionManager?.spawnAgentTeamMember) {
 			return {
 				ok: false,
 				error: {
