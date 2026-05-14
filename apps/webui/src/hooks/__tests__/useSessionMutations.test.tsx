@@ -611,6 +611,7 @@ describe("useSessionMutations", () => {
 					sessionId: "leader-session-1",
 					title: "Team Leader",
 					backendId: "backend-1",
+					backendLabel: "Backend 1",
 					createdAt: "2025-01-01T00:00:00Z",
 					updatedAt: "2025-01-01T00:00:00Z",
 					wrappedDek: "wrapped-leader-dek",

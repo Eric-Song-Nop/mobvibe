@@ -1,3 +1,4 @@
+import type { AgentTeamSummary } from "@mobvibe/shared";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -40,7 +41,7 @@ describe("useSessionQueries", () => {
 	});
 
 	it("fetches agent teams on startup and replaces the projection store", async () => {
-		const team = {
+		const team: AgentTeamSummary = {
 			agentTeamId: "team-1",
 			machineId: "machine-1",
 			title: "Team One",
