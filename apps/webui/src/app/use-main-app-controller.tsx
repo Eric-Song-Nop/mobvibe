@@ -14,6 +14,7 @@ import { useMachineDiscovery } from "@/hooks/useMachineDiscovery";
 import { useMachinesQuery } from "@/hooks/useMachinesQuery";
 import { useSessionActivation } from "@/hooks/useSessionActivation";
 import { useSessionHandlers } from "@/hooks/useSessionHandlers";
+import type { SidebarSessionListEntry } from "@/hooks/useSessionList";
 import { useSessionList } from "@/hooks/useSessionList";
 import { useSessionMutations } from "@/hooks/useSessionMutations";
 import { useSessionQueries } from "@/hooks/useSessionQueries";
@@ -28,6 +29,16 @@ import { shouldActivateSessionOnSelect } from "@/lib/session-selection";
 import { getContextLeftPercent } from "@/lib/session-usage";
 import { useUiStore } from "@/lib/ui-store";
 import { getPathBasename } from "@/lib/ui-utils";
+
+const sidebarEntryContainsSession = (
+	entry: SidebarSessionListEntry,
+	sessionId: string,
+) => {
+	if (entry.kind === "session") {
+		return entry.session.sessionId === sessionId;
+	}
+	return entry.members.some((member) => member.sessionId === sessionId);
+};
 
 export function useMainAppController() {
 	const { t } = useTranslation();
@@ -195,6 +206,7 @@ export function useMainAppController() {
 		selectedWorkspaceCwd,
 		effectiveWorkspaceCwd,
 		sessionList,
+		sidebarSessionList,
 	} = useSessionList({
 		activeSessionId,
 		selectedMachineId,
@@ -284,8 +296,8 @@ export function useMainAppController() {
 			// persisted active session can be cleared before machine selection syncs.
 			return;
 		}
-		const isActiveInList = sessionList.some(
-			(session) => session.sessionId === activeSessionId,
+		const isActiveInList = sidebarSessionList.some((entry) =>
+			sidebarEntryContainsSession(entry, activeSessionId),
 		);
 		if (!isActiveInList) {
 			chatActions.setActiveSessionId(undefined);
@@ -294,7 +306,7 @@ export function useMainAppController() {
 		activeSession,
 		activeSessionId,
 		selectedMachineId,
-		sessionList,
+		sidebarSessionList,
 		chatActions.setActiveSessionId,
 	]);
 
@@ -635,6 +647,7 @@ export function useMainAppController() {
 		plan: activeSession?.plan,
 		selectedMachineId,
 		sessionList,
+		sidebarSessionList,
 		statusMessage,
 		streamError,
 		subdirectoryLabel,
