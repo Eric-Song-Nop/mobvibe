@@ -5,6 +5,7 @@ export type {
 	AgentTeamSummary,
 	CreateAgentTeamRpcResult,
 	CreateSessionResponse,
+	CreateSessionWorktreeOptions,
 	ErrorDetail,
 	FsEntriesResponse,
 	FsEntry,
@@ -31,6 +32,7 @@ import type {
 	ContentBlock,
 	CreateAgentTeamRpcResult,
 	CreateSessionResponse,
+	CreateSessionWorktreeOptions,
 	DiscoverSessionsResult,
 	ErrorDetail,
 	FsEntriesResponse,
@@ -193,8 +195,7 @@ export type CreateAgentTeamPayload = {
 	workspaceRootCwd: string;
 	leaderBackendId: string;
 	workspaceMode?: TeamWorkspaceMode;
-	worktreeSourceCwd?: string;
-	worktreeBranch?: string;
+	worktree?: CreateSessionWorktreeOptions;
 };
 
 export const fetchAgentTeams = async (
@@ -221,8 +222,7 @@ export const createAgentTeam = async (
 			workspaceRootCwd: payload.workspaceRootCwd,
 			leaderBackendId: payload.leaderBackendId,
 			workspaceMode: payload.workspaceMode,
-			worktreeSourceCwd: payload.worktreeSourceCwd,
-			worktreeBranch: payload.worktreeBranch,
+			worktree: payload.worktree,
 		}),
 	});
 
