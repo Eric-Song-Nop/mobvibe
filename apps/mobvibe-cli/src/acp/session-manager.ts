@@ -1313,6 +1313,29 @@ export class SessionManager {
 							}),
 			};
 		}
+		if (!leader.session_id) {
+			return {
+				ok: false,
+				error: createErrorDetail({
+					code: "SESSION_NOT_FOUND",
+					message: "Leader session is not available for member spawn",
+					retryable: true,
+					scope: "session",
+				}),
+			};
+		}
+		const leaderSession = this.sessions.get(leader.session_id);
+		if (!leaderSession) {
+			return {
+				ok: false,
+				error: createErrorDetail({
+					code: "SESSION_NOT_FOUND",
+					message: "Leader ordinary session is not active",
+					retryable: true,
+					scope: "session",
+				}),
+			};
+		}
 
 		const memberName = input.name ?? `Member ${members.length}`;
 		const { memberId } = this.agentTeamStore.addTeamMember({
@@ -1335,7 +1358,14 @@ export class SessionManager {
 				title: memberName,
 				agentTeamId: input.agentTeamId,
 				memberId,
+				executionContext: {
+					cwd: leaderSession.cwd,
+					workspaceRootCwd: leaderSession.workspaceRootCwd,
+					worktreeSourceCwd: leaderSession.worktreeSourceCwd,
+					worktreeBranch: leaderSession.worktreeBranch,
+				},
 			});
+			await this.waitForTeamToolsReady(input.agentTeamId, memberId);
 			return {
 				ok: true,
 				memberId,
