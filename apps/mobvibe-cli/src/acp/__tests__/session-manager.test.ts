@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import type { AgentSessionCapabilities } from "@mobvibe/shared";
 import type { CliConfig } from "../../config.js";
+import type { AgentTeamStore } from "../../team/agent-team-store.js";
+import type { TeamRuntime } from "../../team/team-runtime.js";
 import type { AcpConnection } from "../acp-connection.js";
 
 mock.module("node:fs/promises", () => ({
@@ -58,6 +60,11 @@ mock.module("../../lib/git-utils.js", () => ({
 
 // Dynamic import so that mock.module calls above are registered first
 const { SessionManager } = await import("../session-manager.js");
+
+type SessionManagerTeamInternals = {
+	agentTeamStore: AgentTeamStore;
+	teamRuntime: TeamRuntime;
+};
 
 /**
  * Captured callback from `onSessionUpdate`.
@@ -381,6 +388,62 @@ describe("SessionManager", () => {
 					}),
 				}),
 			);
+		});
+
+		it("persists the team member session binding so mailbox wake can inject messages", async () => {
+			const internals =
+				sessionManager as unknown as SessionManagerTeamInternals;
+			const createdTeam = internals.agentTeamStore.createAgentTeam({
+				machineId: mockConfig.machineId,
+				workspaceRootCwd: "/home/user/project",
+				backendId: "backend-1",
+				title: "Review Team",
+				leaderName: "Leader",
+			});
+			const agentTeamId = createdTeam.team.agentTeamId;
+			const workerMemberId = internals.agentTeamStore.addTeamMember({
+				agentTeamId,
+				backendId: "backend-1",
+				name: "Worker",
+				role: "member",
+			}).memberId;
+			mockConnection.getSessionCapabilities.mockReturnValueOnce({
+				list: true,
+				load: true,
+				mcp: { acp: true },
+			});
+
+			await sessionManager.createTeamSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+				agentTeamId,
+				memberId: workerMemberId,
+			});
+
+			const worker = internals.agentTeamStore
+				.listTeamMembers(agentTeamId)
+				.find((member) => member.member_id === workerMemberId);
+			expect(worker?.session_id).toBe("new-session-1");
+			expect(worker?.lifecycle).toBe("running");
+
+			internals.agentTeamStore.createMailboxMessages({
+				agentTeamId,
+				fromMemberId: createdTeam.team.leaderMemberId,
+				recipients: [{ memberId: workerMemberId, name: "Worker" }],
+				body: { message: "please review", summary: "review" },
+			});
+			await internals.teamRuntime.wakeMember(agentTeamId, workerMemberId);
+
+			const promptCalls = (
+				mockConnection.prompt as unknown as {
+					mock: {
+						calls: Array<[string, Array<{ type: string; text: string }>?]>;
+					};
+				}
+			).mock.calls;
+			expect(promptCalls).toHaveLength(1);
+			expect(promptCalls[0]?.[0]).toBe("new-session-1");
+			expect(promptCalls[0]?.[1]?.[0]?.text).toContain("please review");
 		});
 
 		it("rejects bridge-only team sessions until stdio bridge is executable", async () => {

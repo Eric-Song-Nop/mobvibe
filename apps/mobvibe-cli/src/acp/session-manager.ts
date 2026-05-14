@@ -1129,6 +1129,12 @@ export class SessionManager {
 					this.emitSessionDetached(session.sessionId, "agent_exit");
 				}
 			});
+			this.agentTeamStore.updateTeamMemberRuntimeState({
+				agentTeamId: options.agentTeamId,
+				memberId: options.memberId,
+				sessionId: session.sessionId,
+				lifecycle: "running",
+			});
 			this.sessions.set(session.sessionId, record);
 			const summary = this.buildSummary(record);
 			this.emitSessionsChanged({ added: [summary], updated: [], removed: [] });
