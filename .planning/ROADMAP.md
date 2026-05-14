@@ -81,9 +81,9 @@ Plans:
 Plans:
 - [x] 03-01-PLAN.md — Shared/Gateway Agent Team create contract and safe worktree payload
 - [x] 03-02-PLAN.md — CLI create/start leader session, team-shared worktree, and MCP readiness
-- [ ] 03-03-PLAN.md — Real spawn member tool and ordinary member session orchestration
-- [ ] 03-04-PLAN.md — WebUI Agent Team create flow and encrypted target delivery
-- [ ] 03-05-PLAN.md — WebUI team sidebar, overview, projection badges, and member navigation
+- [x] 03-03-PLAN.md — Real spawn member tool and ordinary member session orchestration
+- [x] 03-04-PLAN.md — WebUI Agent Team create flow and encrypted target delivery
+- [x] 03-05-PLAN.md — WebUI team sidebar, overview, projection badges, and member navigation
 **UI hint**: yes
 
 ### Phase 4: 生命周期、权限、E2EE 与恢复

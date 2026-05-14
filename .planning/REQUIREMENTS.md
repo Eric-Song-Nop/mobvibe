@@ -53,10 +53,10 @@ Requirements for the first agent team release. Each requirement must map to exac
 ### WebUI Experience
 
 - [ ] **UI-01**: WebUI 提供 team run 创建入口，用户可以选择 machine、workspace、leader backend、目标任务和 workspace/worktree 策略。
-- [ ] **UI-02**: WebUI 提供 team run 列表或分组视图，普通 session 与 team run 的关系清晰可见。
-- [ ] **UI-03**: Team detail 展示 leader/member 卡片，包括 backend、role、status、MCP phase、session 链接、worktree branch、错误和最后更新时间。
-- [ ] **UI-04**: Team detail 展示 task board 与 mailbox 活动的非内容 projection，例如 counts、owners、status、unread、wake_failed。
-- [ ] **UI-05**: 用户可以从 team detail 点击成员并跳转到对应普通 session，继续使用现有聊天、文件、Git 和权限 UI。
+- [x] **UI-02**: WebUI 提供 team run 列表或分组视图，普通 session 与 team run 的关系清晰可见。
+- [x] **UI-03**: Team detail 展示 leader/member 卡片，包括 backend、role、status、MCP phase、session 链接、worktree branch、错误和最后更新时间。
+- [x] **UI-04**: Team detail 展示 task board 与 mailbox 活动的非内容 projection，例如 counts、owners、status、unread、wake_failed。
+- [x] **UI-05**: 用户可以从 team detail 点击成员并跳转到对应普通 session，继续使用现有聊天、文件、Git 和权限 UI。
 - [ ] **UI-06**: Team detail 可以聚合显示成员权限等待状态，并引导用户跳转到原 session 完成权限决策。
 - [ ] **UI-07**: Team UI 在桌面和移动端都能完成创建、观察、跳转、取消、重试和归档的基本流程。
 
@@ -141,10 +141,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | LIFE-05 | Phase 4 | Pending |
 | LIFE-06 | Phase 4 | Pending |
 | UI-01 | Phase 3 | Pending |
-| UI-02 | Phase 3 | Pending |
-| UI-03 | Phase 3 | Pending |
-| UI-04 | Phase 3 | Pending |
-| UI-05 | Phase 3 | Pending |
+| UI-02 | Phase 3 | Complete |
+| UI-03 | Phase 3 | Complete |
+| UI-04 | Phase 3 | Complete |
+| UI-05 | Phase 3 | Complete |
 | UI-06 | Phase 4 | Pending |
 | UI-07 | Phase 5 | Pending |
 | SEC-01 | Phase 4 | Pending |

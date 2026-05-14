@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-02-PLAN.md
-last_updated: "2026-05-14T04:19:18.366Z"
+stopped_at: Completed 03-05-PLAN.md
+last_updated: "2026-05-14T06:22:02.360Z"
 last_activity: 2026-05-14
 progress:
   total_phases: 5
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 17
-  completed_plans: 14
-  percent: 82
+  completed_plans: 17
+  percent: 100
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 03 (team-run) — EXECUTING
-Plan: 3 of 5
-Status: Ready to execute
+Plan: 5 of 5
+Status: Phase complete
 Last activity: 2026-05-14
 
-Progress: [████████░░] 82%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -64,6 +64,7 @@ Progress: [████████░░] 82%
 | Phase 02 P04 | 12 min | 2 tasks | 6 files |
 | Phase 03-team-run P01 | 8 min | 3 tasks | 7 files |
 | Phase 03-team-run P02 | 17 min | 4 tasks | 6 files |
+| Phase 03-team-run P05 | 24min | 4 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -119,10 +120,13 @@ Recent decisions affecting current work:
 - [Phase 03-02]: SessionManager owns Agent Team create/start orchestration so durable store updates, ordinary session events, and Team MCP callbacks share one source of truth.
 - [Phase 03-02]: Team-shared worktree keeps workspaceRootCwd/worktreeSourceCwd pointed at the source repo root while cwd points at the execution checkout.
 - [Phase 03-02]: Team create failures use existing shared ErrorCode values while preserving safe failure metadata on the leader member projection.
+- [Phase ?]: [Phase 03-05]: Agent Team sidebar 使用独立 SidebarSessionListEntry 派生模型，不把 team 伪装成普通 ChatSession。
+- [Phase ?]: [Phase 03-05]: Team parent 与 ordinary session selection 互斥；member jump 复用普通 session activation path。
+- [Phase ?]: [Phase 03-05]: AgentTeamOverview 只展示 projection metadata/counts/safe errors，不展示协作正文或 agent output。
 
 ### Pending Todos
 
-- 继续执行 Phase 3 计划 03-03 至 03-05。
+- Phase 3 已完成；等待 transition 到 Phase 4。
 
 ### Blockers/Concerns
 
@@ -139,6 +143,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-14T04:19:18.356Z
-Stopped at: Completed 03-02-PLAN.md
+Last session: 2026-05-14T06:22:02.349Z
+Stopped at: Completed 03-05-PLAN.md
 Resume file: None
