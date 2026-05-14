@@ -8,9 +8,11 @@ import type {
 	AgentTeamsChangedPayload,
 	CreateAgentTeamRpcParams,
 	CreateAgentTeamRpcResult,
+	CreateSessionWorktreeOptions,
 	GetAgentTeamRpcParams,
 	GetAgentTeamRpcResult,
 	ListAgentTeamsRpcResult,
+	SessionSummary,
 	TeamMcpPhase,
 	TeamMemberLifecycle,
 	TeamMemberSummary,
@@ -78,9 +80,11 @@ describe("Agent Team shared contract", () => {
 			machineId: string;
 			backendId: string;
 			workspaceRootCwd: string;
+			worktree?: CreateSessionWorktreeOptions;
 		}>();
 		expectTypeOf<CreateAgentTeamRpcResult>().toMatchTypeOf<{
 			team: AgentTeamSummary;
+			leaderSession?: SessionSummary;
 		}>();
 		expectTypeOf<ListAgentTeamsRpcResult>().toMatchTypeOf<{
 			teams: AgentTeamSummary[];
@@ -108,8 +112,19 @@ describe("Agent Team shared contract", () => {
 			.filter((line) => !line.trimStart().startsWith("//"))
 			.join("\n");
 
-		expect(source).not.toMatch(
+			expect(source).not.toMatch(
 			/\b(prompt|content|body|description|summaryText|agentOutput|providerToken|masterSecret|dek|secret)\b/,
 		);
+	});
+
+	it("keeps Agent Team create metadata extensible without target plaintext", () => {
+		const source = readFileSync(
+			resolve(import.meta.dirname, "../src/types/agent-team.ts"),
+			"utf8",
+		);
+
+		expect(source).toMatch(/worktree\?: CreateSessionWorktreeOptions/);
+		expect(source).toMatch(/leaderSession\?: SessionSummary/);
+		expect(source).not.toMatch(/target\?:/);
 	});
 });
