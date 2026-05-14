@@ -23,6 +23,7 @@ describe("TeamMcpRouter", () => {
 	let shutdownSession: ReturnType<typeof mock>;
 	let requestPermission: ReturnType<typeof mock>;
 	let onAgentTeamChanged: ReturnType<typeof mock>;
+	let spawnMember: ReturnType<typeof mock>;
 
 	beforeEach(() => {
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "team-mcp-router-"));
@@ -48,10 +49,21 @@ describe("TeamMcpRouter", () => {
 		shutdownSession = mock(() => Promise.resolve(undefined));
 		requestPermission = mock(() => Promise.resolve(undefined));
 		onAgentTeamChanged = mock(() => {});
+		spawnMember = mock((caller, args) =>
+			Promise.resolve({
+				ok: true,
+				memberId: "spawned-member-1",
+				sessionId: "spawned-session-1",
+				backendId: args.backendId ?? "backend-1",
+				name: args.name ?? "Member",
+				requestedByMemberId: caller.memberId,
+			}),
+		);
 		const handlers = new TeamToolHandlers({
 			store,
 			requestPermission,
 			onAgentTeamChanged,
+			services: { spawnMember },
 		});
 		router = new TeamMcpRouter({ store, handlers });
 	});
@@ -258,6 +270,68 @@ describe("TeamMcpRouter", () => {
 
 		expect(requestPermission).not.toHaveBeenCalled();
 		expect(readMailboxRows(dbPath)).toHaveLength(2);
+	});
+
+	test("leader and non-leader can spawn members with metadata-only args", async () => {
+		const leaderServerId = `mobvibe-team:${agentTeamId}:${leaderMemberId}`;
+		const memberServerId = `mobvibe-team:${agentTeamId}:${memberId}`;
+		router.handleConnect({ serverId: leaderServerId });
+		router.handleConnect({ serverId: memberServerId });
+
+		const leaderSpawn = await router.handleToolCall({
+			serverId: leaderServerId,
+			toolName: "mobvibe_team_spawn_member",
+			args: { name: "Reviewer" },
+		});
+		const memberSpawn = await router.handleToolCall({
+			serverId: memberServerId,
+			toolName: "mobvibe_team_spawn_member",
+			args: { backendId: "backend-2" },
+		});
+
+		expect(leaderSpawn.data).toEqual(
+			expect.objectContaining({
+				ok: true,
+				requestedByMemberId: leaderMemberId,
+			}),
+		);
+		expect(memberSpawn.data).toEqual(
+			expect.objectContaining({
+				ok: true,
+				requestedByMemberId: memberId,
+			}),
+		);
+		expect(spawnMember).toHaveBeenCalledTimes(2);
+		expect(requestPermission).not.toHaveBeenCalled();
+	});
+
+	test("spawn member rejects identity, prompt, and worktree args", async () => {
+		const serverId = `mobvibe-team:${agentTeamId}:${memberId}`;
+		router.handleConnect({ serverId });
+
+		for (const args of [
+			{ fromMemberId: leaderMemberId },
+			{ prompt: "do not leak" },
+			{ body: "do not leak" },
+			{ target: "do not leak" },
+			{ worktree: { branch: "member" } },
+		]) {
+			const result = await router.handleToolCall({
+				serverId,
+				toolName: "mobvibe_team_spawn_member",
+				args,
+			});
+
+			expect(result.data).toEqual(
+				expect.objectContaining({
+					ok: false,
+					error: expect.objectContaining({
+						code: "REQUEST_VALIDATION_FAILED",
+					}),
+				}),
+			);
+		}
+		expect(spawnMember).not.toHaveBeenCalled();
 	});
 
 	test("task tools create, list, update, and emit projection without local task body", async () => {
