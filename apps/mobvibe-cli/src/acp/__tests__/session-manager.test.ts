@@ -1016,33 +1016,35 @@ describe("SessionManager", () => {
 				mcp: { acp: true },
 			});
 			let createdCount = 0;
-			mockConnection.createSession.mockImplementation(async (...args: unknown[]) => {
-				createdCount += 1;
-				const params = args[0] as {
-					teamMcpDeclaration?: { id?: string };
-					teamMcpHandlers?: {
-						handleConnect(input: { serverId: string }): unknown;
-						handleListTools(input: {
-							serverId: string;
-							toolNames: string[];
-						}): void;
+			mockConnection.createSession.mockImplementation(
+				async (...args: unknown[]) => {
+					createdCount += 1;
+					const params = args[0] as {
+						teamMcpDeclaration?: { id?: string };
+						teamMcpHandlers?: {
+							handleConnect(input: { serverId: string }): unknown;
+							handleListTools(input: {
+								serverId: string;
+								toolNames: string[];
+							}): void;
+						};
 					};
-				};
-				const serverId = params.teamMcpDeclaration?.id;
-				if (params.teamMcpHandlers && serverId) {
-					params.teamMcpHandlers.handleConnect({ serverId });
-					params.teamMcpHandlers.handleListTools({
-						serverId,
-						toolNames: expectedTeamTools,
-					});
-				}
-				return {
-					sessionId:
-						createdCount === 1 ? "leader-session-1" : "member-session-1",
-					modes: null,
-					models: null,
-				};
-			});
+					const serverId = params.teamMcpDeclaration?.id;
+					if (params.teamMcpHandlers && serverId) {
+						params.teamMcpHandlers.handleConnect({ serverId });
+						params.teamMcpHandlers.handleListTools({
+							serverId,
+							toolNames: expectedTeamTools,
+						});
+					}
+					return {
+						sessionId:
+							createdCount === 1 ? "leader-session-1" : "member-session-1",
+						modes: null,
+						models: null,
+					};
+				},
+			);
 			const created = await sessionManager.createAgentTeamRun({
 				machineId: mockConfig.machineId,
 				backendId: "backend-1",
@@ -1126,7 +1128,7 @@ describe("SessionManager", () => {
 		});
 	});
 
-		describe("createAgentTeamRun", () => {
+	describe("createAgentTeamRun", () => {
 		const expectedTeamTools = [
 			"mobvibe_team_send_message",
 			"mobvibe_team_members",
@@ -1254,34 +1256,36 @@ describe("SessionManager", () => {
 				mcp: { acp: true },
 			});
 			let createdCount = 0;
-			mockConnection.createSession.mockImplementation(async (...args: unknown[]) => {
-				createdCount += 1;
-				const params = args[0] as {
-					cwd?: string;
-					teamMcpDeclaration?: { id?: string };
-					teamMcpHandlers?: {
-						handleConnect(input: { serverId: string }): unknown;
-						handleListTools(input: {
-							serverId: string;
-							toolNames: string[];
-						}): void;
+			mockConnection.createSession.mockImplementation(
+				async (...args: unknown[]) => {
+					createdCount += 1;
+					const params = args[0] as {
+						cwd?: string;
+						teamMcpDeclaration?: { id?: string };
+						teamMcpHandlers?: {
+							handleConnect(input: { serverId: string }): unknown;
+							handleListTools(input: {
+								serverId: string;
+								toolNames: string[];
+							}): void;
+						};
 					};
-				};
-				const serverId = params.teamMcpDeclaration?.id;
-				if (params.teamMcpHandlers && serverId) {
-					params.teamMcpHandlers.handleConnect({ serverId });
-					params.teamMcpHandlers.handleListTools({
-						serverId,
-						toolNames: expectedTeamTools,
-					});
-				}
-				return {
-					sessionId:
-						createdCount === 1 ? "leader-session-1" : "member-session-1",
-					modes: null,
-					models: null,
-				};
-			});
+					const serverId = params.teamMcpDeclaration?.id;
+					if (params.teamMcpHandlers && serverId) {
+						params.teamMcpHandlers.handleConnect({ serverId });
+						params.teamMcpHandlers.handleListTools({
+							serverId,
+							toolNames: expectedTeamTools,
+						});
+					}
+					return {
+						sessionId:
+							createdCount === 1 ? "leader-session-1" : "member-session-1",
+						modes: null,
+						models: null,
+					};
+				},
+			);
 
 			const created = await sessionManager.createAgentTeamRun({
 				machineId: mockConfig.machineId,

@@ -91,9 +91,7 @@ describe("per-session stdio bridge fallback", () => {
 		]);
 		expect(manifest.get("mobvibe_team_spawn_member")).not.toContain("prompt");
 		expect(manifest.get("mobvibe_team_spawn_member")).not.toContain("body");
-		expect(manifest.get("mobvibe_team_spawn_member")).not.toContain(
-			"worktree",
-		);
+		expect(manifest.get("mobvibe_team_spawn_member")).not.toContain("worktree");
 		expect(manifest.get("mobvibe_team_task_update")).not.toContain("blocks");
 	});
 

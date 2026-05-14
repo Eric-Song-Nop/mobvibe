@@ -262,7 +262,9 @@ function parseSendMessageArgs(
 	};
 }
 
-function validationError(message: string): MailboxSendResult & SpawnMemberResult {
+function validationError(
+	message: string,
+): MailboxSendResult & SpawnMemberResult {
 	return {
 		ok: false,
 		error: createErrorDetail({
@@ -319,9 +321,11 @@ function parseSpawnMemberArgs(
 	};
 }
 
-function isSuccessfulToolResult(
-	value: unknown,
-): value is (MailboxSendResult | TaskBoardResult | SpawnMemberResult) & {
+function isSuccessfulToolResult(value: unknown): value is (
+	| MailboxSendResult
+	| TaskBoardResult
+	| SpawnMemberResult
+) & {
 	ok: true;
 } {
 	return (
