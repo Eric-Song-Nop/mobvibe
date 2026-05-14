@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionSidebar } from "../src/components/session/SessionSidebar";
+import type { SidebarSessionListEntry } from "../src/hooks/useSessionList";
 import i18n from "../src/i18n";
 import type { ChatSession } from "../src/lib/chat-store";
 import { createDefaultContentBlocks } from "../src/lib/content-block-utils";
@@ -95,6 +96,7 @@ const renderSidebar = (
 			<ThemeProvider>
 				<SessionSidebar
 					sessions={sessions}
+					sidebarEntries={options?.sidebarEntries as SidebarSessionListEntry[]}
 					activeSessionId={options?.activeSessionId}
 					onCreateSession={options?.onCreateSession ?? (() => {})}
 					onSelectSession={options?.onSelectSession ?? (() => {})}
@@ -257,6 +259,87 @@ describe("SessionSidebar", () => {
 		]);
 
 		expect(screen.getByText(/1 hour ago/)).toBeInTheDocument();
+	});
+
+	it("renders an expanded Agent Team parent with member rows and metadata badges", async () => {
+		const onSelectSession = vi.fn();
+		const user = userEvent.setup();
+		renderSidebar([], {
+			onSelectSession,
+			sidebarEntries: [
+				{
+					kind: "agent-team",
+					workspaceCwd: "/repo",
+					updatedAt: "2026-05-14T00:03:00.000Z",
+					team: {
+						agentTeamId: "team-1",
+						machineId: "machine-1",
+						title: "Agent Team UI",
+						workspaceRootCwd: "/repo",
+						workspaceMode: "shared_workspace",
+						leaderMemberId: "leader-1",
+						lifecycle: "running",
+						mailboxCounts: { unread: 2, wakePending: 1, wakeFailed: 0 },
+						taskCounts: {
+							todo: 1,
+							inProgress: 1,
+							blocked: 0,
+							completed: 2,
+							failed: 0,
+							cancelled: 0,
+						},
+						members: [],
+						createdAt: "2026-05-14T00:00:00.000Z",
+						updatedAt: "2026-05-14T00:03:00.000Z",
+					},
+					members: [
+						{
+							memberId: "leader-1",
+							agentTeamId: "team-1",
+							role: "leader",
+							name: "Leader",
+							backendId: "claude",
+							sessionId: "leader-session",
+							lifecycle: "running",
+							health: "healthy",
+							mcp: {
+								transport: "acp",
+								phase: "tools_ready",
+								updatedAt: "2026-05-14T00:02:00.000Z",
+							},
+							mailboxCounts: { unread: 2, wakePending: 0, wakeFailed: 0 },
+							taskCounts: {
+								todo: 0,
+								inProgress: 1,
+								blocked: 0,
+								completed: 0,
+								failed: 0,
+								cancelled: 0,
+							},
+							pendingPermissionCount: 0,
+							worktreeBranch: "team/ui",
+							createdAt: "2026-05-14T00:00:00.000Z",
+							updatedAt: "2026-05-14T00:02:00.000Z",
+						},
+					],
+				},
+			],
+		});
+
+		expect(
+			screen.getByRole("button", { name: /Agent Team UI members/ }),
+		).toHaveAttribute("aria-expanded", "true");
+		expect(screen.getByText("running")).toBeInTheDocument();
+		expect(screen.getByText("tools_ready")).toBeInTheDocument();
+		expect(screen.getByText("Tasks 4")).toBeInTheDocument();
+		expect(screen.getByText("Mail 3")).toBeInTheDocument();
+		expect(screen.getByText("Leader")).toBeInTheDocument();
+		expect(screen.getByText(/leader · claude · running/)).toBeInTheDocument();
+		expect(screen.getByText(/team\/ui/)).toBeInTheDocument();
+
+		await user.click(screen.getByRole("button", { name: /Leader/ }));
+
+		expect(onSelectSession).toHaveBeenCalledWith("leader-session");
 	});
 
 	it("limits the default visible session count and expands on demand", async () => {

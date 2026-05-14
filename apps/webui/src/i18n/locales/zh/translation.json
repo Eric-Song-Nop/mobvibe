@@ -64,6 +64,13 @@
 		"resizeMachineSidebar": "调整机器侧边栏宽度",
 		"resizeSessionSidebar": "调整对话侧边栏宽度"
 	},
+	"agentTeam": {
+		"badge": "Agent Team",
+		"taskBadge": "任务 {{count}}",
+		"mailBadge": "消息 {{count}}",
+		"linked": "已链接",
+		"noSession": "未链接会话"
+	},
 	"session": {
 		"title": "对话",
 		"new": "新建对话",

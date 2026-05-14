@@ -23,6 +23,11 @@ import {
 import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { WorkspaceList } from "@/components/workspace/WorkspaceList";
+import type {
+	SidebarSessionListEntry,
+	TeamSessionListEntry,
+	TeamSessionMemberEntry,
+} from "@/hooks/useSessionList";
 import { type SessionListEntry } from "@/lib/chat-store";
 import { useMachinesStore } from "@/lib/machines-store";
 import { compareSessionsByRecency } from "@/lib/session-order";
@@ -67,9 +72,12 @@ function getStatusTooltip(
 
 type SessionSidebarProps = {
 	sessions: SessionListEntry[];
+	sidebarEntries?: SidebarSessionListEntry[];
 	activeSessionId?: string;
+	activeAgentTeamId?: string;
 	onCreateSession: (mode: "workspace" | "session") => void;
 	onSelectSession: (sessionId: string) => void;
+	onSelectAgentTeam?: (agentTeamId: string) => void;
 	onEditSubmit: () => void;
 	onArchiveSessionRequest: (sessionId: string) => void;
 	onArchiveAllSessionsRequest: (sessionIds: string[]) => void;
@@ -80,9 +88,12 @@ type SessionSidebarProps = {
 
 export const SessionSidebar = ({
 	sessions,
+	sidebarEntries,
 	activeSessionId,
+	activeAgentTeamId,
 	onCreateSession,
 	onSelectSession,
+	onSelectAgentTeam,
 	onEditSubmit,
 	onArchiveSessionRequest,
 	onArchiveAllSessionsRequest,
@@ -92,6 +103,9 @@ export const SessionSidebar = ({
 }: SessionSidebarProps) => {
 	const { t } = useTranslation();
 	const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
+		{},
+	);
+	const [expandedTeams, setExpandedTeams] = useState<Record<string, boolean>>(
 		{},
 	);
 	const [showAllSessions, setShowAllSessions] = useState(false);
@@ -115,6 +129,29 @@ export const SessionSidebar = ({
 		return { label: getPathBasename(cwd) ?? cwd };
 	}, [selectedMachineId, selectedWorkspaceByMachine]);
 
+	const listEntries = useMemo<SidebarSessionListEntry[]>(
+		() =>
+			sidebarEntries ??
+			sessions.map((session) => ({
+				kind: "session",
+				session,
+			})),
+		[sidebarEntries, sessions],
+	);
+
+	const teamEntries = useMemo(
+		() => listEntries.filter((entry) => entry.kind === "agent-team"),
+		[listEntries],
+	);
+
+	const ordinarySessions = useMemo(
+		() =>
+			listEntries.flatMap((entry) =>
+				entry.kind === "session" ? [entry.session] : [],
+			),
+		[listEntries],
+	);
+
 	const groupedSessions = useMemo(() => {
 		const groups = new Map<
 			string,
@@ -125,7 +162,7 @@ export const SessionSidebar = ({
 			}
 		>();
 
-		for (const session of sessions) {
+		for (const session of ordinarySessions) {
 			const id = session.backendId?.trim() || "unknown";
 			const rawLabel = session.backendLabel ?? session.backendId ?? "";
 			const label = rawLabel.trim().length > 0 ? rawLabel : t("common.unknown");
@@ -156,10 +193,10 @@ export const SessionSidebar = ({
 			}
 			return left.label.localeCompare(right.label);
 		});
-	}, [sessions, t]);
+	}, [ordinarySessions, t]);
 
 	const hiddenSessionCount = Math.max(
-		sessions.length - DEFAULT_VISIBLE_SESSION_COUNT,
+		ordinarySessions.length - DEFAULT_VISIBLE_SESSION_COUNT,
 		0,
 	);
 
@@ -251,11 +288,35 @@ export const SessionSidebar = ({
 
 						{/* Session list */}
 						<div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
-							{sessions.length === 0 ? (
+							{listEntries.length === 0 ? (
 								<div className="text-muted-foreground text-xs">
 									{t("session.empty")}
 								</div>
 							) : null}
+							{teamEntries.map((entry) => {
+								const isExpanded =
+									expandedTeams[entry.team.agentTeamId] ?? true;
+								return (
+									<TeamListItem
+										key={entry.team.agentTeamId}
+										entry={entry}
+										isActive={entry.team.agentTeamId === activeAgentTeamId}
+										isExpanded={isExpanded}
+										onSelectTeam={() =>
+											onSelectAgentTeam?.(entry.team.agentTeamId)
+										}
+										onToggleExpanded={() =>
+											setExpandedTeams((prev) => ({
+												...prev,
+												[entry.team.agentTeamId]: !(
+													prev[entry.team.agentTeamId] ?? true
+												),
+											}))
+										}
+										onSelectSession={onSelectSession}
+									/>
+								);
+							})}
 							{(() => {
 								let visibleSessionBudget = showAllSessions
 									? Number.POSITIVE_INFINITY
@@ -371,6 +432,173 @@ export const SessionSidebar = ({
 				) : null}
 			</div>
 		</TooltipProvider>
+	);
+};
+
+type TeamListItemProps = {
+	entry: TeamSessionListEntry;
+	isActive: boolean;
+	isExpanded: boolean;
+	onSelectTeam: () => void;
+	onToggleExpanded: () => void;
+	onSelectSession: (sessionId: string) => void;
+};
+
+const countTasks = (entry: TeamSessionListEntry) =>
+	entry.team.taskCounts.todo +
+	entry.team.taskCounts.inProgress +
+	entry.team.taskCounts.blocked +
+	entry.team.taskCounts.completed +
+	entry.team.taskCounts.failed +
+	entry.team.taskCounts.cancelled;
+
+const countMail = (entry: TeamSessionListEntry) =>
+	entry.team.mailboxCounts.unread +
+	entry.team.mailboxCounts.wakePending +
+	entry.team.mailboxCounts.wakeFailed;
+
+const getMemberMcpPhase = (entry: TeamSessionListEntry) =>
+	entry.members.find((member) => member.mcp)?.mcp?.phase;
+
+const TeamListItem = ({
+	entry,
+	isActive,
+	isExpanded,
+	onSelectTeam,
+	onToggleExpanded,
+	onSelectSession,
+}: TeamListItemProps) => {
+	const { t, i18n } = useTranslation();
+	const stamp = entry.updatedAt ?? entry.team.updatedAt ?? entry.team.createdAt;
+	const relativeTime = stamp
+		? formatRelativeTime(stamp, {
+				locale: i18n.resolvedLanguage ?? i18n.language,
+				justNow: t("time.justNow"),
+			})
+		: null;
+	const mcpPhase = getMemberMcpPhase(entry);
+
+	return (
+		<div className="flex flex-col gap-0.5">
+			<div
+				className={cn(
+					"group/team relative flex items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
+					isActive
+						? "bg-accent border-l-primary border-l-2"
+						: "hover:bg-muted/50",
+				)}
+			>
+				<button
+					type="button"
+					aria-label={`${entry.team.title} members`}
+					aria-expanded={isExpanded}
+					className="text-muted-foreground hover:text-foreground mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md focus-visible:ring-1 focus-visible:ring-ring/50"
+					onClick={onToggleExpanded}
+				>
+					<HugeiconsIcon
+						icon={isExpanded ? ArrowDown01Icon : ArrowRight01Icon}
+						strokeWidth={2}
+						className="h-3.5 w-3.5"
+						aria-hidden="true"
+					/>
+				</button>
+				<button
+					type="button"
+					className="flex min-w-0 flex-1 flex-col gap-1 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
+					onClick={onSelectTeam}
+				>
+					<span className="flex min-w-0 items-center gap-1.5">
+						<span className="truncate text-sm font-semibold">
+							{entry.team.title}
+						</span>
+						<span className="rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+							{t("agentTeam.badge")}
+						</span>
+					</span>
+					<span className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs leading-tight">
+						<span>{entry.team.lifecycle}</span>
+						{mcpPhase ? (
+							<>
+								<span className="opacity-50">&middot;</span>
+								<span>{mcpPhase}</span>
+							</>
+						) : null}
+						{relativeTime ? (
+							<>
+								<span className="opacity-50">&middot;</span>
+								<span>{relativeTime}</span>
+							</>
+						) : null}
+					</span>
+					<span className="flex flex-wrap gap-1">
+						<span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+							{t("agentTeam.taskBadge", { count: countTasks(entry) })}
+						</span>
+						<span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+							{t("agentTeam.mailBadge", { count: countMail(entry) })}
+						</span>
+					</span>
+				</button>
+			</div>
+			{isExpanded ? (
+				<div className="ml-7 flex flex-col gap-0.5 border-l border-border/70 pl-2">
+					{entry.members.map((member) => (
+						<TeamMemberListItem
+							key={member.memberId}
+							member={member}
+							onSelectSession={onSelectSession}
+						/>
+					))}
+				</div>
+			) : null}
+		</div>
+	);
+};
+
+type TeamMemberListItemProps = {
+	member: TeamSessionMemberEntry;
+	onSelectSession: (sessionId: string) => void;
+};
+
+const TeamMemberListItem = ({
+	member,
+	onSelectSession,
+}: TeamMemberListItemProps) => {
+	const { t } = useTranslation();
+	const metadata = [member.role, member.backendId, member.lifecycle]
+		.filter(Boolean)
+		.join(" · ");
+	const branch = member.worktreeBranch ?? member.session?.worktreeBranch;
+	const hasSession = Boolean(member.sessionId);
+
+	return (
+		<button
+			type="button"
+			disabled={!hasSession}
+			className="flex min-h-10 min-w-0 flex-col rounded-md px-2 py-1.5 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:ring-1 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
+			onClick={() => {
+				if (member.sessionId) {
+					onSelectSession(member.sessionId);
+				}
+			}}
+		>
+			<span className="truncate text-sm font-medium">{member.name}</span>
+			<span className="text-muted-foreground truncate text-xs leading-tight">
+				{metadata}
+				{branch ? (
+					<span className="ml-1 inline-flex items-center gap-0.5">
+						<span className="opacity-50">&middot;</span>
+						<span>{branch}</span>
+					</span>
+				) : null}
+				<span className="ml-1 inline-flex items-center gap-0.5">
+					<span className="opacity-50">&middot;</span>
+					<span>
+						{hasSession ? t("agentTeam.linked") : t("agentTeam.noSession")}
+					</span>
+				</span>
+			</span>
+		</button>
 	);
 };
 

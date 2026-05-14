@@ -64,6 +64,13 @@
 		"resizeMachineSidebar": "Resize machine sidebar",
 		"resizeSessionSidebar": "Resize session sidebar"
 	},
+	"agentTeam": {
+		"badge": "Agent Team",
+		"taskBadge": "Tasks {{count}}",
+		"mailBadge": "Mail {{count}}",
+		"linked": "linked",
+		"noSession": "no session"
+	},
 	"session": {
 		"title": "Sessions",
 		"new": "New session",

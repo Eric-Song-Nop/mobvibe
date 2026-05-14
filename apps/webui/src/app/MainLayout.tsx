@@ -21,6 +21,7 @@ export function MainLayout({ controller }: MainLayoutProps) {
 		isCreatingSession,
 		mutationsSnapshot,
 		sessionList,
+		sidebarSessionList,
 	} = controller;
 
 	return (
@@ -32,6 +33,7 @@ export function MainLayout({ controller }: MainLayoutProps) {
 
 			<AppSidebar
 				sessions={sessionList}
+				sidebarEntries={sidebarSessionList}
 				activeSessionId={activeSessionId}
 				onCreateSession={handleOpenCreateDialog}
 				onSelectSession={handleSelectSession}
