@@ -78,6 +78,7 @@ vi.mock("@/hooks/useSessionQueries", () => ({
 vi.mock("@/hooks/useSessionMutations", () => ({
 	useSessionMutations: () => ({
 		createSessionMutation: { isPending: false, mutateAsync: vi.fn() },
+		createAgentTeamRunMutation: { isPending: false, mutateAsync: vi.fn() },
 		renameSessionMutation: { mutate: vi.fn() },
 		archiveSessionMutation: { mutateAsync: vi.fn() },
 		bulkArchiveSessionsMutation: { mutateAsync: vi.fn() },

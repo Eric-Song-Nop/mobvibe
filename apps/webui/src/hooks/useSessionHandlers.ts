@@ -37,7 +37,7 @@ type Mutations = {
 		}) => Promise<unknown>;
 		isPending: boolean;
 	};
-	createAgentTeamRunMutation?: {
+	createAgentTeamRunMutation: {
 		mutateAsync: (params: {
 			leaderBackendId: string;
 			workspaceRootCwd: string;
@@ -335,7 +335,7 @@ export function useSessionHandlers({
 
 		try {
 			if (isAgentTeamMode) {
-				await mutations.createAgentTeamRunMutation?.mutateAsync({
+				await mutations.createAgentTeamRunMutation.mutateAsync({
 					leaderBackendId: draftBackendId,
 					workspaceRootCwd: draftCwd,
 					title: isUserCustomTitle ? title : undefined,

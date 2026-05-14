@@ -623,7 +623,9 @@ export function useMainAppController() {
 		handleSend,
 		handleSyncHistory,
 		isBulkArchiving,
-		isCreatingSession: mutations.createSessionMutation.isPending,
+		isCreatingSession:
+			mutations.createSessionMutation.isPending ||
+			mutations.createAgentTeamRunMutation.isPending,
 		isModeSwitching,
 		isModelSwitching,
 		loadingMessage,

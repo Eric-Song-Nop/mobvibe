@@ -12,6 +12,7 @@ import {
 	archiveSession,
 	bulkArchiveSessions,
 	cancelSession,
+	createAgentTeam,
 	createSession,
 	loadSession,
 	reloadSession,
@@ -85,6 +86,25 @@ type SendMessageVariables = {
 	prompt: ContentBlock[];
 	messageId?: string;
 	draft?: SendMessageDraft;
+};
+
+type CreateAgentTeamRunVariables = {
+	machineId: string;
+	leaderBackendId: string;
+	workspaceRootCwd: string;
+	title?: string;
+	target: string;
+	worktree?: {
+		branch?: string;
+		baseBranch?: string;
+		sourceCwd: string;
+		relativeCwd?: string;
+	};
+};
+
+type CreateAgentTeamRunResult = {
+	leaderSession: SessionSummary;
+	e2eeStatus: ChatSession["e2eeStatus"];
 };
 
 export interface ChatStoreActions {
@@ -225,6 +245,29 @@ const applySessionSummary = (
 	});
 };
 
+const createLeaderSessionMetadata = (
+	summary: SessionSummary,
+): SessionMetadata => ({
+	title: summary.title,
+	backendId: summary.backendId,
+	backendLabel: summary.backendLabel,
+	cwd: summary.cwd,
+	workspaceRootCwd: summary.workspaceRootCwd,
+	agentName: summary.agentName,
+	modelId: summary.modelId,
+	modelName: summary.modelName,
+	modeId: summary.modeId,
+	modeName: summary.modeName,
+	availableModes: summary.availableModes,
+	availableModels: summary.availableModels,
+	availableCommands: summary.availableCommands,
+	createdAt: summary.createdAt,
+	updatedAt: summary.updatedAt,
+	worktreeSourceCwd: summary.worktreeSourceCwd,
+	worktreeBranch: summary.worktreeBranch,
+	machineId: summary.machineId,
+});
+
 /**
  * Hook that manages all session-related mutations.
  * Provides methods for creating, renaming, closing, canceling sessions,
@@ -308,6 +351,60 @@ export function useSessionMutations(store: ChatStoreActions) {
 				);
 			}
 
+			store.setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError(t("errors.createSessionFailed"), "service"),
+				),
+			);
+		},
+	});
+
+	const createAgentTeamRunMutation = useMutation({
+		mutationFn: async (
+			variables: CreateAgentTeamRunVariables,
+		): Promise<CreateAgentTeamRunResult> => {
+			const result = await createAgentTeam({
+				machineId: variables.machineId,
+				leaderBackendId: variables.leaderBackendId,
+				workspaceRootCwd: variables.workspaceRootCwd,
+				title: variables.title,
+				worktree: variables.worktree,
+			});
+			const leaderSession = result.leaderSession;
+			if (!leaderSession) {
+				throw new Error("Agent Team leader session was not returned");
+			}
+			const e2eeStatus = bootstrapSessionE2EE(
+				leaderSession.sessionId,
+				leaderSession.wrappedDek,
+			);
+			if (e2eeStatus !== "ok") {
+				throw new Error(t("errors.sessionE2EEKeyMissing"));
+			}
+			await sendMessage({
+				sessionId: leaderSession.sessionId,
+				prompt: [{ type: "text", text: variables.target }],
+			});
+			return { leaderSession, e2eeStatus };
+		},
+		onSuccess: ({ leaderSession, e2eeStatus }, variables) => {
+			store.createLocalSession(
+				leaderSession.sessionId,
+				createLeaderSessionMetadata(leaderSession),
+			);
+			store.setSessionE2EEStatus(leaderSession.sessionId, e2eeStatus);
+			store.setActiveSessionId(leaderSession.sessionId);
+			const lastCwd =
+				variables.workspaceRootCwd ??
+				leaderSession.worktreeSourceCwd ??
+				leaderSession.cwd;
+			if (leaderSession.machineId && lastCwd) {
+				store.setLastCreatedCwd(leaderSession.machineId, lastCwd);
+			}
+			store.setAppError(undefined);
+		},
+		onError: (mutationError: unknown) => {
 			store.setAppError(
 				normalizeError(
 					mutationError,
@@ -541,6 +638,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 
 	return {
 		createSessionMutation,
+		createAgentTeamRunMutation,
 		renameSessionMutation,
 		archiveSessionMutation,
 		bulkArchiveSessionsMutation,
