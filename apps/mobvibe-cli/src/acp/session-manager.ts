@@ -87,6 +87,13 @@ type SessionRecord = {
 	workspaceRootCwd?: string;
 };
 
+type SessionExecutionContext = {
+	cwd?: string;
+	workspaceRootCwd?: string;
+	worktreeSourceCwd?: string;
+	worktreeBranch?: string;
+};
+
 type PermissionRequestRecord = {
 	sessionId: string;
 	requestId: string;
@@ -823,6 +830,87 @@ export class SessionManager {
 		return backend;
 	}
 
+	private async resolveSessionExecutionContext(options: {
+		cwd?: string;
+		worktree?: CreateSessionWorktreeOptions;
+		executionContext?: SessionExecutionContext;
+	}): Promise<SessionExecutionContext> {
+		if (options.executionContext) {
+			return options.executionContext;
+		}
+		if (!options.worktree) {
+			if (!options.cwd) return {};
+			const projectContext = await resolveGitProjectContext(options.cwd);
+			return {
+				cwd: options.cwd,
+				workspaceRootCwd: projectContext.repoRoot ?? options.cwd,
+			};
+		}
+
+		const repoDir = options.worktree.sourceCwd;
+		if (!(await isGitRepo(repoDir))) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: `Not a git repository: ${repoDir}`,
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+
+		const branch = resolveWorktreeBranchName(options.worktree.branch);
+		const sanitizedBranch = sanitizeWorktreeBranchForPath(branch);
+		const repoName = path.basename(repoDir);
+		const targetPath = path.join(
+			this.config.worktreeBaseDir,
+			repoName,
+			sanitizedBranch,
+		);
+
+		logger.info(
+			{
+				repoDir,
+				branch,
+				baseBranch: options.worktree.baseBranch,
+				targetPath,
+			},
+			"creating_git_worktree",
+		);
+
+		try {
+			const result = await createGitWorktree(repoDir, {
+				branch,
+				targetPath,
+				baseBranch: options.worktree.baseBranch,
+			});
+			return {
+				cwd: resolveWorktreeExecutionCwd(
+					result.path,
+					options.worktree.relativeCwd,
+				),
+				workspaceRootCwd: repoDir,
+				worktreeSourceCwd: repoDir,
+				worktreeBranch: branch,
+			};
+		} catch (error) {
+			if (error instanceof AppError) {
+				throw error;
+			}
+			const message = error instanceof Error ? error.message : String(error);
+			throw new AppError(
+				createErrorDetail({
+					code: "GIT_WORKTREE_FAILED",
+					message: `Failed to create worktree: ${message}`,
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+	}
+
 	async createSession(options: {
 		cwd?: string;
 		title?: string;
@@ -830,79 +918,11 @@ export class SessionManager {
 		worktree?: CreateSessionWorktreeOptions;
 	}): Promise<SessionSummary> {
 		const backend = this.resolveBackend(options.backendId);
-
-		// Handle worktree creation before acquiring connection
-		let effectiveCwd = options.cwd;
-		let worktreeSourceCwd: string | undefined;
-		let worktreeBranch: string | undefined;
-		let workspaceRootCwd: string | undefined;
-
-		if (options.worktree) {
-			const repoDir = options.worktree.sourceCwd;
-			if (!(await isGitRepo(repoDir))) {
-				throw new AppError(
-					createErrorDetail({
-						code: "REQUEST_VALIDATION_FAILED",
-						message: `Not a git repository: ${repoDir}`,
-						retryable: false,
-						scope: "request",
-					}),
-					400,
-				);
-			}
-
-			const branch = resolveWorktreeBranchName(options.worktree.branch);
-			const sanitizedBranch = sanitizeWorktreeBranchForPath(branch);
-			const repoName = path.basename(repoDir);
-			const targetPath = path.join(
-				this.config.worktreeBaseDir,
-				repoName,
-				sanitizedBranch,
-			);
-
-			logger.info(
-				{
-					repoDir,
-					branch,
-					baseBranch: options.worktree.baseBranch,
-					targetPath,
-				},
-				"creating_git_worktree",
-			);
-
-			try {
-				const result = await createGitWorktree(repoDir, {
-					branch,
-					targetPath,
-					baseBranch: options.worktree.baseBranch,
-				});
-				effectiveCwd = resolveWorktreeExecutionCwd(
-					result.path,
-					options.worktree.relativeCwd,
-				);
-			} catch (error) {
-				if (error instanceof AppError) {
-					throw error;
-				}
-				const message = error instanceof Error ? error.message : String(error);
-				throw new AppError(
-					createErrorDetail({
-						code: "GIT_WORKTREE_FAILED",
-						message: `Failed to create worktree: ${message}`,
-						retryable: false,
-						scope: "request",
-					}),
-					400,
-				);
-			}
-
-			worktreeSourceCwd = repoDir;
-			worktreeBranch = branch;
-			workspaceRootCwd = repoDir;
-		} else if (options.cwd) {
-			const projectContext = await resolveGitProjectContext(options.cwd);
-			workspaceRootCwd = projectContext.repoRoot ?? options.cwd;
-		}
+		const executionContext = await this.resolveSessionExecutionContext(options);
+		const effectiveCwd = executionContext.cwd;
+		const worktreeSourceCwd = executionContext.worktreeSourceCwd;
+		const worktreeBranch = executionContext.worktreeBranch;
+		const workspaceRootCwd = executionContext.workspaceRootCwd;
 
 		const connection = await this.acquireConnection(backend);
 		try {
@@ -1033,12 +1053,15 @@ export class SessionManager {
 		backendId: string;
 		agentTeamId: string;
 		memberId: string;
+		worktree?: CreateSessionWorktreeOptions;
+		executionContext?: SessionExecutionContext;
 	}): Promise<SessionSummary> {
 		const backend = this.resolveBackend(options.backendId);
-		const effectiveCwd = options.cwd;
-		const workspaceRootCwd = options.cwd
-			? ((await resolveGitProjectContext(options.cwd)).repoRoot ?? options.cwd)
-			: undefined;
+		const executionContext = await this.resolveSessionExecutionContext(options);
+		const effectiveCwd = executionContext.cwd;
+		const workspaceRootCwd = executionContext.workspaceRootCwd;
+		const worktreeSourceCwd = executionContext.worktreeSourceCwd;
+		const worktreeBranch = executionContext.worktreeBranch;
 		const connection = await this.acquireConnection(backend);
 
 		try {
@@ -1090,6 +1113,8 @@ export class SessionManager {
 				updatedAt: now,
 				cwd: effectiveCwd,
 				workspaceRootCwd,
+				worktreeSourceCwd,
+				worktreeBranch,
 				agentName: agentInfo?.title ?? agentInfo?.name,
 				modelId,
 				modelName,
@@ -1129,11 +1154,13 @@ export class SessionManager {
 					this.emitSessionDetached(session.sessionId, "agent_exit");
 				}
 			});
-			this.agentTeamStore.updateTeamMemberRuntimeState({
+			this.agentTeamStore.updateTeamMemberRuntime({
 				agentTeamId: options.agentTeamId,
 				memberId: options.memberId,
 				sessionId: session.sessionId,
 				lifecycle: "running",
+				worktreeSourceCwd,
+				worktreeBranch,
 			});
 			this.sessions.set(session.sessionId, record);
 			const summary = this.buildSummary(record);
