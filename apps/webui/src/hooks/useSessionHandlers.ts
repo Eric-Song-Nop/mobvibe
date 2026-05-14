@@ -9,6 +9,7 @@ import {
 	buildSessionE2EEKeyMissingError,
 	buildSessionNotReadyError,
 	createFallbackError,
+	isErrorDetail,
 	normalizeError,
 } from "@/lib/error-utils";
 import { getBackendCapability, type Machine } from "@/lib/machines-store";
@@ -27,6 +28,22 @@ type Mutations = {
 			cwd: string;
 			title?: string;
 			machineId: string;
+			worktree?: {
+				branch?: string;
+				baseBranch?: string;
+				sourceCwd: string;
+				relativeCwd?: string;
+			};
+		}) => Promise<unknown>;
+		isPending: boolean;
+	};
+	createAgentTeamRunMutation?: {
+		mutateAsync: (params: {
+			leaderBackendId: string;
+			workspaceRootCwd: string;
+			title?: string;
+			machineId: string;
+			target: string;
 			worktree?: {
 				branch?: string;
 				baseBranch?: string;
@@ -103,8 +120,17 @@ type UiActions = {
 	setDraftTitle: (title: string) => void;
 	setDraftBackendId: (id: string | undefined) => void;
 	setDraftCwd: (cwd: string | undefined) => void;
+	setCreateDialogMode: (mode: "session" | "agent-team") => void;
+	setDraftTeamTarget: (target: string) => void;
 	resetDraftWorktree: () => void;
 	clearEditingSession: () => void;
+};
+
+type WorktreeRequest = {
+	branch?: string;
+	baseBranch?: string;
+	sourceCwd: string;
+	relativeCwd?: string;
 };
 
 export type UseSessionHandlersParams = {
@@ -176,15 +202,20 @@ export function useSessionHandlers({
 		return attachedSession;
 	}, [activateSession]);
 
-	const handleOpenCreateDialog = (mode?: "workspace" | "session") => {
+	const handleOpenCreateDialog = (
+		mode?: "workspace" | "session" | "agent-team",
+	) => {
+		const isAgentTeamMode = mode === "agent-team";
 		uiActions.setDraftTitle(buildSessionTitle(sessionList, t));
 		uiActions.setDraftBackendId(defaultBackendId);
+		uiActions.setCreateDialogMode(isAgentTeamMode ? "agent-team" : "session");
+		uiActions.setDraftTeamTarget("");
 
 		let initialCwd: string | undefined;
 
 		// "session" mode: prefer the effective workspace CWD so the new session
 		// is pre-filled with the currently visible workspace path.
-		if (mode === "session" && effectiveWorkspaceCwd) {
+		if ((mode === "session" || isAgentTeamMode) && effectiveWorkspaceCwd) {
 			initialCwd = effectiveWorkspaceCwd;
 		}
 
@@ -203,11 +234,44 @@ export function useSessionHandlers({
 		uiActions.setCreateDialogOpen(true);
 	};
 
+	const buildWorktreeRequest = async (params: {
+		machineId: string;
+		draftCwd: string;
+		draftWorktreeEnabled: boolean;
+		draftWorktreeBranch: string;
+		draftWorktreeSuggestedBranch?: string;
+		draftWorktreeBaseBranch?: string;
+	}): Promise<WorktreeRequest | undefined> => {
+		if (!params.draftWorktreeEnabled) {
+			return undefined;
+		}
+
+		const branch = resolveWorktreeBranchName(
+			params.draftWorktreeBranch.trim() || params.draftWorktreeSuggestedBranch,
+		);
+		const projectContext = await fetchGitBranchesForCwd({
+			machineId: params.machineId,
+			cwd: params.draftCwd,
+		});
+		if (!projectContext.isGitRepo) {
+			throw createFallbackError(t("errors.worktreeRequiresGitRepo"), "request");
+		}
+
+		return {
+			branch,
+			baseBranch: params.draftWorktreeBaseBranch || undefined,
+			sourceCwd: projectContext.repoRoot ?? params.draftCwd,
+			relativeCwd: projectContext.relativeCwd,
+		};
+	};
+
 	const handleCreateSession = async () => {
 		const {
+			createDialogMode,
 			draftTitle,
 			draftBackendId,
 			draftCwd,
+			draftTeamTarget,
 			draftWorktreeEnabled,
 			draftWorktreeBranch,
 			draftWorktreeSuggestedBranch,
@@ -235,50 +299,54 @@ export function useSessionHandlers({
 		const defaultTitle = buildSessionTitle(sessionList, t);
 		const isUserCustomTitle = title.length > 0 && title !== defaultTitle;
 		chatActions.setAppError(undefined);
-
-		let worktree:
-			| {
-					branch?: string;
-					baseBranch?: string;
-					sourceCwd: string;
-					relativeCwd?: string;
-			  }
-			| undefined;
-
-		if (draftWorktreeEnabled) {
-			const branch = resolveWorktreeBranchName(
-				draftWorktreeBranch.trim() || draftWorktreeSuggestedBranch,
+		const isAgentTeamMode = createDialogMode === "agent-team";
+		const target = draftTeamTarget.trim();
+		if (isAgentTeamMode && target.length === 0) {
+			chatActions.setAppError(
+				createFallbackError(
+					t("errors.createAgentTeamTargetRequired"),
+					"request",
+				),
 			);
+			return;
+		}
 
-			try {
-				const projectContext = await fetchGitBranchesForCwd({
-					machineId: selectedMachineId,
-					cwd: draftCwd,
-				});
-				if (!projectContext.isGitRepo) {
-					chatActions.setAppError(
-						createFallbackError(t("errors.worktreeRequiresGitRepo"), "request"),
-					);
-					return;
-				}
-				worktree = {
-					branch,
-					baseBranch: draftWorktreeBaseBranch || undefined,
-					sourceCwd: projectContext.repoRoot ?? draftCwd,
-					relativeCwd: projectContext.relativeCwd,
-				};
-			} catch (error) {
-				chatActions.setAppError(
-					normalizeError(
-						error,
-						createFallbackError(t("session.worktree.queryError"), "request"),
-					),
-				);
-				return;
-			}
+		let worktree: WorktreeRequest | undefined;
+		try {
+			worktree = await buildWorktreeRequest({
+				machineId: selectedMachineId,
+				draftCwd,
+				draftWorktreeEnabled,
+				draftWorktreeBranch,
+				draftWorktreeSuggestedBranch,
+				draftWorktreeBaseBranch,
+			});
+		} catch (error) {
+			chatActions.setAppError(
+				isErrorDetail(error)
+					? error
+					: normalizeError(
+							error,
+							createFallbackError(t("session.worktree.queryError"), "request"),
+						),
+			);
+			return;
 		}
 
 		try {
+			if (isAgentTeamMode) {
+				await mutations.createAgentTeamRunMutation?.mutateAsync({
+					leaderBackendId: draftBackendId,
+					workspaceRootCwd: draftCwd,
+					title: isUserCustomTitle ? title : undefined,
+					machineId: selectedMachineId,
+					target,
+					worktree,
+				});
+				uiActions.setCreateDialogOpen(false);
+				uiActions.setMobileMenuOpen(false);
+				return;
+			}
 			await mutations.createSessionMutation.mutateAsync({
 				backendId: draftBackendId,
 				cwd: draftCwd,
