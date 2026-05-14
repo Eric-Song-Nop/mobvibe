@@ -112,7 +112,7 @@ describe("Agent Team shared contract", () => {
 			.filter((line) => !line.trimStart().startsWith("//"))
 			.join("\n");
 
-			expect(source).not.toMatch(
+		expect(source).not.toMatch(
 			/\b(prompt|content|body|description|summaryText|agentOutput|providerToken|masterSecret|dek|secret)\b/,
 		);
 	});
