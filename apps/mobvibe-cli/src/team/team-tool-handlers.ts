@@ -17,6 +17,7 @@ import {
 export const EXPECTED_TEAM_TOOL_NAMES = [
 	"mobvibe_team_send_message",
 	"mobvibe_team_members",
+	"mobvibe_team_spawn_member",
 	"mobvibe_team_task_create",
 	"mobvibe_team_task_list",
 	"mobvibe_team_task_update",
@@ -123,6 +124,8 @@ export class TeamToolHandlers {
 					}));
 			case "mobvibe_team_send_message":
 				return this.handleSendMessage(caller, args);
+			case "mobvibe_team_spawn_member":
+				return validationError("spawn_member is not implemented yet");
 			case "mobvibe_team_task_create":
 				return this.handleCreateTask(caller, args);
 			case "mobvibe_team_task_list":
