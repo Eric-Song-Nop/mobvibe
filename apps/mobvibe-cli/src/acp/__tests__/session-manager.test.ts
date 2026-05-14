@@ -1000,6 +1000,81 @@ describe("SessionManager", () => {
 				true,
 			);
 		});
+
+		it("marks non-leader team member completed and emits team projection update", async () => {
+			const expectedTeamTools = [
+				"mobvibe_team_send_message",
+				"mobvibe_team_members",
+				"mobvibe_team_spawn_member",
+				"mobvibe_team_task_create",
+				"mobvibe_team_task_list",
+				"mobvibe_team_task_update",
+			];
+			mockConnection.getSessionCapabilities.mockReturnValue({
+				list: true,
+				load: true,
+				mcp: { acp: true },
+			});
+			let createdCount = 0;
+			mockConnection.createSession.mockImplementation(async (...args: unknown[]) => {
+				createdCount += 1;
+				const params = args[0] as {
+					teamMcpDeclaration?: { id?: string };
+					teamMcpHandlers?: {
+						handleConnect(input: { serverId: string }): unknown;
+						handleListTools(input: {
+							serverId: string;
+							toolNames: string[];
+						}): void;
+					};
+				};
+				const serverId = params.teamMcpDeclaration?.id;
+				if (params.teamMcpHandlers && serverId) {
+					params.teamMcpHandlers.handleConnect({ serverId });
+					params.teamMcpHandlers.handleListTools({
+						serverId,
+						toolNames: expectedTeamTools,
+					});
+				}
+				return {
+					sessionId:
+						createdCount === 1 ? "leader-session-1" : "member-session-1",
+					modes: null,
+					models: null,
+				};
+			});
+			const created = await sessionManager.createAgentTeamRun({
+				machineId: mockConfig.machineId,
+				backendId: "backend-1",
+				workspaceRootCwd: "/home/user/project",
+			});
+			await sessionManager.spawnAgentTeamMember({
+				agentTeamId: created.team.agentTeamId,
+				requestedByMemberId: created.team.leaderMemberId,
+				name: "Worker",
+			});
+			const teamChanged = mock(() => {});
+			sessionManager.onAgentTeamChanged(teamChanged);
+
+			sessionManager.recordTurnEnd("member-session-1", "end_turn");
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			expect(teamChanged).toHaveBeenCalledWith(
+				expect.objectContaining({
+					updated: [
+						expect.objectContaining({
+							agentTeamId: created.team.agentTeamId,
+							members: expect.arrayContaining([
+								expect.objectContaining({
+									sessionId: "member-session-1",
+									lifecycle: "completed",
+								}),
+							]),
+						}),
+					],
+				}),
+			);
+		});
 	});
 
 	describe("injectTeamMailboxPrompt", () => {
