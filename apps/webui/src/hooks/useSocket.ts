@@ -1,4 +1,8 @@
-import { isEncryptedPayload, type SessionSummary } from "@mobvibe/shared";
+import {
+	type AgentTeamsChangedPayload,
+	isEncryptedPayload,
+	type SessionSummary,
+} from "@mobvibe/shared";
 import { useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -37,6 +41,7 @@ import {
 	notifySessionError,
 } from "@/lib/notifications";
 import { gatewaySocket } from "@/lib/socket";
+import { useTeamStore } from "@/lib/team-store";
 
 type UseSocketOptions = {
 	// Legacy compatibility for older tests; the hook now reads sessions from the store.
@@ -610,6 +615,9 @@ export function useSocket({
 			handlePermissionResultRef.current?.(p);
 		const onSessionsChanged = (p: SessionsChangedPayload) =>
 			handleSessionsChangedRef.current?.(p);
+		const onAgentTeamsChanged = (p: AgentTeamsChangedPayload) => {
+			useTeamStore.getState().handleAgentTeamsChanged(p);
+		};
 		const onSessionEvent = (e: SessionEvent) =>
 			handleSessionEventRef.current?.(e);
 
@@ -623,6 +631,8 @@ export function useSocket({
 		const unsubPermRes = gatewaySocket.onPermissionResult(onPermissionResult);
 		const unsubSessionsChanged =
 			gatewaySocket.onSessionsChanged(onSessionsChanged);
+		const unsubAgentTeamsChanged =
+			gatewaySocket.onAgentTeamsChanged(onAgentTeamsChanged);
 		const unsubSessionEvent = gatewaySocket.onSessionEvent(onSessionEvent);
 
 		const unsubDisconnect = gatewaySocket.onDisconnect(() => {
@@ -670,6 +680,7 @@ export function useSocket({
 			unsubPermReq();
 			unsubPermRes();
 			unsubSessionsChanged();
+			unsubAgentTeamsChanged();
 			unsubSessionEvent();
 			unsubDisconnect();
 			window.removeEventListener("storage", handleStorageChange);

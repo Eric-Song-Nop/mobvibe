@@ -243,6 +243,12 @@ const mockGatewaySocket = vi.hoisted(() => ({
 			handlers.sessionsChanged = undefined;
 		};
 	}),
+	onAgentTeamsChanged: vi.fn((handler: (payload: unknown) => void) => {
+		handlers.agentTeamsChanged = handler;
+		return () => {
+			handlers.agentTeamsChanged = undefined;
+		};
+	}),
 	onSessionAttached: vi.fn((handler: (payload: unknown) => void) => {
 		handlers.sessionAttached = handler;
 		return () => {

@@ -95,6 +95,7 @@ const mockGatewaySocket = vi.hoisted(() => ({
 	onPermissionRequest: vi.fn(),
 	onPermissionResult: vi.fn(),
 	onSessionsChanged: vi.fn(),
+	onAgentTeamsChanged: vi.fn(),
 	onSessionAttached: vi.fn(),
 	onSessionDetached: vi.fn(),
 	onCliStatus: vi.fn(),
@@ -104,6 +105,16 @@ const mockGatewaySocket = vi.hoisted(() => ({
 
 vi.mock("@/lib/socket", () => ({
 	gatewaySocket: mockGatewaySocket,
+}));
+
+const mockHandleAgentTeamsChanged = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/team-store", () => ({
+	useTeamStore: {
+		getState: () => ({
+			handleAgentTeamsChanged: mockHandleAgentTeamsChanged,
+		}),
+	},
 }));
 
 const dekReadyListeners = vi.hoisted(
@@ -494,6 +505,14 @@ describe("useSocket (webui)", () => {
 				};
 			},
 		);
+		mockGatewaySocket.onAgentTeamsChanged.mockImplementation(
+			(handler: (payload: unknown) => void) => {
+				handlers.agentTeamsChanged = handler;
+				return () => {
+					handlers.agentTeamsChanged = undefined;
+				};
+			},
+		);
 		mockGatewaySocket.onSessionEvent.mockImplementation(
 			(handler: (event: unknown) => void) => {
 				handlers.sessionEvent = handler;
@@ -538,6 +557,42 @@ describe("useSocket (webui)", () => {
 				handlers.connect = undefined;
 			};
 		});
+	});
+
+	it("updates the team projection store from agent-teams:changed events", async () => {
+		const store = createStore();
+		renderHook(() =>
+			useSocket({
+				sessions: {},
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		const payload = {
+			machineId: "machine-1",
+			added: [],
+			updated: [],
+			removed: ["team-1"],
+		};
+		handlers.agentTeamsChanged?.(payload);
+
+		expect(mockHandleAgentTeamsChanged).toHaveBeenCalledWith(payload);
 	});
 
 	it("subscribes to sessions that are attached or loading", async () => {
