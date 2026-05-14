@@ -77,7 +77,13 @@ Plans:
   4. Leader 可以通过 team tools 创建任务、发送 mailbox message，并在确认后 spawn 一个普通 member ACP session。
   5. Team detail 展示 leader/member、MCP phase、task/mailbox 非内容 projection、session 链接、worktree branch、错误和最后更新时间。
   6. 用户可以从 team detail 跳转到任意成员普通 session，继续使用现有聊天、文件、Git 和权限 UI。
-**Plans**: TBD
+**Plans**: 5 plans
+Plans:
+- [ ] 03-01-PLAN.md — Shared/Gateway Agent Team create contract and safe worktree payload
+- [ ] 03-02-PLAN.md — CLI create/start leader session, team-shared worktree, and MCP readiness
+- [ ] 03-03-PLAN.md — Real spawn member tool and ordinary member session orchestration
+- [ ] 03-04-PLAN.md — WebUI Agent Team create flow and encrypted target delivery
+- [ ] 03-05-PLAN.md — WebUI team sidebar, overview, projection badges, and member navigation
 **UI hint**: yes
 
 ### Phase 4: 生命周期、权限、E2EE 与恢复
@@ -118,7 +124,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. 协议、状态模型与持久化边界 | 5/5 | Completed | 2026-05-13 |
 | 2. CLI Team MCP、Mailbox 与 Task Board | 7/7 | Completed | 2026-05-13 |
-| 3. 最小端到端 Team Run | 0/TBD | Not started | - |
+| 3. 最小端到端 Team Run | 0/5 | Planned | - |
 | 4. 生命周期、权限、E2EE 与恢复 | 0/TBD | Not started | - |
 | 5. UI 规模化与 v1 Polish | 0/TBD | Not started | - |
 
