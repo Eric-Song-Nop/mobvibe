@@ -1,4 +1,6 @@
+import path from "node:path";
 import {
+	AppError,
 	createErrorDetail,
 	createInternalError,
 	type ErrorDetail,
@@ -88,11 +90,64 @@ const optionalString = (value: unknown): string | undefined => {
 	return trimmed.length > 0 ? trimmed : undefined;
 };
 
+const normalizeRelativeCwd = (value: unknown): string | undefined => {
+	const trimmed = optionalString(value);
+	if (!trimmed) return undefined;
+	if (path.posix.isAbsolute(trimmed) || path.win32.isAbsolute(trimmed)) {
+		throw new AppError(
+			buildRequestValidationError(
+				"worktree.relativeCwd must be a relative subdirectory",
+			),
+			400,
+		);
+	}
+	const segments = trimmed.split(/[/\\]+/).filter(Boolean);
+	if (
+		segments.length === 0 ||
+		segments.some((segment) => segment === "." || segment === "..")
+	) {
+		throw new AppError(
+			buildRequestValidationError(
+				"worktree.relativeCwd must be a normalized subdirectory path",
+			),
+			400,
+		);
+	}
+	return segments.join("/");
+};
+
+const parseWorktreeOptions = (value: unknown) => {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		return undefined;
+	}
+	const worktree = value as Record<string, unknown>;
+	const sourceCwd = optionalString(worktree.sourceCwd);
+	if (!sourceCwd) return undefined;
+	const branch = optionalString(worktree.branch);
+	const baseBranch = optionalString(worktree.baseBranch);
+	if (branch?.startsWith("-") || baseBranch?.startsWith("-")) {
+		throw new AppError(
+			buildRequestValidationError("Branch name cannot start with '-'"),
+			400,
+		);
+	}
+	return {
+		branch,
+		baseBranch,
+		sourceCwd,
+		relativeCwd: normalizeRelativeCwd(worktree.relativeCwd),
+	};
+};
+
 const mapRouteError = (
 	response: { status: (code: number) => { json: (body: unknown) => void } },
 	error: unknown,
 ) => {
 	const message = getErrorMessage(error);
+	if (error instanceof AppError) {
+		respondError(response, error.detail, error.status);
+		return;
+	}
 	if (message.includes("Machine not found")) {
 		respondError(response, buildAuthorizationError(message), 403);
 		return;
@@ -141,6 +196,7 @@ export function setupAgentTeamRoutes(
 				workspaceRootCwd,
 				leaderBackendId,
 				workspaceMode,
+				worktree,
 			} = request.body ?? {};
 			if (
 				typeof machineId !== "string" ||
@@ -158,6 +214,7 @@ export function setupAgentTeamRoutes(
 			}
 
 			try {
+				const worktreeOptions = parseWorktreeOptions(worktree);
 				logger.info({ userId, machineId }, "agent_team_create_request");
 				const result = await teamRouter.createAgentTeam(
 					{
@@ -170,6 +227,7 @@ export function setupAgentTeamRoutes(
 							workspaceMode === "shared_workspace"
 								? workspaceMode
 								: undefined,
+						worktree: worktreeOptions,
 					},
 					userId,
 				);
