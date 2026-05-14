@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 3 plans drafted, awaiting implementation confirmation
-last_updated: "2026-05-14T03:38:39.676Z"
-last_activity: 2026-05-14 -- Phase 03 execution started
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-05-14T03:51:48.765Z"
+last_activity: 2026-05-14
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 17
-  completed_plans: 12
-  percent: 71
+  completed_plans: 13
+  percent: 76
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 03 (team-run) — EXECUTING
-Plan: 1 of 5
-Status: Executing Phase 03
-Last activity: 2026-05-14 -- Phase 03 execution started
+Plan: 2 of 5
+Status: Ready to execute
+Last activity: 2026-05-14
 
-Progress: [███████░░░] 71% of planned Phase 1-3 plans
+Progress: [████████░░] 76%
 
 ## Performance Metrics
 
@@ -62,6 +62,7 @@ Progress: [███████░░░] 71% of planned Phase 1-3 plans
 | Phase 02 P03 | 14 min | 2 tasks | 8 files |
 | Phase 02 P06 | 9 min | 2 tasks | 7 files |
 | Phase 02 P04 | 12 min | 2 tasks | 6 files |
+| Phase 03-team-run P01 | 8 min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -112,6 +113,8 @@ Recent decisions affecting current work:
 - [Phase 02-07]: Production ACP MCP callbacks now enter the SessionManager-owned TeamRuntime through AcpConnection extension method routing.
 - [Phase 02-07]: stdio_bridge is rejected until a real executable MCP stdio server exists; native MCP-over-ACP is required for team sessions in the current implementation.
 - [Phase 02-07]: Callback-path tests prove mailbox/task tools mutate durable AgentTeamStore facts while projection payloads remain plaintext-safe.
+- [Phase 03-team-run]: Agent Team create contract reuses ordinary session worktree metadata instead of introducing team-only worktree field names. — This preserves Phase 3 team-shared worktree semantics and avoids contract drift with ordinary session creation.
+- [Phase 03-team-run]: Target/plaintext delivery remains outside /acp/agent-teams; WebUI createAgentTeam serializes only metadata and nested worktree options. — This preserves the existing E2EE boundary: target delivery must use the ordinary encrypted message path.
 
 ### Pending Todos
 
@@ -132,6 +135,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-14T03:26:51Z
-Stopped at: Phase 3 plans drafted, awaiting implementation confirmation
-Resume file: .planning/phases/03-team-run/03-01-PLAN.md
+Last session: 2026-05-14T03:51:07.180Z
+Stopped at: Completed 03-01-PLAN.md
+Resume file: None
