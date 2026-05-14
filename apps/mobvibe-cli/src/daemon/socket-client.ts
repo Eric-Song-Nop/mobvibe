@@ -330,7 +330,7 @@ export class SocketClient extends EventEmitter {
 					},
 					"rpc_agent_team_create",
 				);
-				const result = agentTeamStore.createAgentTeam(request.params);
+				const result = await sessionManager.createAgentTeamRun(request.params);
 				this.sendRpcResponse(request.requestId, result);
 				this.socket.emit("agent-teams:changed", {
 					added: [result.team],
@@ -1420,6 +1420,12 @@ export class SocketClient extends EventEmitter {
 					"sessions_changed_emit",
 				);
 				this.socket.emit("sessions:changed", payload);
+			}
+		});
+
+		sessionManager.onAgentTeamChanged((payload) => {
+			if (this.connected) {
+				this.socket.emit("agent-teams:changed", payload);
 			}
 		});
 
