@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 03-05-PLAN.md
-last_updated: "2026-05-14T06:22:02.360Z"
+status: ready_to_plan
+stopped_at: Phase 03 verified and marked complete
+last_updated: "2026-05-14T06:48:30Z"
 last_activity: 2026-05-14
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 17
   completed_plans: 17
-  percent: 100
+  percent: 60
 ---
 
 # Project State
@@ -21,22 +21,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-12)
 
 **Core value:** 用户可以在一个 Mobvibe 团队任务中安全地协调多个不同 ACP agent，让它们围绕同一代码目标协作，并清楚看到每个 agent 的进展、任务、消息、产出和最终汇总。
-**Current focus:** Phase 03 — team-run
+**Current focus:** Phase 4 — 生命周期、权限、E2EE 与恢复
 
 ## Current Position
 
-Phase: 03 (team-run) — EXECUTING
-Plan: 5 of 5
-Status: Phase complete
+Phase: 4
+Plan: Not started
+Status: Ready to plan
 Last activity: 2026-05-14
 
-Progress: [██████████] 100%
+Progress: [██████░░░░] 60%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 14
+- Total plans completed: 17
 - Average duration: 12 min
 - Total execution time: 2.1 hours
 
@@ -46,7 +46,7 @@ Progress: [██████████] 100%
 |-------|-------|-------|----------|
 | 1. 协议、状态模型与持久化边界 | 5 | 41 min | 8 min |
 | 2. CLI Team MCP、Mailbox 与 Task Board | 7 | 67 min | 10 min |
-| 3. 最小端到端 Team Run | 5 planned / 2 completed | 25 min | 13 min |
+| 3. 最小端到端 Team Run | 5 | 154 min | 31 min |
 | 4. 生命周期、权限、E2EE 与恢复 | 0 | TBD | N/A |
 | 5. UI 规模化与 v1 Polish | 0 | TBD | N/A |
 
@@ -120,18 +120,23 @@ Recent decisions affecting current work:
 - [Phase 03-02]: SessionManager owns Agent Team create/start orchestration so durable store updates, ordinary session events, and Team MCP callbacks share one source of truth.
 - [Phase 03-02]: Team-shared worktree keeps workspaceRootCwd/worktreeSourceCwd pointed at the source repo root while cwd points at the execution checkout.
 - [Phase 03-02]: Team create failures use existing shared ErrorCode values while preserving safe failure metadata on the leader member projection.
-- [Phase ?]: [Phase 03-05]: Agent Team sidebar 使用独立 SidebarSessionListEntry 派生模型，不把 team 伪装成普通 ChatSession。
-- [Phase ?]: [Phase 03-05]: Team parent 与 ordinary session selection 互斥；member jump 复用普通 session activation path。
-- [Phase ?]: [Phase 03-05]: AgentTeamOverview 只展示 projection metadata/counts/safe errors，不展示协作正文或 agent output。
+- [Phase 03-03]: `mobvibe_team_spawn_member` 只接受 metadata-only `name`/`backendId` 参数；caller identity 来自 MCP server 绑定，不能由 tool args 覆盖。
+- [Phase 03-03]: Spawned member 在 Phase 3 复用 leader/team shared checkout；per-member worktree isolation 延后，不作为当前阶段语义。
+- [Phase 03-04]: Agent Team target/plaintext 不进入 `/acp/agent-teams`；WebUI 先创建 metadata-only team/leader，再通过 ordinary session E2EE `sendMessage()` 投递 target。
+- [Phase 03-05]: Agent Team sidebar 使用独立 SidebarSessionListEntry 派生模型，不把 team 伪装成普通 ChatSession。
+- [Phase 03-05]: Team parent 与 ordinary session selection 互斥；member jump 复用普通 session activation path。
+- [Phase 03-05]: AgentTeamOverview 只展示 projection metadata/counts/safe errors，不展示协作正文或 agent output。
 
 ### Pending Todos
 
-- Phase 3 已完成；等待 transition 到 Phase 4。
+- Phase 3 已验证完成；下一步规划 Phase 4 生命周期、权限、E2EE 与恢复。
 
 ### Blockers/Concerns
 
 - No blocking gaps. Phase 02 verification passed 6/6 after 02-07 gap closure.
 - Non-blocking warning carried forward: mailbox wake retry semantics still mark rows read before successful injection; address in a later reliability slice.
+- Phase 3 verification passed 6/6. Non-blocking carry-forward: create succeeds but encrypted target send fails cleanup/retry belongs to Phase 4 lifecycle/recovery.
+- Codebase drift gate returned warn-only structural drift; run `/gsd-map-codebase --paths .codex,.dockerignore,.gitattributes,.gitignore,.npmrc,AGENTS.md,CLAUDE.md,LICENSE,README.md,README.zh.md,apps/gateway,apps/mobvibe-cli,packages/shared,packages/ui,pnpm-lock.yaml,render.yaml` when refreshing planning context.
 
 ## Deferred Items
 
@@ -143,6 +148,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-05-14T06:22:02.349Z
-Stopped at: Completed 03-05-PLAN.md
+Last session: 2026-05-14T06:48:30Z
+Stopped at: Phase 03 verified and marked complete
 Resume file: None

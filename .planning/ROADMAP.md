@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: 协议、状态模型与持久化边界** - 用户拥有可恢复的 team/member/MCP/mailbox/task 元数据模型，但还不启动 agent。
 - [x] **Phase 2: CLI Team MCP、Mailbox 与 Task Board** - CLI 本地具备 per-session team tools、durable mailbox 和 durable task board 的协作闭环。
-- [ ] **Phase 3: 最小端到端 Team Run** - 用户可以从 WebUI 创建 team run，leader/member 普通 ACP session 被创建、注入 MCP 并可跳转。
+- [x] **Phase 3: 最小端到端 Team Run** - 用户可以从 WebUI 创建 team run，leader/member 普通 ACP session 被创建、注入 MCP 并可跳转。 (completed 2026-05-14)
 - [ ] **Phase 4: 生命周期、权限、E2EE 与恢复** - 用户可以安全取消、重试、归档、处理权限，并在重连后恢复 team 状态。
 - [ ] **Phase 5: UI 规模化与 v1 Polish** - 用户可以在桌面和移动端完成 v1 关键 team 流程。
 
@@ -74,7 +74,7 @@ Plans:
   1. 用户可以在 WebUI 选择 machine、workspace、leader backend、目标任务和 workspace/worktree 策略来创建 team run。
   2. Gateway 认证并把创建请求路由到目标 CLI，且不需要解密或存储目标任务明文。
   3. CLI 创建 leader 普通 ACP session，注入 team MCP server，并在 MCP ready 后把用户目标交给 leader。
-  4. Leader 可以通过 team tools 创建任务、发送 mailbox message，并在确认后 spawn 一个普通 member ACP session。
+  4. Leader 可以通过 team tools 创建任务、发送 mailbox message，并按当前 tool policy spawn 一个普通 member ACP session；用户确认/权限聚合在 Phase 4 补齐。
   5. Team detail 展示 leader/member、MCP phase、task/mailbox 非内容 projection、session 链接、worktree branch、错误和最后更新时间。
   6. 用户可以从 team detail 跳转到任意成员普通 session，继续使用现有聊天、文件、Git 和权限 UI。
 **Plans**: 5 plans
@@ -124,7 +124,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. 协议、状态模型与持久化边界 | 5/5 | Completed | 2026-05-13 |
 | 2. CLI Team MCP、Mailbox 与 Task Board | 7/7 | Completed | 2026-05-13 |
-| 3. 最小端到端 Team Run | 2/5 | In Progress | - |
+| 3. 最小端到端 Team Run | 5/5 | Complete    | 2026-05-14 |
 | 4. 生命周期、权限、E2EE 与恢复 | 0/TBD | Not started | - |
 | 5. UI 规模化与 v1 Polish | 0/TBD | Not started | - |
 

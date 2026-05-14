@@ -36,9 +36,9 @@ Requirements for the first agent team release. Each requirement must map to exac
 
 - [x] **ORCH-01**: 用户可以从 WebUI 创建 team run，并通过 Gateway 将创建请求路由到用户拥有的目标 CLI machine。
 - [x] **ORCH-02**: CLI 可以创建 leader 普通 ACP session，注入 team MCP server，并在 MCP ready 后把用户目标交给 leader。
-- [ ] **ORCH-03**: Leader 可以请求 spawn member；系统在 capability check、tool policy 和用户确认后创建普通 member ACP session。
+- [x] **ORCH-03**: Leader 可以请求 spawn member；系统在 capability check 和 tool policy 后创建普通 member ACP session；用户确认/权限聚合由 Phase 4 覆盖。
 - [x] **ORCH-04**: 每个 leader/member session 都绑定独立普通 `sessionId`，并保持现有 WAL、E2EE、permission、文件/Git 和历史语义。
-- [x] **ORCH-05**: 并行或动态创建的成员默认可以使用独立 worktree，系统可以记录并展示成员的 worktree source 和 branch。
+- [x] **ORCH-05**: 并行或动态创建的成员可以继承 team-shared worktree，系统可以记录并展示成员的 worktree source 和 branch；per-member 独立 worktree 策略留给后续 lifecycle/retry 设计。
 - [x] **ORCH-06**: 如果目标 backend 不存在、MCP transport 不可用或创建失败，系统可以给出成员级错误并保留已创建成员的可恢复状态。
 
 ### Lifecycle And Recovery
@@ -52,7 +52,7 @@ Requirements for the first agent team release. Each requirement must map to exac
 
 ### WebUI Experience
 
-- [ ] **UI-01**: WebUI 提供 team run 创建入口，用户可以选择 machine、workspace、leader backend、目标任务和 workspace/worktree 策略。
+- [x] **UI-01**: WebUI 提供 team run 创建入口，用户可以选择 machine、workspace、leader backend、目标任务和 workspace/worktree 策略。
 - [x] **UI-02**: WebUI 提供 team run 列表或分组视图，普通 session 与 team run 的关系清晰可见。
 - [x] **UI-03**: Team detail 展示 leader/member 卡片，包括 backend、role、status、MCP phase、session 链接、worktree branch、错误和最后更新时间。
 - [x] **UI-04**: Team detail 展示 task board 与 mailbox 活动的非内容 projection，例如 counts、owners、status、unread、wake_failed。
@@ -130,7 +130,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | COORD-04 | Phase 2 | Complete |
 | ORCH-01 | Phase 3 | Complete |
 | ORCH-02 | Phase 3 | Complete |
-| ORCH-03 | Phase 3 | Pending |
+| ORCH-03 | Phase 3 | Complete |
 | ORCH-04 | Phase 3 | Complete |
 | ORCH-05 | Phase 3 | Complete |
 | ORCH-06 | Phase 3 | Complete |
@@ -140,7 +140,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | LIFE-04 | Phase 4 | Pending |
 | LIFE-05 | Phase 4 | Pending |
 | LIFE-06 | Phase 4 | Pending |
-| UI-01 | Phase 3 | Pending |
+| UI-01 | Phase 3 | Complete |
 | UI-02 | Phase 3 | Complete |
 | UI-03 | Phase 3 | Complete |
 | UI-04 | Phase 3 | Complete |
@@ -158,4 +158,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 - Unmapped: 0 ✓
 
 ---
-*Requirements updated: 2026-05-12 after AionUI and MCP-over-ACP correction*
+*Requirements updated: 2026-05-14 after Phase 3 verification*
