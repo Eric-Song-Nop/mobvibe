@@ -44,6 +44,7 @@ import { logger } from "../lib/logger.js";
 import { AgentTeamStore } from "../team/agent-team-store.js";
 import { buildTeamMcpSessionSelection } from "../team/team-capability.js";
 import { TeamRuntime } from "../team/team-runtime.js";
+import type { SpawnMemberResult } from "../team/team-tool-handlers.js";
 import {
 	consolidateEventsForRead,
 	isStubPayload,
@@ -1273,6 +1274,87 @@ export class SessionManager {
 			});
 			this.emitCurrentAgentTeam(agentTeamId, "updated");
 			throw error;
+		}
+	}
+
+	async spawnAgentTeamMember(input: {
+		agentTeamId: string;
+		requestedByMemberId: string;
+		name?: string;
+		backendId?: string;
+	}): Promise<SpawnMemberResult> {
+		const members = this.agentTeamStore.listTeamMembers(input.agentTeamId);
+		const leader = members.find((member) => member.role === "leader");
+		if (!leader) {
+			return {
+				ok: false,
+				error: createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Agent Team leader member not found",
+					retryable: false,
+					scope: "request",
+				}),
+			};
+		}
+		const backendId = input.backendId ?? leader.backend_id;
+		try {
+			this.resolveBackend(backendId);
+		} catch (error) {
+			return {
+				ok: false,
+				error:
+					error instanceof AppError
+						? error.detail
+						: createErrorDetail({
+								code: "REQUEST_VALIDATION_FAILED",
+								message: "Invalid backend ID",
+								retryable: false,
+								scope: "request",
+							}),
+			};
+		}
+
+		const memberName = input.name ?? `Member ${members.length}`;
+		const { memberId } = this.agentTeamStore.addTeamMember({
+			agentTeamId: input.agentTeamId,
+			backendId,
+			name: memberName,
+			role: "member",
+		});
+		this.agentTeamStore.updateTeamMemberRuntime({
+			agentTeamId: input.agentTeamId,
+			memberId,
+			lifecycle: "creating_session",
+			health: "healthy",
+		});
+		this.emitCurrentAgentTeam(input.agentTeamId, "updated");
+
+		try {
+			const session = await this.createTeamSession({
+				backendId,
+				title: memberName,
+				agentTeamId: input.agentTeamId,
+				memberId,
+			});
+			return {
+				ok: true,
+				memberId,
+				sessionId: session.sessionId,
+				backendId,
+				name: memberName,
+				requestedByMemberId: input.requestedByMemberId,
+			};
+		} catch (error) {
+			const detail = toTeamCreateErrorDetail(error);
+			this.agentTeamStore.updateTeamMemberRuntime({
+				agentTeamId: input.agentTeamId,
+				memberId,
+				lifecycle: "failed",
+				health: "error",
+				error: detail,
+			});
+			this.emitCurrentAgentTeam(input.agentTeamId, "updated");
+			return { ok: false, memberId, error: detail };
 		}
 	}
 

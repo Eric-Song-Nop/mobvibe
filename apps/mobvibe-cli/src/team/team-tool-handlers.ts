@@ -37,6 +37,21 @@ export type TeamToolResult = {
 	data: unknown;
 };
 
+export type SpawnMemberResult =
+	| {
+			ok: true;
+			memberId: string;
+			sessionId: string;
+			backendId: string;
+			name: string;
+			requestedByMemberId: string;
+	  }
+	| {
+			ok: false;
+			memberId?: string;
+			error: ReturnType<typeof createErrorDetail>;
+	  };
+
 export type TeamToolHandlersOptions = {
 	store: AgentTeamStore;
 	requestPermission?: (input: unknown) => Promise<unknown>;
@@ -49,6 +64,10 @@ export type TeamToolHandlersOptions = {
 		createTask?: (caller: TeamToolCaller, args: unknown) => Promise<unknown>;
 		listTasks?: (caller: TeamToolCaller, args: unknown) => Promise<unknown>;
 		updateTask?: (caller: TeamToolCaller, args: unknown) => Promise<unknown>;
+		spawnMember?: (
+			caller: TeamToolCaller,
+			args: { name?: string; backendId?: string },
+		) => Promise<SpawnMemberResult> | SpawnMemberResult;
 	};
 };
 
@@ -125,7 +144,7 @@ export class TeamToolHandlers {
 			case "mobvibe_team_send_message":
 				return this.handleSendMessage(caller, args);
 			case "mobvibe_team_spawn_member":
-				return validationError("spawn_member is not implemented yet");
+				return this.handleSpawnMember(caller, args);
 			case "mobvibe_team_task_create":
 				return this.handleCreateTask(caller, args);
 			case "mobvibe_team_task_list":
@@ -180,6 +199,20 @@ export class TeamToolHandlers {
 		return result;
 	}
 
+	private async handleSpawnMember(
+		caller: TeamToolCaller,
+		args: unknown,
+	): Promise<SpawnMemberResult> {
+		const parsed = parseSpawnMemberArgs(args);
+		if (!parsed.ok) return parsed.result;
+		if (!this.options.services?.spawnMember) {
+			return validationError("spawn_member is not available");
+		}
+		const result = await this.options.services.spawnMember(caller, parsed.args);
+		this.emitProjectionChanged(caller.agentTeamId, result);
+		return result;
+	}
+
 	private emitProjectionChanged(agentTeamId: string, result: unknown): void {
 		if (!isSuccessfulToolResult(result)) return;
 		const team = this.options.store.getAgentTeam({ agentTeamId }).team;
@@ -229,7 +262,7 @@ function parseSendMessageArgs(
 	};
 }
 
-function validationError(message: string): MailboxSendResult {
+function validationError(message: string): MailboxSendResult & SpawnMemberResult {
 	return {
 		ok: false,
 		error: createErrorDetail({
@@ -242,9 +275,55 @@ function validationError(message: string): MailboxSendResult {
 	};
 }
 
+function parseSpawnMemberArgs(
+	args: unknown,
+):
+	| { ok: true; args: { name?: string; backendId?: string } }
+	| { ok: false; result: SpawnMemberResult } {
+	if (args === undefined || args === null) {
+		return { ok: true, args: {} };
+	}
+	if (typeof args !== "object" || Array.isArray(args)) {
+		return {
+			ok: false,
+			result: validationError("spawn_member args must be an object"),
+		};
+	}
+	const record = args as Record<string, unknown>;
+	const allowedKeys = new Set(["name", "backendId"]);
+	const invalidKey = Object.keys(record).find((key) => !allowedKeys.has(key));
+	if (invalidKey) {
+		return {
+			ok: false,
+			result: validationError(`spawn_member.${invalidKey} is not accepted`),
+		};
+	}
+	if (record.name !== undefined && typeof record.name !== "string") {
+		return {
+			ok: false,
+			result: validationError("spawn_member.name must be a string"),
+		};
+	}
+	if (record.backendId !== undefined && typeof record.backendId !== "string") {
+		return {
+			ok: false,
+			result: validationError("spawn_member.backendId must be a string"),
+		};
+	}
+	return {
+		ok: true,
+		args: {
+			name: record.name?.trim() || undefined,
+			backendId: record.backendId?.trim() || undefined,
+		},
+	};
+}
+
 function isSuccessfulToolResult(
 	value: unknown,
-): value is (MailboxSendResult | TaskBoardResult) & { ok: true } {
+): value is (MailboxSendResult | TaskBoardResult | SpawnMemberResult) & {
+	ok: true;
+} {
 	return (
 		typeof value === "object" &&
 		value !== null &&

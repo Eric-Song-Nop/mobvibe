@@ -3,6 +3,7 @@ import type { AgentTeamStore, MailboxWakeMessage } from "./agent-team-store.js";
 import { MailboxService } from "./mailbox-service.js";
 import { TeamMcpRouter } from "./team-mcp-router.js";
 import {
+	type SpawnMemberResult,
 	TeamToolHandlers,
 	type TeamToolHandlersOptions,
 } from "./team-tool-handlers.js";
@@ -19,6 +20,12 @@ export type TeamSessionInjector = {
 		sessionId: string;
 		text: string;
 	}): Promise<TeamSourceRef>;
+	spawnAgentTeamMember(input: {
+		agentTeamId: string;
+		requestedByMemberId: string;
+		name?: string;
+		backendId?: string;
+	}): Promise<SpawnMemberResult>;
 };
 
 export class TeamRuntime {
@@ -27,10 +34,12 @@ export class TeamRuntime {
 	private readonly store: AgentTeamStore;
 	private readonly sessionManager?: TeamSessionInjector;
 	private readonly mailboxService: MailboxService;
+	private readonly onAgentTeamChanged?: TeamRuntimeOptions["onAgentTeamChanged"];
 
 	constructor(options: TeamRuntimeOptions) {
 		this.store = options.store;
 		this.sessionManager = options.sessionManager;
+		this.onAgentTeamChanged = options.onAgentTeamChanged;
 		this.mailboxService = new MailboxService(options.store);
 		this.toolHandlers = new TeamToolHandlers({
 			store: options.store,
@@ -41,6 +50,9 @@ export class TeamRuntime {
 				sendMessage:
 					options.services?.sendMessage ??
 					((caller, args) => this.sendMessageAndWake(caller, args)),
+				spawnMember:
+					options.services?.spawnMember ??
+					((caller, args) => this.spawnMember(caller, args)),
 			},
 		});
 		this.mcpRouter = new TeamMcpRouter({
@@ -140,6 +152,40 @@ export class TeamRuntime {
 			}
 		}
 		return result;
+	}
+
+	private async spawnMember(
+		caller: {
+			agentTeamId: string;
+			memberId: string;
+			role: "leader" | "member";
+		},
+		args: { name?: string; backendId?: string },
+	): Promise<SpawnMemberResult> {
+		if (!this.sessionManager) {
+			return {
+				ok: false,
+				error: {
+					code: "INTERNAL_ERROR",
+					message: "Team session manager is not available",
+					retryable: true,
+					scope: "session",
+				},
+			};
+		}
+		const result = await this.sessionManager.spawnAgentTeamMember({
+			agentTeamId: caller.agentTeamId,
+			requestedByMemberId: caller.memberId,
+			name: args.name,
+			backendId: args.backendId,
+		});
+		this.emitCurrentTeam(caller.agentTeamId);
+		return result;
+	}
+
+	private emitCurrentTeam(agentTeamId: string): void {
+		const team = this.store.getAgentTeam({ agentTeamId }).team;
+		if (team) this.onAgentTeamChanged?.(team);
 	}
 
 	private areNonLeaderMembersSettled(agentTeamId: string): boolean {
