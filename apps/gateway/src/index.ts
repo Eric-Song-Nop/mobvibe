@@ -20,14 +20,18 @@ import { setupHealthRoutes } from "./routes/health.js";
 import { setupMachineRoutes } from "./routes/machines.js";
 import { setupNotificationRoutes } from "./routes/notifications.js";
 import { setupSessionRoutes } from "./routes/sessions.js";
+import {
+	createRegisteredAffinityServices,
+	shutdownAffinityServices,
+} from "./services/affinity-initialization.js";
 import { renewActiveUserAffinities } from "./services/affinity-renewal.js";
 import { CliRegistry } from "./services/cli-registry.js";
-import { InstanceRegistry } from "./services/instance-registry.js";
+import type { InstanceRegistry } from "./services/instance-registry.js";
 import { NotificationService } from "./services/notification-service.js";
 import { closeRedis, initRedis } from "./services/redis.js";
 import { SessionRouter } from "./services/session-router.js";
 import { TeamRouter } from "./services/team-router.js";
-import { UserAffinityManager } from "./services/user-affinity.js";
+import type { UserAffinityManager } from "./services/user-affinity.js";
 import { setupCliHandlers } from "./socket/cli-handlers.js";
 import { setupWebuiHandlers } from "./socket/webui-handlers.js";
 
@@ -77,18 +81,14 @@ async function initAffinity() {
 	const redis = await initRedis(config.redisUrl);
 	if (!redis) return;
 
-	instanceRegistry = new InstanceRegistry(
+	const affinityServices = await createRegisteredAffinityServices(
 		redis,
 		config.instanceId,
 		config.flyRegion,
 	);
-	userAffinity = new UserAffinityManager(
-		redis,
-		config.instanceId,
-		config.flyRegion,
-	);
+	instanceRegistry = affinityServices.instanceRegistry;
+	userAffinity = affinityServices.userAffinity;
 
-	await instanceRegistry.register();
 	instanceRegistry.startHeartbeatLoop(() => {
 		// Count unique user IDs across CLI and WebUI
 		const cliUserIds = new Set(cliRegistry.getConnectedUserIds());
@@ -419,9 +419,8 @@ const shutdown = async (signal: string) => {
 		if (affinityRenewTimer) {
 			clearInterval(affinityRenewTimer);
 		}
-		if (instanceRegistry) {
-			instanceRegistry.stopHeartbeatLoop();
-			await instanceRegistry.deregister();
+		if (instanceRegistry && userAffinity) {
+			await shutdownAffinityServices({ instanceRegistry, userAffinity });
 		}
 		await closeRedis();
 		await stopServer();

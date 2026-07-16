@@ -98,6 +98,127 @@ describe("UserAffinityManager ownership safety", () => {
 		expect(stored).toBe(instanceB);
 	});
 
+	it("releases tracked leases without deleting users claimed by another instance", async () => {
+		const instanceA = JSON.stringify({
+			instanceId: "instance-a",
+			region: undefined,
+		});
+		const instanceB = JSON.stringify({
+			instanceId: "instance-b",
+			region: undefined,
+		});
+		const stored = new Map<string, string>();
+		const releaseCommands: Array<() => [null, number]> = [];
+		const pipeline = {
+			eval: vi.fn(
+				(_script: string, _keyCount: number, key: string, expected: string) => {
+					releaseCommands.push(() => {
+						if (stored.get(key) !== expected) return [null, 0];
+						stored.delete(key);
+						return [null, 1];
+					});
+					return pipeline;
+				},
+			),
+			exec: vi.fn(async () => releaseCommands.map((execute) => execute())),
+		};
+		const redis = {
+			eval: vi.fn(
+				async (
+					_script: string,
+					_keyCount: number,
+					key: string,
+					value: string,
+				) => {
+					if (stored.has(key) && stored.get(key) !== value) return 0;
+					stored.set(key, value);
+					return 1;
+				},
+			),
+			pipeline: vi.fn(() => pipeline),
+		};
+		const manager = new UserAffinityManager(
+			redis as unknown as Redis,
+			"instance-a",
+			undefined,
+		);
+
+		expect(await manager.claimUser("owned-user")).toBe(true);
+		expect(await manager.claimUser("moved-user")).toBe(true);
+		expect(stored.get("gw:user:owned-user")).toBe(instanceA);
+		stored.set("gw:user:moved-user", instanceB);
+		stored.set("gw:user:untracked-user", instanceB);
+
+		await manager.releaseAllOwnedUsers();
+
+		expect(stored.get("gw:user:owned-user")).toBeUndefined();
+		expect(stored.get("gw:user:moved-user")).toBe(instanceB);
+		expect(stored.get("gw:user:untracked-user")).toBe(instanceB);
+		expect(pipeline.eval).toHaveBeenCalledTimes(2);
+	});
+
+	it("drains an in-flight claim before releasing leases during shutdown", async () => {
+		const owner = JSON.stringify({
+			instanceId: "instance-a",
+			region: undefined,
+		});
+		const stored = new Map<string, string>();
+		let resolveClaim: ((result: number) => void) | undefined;
+		const releaseCommands: Array<() => [null, number]> = [];
+		const pipeline = {
+			eval: vi.fn(
+				(_script: string, _keyCount: number, key: string, expected: string) => {
+					releaseCommands.push(() => {
+						if (stored.get(key) !== expected) return [null, 0];
+						stored.delete(key);
+						return [null, 1];
+					});
+					return pipeline;
+				},
+			),
+			exec: vi.fn(async () => releaseCommands.map((execute) => execute())),
+		};
+		const redis = {
+			eval: vi.fn(
+				async (
+					_script: string,
+					_keyCount: number,
+					key: string,
+					value: string,
+				) => {
+					const result = await new Promise<number>((resolve) => {
+						resolveClaim = resolve;
+					});
+					if (result === 1) stored.set(key, value);
+					return result;
+				},
+			),
+			pipeline: vi.fn(() => pipeline),
+		};
+		const manager = new UserAffinityManager(
+			redis as unknown as Redis,
+			"instance-a",
+			undefined,
+		);
+
+		const claim = manager.claimUser("racing-user");
+		const shutdown = manager.shutdownAndReleaseAllOwnedUsers();
+		resolveClaim?.(1);
+
+		await expect(claim).resolves.toBe(true);
+		await shutdown;
+
+		expect(stored.get("gw:user:racing-user")).toBeUndefined();
+		expect(pipeline.eval).toHaveBeenCalledWith(
+			expect.any(String),
+			1,
+			"gw:user:racing-user",
+			owner,
+		);
+		await expect(manager.claimUser("late-user")).resolves.toBe(false);
+		expect(redis.eval).toHaveBeenCalledTimes(1);
+	});
+
 	it("restores a missing affinity key while renewing an active owner", async () => {
 		const instanceA = JSON.stringify({ instanceId: "instance-a" });
 		let stored: string | null = null;

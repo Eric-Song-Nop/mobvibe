@@ -38,6 +38,10 @@ export type AffinityRecord = {
 export type UserAffinityProvider = () => UserAffinityManager | null;
 
 export class UserAffinityManager {
+	private readonly ownedUserIds = new Set<string>();
+	private readonly inFlightOwnershipOperations = new Set<Promise<unknown>>();
+	private ownershipChangesOpen = true;
+
 	constructor(
 		private readonly redis: Redis,
 		private readonly instanceId: string,
@@ -64,6 +68,13 @@ export class UserAffinityManager {
 
 	/** Claim or refresh a user atomically if no other instance owns it. */
 	async claimUser(userId: string): Promise<boolean> {
+		return this.runOwnershipOperation(
+			() => this.claimUserWhileOpen(userId),
+			false,
+		);
+	}
+
+	private async claimUserWhileOpen(userId: string): Promise<boolean> {
 		const key = `${USER_KEY_PREFIX}${userId}`;
 		const value = this.ownerValue();
 		const result = await this.redis.eval(
@@ -75,6 +86,7 @@ export class UserAffinityManager {
 		);
 
 		if (result === 1) {
+			this.ownedUserIds.add(userId);
 			logger.debug({ userId, instanceId: this.instanceId }, "user_claimed");
 			return true;
 		}
@@ -91,6 +103,19 @@ export class UserAffinityManager {
 		return false;
 	}
 
+	private runOwnershipOperation<T>(
+		operation: () => Promise<T>,
+		closedResult: T,
+	): Promise<T> {
+		if (!this.ownershipChangesOpen) return Promise.resolve(closedResult);
+
+		const result = operation();
+		this.inFlightOwnershipOperations.add(result);
+		const clear = () => this.inFlightOwnershipOperations.delete(result);
+		void result.then(clear, clear);
+		return result;
+	}
+
 	/** Release a user's affinity (only if this instance owns it). */
 	async releaseUser(userId: string): Promise<void> {
 		const released = await this.redis.eval(
@@ -102,10 +127,69 @@ export class UserAffinityManager {
 		if (released === 1) {
 			logger.debug({ userId, instanceId: this.instanceId }, "user_released");
 		}
+		this.ownedUserIds.delete(userId);
+	}
+
+	/** Release every affinity this process successfully claimed, preserving new owners. */
+	async releaseAllOwnedUsers(): Promise<void> {
+		const userIds = Array.from(this.ownedUserIds);
+		if (userIds.length === 0) return;
+
+		const pipeline = this.redis.pipeline();
+		const ownerValue = this.ownerValue();
+		for (const userId of userIds) {
+			pipeline.eval(
+				RELEASE_IF_OWNER_SCRIPT,
+				1,
+				`${USER_KEY_PREFIX}${userId}`,
+				ownerValue,
+			);
+		}
+		const results = await pipeline.exec();
+		if (!results) {
+			logger.warn(
+				{ instanceId: this.instanceId, userCount: userIds.length },
+				"affinity_release_pipeline_aborted",
+			);
+			return;
+		}
+
+		for (const [index, result] of results.entries()) {
+			const userId = userIds[index];
+			const [error, released] = result;
+			if (error) {
+				logger.warn(
+					{ err: error, userId, instanceId: this.instanceId },
+					"affinity_release_command_failed",
+				);
+				continue;
+			}
+			this.ownedUserIds.delete(userId);
+			if (released === 1) {
+				logger.debug({ userId, instanceId: this.instanceId }, "user_released");
+			}
+		}
+	}
+
+	/** Stop ownership changes, drain operations already in flight, then release. */
+	async shutdownAndReleaseAllOwnedUsers(): Promise<void> {
+		this.ownershipChangesOpen = false;
+		const pendingOperations = Array.from(this.inFlightOwnershipOperations);
+		if (pendingOperations.length > 0) {
+			await Promise.allSettled(pendingOperations);
+		}
+		await this.releaseAllOwnedUsers();
 	}
 
 	/** Batch-renew TTLs and return only users owned by another instance. */
 	async renewAll(userIds: string[]): Promise<string[]> {
+		return this.runOwnershipOperation(
+			() => this.renewAllWhileOpen(userIds),
+			[],
+		);
+	}
+
+	private async renewAllWhileOpen(userIds: string[]): Promise<string[]> {
 		if (userIds.length === 0) return [];
 		const pipeline = this.redis.pipeline();
 		const ownerValue = this.ownerValue();
@@ -139,16 +223,20 @@ export class UserAffinityManager {
 				continue;
 			}
 			if (status === 0) {
+				this.ownedUserIds.delete(userId);
 				conflicts.push(userId);
 				logger.warn(
 					{ userId, instanceId: this.instanceId },
 					"affinity_renew_conflict",
 				);
-			} else if (status === 1) {
-				logger.info(
-					{ userId, instanceId: this.instanceId },
-					"affinity_recovered",
-				);
+			} else {
+				this.ownedUserIds.add(userId);
+				if (status === 1) {
+					logger.info(
+						{ userId, instanceId: this.instanceId },
+						"affinity_recovered",
+					);
+				}
 			}
 		}
 		return conflicts;
