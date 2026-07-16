@@ -271,6 +271,78 @@ describe("UserAffinityManager ownership safety", () => {
 		expect(conflicts).toEqual([]);
 	});
 
+	it("retains an inactive lease for shutdown and resets its deadline on reclaim", async () => {
+		vi.useFakeTimers();
+		const stored = new Map<string, string>();
+		const queued: Array<() => [null, number]> = [];
+		const executeScript = (
+			script: string,
+			key: string,
+			owner: string,
+		): number => {
+			if (script.includes('redis.call("del"')) {
+				if (stored.get(key) !== owner) return 0;
+				stored.delete(key);
+				return 1;
+			}
+			if (stored.has(key) && stored.get(key) !== owner) return 0;
+			stored.set(key, owner);
+			return 1;
+		};
+		const pipeline = {
+			eval: vi.fn(
+				(script: string, _keyCount: number, key: string, owner: string) => {
+					queued.push(() => [null, executeScript(script, key, owner)]);
+					return pipeline;
+				},
+			),
+			exec: vi.fn(async () => queued.splice(0).map((execute) => execute())),
+		};
+		const redis = {
+			eval: vi.fn(
+				async (script: string, _keyCount: number, key: string, owner: string) =>
+					executeScript(script, key, owner),
+			),
+			pipeline: vi.fn(() => pipeline),
+		};
+		const firstManager = new UserAffinityManager(
+			redis as unknown as Redis,
+			"instance-a",
+			undefined,
+		);
+		const secondManager = new UserAffinityManager(
+			redis as unknown as Redis,
+			"instance-b",
+			undefined,
+		);
+
+		try {
+			expect(await firstManager.claimUser("inactive-user")).toBe(true);
+			await firstManager.renewAll([]);
+			expect(
+				JSON.parse(stored.get("gw:user:inactive-user") ?? "{}"),
+			).toMatchObject({ instanceId: "instance-a" });
+
+			await vi.advanceTimersByTimeAsync(200_000);
+			expect(await firstManager.claimUser("inactive-user")).toBe(true);
+			await firstManager.renewAll([]);
+
+			// The reclaim starts a fresh inactivity window. Crossing the original
+			// deadline must not drop shutdown tracking for the refreshed lease.
+			await vi.advanceTimersByTimeAsync(101_000);
+			await firstManager.renewAll([]);
+			await firstManager.shutdownAndReleaseAllOwnedUsers();
+			expect(stored.get("gw:user:inactive-user")).toBeUndefined();
+
+			expect(await secondManager.claimUser("inactive-user")).toBe(true);
+			expect(
+				JSON.parse(stored.get("gw:user:inactive-user") ?? "{}"),
+			).toMatchObject({ instanceId: "instance-b" });
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("renews TTL only while this instance still owns the affinity", async () => {
 		const instanceB = JSON.stringify({ instanceId: "instance-b" });
 		let renewed = false;

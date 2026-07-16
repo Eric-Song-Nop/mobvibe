@@ -18,6 +18,7 @@ export type CliRecord = {
 	connectedAt: Date;
 	sessions: SessionSummary[];
 	backends: AcpBackendSummary[];
+	protocolCapabilities?: CliRegistrationInfo["protocolCapabilities"];
 	/** User ID from auth */
 	userId?: string;
 	/** Device key ID used to authenticate this CLI */
@@ -70,6 +71,7 @@ export class CliRegistry extends EventEmitter {
 			connectedAt: new Date(),
 			sessions: [],
 			backends: info.backends ?? [],
+			protocolCapabilities: info.protocolCapabilities,
 			userId: authInfo?.userId,
 			deviceId: authInfo?.deviceId,
 		};

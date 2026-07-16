@@ -55,7 +55,7 @@ describe("session message routes", () => {
 		});
 	});
 
-	it("requires a stable messageId for idempotent sends", async () => {
+	it("accepts legacy clients without a messageId and generates one", async () => {
 		const response = await fetch(`${baseUrl}/acp/message`, {
 			method: "POST",
 			headers: {
@@ -65,8 +65,63 @@ describe("session message routes", () => {
 			body: JSON.stringify({ sessionId: "session-1", prompt: encryptedPrompt }),
 		});
 
+		expect(response.status).toBe(200);
+		expect(sessionRouter.sendMessage).toHaveBeenCalledWith(
+			{
+				sessionId: "session-1",
+				messageId: expect.stringMatching(
+					/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+				),
+				prompt: encryptedPrompt,
+			},
+			"user-1",
+		);
+	});
+
+	it("rejects message IDs over 128 UTF-8 bytes", async () => {
+		const overlongMessageId = "界".repeat(43);
+		expect(Buffer.byteLength(overlongMessageId, "utf8")).toBe(129);
+		const response = await fetch(`${baseUrl}/acp/message`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				sessionId: "session-1",
+				messageId: overlongMessageId,
+				prompt: encryptedPrompt,
+			}),
+		});
+
 		expect(response.status).toBe(400);
 		expect(sessionRouter.sendMessage).not.toHaveBeenCalled();
+	});
+
+	it("accepts plaintext content blocks for a no-E2EE CLI", async () => {
+		const prompt = [{ type: "text", text: "plain prompt" }];
+		const response = await fetch(`${baseUrl}/acp/message`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				sessionId: "session-1",
+				messageId: "plaintext-message-1",
+				prompt,
+			}),
+		});
+
+		expect(response.status).toBe(200);
+		expect(sessionRouter.sendMessage).toHaveBeenCalledWith(
+			{
+				sessionId: "session-1",
+				messageId: "plaintext-message-1",
+				prompt,
+			},
+			"user-1",
+		);
 	});
 
 	it("provides a bodyless authenticated routing preflight", async () => {
@@ -101,6 +156,82 @@ describe("session message routes", () => {
 			},
 			"user-1",
 		);
+	});
+
+	it("canonicalizes messageId before forwarding or logging it", async () => {
+		const response = await fetch(`${baseUrl}/acp/message`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				sessionId: "session-1",
+				messageId: `${" ".repeat(256)}message-stable-2${" ".repeat(256)}`,
+				prompt: encryptedPrompt,
+			}),
+		});
+
+		expect(response.status).toBe(200);
+		expect(sessionRouter.sendMessage).toHaveBeenCalledWith(
+			{
+				sessionId: "session-1",
+				messageId: "message-stable-2",
+				prompt: encryptedPrompt,
+			},
+			"user-1",
+		);
+	});
+
+	it("forwards an expected session revision to the CLI RPC", async () => {
+		const response = await fetch(`${baseUrl}/acp/message`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				sessionId: "session-1",
+				messageId: "revision-pinned-message",
+				expectedRevision: 7,
+				prompt: encryptedPrompt,
+			}),
+		});
+
+		expect(response.status).toBe(200);
+		expect(sessionRouter.sendMessage).toHaveBeenCalledWith(
+			{
+				sessionId: "session-1",
+				messageId: "revision-pinned-message",
+				expectedRevision: 7,
+				prompt: encryptedPrompt,
+			},
+			"user-1",
+		);
+	});
+
+	it.each([
+		0,
+		-1,
+		1.5,
+		"7",
+	])("rejects invalid expectedRevision %j", async (expectedRevision) => {
+		const response = await fetch(`${baseUrl}/acp/message`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				sessionId: "session-1",
+				messageId: "invalid-revision-pin",
+				expectedRevision,
+				prompt: encryptedPrompt,
+			}),
+		});
+
+		expect(response.status).toBe(400);
+		expect(sessionRouter.sendMessage).not.toHaveBeenCalled();
 	});
 
 	it("returns an indeterminate message outcome as a non-retryable 409", async () => {

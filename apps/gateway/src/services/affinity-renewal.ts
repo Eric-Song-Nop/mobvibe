@@ -32,8 +32,11 @@ export async function renewActiveUserAffinities(
 			},
 			"affinity_conflict_connections_disconnected",
 		);
-		for (const socket of cliSockets) socket.disconnect(true);
-		for (const socket of conflictingWebuiSockets) socket.disconnect(true);
+		// Closing the Engine.IO transport yields a reconnectable `transport close`.
+		// `socket.disconnect(true)` yields `io server disconnect`, which permanently
+		// disables Socket.IO's automatic reconnection for that client.
+		for (const socket of cliSockets) socket.conn.close();
+		for (const socket of conflictingWebuiSockets) socket.conn.close();
 	}
 	return conflicts;
 }

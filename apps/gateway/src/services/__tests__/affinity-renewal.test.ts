@@ -20,6 +20,7 @@ const createSocket = (id: string, userId: string) =>
 		id,
 		data: { userId },
 		disconnect: vi.fn(),
+		conn: { close: vi.fn() },
 	}) as unknown as Socket;
 
 describe("renewActiveUserAffinities", () => {
@@ -73,8 +74,10 @@ describe("renewActiveUserAffinities", () => {
 
 		expect(conflicts).toEqual(["user-1"]);
 		expect(stored.get("gw:user:user-1")).toBe(instanceB);
-		expect(conflictingCliSocket.disconnect).toHaveBeenCalledWith(true);
-		expect(conflictingWebuiSocket.disconnect).toHaveBeenCalledWith(true);
+		expect(conflictingCliSocket.conn.close).toHaveBeenCalledOnce();
+		expect(conflictingWebuiSocket.conn.close).toHaveBeenCalledOnce();
+		expect(conflictingCliSocket.disconnect).not.toHaveBeenCalled();
+		expect(conflictingWebuiSocket.disconnect).not.toHaveBeenCalled();
 		expect(healthyCliSocket.disconnect).not.toHaveBeenCalled();
 		expect(healthyWebuiSocket.disconnect).not.toHaveBeenCalled();
 		expect(mockLoggerWarn).toHaveBeenCalledWith(

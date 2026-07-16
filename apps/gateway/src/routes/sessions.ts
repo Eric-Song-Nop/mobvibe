@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type { SessionSummary } from "@mobvibe/shared";
+import type { ContentBlock, SessionSummary } from "@mobvibe/shared";
 import {
 	AppError,
 	createErrorDetail,
@@ -15,6 +15,7 @@ import {
 	requireAuth,
 } from "../middleware/auth.js";
 import type { CliRegistry } from "../services/cli-registry.js";
+import { isMessageIdWithinLimit } from "../services/message-send-safety.js";
 import type { SessionRouter } from "../services/session-router.js";
 import { respondAppError, respondError } from "./error-response.js";
 
@@ -40,6 +41,16 @@ const buildAuthorizationError = (message = "Not authorized") =>
 		retryable: false,
 		scope: "request",
 	});
+
+const isPlaintextPrompt = (value: unknown): value is ContentBlock[] =>
+	Array.isArray(value) &&
+	value.every(
+		(block) =>
+			typeof block === "object" &&
+			block !== null &&
+			"type" in block &&
+			typeof block.type === "string",
+	);
 
 const normalizeRelativeCwd = (value: unknown): string | undefined => {
 	if (typeof value !== "string") {
@@ -463,22 +474,36 @@ export function setupSessionRoutes(
 
 	// Send message - with authorization check
 	router.post("/message", async (request: AuthenticatedRequest, response) => {
-		const { sessionId, messageId, prompt } = request.body ?? {};
+		const {
+			sessionId,
+			messageId: requestedMessageId,
+			expectedRevision,
+			prompt,
+		} = request.body ?? {};
+		const canonicalMessageId =
+			typeof requestedMessageId === "string"
+				? requestedMessageId.trim()
+				: undefined;
 		if (
 			typeof sessionId !== "string" ||
-			typeof messageId !== "string" ||
-			messageId.trim().length === 0 ||
-			!isEncryptedPayload(prompt)
+			(requestedMessageId !== undefined &&
+				(canonicalMessageId === undefined ||
+					canonicalMessageId.length === 0 ||
+					!isMessageIdWithinLimit(canonicalMessageId))) ||
+			(expectedRevision !== undefined &&
+				(!Number.isSafeInteger(expectedRevision) || expectedRevision < 1)) ||
+			(!isEncryptedPayload(prompt) && !isPlaintextPrompt(prompt))
 		) {
 			respondError(
 				response,
 				buildRequestValidationError(
-					"sessionId, messageId, and prompt required",
+					"sessionId and prompt required; messageId must be non-empty and at most 128 UTF-8 bytes, and expectedRevision must be a positive integer when provided",
 				),
 				400,
 			);
 			return;
 		}
+		const messageId = canonicalMessageId ?? randomUUID();
 
 		const userId = getUserId(request);
 		if (!userId) {
@@ -525,7 +550,12 @@ export function setupSessionRoutes(
 			);
 
 			const result = await sessionRouter.sendMessage(
-				{ sessionId, messageId, prompt },
+				{
+					sessionId,
+					messageId,
+					prompt,
+					...(expectedRevision !== undefined ? { expectedRevision } : {}),
+				},
 				userId,
 			);
 			logger.debug(

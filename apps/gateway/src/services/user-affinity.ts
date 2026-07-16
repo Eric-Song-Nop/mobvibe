@@ -39,6 +39,7 @@ export type UserAffinityProvider = () => UserAffinityManager | null;
 
 export class UserAffinityManager {
 	private readonly ownedUserIds = new Set<string>();
+	private readonly inactiveOwnedUserDeadlines = new Map<string, number>();
 	private readonly inFlightOwnershipOperations = new Set<Promise<unknown>>();
 	private ownershipChangesOpen = true;
 
@@ -87,6 +88,7 @@ export class UserAffinityManager {
 
 		if (result === 1) {
 			this.ownedUserIds.add(userId);
+			this.inactiveOwnedUserDeadlines.delete(userId);
 			logger.debug({ userId, instanceId: this.instanceId }, "user_claimed");
 			return true;
 		}
@@ -128,11 +130,16 @@ export class UserAffinityManager {
 			logger.debug({ userId, instanceId: this.instanceId }, "user_released");
 		}
 		this.ownedUserIds.delete(userId);
+		this.inactiveOwnedUserDeadlines.delete(userId);
 	}
 
 	/** Release every affinity this process successfully claimed, preserving new owners. */
 	async releaseAllOwnedUsers(): Promise<void> {
 		const userIds = Array.from(this.ownedUserIds);
+		await this.releaseOwnedUsers(userIds);
+	}
+
+	private async releaseOwnedUsers(userIds: string[]): Promise<void> {
 		if (userIds.length === 0) return;
 
 		const pipeline = this.redis.pipeline();
@@ -165,6 +172,7 @@ export class UserAffinityManager {
 				continue;
 			}
 			this.ownedUserIds.delete(userId);
+			this.inactiveOwnedUserDeadlines.delete(userId);
 			if (released === 1) {
 				logger.debug({ userId, instanceId: this.instanceId }, "user_released");
 			}
@@ -190,10 +198,32 @@ export class UserAffinityManager {
 	}
 
 	private async renewAllWhileOpen(userIds: string[]): Promise<string[]> {
-		if (userIds.length === 0) return [];
+		const activeUserIds = new Set(userIds);
+		const now = Date.now();
+		for (const ownedUserId of this.ownedUserIds) {
+			if (activeUserIds.has(ownedUserId)) {
+				this.inactiveOwnedUserDeadlines.delete(ownedUserId);
+				continue;
+			}
+
+			const deadline = this.inactiveOwnedUserDeadlines.get(ownedUserId);
+			if (deadline === undefined) {
+				// Stop renewing an inactive lease, but retain it long enough for a
+				// graceful shutdown to release it. Redis expires it at the same deadline.
+				this.inactiveOwnedUserDeadlines.set(
+					ownedUserId,
+					now + USER_TTL_SECONDS * 1_000,
+				);
+			} else if (deadline <= now) {
+				this.inactiveOwnedUserDeadlines.delete(ownedUserId);
+				this.ownedUserIds.delete(ownedUserId);
+			}
+		}
+		const activeUsers = Array.from(activeUserIds);
+		if (activeUsers.length === 0) return [];
 		const pipeline = this.redis.pipeline();
 		const ownerValue = this.ownerValue();
-		for (const userId of userIds) {
+		for (const userId of activeUsers) {
 			pipeline.eval(
 				RENEW_OR_RECOVER_SCRIPT,
 				1,
@@ -205,7 +235,7 @@ export class UserAffinityManager {
 		const results = await pipeline.exec();
 		if (!results) {
 			logger.warn(
-				{ instanceId: this.instanceId, userCount: userIds.length },
+				{ instanceId: this.instanceId, userCount: activeUsers.length },
 				"affinity_renew_pipeline_aborted",
 			);
 			return [];
@@ -213,7 +243,7 @@ export class UserAffinityManager {
 
 		const conflicts: string[] = [];
 		for (const [index, result] of results.entries()) {
-			const userId = userIds[index];
+			const userId = activeUsers[index];
 			const [error, status] = result;
 			if (error) {
 				logger.warn(
@@ -224,6 +254,7 @@ export class UserAffinityManager {
 			}
 			if (status === 0) {
 				this.ownedUserIds.delete(userId);
+				this.inactiveOwnedUserDeadlines.delete(userId);
 				conflicts.push(userId);
 				logger.warn(
 					{ userId, instanceId: this.instanceId },
@@ -231,6 +262,7 @@ export class UserAffinityManager {
 				);
 			} else {
 				this.ownedUserIds.add(userId);
+				this.inactiveOwnedUserDeadlines.delete(userId);
 				if (status === 1) {
 					logger.info(
 						{ userId, instanceId: this.instanceId },
