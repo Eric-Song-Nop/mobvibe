@@ -1,9 +1,14 @@
 import { Database } from "bun:sqlite";
+import path from "node:path";
 import { Command } from "commander";
-import { loadCredentials } from "./auth/credentials.js";
+import {
+	getMobvibeHome,
+	isAuthenticationActive,
+	loadCredentials,
+} from "./auth/credentials.js";
 import { login, loginStatus, logout } from "./auth/login.js";
 import { getCliConfig } from "./config.js";
-import { DaemonManager } from "./daemon/daemon.js";
+import { DaemonManager, stopDaemonByPidFile } from "./daemon/daemon.js";
 import { logger } from "./lib/logger.js";
 import { runStartCommand } from "./start-command.js";
 import { ReportedCliError } from "./startup-preflight.js";
@@ -28,9 +33,7 @@ program
 	.command("stop")
 	.description("Stop the mobvibe daemon")
 	.action(async () => {
-		const config = await getCliConfig();
-		const daemon = new DaemonManager(config);
-		await daemon.stop();
+		await stopDaemonByPidFile(path.join(getMobvibeHome(), "daemon.pid"));
 	});
 
 program
@@ -83,9 +86,12 @@ program
 
 program
 	.command("logout")
-	.description("Remove stored credentials")
+	.description("Sign out and stop the daemon")
 	.action(async () => {
-		await logout();
+		await logout({
+			stopDaemon: () =>
+				stopDaemonByPidFile(path.join(getMobvibeHome(), "daemon.pid")),
+		});
 	});
 
 program
@@ -105,6 +111,11 @@ e2eeCmd
 		if (!credentials) {
 			console.error("Not logged in. Run 'mobvibe login' first.");
 			process.exit(1);
+		}
+		if (!(await isAuthenticationActive(credentials))) {
+			console.log(
+				"Authentication is logged out; showing the recovery key retained for encrypted WAL data.\n",
+			);
 		}
 
 		// Convert standard base64 to base64url for URL safety
@@ -144,6 +155,11 @@ e2eeCmd
 		if (!credentials) {
 			console.log("Status: Not logged in");
 			console.log("Run 'mobvibe login' to authenticate.");
+			return;
+		}
+		if (!(await isAuthenticationActive(credentials))) {
+			console.log("Status: Logged out (E2EE recovery key retained)");
+			console.log("Run 'mobvibe login' to authenticate again.");
 			return;
 		}
 		await initCrypto();
