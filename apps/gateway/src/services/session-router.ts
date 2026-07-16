@@ -60,6 +60,7 @@ import type { CliRecord, CliRegistry } from "./cli-registry.js";
 
 type PendingRpc<T> = {
 	requestId: string;
+	socketId: string;
 	resolve: (result: T) => void;
 	reject: (error: Error) => void;
 	timeout: NodeJS.Timeout;
@@ -100,9 +101,20 @@ export class SessionRouter {
 		return cli;
 	}
 
-	handleRpcResponse(response: RpcResponse<unknown>) {
+	handleRpcResponse(response: RpcResponse<unknown>, sourceSocketId?: string) {
 		const pending = this.pendingRpcs.get(response.requestId);
 		if (!pending) {
+			return;
+		}
+		if (sourceSocketId && pending.socketId !== sourceSocketId) {
+			logger.warn(
+				{
+					requestId: response.requestId,
+					expectedSocketId: pending.socketId,
+					sourceSocketId,
+				},
+				"rpc_response_socket_mismatch",
+			);
 			return;
 		}
 		this.pendingRpcs.delete(response.requestId);
@@ -127,6 +139,17 @@ export class SessionRouter {
 		} else {
 			logger.debug({ requestId: response.requestId }, "rpc_response_success");
 			pending.resolve(response.result);
+		}
+	}
+
+	handleCliDisconnect(socketId: string): void {
+		for (const [requestId, pending] of this.pendingRpcs) {
+			if (pending.socketId !== socketId) {
+				continue;
+			}
+			this.pendingRpcs.delete(requestId);
+			clearTimeout(pending.timeout);
+			pending.reject(new Error("CLI disconnected"));
 		}
 	}
 
@@ -1128,6 +1151,7 @@ export class SessionRouter {
 
 			this.pendingRpcs.set(requestId, {
 				requestId,
+				socketId: socket.id,
 				resolve: (result) => {
 					const durationMs =
 						Number(process.hrtime.bigint() - start) / 1_000_000;

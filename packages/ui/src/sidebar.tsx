@@ -148,6 +148,8 @@ function Sidebar({
 	side = "left",
 	variant = "sidebar",
 	collapsible = "offcanvas",
+	mobileTitle = "Sidebar",
+	mobileDescription = "Displays the mobile sidebar.",
 	className,
 	children,
 	dir,
@@ -156,6 +158,8 @@ function Sidebar({
 	side?: "left" | "right";
 	variant?: "sidebar" | "floating" | "inset";
 	collapsible?: "offcanvas" | "icon" | "none";
+	mobileTitle?: React.ReactNode;
+	mobileDescription?: React.ReactNode;
 }) {
 	const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
 
@@ -191,8 +195,8 @@ function Sidebar({
 					side={side}
 				>
 					<SheetHeader className="sr-only">
-						<SheetTitle>Sidebar</SheetTitle>
-						<SheetDescription>Displays the mobile sidebar.</SheetDescription>
+						<SheetTitle>{mobileTitle}</SheetTitle>
+						<SheetDescription>{mobileDescription}</SheetDescription>
 					</SheetHeader>
 					<div className="flex h-full w-full flex-col">{children}</div>
 				</SheetContent>
@@ -284,7 +288,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
 			onClick={toggleSidebar}
 			title="Toggle Sidebar"
 			className={cn(
-				"hover:after:bg-sidebar-border absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
+				"hover:after:bg-sidebar-border absolute inset-y-0 z-20 hidden w-4 transition-[width,transform,background-color] ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
 				"in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize",
 				"[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize",
 				"hover:group-data-[collapsible=offcanvas]:bg-sidebar group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:left-full",

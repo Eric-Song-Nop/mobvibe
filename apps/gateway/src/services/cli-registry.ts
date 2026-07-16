@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { isDeepStrictEqual } from "node:util";
 import type {
 	AcpBackendSummary,
 	AgentSessionCapabilities,
@@ -55,6 +56,9 @@ export class CliRegistry extends EventEmitter {
 						this.clisByUserId.delete(existing.userId);
 					}
 				}
+			}
+			if (existing.socket.id !== socket.id) {
+				existing.socket.disconnect(true);
 			}
 		}
 
@@ -131,10 +135,38 @@ export class CliRegistry extends EventEmitter {
 			return;
 		}
 
+		const previousById = new Map(
+			record.sessions.map((session) => [session.sessionId, session]),
+		);
+		const nextById = new Map(
+			sessions.map((session) => [session.sessionId, session]),
+		);
+		const added: SessionSummary[] = [];
+		const updated: SessionSummary[] = [];
+		for (const session of nextById.values()) {
+			const previous = previousById.get(session.sessionId);
+			if (!previous) {
+				added.push({ ...session, machineId: record.machineId });
+			} else if (!isDeepStrictEqual(previous, session)) {
+				updated.push({ ...session, machineId: record.machineId });
+			}
+		}
+		const removed = record.sessions
+			.filter((session) => !nextById.has(session.sessionId))
+			.map((session) => session.sessionId);
+
 		// Replace the entire list — the CLI now sends the complete set
 		// (active + discovered), so stale entries are cleaned up naturally.
-		record.sessions = sessions;
+		record.sessions = Array.from(nextById.values());
 		this.emit("sessions:updated", record.machineId, record.sessions);
+		if (added.length > 0 || updated.length > 0 || removed.length > 0) {
+			this.emit(
+				"sessions:changed",
+				record.machineId,
+				{ added, updated, removed } satisfies SessionsChangedPayload,
+				record.userId,
+			);
+		}
 	}
 
 	/**

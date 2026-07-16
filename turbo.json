@@ -22,7 +22,7 @@
 			"dependsOn": ["^test"]
 		},
 		"test:run": {
-			"dependsOn": ["^test:run"]
+			"dependsOn": ["^build", "^test:run"]
 		},
 		"test:e2e": {
 			"dependsOn": ["^test:e2e"],

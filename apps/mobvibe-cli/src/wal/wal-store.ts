@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import fs from "node:fs";
 import path from "node:path";
-import type { SessionEventKind } from "@mobvibe/shared";
+import type { SessionEventKind, StopReason } from "@mobvibe/shared";
 import { logger } from "../lib/logger.js";
 import { runMigrations } from "./migrations.js";
 import { SeqGenerator } from "./seq-generator.js";
@@ -27,6 +27,11 @@ export type WalEvent = {
 	payload: unknown;
 	createdAt: string;
 	ackedAt?: string;
+};
+
+export type UnackedSessionRevision = {
+	sessionId: string;
+	revision: number;
 };
 
 export type AppendEventParams = {
@@ -72,6 +77,7 @@ export class WalStore {
 
 	// Prepared statements for performance
 	private stmtGetSession: ReturnType<Database["query"]>;
+	private stmtGetSessions: ReturnType<Database["query"]>;
 	private stmtInsertSession: ReturnType<Database["query"]>;
 	private stmtUpdateSession: ReturnType<Database["query"]>;
 	private stmtInsertEvent: ReturnType<Database["query"]>;
@@ -80,6 +86,11 @@ export class WalStore {
 	private stmtAckEvents: ReturnType<Database["query"]>;
 	private stmtIncrementRevision: ReturnType<Database["query"]>;
 	private stmtGetMaxSeq: ReturnType<Database["query"]>;
+	private stmtGetMessageSendResult: ReturnType<Database["query"]>;
+	private stmtInsertMessageSendResult: ReturnType<Database["query"]>;
+	private stmtGetSessionRevisionKey: ReturnType<Database["query"]>;
+	private stmtInsertSessionRevisionKey: ReturnType<Database["query"]>;
+	private stmtListUnackedSessionRevisions: ReturnType<Database["query"]>;
 
 	// Discovered sessions statements
 	private stmtUpsertDiscoveredSession: ReturnType<Database["query"]>;
@@ -94,6 +105,8 @@ export class WalStore {
 
 	// Archive statements
 	private stmtDeleteSessionEvents: ReturnType<Database["query"]>;
+	private stmtDeleteMessageSendResults: ReturnType<Database["query"]>;
+	private stmtDeleteSessionRevisionKeys: ReturnType<Database["query"]>;
 	private stmtDeleteSession: ReturnType<Database["query"]>;
 	private stmtInsertArchivedSession: ReturnType<Database["query"]>;
 	private stmtIsArchived: ReturnType<Database["query"]>;
@@ -115,6 +128,12 @@ export class WalStore {
       FROM sessions
       WHERE session_id = $sessionId
     `);
+
+		this.stmtGetSessions = this.db.query(`
+			SELECT session_id, machine_id, backend_id, current_revision, cwd, title, is_title_pinned, created_at, updated_at
+			FROM sessions
+			ORDER BY updated_at DESC, session_id ASC
+		`);
 
 		this.stmtInsertSession = this.db.query(`
       INSERT INTO sessions (session_id, machine_id, backend_id, current_revision, cwd, title, is_title_pinned, created_at, updated_at)
@@ -175,7 +194,41 @@ export class WalStore {
       SELECT MAX(seq) as max_seq
       FROM session_events
       WHERE session_id = $sessionId AND revision = $revision
-    `);
+		`);
+
+		this.stmtGetMessageSendResult = this.db.query(`
+			SELECT stop_reason
+			FROM message_send_results
+			WHERE session_id = $sessionId AND message_id = $messageId
+		`);
+
+		this.stmtInsertMessageSendResult = this.db.query(`
+			INSERT OR IGNORE INTO message_send_results (
+				session_id, message_id, stop_reason, completed_at
+			) VALUES ($sessionId, $messageId, $stopReason, $completedAt)
+		`);
+
+		this.stmtGetSessionRevisionKey = this.db.query(`
+			SELECT wrapped_dek
+			FROM session_revision_keys
+			WHERE session_id = $sessionId AND revision = $revision
+		`);
+
+		this.stmtInsertSessionRevisionKey = this.db.query(`
+			INSERT OR IGNORE INTO session_revision_keys (
+				session_id, revision, wrapped_dek, created_at
+			) VALUES ($sessionId, $revision, $wrappedDek, $createdAt)
+		`);
+
+		this.stmtListUnackedSessionRevisions = this.db.query(`
+			SELECT DISTINCT e.session_id, e.revision
+			FROM session_events e
+			INNER JOIN sessions s
+				ON s.session_id = e.session_id
+				AND s.current_revision = e.revision
+			WHERE e.acked_at IS NULL
+			ORDER BY e.session_id ASC, e.revision ASC
+		`);
 
 		// Consolidation statements
 		this.stmtQueryBySeqRange = this.db.query(`
@@ -242,6 +295,14 @@ export class WalStore {
 		this.stmtDeleteSessionEvents = this.db.query(`
       DELETE FROM session_events WHERE session_id = $sessionId
     `);
+
+		this.stmtDeleteMessageSendResults = this.db.query(`
+			DELETE FROM message_send_results WHERE session_id = $sessionId
+		`);
+
+		this.stmtDeleteSessionRevisionKeys = this.db.query(`
+			DELETE FROM session_revision_keys WHERE session_id = $sessionId
+		`);
 
 		this.stmtDeleteSession = this.db.query(`
       DELETE FROM sessions WHERE session_id = $sessionId
@@ -349,9 +410,21 @@ export class WalStore {
 	}
 
 	/**
+	 * Get all durable WAL sessions, including sessions that are not attached.
+	 */
+	getSessions(): WalSession[] {
+		const rows = this.stmtGetSessions.all() as WalSessionRow[];
+		return rows.map((row) => this.rowToSession(row));
+	}
+
+	/**
 	 * Append an event to the WAL.
 	 */
 	appendEvent(params: AppendEventParams): WalEvent {
+		const serializedPayload = JSON.stringify(params.payload);
+		if (serializedPayload === undefined) {
+			throw new Error("WAL event payload must be JSON serializable");
+		}
 		const seq = this.seqGenerator.next(params.sessionId, params.revision);
 		const now = new Date().toISOString();
 
@@ -365,14 +438,25 @@ export class WalStore {
 			"wal_append_event",
 		);
 
-		this.stmtInsertEvent.run({
-			$sessionId: params.sessionId,
-			$revision: params.revision,
-			$seq: seq,
-			$kind: params.kind,
-			$payload: JSON.stringify(params.payload),
-			$createdAt: now,
-		});
+		try {
+			this.stmtInsertEvent.run({
+				$sessionId: params.sessionId,
+				$revision: params.revision,
+				$seq: seq,
+				$kind: params.kind,
+				$payload: serializedPayload,
+				$createdAt: now,
+			});
+		} catch (error) {
+			// Keep the in-memory generator aligned with durable state. Otherwise a
+			// failed insert permanently creates an apparent missing-message gap.
+			this.seqGenerator.initialize(
+				params.sessionId,
+				params.revision,
+				this.getMaxSeq(params.sessionId, params.revision),
+			);
+			throw error;
+		}
 
 		// Get the inserted row ID
 		const lastId = this.db.query("SELECT last_insert_rowid() as id").get() as {
@@ -467,6 +551,83 @@ export class WalStore {
 			{ sessionId, revision, upToSeq, changes: result.changes },
 			"wal_ack_events_result",
 		);
+	}
+
+	/**
+	 * Return a completed message send result for gateway retry deduplication.
+	 */
+	getMessageSendResult(
+		sessionId: string,
+		messageId: string,
+	): { stopReason: StopReason } | undefined {
+		const row = this.stmtGetMessageSendResult.get({
+			$sessionId: sessionId,
+			$messageId: messageId,
+		}) as { stop_reason: StopReason } | null;
+		return row ? { stopReason: row.stop_reason } : undefined;
+	}
+
+	/**
+	 * Persist the first terminal result. Retries cannot overwrite it.
+	 */
+	recordMessageSendResult(
+		sessionId: string,
+		messageId: string,
+		stopReason: StopReason,
+	): void {
+		this.stmtInsertMessageSendResult.run({
+			$sessionId: sessionId,
+			$messageId: messageId,
+			$stopReason: stopReason,
+			$completedAt: new Date().toISOString(),
+		});
+	}
+
+	/**
+	 * Return the sealed DEK for one durable session revision.
+	 */
+	getSessionRevisionKey(
+		sessionId: string,
+		revision: number,
+	): string | undefined {
+		const row = this.stmtGetSessionRevisionKey.get({
+			$sessionId: sessionId,
+			$revision: revision,
+		}) as { wrapped_dek: string } | null;
+		return row?.wrapped_dek;
+	}
+
+	/**
+	 * Persist the first sealed DEK generated for a revision. A later retry must
+	 * not replace it or already-delivered ciphertext would become undecryptable.
+	 */
+	recordSessionRevisionKey(
+		sessionId: string,
+		revision: number,
+		wrappedDek: string,
+	): void {
+		this.stmtInsertSessionRevisionKey.run({
+			$sessionId: sessionId,
+			$revision: revision,
+			$wrappedDek: wrappedDek,
+			$createdAt: new Date().toISOString(),
+		});
+	}
+
+	/**
+	 * List current revisions with durable, unacknowledged events. Obsolete
+	 * revisions are intentionally excluded because clients reset on revision
+	 * changes and must not receive stale history after the reset.
+	 */
+	listUnackedSessionRevisions(): UnackedSessionRevision[] {
+		const rows = this.stmtListUnackedSessionRevisions.all() as Array<{
+			session_id: string;
+			revision: number;
+		}>;
+		return rows.map((row) => ({
+			sessionId: row.session_id,
+			revision: row.revision,
+		}));
 	}
 
 	/**
@@ -596,6 +757,8 @@ export class WalStore {
 	 */
 	archiveSession(sessionId: string): void {
 		this.stmtDeleteSessionEvents.run({ $sessionId: sessionId });
+		this.stmtDeleteMessageSendResults.run({ $sessionId: sessionId });
+		this.stmtDeleteSessionRevisionKeys.run({ $sessionId: sessionId });
 		this.stmtDeleteSession.run({ $sessionId: sessionId });
 		this.stmtInsertArchivedSession.run({
 			$sessionId: sessionId,

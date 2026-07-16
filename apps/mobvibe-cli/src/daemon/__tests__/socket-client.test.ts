@@ -129,8 +129,11 @@ describe("SocketClient restore semantics", () => {
 		listAllSessions: ReturnType<typeof mock>;
 		listSessions: ReturnType<typeof mock>;
 		getSessionRevision: ReturnType<typeof mock>;
+		listUnackedSessionRevisions: ReturnType<typeof mock>;
 		getUnackedEvents: ReturnType<typeof mock>;
 		ackEvents: ReturnType<typeof mock>;
+		getMessageSendResult: ReturnType<typeof mock>;
+		recordMessageSendResult: ReturnType<typeof mock>;
 		getSession: ReturnType<typeof mock>;
 		touchSession: ReturnType<typeof mock>;
 		recordTurnEnd: ReturnType<typeof mock>;
@@ -178,8 +181,13 @@ describe("SocketClient restore semantics", () => {
 			listAllSessions: mock(() => [{ sessionId: "session-1" }]),
 			listSessions: mock(() => [{ sessionId: "session-1" }]),
 			getSessionRevision: mock(() => 2),
+			listUnackedSessionRevisions: mock(() => [
+				{ sessionId: "session-1", revision: 2 },
+			]),
 			getUnackedEvents: mock(() => [createSessionEvent()]),
 			ackEvents: mock(() => {}),
+			getMessageSendResult: mock(() => undefined),
+			recordMessageSendResult: mock(() => {}),
 			getSession: mock(() => ({
 				connection: promptConnection,
 				cwd: "/tmp/project",
@@ -224,14 +232,14 @@ describe("SocketClient restore semantics", () => {
 		client.disconnect();
 	});
 
-	test("replays unacked events after reconnect using the active revision", async () => {
+	test("replays unacked events after reconnect using the durable revision", async () => {
 		(client as unknown as { reconnectAttempts: number }).reconnectAttempts = 1;
 
 		await (
 			socketHandlers.get("connect") as (() => Promise<void>) | undefined
 		)?.();
 
-		expect(sessionManager.getSessionRevision).toHaveBeenCalledWith("session-1");
+		expect(sessionManager.listUnackedSessionRevisions).toHaveBeenCalled();
 		expect(sessionManager.getUnackedEvents).toHaveBeenCalledWith(
 			"session-1",
 			2,
@@ -253,17 +261,51 @@ describe("SocketClient restore semantics", () => {
 		);
 	});
 
-	test("does not replay events on the first successful connect", async () => {
+	test("replays unacked events after a clean transport reconnect", async () => {
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const disconnectHandler = socketHandlers.get("disconnect");
+		if (!connectHandler || !disconnectHandler) {
+			throw new Error("socket lifecycle handlers not registered");
+		}
+
+		// A normal transport recovery can reconnect without any connect_error event.
+		await connectHandler();
+		sessionManager.getUnackedEvents.mockClear();
+		socketMock.emit.mockClear();
+
+		disconnectHandler("transport close");
+		await connectHandler();
+
+		expect(sessionManager.getUnackedEvents).toHaveBeenCalledWith(
+			"session-1",
+			2,
+		);
+		expect(socketMock.emit).toHaveBeenCalledWith(
+			"session:event",
+			expect.objectContaining({
+				sessionId: "session-1",
+				revision: 2,
+				seq: 4,
+			}),
+		);
+	});
+
+	test("replays persisted events on the first successful connect", async () => {
 		(client as unknown as { reconnectAttempts: number }).reconnectAttempts = 0;
 
 		await (
 			socketHandlers.get("connect") as (() => Promise<void>) | undefined
 		)?.();
 
-		expect(sessionManager.getUnackedEvents).not.toHaveBeenCalled();
-		expect(socketMock.emit).not.toHaveBeenCalledWith(
+		expect(sessionManager.getUnackedEvents).toHaveBeenCalledWith(
+			"session-1",
+			2,
+		);
+		expect(socketMock.emit).toHaveBeenCalledWith(
 			"session:event",
-			expect.anything(),
+			expect.objectContaining({ sessionId: "session-1", revision: 2 }),
 		);
 	});
 
@@ -282,25 +324,15 @@ describe("SocketClient restore semantics", () => {
 		expect(sessionManager.ackEvents).toHaveBeenCalledWith("session-1", 2, 4);
 	});
 
-	test("skips replay for sessions without a current revision", async () => {
-		sessionManager.listSessions.mockReturnValue([
-			{ sessionId: "session-1" },
-			{ sessionId: "session-2" },
-		]);
-		sessionManager.getSessionRevision.mockImplementation((sessionId: string) =>
-			sessionId === "session-1" ? 2 : undefined,
-		);
+	test("skips replay when no durable revision has unacked events", async () => {
+		sessionManager.listUnackedSessionRevisions.mockReturnValue([]);
 
 		(client as unknown as { reconnectAttempts: number }).reconnectAttempts = 1;
 		await (
 			socketHandlers.get("connect") as (() => Promise<void>) | undefined
 		)?.();
 
-		expect(sessionManager.getUnackedEvents).toHaveBeenCalledTimes(1);
-		expect(sessionManager.getUnackedEvents).toHaveBeenCalledWith(
-			"session-1",
-			2,
-		);
+		expect(sessionManager.getUnackedEvents).not.toHaveBeenCalled();
 	});
 
 	test("forwards plaintext prompts through rpc:message:send", async () => {
@@ -314,6 +346,7 @@ describe("SocketClient restore semantics", () => {
 			requestId: "req-1",
 			params: {
 				sessionId: "session-1",
+				messageId: "message-1",
 				prompt,
 			},
 		});
@@ -330,6 +363,139 @@ describe("SocketClient restore semantics", () => {
 		);
 		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
 			requestId: "req-1",
+			result: { stopReason: "end_turn" },
+		});
+	});
+
+	test("shares one prompt execution when a timed-out RPC is retried concurrently", async () => {
+		let resolvePrompt: ((value: { stopReason: string }) => void) | undefined;
+		promptConnection.prompt.mockImplementationOnce(
+			() =>
+				new Promise<{ stopReason: string }>((resolve) => {
+					resolvePrompt = resolve;
+				}),
+		);
+		const handler = socketHandlers.get("rpc:message:send");
+		if (!handler) {
+			throw new Error("rpc:message:send handler not registered");
+		}
+		const params = {
+			sessionId: "session-1",
+			messageId: "message-concurrent",
+			prompt: [{ type: "text", text: "run once" }],
+		};
+
+		const first = handler({ requestId: "req-concurrent-1", params });
+		const second = handler({ requestId: "req-concurrent-2", params });
+		await Promise.resolve();
+		resolvePrompt?.({ stopReason: "end_turn" });
+		await Promise.all([first, second]);
+
+		expect(promptConnection.prompt).toHaveBeenCalledTimes(1);
+		expect(sessionManager.recordTurnEnd).toHaveBeenCalledTimes(1);
+		expect(sessionManager.recordMessageSendResult).toHaveBeenCalledTimes(1);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-concurrent-1",
+			result: { stopReason: "end_turn" },
+		});
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-concurrent-2",
+			result: { stopReason: "end_turn" },
+		});
+	});
+
+	test("allows the same message to be retried after prompt execution fails", async () => {
+		promptConnection.prompt.mockImplementationOnce(() =>
+			Promise.reject(new Error("agent unavailable")),
+		);
+		const handler = socketHandlers.get("rpc:message:send");
+		if (!handler) {
+			throw new Error("rpc:message:send handler not registered");
+		}
+		const params = {
+			sessionId: "session-1",
+			messageId: "message-retry-after-failure",
+			prompt: [{ type: "text", text: "retry me" }],
+		};
+
+		await handler({ requestId: "req-failed", params });
+		await handler({ requestId: "req-retry", params });
+
+		expect(promptConnection.prompt).toHaveBeenCalledTimes(2);
+		expect(sessionManager.recordMessageSendResult).toHaveBeenCalledTimes(1);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-retry",
+			result: { stopReason: "end_turn" },
+		});
+	});
+
+	test("serializes distinct messages for the same session", async () => {
+		let resolveFirstPrompt:
+			| ((value: { stopReason: string }) => void)
+			| undefined;
+		promptConnection.prompt.mockImplementationOnce(
+			() =>
+				new Promise<{ stopReason: string }>((resolve) => {
+					resolveFirstPrompt = resolve;
+				}),
+		);
+		const handler = socketHandlers.get("rpc:message:send");
+		if (!handler) {
+			throw new Error("rpc:message:send handler not registered");
+		}
+
+		const first = handler({
+			requestId: "req-serial-1",
+			params: {
+				sessionId: "session-1",
+				messageId: "message-serial-1",
+				prompt: [{ type: "text", text: "first" }],
+			},
+		});
+		const second = handler({
+			requestId: "req-serial-2",
+			params: {
+				sessionId: "session-1",
+				messageId: "message-serial-2",
+				prompt: [{ type: "text", text: "second" }],
+			},
+		});
+		await Promise.resolve();
+
+		expect(promptConnection.prompt).toHaveBeenCalledTimes(1);
+		resolveFirstPrompt?.({ stopReason: "end_turn" });
+		await Promise.all([first, second]);
+
+		expect(promptConnection.prompt).toHaveBeenCalledTimes(2);
+		expect(promptConnection.prompt.mock.calls[0]?.[1]).toEqual([
+			{ type: "text", text: "first" },
+		]);
+		expect(promptConnection.prompt.mock.calls[1]?.[1]).toEqual([
+			{ type: "text", text: "second" },
+		]);
+	});
+
+	test("replays a durable completed result without prompting again", async () => {
+		sessionManager.getMessageSendResult.mockReturnValueOnce({
+			stopReason: "end_turn",
+		});
+		const handler = socketHandlers.get("rpc:message:send");
+		if (!handler) {
+			throw new Error("rpc:message:send handler not registered");
+		}
+
+		await handler({
+			requestId: "req-durable-retry",
+			params: {
+				sessionId: "session-1",
+				messageId: "message-completed",
+				prompt: [{ type: "text", text: "must not run again" }],
+			},
+		});
+
+		expect(promptConnection.prompt).not.toHaveBeenCalled();
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-durable-retry",
 			result: { stopReason: "end_turn" },
 		});
 	});
@@ -351,6 +517,7 @@ describe("SocketClient restore semantics", () => {
 			requestId: "req-image-disabled",
 			params: {
 				sessionId: "session-1",
+				messageId: "message-image-disabled",
 				prompt,
 			},
 		});
@@ -394,6 +561,7 @@ describe("SocketClient restore semantics", () => {
 			requestId: "req-image-too-large",
 			params: {
 				sessionId: "session-1",
+				messageId: "message-image-too-large",
 				prompt,
 			},
 		});

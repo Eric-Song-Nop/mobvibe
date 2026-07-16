@@ -1,6 +1,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChatSession } from "@/lib/chat-store";
+import type { SessionEvent } from "@/lib/acp";
+import type {
+	ChatSession,
+	SessionEventTransactionActions,
+} from "@/lib/chat-store";
 import type { ChatStoreActions } from "../useSessionMutations";
 import { useSocket } from "../useSocket";
 
@@ -16,11 +20,20 @@ const mockStoreState = vi.hoisted(
 			restoreSessionMessages: vi.fn(),
 			setHistorySyncing: vi.fn(),
 			setHistorySyncWarning: vi.fn(),
+			setSessionE2EEStatus: vi.fn(),
+			applySessionEventTransaction: vi.fn(),
+			updateSessionCursor: vi.fn(),
 		}) as {
 			sessions: Record<string, ChatSession>;
 			restoreSessionMessages: ChatStoreActions["restoreSessionMessages"];
 			setHistorySyncing: ChatStoreActions["setHistorySyncing"];
 			setHistorySyncWarning: ChatStoreActions["setHistorySyncWarning"];
+			setSessionE2EEStatus: ChatStoreActions["setSessionE2EEStatus"];
+			applySessionEventTransaction: (
+				event: Pick<SessionEvent, "sessionId" | "revision" | "seq">,
+				applyEvent: (actions: SessionEventTransactionActions) => void,
+			) => void;
+			updateSessionCursor: ChatStoreActions["updateSessionCursor"];
 		},
 );
 
@@ -42,9 +55,9 @@ const setMockSessions = (sessions: Record<string, ChatSession>) => {
 	}
 };
 
-const emitDekReady = (sessionId: string) => {
+const emitDekReady = (sessionId: string, revision?: number) => {
 	for (const listener of dekReadyListeners) {
-		listener(sessionId);
+		listener(sessionId, revision);
 	}
 };
 
@@ -107,13 +120,13 @@ vi.mock("@/lib/socket", () => ({
 }));
 
 const dekReadyListeners = vi.hoisted(
-	() => new Set<(sessionId: string) => void>(),
+	() => new Set<(sessionId: string, revision?: number) => void>(),
 );
 const decryptedPayloads = vi.hoisted(
 	() => new Map<string, Record<string, unknown>>(),
 );
 const mockE2EE = vi.hoisted(() => ({
-	hasSessionDek: vi.fn(() => true),
+	hasSessionDek: vi.fn((_sessionId: string, _revision?: number) => true),
 	decryptEvent: vi.fn((event: { payload: unknown }) => {
 		if (
 			event.payload &&
@@ -128,12 +141,14 @@ const mockE2EE = vi.hoisted(() => ({
 		}
 		return event;
 	}),
-	onDekReady: vi.fn((listener: (sessionId: string) => void) => {
-		dekReadyListeners.add(listener);
-		return () => {
-			dekReadyListeners.delete(listener);
-		};
-	}),
+	onDekReady: vi.fn(
+		(listener: (sessionId: string, revision?: number) => void) => {
+			dekReadyListeners.add(listener);
+			return () => {
+				dekReadyListeners.delete(listener);
+			};
+		},
+	),
 	unwrapSessionDek: vi.fn(),
 	getSessionE2EEStatus: vi.fn(
 		(_sessionId: string, _hasWrappedDek: boolean) => "ready",
@@ -142,12 +157,14 @@ const mockE2EE = vi.hoisted(() => ({
 
 vi.mock("@/lib/e2ee", () => ({
 	e2ee: mockE2EE,
-	bootstrapSessionE2EE: vi.fn((sessionId: string, wrappedDek?: string) => {
-		if (wrappedDek) {
-			mockE2EE.unwrapSessionDek(sessionId, wrappedDek);
-		}
-		return mockE2EE.getSessionE2EEStatus(sessionId, Boolean(wrappedDek));
-	}),
+	bootstrapSessionE2EE: vi.fn(
+		(sessionId: string, wrappedDek?: string, revision?: number) => {
+			if (wrappedDek) {
+				mockE2EE.unwrapSessionDek(sessionId, wrappedDek, revision);
+			}
+			return mockE2EE.getSessionE2EEStatus(sessionId, Boolean(wrappedDek));
+		},
+	),
 }));
 
 const notificationMocks = vi.hoisted(() => ({
@@ -218,6 +235,7 @@ const createStore = (): ChatStoreActions => {
 			}
 		},
 	);
+	mockStoreState.updateSessionCursor = updateSessionCursor;
 
 	// Create resetSessionForRevision that resets the session
 	const resetSessionForRevision = vi.fn(
@@ -329,7 +347,7 @@ const createStore = (): ChatStoreActions => {
 		},
 	);
 
-	return {
+	const store = {
 		sessions: {},
 		setActiveSessionId: vi.fn(),
 		setLastCreatedCwd: vi.fn(),
@@ -366,6 +384,11 @@ const createStore = (): ChatStoreActions => {
 		updateSessionCursor,
 		resetSessionForRevision,
 	} as unknown as ChatStoreActions;
+	mockStoreState.applySessionEventTransaction = vi.fn((event, applyEvent) => {
+		applyEvent(store as unknown as SessionEventTransactionActions);
+		updateSessionCursor(event.sessionId, event.revision, event.seq);
+	});
+	return store;
 };
 
 const buildSession = (overrides: Partial<ChatSession> = {}): ChatSession => ({
@@ -442,6 +465,7 @@ describe("useSocket (webui)", () => {
 		mockStoreState.restoreSessionMessages = vi.fn();
 		mockStoreState.setHistorySyncing = vi.fn();
 		mockStoreState.setHistorySyncWarning = vi.fn();
+		mockStoreState.setSessionE2EEStatus = vi.fn();
 		dekReadyListeners.clear();
 		decryptedPayloads.clear();
 
@@ -1162,6 +1186,69 @@ describe("useSocket (webui)", () => {
 		);
 	});
 
+	it("retains a buffered live event when gap backfill fails", () => {
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				revision: 1,
+				lastAppliedSeq: 1,
+			}),
+		};
+		setMockSessions(sessions);
+
+		renderHook(() =>
+			useSocket({
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		act(() =>
+			handlers.sessionEvent?.(
+				buildAssistantBackfillEvent({ seq: 5, text: "5" }),
+			),
+		);
+		expect(store.appendAssistantChunk).not.toHaveBeenCalledWith(
+			"session-1",
+			"5",
+		);
+
+		act(() =>
+			backfillOptionsRef.current?.onError?.(
+				"session-1",
+				new Error("temporary backfill failure"),
+			),
+		);
+
+		act(() => {
+			for (const seq of [2, 3, 4]) {
+				handlers.sessionEvent?.(
+					buildAssistantBackfillEvent({ seq, text: String(seq) }),
+				);
+			}
+		});
+
+		expect(store.appendAssistantChunk).toHaveBeenCalledWith("session-1", "5");
+		expect(mockStoreState.sessions["session-1"].lastAppliedSeq).toBe(5);
+	});
+
 	it("applies consolidated backfill assistant events and advances the cursor to the final seq", async () => {
 		// Regression: CLI read-time consolidation returns one event at the final seq.
 		const store = createStore();
@@ -1524,6 +1611,159 @@ describe("useSocket (webui)", () => {
 		expect(store.updateSessionCursor).toHaveBeenCalledWith("session-1", 1, 1);
 	});
 
+	it("does not apply or advance past an encrypted event that fails decryption", () => {
+		const store = createStore();
+		setMockSessions({
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				revision: 1,
+				lastAppliedSeq: 0,
+			}),
+		});
+		mockE2EE.hasSessionDek.mockReturnValue(true);
+		mockE2EE.decryptEvent.mockImplementationOnce(() => {
+			throw new Error("wrong revision key");
+		});
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		renderHook(() =>
+			useSocket({
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		act(() => {
+			handlers.sessionEvent?.({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				revision: 1,
+				seq: 1,
+				kind: "agent_message_chunk",
+				createdAt: "2024-01-01T00:00:00Z",
+				payload: { t: "encrypted", c: "corrupt-ciphertext" },
+			});
+		});
+
+		expect(store.appendAssistantChunk).not.toHaveBeenCalled();
+		expect(store.updateSessionCursor).not.toHaveBeenCalledWith(
+			"session-1",
+			1,
+			1,
+		);
+		expect(mockStoreState.setSessionE2EEStatus).toHaveBeenCalledWith(
+			"session-1",
+			"missing_key",
+		);
+		expect(errorSpy).toHaveBeenCalledWith(
+			expect.stringContaining("revision 1"),
+			expect.any(Error),
+		);
+		errorSpy.mockRestore();
+	});
+
+	it("flushes buffered live events after delayed backfill decryption advances the cursor", () => {
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				revision: 1,
+				lastAppliedSeq: 0,
+			}),
+		};
+		setMockSessions(sessions);
+		mockE2EE.hasSessionDek.mockReturnValue(false);
+		decryptedPayloads.set("cipher-live-4", {
+			sessionId: "session-1",
+			update: {
+				sessionUpdate: "agent_message_chunk",
+				content: { type: "text", text: "live fourth" },
+			},
+		});
+		decryptedPayloads.set("cipher-backfill-3", {
+			sessionId: "session-1",
+			update: {
+				sessionUpdate: "agent_message_chunk",
+				content: { type: "text", text: "backfilled through third" },
+			},
+		});
+
+		renderHook(() =>
+			useSocket({
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		act(() => {
+			handlers.sessionEvent?.({
+				sessionId: "session-1",
+				revision: 1,
+				seq: 4,
+				kind: "agent_message_chunk",
+				payload: { t: "encrypted", c: "cipher-live-4" },
+			});
+			backfillOptionsRef.current?.onEvents("session-1", [
+				{
+					sessionId: "session-1",
+					machineId: "machine-1",
+					revision: 1,
+					seq: 3,
+					kind: "agent_message_chunk",
+					createdAt: "2024-01-01T00:00:00Z",
+					payload: { t: "encrypted", c: "cipher-backfill-3" },
+				},
+			]);
+		});
+
+		mockE2EE.hasSessionDek.mockReturnValue(true);
+		act(() => emitDekReady("session-1"));
+
+		expect(store.appendAssistantChunk).toHaveBeenNthCalledWith(
+			1,
+			"session-1",
+			"backfilled through third",
+		);
+		expect(store.appendAssistantChunk).toHaveBeenNthCalledWith(
+			2,
+			"session-1",
+			"live fourth",
+		);
+		expect(mockStoreState.sessions["session-1"].lastAppliedSeq).toBe(4);
+	});
+
 	it("keeps encrypted reconnect backfill buffered until the DEK is ready", async () => {
 		const store = createStore();
 		const sessions = {
@@ -1699,6 +1939,109 @@ describe("useSocket (webui)", () => {
 		expect(mockBackfill.startBackfill).not.toHaveBeenCalled();
 	});
 
+	it("waits for the matching revision DEK before applying a future encrypted event", () => {
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				revision: 1,
+				lastAppliedSeq: 3,
+			}),
+		};
+		setMockSessions(sessions);
+		mockE2EE.hasSessionDek.mockImplementation(
+			(_sessionId: string, revision?: number) => revision !== 2,
+		);
+		decryptedPayloads.set("cipher-revision-2", {
+			sessionId: "session-1",
+			update: {
+				sessionUpdate: "agent_message_chunk",
+				content: { type: "text", text: "revision two decrypted" },
+			},
+		});
+		(
+			store.handleSessionsChanged as ReturnType<typeof vi.fn>
+		).mockImplementation(() => {
+			setMockSessions({
+				"session-1": {
+					...mockStoreState.sessions["session-1"],
+					messages: [],
+					revision: 2,
+					lastAppliedSeq: 0,
+				},
+			});
+		});
+
+		renderHook(() =>
+			useSocket({
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		act(() => {
+			handlers.sessionEvent?.({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				revision: 2,
+				seq: 1,
+				kind: "agent_message_chunk",
+				createdAt: "2024-01-01T00:00:00Z",
+				payload: { t: "encrypted", c: "cipher-revision-2" },
+			});
+		});
+
+		expect(store.appendAssistantChunk).not.toHaveBeenCalled();
+		expect(store.updateSessionCursor).not.toHaveBeenCalledWith(
+			"session-1",
+			2,
+			1,
+		);
+
+		act(() => {
+			handlers.sessionsChanged?.({
+				added: [],
+				updated: [
+					{
+						sessionId: "session-1",
+						title: "Session 1",
+						createdAt: "2024-01-01T00:00:00Z",
+						updatedAt: "2024-01-01T00:00:00Z",
+						isAttached: true,
+						revision: 2,
+						wrappedDek: "wrapped-revision-2",
+					},
+				],
+				removed: [],
+			});
+			mockE2EE.hasSessionDek.mockReturnValue(true);
+			emitDekReady("session-1", 2);
+		});
+
+		expect(store.appendAssistantChunk).toHaveBeenCalledTimes(1);
+		expect(store.appendAssistantChunk).toHaveBeenCalledWith(
+			"session-1",
+			"revision two decrypted",
+		);
+		expect(store.updateSessionCursor).toHaveBeenCalledWith("session-1", 2, 1);
+	});
+
 	it("resets and backfills when a decryptable event arrives for a newer revision", async () => {
 		const store = createStore();
 		const sessions = {
@@ -1821,6 +2164,78 @@ describe("useSocket (webui)", () => {
 		expect(mockBackfill.startBackfill).toHaveBeenCalledTimes(1);
 		expect(mockBackfill.startBackfill).toHaveBeenCalledWith("session-1", 2, 4);
 		expect(onReconnect).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not advance a local cursor from another tab without the matching transcript", () => {
+		const store = createStore();
+		const sessions = {
+			"session-1": buildSession({
+				sessionId: "session-1",
+				isAttached: true,
+				revision: 1,
+				lastAppliedSeq: 1,
+				messages: [
+					{
+						id: "assistant-1",
+						role: "assistant",
+						kind: "text",
+						content: "only the first event is present locally",
+						contentBlocks: [
+							{ type: "text", text: "only the first event is present locally" },
+						],
+						createdAt: "2024-01-01T00:00:00Z",
+						isStreaming: false,
+					},
+				],
+			}),
+		};
+		setMockSessions(sessions);
+
+		renderHook(() =>
+			useSocket({
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+		vi.mocked(store.updateSessionCursor).mockClear();
+
+		act(() => {
+			window.dispatchEvent(
+				new StorageEvent("storage", {
+					key: "mobvibe.chat-store",
+					newValue: JSON.stringify({
+						state: {
+							sessions: {
+								"session-1": { revision: 1, lastAppliedSeq: 7 },
+							},
+						},
+					}),
+				}),
+			);
+		});
+
+		expect(store.updateSessionCursor).not.toHaveBeenCalledWith(
+			"session-1",
+			1,
+			7,
+		);
+		expect(mockStoreState.sessions["session-1"].lastAppliedSeq).toBe(1);
+		expect(mockStoreState.sessions["session-1"].messages).toHaveLength(1);
 	});
 
 	it("resets sending state when turn_end event is received", async () => {

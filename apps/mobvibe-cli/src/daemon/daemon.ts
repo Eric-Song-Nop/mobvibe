@@ -202,11 +202,32 @@ export class DaemonManager {
 		// P1-2: Track compactor resources for cleanup on shutdown
 		let compactorWalStore: WalStore | undefined;
 		let compactorDb: Database | undefined;
+		const compactionRuns = new Set<Promise<unknown>>();
+		const startCompaction = (source: "startup" | "scheduled") => {
+			if (!compactor) return;
+			let run: Promise<unknown>;
+			try {
+				run = compactor.compactAll();
+			} catch (error) {
+				logger.error({ err: error }, `compaction_${source}_error`);
+				return;
+			}
+			compactionRuns.add(run);
+			void run.then(
+				() => {
+					compactionRuns.delete(run);
+				},
+				(error) => {
+					compactionRuns.delete(run);
+					logger.error({ err: error }, `compaction_${source}_error`);
+				},
+			);
+		};
 
 		if (this.config.compaction.enabled) {
 			compactorWalStore = new WalStore(this.config.walDbPath);
 			compactorDb = new Database(this.config.walDbPath);
-			compactor = new WalCompactor(
+			compactor = this.createWalCompactor(
 				compactorWalStore,
 				this.config.compaction,
 				compactorDb,
@@ -215,9 +236,7 @@ export class DaemonManager {
 			// Run compaction on startup
 			if (this.config.compaction.runOnStartup) {
 				logger.info("compaction_startup_start");
-				compactor.compactAll().catch((error) => {
-					logger.error({ err: error }, "compaction_startup_error");
-				});
+				startCompaction("startup");
 			}
 
 			// Schedule periodic compaction
@@ -225,9 +244,7 @@ export class DaemonManager {
 				this.config.compaction.runIntervalHours * 60 * 60 * 1000;
 			compactionInterval = setInterval(() => {
 				logger.info("compaction_scheduled_start");
-				compactor?.compactAll().catch((error) => {
-					logger.error({ err: error }, "compaction_scheduled_error");
-				});
+				startCompaction("scheduled");
 			}, intervalMs);
 
 			logger.info(
@@ -237,6 +254,10 @@ export class DaemonManager {
 		}
 
 		let shuttingDown = false;
+		let resolveShutdown: () => void = () => {};
+		const shutdownComplete = new Promise<void>((resolve) => {
+			resolveShutdown = resolve;
+		});
 
 		const shutdown = async (signal: string) => {
 			if (shuttingDown) {
@@ -251,6 +272,14 @@ export class DaemonManager {
 				// Stop compaction interval
 				if (compactionInterval) {
 					clearInterval(compactionInterval);
+				}
+				const pendingCompactions = Array.from(compactionRuns);
+				if (pendingCompactions.length > 0) {
+					logger.info(
+						{ count: pendingCompactions.length },
+						"compaction_shutdown_wait",
+					);
+					await Promise.allSettled(pendingCompactions);
 				}
 
 				// P1-2: Close compactor resources to prevent connection leak
@@ -267,24 +296,35 @@ export class DaemonManager {
 				logger.info({ signal }, "daemon_shutdown_complete");
 			} catch (error) {
 				logger.error({ err: error, signal }, "daemon_shutdown_error");
+			} finally {
+				resolveShutdown();
 			}
 		};
 
-		process.on("SIGINT", () => {
+		const handleSigint = () => {
 			shutdown("SIGINT").catch((error) => {
 				logger.error({ err: error }, "daemon_shutdown_sigint_error");
 			});
-		});
-		process.on("SIGTERM", () => {
+		};
+		const handleSigterm = () => {
 			shutdown("SIGTERM").catch((error) => {
 				logger.error({ err: error }, "daemon_shutdown_sigterm_error");
 			});
-		});
+		};
 
-		socketClient.connect();
+		process.on("SIGINT", handleSigint);
+		process.on("SIGTERM", handleSigterm);
 
-		// Keep process alive
-		await new Promise(() => {});
+		try {
+			socketClient.connect();
+			await shutdownComplete;
+		} catch (error) {
+			await shutdown("startup_error");
+			throw error;
+		} finally {
+			process.off("SIGINT", handleSigint);
+			process.off("SIGTERM", handleSigterm);
+		}
 	}
 
 	protected async createRuntimeCryptoService(options?: {
@@ -310,6 +350,14 @@ export class DaemonManager {
 		cryptoService: CliCryptoService,
 	): SessionManager {
 		return new SessionManager(this.config, cryptoService);
+	}
+
+	protected createWalCompactor(
+		walStore: WalStore,
+		config: CliConfig["compaction"],
+		db: Database,
+	): WalCompactor {
+		return new WalCompactor(walStore, config, db);
 	}
 
 	protected createSocketClient(

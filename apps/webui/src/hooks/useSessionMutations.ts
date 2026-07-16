@@ -83,7 +83,7 @@ type SendMessageDraft = {
 type SendMessageVariables = {
 	sessionId: string;
 	prompt: ContentBlock[];
-	messageId?: string;
+	messageId: string;
 	draft?: SendMessageDraft;
 };
 
@@ -286,7 +286,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 
 			store.setSessionE2EEStatus(
 				data.sessionId,
-				bootstrapSessionE2EE(data.sessionId, data.wrappedDek),
+				bootstrapSessionE2EE(data.sessionId, data.wrappedDek, data.revision),
 			);
 
 			// Switch to real session
@@ -435,6 +435,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 			return sendMessage({
 				sessionId: variables.sessionId,
 				prompt: variables.prompt,
+				messageId: variables.messageId,
 			});
 		},
 		onError: (mutationError: unknown, variables) => {
@@ -442,9 +443,10 @@ export function useSessionMutations(store: ChatStoreActions) {
 				store.markUserMessageFailed(variables.sessionId, variables.messageId);
 			}
 			if (variables?.draft) {
-				useUiStore
-					.getState()
-					.setChatDraft(variables.sessionId, variables.draft);
+				useUiStore.getState().setChatDraft(variables.sessionId, {
+					...variables.draft,
+					messageId: variables.messageId,
+				});
 			}
 			store.setAppError(
 				normalizeError(

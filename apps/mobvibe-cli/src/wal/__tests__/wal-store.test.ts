@@ -120,6 +120,33 @@ describe("WalStore", () => {
 			expect(events.length).toBe(1);
 			expect(events[0].payload).toEqual(payload);
 		});
+
+		it("does not leave a sequence gap when an append fails", () => {
+			walStore.ensureSession({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				backendId: "backend-1",
+			});
+			const circular: { self?: unknown } = {};
+			circular.self = circular;
+
+			expect(() =>
+				walStore.appendEvent({
+					sessionId: "session-1",
+					revision: 1,
+					kind: "user_message",
+					payload: circular,
+				}),
+			).toThrow();
+
+			const event = walStore.appendEvent({
+				sessionId: "session-1",
+				revision: 1,
+				kind: "user_message",
+				payload: { text: "valid" },
+			});
+			expect(event.seq).toBe(1);
+		});
 	});
 
 	describe("queryEvents", () => {
@@ -240,6 +267,84 @@ describe("WalStore", () => {
 		});
 	});
 
+	describe("message send idempotency", () => {
+		it("persists the first completed result across store restarts", () => {
+			walStore.ensureSession({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				backendId: "backend-1",
+			});
+
+			walStore.recordMessageSendResult("session-1", "message-1", "end_turn");
+			walStore.recordMessageSendResult("session-1", "message-1", "cancelled");
+			expect(walStore.getMessageSendResult("session-1", "message-1")).toEqual({
+				stopReason: "end_turn",
+			});
+
+			walStore.close();
+			walStore = new WalStore(dbPath);
+
+			expect(walStore.getMessageSendResult("session-1", "message-1")).toEqual({
+				stopReason: "end_turn",
+			});
+		});
+	});
+
+	describe("revision encryption keys", () => {
+		it("persists the first sealed key for a revision across restarts", () => {
+			walStore.ensureSession({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				backendId: "backend-1",
+			});
+
+			walStore.recordSessionRevisionKey("session-1", 1, "wrapped-first");
+			walStore.recordSessionRevisionKey("session-1", 1, "wrapped-replacement");
+			expect(walStore.getSessionRevisionKey("session-1", 1)).toBe(
+				"wrapped-first",
+			);
+
+			walStore.close();
+			walStore = new WalStore(dbPath);
+
+			expect(walStore.getSessionRevisionKey("session-1", 1)).toBe(
+				"wrapped-first",
+			);
+		});
+
+		it("lists only current revisions with unacknowledged events", () => {
+			walStore.ensureSession({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				backendId: "backend-1",
+			});
+			walStore.appendEvent({
+				sessionId: "session-1",
+				revision: 1,
+				kind: "user_message",
+				payload: { text: "obsolete" },
+			});
+			expect(walStore.listUnackedSessionRevisions()).toEqual([
+				{ sessionId: "session-1", revision: 1 },
+			]);
+
+			walStore.incrementRevision("session-1");
+			expect(walStore.listUnackedSessionRevisions()).toEqual([]);
+			const current = walStore.appendEvent({
+				sessionId: "session-1",
+				revision: 2,
+				kind: "user_message",
+				payload: { text: "current" },
+			});
+			expect(walStore.listUnackedSessionRevisions()).toEqual([
+				{ sessionId: "session-1", revision: 2 },
+			]);
+
+			walStore.ackEvents("session-1", 2, current.seq);
+			expect(walStore.listUnackedSessionRevisions()).toEqual([]);
+		});
+	});
+
 	describe("incrementRevision", () => {
 		it("should increment revision and reset sequence", () => {
 			walStore.ensureSession({
@@ -322,6 +427,11 @@ describe("WalStore", () => {
 				kind: "user_message",
 				payload: { text: "Hello" },
 			});
+			walStore.recordMessageSendResult("session-1", "message-1", "end_turn");
+			walStore.recordSessionRevisionKey("session-1", 1, "wrapped-dek");
+			expect(walStore.getMessageSendResult("session-1", "message-1")).toEqual({
+				stopReason: "end_turn",
+			});
 
 			walStore.archiveSession("session-1");
 
@@ -334,6 +444,10 @@ describe("WalStore", () => {
 				revision: 1,
 			});
 			expect(events.length).toBe(0);
+			expect(
+				walStore.getMessageSendResult("session-1", "message-1"),
+			).toBeUndefined();
+			expect(walStore.getSessionRevisionKey("session-1", 1)).toBeUndefined();
 
 			// Should be marked as archived
 			expect(walStore.isArchived("session-1")).toBe(true);

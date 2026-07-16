@@ -425,6 +425,7 @@ export const setSessionModel = async (payload: {
 
 export const sendMessage = async (payload: {
 	sessionId: string;
+	messageId: string;
 	prompt: ContentBlock[];
 }): Promise<SendMessageResult> => {
 	const encryptedPrompt = e2ee.encryptPayloadForSession(

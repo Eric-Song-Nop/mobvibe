@@ -11,6 +11,7 @@ import {
 	generateDEK,
 	isEncryptedPayload,
 	uint8ToBase64,
+	unwrapDEK,
 	wrapDEK,
 } from "@mobvibe/shared";
 
@@ -24,6 +25,8 @@ export class CliCryptoService {
 	private contentKeyPair?: CryptoKeyPair;
 	private sessionDeks = new Map<string, Uint8Array>();
 	private wrappedDekCache = new Map<string, string>();
+	private revisionDeks = new Map<string, Uint8Array>();
+	private revisionWrappedDekCache = new Map<string, string>();
 
 	constructor(masterSecret: Uint8Array, options?: CliCryptoServiceOptions) {
 		this.authKeyPair = deriveAuthKeyPair(masterSecret);
@@ -37,7 +40,10 @@ export class CliCryptoService {
 	 * Initialize a DEK for a session. Generates a random DEK and wraps it
 	 * with the content public key.
 	 */
-	initSessionDek(sessionId: string): {
+	initSessionDek(
+		sessionId: string,
+		revision?: number,
+	): {
 		dek: Uint8Array;
 		wrappedDek: string | null;
 	} {
@@ -49,21 +55,54 @@ export class CliCryptoService {
 		const wrappedDek = wrapDEK(dek, this.contentKeyPair.publicKey);
 		this.sessionDeks.set(sessionId, dek);
 		this.wrappedDekCache.set(sessionId, wrappedDek);
+		if (revision !== undefined) {
+			const key = this.revisionKey(sessionId, revision);
+			this.revisionDeks.set(key, dek);
+			this.revisionWrappedDekCache.set(key, wrappedDek);
+		}
 		return { dek, wrappedDek };
 	}
 
 	/**
 	 * Set an existing DEK for a session (e.g., loaded from WAL).
 	 */
-	setSessionDek(sessionId: string, dek: Uint8Array): void {
+	setSessionDek(sessionId: string, dek: Uint8Array, revision?: number): void {
 		if (!this.contentEncryptionEnabled || !this.contentKeyPair) {
 			return;
 		}
+		const wrappedDek = wrapDEK(dek, this.contentKeyPair.publicKey);
 		this.sessionDeks.set(sessionId, dek);
-		this.wrappedDekCache.set(
-			sessionId,
-			wrapDEK(dek, this.contentKeyPair.publicKey),
+		this.wrappedDekCache.set(sessionId, wrappedDek);
+		if (revision !== undefined) {
+			const key = this.revisionKey(sessionId, revision);
+			this.revisionDeks.set(key, dek);
+			this.revisionWrappedDekCache.set(key, wrappedDek);
+		}
+	}
+
+	/**
+	 * Recover a revision DEK from its sealed representation. The sealing keypair
+	 * is deterministically derived from the existing CLI master secret.
+	 */
+	restoreSessionDek(
+		sessionId: string,
+		revision: number,
+		wrappedDek: string,
+	): Uint8Array | null {
+		if (!this.contentEncryptionEnabled || !this.contentKeyPair) {
+			return null;
+		}
+		const dek = unwrapDEK(
+			wrappedDek,
+			this.contentKeyPair.publicKey,
+			this.contentKeyPair.secretKey,
 		);
+		const key = this.revisionKey(sessionId, revision);
+		this.revisionDeks.set(key, dek);
+		this.revisionWrappedDekCache.set(key, wrappedDek);
+		this.sessionDeks.set(sessionId, dek);
+		this.wrappedDekCache.set(sessionId, wrappedDek);
+		return dek;
 	}
 
 	/**
@@ -74,7 +113,10 @@ export class CliCryptoService {
 		if (!this.contentEncryptionEnabled) {
 			return event;
 		}
-		const dek = this.sessionDeks.get(event.sessionId);
+		const dek =
+			this.revisionDeks.get(
+				this.revisionKey(event.sessionId, event.revision),
+			) ?? this.sessionDeks.get(event.sessionId);
 		if (!dek) {
 			// No DEK for this session — pass through unencrypted
 			return event;
@@ -88,7 +130,14 @@ export class CliCryptoService {
 	/**
 	 * Get the wrapped DEK for a session, or null if not initialized.
 	 */
-	getWrappedDek(sessionId: string): string | null {
+	getWrappedDek(sessionId: string, revision?: number): string | null {
+		if (revision !== undefined) {
+			return (
+				this.revisionWrappedDekCache.get(
+					this.revisionKey(sessionId, revision),
+				) ?? null
+			);
+		}
 		return this.wrappedDekCache.get(sessionId) ?? null;
 	}
 
@@ -102,8 +151,17 @@ export class CliCryptoService {
 	/**
 	 * Get the DEK for a session, or null if not initialized.
 	 */
-	getDek(sessionId: string): Uint8Array | null {
+	getDek(sessionId: string, revision?: number): Uint8Array | null {
+		if (revision !== undefined) {
+			return (
+				this.revisionDeks.get(this.revisionKey(sessionId, revision)) ?? null
+			);
+		}
 		return this.sessionDeks.get(sessionId) ?? null;
+	}
+
+	private revisionKey(sessionId: string, revision: number): string {
+		return `${sessionId}\u0000${revision}`;
 	}
 
 	/**

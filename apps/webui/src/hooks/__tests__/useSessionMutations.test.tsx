@@ -1,9 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
-import type { ContentBlock } from "@/lib/acp";
 import * as apiModule from "@/lib/api";
 import { useSessionMutations } from "../useSessionMutations";
 
@@ -189,6 +188,7 @@ describe("useSessionMutations", () => {
 			expect(mockBootstrapSessionE2EE).toHaveBeenCalledWith(
 				"new-session",
 				"wrapped-dek-1",
+				undefined,
 			);
 			expect(mockStore.setSessionE2EEStatus).toHaveBeenCalledWith(
 				"new-session",
@@ -258,6 +258,7 @@ describe("useSessionMutations", () => {
 
 			expect(mockBootstrapSessionE2EE).toHaveBeenCalledWith(
 				"plain-session",
+				undefined,
 				undefined,
 			);
 			expect(mockStore.setSessionE2EEStatus).toHaveBeenCalledWith(
@@ -521,9 +522,11 @@ describe("useSessionMutations", () => {
 				wrapper,
 			});
 
-			await result.current.createSessionMutation.mutateAsync({
-				backendId: "backend-1",
-				title: "Test Session",
+			await act(async () => {
+				await result.current.createSessionMutation.mutateAsync({
+					backendId: "backend-1",
+					title: "Test Session",
+				});
 			});
 
 			// Both optimistic and real sessions should be created
@@ -842,8 +845,14 @@ describe("useSessionMutations", () => {
 			await result.current.sendMessageMutation.mutateAsync({
 				sessionId: "session-1",
 				prompt: [{ type: "text", text: "Hello" }],
+				messageId: "user-msg-1",
 			});
 
+			expect(apiModule.sendMessage).toHaveBeenCalledWith({
+				sessionId: "session-1",
+				prompt: [{ type: "text", text: "Hello" }],
+				messageId: "user-msg-1",
+			});
 			expect(mockStore.finalizeAssistantMessage).toHaveBeenCalledWith(
 				"session-1",
 			);
@@ -876,6 +885,7 @@ describe("useSessionMutations", () => {
 			expect(mockUiStoreState.setChatDraft).toHaveBeenCalledWith("session-1", {
 				input: "Hello",
 				inputContents: [{ type: "text", text: "Hello" }],
+				messageId: "user-msg-1",
 			});
 			expect(mockStore.setAppError).toHaveBeenCalled();
 		});
@@ -889,9 +899,7 @@ describe("useSessionMutations", () => {
 				wrapper,
 			});
 
-			await result.current.sendMessageMutation.mutateAsync(
-				undefined as unknown as { sessionId: string; prompt: ContentBlock[] },
-			);
+			await result.current.sendMessageMutation.mutateAsync(undefined as never);
 
 			// Should not call finalizeAssistantMessage with undefined
 			// This test verifies the onSettled logic handles undefined correctly

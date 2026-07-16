@@ -1,16 +1,16 @@
-import {
-	AlertDialog,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-	AlertDialogTrigger,
-} from "@mobvibe/ui/alert-dialog";
 import { Button } from "@mobvibe/ui/button";
+import {
+	Dialog,
+	DialogClose,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+	DialogTrigger,
+} from "@mobvibe/ui/dialog";
 import { Separator } from "@mobvibe/ui/separator";
-import { useCallback, useRef } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 interface GetStartedDialogProps {
@@ -29,22 +29,27 @@ export function GetStartedDialog({
 	onOpenChange,
 }: GetStartedDialogProps) {
 	const { t } = useTranslation();
-	const codeRef = useRef<HTMLElement>(null);
+	const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">(
+		"idle",
+	);
 
-	const handleCopy = useCallback(() => {
-		navigator.clipboard.writeText(CLI_COMMAND);
+	const handleCopy = useCallback(async () => {
+		try {
+			await navigator.clipboard.writeText(CLI_COMMAND);
+			setCopyStatus("copied");
+		} catch {
+			setCopyStatus("error");
+		}
 	}, []);
 
 	return (
-		<AlertDialog open={open} onOpenChange={onOpenChange}>
-			<AlertDialogTrigger asChild>{children}</AlertDialogTrigger>
-			<AlertDialogContent className="sm:max-w-md">
-				<AlertDialogHeader>
-					<AlertDialogTitle>{t("getStarted.title")}</AlertDialogTitle>
-					<AlertDialogDescription>
-						{t("getStarted.description")}
-					</AlertDialogDescription>
-				</AlertDialogHeader>
+		<Dialog open={open} onOpenChange={onOpenChange}>
+			<DialogTrigger asChild>{children}</DialogTrigger>
+			<DialogContent className="sm:max-w-md">
+				<DialogHeader>
+					<DialogTitle>{t("getStarted.title")}</DialogTitle>
+					<DialogDescription>{t("getStarted.description")}</DialogDescription>
+				</DialogHeader>
 
 				<div className="flex flex-col gap-4">
 					{/* Step 1 */}
@@ -53,10 +58,12 @@ export function GetStartedDialog({
 							{t("getStarted.step1Title")}
 						</span>
 						<div className="bg-muted flex items-center gap-2 rounded-md px-3 py-2">
-							<code ref={codeRef} className="flex-1 text-xs">
-								{CLI_COMMAND}
-							</code>
-							<Button variant="ghost" size="icon-sm" onClick={handleCopy}>
+							<code className="flex-1 text-xs">{CLI_COMMAND}</code>
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								onClick={() => void handleCopy()}
+							>
 								<span className="sr-only">{t("getStarted.copyCommand")}</span>
 								<svg
 									className="size-3.5"
@@ -77,6 +84,18 @@ export function GetStartedDialog({
 						<p className="text-muted-foreground text-xs">
 							{t("getStarted.step1Description")}
 						</p>
+						{copyStatus !== "idle" ? (
+							<p
+								role={copyStatus === "error" ? "alert" : "status"}
+								className="text-muted-foreground text-xs"
+							>
+								{t(
+									copyStatus === "error"
+										? "getStarted.copyError"
+										: "getStarted.copySuccess",
+								)}
+							</p>
+						) : null}
 					</div>
 
 					<Separator />
@@ -87,26 +106,28 @@ export function GetStartedDialog({
 							{t("getStarted.step2Title")}
 						</span>
 						<div className="flex flex-wrap gap-2">
-							<a href={WEB_APP_URL} target="_blank" rel="noopener noreferrer">
-								<Button variant="outline" size="sm">
+							<Button variant="outline" size="sm" asChild>
+								<a href={WEB_APP_URL} target="_blank" rel="noopener noreferrer">
 									{t("getStarted.webApp")}
-								</Button>
-							</a>
-							<a
-								href="https://github.com/Eric-Song-Nop/mobvibe/releases/latest"
-								target="_blank"
-								rel="noopener noreferrer"
-							>
-								<Button variant="outline" size="sm">
+								</a>
+							</Button>
+							<Button variant="outline" size="sm" asChild>
+								<a
+									href="https://github.com/Eric-Song-Nop/mobvibe/releases/latest"
+									target="_blank"
+									rel="noopener noreferrer"
+								>
 									{t("getStarted.androidApk")}
-								</Button>
-							</a>
+								</a>
+							</Button>
 						</div>
 					</div>
 				</div>
 
-				<AlertDialogFooter>
-					<AlertDialogCancel>{t("getStarted.close")}</AlertDialogCancel>
+				<DialogFooter>
+					<DialogClose asChild>
+						<Button variant="outline">{t("getStarted.close")}</Button>
+					</DialogClose>
 					<Button variant="outline" asChild>
 						<a
 							href="https://github.com/Eric-Song-Nop/mobvibe"
@@ -116,8 +137,8 @@ export function GetStartedDialog({
 							{t("getStarted.viewOnGitHub")}
 						</a>
 					</Button>
-				</AlertDialogFooter>
-			</AlertDialogContent>
-		</AlertDialog>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
 	);
 }

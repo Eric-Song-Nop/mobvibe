@@ -14,6 +14,7 @@ import { logger } from "../lib/logger.js";
 import type { CliRecord, CliRegistry } from "./cli-registry.js";
 
 type PendingRpc<T> = {
+	socketId: string;
 	resolve: (result: T) => void;
 	reject: (error: Error) => void;
 	timeout: NodeJS.Timeout;
@@ -89,9 +90,20 @@ export class TeamRouter {
 		);
 	}
 
-	handleRpcResponse(response: RpcResponse<unknown>) {
+	handleRpcResponse(response: RpcResponse<unknown>, sourceSocketId?: string) {
 		const pending = this.pendingRpcs.get(response.requestId);
 		if (!pending) {
+			return;
+		}
+		if (sourceSocketId && pending.socketId !== sourceSocketId) {
+			logger.warn(
+				{
+					requestId: response.requestId,
+					expectedSocketId: pending.socketId,
+					sourceSocketId,
+				},
+				"agent_team_rpc_response_socket_mismatch",
+			);
 			return;
 		}
 		this.pendingRpcs.delete(response.requestId);
@@ -111,6 +123,17 @@ export class TeamRouter {
 			return;
 		}
 		pending.resolve(response.result);
+	}
+
+	handleCliDisconnect(socketId: string): void {
+		for (const [requestId, pending] of this.pendingRpcs) {
+			if (pending.socketId !== socketId) {
+				continue;
+			}
+			this.pendingRpcs.delete(requestId);
+			clearTimeout(pending.timeout);
+			pending.reject(new Error("CLI disconnected"));
+		}
 	}
 
 	private resolveMachineForUser(machineId: string, userId: string): CliRecord {
@@ -133,6 +156,7 @@ export class TeamRouter {
 				reject(new Error("RPC timeout"));
 			}, RPC_TIMEOUT);
 			this.pendingRpcs.set(requestId, {
+				socketId: socket.id,
 				resolve: (result) => resolve(result as TResult),
 				reject,
 				timeout,

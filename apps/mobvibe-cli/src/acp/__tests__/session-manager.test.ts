@@ -1,6 +1,15 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
+import {
+	decryptPayload,
+	deriveContentKeyPair,
+	generateMasterSecret,
+	initCrypto,
+	isEncryptedPayload,
+	unwrapDEK,
+} from "@mobvibe/shared";
 import type { CliConfig } from "../../config.js";
+import { CliCryptoService } from "../../e2ee/crypto-service.js";
 import type { AcpConnection } from "../acp-connection.js";
 
 mock.module("node:fs/promises", () => ({
@@ -65,6 +74,7 @@ const { SessionManager } = await import("../session-manager.js");
 let sessionUpdateCallback:
 	| ((notification: SessionNotification) => void)
 	| undefined;
+let statusChangeCallback: ((status: { error?: unknown }) => void) | undefined;
 
 const createMockConnection = () => ({
 	connect: mock(() => Promise.resolve(undefined)),
@@ -126,7 +136,12 @@ const createMockConnection = () => ({
 		};
 	}),
 	onTerminalOutput: mock(() => () => {}),
-	onStatusChange: mock(() => () => {}),
+	onStatusChange: mock((cb: (status: { error?: unknown }) => void) => {
+		statusChangeCallback = cb;
+		return () => {
+			statusChangeCallback = undefined;
+		};
+	}),
 });
 
 const createMockConfig = (): CliConfig => ({
@@ -178,6 +193,7 @@ describe("SessionManager", () => {
 		sessionManager = new SessionManager(mockConfig);
 		mockConnection = createMockConnection();
 		sessionUpdateCallback = undefined;
+		statusChangeCallback = undefined;
 		mockIsGitRepo.mockClear();
 		mockCreateGitWorktree.mockClear();
 		mockResolveGitProjectContext.mockClear();
@@ -226,6 +242,63 @@ describe("SessionManager", () => {
 	});
 
 	describe("loadSession", () => {
+		it("preserves the current WAL revision when loading fails", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			sessionUpdateCallback?.({
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "durable history" },
+				},
+			} as SessionNotification);
+			await sessionManager.closeSession(created.sessionId);
+
+			const historyBefore = sessionManager.getSessionEvents({
+				sessionId: created.sessionId,
+				revision: 1,
+				afterSeq: 0,
+			});
+			expect(historyBefore.events).toHaveLength(1);
+			mockConnection.loadSession.mockRejectedValueOnce(
+				new Error("load failed"),
+			);
+
+			await expect(
+				sessionManager.loadSession(
+					created.sessionId,
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toThrow("load failed");
+
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: created.sessionId,
+					revision: 1,
+					afterSeq: 0,
+				}).events,
+			).toEqual(historyBefore.events);
+		});
+
+		it("unsubscribes buffered updates when loading fails", async () => {
+			mockConnection.loadSession.mockRejectedValueOnce(
+				new Error("load failed"),
+			);
+
+			await expect(
+				sessionManager.loadSession(
+					"session-to-load",
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toThrow("load failed");
+
+			expect(sessionUpdateCallback).toBeUndefined();
+		});
+
 		it("loads a historical session", async () => {
 			const result = await sessionManager.loadSession(
 				"session-to-load",
@@ -300,6 +373,120 @@ describe("SessionManager", () => {
 	});
 
 	describe("reloadSession", () => {
+		it("writes replay updates to the new revision after reload succeeds", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			sessionUpdateCallback?.({
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "revision one" },
+				},
+			} as SessionNotification);
+			mockConnection.loadSession.mockImplementationOnce(async () => {
+				sessionUpdateCallback?.({
+					sessionId: created.sessionId,
+					update: {
+						sessionUpdate: "agent_message_chunk",
+						content: { type: "text", text: "revision two" },
+					},
+				} as SessionNotification);
+				return { modes: null, models: null };
+			});
+
+			await sessionManager.reloadSession(
+				created.sessionId,
+				"/home/user/project",
+				"backend-1",
+			);
+
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: created.sessionId,
+					revision: 2,
+					afterSeq: 0,
+				}).events,
+			).toEqual([
+				expect.objectContaining({
+					revision: 2,
+					seq: 1,
+					payload: expect.objectContaining({
+						update: expect.objectContaining({
+							content: { type: "text", text: "revision two" },
+						}),
+					}),
+				}),
+			]);
+		});
+
+		it("discards partial replay but resumes live updates when reload fails", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			sessionUpdateCallback?.({
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "history before reload" },
+				},
+			} as SessionNotification);
+			const historyBefore = sessionManager.getSessionEvents({
+				sessionId: created.sessionId,
+				revision: 1,
+				afterSeq: 0,
+			});
+			mockConnection.loadSession.mockImplementationOnce(async () => {
+				sessionUpdateCallback?.({
+					sessionId: created.sessionId,
+					update: {
+						sessionUpdate: "agent_message_chunk",
+						content: { type: "text", text: "partial failed replay" },
+					},
+				} as SessionNotification);
+				throw new Error("reload failed");
+			});
+
+			await expect(
+				sessionManager.reloadSession(
+					created.sessionId,
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toThrow("reload failed");
+
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: created.sessionId,
+					revision: 1,
+					afterSeq: 0,
+				}).events,
+			).toEqual(historyBefore.events);
+
+			sessionUpdateCallback?.({
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "live after failure" },
+				},
+			} as SessionNotification);
+			const resumedHistory = sessionManager.getSessionEvents({
+				sessionId: created.sessionId,
+				revision: 1,
+				afterSeq: 0,
+			}).events;
+			expect(resumedHistory).toHaveLength(historyBefore.events.length + 1);
+			expect(resumedHistory.at(-1)?.payload).toEqual(
+				expect.objectContaining({
+					update: expect.objectContaining({
+						content: { type: "text", text: "live after failure" },
+					}),
+				}),
+			);
+		});
+
 		it("emits session:attached event even if already attached", async () => {
 			const attachedListener = mock(() => {});
 			sessionManager.onSessionAttached(attachedListener);
@@ -497,6 +684,84 @@ describe("SessionManager", () => {
 	});
 
 	describe("E2EE session summaries", () => {
+		it("recovers a revision DEK and unacked WAL events after a daemon restart", async () => {
+			await initCrypto();
+			const masterSecret = generateMasterSecret();
+			const restartConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/restart-events-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const firstCrypto = new CliCryptoService(masterSecret);
+			const firstManager = new SessionManager(restartConfig, firstCrypto);
+			const firstConnection = createMockConnection();
+			firstManager.createConnection = () =>
+				firstConnection as unknown as AcpConnection;
+
+			const created = await firstManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			sessionUpdateCallback?.({
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "survives restart" },
+				},
+			} as SessionNotification);
+			if (!created.wrappedDek) {
+				throw new Error("created session should expose a wrapped DEK");
+			}
+			await firstManager.shutdown();
+
+			const secondCrypto = new CliCryptoService(masterSecret);
+			const secondManager = new SessionManager(restartConfig, secondCrypto);
+			try {
+				const [backfillEvent] = secondManager.getSessionEvents({
+					sessionId: created.sessionId,
+					revision: 1,
+					afterSeq: 0,
+				}).events;
+				expect(backfillEvent).toBeDefined();
+				expect(
+					isEncryptedPayload(secondCrypto.encryptEvent(backfillEvent).payload),
+				).toBe(true);
+
+				const restored = secondManager
+					.listAllSessions()
+					.find((session) => session.sessionId === created.sessionId);
+				expect(restored).toEqual(
+					expect.objectContaining({
+						sessionId: created.sessionId,
+						revision: 1,
+						wrappedDek: created.wrappedDek,
+						isAttached: false,
+					}),
+				);
+				const revisions = secondManager.listUnackedSessionRevisions();
+				expect(revisions).toEqual([
+					{ sessionId: created.sessionId, revision: 1 },
+				]);
+				const [event] = secondManager.getUnackedEvents(created.sessionId, 1);
+				expect(event).toBeDefined();
+
+				const encrypted = secondCrypto.encryptEvent(event);
+				if (!isEncryptedPayload(encrypted.payload)) {
+					throw new Error("restored WAL event should be encrypted");
+				}
+				const contentKeyPair = deriveContentKeyPair(masterSecret);
+				const dek = unwrapDEK(
+					created.wrappedDek,
+					contentKeyPair.publicKey,
+					contentKeyPair.secretKey,
+				);
+				expect(decryptPayload(encrypted.payload, dek)).toEqual(event.payload);
+			} finally {
+				await secondManager.shutdown();
+			}
+		});
+
 		it("includes wrappedDek and initializes a DEK when creating a session", async () => {
 			const cryptoService = {
 				initSessionDek: mock(() => ({
@@ -519,11 +784,66 @@ describe("SessionManager", () => {
 
 			expect(cryptoService.initSessionDek).toHaveBeenCalledWith(
 				created.sessionId,
+				1,
 			);
 			expect(cryptoService.getWrappedDek).toHaveBeenCalledWith(
 				created.sessionId,
+				1,
 			);
 			expect(created.wrappedDek).toBe("wrapped-dek-1");
+		});
+
+		it("does not advertise a persisted DEK when content encryption is disabled", async () => {
+			await initCrypto();
+			const masterSecret = generateMasterSecret();
+			const noE2eeConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/no-e2ee-events-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const enabledManager = new SessionManager(
+				noE2eeConfig,
+				new CliCryptoService(masterSecret),
+			);
+			enabledManager.createConnection = () =>
+				createMockConnection() as unknown as AcpConnection;
+			const created = await enabledManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			sessionUpdateCallback?.({
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "plaintext replay" },
+				},
+			} as SessionNotification);
+			expect(created.wrappedDek).toBeDefined();
+			await enabledManager.shutdown();
+
+			const disabledCrypto = new CliCryptoService(masterSecret, {
+				contentEncryptionEnabled: false,
+			});
+			const disabledManager = new SessionManager(noE2eeConfig, disabledCrypto);
+			try {
+				const restored = disabledManager
+					.listAllSessions()
+					.find((session) => session.sessionId === created.sessionId);
+				expect(restored?.wrappedDek).toBeUndefined();
+
+				const [event] = disabledManager.getUnackedEvents(created.sessionId, 1);
+				expect(disabledCrypto.encryptEvent(event)).toBe(event);
+				const prompt = [{ type: "text", text: "plaintext prompt" }];
+				expect(
+					disabledCrypto.decryptRpcPayload<typeof prompt>(
+						created.sessionId,
+						prompt,
+					),
+				).toBe(prompt);
+			} finally {
+				await disabledManager.shutdown();
+			}
 		});
 
 		it("omits wrappedDek when crypto service returns null", async () => {
@@ -548,6 +868,7 @@ describe("SessionManager", () => {
 
 			expect(cryptoService.initSessionDek).toHaveBeenCalledWith(
 				created.sessionId,
+				1,
 			);
 			expect(created.wrappedDek).toBeUndefined();
 		});
@@ -575,6 +896,7 @@ describe("SessionManager", () => {
 
 			expect(cryptoService.initSessionDek).toHaveBeenCalledWith(
 				"session-to-load",
+				1,
 			);
 			expect(loaded.wrappedDek).toBe("wrapped-load");
 		});
@@ -937,6 +1259,72 @@ describe("SessionManager", () => {
 				}),
 			);
 			expect(result.nextAfterSeq).toBe(2);
+		});
+
+		it("advances past a raw page containing only consolidation stubs", async () => {
+			const { manager } = createConsolidatedManager();
+			await manager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const sessionId = manager.listSessions()[0].sessionId;
+			const walStore = (
+				manager as unknown as {
+					walStore: {
+						appendEvent: (params: {
+							sessionId: string;
+							revision: number;
+							kind: "agent_message_chunk";
+							payload: unknown;
+						}) => unknown;
+					};
+				}
+			).walStore;
+
+			walStore.appendEvent({
+				sessionId,
+				revision: 1,
+				kind: "agent_message_chunk",
+				payload: { _c: true },
+			});
+			walStore.appendEvent({
+				sessionId,
+				revision: 1,
+				kind: "agent_message_chunk",
+				payload: { _c: true },
+			});
+			walStore.appendEvent({
+				sessionId,
+				revision: 1,
+				kind: "agent_message_chunk",
+				payload: {
+					sessionId,
+					update: {
+						sessionUpdate: "agent_message_chunk",
+						content: { type: "text", text: "next page" },
+					},
+				},
+			});
+
+			const firstPage = manager.getSessionEvents({
+				sessionId,
+				revision: 1,
+				afterSeq: 0,
+				limit: 2,
+			});
+			expect(firstPage.events).toEqual([]);
+			expect(firstPage.hasMore).toBe(true);
+			expect(firstPage.nextAfterSeq).toBe(2);
+
+			const secondPage = manager.getSessionEvents({
+				sessionId,
+				revision: 1,
+				afterSeq: firstPage.nextAfterSeq ?? 0,
+				limit: 2,
+			});
+			expect(secondPage.events).toEqual([
+				expect.objectContaining({ seq: 3, kind: "agent_message_chunk" }),
+			]);
 		});
 	});
 
@@ -1398,6 +1786,45 @@ describe("SessionManager", () => {
 	// 2.4 session update subscription lifecycle
 	// =========================================================================
 	describe("session update subscription lifecycle", () => {
+		it("persists updates emitted while session creation is in flight", async () => {
+			mockConnection.createSession.mockImplementationOnce(async () => {
+				sessionUpdateCallback?.({
+					sessionId: "new-session-1",
+					update: {
+						sessionUpdate: "agent_message_chunk",
+						content: { type: "text", text: "early update" },
+					},
+				} as SessionNotification);
+				return {
+					sessionId: "new-session-1",
+					modes: null,
+					models: null,
+				};
+			});
+
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			const events = sessionManager.getSessionEvents({
+				sessionId: created.sessionId,
+				revision: 1,
+				afterSeq: 0,
+			});
+			expect(events.events).toEqual([
+				expect.objectContaining({
+					seq: 1,
+					kind: "agent_message_chunk",
+					payload: expect.objectContaining({
+						update: expect.objectContaining({
+							content: { type: "text", text: "early update" },
+						}),
+					}),
+				}),
+			]);
+		});
+
 		it("subscribes to onSessionUpdate when session is created", async () => {
 			await sessionManager.createSession({
 				cwd: "/home/user/project",
@@ -1455,6 +1882,24 @@ describe("SessionManager", () => {
 				afterSeq: 0,
 			});
 			expect(afterEvents.events.length).toBe(eventCountBeforeClose);
+		});
+
+		it("ignores late connection status errors after a session is closed", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			expect(statusChangeCallback).toBeDefined();
+
+			await sessionManager.closeSession(created.sessionId);
+			expect(statusChangeCallback).toBeUndefined();
+
+			const events = sessionManager.getSessionEvents({
+				sessionId: created.sessionId,
+				revision: 1,
+				afterSeq: 0,
+			});
+			expect(events.events).toEqual([]);
 		});
 	});
 });

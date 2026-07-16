@@ -1,5 +1,6 @@
 import {
 	ArrowUp01Icon,
+	Cancel01Icon,
 	Image01Icon,
 	StopIcon,
 } from "@hugeicons/core-free-icons";
@@ -8,6 +9,16 @@ import {
 	PROMPT_IMAGE_MIME_TYPES,
 	validatePromptImageBlocks,
 } from "@mobvibe/shared";
+import {
+	Attachment,
+	AttachmentAction,
+	AttachmentActions,
+	AttachmentContent,
+	AttachmentDescription,
+	AttachmentGroup,
+	AttachmentMedia,
+	AttachmentTitle,
+} from "@mobvibe/ui/attachment";
 import { badgeVariants } from "@mobvibe/ui/badge";
 import { Button } from "@mobvibe/ui/button";
 import {
@@ -1221,42 +1232,41 @@ export function ChatFooter({
 					/>
 
 					{imageAttachments.length > 0 ? (
-						<div className="flex flex-wrap gap-2 border-b border-input px-2.5 py-2">
+						<AttachmentGroup className="border-b border-input px-2.5 py-2">
 							{imageAttachments.map((image, index) => (
-								<div
-									key={`${image.uri ?? "upload"}-${index}`}
-									className="bg-muted/40 flex items-start gap-2 border border-input p-2"
-								>
-									<img
-										src={`data:${image.mimeType};base64,${image.data}`}
-										alt={image.uri ?? `Attached image ${index + 1}`}
-										width={48}
-										height={48}
-										loading="lazy"
-										className="size-12 object-cover"
-									/>
-									<div className="flex min-w-0 flex-col gap-1">
-										<span className="max-w-40 truncate text-[11px] text-foreground">
+								<Attachment key={`${image.uri ?? "upload"}-${index}`} size="sm">
+									<AttachmentMedia variant="image">
+										<img
+											src={`data:${image.mimeType};base64,${image.data}`}
+											alt={image.uri ?? `Attached image ${index + 1}`}
+											width={32}
+											height={32}
+											loading="lazy"
+										/>
+									</AttachmentMedia>
+									<AttachmentContent>
+										<AttachmentTitle>
 											{image.uri
 												? (resolveFilePathFromUri(image.uri) ?? image.uri)
 												: `Image ${index + 1}`}
-										</span>
-										<span className="text-[10px] text-muted-foreground">
+										</AttachmentTitle>
+										<AttachmentDescription>
 											{image.mimeType}
-										</span>
-										<Button
+										</AttachmentDescription>
+									</AttachmentContent>
+									<AttachmentActions>
+										<AttachmentAction
 											type="button"
-											variant="ghost"
-											size="xs"
-											className="h-auto justify-start px-0 text-[10px]"
+											aria-label="Remove"
+											title="Remove"
 											onClick={() => handleRemoveImageAttachment(index)}
 										>
-											Remove
-										</Button>
-									</div>
-								</div>
+											<HugeiconsIcon icon={Cancel01Icon} aria-hidden="true" />
+										</AttachmentAction>
+									</AttachmentActions>
+								</Attachment>
 							))}
-						</div>
+						</AttachmentGroup>
 					) : null}
 
 					{attachmentError ? (
@@ -1354,7 +1364,6 @@ export function ChatFooter({
 							<HugeiconsIcon
 								icon={Image01Icon}
 								strokeWidth={2}
-								className="size-4"
 								aria-hidden="true"
 							/>
 						</Button>
@@ -1372,7 +1381,6 @@ export function ChatFooter({
 							<HugeiconsIcon
 								icon={activeSession?.sending ? StopIcon : ArrowUp01Icon}
 								strokeWidth={2}
-								className="size-4"
 								aria-hidden="true"
 							/>
 							<span className="sr-only">

@@ -64,7 +64,7 @@ type Mutations = {
 		mutate: (params: {
 			sessionId: string;
 			prompt: ChatSession["inputContents"];
-			messageId?: string;
+			messageId: string;
 			draft?: {
 				input: string;
 				inputContents: ChatSession["inputContents"];
@@ -482,7 +482,7 @@ export function useSessionHandlers({
 			return;
 		}
 
-		const messageId = crypto.randomUUID();
+		const messageId = latestDraft?.messageId ?? crypto.randomUUID();
 
 		chatActions.setSending(activeSessionId, true);
 		chatActions.setCanceling(activeSessionId, false);

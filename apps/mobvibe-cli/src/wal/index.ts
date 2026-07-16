@@ -11,6 +11,7 @@ export type {
 	DiscoveredSession,
 	EnsureSessionParams,
 	QueryEventsParams,
+	UnackedSessionRevision,
 	WalEvent,
 	WalSession,
 } from "./wal-store.js";

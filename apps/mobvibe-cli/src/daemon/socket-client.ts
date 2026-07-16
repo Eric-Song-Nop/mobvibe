@@ -10,6 +10,8 @@ import type {
 	GatewayToCliEvents,
 	GitBranchesForCwdResponse,
 	RpcResponse,
+	SendMessageParams,
+	SendMessageResult,
 	SessionEventsResponse,
 	SessionFsFilePreview,
 	SessionFsResourceEntry,
@@ -165,10 +167,16 @@ const DISCOVER_THROTTLE_MS = 60_000;
 export class SocketClient extends EventEmitter {
 	private socket: Socket<GatewayToCliEvents, CliToGatewayEvents>;
 	private connected = false;
+	private hasConnectedOnce = false;
 	private reconnectAttempts = 0;
 	private heartbeatInterval?: NodeJS.Timeout;
 	private lastDiscoverAt = 0;
 	private readonly agentTeamStore: AgentTeamStore;
+	private readonly messageSendsInFlight = new Map<
+		string,
+		Promise<SendMessageResult>
+	>();
+	private readonly sessionMessageTails = new Map<string, Promise<void>>();
 
 	constructor(private readonly options: SocketClientOptions) {
 		super();
@@ -494,15 +502,12 @@ export class SocketClient extends EventEmitter {
 		this.socket.on("rpc:message:send", async (request) => {
 			const requestStart = process.hrtime.bigint();
 			try {
-				const { sessionId, prompt: rawPrompt } = request.params;
-				const prompt = this.options.cryptoService.decryptRpcPayload<
-					import("@agentclientprotocol/sdk").ContentBlock[]
-				>(sessionId, rawPrompt);
+				const { sessionId, messageId } = request.params;
 				logger.info(
 					{
 						requestId: request.requestId,
 						sessionId,
-						promptBlocks: prompt.length,
+						messageId,
 					},
 					"rpc_message_send",
 				);
@@ -510,34 +515,19 @@ export class SocketClient extends EventEmitter {
 					{
 						requestId: request.requestId,
 						sessionId,
-						promptBlocks: prompt.length,
+						messageId,
 					},
 					"rpc_message_send_start",
 				);
-				const record = sessionManager.getSession(sessionId);
-				if (!record) {
-					throw new Error("Session not found");
-				}
-				validatePromptForBackend(
-					prompt,
-					record.connection.getSessionCapabilities().prompt?.image === true,
-				);
-				sessionManager.touchSession(sessionId);
-				const result = await record.connection.prompt(sessionId, prompt);
-				sessionManager.touchSession(sessionId);
-				sessionManager.recordTurnEnd(
-					sessionId,
-					result.stopReason as StopReason,
-				);
-				this.sendRpcResponse<{ stopReason: StopReason }>(request.requestId, {
-					stopReason: result.stopReason as StopReason,
-				});
+				const result = await this.getOrCreateMessageSend(request.params);
+				this.sendRpcResponse<SendMessageResult>(request.requestId, result);
 				const durationMs =
 					Number(process.hrtime.bigint() - requestStart) / 1_000_000;
 				logger.info(
 					{
 						requestId: request.requestId,
 						sessionId,
+						messageId,
 						stopReason: result.stopReason,
 						durationMs,
 					},
@@ -547,6 +537,7 @@ export class SocketClient extends EventEmitter {
 					{
 						requestId: request.requestId,
 						sessionId,
+						messageId,
 						durationMs,
 					},
 					"rpc_message_send_finish",
@@ -1390,6 +1381,83 @@ export class SocketClient extends EventEmitter {
 		});
 	}
 
+	private getOrCreateMessageSend(
+		params: SendMessageParams,
+	): Promise<SendMessageResult> {
+		const messageId = params.messageId.trim();
+		if (!messageId) {
+			return Promise.reject(new Error("messageId is required"));
+		}
+		const key = `${params.sessionId}\u0000${messageId}`;
+		const inFlight = this.messageSendsInFlight.get(key);
+		if (inFlight) {
+			return inFlight;
+		}
+
+		const previous =
+			this.sessionMessageTails.get(params.sessionId) ?? Promise.resolve();
+		const operation = previous.then(() =>
+			this.executeMessageSend({ ...params, messageId }),
+		);
+		this.messageSendsInFlight.set(key, operation);
+		const tail = operation.then(
+			() => {},
+			() => {},
+		);
+		this.sessionMessageTails.set(params.sessionId, tail);
+		const clearInFlight = () => {
+			if (this.messageSendsInFlight.get(key) === operation) {
+				this.messageSendsInFlight.delete(key);
+			}
+			if (this.sessionMessageTails.get(params.sessionId) === tail) {
+				this.sessionMessageTails.delete(params.sessionId);
+			}
+		};
+		// Handle both outcomes without creating an unobserved rejected promise.
+		void operation.then(clearInFlight, clearInFlight);
+		return operation;
+	}
+
+	private async executeMessageSend(
+		params: SendMessageParams,
+	): Promise<SendMessageResult> {
+		const { sessionManager, cryptoService } = this.options;
+		const completed = sessionManager.getMessageSendResult(
+			params.sessionId,
+			params.messageId,
+		);
+		if (completed) {
+			return completed;
+		}
+
+		const prompt = cryptoService.decryptRpcPayload<ContentBlock[]>(
+			params.sessionId,
+			params.prompt,
+		);
+		const record = sessionManager.getSession(params.sessionId);
+		if (!record) {
+			throw new Error("Session not found");
+		}
+		validatePromptForBackend(
+			prompt,
+			record.connection.getSessionCapabilities().prompt?.image === true,
+		);
+		sessionManager.touchSession(params.sessionId);
+		const promptResult = await record.connection.prompt(
+			params.sessionId,
+			prompt,
+		);
+		sessionManager.touchSession(params.sessionId);
+		const result = { stopReason: promptResult.stopReason as StopReason };
+		sessionManager.recordTurnEnd(params.sessionId, result.stopReason);
+		sessionManager.recordMessageSendResult(
+			params.sessionId,
+			params.messageId,
+			result.stopReason,
+		);
+		return result;
+	}
+
 	private setupSessionManagerListeners() {
 		const { sessionManager } = this.options;
 
@@ -1578,7 +1646,11 @@ export class SocketClient extends EventEmitter {
 
 	private async handleConnect() {
 		const { config, sessionManager } = this.options;
-		const wasReconnect = this.reconnectAttempts > 0;
+		// A successful Socket.IO transport recovery does not necessarily emit a
+		// connect_error first. Track completed transport connections directly so
+		// WAL replay is not skipped after a clean reconnect.
+		const wasReconnect = this.hasConnectedOnce || this.reconnectAttempts > 0;
+		this.hasConnectedOnce = true;
 		logger.info(
 			{
 				gatewayUrl: config.gatewayUrl,
@@ -1599,9 +1671,9 @@ export class SocketClient extends EventEmitter {
 		this.socket.emit("sessions:list", sessionManager.listAllSessions());
 		this.startHeartbeat();
 
-		if (wasReconnect) {
-			this.replayUnackedEvents();
-		}
+		// Durable WAL state can outlive the process, so the very first transport
+		// connection after a daemon restart must replay unacknowledged events too.
+		this.replayUnackedEvents();
 
 		this.emit("connected");
 	}
@@ -1627,25 +1699,22 @@ export class SocketClient extends EventEmitter {
 	}
 
 	/**
-	 * Replay unacked events for all active sessions after reconnection.
+	 * Replay unacked events for every durable current session revision.
 	 */
 	private replayUnackedEvents() {
 		const { sessionManager } = this.options;
-		const sessions = sessionManager.listSessions();
+		const revisions = sessionManager.listUnackedSessionRevisions();
 
-		for (const session of sessions) {
-			const revision = sessionManager.getSessionRevision(session.sessionId);
-			if (revision === undefined) continue;
-
+		for (const { sessionId, revision } of revisions) {
 			const unackedEvents = sessionManager.getUnackedEvents(
-				session.sessionId,
+				sessionId,
 				revision,
 			);
 
 			if (unackedEvents.length > 0) {
 				logger.info(
 					{
-						sessionId: session.sessionId,
+						sessionId,
 						revision,
 						count: unackedEvents.length,
 					},
@@ -1666,6 +1735,7 @@ export class SocketClient extends EventEmitter {
 
 	disconnect() {
 		this.stopHeartbeat();
+		this.connected = false;
 		this.agentTeamStore.close();
 		this.socket.disconnect();
 	}

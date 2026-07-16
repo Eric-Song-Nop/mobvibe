@@ -467,6 +467,77 @@ describe("SessionRouter", () => {
 				sessionRouter.discoverSessions("machine-1", undefined, "user-1"),
 			).rejects.toThrow("Agent does not support session listing");
 		});
+
+		it("rejects pending RPCs immediately when their CLI disconnects", async () => {
+			const disconnectAwareRouter = sessionRouter as SessionRouter & {
+				handleCliDisconnect: (socketId: string) => void;
+			};
+			expect(disconnectAwareRouter.handleCliDisconnect).toBeTypeOf("function");
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			cliRegistry.register(socket, info, {
+				userId: "user-1",
+				deviceId: "device-123",
+			});
+			const pending = sessionRouter.discoverSessions(
+				"machine-1",
+				undefined,
+				"user-1",
+			);
+
+			disconnectAwareRouter.handleCliDisconnect(socket.id);
+
+			await expect(pending).rejects.toThrow("CLI disconnected");
+		});
+
+		it("ignores RPC responses from a different authenticated CLI socket", async () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			cliRegistry.register(socket, info, {
+				userId: "user-1",
+				deviceId: "device-123",
+			});
+			let requestId: string | undefined;
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:sessions:discover") requestId = request.requestId;
+			});
+			const pending = sessionRouter.discoverSessions(
+				"machine-1",
+				undefined,
+				"user-1",
+			);
+			expect(requestId).toBeDefined();
+			const sourceAwareRouter = sessionRouter as SessionRouter & {
+				handleRpcResponse: (
+					response: {
+						requestId: string;
+						result: DiscoverSessionsRpcResult;
+					},
+					socketId: string,
+				) => void;
+			};
+
+			sourceAwareRouter.handleRpcResponse(
+				{
+					requestId: requestId as string,
+					result: { ...createMockDiscoverResult(), sessions: [] },
+				},
+				"attacker-socket",
+			);
+			sourceAwareRouter.handleRpcResponse(
+				{
+					requestId: requestId as string,
+					result: createMockDiscoverResult(),
+				},
+				socket.id,
+			);
+
+			await expect(pending).resolves.toMatchObject({
+				sessions: expect.arrayContaining([
+					expect.objectContaining({ sessionId: "discovered-session-1" }),
+				]),
+			});
+		});
 	});
 
 	describe("getGitStatus", () => {

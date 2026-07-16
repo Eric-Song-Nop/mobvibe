@@ -9,10 +9,10 @@ import { fromNodeHeaders } from "better-auth/node";
 import type { NextFunction, Request, Response } from "express";
 import { auth } from "../lib/auth.js";
 import { logger } from "../lib/logger.js";
-import type { UserAffinityManager } from "../services/user-affinity.js";
+import type { UserAffinityProvider } from "../services/user-affinity.js";
 
 export function createFlyReplayMiddleware(
-	userAffinity: UserAffinityManager,
+	getUserAffinity: UserAffinityProvider,
 	instanceId: string,
 ) {
 	return async (
@@ -21,6 +21,12 @@ export function createFlyReplayMiddleware(
 		next: NextFunction,
 	): Promise<void> => {
 		try {
+			const userAffinity = getUserAffinity();
+			if (!userAffinity) {
+				next();
+				return;
+			}
+
 			// Extract userId from session (cookie or bearer)
 			const session = await auth.api.getSession({
 				headers: fromNodeHeaders(req.headers),

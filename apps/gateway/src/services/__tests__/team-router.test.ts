@@ -212,4 +212,57 @@ describe("TeamRouter", () => {
 			),
 		).rejects.toThrow("invalid team");
 	});
+
+	it("rejects pending team RPCs immediately when their CLI disconnects", async () => {
+		socket.emit.mockImplementation(() => undefined);
+		const pending = teamRouter.createAgentTeam(
+			{
+				machineId: "machine-1",
+				backendId: "backend-1",
+				workspaceRootCwd: "/repo",
+			},
+			"user-1",
+		);
+
+		teamRouter.handleCliDisconnect(socket.id);
+
+		await expect(pending).rejects.toThrow("CLI disconnected");
+	});
+
+	it("ignores team RPC responses from a different CLI socket", async () => {
+		let requestId: string | undefined;
+		socket.emit.mockImplementation((event, request) => {
+			if (event === "rpc:agent-team:create") requestId = request.requestId;
+		});
+		const pending = teamRouter.createAgentTeam(
+			{
+				machineId: "machine-1",
+				backendId: "backend-1",
+				workspaceRootCwd: "/repo",
+			},
+			"user-1",
+		);
+		expect(requestId).toBeDefined();
+
+		teamRouter.handleRpcResponse(
+			{
+				requestId: requestId as string,
+				result: {
+					team: createTeam({ agentTeamId: "spoofed-team" }),
+				},
+			},
+			"attacker-socket",
+		);
+		teamRouter.handleRpcResponse(
+			{
+				requestId: requestId as string,
+				result: { team: createTeam({ agentTeamId: "valid-team" }) },
+			},
+			socket.id,
+		);
+
+		await expect(pending).resolves.toMatchObject({
+			team: { agentTeamId: "valid-team" },
+		});
+	});
 });

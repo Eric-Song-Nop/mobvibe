@@ -283,6 +283,30 @@ describe("chat-store", () => {
 				expect(msg.failed).toBe(true);
 			}
 		});
+
+		it("reuses a failed optimistic message when retrying with the same id", () => {
+			const { createLocalSession, addUserMessage, markUserMessageFailed } =
+				useChatStore.getState();
+			createLocalSession("s1");
+			addUserMessage("s1", "hello", {
+				provisional: true,
+				messageId: "msg-1",
+			});
+			markUserMessageFailed("s1", "msg-1");
+
+			addUserMessage("s1", "hello", {
+				provisional: true,
+				messageId: "msg-1",
+			});
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(1);
+			expect(messages[0]).toMatchObject({
+				id: "msg-1",
+				provisional: true,
+				failed: false,
+			});
+		});
 	});
 
 	// ---------------------------------------------------------------------------

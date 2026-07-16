@@ -166,6 +166,8 @@ export type CreateSessionParams = {
 // Send message RPC params
 export type SendMessageParams = {
 	sessionId: string;
+	/** Stable client-generated ID used to deduplicate retries. */
+	messageId: string;
 	prompt: EncryptedPayload;
 };
 

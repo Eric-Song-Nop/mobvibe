@@ -458,11 +458,18 @@ export function setupSessionRoutes(
 
 	// Send message - with authorization check
 	router.post("/message", async (request: AuthenticatedRequest, response) => {
-		const { sessionId, prompt } = request.body ?? {};
-		if (typeof sessionId !== "string" || !isEncryptedPayload(prompt)) {
+		const { sessionId, messageId, prompt } = request.body ?? {};
+		if (
+			typeof sessionId !== "string" ||
+			typeof messageId !== "string" ||
+			messageId.trim().length === 0 ||
+			!isEncryptedPayload(prompt)
+		) {
 			respondError(
 				response,
-				buildRequestValidationError("sessionId and prompt required"),
+				buildRequestValidationError(
+					"sessionId, messageId, and prompt required",
+				),
 				400,
 			);
 			return;
@@ -482,6 +489,7 @@ export function setupSessionRoutes(
 			logger.info(
 				{
 					sessionId,
+					messageId,
 					userId,
 					promptBlocks: "encrypted",
 					requestId,
@@ -491,6 +499,7 @@ export function setupSessionRoutes(
 			logger.debug(
 				{
 					sessionId,
+					messageId,
 					userId,
 					promptBlocks: "encrypted",
 					requestId,
@@ -500,6 +509,7 @@ export function setupSessionRoutes(
 			logger.debug(
 				{
 					sessionId,
+					messageId,
 					userId,
 					requestId,
 					route: "/acp/message",
@@ -510,12 +520,13 @@ export function setupSessionRoutes(
 			);
 
 			const result = await sessionRouter.sendMessage(
-				{ sessionId, prompt },
+				{ sessionId, messageId, prompt },
 				userId,
 			);
 			logger.debug(
 				{
 					sessionId,
+					messageId,
 					userId,
 					requestId,
 					stopReason: result.stopReason,
@@ -525,6 +536,7 @@ export function setupSessionRoutes(
 			logger.info(
 				{
 					sessionId,
+					messageId,
 					userId,
 					stopReason: result.stopReason,
 					requestId,
@@ -534,6 +546,7 @@ export function setupSessionRoutes(
 			logger.debug(
 				{
 					sessionId,
+					messageId,
 					userId,
 					requestId,
 					stopReason: result.stopReason,
@@ -552,6 +565,7 @@ export function setupSessionRoutes(
 				{
 					err: error,
 					sessionId,
+					messageId,
 					userId: getUserId(request),
 					promptBlocks: Array.isArray(prompt) ? prompt.length : undefined,
 					requestId,

@@ -144,7 +144,7 @@ describe("E2EEManager", () => {
 
 	it("decryptEvent decrypts encrypted payloads", async () => {
 		await e2ee.addPairedSecret(btoa("test-secret"));
-		e2ee.unwrapSessionDek("session-1", "wrapped-dek");
+		e2ee.unwrapSessionDek("session-1", "wrapped-dek", 1);
 
 		const original = { text: "decrypted" };
 		const encrypted = { t: "encrypted", c: btoa(JSON.stringify(original)) };
@@ -155,28 +155,35 @@ describe("E2EEManager", () => {
 		expect(mockDecryptPayload).toHaveBeenCalled();
 	});
 
-	it("decryptEvent logs warning on failure", async () => {
+	it("decryptEvent surfaces failure instead of returning ciphertext as applied", async () => {
 		await e2ee.addPairedSecret(btoa("test-secret"));
-		e2ee.unwrapSessionDek("session-1", "wrapped-dek");
+		e2ee.unwrapSessionDek("session-1", "wrapped-dek", 1);
 
 		mockDecryptPayload.mockImplementationOnce(() => {
 			throw new Error("decrypt failed");
 		});
 
-		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const event = makeEvent("session-1", {
 			t: "encrypted",
 			c: "bad-data",
 		});
 
-		const result = e2ee.decryptEvent(event);
-		expect(result).toEqual(event);
-		expect(warnSpy).toHaveBeenCalledWith(
-			"[E2EE] Failed to decrypt event",
-			"session-1",
-			expect.any(Error),
-		);
-		warnSpy.mockRestore();
+		expect(() => e2ee.decryptEvent(event)).toThrow("decrypt failed");
+	});
+
+	it("requires the DEK for the event revision", async () => {
+		await e2ee.addPairedSecret(btoa("test-secret"));
+		e2ee.unwrapSessionDek("session-1", "wrapped-revision-1", 1);
+
+		const event = {
+			...makeEvent("session-1", { t: "encrypted", c: "x" }),
+			revision: 2,
+		};
+
+		expect(e2ee.hasSessionDek("session-1", 1)).toBe(true);
+		expect(e2ee.hasSessionDek("session-1", 2)).toBe(false);
+		expect(e2ee.decryptEvent(event)).toBe(event);
+		expect(mockDecryptPayload).not.toHaveBeenCalled();
 	});
 
 	it("loadFromStorage restores state from localStorage", async () => {
@@ -435,7 +442,7 @@ describe("E2EEManager", () => {
 
 		it("round-trip: encrypt then decrypt same DEK", async () => {
 			await e2ee.addPairedSecret(btoa("test-secret"));
-			e2ee.unwrapSessionDek("session-rt", "wrapped-dek");
+			e2ee.unwrapSessionDek("session-rt", "wrapped-dek", 1);
 
 			const original = [{ type: "text", text: "round trip" }];
 			const encrypted = e2ee.encryptPayloadForSession("session-rt", original);

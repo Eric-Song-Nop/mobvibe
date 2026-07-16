@@ -77,7 +77,12 @@ describe("MessageItem", () => {
 	it("renders user messages on the right", () => {
 		const message = buildMessage({ role: "user", content: "Hello" });
 		const { container } = render(<MessageItem message={message} />);
-		expect(container.firstChild).toHaveClass("items-end");
+		expect(
+			container.querySelector('[data-slot="message"][data-align="end"]'),
+		).toBeInTheDocument();
+		expect(
+			container.querySelector('[data-slot="bubble"][data-align="end"]'),
+		).toBeInTheDocument();
 	});
 
 	it("renders user image attachments inline", () => {

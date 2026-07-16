@@ -12,6 +12,10 @@
 			"types": "./dist/alert-dialog.d.ts",
 			"import": "./dist/alert-dialog.js"
 		},
+		"./attachment": {
+			"types": "./dist/attachment.d.ts",
+			"import": "./dist/attachment.js"
+		},
 		"./badge": {
 			"types": "./dist/badge.d.ts",
 			"import": "./dist/badge.js"
@@ -19,6 +23,10 @@
 		"./brand-logo": {
 			"types": "./dist/brand-logo.d.ts",
 			"import": "./dist/brand-logo.js"
+		},
+		"./bubble": {
+			"types": "./dist/bubble.d.ts",
+			"import": "./dist/bubble.js"
 		},
 		"./button": {
 			"types": "./dist/button.d.ts",
@@ -48,6 +56,10 @@
 			"types": "./dist/dropdown-menu.d.ts",
 			"import": "./dist/dropdown-menu.js"
 		},
+		"./empty": {
+			"types": "./dist/empty.d.ts",
+			"import": "./dist/empty.js"
+		},
 		"./field": {
 			"types": "./dist/field.d.ts",
 			"import": "./dist/field.js"
@@ -63,6 +75,14 @@
 		"./label": {
 			"types": "./dist/label.d.ts",
 			"import": "./dist/label.js"
+		},
+		"./marker": {
+			"types": "./dist/marker.d.ts",
+			"import": "./dist/marker.js"
+		},
+		"./message": {
+			"types": "./dist/message.d.ts",
+			"import": "./dist/message.js"
 		},
 		"./popover": {
 			"types": "./dist/popover.d.ts",
@@ -108,6 +128,14 @@
 		"./toast": {
 			"types": "./dist/toast.d.ts",
 			"import": "./dist/toast.js"
+		},
+		"./toggle": {
+			"types": "./dist/toggle.d.ts",
+			"import": "./dist/toggle.js"
+		},
+		"./toggle-group": {
+			"types": "./dist/toggle-group.d.ts",
+			"import": "./dist/toggle-group.js"
 		},
 		"./tooltip": {
 			"types": "./dist/tooltip.d.ts",

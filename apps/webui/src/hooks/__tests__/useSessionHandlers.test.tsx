@@ -33,6 +33,7 @@ const mockUiStoreState = vi.hoisted(() => ({
 		{
 			input: string;
 			inputContents: ReturnType<typeof createDefaultContentBlocks>;
+			messageId?: string;
 		}
 	>,
 	clearChatDraft: vi.fn<(sessionId: string) => void>(),
@@ -587,6 +588,36 @@ describe("useSessionHandlers — handleSend", () => {
 			messageId: expect.any(String),
 			draft: {
 				input: "Ship it",
+				inputContents: promptContents,
+			},
+		});
+	});
+
+	it("reuses the failed send id when retrying an unchanged restored draft", async () => {
+		const promptContents = createDefaultContentBlocks("Retry exactly once");
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Retry exactly once",
+			inputContents: promptContents,
+			messageId: "failed-msg-1",
+		};
+
+		const { result } = renderHandlers();
+
+		await act(async () => {
+			await result.current.handleSend();
+		});
+
+		expect(chatActions.addUserMessage).toHaveBeenCalledWith(
+			"session-1",
+			"Retry exactly once",
+			expect.objectContaining({ messageId: "failed-msg-1" }),
+		);
+		expect(mutations.sendMessageMutation.mutate).toHaveBeenCalledWith({
+			sessionId: "session-1",
+			prompt: promptContents,
+			messageId: "failed-msg-1",
+			draft: {
+				input: "Retry exactly once",
 				inputContents: promptContents,
 			},
 		});

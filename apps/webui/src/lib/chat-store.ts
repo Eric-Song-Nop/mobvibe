@@ -6,6 +6,7 @@ import type {
 	PermissionOutcome,
 	PermissionToolCall,
 	PlanEntry,
+	SessionEvent,
 	SessionModelOption,
 	SessionModeOption,
 	SessionSummary,
@@ -15,7 +16,7 @@ import type {
 	ToolCallStatus,
 	ToolCallUpdate,
 } from "@mobvibe/shared";
-import { create } from "zustand";
+import { create, type StateCreator } from "zustand";
 import { persist } from "zustand/middleware";
 import i18n from "@/i18n";
 import { createDefaultContentBlocks } from "./content-block-utils";
@@ -372,6 +373,11 @@ type ChatState = {
 		},
 	) => void;
 	finalizeAssistantMessage: (sessionId: string) => void;
+	/** Reduce one WAL event and advance its cursor in one state/persist commit. */
+	applySessionEventTransaction: (
+		event: Pick<SessionEvent, "sessionId" | "revision" | "seq">,
+		applyEvent: (actions: SessionEventTransactionActions) => void,
+	) => void;
 	/** Update session cursor (revision + lastAppliedSeq) */
 	updateSessionCursor: (
 		sessionId: string,
@@ -386,6 +392,24 @@ type ChatState = {
 		status: ChatSession["e2eeStatus"],
 	) => void;
 };
+
+export type SessionEventTransactionActions = Pick<
+	ChatState,
+	| "appendAssistantChunk"
+	| "appendThoughtChunk"
+	| "confirmOrAppendUserMessage"
+	| "updateSessionMeta"
+	| "setStreamError"
+	| "addPermissionRequest"
+	| "setPermissionDecisionState"
+	| "setPermissionOutcome"
+	| "addToolCall"
+	| "updateToolCall"
+	| "appendTerminalOutput"
+	| "finalizeAssistantMessage"
+	| "setSending"
+	| "setCanceling"
+>;
 
 export const selectTerminalOutputSnapshot = (
 	state: Pick<ChatState, "sessions">,
@@ -768,9 +792,80 @@ const partializeChatState = (state: ChatState): PersistedChatState => ({
 	lastCreatedCwd: state.lastCreatedCwd,
 });
 
+type ChatStateSetter = Parameters<StateCreator<ChatState>>[0];
+type ChatStateUpdate =
+	| ChatState
+	| Partial<ChatState>
+	| ((state: ChatState) => ChatState | Partial<ChatState>);
+type FlexibleChatStateSetter = (
+	partial: ChatStateUpdate,
+	replace?: boolean,
+) => void;
+type ChatStateFactory = (
+	set: ChatStateSetter,
+	applySessionEventTransaction: ChatState["applySessionEventTransaction"],
+) => ChatState;
+
+const withSessionEventTransactions = (
+	createState: ChatStateFactory,
+): StateCreator<ChatState> => {
+	return (commitSet) => {
+		let transactionState: ChatState | undefined;
+		let actions: ChatState;
+		const commit = commitSet as unknown as FlexibleChatStateSetter;
+		const set = ((partial: ChatStateUpdate, replace?: boolean) => {
+			if (transactionState === undefined) {
+				commit(partial, replace);
+				return;
+			}
+
+			const nextState =
+				typeof partial === "function" ? partial(transactionState) : partial;
+			if (Object.is(nextState, transactionState)) return;
+			transactionState = replace
+				? (nextState as ChatState)
+				: { ...transactionState, ...nextState };
+		}) as ChatStateSetter;
+		const applySessionEventTransaction: ChatState["applySessionEventTransaction"] =
+			(event, applyEvent) =>
+				commitSet((state) => {
+					const session = state.sessions[event.sessionId];
+					if (!session) return state;
+					if (
+						session.revision !== undefined &&
+						event.revision < session.revision
+					) {
+						return state;
+					}
+					if (
+						session.revision === event.revision &&
+						(session.lastAppliedSeq ?? 0) >= event.seq
+					) {
+						return state;
+					}
+
+					transactionState = state;
+					try {
+						applyEvent(actions);
+						actions.updateSessionCursor(
+							event.sessionId,
+							event.revision,
+							event.seq,
+						);
+						return transactionState;
+					} finally {
+						transactionState = undefined;
+					}
+				});
+
+		actions = createState(set, applySessionEventTransaction);
+		return actions;
+	};
+};
+
 export const useChatStore = create<ChatState>()(
 	persist(
-		(set) => ({
+		withSessionEventTransactions((set, applySessionEventTransaction) => ({
 			sessions: {},
 			activeSessionId: undefined,
 			lastCreatedCwd: {},
@@ -1231,6 +1326,38 @@ export const useChatStore = create<ChatState>()(
 				set((state) => {
 					const session =
 						state.sessions[sessionId] ?? createSessionState(sessionId);
+					const existingMessageIndex = options?.messageId
+						? session.messages.findIndex(
+								(message) => message.id === options.messageId,
+							)
+						: -1;
+					if (existingMessageIndex >= 0) {
+						const existingMessage = session.messages[existingMessageIndex];
+						if (
+							existingMessage.role !== "user" ||
+							existingMessage.kind !== "text" ||
+							(!existingMessage.provisional && !existingMessage.failed)
+						) {
+							return state;
+						}
+
+						const messages = [...session.messages];
+						messages[existingMessageIndex] = {
+							...existingMessage,
+							content,
+							contentBlocks:
+								options?.contentBlocks ?? createDefaultContentBlocks(content),
+							provisional: options?.provisional ?? existingMessage.provisional,
+							failed: false,
+						};
+						return {
+							sessions: {
+								...state.sessions,
+								[sessionId]: { ...session, messages },
+							},
+						};
+					}
+
 					const nextMessage = {
 						...createMessage("user", content),
 						id: options?.messageId ?? createLocalId(),
@@ -1616,6 +1743,7 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
+			applySessionEventTransaction,
 			updateSessionCursor: (sessionId, revision, lastAppliedSeq) =>
 				set((state: ChatState) => {
 					const session = state.sessions[sessionId];
@@ -1676,7 +1804,7 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
-		}),
+		})),
 		{
 			name: STORAGE_KEY,
 			version: 1,

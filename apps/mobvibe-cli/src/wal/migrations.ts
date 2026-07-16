@@ -211,7 +211,42 @@ const MIGRATIONS = [
         ON agent_team_mailbox_messages (agent_team_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_agent_team_tasks_team
         ON agent_team_tasks (agent_team_id, updated_at);
-    `,
+		`,
+	},
+	{
+		version: 8,
+		up: `
+			-- Completed message sends are durable idempotency records. The prompt
+			-- itself remains in the session event WAL; only the terminal result is
+			-- stored here so a gateway retry cannot execute the agent twice.
+			CREATE TABLE IF NOT EXISTS message_send_results (
+				session_id TEXT NOT NULL,
+				message_id TEXT NOT NULL,
+				stop_reason TEXT NOT NULL,
+				completed_at TEXT NOT NULL,
+				PRIMARY KEY (session_id, message_id)
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_message_send_results_completed_at
+				ON message_send_results (completed_at);
+		`,
+	},
+	{
+		version: 9,
+		up: `
+			-- DEKs are never stored in plaintext. wrapped_dek is a sealed box
+			-- encrypted to the content keypair derived from the CLI master secret.
+			CREATE TABLE IF NOT EXISTS session_revision_keys (
+				session_id TEXT NOT NULL,
+				revision INTEGER NOT NULL,
+				wrapped_dek TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				PRIMARY KEY (session_id, revision)
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_session_revision_keys_session
+				ON session_revision_keys (session_id, revision);
+		`,
 	},
 ];
 

@@ -202,12 +202,25 @@ afterEach(() => {
 
 describe("CodePreview", () => {
 	it("renders language badge and line count", () => {
-		render(<CodePreview payload={buildPayload()} />, { wrapper: TestWrapper });
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => {});
 
-		expect(screen.getByText("typescript")).toBeInTheDocument();
-		expect(
-			screen.getByText(i18n.t("codePreview.lineCount", { count: 2 })),
-		).toBeInTheDocument();
+		try {
+			render(<CodePreview payload={buildPayload()} />, {
+				wrapper: TestWrapper,
+			});
+
+			expect(screen.getByText("typescript")).toBeInTheDocument();
+			expect(
+				screen.getByText(i18n.t("codePreview.lineCount", { count: 2 })),
+			).toBeInTheDocument();
+
+			const messages = consoleError.mock.calls.flat().map(String).join(" ");
+			expect(messages).not.toContain('props object containing a "key" prop');
+		} finally {
+			consoleError.mockRestore();
+		}
 	});
 
 	it("renders at least one line for empty content", () => {

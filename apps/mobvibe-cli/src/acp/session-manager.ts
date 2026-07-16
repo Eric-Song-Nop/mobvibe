@@ -67,6 +67,8 @@ type SessionRecord = {
 	availableCommands?: AvailableCommand[];
 	unsubscribe?: () => void;
 	unsubscribeTerminal?: () => void;
+	unsubscribeStatus?: () => void;
+	pendingReloadUpdates?: SessionNotification[];
 	isAttached?: boolean;
 	attachedAt?: Date;
 	/** Current WAL revision for this session */
@@ -328,6 +330,28 @@ export class SessionManager {
 			active.map((s) => [s.sessionId, s]),
 		);
 
+		for (const session of this.walStore.getSessions()) {
+			if (merged.has(session.sessionId)) continue;
+			const backend = this.backendById.get(session.backendId);
+			merged.set(session.sessionId, {
+				sessionId: session.sessionId,
+				title: session.title ?? `Session ${session.sessionId.slice(0, 8)}`,
+				backendId: session.backendId,
+				backendLabel: backend?.label ?? session.backendId,
+				cwd: session.cwd,
+				workspaceRootCwd: session.cwd,
+				createdAt: session.createdAt,
+				updatedAt: session.updatedAt,
+				revision: session.currentRevision,
+				wrappedDek: this.ensureSessionRevisionDek(
+					session.sessionId,
+					session.currentRevision,
+				),
+				isAttached: false,
+				isTitlePinned: session.isTitlePinned,
+			});
+		}
+
 		for (const s of this.walStore.getDiscoveredSessions()) {
 			if (s.cwd === undefined) continue;
 			const existing = merged.get(s.sessionId);
@@ -357,6 +381,57 @@ export class SessionManager {
 		}
 
 		return Array.from(merged.values());
+	}
+
+	private ensureSessionRevisionDek(
+		sessionId: string,
+		revision: number,
+	): string | undefined {
+		if (!this.cryptoService) return undefined;
+		if (this.cryptoService.contentEncryptionEnabled === false) return undefined;
+
+		const persisted = this.walStore.getSessionRevisionKey(sessionId, revision);
+		if (persisted) {
+			if (this.cryptoService.getWrappedDek(sessionId, revision) === persisted) {
+				return persisted;
+			}
+			try {
+				const restored = this.cryptoService.restoreSessionDek(
+					sessionId,
+					revision,
+					persisted,
+				);
+				if (!restored) return undefined;
+				return persisted;
+			} catch (error) {
+				logger.error(
+					{ err: error, sessionId, revision },
+					"session_revision_dek_restore_failed",
+				);
+				return undefined;
+			}
+		}
+
+		const { wrappedDek } = this.cryptoService.initSessionDek(
+			sessionId,
+			revision,
+		);
+		if (!wrappedDek) return undefined;
+		this.walStore.recordSessionRevisionKey(sessionId, revision, wrappedDek);
+		return wrappedDek;
+	}
+
+	private requireSessionRevisionDek(
+		sessionId: string,
+		revision: number,
+	): string | undefined {
+		const wrappedDek = this.ensureSessionRevisionDek(sessionId, revision);
+		if (this.cryptoService?.contentEncryptionEnabled && !wrappedDek) {
+			throw new Error(
+				`Unable to initialize encryption key for session ${sessionId} revision ${revision}`,
+			);
+		}
+		return wrappedDek;
 	}
 
 	async backfillDiscoveredWorkspaceRoots(): Promise<void> {
@@ -522,6 +597,8 @@ export class SessionManager {
 			};
 		}
 
+		this.requireSessionRevisionDek(params.sessionId, actualRevision);
+
 		const limit = params.limit ?? 100;
 		const events = this.walStore.queryEvents({
 			sessionId: params.sessionId,
@@ -553,17 +630,30 @@ export class SessionManager {
 				payload: e.payload,
 			})),
 			nextAfterSeq:
-				consolidated.length > 0
-					? consolidated[consolidated.length - 1].seq
-					: undefined,
+				rawEvents.length > 0 ? rawEvents[rawEvents.length - 1].seq : undefined,
 			hasMore,
 		};
+	}
+
+	listUnackedSessionRevisions(): Array<{
+		sessionId: string;
+		revision: number;
+	}> {
+		return this.walStore.listUnackedSessionRevisions();
 	}
 
 	/**
 	 * Get unacked events for a session/revision (for reconnection replay).
 	 */
 	getUnackedEvents(sessionId: string, revision: number): SessionEvent[] {
+		const wrappedDek = this.ensureSessionRevisionDek(sessionId, revision);
+		if (this.cryptoService?.contentEncryptionEnabled && !wrappedDek) {
+			logger.error(
+				{ sessionId, revision },
+				"unacked_events_skipped_missing_revision_dek",
+			);
+			return [];
+		}
 		const events = this.walStore.getUnackedEvents(sessionId, revision);
 		return events.map((e) => ({
 			sessionId: e.sessionId,
@@ -581,6 +671,21 @@ export class SessionManager {
 	 */
 	ackEvents(sessionId: string, revision: number, upToSeq: number): void {
 		this.walStore.ackEvents(sessionId, revision, upToSeq);
+	}
+
+	getMessageSendResult(
+		sessionId: string,
+		messageId: string,
+	): { stopReason: StopReason } | undefined {
+		return this.walStore.getMessageSendResult(sessionId, messageId);
+	}
+
+	recordMessageSendResult(
+		sessionId: string,
+		messageId: string,
+		stopReason: StopReason,
+	): void {
+		this.walStore.recordMessageSendResult(sessionId, messageId, stopReason);
 	}
 
 	recordTurnEnd(sessionId: string, stopReason: StopReason): void {
@@ -846,6 +951,25 @@ export class SessionManager {
 		}
 
 		const connection = await this.acquireConnection(backend);
+		const bufferedUpdates: SessionNotification[] = [];
+		let recordRef: SessionRecord | undefined;
+		const unsubscribe = connection.onSessionUpdate(
+			(notification: SessionNotification) => {
+				logger.debug(
+					{
+						sessionId: notification.sessionId,
+						updateType: notification.update.sessionUpdate,
+						hasRecordRef: !!recordRef,
+					},
+					"acp_session_update_received",
+				);
+				if (recordRef) {
+					this.handleSessionUpdate(recordRef, notification);
+					return;
+				}
+				bufferedUpdates.push(notification);
+			},
+		);
 		try {
 			const session = await connection.createSession({ cwd: effectiveCwd });
 			connection.setPermissionHandler((params) =>
@@ -876,9 +1000,7 @@ export class SessionManager {
 			});
 
 			// Initialize DEK for E2EE
-			if (this.cryptoService) {
-				this.cryptoService.initSessionDek(session.sessionId);
-			}
+			this.requireSessionRevisionDek(session.sessionId, revision);
 
 			const record: SessionRecord = {
 				sessionId: session.sessionId,
@@ -903,21 +1025,8 @@ export class SessionManager {
 				revision,
 				isTitlePinned: hasExplicitTitle,
 			};
-			record.unsubscribe = connection.onSessionUpdate(
-				(notification: SessionNotification) => {
-					logger.debug(
-						{
-							sessionId: session.sessionId,
-							updateType: notification.update.sessionUpdate,
-						},
-						"acp_session_update_received",
-					);
-					record.updatedAt = new Date();
-					// Write to WAL and emit via session:event (unified event channel)
-					this.writeSessionUpdateToWal(record, notification);
-					this.applySessionUpdateToRecord(record, notification);
-				},
-			);
+			recordRef = record;
+			record.unsubscribe = unsubscribe;
 			record.unsubscribeTerminal = connection.onTerminalOutput((event) => {
 				logger.debug(
 					{ sessionId: record.sessionId },
@@ -931,7 +1040,7 @@ export class SessionManager {
 					event,
 				);
 			});
-			connection.onStatusChange((status) => {
+			record.unsubscribeStatus = connection.onStatusChange((status) => {
 				if (status.error) {
 					// Write error to WAL (emits via session:event)
 					this.writeAndEmitEvent(
@@ -943,6 +1052,10 @@ export class SessionManager {
 					this.emitSessionDetached(session.sessionId, "agent_exit");
 				}
 			});
+			for (const notification of bufferedUpdates) {
+				this.writeSessionUpdateToWal(record, notification);
+				this.applySessionUpdateToRecord(record, notification);
+			}
 			this.sessions.set(session.sessionId, record);
 			const summary = this.buildSummary(record);
 			this.emitSessionsChanged({
@@ -953,6 +1066,9 @@ export class SessionManager {
 			this.emitSessionAttached(session.sessionId);
 			return summary;
 		} catch (error) {
+			unsubscribe();
+			recordRef?.unsubscribeTerminal?.();
+			recordRef?.unsubscribeStatus?.();
 			if (worktreeSourceCwd) {
 				logger.warn(
 					{ worktreePath: effectiveCwd, branch: worktreeBranch },
@@ -1194,6 +1310,7 @@ export class SessionManager {
 		try {
 			record.unsubscribe?.();
 			record.unsubscribeTerminal?.();
+			record.unsubscribeStatus?.();
 		} catch (error) {
 			logger.error({ err: error, sessionId }, "session_unsubscribe_failed");
 		}
@@ -1412,6 +1529,8 @@ export class SessionManager {
 
 		const backend = this.resolveBackend(backendId);
 		const connection = await this.acquireConnection(backend);
+		let unsubscribe: (() => void) | undefined;
+		let recordRef: SessionRecord | undefined;
 
 		try {
 			if (!connection.supportsSessionLoad()) {
@@ -1432,25 +1551,8 @@ export class SessionManager {
 					limit: 1,
 				}).length > 0;
 
-			let revision: number;
-			if (hasExistingHistory) {
-				// Already have history → bump revision to avoid duplicates
-				revision = this.walStore.incrementRevision(sessionId);
-				logger.debug({ sessionId, revision }, "load_session_bump_revision");
-			} else {
-				// First time import → create or get existing revision
-				const result = this.walStore.ensureSession({
-					sessionId,
-					machineId: this.config.machineId,
-					backendId: backend.id,
-					cwd,
-				});
-				revision = result.revision;
-			}
-
 			const bufferedUpdates: SessionNotification[] = [];
-			let recordRef: SessionRecord | undefined;
-			const unsubscribe = connection.onSessionUpdate(
+			unsubscribe = connection.onSessionUpdate(
 				(notification: SessionNotification) => {
 					logger.debug(
 						{
@@ -1462,9 +1564,7 @@ export class SessionManager {
 					);
 					// Write to WAL (emits via session:event)
 					if (recordRef) {
-						this.writeSessionUpdateToWal(recordRef, notification);
-						recordRef.updatedAt = new Date();
-						this.applySessionUpdateToRecord(recordRef, notification);
+						this.handleSessionUpdate(recordRef, notification);
 					} else {
 						bufferedUpdates.push(notification);
 						logger.debug(
@@ -1500,6 +1600,17 @@ export class SessionManager {
 			);
 			const discovered = this.discoveredSessions.get(sessionId);
 			const projectContext = await resolveGitProjectContext(cwd);
+			const revision = hasExistingHistory
+				? this.walStore.incrementRevision(sessionId)
+				: this.walStore.ensureSession({
+						sessionId,
+						machineId: this.config.machineId,
+						backendId: backend.id,
+						cwd,
+					}).revision;
+			if (hasExistingHistory) {
+				logger.debug({ sessionId, revision }, "load_session_bump_revision");
+			}
 
 			// Restore pinned title from WAL if applicable
 			const walPinned = existingWalSession?.isTitlePinned;
@@ -1533,9 +1644,7 @@ export class SessionManager {
 			record.unsubscribe = unsubscribe;
 
 			// Initialize DEK for E2EE (new revision = new key)
-			if (this.cryptoService) {
-				this.cryptoService.initSessionDek(sessionId);
-			}
+			this.requireSessionRevisionDek(sessionId, revision);
 
 			// Write buffered updates to WAL
 			logger.debug(
@@ -1570,6 +1679,9 @@ export class SessionManager {
 
 			return summary;
 		} catch (error) {
+			unsubscribe?.();
+			recordRef?.unsubscribeTerminal?.();
+			recordRef?.unsubscribeStatus?.();
 			await connection.disconnect();
 			throw error;
 		}
@@ -1595,46 +1707,84 @@ export class SessionManager {
 			);
 		}
 
-		// Increment revision in WAL (signals a fresh replay)
-		const newRevision = this.walStore.incrementRevision(sessionId);
-		existing.revision = newRevision;
+		const bufferedUpdates: SessionNotification[] = [];
+		existing.pendingReloadUpdates = bufferedUpdates;
+		try {
+			const response = await existing.connection.loadSession(sessionId, cwd);
+			const { modelId, modelName, availableModels } = resolveModelState(
+				response.models,
+			);
+			const { modeId, modeName, availableModes } = resolveModeState(
+				response.modes,
+			);
+			const agentInfo = existing.connection.getAgentInfo();
+			const projectContext = await resolveGitProjectContext(cwd);
 
-		const response = await existing.connection.loadSession(sessionId, cwd);
-		const { modelId, modelName, availableModels } = resolveModelState(
-			response.models,
-		);
-		const { modeId, modeName, availableModes } = resolveModeState(
-			response.modes,
-		);
-		const agentInfo = existing.connection.getAgentInfo();
+			// Only advance the durable revision after the ACP replay succeeds. Updates
+			// emitted while it is in flight are held until the new revision exists.
+			const targetRevision = existing.revision + 1;
+			this.requireSessionRevisionDek(sessionId, targetRevision);
+			const newRevision = this.walStore.incrementRevision(sessionId);
+			existing.revision = newRevision;
+			existing.cwd = cwd;
+			existing.workspaceRootCwd = projectContext.repoRoot ?? cwd;
+			existing.agentName =
+				agentInfo?.title ?? agentInfo?.name ?? existing.agentName;
+			existing.modelId = modelId;
+			existing.modelName = modelName;
+			existing.availableModels = availableModels;
+			existing.modeId = modeId;
+			existing.modeName = modeName;
+			existing.availableModes = availableModes;
+			existing.updatedAt = new Date();
 
-		existing.cwd = cwd;
-		existing.workspaceRootCwd =
-			(await resolveGitProjectContext(cwd)).repoRoot ?? cwd;
-		existing.agentName =
-			agentInfo?.title ?? agentInfo?.name ?? existing.agentName;
-		existing.modelId = modelId;
-		existing.modelName = modelName;
-		existing.availableModels = availableModels;
-		existing.modeId = modeId;
-		existing.modeName = modeName;
-		existing.availableModes = availableModes;
-		existing.updatedAt = new Date();
+			delete existing.pendingReloadUpdates;
+			for (const notification of bufferedUpdates) {
+				this.handleSessionUpdate(existing, notification);
+			}
 
-		const summary = this.buildSummary(existing);
-		this.emitSessionsChanged({
-			added: [],
-			updated: [summary],
-			removed: [],
-		});
-		this.emitSessionAttached(sessionId, true);
+			const summary = this.buildSummary(existing);
+			this.emitSessionsChanged({
+				added: [],
+				updated: [summary],
+				removed: [],
+			});
+			this.emitSessionAttached(sessionId, true);
 
-		logger.info(
-			{ sessionId, backendId, revision: newRevision },
-			"session_reloaded",
-		);
+			logger.info(
+				{ sessionId, backendId, revision: newRevision },
+				"session_reloaded",
+			);
 
-		return summary;
+			return summary;
+		} catch (error) {
+			if (bufferedUpdates.length > 0) {
+				logger.warn(
+					{
+						err: error,
+						sessionId,
+						discardedUpdates: bufferedUpdates.length,
+					},
+					"reload_partial_replay_discarded",
+				);
+			}
+			throw error;
+		} finally {
+			delete existing.pendingReloadUpdates;
+		}
+	}
+
+	private handleSessionUpdate(
+		record: SessionRecord,
+		notification: SessionNotification,
+	): void {
+		if (record.pendingReloadUpdates) {
+			record.pendingReloadUpdates.push(notification);
+			return;
+		}
+		record.updatedAt = new Date();
+		this.writeSessionUpdateToWal(record, notification);
+		this.applySessionUpdateToRecord(record, notification);
 	}
 
 	private applySessionUpdateToRecord(
@@ -1788,10 +1938,7 @@ export class SessionManager {
 						},
 						"acp_session_update_received_via_setup",
 					);
-					record.updatedAt = new Date();
-					// Write to WAL and emit via session:event (unified event channel)
-					this.writeSessionUpdateToWal(record, notification);
-					this.applySessionUpdateToRecord(record, notification);
+					this.handleSessionUpdate(record, notification);
 				},
 			);
 		}
@@ -1807,7 +1954,7 @@ export class SessionManager {
 			);
 		});
 
-		connection.onStatusChange((status) => {
+		record.unsubscribeStatus = connection.onStatusChange((status) => {
 			logger.debug(
 				{ sessionId, hasError: !!status.error },
 				"acp_status_change",
@@ -1845,7 +1992,8 @@ export class SessionManager {
 			availableCommands: record.availableCommands,
 			revision: record.revision,
 			wrappedDek:
-				this.cryptoService?.getWrappedDek(record.sessionId) ?? undefined,
+				this.cryptoService?.getWrappedDek(record.sessionId, record.revision) ??
+				undefined,
 			_meta: record._meta,
 			isTitlePinned: record.isTitlePinned,
 			worktreeSourceCwd: record.worktreeSourceCwd,
