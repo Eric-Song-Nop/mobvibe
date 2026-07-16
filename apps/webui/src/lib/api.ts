@@ -53,21 +53,44 @@ import { isErrorDetail } from "@mobvibe/shared";
 import { isInTauri } from "./auth";
 import { getAuthToken } from "./auth-token";
 import { e2ee } from "./e2ee";
+import { createFallbackError } from "./error-utils";
 import { getDefaultGatewayUrl } from "./gateway-config";
 import { platformFetch } from "./tauri-fetch";
 
 let API_BASE_URL = getDefaultGatewayUrl();
 const SEND_MESSAGE_TIMEOUT_MS = 120_000;
 const SESSION_LOAD_TIMEOUT_MS = 30_000;
+const OWNER_ROUTING_PATH = "/acp/routing";
+const OWNER_RESPONSE_HEADER = "x-mobvibe-instance-id";
+const FORCE_INSTANCE_HEADER = "fly-force-instance-id";
+const INSTANCE_AFFINITY_CHANGED_CODE = "INSTANCE_AFFINITY_CHANGED";
+const OWNER_RESOLUTION_TIMEOUT_MS = 3_000;
+const OWNER_RESOLUTION_RETRY_BASE_MS = 1_000;
+const OWNER_RESOLUTION_RETRY_MAX_MS = 30_000;
+
+type OwnerRoutingState = {
+	baseUrl: string;
+	ownerId?: string;
+	consecutiveResolutionMisses: number;
+	retryResolutionAt: number;
+	resolutionPromise?: Promise<string | undefined>;
+};
+
+const createOwnerRoutingState = (baseUrl: string): OwnerRoutingState => ({
+	baseUrl,
+	consecutiveResolutionMisses: 0,
+	retryResolutionAt: 0,
+});
+
+let ownerRoutingState = createOwnerRoutingState(API_BASE_URL);
 
 /**
  * Update the API base URL. Used when Tauri app loads a stored gateway URL.
  */
 export const setApiBaseUrl = (url: string): void => {
 	API_BASE_URL = url;
+	ownerRoutingState = createOwnerRoutingState(url);
 };
-
-import { createFallbackError } from "./error-utils";
 
 export class ApiError extends Error {
 	readonly detail: ErrorDetail;
@@ -78,52 +101,273 @@ export class ApiError extends Error {
 	}
 }
 
-const requestJson = async <ResponseType>(
-	path: string,
-	options?: RequestInit,
-): Promise<ResponseType> => {
-	const headers: Record<string, string> = {
-		"Content-Type": "application/json",
-	};
+type RequestTransport = {
+	credentials: RequestCredentials;
+	headers: Record<string, string>;
+};
+
+const createRequestTransport = (): RequestTransport => {
 	const tauriEnv = isInTauri();
+	const headers: Record<string, string> = {};
 	if (tauriEnv) {
 		const token = getAuthToken();
 		if (token) {
 			headers.Authorization = `Bearer ${token}`;
 		}
 	}
-	const response = await platformFetch(`${API_BASE_URL}${path}`, {
-		...options,
+	return {
 		credentials: tauriEnv ? "omit" : "include",
-		headers: {
-			...headers,
-			...options?.headers,
-		},
+		headers,
+	};
+};
+
+const readResponseHeader = (
+	response: Response,
+	headerName: string,
+): string | undefined => {
+	const value = (response as { headers?: Headers }).headers?.get?.(headerName);
+	const normalizedValue = value?.trim();
+	return normalizedValue || undefined;
+};
+
+const isOwnerRoutedPath = (path: string): boolean =>
+	path !== OWNER_ROUTING_PATH &&
+	(path === "/acp" ||
+		path.startsWith("/acp/") ||
+		path === "/fs" ||
+		path.startsWith("/fs/") ||
+		path === "/api/machines" ||
+		path.startsWith("/api/machines?"));
+
+const cacheOwner = (state: OwnerRoutingState, ownerId: string): void => {
+	state.ownerId = ownerId;
+	state.consecutiveResolutionMisses = 0;
+	state.retryResolutionAt = 0;
+};
+
+const recordOwnerResolutionMiss = (state: OwnerRoutingState): void => {
+	state.consecutiveResolutionMisses = Math.min(
+		state.consecutiveResolutionMisses + 1,
+		6,
+	);
+	const retryDelay = Math.min(
+		OWNER_RESOLUTION_RETRY_BASE_MS *
+			2 ** (state.consecutiveResolutionMisses - 1),
+		OWNER_RESOLUTION_RETRY_MAX_MS,
+	);
+	state.retryResolutionAt = Date.now() + retryDelay;
+};
+
+const createAbortError = (): DOMException =>
+	new DOMException("The operation was aborted", "AbortError");
+
+const waitForResolution = <Value>(
+	promise: Promise<Value>,
+	signal?: AbortSignal | null,
+): Promise<Value> => {
+	if (!signal) {
+		return promise;
+	}
+	if (signal.aborted) {
+		return Promise.reject(createAbortError());
+	}
+	return new Promise((resolve, reject) => {
+		const handleAbort = () => {
+			signal.removeEventListener("abort", handleAbort);
+			reject(createAbortError());
+		};
+		signal.addEventListener("abort", handleAbort, { once: true });
+		promise.then(
+			(value) => {
+				signal.removeEventListener("abort", handleAbort);
+				resolve(value);
+			},
+			(error: unknown) => {
+				signal.removeEventListener("abort", handleAbort);
+				reject(error);
+			},
+		);
 	});
+};
 
-	if (!response.ok) {
-		let fallbackMessage = `${response.status} ${response.statusText}`;
-		try {
-			const payload = (await response.json()) as { error?: unknown };
-			if (payload?.error && isErrorDetail(payload.error)) {
-				throw new ApiError(payload.error);
+const startOwnerResolution = (
+	state: OwnerRoutingState,
+	transport: RequestTransport,
+): Promise<string | undefined> => {
+	const controller = new AbortController();
+	let timeoutId: ReturnType<typeof setTimeout> | undefined;
+	const fetchOwner = platformFetch(`${state.baseUrl}${OWNER_ROUTING_PATH}`, {
+		method: "GET",
+		credentials: transport.credentials,
+		headers: transport.headers,
+		signal: controller.signal,
+	})
+		.then((response) => readResponseHeader(response, OWNER_RESPONSE_HEADER))
+		.catch(() => undefined);
+	const timeout = new Promise<undefined>((resolve) => {
+		timeoutId = setTimeout(() => {
+			controller.abort();
+			resolve(undefined);
+		}, OWNER_RESOLUTION_TIMEOUT_MS);
+	});
+	const resolutionPromise = Promise.race([fetchOwner, timeout])
+		.then((ownerId) => {
+			if (ownerId) {
+				cacheOwner(state, ownerId);
+			} else {
+				recordOwnerResolutionMiss(state);
 			}
-			if (typeof payload?.error === "string") {
-				fallbackMessage = payload.error;
+			return ownerId;
+		})
+		.finally(() => {
+			if (timeoutId !== undefined) {
+				clearTimeout(timeoutId);
 			}
-		} catch (parseError) {
-			if (parseError instanceof ApiError) {
-				throw parseError;
-			}
+			state.resolutionPromise = undefined;
+		});
+	state.resolutionPromise = resolutionPromise;
+	return resolutionPromise;
+};
+
+const resolveOwner = async (
+	state: OwnerRoutingState,
+	transport: RequestTransport,
+	signal?: AbortSignal | null,
+): Promise<string | undefined> => {
+	if (state.ownerId) {
+		return state.ownerId;
+	}
+	if (signal?.aborted) {
+		throw createAbortError();
+	}
+	if (!state.resolutionPromise && Date.now() < state.retryResolutionAt) {
+		return undefined;
+	}
+	const resolutionPromise =
+		state.resolutionPromise ?? startOwnerResolution(state, transport);
+	return waitForResolution(resolutionPromise, signal);
+};
+
+const mergeHeaders = (
+	transportHeaders: Record<string, string>,
+	requestHeaders: HeadersInit | undefined,
+	ownerId: string | undefined,
+): Record<string, string> => {
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+		...transportHeaders,
+	};
+	if (requestHeaders instanceof Headers) {
+		requestHeaders.forEach((value, key) => {
+			headers[key] = value;
+		});
+	} else if (Array.isArray(requestHeaders)) {
+		for (const [key, value] of requestHeaders) {
+			headers[key] = value;
 		}
-		throw new ApiError(createFallbackError(fallbackMessage, "request"));
+	} else if (requestHeaders) {
+		Object.assign(headers, requestHeaders);
 	}
-
-	if (response.status === 204 || response.status === 205) {
-		return undefined as ResponseType;
+	if (ownerId) {
+		headers[FORCE_INSTANCE_HEADER] = ownerId;
 	}
+	return headers;
+};
 
-	return (await response.json()) as ResponseType;
+const parseErrorDetail = async (response: Response): Promise<ErrorDetail> => {
+	let fallbackMessage = `${response.status} ${response.statusText}`;
+	try {
+		const payload = (await response.json()) as { error?: unknown };
+		if (payload?.error && isErrorDetail(payload.error)) {
+			return payload.error;
+		}
+		if (typeof payload?.error === "string") {
+			fallbackMessage = payload.error;
+		}
+	} catch {
+		// Keep the status fallback for non-JSON error responses.
+	}
+	return createFallbackError(fallbackMessage, "request");
+};
+
+const hasStableMessageId = (body: BodyInit | null | undefined): boolean => {
+	if (typeof body !== "string") {
+		return false;
+	}
+	try {
+		const payload = JSON.parse(body) as { messageId?: unknown };
+		return (
+			typeof payload.messageId === "string" && payload.messageId.length > 0
+		);
+	} catch {
+		return false;
+	}
+};
+
+const canRetryAfterAffinityChange = (
+	path: string,
+	options: RequestInit | undefined,
+): boolean => {
+	const method = (options?.method ?? "GET").toUpperCase();
+	if (method === "GET" || method === "HEAD") {
+		return true;
+	}
+	return (
+		path === "/acp/message" &&
+		method === "POST" &&
+		hasStableMessageId(options?.body)
+	);
+};
+
+const requestJson = async <ResponseType>(
+	path: string,
+	options?: RequestInit,
+): Promise<ResponseType> => {
+	const baseUrl = API_BASE_URL;
+	const state = ownerRoutingState;
+	const transport = createRequestTransport();
+	const routedRequest = isOwnerRoutedPath(path);
+	const initialOwnerId = routedRequest
+		? await resolveOwner(state, transport, options?.signal)
+		: undefined;
+
+	const performRequest = async (
+		ownerId: string | undefined,
+		retriedAfterAffinityChange: boolean,
+	): Promise<ResponseType> => {
+		const response = await platformFetch(`${baseUrl}${path}`, {
+			...options,
+			credentials: transport.credentials,
+			headers: mergeHeaders(transport.headers, options?.headers, ownerId),
+		});
+		const advertisedOwnerId = routedRequest
+			? readResponseHeader(response, OWNER_RESPONSE_HEADER)
+			: undefined;
+		if (advertisedOwnerId) {
+			cacheOwner(state, advertisedOwnerId);
+		}
+
+		if (!response.ok) {
+			const detail = await parseErrorDetail(response);
+			if (
+				!retriedAfterAffinityChange &&
+				detail.code === INSTANCE_AFFINITY_CHANGED_CODE &&
+				advertisedOwnerId &&
+				canRetryAfterAffinityChange(path, options)
+			) {
+				return performRequest(advertisedOwnerId, true);
+			}
+			throw new ApiError(detail);
+		}
+
+		if (response.status === 204 || response.status === 205) {
+			return undefined as ResponseType;
+		}
+
+		return (await response.json()) as ResponseType;
+	};
+
+	return performRequest(initialOwnerId, false);
 };
 
 const isAbortError = (error: unknown): boolean =>

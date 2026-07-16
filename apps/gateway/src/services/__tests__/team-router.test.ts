@@ -1,4 +1,8 @@
-import type { AgentTeamSummary, CliRegistrationInfo } from "@mobvibe/shared";
+import {
+	type AgentTeamSummary,
+	AppError,
+	type CliRegistrationInfo,
+} from "@mobvibe/shared";
 import type { Socket } from "socket.io";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CliRegistry } from "../cli-registry.js";
@@ -184,7 +188,7 @@ describe("TeamRouter", () => {
 		expect(socket.emit).not.toHaveBeenCalled();
 	});
 
-	it("maps RPC errors and timeouts to rejected promises", async () => {
+	it("preserves structured RPC errors and status metadata", async () => {
 		socket.emit.mockImplementation((event, request) => {
 			if (event === "rpc:agent-team:create") {
 				setTimeout(() => {
@@ -195,22 +199,85 @@ describe("TeamRouter", () => {
 							message: "invalid team",
 							retryable: false,
 							scope: "request",
+							status: 422,
+							detail: "title conflicts with an existing team",
 						},
 					});
 				}, 0);
 			}
 		});
 
-		await expect(
-			teamRouter.createAgentTeam(
+		const error = await teamRouter
+			.createAgentTeam(
 				{
 					machineId: "machine-1",
 					backendId: "backend-1",
 					workspaceRootCwd: "/repo",
 				},
 				"user-1",
-			),
-		).rejects.toThrow("invalid team");
+			)
+			.catch((caught: unknown) => caught as AppError);
+
+		expect(error).toBeInstanceOf(AppError);
+		if (!(error instanceof AppError)) {
+			throw new Error("Expected createAgentTeam to reject with AppError");
+		}
+		expect(error).toMatchObject({
+			status: 422,
+			detail: {
+				code: "REQUEST_VALIDATION_FAILED",
+				message: "invalid team",
+				retryable: false,
+				scope: "request",
+				detail: "title conflicts with an existing team",
+			},
+		});
+	});
+
+	it("sanitizes internal Team RPC errors", async () => {
+		socket.emit.mockImplementation((event, request) => {
+			if (event === "rpc:agent-team:create") {
+				setTimeout(() => {
+					teamRouter.handleRpcResponse({
+						requestId: request.requestId,
+						error: {
+							code: "INTERNAL_ERROR",
+							message: "ENOENT /Users/alice/private/team.json",
+							retryable: true,
+							scope: "request",
+							status: 500,
+							detail: "secret stack trace",
+						},
+					});
+				}, 0);
+			}
+		});
+
+		const error = await teamRouter
+			.createAgentTeam(
+				{
+					machineId: "machine-1",
+					backendId: "backend-1",
+					workspaceRootCwd: "/repo",
+				},
+				"user-1",
+			)
+			.catch((caught: unknown) => caught as AppError);
+
+		expect(error).toBeInstanceOf(AppError);
+		if (!(error instanceof AppError)) {
+			throw new Error("Expected createAgentTeam to reject with AppError");
+		}
+		expect(error).toMatchObject({
+			status: 500,
+			detail: {
+				code: "INTERNAL_ERROR",
+				message: "Internal server error",
+				retryable: true,
+				scope: "request",
+			},
+		});
+		expect(error.detail.detail).toBeUndefined();
 	});
 
 	it("rejects pending team RPCs immediately when their CLI disconnects", async () => {

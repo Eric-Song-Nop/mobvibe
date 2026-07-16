@@ -11,6 +11,17 @@ import { auth } from "../lib/auth.js";
 import { logger } from "../lib/logger.js";
 import type { UserAffinityProvider } from "../services/user-affinity.js";
 
+export const INSTANCE_ROUTING_REQUEST_HEADER = "fly-force-instance-id";
+export const INSTANCE_ROUTING_RESPONSE_HEADER = "x-mobvibe-instance-id";
+export const INSTANCE_ROUTING_ALLOWED_HEADERS = Object.freeze([
+	"Content-Type",
+	"Authorization",
+	INSTANCE_ROUTING_REQUEST_HEADER,
+]);
+export const INSTANCE_ROUTING_EXPOSED_HEADERS = Object.freeze([
+	INSTANCE_ROUTING_RESPONSE_HEADER,
+]);
+
 export function createFlyReplayMiddleware(
 	getUserAffinity: UserAffinityProvider,
 	instanceId: string,
@@ -42,6 +53,28 @@ export function createFlyReplayMiddleware(
 			const target = await userAffinity.getUserInstance(userId);
 
 			if (target && target.instanceId !== instanceId) {
+				res.set(INSTANCE_ROUTING_RESPONSE_HEADER, target.instanceId);
+				const forcedInstance = req.headers[INSTANCE_ROUTING_REQUEST_HEADER];
+				if (typeof forcedInstance === "string" && forcedInstance.length > 0) {
+					logger.info(
+						{
+							userId,
+							forcedInstance,
+							targetInstance: target.instanceId,
+							path: req.path,
+						},
+						"fly_forced_instance_stale",
+					);
+					res.status(409).json({
+						error: {
+							code: "INSTANCE_AFFINITY_CHANGED",
+							message: "Request must be retried on the current session owner",
+							retryable: true,
+							scope: "request",
+						},
+					});
+					return;
+				}
 				// User is on another instance — replay
 				logger.info(
 					{
@@ -58,6 +91,10 @@ export function createFlyReplayMiddleware(
 					code: "FLY_REPLAY",
 				});
 				return;
+			}
+
+			if (!target || target.instanceId === instanceId) {
+				res.set(INSTANCE_ROUTING_RESPONSE_HEADER, instanceId);
 			}
 
 			// User is on this instance or new user — proceed

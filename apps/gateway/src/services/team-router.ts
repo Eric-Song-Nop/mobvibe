@@ -12,6 +12,7 @@ import type {
 import type { Socket } from "socket.io";
 import { logger } from "../lib/logger.js";
 import type { CliRecord, CliRegistry } from "./cli-registry.js";
+import { toRpcAppError } from "./rpc-errors.js";
 
 type PendingRpc<T> = {
 	socketId: string;
@@ -119,7 +120,7 @@ export class TeamRouter {
 				},
 				"agent_team_rpc_response_error",
 			);
-			pending.reject(new Error(response.error.message));
+			pending.reject(toRpcAppError(response.error));
 			return;
 		}
 		pending.resolve(response.result);

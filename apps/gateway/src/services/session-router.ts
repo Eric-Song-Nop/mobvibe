@@ -57,6 +57,7 @@ import type {
 import type { Socket } from "socket.io";
 import { logger } from "../lib/logger.js";
 import type { CliRecord, CliRegistry } from "./cli-registry.js";
+import { toRpcAppError } from "./rpc-errors.js";
 
 type PendingRpc<T> = {
 	requestId: string;
@@ -131,11 +132,7 @@ export class SessionRouter {
 				},
 				"rpc_response_error",
 			);
-			const error = new Error(response.error.message);
-			if (response.error.detail) {
-				error.cause = response.error.detail;
-			}
-			pending.reject(error);
+			pending.reject(toRpcAppError(response.error));
 		} else {
 			logger.debug({ requestId: response.requestId }, "rpc_response_success");
 			pending.resolve(response.result);

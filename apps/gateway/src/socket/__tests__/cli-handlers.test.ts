@@ -395,6 +395,79 @@ describe("setupCliHandlers", () => {
 		);
 	});
 
+	it("disconnects when pre-registration payload bytes exceed the queue budget", async () => {
+		let finishUpsert:
+			| ((value: { machineId: string; userId: string }) => void)
+			| undefined;
+		vi.mocked(upsertMachine).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finishUpsert = resolve;
+				}),
+		);
+
+		socketHandlers["cli:register"]?.(
+			createMockRegistrationInfo({ machineId: "raw-machine-1" }),
+		);
+		for (let seq = 1; seq <= 5; seq += 1) {
+			socketHandlers["session:event"]?.({
+				sessionId: "session-byte-flood",
+				machineId: "machine-1",
+				revision: 1,
+				seq,
+				kind: "agent_message_chunk",
+				createdAt: "2026-07-16T00:00:00.000Z",
+				payload: { text: "x".repeat(1024 * 1024) },
+			});
+		}
+		finishUpsert?.({ machineId: "machine-1", userId: "user-1" });
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(socket.disconnect).toHaveBeenCalledWith(true);
+		expect(socket.emit).toHaveBeenCalledWith("cli:error", {
+			code: "REGISTRATION_BACKPRESSURE",
+			message: "Registration event buffer exceeded its byte limit.",
+		});
+		expect(emitToWebui).not.toHaveBeenCalledWith(
+			"session:event",
+			expect.anything(),
+			expect.anything(),
+		);
+	});
+
+	it("disconnects on an unserializable pre-registration payload", async () => {
+		let finishUpsert:
+			| ((value: { machineId: string; userId: string }) => void)
+			| undefined;
+		vi.mocked(upsertMachine).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finishUpsert = resolve;
+				}),
+		);
+
+		socketHandlers["cli:register"]?.(createMockRegistrationInfo());
+		const payload: Record<string, unknown> = {
+			sessionId: "session-cyclic",
+			revision: 1,
+			seq: 1,
+			kind: "agent_message_chunk",
+			createdAt: "2026-07-16T00:00:00.000Z",
+		};
+		payload.payload = payload;
+		socketHandlers["session:event"]?.(payload);
+		finishUpsert?.({ machineId: "machine-1", userId: "user-1" });
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(socket.disconnect).toHaveBeenCalledWith(true);
+		expect(socket.emit).toHaveBeenCalledWith("cli:error", {
+			code: "INVALID_EVENT_PAYLOAD",
+			message: "Event payload must be JSON serializable.",
+		});
+	});
+
 	it("forwards session:attached events to webui", () => {
 		// Register the socket first so the guard passes
 		const info = createMockRegistrationInfo({ machineId: "machine-1" });

@@ -1,4 +1,5 @@
 import type {
+	AppError,
 	CliRegistrationInfo,
 	DiscoverSessionsRpcResult,
 	GitFileDiffResponse,
@@ -466,6 +467,93 @@ describe("SessionRouter", () => {
 			await expect(
 				sessionRouter.discoverSessions("machine-1", undefined, "user-1"),
 			).rejects.toThrow("Agent does not support session listing");
+		});
+
+		it("preserves structured RPC error details and HTTP status", async () => {
+			const socket = createMockSocket("socket-1");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-1" }),
+				{
+					userId: "user-1",
+					deviceId: "device-123",
+				},
+			);
+
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:sessions:discover") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							error: {
+								code: "MESSAGE_OUTCOME_UNKNOWN",
+								message: "Send it again as a new message",
+								retryable: false,
+								scope: "request",
+								status: 409,
+								detail: "The previous outcome could not be proven",
+							},
+						});
+					}, 0);
+				}
+			});
+
+			const error = await sessionRouter
+				.discoverSessions("machine-1", undefined, "user-1")
+				.catch((caught: unknown) => caught as AppError);
+
+			expect(error).toMatchObject({
+				status: 409,
+				detail: {
+					code: "MESSAGE_OUTCOME_UNKNOWN",
+					message: "Send it again as a new message",
+					retryable: false,
+					scope: "request",
+					detail: "The previous outcome could not be proven",
+				},
+			});
+		});
+
+		it("sanitizes generic internal RPC failures", async () => {
+			const socket = createMockSocket("socket-1");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-1" }),
+				{ userId: "user-1", deviceId: "device-123" },
+			);
+
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:sessions:discover") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							error: {
+								code: "INTERNAL_ERROR",
+								message: "ENOENT /Users/alice/private/token.txt",
+								retryable: true,
+								scope: "request",
+								status: 500,
+								detail: "secret stack trace",
+							},
+						});
+					}, 0);
+				}
+			});
+
+			const error = await sessionRouter
+				.discoverSessions("machine-1", undefined, "user-1")
+				.catch((caught: unknown) => caught as AppError);
+
+			expect(error).toMatchObject({
+				status: 500,
+				detail: {
+					code: "INTERNAL_ERROR",
+					message: "Internal server error",
+					retryable: true,
+					scope: "request",
+				},
+			});
+			expect((error as AppError).detail.detail).toBeUndefined();
 		});
 
 		it("rejects pending RPCs immediately when their CLI disconnects", async () => {

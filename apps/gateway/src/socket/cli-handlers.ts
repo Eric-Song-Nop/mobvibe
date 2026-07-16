@@ -35,6 +35,18 @@ interface SocketData {
 }
 
 const MAX_PRE_REGISTRATION_EVENTS = 1_000;
+const MAX_PRE_REGISTRATION_BYTES = 4 * 1024 * 1024;
+
+const getSerializedPayloadBytes = (payload: unknown): number | undefined => {
+	try {
+		const serialized = JSON.stringify(payload);
+		return typeof serialized === "string"
+			? Buffer.byteLength(serialized, "utf8")
+			: undefined;
+	} catch {
+		return undefined;
+	}
+};
 
 export type CliHandlersDeps = {
 	io: Server;
@@ -155,6 +167,7 @@ export function setupCliHandlers(
 			event: string;
 			handler: (record: CliRecord) => void;
 		}> = [];
+		let pendingRegistrationBytes = 0;
 
 		const socketData = (socket as Socket & { data: SocketData }).data;
 		const userId = socketData?.userId;
@@ -172,8 +185,12 @@ export function setupCliHandlers(
 
 		const withRegisteredCli = (
 			event: string,
+			payload: unknown,
 			handler: (record: CliRecord) => void,
 		): void => {
+			if (disconnected) {
+				return;
+			}
 			const record = cliRegistry.getCliBySocketId(socket.id);
 			if (record) {
 				try {
@@ -196,6 +213,46 @@ export function setupCliHandlers(
 				return;
 			}
 
+			const payloadBytes = getSerializedPayloadBytes(payload);
+			if (payloadBytes === undefined) {
+				logger.error(
+					{ socketId: socket.id, event },
+					"cli_event_payload_invalid",
+				);
+				disconnected = true;
+				pendingRegistrationEvents = [];
+				pendingRegistrationBytes = 0;
+				socket.emit("cli:error", {
+					code: "INVALID_EVENT_PAYLOAD",
+					message: "Event payload must be JSON serializable.",
+				});
+				socket.disconnect(true);
+				return;
+			}
+
+			const queuedBytes = Buffer.byteLength(event, "utf8") + payloadBytes;
+			if (pendingRegistrationBytes + queuedBytes > MAX_PRE_REGISTRATION_BYTES) {
+				logger.error(
+					{
+						socketId: socket.id,
+						event,
+						queuedBytes: pendingRegistrationBytes,
+						payloadBytes: queuedBytes,
+						limitBytes: MAX_PRE_REGISTRATION_BYTES,
+					},
+					"cli_pre_registration_queue_bytes_overflow",
+				);
+				disconnected = true;
+				pendingRegistrationEvents = [];
+				pendingRegistrationBytes = 0;
+				socket.emit("cli:error", {
+					code: "REGISTRATION_BACKPRESSURE",
+					message: "Registration event buffer exceeded its byte limit.",
+				});
+				socket.disconnect(true);
+				return;
+			}
+
 			if (pendingRegistrationEvents.length >= MAX_PRE_REGISTRATION_EVENTS) {
 				logger.error(
 					{
@@ -207,6 +264,7 @@ export function setupCliHandlers(
 				);
 				disconnected = true;
 				pendingRegistrationEvents = [];
+				pendingRegistrationBytes = 0;
 				socket.emit("cli:error", {
 					code: "REGISTRATION_BACKPRESSURE",
 					message: "Too many events arrived before registration completed.",
@@ -215,12 +273,14 @@ export function setupCliHandlers(
 				return;
 			}
 
+			pendingRegistrationBytes += queuedBytes;
 			pendingRegistrationEvents.push({ event, handler });
 		};
 
 		const flushPendingRegistrationEvents = (record: CliRecord): boolean => {
 			const pending = pendingRegistrationEvents;
 			pendingRegistrationEvents = [];
+			pendingRegistrationBytes = 0;
 			for (const queued of pending) {
 				if (
 					disconnected ||
@@ -236,6 +296,7 @@ export function setupCliHandlers(
 						"cli_queued_event_failed",
 					);
 					disconnected = true;
+					pendingRegistrationBytes = 0;
 					socket.disconnect(true);
 					return false;
 				}
@@ -263,6 +324,7 @@ export function setupCliHandlers(
 
 				if (!machineResult) {
 					pendingRegistrationEvents = [];
+					pendingRegistrationBytes = 0;
 					logger.error(
 						{ machineId: info.machineId, userId },
 						"cli_register_failed",
@@ -277,6 +339,7 @@ export function setupCliHandlers(
 
 				if (disconnected) {
 					pendingRegistrationEvents = [];
+					pendingRegistrationBytes = 0;
 					logger.info(
 						{ socketId: socket.id, machineId: rawMachineId },
 						"cli_registration_aborted_disconnected",
@@ -334,6 +397,7 @@ export function setupCliHandlers(
 				return record;
 			} catch (error) {
 				pendingRegistrationEvents = [];
+				pendingRegistrationBytes = 0;
 				logger.error(
 					{ err: error, machineId: info.machineId, userId },
 					"cli_register_error",
@@ -369,7 +433,7 @@ export function setupCliHandlers(
 
 		// Sessions list update (initial sync and heartbeat)
 		socket.on("sessions:list", (sessions: SessionSummary[]) => {
-			withRegisteredCli("sessions:list", () => {
+			withRegisteredCli("sessions:list", sessions, () => {
 				cliRegistry.updateSessions(socket.id, sessions);
 				logger.debug(
 					{ socketId: socket.id, sessionCount: sessions.length },
@@ -380,7 +444,7 @@ export function setupCliHandlers(
 
 		// Incremental sessions update
 		socket.on("sessions:changed", (payload: SessionsChangedPayload) => {
-			withRegisteredCli("sessions:changed", () => {
+			withRegisteredCli("sessions:changed", payload, () => {
 				logger.info(
 					{
 						socketId: socket.id,
@@ -396,7 +460,7 @@ export function setupCliHandlers(
 
 		// Historical sessions discovered from ACP agent
 		socket.on("sessions:discovered", (payload: SessionsDiscoveredPayload) => {
-			withRegisteredCli("sessions:discovered", (cliRecord) => {
+			withRegisteredCli("sessions:discovered", payload, (cliRecord) => {
 				const { sessions, capabilities } = payload;
 
 				// Update per-backend capabilities from discovery result
@@ -456,7 +520,7 @@ export function setupCliHandlers(
 		// now go through session:event (WAL-persisted events with seq/revision)
 
 		socket.on("agent-teams:changed", (payload: AgentTeamsChangedPayload) => {
-			withRegisteredCli("agent-teams:changed", (record) => {
+			withRegisteredCli("agent-teams:changed", payload, (record) => {
 				const payloadWithMachineId: AgentTeamsChangedPayload = {
 					...payload,
 					machineId: record.machineId,
@@ -484,7 +548,7 @@ export function setupCliHandlers(
 
 		// Session attached
 		socket.on("session:attached", (payload: SessionAttachedPayload) => {
-			withRegisteredCli("session:attached", (record) => {
+			withRegisteredCli("session:attached", payload, (record) => {
 				logger.info(
 					{ sessionId: payload.sessionId, machineId: record.machineId },
 					"session_attached_received",
@@ -499,7 +563,7 @@ export function setupCliHandlers(
 
 		// Session detached
 		socket.on("session:detached", (payload: SessionDetachedPayload) => {
-			withRegisteredCli("session:detached", (record) => {
+			withRegisteredCli("session:detached", payload, (record) => {
 				logger.info(
 					{
 						sessionId: payload.sessionId,
@@ -518,7 +582,7 @@ export function setupCliHandlers(
 
 		// Permission request from CLI
 		socket.on("permission:request", (payload: PermissionRequestPayload) => {
-			withRegisteredCli("permission:request", (record) => {
+			withRegisteredCli("permission:request", payload, (record) => {
 				logger.info(
 					{ sessionId: payload.sessionId, requestId: payload.requestId },
 					"permission_request_received",
@@ -539,7 +603,7 @@ export function setupCliHandlers(
 
 		// Permission result from CLI
 		socket.on("permission:result", (payload: PermissionDecisionPayload) => {
-			withRegisteredCli("permission:result", (record) => {
+			withRegisteredCli("permission:result", payload, (record) => {
 				logger.info(
 					{ sessionId: payload.sessionId, requestId: payload.requestId },
 					"permission_result_received",
@@ -552,7 +616,7 @@ export function setupCliHandlers(
 		// Note: terminal:output is deprecated - terminal output now goes through
 		// session:event with kind="terminal_output"
 		socket.on("session:event", (event: SessionEvent) => {
-			withRegisteredCli("session:event", (record) => {
+			withRegisteredCli("session:event", event, (record) => {
 				const eventWithMachineId: SessionEvent = {
 					...event,
 					machineId: record.machineId,
@@ -606,6 +670,7 @@ export function setupCliHandlers(
 		socket.on("disconnect", (reason) => {
 			disconnected = true;
 			pendingRegistrationEvents = [];
+			pendingRegistrationBytes = 0;
 			sessionRouter.handleCliDisconnect(socket.id);
 			teamRouter.handleCliDisconnect(socket.id);
 			// Cache userId before unregister (unregister deletes the userId mapping)

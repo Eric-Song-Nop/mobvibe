@@ -134,11 +134,16 @@ export type RpcRequest<TParams> = {
 	params: TParams;
 };
 
+/** RPC-only error metadata. `status` is transport metadata, not part of ErrorDetail. */
+export type RpcError = ErrorDetail & {
+	status?: number;
+};
+
 // RPC response wrapper
 export type RpcResponse<TResult> = {
 	requestId: string;
 	result?: TResult;
-	error?: ErrorDetail;
+	error?: RpcError;
 };
 
 // Worktree options for session creation

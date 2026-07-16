@@ -12,7 +12,11 @@ import { getGatewayConfig, tauriOrigins } from "./config.js";
 import { closeDb } from "./db/index.js";
 import { auth } from "./lib/auth.js";
 import { logger } from "./lib/logger.js";
-import { createFlyReplayMiddleware } from "./middleware/fly-replay.js";
+import {
+	createFlyReplayMiddleware,
+	INSTANCE_ROUTING_ALLOWED_HEADERS,
+	INSTANCE_ROUTING_EXPOSED_HEADERS,
+} from "./middleware/fly-replay.js";
 import { setupAgentTeamRoutes } from "./routes/agent-teams.js";
 import { setupDeviceRoutes } from "./routes/device.js";
 import { setupFsRoutes } from "./routes/fs.js";
@@ -131,7 +135,7 @@ const corsConfig = {
 		}
 		callback(null, isAllowedOrigin(origin));
 	},
-	allowedHeaders: ["Content-Type", "Authorization"],
+	allowedHeaders: [...INSTANCE_ROUTING_ALLOWED_HEADERS],
 	methods: ["GET", "POST"],
 	credentials: true,
 };
@@ -337,7 +341,8 @@ app.use(
 			}
 			callback(null, isAllowedOrigin(origin));
 		},
-		allowedHeaders: ["Content-Type", "Authorization"],
+		allowedHeaders: [...INSTANCE_ROUTING_ALLOWED_HEADERS],
+		exposedHeaders: [...INSTANCE_ROUTING_EXPOSED_HEADERS],
 		methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
 		credentials: true,
 	}),

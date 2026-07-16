@@ -1,5 +1,5 @@
 import type { AddressInfo } from "node:net";
-import type { AgentTeamSummary } from "@mobvibe/shared";
+import { type AgentTeamSummary, AppError } from "@mobvibe/shared";
 import express from "express";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setupAgentTeamRoutes } from "../agent-teams.js";
@@ -214,6 +214,37 @@ describe("agent team routes", () => {
 		expect(ownership.payload.error?.code).toBe("AUTHORIZATION_FAILED");
 		expect(timeout.response.status).toBe(504);
 		expect(timeout.payload.error?.code).toBe("INTERNAL_ERROR");
+	});
+
+	it("returns structured TeamRouter AppErrors with their HTTP status", async () => {
+		teamRouter.createAgentTeam.mockRejectedValueOnce(
+			new AppError(
+				{
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "invalid team",
+					retryable: false,
+					scope: "request",
+				},
+				422,
+			),
+		);
+
+		const { response, payload } = await requestJson(
+			baseUrl,
+			"/acp/agent-teams",
+			{
+				method: "POST",
+				headers: { authorization: "Bearer user-1" },
+				body: JSON.stringify({
+					machineId: "machine-1",
+					workspaceRootCwd: "/repo",
+					leaderBackendId: "backend-1",
+				}),
+			},
+		);
+
+		expect(response.status).toBe(422);
+		expect(payload.error?.code).toBe("REQUEST_VALIDATION_FAILED");
 	});
 
 	it("rejects forbidden plaintext and secret keys before forwarding", async () => {
