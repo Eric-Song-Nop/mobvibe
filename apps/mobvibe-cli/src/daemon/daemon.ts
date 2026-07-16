@@ -25,14 +25,19 @@ const DAEMON_IDENTITY_FILE_PREFIX = ".mobvibe-daemon-";
 const DAEMON_IDENTITY_FILE_SUFFIX = ".identity";
 const PID_FILE_LOCK_RETRY_COUNT = 100;
 const PID_FILE_LOCK_RETRY_MS = 20;
+const PID_FILE_LOCK_OWNER_FILE = "owner.json";
+const MOBVIBE_CLI_PACKAGE_NAME = "@mobvibe/cli";
 
-type SupportedDaemonPlatform = "darwin" | "linux";
+type SupportedDaemonPlatform = "darwin" | "linux" | "win32";
 
 export type DaemonProcessIdentity = {
 	platform: SupportedDaemonPlatform;
-	uid: number;
+	uid: number | string;
 	startTime: string;
 	instanceId: string | null;
+	commandLine?: string[];
+	cwd?: string;
+	cwdPackageName?: string;
 };
 
 export type DaemonPidRecord = {
@@ -42,12 +47,11 @@ export type DaemonPidRecord = {
 	process: Omit<DaemonProcessIdentity, "instanceId">;
 };
 
-type DaemonPidState = {
-	content: string;
-	record: DaemonPidRecord;
-};
+type DaemonPidState =
+	| { kind: "record"; content: string; record: DaemonPidRecord }
+	| { kind: "legacy"; content: string; pid: number };
 
-type DaemonIdentityState = "matches" | "missing" | "mismatch";
+type DaemonIdentityState = "matches" | "missing" | "mismatch" | "unverifiable";
 
 const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
 	error instanceof Error && "code" in error;
@@ -55,7 +59,7 @@ const isNodeError = (error: unknown): error is NodeJS.ErrnoException =>
 export type DaemonProcessControl = {
 	kill: (pid: number, signal: NodeJS.Signals | 0) => void;
 	inspectProcess: (pid: number) => Promise<DaemonProcessIdentity | null>;
-	currentUid: () => number | null;
+	currentUid: () => number | string | null | Promise<number | string | null>;
 	now: () => number;
 	wait: (milliseconds: number) => Promise<void>;
 };
@@ -65,6 +69,145 @@ const daemonIdentityFileName = (instanceId: string): string =>
 
 const daemonIdentityFilePath = (pidFile: string, instanceId: string): string =>
 	path.join(path.dirname(pidFile), daemonIdentityFileName(instanceId));
+
+const parseQuotedCommandLine = (commandLine: string): string[] => {
+	const args: string[] = [];
+	let current = "";
+	let quote: '"' | "'" | undefined;
+	for (const character of commandLine.trim()) {
+		if (character === '"' || character === "'") {
+			if (quote === character) {
+				quote = undefined;
+			} else if (!quote) {
+				quote = character;
+			} else {
+				current += character;
+			}
+			continue;
+		}
+		if (/\s/.test(character) && !quote) {
+			if (current) {
+				args.push(current);
+				current = "";
+			}
+			continue;
+		}
+		current += character;
+	}
+	if (current) args.push(current);
+	return args;
+};
+
+const isAllowedLegacyRuntimeFlag = (
+	runtimeName: string,
+	argument: string,
+): boolean => {
+	if (runtimeName === "bun" || runtimeName === "bun.exe") {
+		return (
+			argument === "--watch" ||
+			argument === "--hot" ||
+			argument === "--no-clear-screen"
+		);
+	}
+	if (runtimeName === "node" || runtimeName === "node.exe") {
+		return (
+			argument === "--watch" ||
+			argument === "--watch-preserve-output" ||
+			/^--watch-(?:kill-signal|path)=.+$/.test(argument)
+		);
+	}
+	return false;
+};
+
+const getLegacyMobvibeCommandState = (
+	identity: DaemonProcessIdentity,
+): Exclude<DaemonIdentityState, "missing"> => {
+	const args = identity.commandLine;
+	if (!args || args.length === 0) return "mismatch";
+	const normalizedArgs = args.map((argument) => argument.toLowerCase());
+	const startIndex = normalizedArgs.indexOf("start");
+	if (startIndex < 1) return "mismatch";
+	const daemonArguments = normalizedArgs.slice(startIndex + 1);
+	if (
+		!daemonArguments.includes("--foreground") &&
+		!daemonArguments.includes("-f")
+	) {
+		return "mismatch";
+	}
+	const commandPrefix = normalizedArgs.slice(0, startIndex);
+	const executablePath = commandPrefix[0]?.replace(/\\/g, "/");
+	if (!executablePath) return "mismatch";
+	if (commandPrefix.length === 1) {
+		return /^mobvibe(?:\.exe)?$/.test(path.posix.basename(executablePath))
+			? "matches"
+			: "mismatch";
+	}
+	const runtimeName = path.posix.basename(executablePath);
+	if (!/^(?:bun|node)(?:\.exe)?$/.test(runtimeName)) {
+		return "mismatch";
+	}
+	let entrypointIndex = 1;
+	while (
+		entrypointIndex < commandPrefix.length &&
+		commandPrefix[entrypointIndex]?.startsWith("-")
+	) {
+		const runtimeFlag = commandPrefix[entrypointIndex];
+		if (!runtimeFlag || !isAllowedLegacyRuntimeFlag(runtimeName, runtimeFlag)) {
+			return "mismatch";
+		}
+		entrypointIndex += 1;
+	}
+	if (entrypointIndex !== commandPrefix.length - 1) return "mismatch";
+
+	const entrypointPath = commandPrefix[entrypointIndex]?.replace(/\\/g, "/");
+	if (!entrypointPath) return "mismatch";
+	if (
+		entrypointPath.includes("/apps/mobvibe-cli/") ||
+		entrypointPath.includes("/node_modules/@mobvibe/cli/")
+	) {
+		return "matches";
+	}
+	const relativeEntrypoint = entrypointPath.replace(/^\.\//, "");
+	const isRelativeDevelopmentEntrypoint =
+		relativeEntrypoint === "dist/index.js" ||
+		relativeEntrypoint === "src/index.ts";
+	if (!isRelativeDevelopmentEntrypoint) return "mismatch";
+	if (
+		identity.cwdPackageName !== undefined &&
+		identity.cwdPackageName !== MOBVIBE_CLI_PACKAGE_NAME
+	) {
+		return "mismatch";
+	}
+	if (!identity.cwd || identity.cwdPackageName === undefined) {
+		return "unverifiable";
+	}
+	return "matches";
+};
+
+const readCwdPackageName = async (cwd: string): Promise<string | undefined> => {
+	let content: string;
+	try {
+		content = await fs.readFile(path.join(cwd, "package.json"), "utf8");
+	} catch (error) {
+		if (
+			isNodeError(error) &&
+			(error.code === "ENOENT" ||
+				error.code === "ENOTDIR" ||
+				error.code === "EACCES")
+		) {
+			return undefined;
+		}
+		throw error;
+	}
+	try {
+		const parsed = JSON.parse(content) as unknown;
+		if (!parsed || typeof parsed !== "object") return undefined;
+		const name = (parsed as Record<string, unknown>).name;
+		return typeof name === "string" ? name : undefined;
+	} catch {
+		return undefined;
+	}
+};
 
 const extractDaemonInstanceId = (
 	openFiles: readonly string[],
@@ -115,11 +258,14 @@ const inspectLinuxProcess = async (
 ): Promise<DaemonProcessIdentity | null> => {
 	try {
 		const processDirectory = `/proc/${pid}`;
-		const [statContent, processStat, openFiles] = await Promise.all([
-			fs.readFile(path.join(processDirectory, "stat"), "utf8"),
-			fs.stat(processDirectory),
-			readLinuxOpenFiles(pid),
-		]);
+		const [statContent, processStat, openFiles, commandLineContent, cwd] =
+			await Promise.all([
+				fs.readFile(path.join(processDirectory, "stat"), "utf8"),
+				fs.stat(processDirectory),
+				readLinuxOpenFiles(pid),
+				fs.readFile(path.join(processDirectory, "cmdline"), "utf8"),
+				fs.readlink(path.join(processDirectory, "cwd")),
+			]);
 		const commandEnd = statContent.lastIndexOf(")");
 		if (commandEnd < 0) {
 			throw new Error(`Unable to parse process identity for PID ${pid}`);
@@ -137,6 +283,9 @@ const inspectLinuxProcess = async (
 			uid: processStat.uid,
 			startTime,
 			instanceId: extractDaemonInstanceId(openFiles),
+			commandLine: commandLineContent.split("\0").filter(Boolean),
+			cwd,
+			cwdPackageName: await readCwdPackageName(cwd),
 		};
 	} catch (error) {
 		if (
@@ -196,14 +345,68 @@ const runLsof = async (pid: number): Promise<string[] | null> =>
 		);
 	});
 
+const runPsCommand = async (pid: number): Promise<string | null> =>
+	new Promise((resolve, reject) => {
+		execFile(
+			"ps",
+			["-p", String(pid), "-o", "command="],
+			{ encoding: "utf8", env: { ...process.env, LC_ALL: "C" } },
+			(error, stdout) => {
+				if (error) {
+					const exitCode = (error as Error & { code?: string | number }).code;
+					if (exitCode === 1 || exitCode === "1") {
+						resolve(null);
+						return;
+					}
+					reject(error);
+					return;
+				}
+				resolve(stdout);
+			},
+		);
+	});
+
+const runLsofCwd = async (pid: number): Promise<string | null> =>
+	new Promise((resolve, reject) => {
+		execFile(
+			"/usr/sbin/lsof",
+			["-a", "-p", String(pid), "-d", "cwd", "-Fn"],
+			{ encoding: "utf8", env: { ...process.env, LC_ALL: "C" } },
+			(error, stdout) => {
+				if (error) {
+					const exitCode = (error as Error & { code?: string | number }).code;
+					if (exitCode === 1 || exitCode === "1") {
+						resolve(null);
+						return;
+					}
+					reject(error);
+					return;
+				}
+				resolve(
+					stdout
+						.split("\n")
+						.find((line) => line.startsWith("n"))
+						?.slice(1) ?? null,
+				);
+			},
+		);
+	});
+
 export type DarwinProcessInspection = {
 	runPs: (pid: number) => Promise<string | null>;
 	runLsof: (pid: number) => Promise<string[] | null>;
+	runCommand?: (pid: number) => Promise<string | null>;
+	runCwd?: (pid: number) => Promise<string | null>;
 };
 
 export const inspectDarwinProcess = async (
 	pid: number,
-	inspection: DarwinProcessInspection = { runPs, runLsof },
+	inspection: DarwinProcessInspection = {
+		runPs,
+		runLsof,
+		runCommand: runPsCommand,
+		runCwd: runLsofCwd,
+	},
 ): Promise<DaemonProcessIdentity | null> => {
 	const output = await inspection.runPs(pid);
 	if (output === null || output.trim() === "") return null;
@@ -211,6 +414,10 @@ export const inspectDarwinProcess = async (
 	if (openFiles === null) {
 		throw new Error(`Unable to inspect open files for daemon process ${pid}`);
 	}
+	const command = inspection.runCommand
+		? await inspection.runCommand(pid)
+		: undefined;
+	const cwd = inspection.runCwd ? await inspection.runCwd(pid) : undefined;
 	const match = output
 		.trim()
 		.match(
@@ -228,7 +435,127 @@ export const inspectDarwinProcess = async (
 		uid,
 		startTime: match[2],
 		instanceId: extractDaemonInstanceId(openFiles),
+		commandLine: command ? parseQuotedCommandLine(command) : undefined,
+		cwd: cwd ?? undefined,
+		cwdPackageName: cwd ? await readCwdPackageName(cwd) : undefined,
 	};
+};
+
+const runPowerShellProcessQuery = async (pid: number): Promise<string | null> =>
+	new Promise((resolve, reject) => {
+		const script = `
+			[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+			$process = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'
+			if ($null -eq $process) { exit 3 }
+			$owner = Invoke-CimMethod -InputObject $process -MethodName GetOwnerSid
+			if ($owner.ReturnValue -ne 0 -or [string]::IsNullOrWhiteSpace($owner.Sid)) { exit 4 }
+			[PSCustomObject]@{
+				ownerSid = $owner.Sid
+				startTime = $process.CreationDate.ToUniversalTime().ToString('O')
+				commandLine = $process.CommandLine
+			} | ConvertTo-Json -Compress
+		`;
+		execFile(
+			"powershell.exe",
+			["-NoProfile", "-NonInteractive", "-Command", script],
+			{ encoding: "utf8" },
+			(error, stdout) => {
+				if (error) {
+					const exitCode = (error as Error & { code?: string | number }).code;
+					if (exitCode === 3 || exitCode === "3") {
+						resolve(null);
+						return;
+					}
+					reject(error);
+					return;
+				}
+				resolve(stdout);
+			},
+		);
+	});
+
+export type WindowsProcessInspection = {
+	runPowerShell: (pid: number) => Promise<string | null>;
+};
+
+export const inspectWindowsProcess = async (
+	pid: number,
+	inspection: WindowsProcessInspection = {
+		runPowerShell: runPowerShellProcessQuery,
+	},
+): Promise<DaemonProcessIdentity | null> => {
+	const output = await inspection.runPowerShell(pid);
+	if (output === null) return null;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(output.trim());
+	} catch {
+		throw new Error(`Unable to parse process identity for PID ${pid}`);
+	}
+	if (!parsed || typeof parsed !== "object") {
+		throw new Error(`Unable to parse process identity for PID ${pid}`);
+	}
+	const record = parsed as Record<string, unknown>;
+	if (
+		typeof record.ownerSid !== "string" ||
+		!/^S-\d+(?:-\d+)+$/i.test(record.ownerSid.trim()) ||
+		typeof record.startTime !== "string" ||
+		!record.startTime.trim() ||
+		(record.commandLine !== null &&
+			record.commandLine !== undefined &&
+			typeof record.commandLine !== "string")
+	) {
+		throw new Error(`Unable to parse process identity for PID ${pid}`);
+	}
+	return {
+		platform: "win32",
+		uid: record.ownerSid.trim().toUpperCase(),
+		startTime: record.startTime.trim(),
+		instanceId: null,
+		commandLine:
+			typeof record.commandLine === "string"
+				? parseQuotedCommandLine(record.commandLine)
+				: undefined,
+	};
+};
+
+const runPowerShellCurrentUserSid = async (): Promise<string> =>
+	new Promise((resolve, reject) => {
+		const script = `
+			[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+			$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+			if ([string]::IsNullOrWhiteSpace($sid)) { exit 4 }
+			$sid
+		`;
+		execFile(
+			"powershell.exe",
+			["-NoProfile", "-NonInteractive", "-Command", script],
+			{ encoding: "utf8" },
+			(error, stdout) => {
+				if (error) {
+					reject(error);
+					return;
+				}
+				const sid = stdout.trim().toUpperCase();
+				if (!/^S-\d+(?:-\d+)+$/.test(sid)) {
+					reject(new Error("Unable to determine the current Windows user SID"));
+					return;
+				}
+				resolve(sid);
+			},
+		);
+	});
+
+let currentWindowsSidPromise: Promise<string> | undefined;
+
+const getCurrentWindowsSid = (): Promise<string> => {
+	if (!currentWindowsSidPromise) {
+		currentWindowsSidPromise = runPowerShellCurrentUserSid().catch((error) => {
+			currentWindowsSidPromise = undefined;
+			throw error;
+		});
+	}
+	return currentWindowsSidPromise;
 };
 
 const inspectDaemonProcess = async (
@@ -236,6 +563,7 @@ const inspectDaemonProcess = async (
 ): Promise<DaemonProcessIdentity | null> => {
 	if (process.platform === "linux") return inspectLinuxProcess(pid);
 	if (process.platform === "darwin") return inspectDarwinProcess(pid);
+	if (process.platform === "win32") return inspectWindowsProcess(pid);
 	throw new Error(
 		`Daemon process identity verification is unsupported on ${process.platform}`,
 	);
@@ -246,7 +574,10 @@ const daemonProcessControl: DaemonProcessControl = {
 		process.kill(pid, signal);
 	},
 	inspectProcess: inspectDaemonProcess,
-	currentUid: () => process.getuid?.() ?? null,
+	currentUid: () =>
+		process.platform === "win32"
+			? getCurrentWindowsSid()
+			: (process.getuid?.() ?? null),
 	now: Date.now,
 	wait: (milliseconds) =>
 		new Promise((resolve) => setTimeout(resolve, milliseconds)),
@@ -255,50 +586,403 @@ const daemonProcessControl: DaemonProcessControl = {
 const delay = async (milliseconds: number): Promise<void> =>
 	new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+type PidFileLockRecord = {
+	version: 1;
+	pid: number;
+	nonce: string;
+	process: {
+		platform: SupportedDaemonPlatform;
+		uid: number | string;
+		startTime: string;
+	};
+};
+
+type PidFileLockState = {
+	content: string;
+	record: PidFileLockRecord;
+};
+
+const isPidFileLockRecord = (value: unknown): value is PidFileLockRecord => {
+	if (!value || typeof value !== "object") return false;
+	const record = value as Partial<PidFileLockRecord>;
+	const processIdentity = record.process as
+		| Partial<PidFileLockRecord["process"]>
+		| undefined;
+	return (
+		record.version === 1 &&
+		typeof record.pid === "number" &&
+		Number.isSafeInteger(record.pid) &&
+		record.pid > 0 &&
+		typeof record.nonce === "string" &&
+		/^[a-f0-9]{16}$/.test(record.nonce) &&
+		processIdentity !== undefined &&
+		(processIdentity.platform === "linux" ||
+			processIdentity.platform === "darwin" ||
+			processIdentity.platform === "win32") &&
+		(typeof processIdentity.uid === "number" ||
+			typeof processIdentity.uid === "string") &&
+		typeof processIdentity.startTime === "string" &&
+		processIdentity.startTime.length > 0 &&
+		processIdentity.startTime.length <= 256
+	);
+};
+
+const readPidFileLockState = async (
+	lockDirectory: string,
+): Promise<PidFileLockState | null> => {
+	let content: string;
+	try {
+		content = await fs.readFile(
+			path.join(lockDirectory, PID_FILE_LOCK_OWNER_FILE),
+			"utf8",
+		);
+	} catch (error) {
+		if (isNodeError(error) && error.code === "ENOENT") return null;
+		throw error;
+	}
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(content);
+	} catch {
+		return null;
+	}
+	return isPidFileLockRecord(parsed) ? { content, record: parsed } : null;
+};
+
+type InspectPidFileLockProcess = (
+	pid: number,
+) => Promise<DaemonProcessIdentity | null>;
+
+let currentPidFileLockIdentityPromise:
+	| Promise<DaemonProcessIdentity | null>
+	| undefined;
+
+const getCurrentPidFileLockIdentity = () => {
+	if (!currentPidFileLockIdentityPromise) {
+		currentPidFileLockIdentityPromise = inspectDaemonProcess(process.pid).catch(
+			(error) => {
+				currentPidFileLockIdentityPromise = undefined;
+				throw error;
+			},
+		);
+	}
+	return currentPidFileLockIdentityPromise;
+};
+
+const isPidFileLockOwnerActive = async (
+	record: PidFileLockRecord,
+	inspectProcess: InspectPidFileLockProcess,
+): Promise<boolean> => {
+	const identity = await inspectProcess(record.pid);
+	return (
+		identity !== null &&
+		identity.platform === record.process.platform &&
+		identity.uid === record.process.uid &&
+		identity.startTime === record.process.startTime
+	);
+};
+
+const pathExists = async (targetPath: string): Promise<boolean> => {
+	try {
+		await fs.access(targetPath);
+		return true;
+	} catch (error) {
+		if (isNodeError(error) && error.code === "ENOENT") return false;
+		throw error;
+	}
+};
+
+const throwIfPidFileLockHasNoVerifiableOwner = async (
+	lockDirectory: string,
+): Promise<void> => {
+	if (await readPidFileLockState(lockDirectory)) return;
+
+	// Legacy writers published an empty lock directory, while current lock and
+	// recovery claims are atomically published with an owner. Without a valid
+	// owner identity, no writer can be fenced from a later claim, so recovery
+	// must be manual rather than based on mtime.
+	let entries: string[];
+	try {
+		entries = await fs.readdir(lockDirectory);
+	} catch (error) {
+		if (isNodeError(error) && error.code === "ENOENT") return;
+		throw error;
+	}
+	const reason = entries.includes(PID_FILE_LOCK_OWNER_FILE)
+		? "its owner record is invalid"
+		: "it has no owner record";
+	throw new Error(
+		`Daemon PID lock cannot be safely recovered because ${reason}: ${lockDirectory}. Verify that no Mobvibe CLI process is accessing the PID file, then remove this lock directory and retry.`,
+	);
+};
+
+type PreparedPidFileLockClaim = {
+	candidateDirectory: string;
+	content: string;
+};
+
+const preparePidFileLockClaim = async (
+	claimDirectory: string,
+	identity: DaemonProcessIdentity,
+): Promise<PreparedPidFileLockClaim> => {
+	const nonce = randomBytes(8).toString("hex");
+	const content = JSON.stringify({
+		version: 1,
+		pid: process.pid,
+		nonce,
+		process: {
+			platform: identity.platform,
+			uid: identity.uid,
+			startTime: identity.startTime,
+		},
+	} satisfies PidFileLockRecord);
+	const candidateDirectory = `${claimDirectory}.candidate.${process.pid}.${nonce}`;
+	await fs.mkdir(candidateDirectory);
+	try {
+		await fs.writeFile(
+			path.join(candidateDirectory, PID_FILE_LOCK_OWNER_FILE),
+			content,
+			{ encoding: "utf8", flag: "wx", mode: 0o600 },
+		);
+	} catch (error) {
+		await fs.rm(candidateDirectory, { recursive: true, force: true });
+		throw error;
+	}
+	return { candidateDirectory, content };
+};
+
+const releasePidFileLockClaim = async (
+	claimDirectory: string,
+	expectedContent: string,
+): Promise<void> => {
+	const current = await readPidFileLockState(claimDirectory);
+	if (current?.content === expectedContent) {
+		await fs.rm(claimDirectory, { recursive: true });
+	}
+};
+
+const removeAbandonedPidFileLockClaim = async (
+	claimDirectory: string,
+	inspectProcess: InspectPidFileLockProcess,
+): Promise<boolean> => {
+	const observed = await readPidFileLockState(claimDirectory);
+	if (
+		!observed ||
+		(await isPidFileLockOwnerActive(observed.record, inspectProcess))
+	) {
+		return false;
+	}
+	const abandonedDirectory = `${claimDirectory}.abandoned.${process.pid}.${randomBytes(8).toString("hex")}`;
+	try {
+		await fs.rename(claimDirectory, abandonedDirectory);
+	} catch (error) {
+		if (isNodeError(error) && error.code === "ENOENT") return true;
+		throw error;
+	}
+	const moved = await readPidFileLockState(abandonedDirectory);
+	if (!moved || moved.content !== observed.content) {
+		await fs.rename(abandonedDirectory, claimDirectory).catch(() => undefined);
+		return false;
+	}
+	await fs.rm(abandonedDirectory, { recursive: true, force: true });
+	return true;
+};
+
+const recoverAbandonedPidFileLock = async (
+	lockDirectory: string,
+	inspectProcess: InspectPidFileLockProcess,
+): Promise<boolean> => {
+	const observed = await readPidFileLockState(lockDirectory);
+	if (
+		!observed ||
+		(await isPidFileLockOwnerActive(observed.record, inspectProcess))
+	) {
+		return false;
+	}
+
+	const recoveryDirectory = `${lockDirectory}.recovery`;
+	const ownerIdentity = await inspectProcess(process.pid);
+	if (!ownerIdentity) {
+		throw new Error("Unable to verify the PID file recovery owner process");
+	}
+	const prepared = await preparePidFileLockClaim(
+		recoveryDirectory,
+		ownerIdentity,
+	);
+	let recoveryAcquired = false;
+
+	try {
+		if (await pathExists(recoveryDirectory)) {
+			if (
+				!(await removeAbandonedPidFileLockClaim(
+					recoveryDirectory,
+					inspectProcess,
+				))
+			) {
+				return false;
+			}
+		}
+		try {
+			await fs.rename(prepared.candidateDirectory, recoveryDirectory);
+			recoveryAcquired = true;
+		} catch (error) {
+			if (
+				isNodeError(error) &&
+				(error.code === "EEXIST" || error.code === "ENOTEMPTY")
+			) {
+				return false;
+			}
+			throw error;
+		}
+
+		const current = await readPidFileLockState(lockDirectory);
+		if (
+			!current ||
+			current.content !== observed.content ||
+			(await isPidFileLockOwnerActive(current.record, inspectProcess))
+		) {
+			return false;
+		}
+		const recoveryState = await readPidFileLockState(recoveryDirectory);
+		if (recoveryState?.content !== prepared.content) return false;
+
+		const abandonedDirectory = `${lockDirectory}.abandoned.${process.pid}.${randomBytes(8).toString("hex")}`;
+		try {
+			await fs.rename(lockDirectory, abandonedDirectory);
+		} catch (error) {
+			if (isNodeError(error) && error.code === "ENOENT") return true;
+			throw error;
+		}
+
+		const moved = await readPidFileLockState(abandonedDirectory);
+		if (!moved || moved.content !== observed.content) {
+			await fs.rename(abandonedDirectory, lockDirectory).catch(() => undefined);
+			return false;
+		}
+		await fs.rm(abandonedDirectory, { recursive: true, force: true });
+		return true;
+	} finally {
+		if (recoveryAcquired) {
+			await releasePidFileLockClaim(recoveryDirectory, prepared.content);
+		}
+		await fs.rm(prepared.candidateDirectory, {
+			recursive: true,
+			force: true,
+		});
+	}
+};
+
 const withPidFileLock = async <T>(
 	pidFile: string,
 	operation: () => Promise<T>,
+	inspectProcess: InspectPidFileLockProcess = inspectDaemonProcess,
 ): Promise<T> => {
 	const lockDirectory = `${pidFile}.lock`;
+	const recoveryDirectory = `${lockDirectory}.recovery`;
+	const ownerIdentity =
+		inspectProcess === inspectDaemonProcess
+			? await getCurrentPidFileLockIdentity()
+			: await inspectProcess(process.pid);
+	if (!ownerIdentity) {
+		throw new Error("Unable to verify the PID file lock owner process");
+	}
+	const prepared = await preparePidFileLockClaim(lockDirectory, ownerIdentity);
 	let acquired = false;
-	for (let attempt = 0; attempt < PID_FILE_LOCK_RETRY_COUNT; attempt++) {
-		try {
-			await fs.mkdir(lockDirectory);
-			acquired = true;
-			break;
-		} catch (error) {
-			if (!isNodeError(error) || error.code !== "EEXIST") throw error;
-			await delay(PID_FILE_LOCK_RETRY_MS);
-		}
-	}
-	if (!acquired) {
-		throw new Error(`Daemon PID file is busy: ${pidFile}`);
-	}
 	try {
-		return await operation();
+		for (let attempt = 0; attempt < PID_FILE_LOCK_RETRY_COUNT; attempt++) {
+			if (await pathExists(recoveryDirectory)) {
+				if (
+					await removeAbandonedPidFileLockClaim(
+						recoveryDirectory,
+						inspectProcess,
+					)
+				) {
+					continue;
+				}
+				await throwIfPidFileLockHasNoVerifiableOwner(recoveryDirectory);
+				await delay(PID_FILE_LOCK_RETRY_MS);
+				continue;
+			}
+			if (await pathExists(lockDirectory)) {
+				if (await recoverAbandonedPidFileLock(lockDirectory, inspectProcess)) {
+					continue;
+				}
+				await throwIfPidFileLockHasNoVerifiableOwner(lockDirectory);
+				await delay(PID_FILE_LOCK_RETRY_MS);
+				continue;
+			}
+			try {
+				await fs.rename(prepared.candidateDirectory, lockDirectory);
+			} catch (error) {
+				if (
+					!isNodeError(error) ||
+					(error.code !== "EEXIST" && error.code !== "ENOTEMPTY")
+				) {
+					throw error;
+				}
+				if (await recoverAbandonedPidFileLock(lockDirectory, inspectProcess)) {
+					continue;
+				}
+				await throwIfPidFileLockHasNoVerifiableOwner(lockDirectory);
+				await delay(PID_FILE_LOCK_RETRY_MS);
+				continue;
+			}
+			acquired = true;
+			if (await pathExists(recoveryDirectory)) {
+				if (
+					!(await removeAbandonedPidFileLockClaim(
+						recoveryDirectory,
+						inspectProcess,
+					))
+				) {
+					await fs.rename(lockDirectory, prepared.candidateDirectory);
+					acquired = false;
+					await throwIfPidFileLockHasNoVerifiableOwner(recoveryDirectory);
+					await delay(PID_FILE_LOCK_RETRY_MS);
+					continue;
+				}
+			}
+			break;
+		}
+		if (!acquired) {
+			throw new Error(`Daemon PID file is busy: ${pidFile}`);
+		}
+		try {
+			return await operation();
+		} finally {
+			await releasePidFileLockClaim(lockDirectory, prepared.content);
+		}
 	} finally {
-		await fs.rmdir(lockDirectory).catch((error: unknown) => {
-			if (!isNodeError(error) || error.code !== "ENOENT") throw error;
-		});
+		if (!acquired) {
+			await fs.rm(prepared.candidateDirectory, {
+				recursive: true,
+				force: true,
+			});
+		}
 	}
 };
 
 export async function removeDaemonPidFile(
 	pidFile: string,
 	expectedContent: string,
+	inspectProcess: InspectPidFileLockProcess = inspectDaemonProcess,
 ): Promise<boolean> {
-	return withPidFileLock(pidFile, async () => {
-		let currentContent: string;
-		try {
-			currentContent = await fs.readFile(pidFile, "utf8");
-		} catch (error) {
-			if (isNodeError(error) && error.code === "ENOENT") return false;
-			throw error;
-		}
-		if (currentContent !== expectedContent) return false;
-		await fs.unlink(pidFile);
-		return true;
-	});
+	return withPidFileLock(
+		pidFile,
+		async () => {
+			let currentContent: string;
+			try {
+				currentContent = await fs.readFile(pidFile, "utf8");
+			} catch (error) {
+				if (isNodeError(error) && error.code === "ENOENT") return false;
+				throw error;
+			}
+			if (currentContent !== expectedContent) return false;
+			await fs.unlink(pidFile);
+			return true;
+		},
+		inspectProcess,
+	);
 }
 
 const isDaemonPidRecord = (value: unknown): value is DaemonPidRecord => {
@@ -316,10 +1000,15 @@ const isDaemonPidRecord = (value: unknown): value is DaemonPidRecord => {
 		/^[a-f0-9]{16}$/.test(record.instanceId) &&
 		processIdentity !== undefined &&
 		(processIdentity.platform === "linux" ||
-			processIdentity.platform === "darwin") &&
-		typeof processIdentity.uid === "number" &&
-		Number.isSafeInteger(processIdentity.uid) &&
-		processIdentity.uid >= 0 &&
+			processIdentity.platform === "darwin" ||
+			processIdentity.platform === "win32") &&
+		(processIdentity.platform === "win32"
+			? typeof processIdentity.uid === "string" &&
+				processIdentity.uid.length > 0 &&
+				processIdentity.uid.length <= 256
+			: typeof processIdentity.uid === "number" &&
+				Number.isSafeInteger(processIdentity.uid) &&
+				processIdentity.uid >= 0) &&
 		typeof processIdentity.startTime === "string" &&
 		processIdentity.startTime.length > 0 &&
 		processIdentity.startTime.length <= 256
@@ -338,9 +1027,11 @@ const readDaemonPidState = async (
 	}
 	const normalizedContent = content.trim();
 	if (/^[1-9]\d*$/.test(normalizedContent)) {
-		throw new Error(
-			`Unsafe legacy daemon PID file cannot be verified: ${pidFile}`,
-		);
+		const pid = Number(normalizedContent);
+		if (!Number.isSafeInteger(pid) || pid <= 0) {
+			throw new Error(`Invalid daemon PID file: ${pidFile}`);
+		}
+		return { kind: "legacy", content, pid };
 	}
 	let parsed: unknown;
 	try {
@@ -351,14 +1042,14 @@ const readDaemonPidState = async (
 	if (!isDaemonPidRecord(parsed)) {
 		throw new Error(`Invalid daemon PID file: ${pidFile}`);
 	}
-	return { content, record: parsed };
+	return { kind: "record", content, record: parsed };
 };
 
 const getDaemonIdentityState = async (
 	record: DaemonPidRecord,
 	control: DaemonProcessControl,
 ): Promise<DaemonIdentityState> => {
-	const currentUid = control.currentUid();
+	const currentUid = await control.currentUid();
 	if (currentUid === null) {
 		throw new Error(
 			"Daemon process ownership cannot be verified on this platform",
@@ -375,12 +1066,86 @@ const getDaemonIdentityState = async (
 		identity.platform !== record.process.platform ||
 		identity.uid !== record.process.uid ||
 		identity.startTime !== record.process.startTime ||
-		identity.instanceId !== record.instanceId
+		(record.process.platform !== "win32" &&
+			identity.instanceId !== record.instanceId)
 	) {
 		return "mismatch";
 	}
 	return "matches";
 };
+
+type LegacyDaemonIdentityCheck = {
+	state: DaemonIdentityState;
+	token?: Pick<DaemonProcessIdentity, "platform" | "uid" | "startTime">;
+};
+
+const inspectLegacyDaemonIdentity = async (
+	pid: number,
+	control: DaemonProcessControl,
+	expectedIdentity?: Pick<
+		DaemonProcessIdentity,
+		"platform" | "uid" | "startTime"
+	>,
+): Promise<LegacyDaemonIdentityCheck> => {
+	const currentUid = await control.currentUid();
+	if (currentUid === null) {
+		throw new Error(
+			"Daemon process ownership cannot be verified on this platform",
+		);
+	}
+	const identity = await control.inspectProcess(pid);
+	if (identity === null) return { state: "missing" };
+	if (
+		expectedIdentity &&
+		(identity.platform !== expectedIdentity.platform ||
+			identity.uid !== expectedIdentity.uid ||
+			identity.startTime !== expectedIdentity.startTime)
+	) {
+		return { state: "mismatch" };
+	}
+	if (identity.uid !== currentUid) {
+		return { state: "mismatch" };
+	}
+	const commandState = getLegacyMobvibeCommandState(identity);
+	if (commandState !== "matches") return { state: commandState };
+	return {
+		state: "matches",
+		token: {
+			platform: identity.platform,
+			uid: identity.uid,
+			startTime: identity.startTime,
+		},
+	};
+};
+
+const getLegacyDaemonIdentityState = async (
+	pid: number,
+	control: DaemonProcessControl,
+	expectedIdentity?: Pick<
+		DaemonProcessIdentity,
+		"platform" | "uid" | "startTime"
+	>,
+): Promise<DaemonIdentityState> =>
+	(await inspectLegacyDaemonIdentity(pid, control, expectedIdentity)).state;
+
+const getDaemonPidStateIdentity = async (
+	state: DaemonPidState,
+	control: DaemonProcessControl,
+): Promise<DaemonIdentityState> =>
+	state.kind === "record"
+		? getDaemonIdentityState(state.record, control)
+		: getLegacyDaemonIdentityState(state.pid, control);
+
+const getPidFromState = (state: DaemonPidState): number =>
+	state.kind === "record" ? state.record.pid : state.pid;
+
+const createUnverifiableLegacyDaemonError = (
+	pid: number,
+	pidFile: string,
+): Error =>
+	new Error(
+		`Legacy daemon PID ${pid} cannot be safely verified because its relative entrypoint has no verifiable Mobvibe package identity. Inspect PID ${pid} and confirm it is not the Mobvibe daemon before manually removing ${pidFile}.`,
+	);
 
 const removeStoppedDaemonPidState = async (
 	pidFile: string,
@@ -388,6 +1153,7 @@ const removeStoppedDaemonPidState = async (
 ): Promise<void> => {
 	const removed = await removeDaemonPidFile(pidFile, state.content);
 	if (!removed) return;
+	if (state.kind === "legacy") return;
 	await fs
 		.unlink(daemonIdentityFilePath(pidFile, state.record.instanceId))
 		.catch((error: unknown) => {
@@ -401,17 +1167,15 @@ export async function getDaemonPid(
 ): Promise<number | null> {
 	const state = await readDaemonPidState(pidFile);
 	if (!state) return null;
-	const identityState = await getDaemonIdentityState(state.record, control);
-	if (identityState === "missing") {
+	const identityState = await getDaemonPidStateIdentity(state, control);
+	if (identityState === "unverifiable") {
+		throw createUnverifiableLegacyDaemonError(getPidFromState(state), pidFile);
+	}
+	if (identityState === "missing" || identityState === "mismatch") {
 		await removeStoppedDaemonPidState(pidFile, state);
 		return null;
 	}
-	if (identityState === "mismatch") {
-		throw new Error(
-			`Daemon process ${state.record.pid} identity no longer matches its PID file`,
-		);
-	}
-	return state.record.pid;
+	return getPidFromState(state);
 }
 
 /** Stop the local daemon using only MOBVIBE_HOME state, not credentials. */
@@ -424,20 +1188,42 @@ export async function stopDaemonByPidFile(
 		logger.info("daemon_not_running");
 		return;
 	}
-	const { pid } = state.record;
-	const initialIdentityState = await getDaemonIdentityState(
-		state.record,
-		control,
-	);
-	if (initialIdentityState === "missing") {
+	const pid = getPidFromState(state);
+	let expectedLegacyIdentity:
+		| Pick<DaemonProcessIdentity, "platform" | "uid" | "startTime">
+		| undefined;
+	let initialIdentityState: DaemonIdentityState;
+	if (state.kind === "legacy") {
+		const initialCheck = await inspectLegacyDaemonIdentity(state.pid, control);
+		initialIdentityState = initialCheck.state;
+		expectedLegacyIdentity = initialCheck.token;
+	} else {
+		initialIdentityState = await getDaemonIdentityState(state.record, control);
+	}
+	const getCurrentIdentityState = (): Promise<DaemonIdentityState> =>
+		state.kind === "legacy"
+			? getLegacyDaemonIdentityState(state.pid, control, expectedLegacyIdentity)
+			: getDaemonIdentityState(state.record, control);
+	const requireVerifiableIdentityState = (
+		identityState: DaemonIdentityState,
+	): Exclude<DaemonIdentityState, "unverifiable"> => {
+		if (identityState === "unverifiable") {
+			throw createUnverifiableLegacyDaemonError(pid, pidFile);
+		}
+		return identityState;
+	};
+	const getCurrentVerifiableIdentityState = async (): Promise<
+		Exclude<DaemonIdentityState, "unverifiable">
+	> => requireVerifiableIdentityState(await getCurrentIdentityState());
+	const verifiedInitialIdentityState =
+		requireVerifiableIdentityState(initialIdentityState);
+	if (
+		verifiedInitialIdentityState === "missing" ||
+		verifiedInitialIdentityState === "mismatch"
+	) {
 		await removeStoppedDaemonPidState(pidFile, state);
 		logger.info("daemon_not_running");
 		return;
-	}
-	if (initialIdentityState === "mismatch") {
-		throw new Error(
-			`Daemon process ${pid} identity no longer matches its PID file`,
-		);
 	}
 
 	try {
@@ -445,62 +1231,55 @@ export async function stopDaemonByPidFile(
 		control.kill(pid, "SIGTERM");
 	} catch (error) {
 		if (!isNodeError(error) || error.code !== "ESRCH") throw error;
-		const identityState = await getDaemonIdentityState(state.record, control);
-		if (identityState === "missing") {
+		const identityState = await getCurrentVerifiableIdentityState();
+		if (identityState === "missing" || identityState === "mismatch") {
 			await removeStoppedDaemonPidState(pidFile, state);
 			return;
 		}
-		if (identityState === "mismatch") return;
 		throw error;
 	}
 
 	const startTime = control.now();
 	while (control.now() - startTime < 5000) {
 		await control.wait(100);
-		const identityState = await getDaemonIdentityState(state.record, control);
-		if (identityState === "missing") {
+		const identityState = await getCurrentVerifiableIdentityState();
+		if (identityState === "missing" || identityState === "mismatch") {
 			logger.info({ pid }, "daemon_stopped_gracefully");
 			await removeStoppedDaemonPidState(pidFile, state);
 			return;
 		}
-		if (identityState === "mismatch") return;
 	}
 
-	const identityStateBeforeForceKill = await getDaemonIdentityState(
-		state.record,
-		control,
-	);
-	if (identityStateBeforeForceKill === "missing") {
+	const identityStateBeforeForceKill =
+		await getCurrentVerifiableIdentityState();
+	if (
+		identityStateBeforeForceKill === "missing" ||
+		identityStateBeforeForceKill === "mismatch"
+	) {
 		logger.info({ pid }, "daemon_stopped_gracefully");
 		await removeStoppedDaemonPidState(pidFile, state);
 		return;
 	}
-	if (identityStateBeforeForceKill === "mismatch") return;
 
 	logger.warn({ pid }, "daemon_force_kill_start");
 	try {
 		control.kill(pid, "SIGKILL");
 	} catch (error) {
 		if (!isNodeError(error) || error.code !== "ESRCH") throw error;
-		const identityState = await getDaemonIdentityState(state.record, control);
-		if (identityState === "missing") {
+		const identityState = await getCurrentVerifiableIdentityState();
+		if (identityState === "missing" || identityState === "mismatch") {
 			await removeStoppedDaemonPidState(pidFile, state);
 			return;
 		}
-		if (identityState === "mismatch") return;
 		throw error;
 	}
 	await control.wait(500);
-	const finalIdentityState = await getDaemonIdentityState(
-		state.record,
-		control,
-	);
-	if (finalIdentityState === "missing") {
+	const finalIdentityState = await getCurrentVerifiableIdentityState();
+	if (finalIdentityState === "missing" || finalIdentityState === "mismatch") {
 		logger.warn({ pid }, "daemon_force_kill_complete");
 		await removeStoppedDaemonPidState(pidFile, state);
 		return;
 	}
-	if (finalIdentityState === "mismatch") return;
 	throw new Error(`Daemon process ${pid} did not stop after SIGKILL`);
 }
 
@@ -539,11 +1318,11 @@ export class DaemonManager {
 			if (identity === null) {
 				throw new Error(`Cannot verify daemon process ${pid}`);
 			}
-			const currentUid = this.processControl.currentUid();
+			const currentUid = await this.processControl.currentUid();
 			if (currentUid === null || identity.uid !== currentUid) {
 				throw new Error(`Cannot verify ownership of daemon process ${pid}`);
 			}
-			if (identity.instanceId !== instanceId) {
+			if (identity.platform !== "win32" && identity.instanceId !== instanceId) {
 				throw new Error(
 					`Cannot verify daemon instance identity for PID ${pid}`,
 				);
