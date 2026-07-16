@@ -1,33 +1,34 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const render = vi.fn();
-const createRoot = vi.fn(() => ({ render }));
-const hydrateRoot = vi.fn();
-
-vi.mock("react-dom/client", () => ({ createRoot, hydrateRoot }));
+import { mountClientRoot } from "@/lib/mount-client-root";
 
 describe("website client entry", () => {
 	beforeEach(() => {
-		vi.resetModules();
 		vi.clearAllMocks();
 	});
 
-	it("uses a client render for Vite's empty development root", async () => {
+	it("uses a client render for Vite's empty development root", () => {
 		document.body.innerHTML = '<div id="root"></div>';
+		const root = document.getElementById("root");
+		const render = vi.fn();
+		const hydrate = vi.fn();
+		if (!root) throw new Error("Root element not found");
 
-		await import("@/entry-client");
+		mountClientRoot(root, { render, hydrate });
 
-		expect(createRoot).toHaveBeenCalledOnce();
 		expect(render).toHaveBeenCalledOnce();
-		expect(hydrateRoot).not.toHaveBeenCalled();
+		expect(hydrate).not.toHaveBeenCalled();
 	});
 
-	it("hydrates the prerendered production root", async () => {
+	it("hydrates the prerendered production root", () => {
 		document.body.innerHTML = '<div id="root"><main>Prerendered</main></div>';
+		const root = document.getElementById("root");
+		const render = vi.fn();
+		const hydrate = vi.fn();
+		if (!root) throw new Error("Root element not found");
 
-		await import("@/entry-client");
+		mountClientRoot(root, { render, hydrate });
 
-		expect(hydrateRoot).toHaveBeenCalledOnce();
-		expect(createRoot).not.toHaveBeenCalled();
+		expect(hydrate).toHaveBeenCalledOnce();
+		expect(render).not.toHaveBeenCalled();
 	});
 });
