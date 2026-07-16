@@ -51,8 +51,12 @@ export function resolveLoginMasterSecret(
 	const gatewayIdentity = normalizeGatewayIdentity(identity.gatewayUrl);
 	const existingGatewayIdentity =
 		existing.gatewayIdentity ??
-		normalizeGatewayIdentity(existing.gatewayUrl ?? DEFAULT_GATEWAY_URL);
-	const sameGateway = existingGatewayIdentity === gatewayIdentity;
+		(existing.gatewayUrl
+			? normalizeGatewayIdentity(existing.gatewayUrl)
+			: undefined);
+	const sameGateway =
+		existingGatewayIdentity === undefined ||
+		existingGatewayIdentity === gatewayIdentity;
 	const sameAccount =
 		existing.accountId === undefined ||
 		existing.accountId === identity.accountId;

@@ -135,6 +135,8 @@ describe("SocketClient restore semantics", () => {
 		ackEvents: ReturnType<typeof mock>;
 		claimMessageSend: ReturnType<typeof mock>;
 		completeMessageSend: ReturnType<typeof mock>;
+		beginMessageSend: ReturnType<typeof mock>;
+		endMessageSend: ReturnType<typeof mock>;
 		getMessageSendResult: ReturnType<typeof mock>;
 		recordMessageSendResult: ReturnType<typeof mock>;
 		getSession: ReturnType<typeof mock>;
@@ -153,6 +155,7 @@ describe("SocketClient restore semantics", () => {
 	};
 	let cryptoService: {
 		authKeyPair: { publicKey: Uint8Array; secretKey: Uint8Array };
+		contentEncryptionEnabled: boolean;
 		encryptEvent: ReturnType<typeof mock>;
 		decryptRpcPayload: ReturnType<typeof mock>;
 		getWrappedDek: ReturnType<typeof mock>;
@@ -202,6 +205,8 @@ describe("SocketClient restore semantics", () => {
 				claimId: "claim-1",
 			})),
 			completeMessageSend: mock(() => {}),
+			beginMessageSend: mock(() => {}),
+			endMessageSend: mock(() => {}),
 			getMessageSendResult: mock(() => undefined),
 			recordMessageSendResult: mock(() => {}),
 			getSession: mock(() => ({
@@ -232,6 +237,7 @@ describe("SocketClient restore semantics", () => {
 				publicKey: new Uint8Array(32),
 				secretKey: new Uint8Array(64),
 			},
+			contentEncryptionEnabled: false,
 			encryptEvent: mock((event: SessionEvent) => ({
 				...event,
 				payload: { encrypted: true, originalSeq: event.seq },
@@ -772,6 +778,14 @@ describe("SocketClient restore semantics", () => {
 			prompt,
 		);
 		expect(promptConnection.prompt).toHaveBeenCalledWith("session-1", prompt);
+		expect(sessionManager.beginMessageSend).toHaveBeenCalledWith(
+			"session-1",
+			"message-1",
+		);
+		expect(sessionManager.endMessageSend).toHaveBeenCalledWith(
+			"session-1",
+			"message-1",
+		);
 		expect(sessionManager.touchSession).toHaveBeenCalledTimes(2);
 		expect(sessionManager.completeMessageSend).toHaveBeenCalledWith(
 			"session-1",
@@ -783,6 +797,198 @@ describe("SocketClient restore semantics", () => {
 		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
 			requestId: "req-1",
 			result: { stopReason: "end_turn" },
+		});
+	});
+
+	test("rejects plaintext prompts when content encryption is required", async () => {
+		cryptoService.contentEncryptionEnabled = true;
+		const handler = socketHandlers.get("rpc:message:send");
+		if (!handler) {
+			throw new Error("rpc:message:send handler not registered");
+		}
+
+		await handler({
+			requestId: "req-plaintext-downgrade",
+			params: {
+				sessionId: "session-1",
+				messageId: "message-plaintext-downgrade",
+				prompt: [{ type: "text", text: "must stay encrypted" }],
+			},
+		});
+
+		expect(cryptoService.decryptRpcPayload).not.toHaveBeenCalled();
+		expect(promptConnection.prompt).not.toHaveBeenCalled();
+		expect(sessionManager.claimMessageSend).not.toHaveBeenCalled();
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-plaintext-downgrade",
+			error: expect.objectContaining({
+				code: "REQUEST_VALIDATION_FAILED",
+				retryable: false,
+				status: 400,
+			}),
+		});
+	});
+
+	test("uses the RPC request id when an old gateway omits messageId", async () => {
+		const prompt = [{ type: "text", text: "legacy prompt" }] as const;
+		const handler = socketHandlers.get("rpc:message:send");
+		if (!handler) {
+			throw new Error("rpc:message:send handler not registered");
+		}
+
+		await handler({
+			requestId: "req-from-old-gateway",
+			params: {
+				sessionId: "session-1",
+				prompt,
+			},
+		});
+
+		expect(sessionManager.claimMessageSend).toHaveBeenCalledWith(
+			"session-1",
+			"legacy-rpc:req-from-old-gateway",
+		);
+		expect(sessionManager.completeMessageSend).toHaveBeenCalledWith(
+			"session-1",
+			"legacy-rpc:req-from-old-gateway",
+			"claim-1",
+			"end_turn",
+		);
+		expect(promptConnection.prompt).toHaveBeenCalledTimes(1);
+	});
+
+	test("uses the RPC request id when an old gateway sends a blank messageId", async () => {
+		const handler = socketHandlers.get("rpc:message:send");
+		if (!handler) {
+			throw new Error("rpc:message:send handler not registered");
+		}
+
+		await handler({
+			requestId: "req-with-blank-message-id",
+			params: {
+				sessionId: "session-1",
+				messageId: "  ",
+				prompt: [{ type: "text", text: "legacy prompt" }],
+			},
+		});
+
+		expect(sessionManager.claimMessageSend).toHaveBeenCalledWith(
+			"session-1",
+			"legacy-rpc:req-with-blank-message-id",
+		);
+		expect(promptConnection.prompt).toHaveBeenCalledTimes(1);
+	});
+
+	test("advertises durable message idempotency and revision pinning", () => {
+		(
+			client as unknown as {
+				register: () => void;
+			}
+		).register();
+
+		expect(socketMock.emit).toHaveBeenCalledWith(
+			"cli:register",
+			expect.objectContaining({
+				protocolCapabilities: {
+					messageIdempotency: true,
+					messageRevisionPinning: true,
+				},
+			}),
+		);
+	});
+
+	test("rejects a stale no-E2EE revision before decrypting or claiming", async () => {
+		sessionManager.getSessionRevision.mockReturnValue(3);
+		const handler = socketHandlers.get("rpc:message:send");
+		if (!handler) {
+			throw new Error("rpc:message:send handler not registered");
+		}
+
+		await handler({
+			requestId: "req-stale-plaintext-revision",
+			params: {
+				sessionId: "session-1",
+				messageId: "message-stale-plaintext-revision",
+				expectedRevision: 2,
+				prompt: [{ type: "text", text: "must not run" }],
+			},
+		});
+
+		expect(cryptoService.decryptRpcPayload).not.toHaveBeenCalled();
+		expect(sessionManager.claimMessageSend).not.toHaveBeenCalled();
+		expect(sessionManager.beginMessageSend).not.toHaveBeenCalled();
+		expect(promptConnection.prompt).not.toHaveBeenCalled();
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-stale-plaintext-revision",
+			error: expect.objectContaining({
+				code: "SESSION_NOT_READY",
+				retryable: false,
+				status: 409,
+			}),
+		});
+	});
+
+	test("rejects a stale E2EE revision before decrypting or claiming", async () => {
+		cryptoService.contentEncryptionEnabled = true;
+		cryptoService.decryptRpcPayload.mockReturnValue([
+			{ type: "text", text: "must not run" },
+		]);
+		sessionManager.getSessionRevision.mockReturnValue(3);
+		const handler = socketHandlers.get("rpc:message:send");
+		if (!handler) {
+			throw new Error("rpc:message:send handler not registered");
+		}
+
+		await handler({
+			requestId: "req-stale-encrypted-revision",
+			params: {
+				sessionId: "session-1",
+				messageId: "message-stale-encrypted-revision",
+				expectedRevision: 2,
+				prompt: { t: "encrypted", c: "ciphertext" },
+			},
+		});
+
+		expect(cryptoService.decryptRpcPayload).not.toHaveBeenCalled();
+		expect(sessionManager.claimMessageSend).not.toHaveBeenCalled();
+		expect(sessionManager.beginMessageSend).not.toHaveBeenCalled();
+		expect(promptConnection.prompt).not.toHaveBeenCalled();
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-stale-encrypted-revision",
+			error: expect.objectContaining({
+				code: "SESSION_NOT_READY",
+				retryable: false,
+				status: 409,
+			}),
+		});
+	});
+
+	test("rejects an invalid expected revision at the CLI boundary", async () => {
+		const handler = socketHandlers.get("rpc:message:send");
+		if (!handler) {
+			throw new Error("rpc:message:send handler not registered");
+		}
+
+		await handler({
+			requestId: "req-invalid-revision",
+			params: {
+				sessionId: "session-1",
+				messageId: "message-invalid-revision",
+				expectedRevision: 1.5,
+				prompt: [{ type: "text", text: "must not run" }],
+			},
+		});
+
+		expect(cryptoService.decryptRpcPayload).not.toHaveBeenCalled();
+		expect(sessionManager.claimMessageSend).not.toHaveBeenCalled();
+		expect(promptConnection.prompt).not.toHaveBeenCalled();
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-invalid-revision",
+			error: expect.objectContaining({
+				code: "REQUEST_VALIDATION_FAILED",
+				retryable: false,
+				status: 400,
+			}),
 		});
 	});
 
@@ -1124,6 +1330,61 @@ describe("SocketClient restore semantics", () => {
 		expect(sessionManager.reloadSession).toHaveBeenCalledTimes(1);
 	});
 
+	test("checks the revision after a queued reload and before prompt execution", async () => {
+		let resolveReload:
+			| ((value: { sessionId: string; revision: number }) => void)
+			| undefined;
+		sessionManager.getSessionRevision.mockReturnValue(2);
+		sessionManager.reloadSession.mockImplementationOnce(
+			() =>
+				new Promise<{ sessionId: string; revision: number }>((resolve) => {
+					resolveReload = resolve;
+				}),
+		);
+		const reloadHandler = socketHandlers.get("rpc:session:reload");
+		const messageHandler = socketHandlers.get("rpc:message:send");
+		if (!reloadHandler || !messageHandler) {
+			throw new Error("session RPC handlers not registered");
+		}
+
+		const reload = reloadHandler({
+			requestId: "req-reload-before-pinned-message",
+			params: {
+				sessionId: "session-1",
+				cwd: "/tmp/project",
+				backendId: "backend-1",
+			},
+		});
+		await Promise.resolve();
+		const message = messageHandler({
+			requestId: "req-pinned-message-after-reload",
+			params: {
+				sessionId: "session-1",
+				messageId: "message-pinned-before-reload",
+				expectedRevision: 2,
+				prompt: [{ type: "text", text: "must stay on revision 2" }],
+			},
+		});
+		await Promise.resolve();
+
+		expect(cryptoService.decryptRpcPayload).not.toHaveBeenCalled();
+		sessionManager.getSessionRevision.mockReturnValue(3);
+		resolveReload?.({ sessionId: "session-1", revision: 3 });
+		await Promise.all([reload, message]);
+
+		expect(cryptoService.decryptRpcPayload).not.toHaveBeenCalled();
+		expect(sessionManager.claimMessageSend).not.toHaveBeenCalled();
+		expect(promptConnection.prompt).not.toHaveBeenCalled();
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-pinned-message-after-reload",
+			error: expect.objectContaining({
+				code: "SESSION_NOT_READY",
+				retryable: false,
+				status: 409,
+			}),
+		});
+	});
+
 	test("waits for an in-flight prompt before archiving its session", async () => {
 		let resolvePrompt: ((value: { stopReason: string }) => void) | undefined;
 		promptConnection.prompt.mockImplementationOnce(
@@ -1287,6 +1548,8 @@ describe("SocketClient restore semantics", () => {
 		sessionManager.getMessageSendResult.mockReturnValueOnce({
 			stopReason: "end_turn",
 		});
+		sessionManager.getSessionRevision.mockReturnValue(2);
+		sessionManager.getSessionRevision.mockClear();
 		const handler = socketHandlers.get("rpc:message:send");
 		if (!handler) {
 			throw new Error("rpc:message:send handler not registered");
@@ -1297,11 +1560,15 @@ describe("SocketClient restore semantics", () => {
 			params: {
 				sessionId: "session-1",
 				messageId: "message-completed",
+				expectedRevision: 1,
 				prompt: [{ type: "text", text: "must not run again" }],
 			},
 		});
 
 		expect(promptConnection.prompt).not.toHaveBeenCalled();
+		expect(sessionManager.getSessionRevision).not.toHaveBeenCalled();
+		expect(cryptoService.decryptRpcPayload).not.toHaveBeenCalled();
+		expect(sessionManager.claimMessageSend).not.toHaveBeenCalled();
 		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
 			requestId: "req-durable-retry",
 			result: { stopReason: "end_turn" },

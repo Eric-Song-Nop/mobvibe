@@ -158,6 +158,7 @@ export const hasDurableWalData = (dbPath: string): boolean => {
 
 export class WalStore {
 	private db: Database;
+	private readonly initialSchemaVersion: number;
 	private seqGenerator = new SeqGenerator();
 
 	// Prepared statements for performance
@@ -212,7 +213,7 @@ export class WalStore {
 		}
 
 		this.db = new Database(dbPath);
-		runMigrations(this.db);
+		this.initialSchemaVersion = runMigrations(this.db);
 
 		// Prepare statements
 		this.stmtGetSession = this.db.query(`
@@ -498,6 +499,11 @@ export class WalStore {
 			.query("SELECT key_identity FROM wal_encryption_identity WHERE id = 1")
 			.get() as { key_identity: string } | null;
 		return row?.key_identity;
+	}
+
+	/** Schema version observed before this process applied pending migrations. */
+	getInitialSchemaVersion(): number {
+		return this.initialSchemaVersion;
 	}
 
 	/** Return whether this database contains identity-bound user data. */

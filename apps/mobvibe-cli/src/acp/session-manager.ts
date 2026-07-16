@@ -62,6 +62,7 @@ type PendingReloadBuffer = {
 const MAX_RELOAD_BUFFER_BYTES = 8 * 1024 * 1024;
 const MAX_RELOAD_BUFFER_EVENTS = 20_000;
 const LEGACY_KEY_VALIDATION_PAGE_SIZE = 100;
+const WAL_ENCRYPTION_IDENTITY_SCHEMA_VERSION = 11;
 
 const resolveSessionUpdateEventKind = (
 	notification: SessionNotification,
@@ -280,6 +281,8 @@ export class SessionManager {
 	private readonly sessionEventEmitter = new EventEmitter();
 	private readonly walStore: WalStore;
 	private readonly cryptoService?: CliCryptoService;
+	private readonly validateWorkspacePath: (cwd: string) => Promise<boolean>;
+	private readonly activeMessageIdBySession = new Map<string, string>();
 	private readonly sessionReloadTails = new Map<string, Promise<void>>();
 	private readonly closedSessionRecords = new WeakSet<SessionRecord>();
 	/** Per-backend idle connections (initialized but no session bound) */
@@ -291,12 +294,17 @@ export class SessionManager {
 	constructor(
 		private readonly config: CliConfig,
 		cryptoService?: CliCryptoService,
+		dependencies?: {
+			validateWorkspacePath?: (cwd: string) => Promise<boolean>;
+		},
 	) {
 		this.backendById = new Map(
 			config.acpBackends.map((backend) => [backend.id, backend]),
 		);
 		this.walStore = new WalStore(config.walDbPath);
 		this.cryptoService = cryptoService;
+		this.validateWorkspacePath =
+			dependencies?.validateWorkspacePath ?? isValidWorkspacePath;
 		const keyIdentity = cryptoService?.getKeyIdentity?.();
 		if (keyIdentity && cryptoService) {
 			try {
@@ -331,7 +339,12 @@ export class SessionManager {
 							revision: lastKey.revision,
 						};
 					}
-					if (verifiedLegacyKeyCount === 0 && this.walStore.hasDurableData()) {
+					if (
+						verifiedLegacyKeyCount === 0 &&
+						this.walStore.hasDurableData() &&
+						this.walStore.getInitialSchemaVersion() >=
+							WAL_ENCRYPTION_IDENTITY_SCHEMA_VERSION
+					) {
 						throw new Error(
 							"WAL encryption identity is missing and durable data has no wrapped key, so Mobvibe cannot verify the original master secret; restore the original credentials or move the WAL to a separate MOBVIBE_HOME",
 						);
@@ -839,6 +852,22 @@ export class SessionManager {
 
 	claimMessageSend(sessionId: string, messageId: string): MessageSendClaim {
 		return this.walStore.claimMessageSend(sessionId, messageId);
+	}
+
+	beginMessageSend(sessionId: string, messageId: string): void {
+		const activeMessageId = this.activeMessageIdBySession.get(sessionId);
+		if (activeMessageId && activeMessageId !== messageId) {
+			throw new Error(
+				`Another message is already active for session ${sessionId}`,
+			);
+		}
+		this.activeMessageIdBySession.set(sessionId, messageId);
+	}
+
+	endMessageSend(sessionId: string, messageId: string): void {
+		if (this.activeMessageIdBySession.get(sessionId) === messageId) {
+			this.activeMessageIdBySession.delete(sessionId);
+		}
 	}
 
 	completeMessageSend(
@@ -1637,7 +1666,7 @@ export class SessionManager {
 					response.sessions.map(async (session) => ({
 						session,
 						isValid: session.cwd
-							? await isValidWorkspacePath(session.cwd)
+							? await this.validateWorkspacePath(session.cwd)
 							: false,
 						projectContext: session.cwd
 							? await resolveGitProjectContext(session.cwd)
@@ -2277,12 +2306,13 @@ export class SessionManager {
 			"write_session_update_to_wal_mapped",
 		);
 
-		this.writeAndEmitEvent(
-			record.sessionId,
-			record.revision,
-			kind,
-			notification,
-		);
+		const messageId =
+			kind === "user_message"
+				? this.activeMessageIdBySession.get(record.sessionId)
+				: undefined;
+		const payload = messageId ? { ...notification, messageId } : notification;
+
+		this.writeAndEmitEvent(record.sessionId, record.revision, kind, payload);
 	}
 
 	/**

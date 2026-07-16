@@ -73,6 +73,21 @@ describe("resolveLoginMasterSecret", () => {
 		).toThrow("different account or gateway");
 	});
 
+	test("binds legacy credentials without gateway metadata to the selected custom gateway", () => {
+		const existingSecret = new Uint8Array(32).fill(9);
+		const existing = {
+			masterSecret: uint8ToBase64(existingSecret),
+			createdAt: 1,
+		};
+
+		expect(
+			resolveLoginMasterSecret(existing, {
+				accountId: "user-1",
+				gatewayUrl: "https://self-hosted.example/api",
+			}),
+		).toEqual(existingSecret);
+	});
+
 	test("generates a secret for the first login", () => {
 		const generated = resolveLoginMasterSecret(null, {
 			accountId: "user-1",

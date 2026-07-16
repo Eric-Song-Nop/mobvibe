@@ -14,15 +14,6 @@ import { CliCryptoService } from "../../e2ee/crypto-service.js";
 import { WalStore } from "../../wal/wal-store.js";
 import type { AcpConnection } from "../acp-connection.js";
 
-mock.module("node:fs/promises", () => ({
-	default: {
-		stat: mock(() => Promise.resolve({ isDirectory: () => true })),
-		readFile: mock(() => Promise.resolve("")),
-	},
-	stat: mock(() => Promise.resolve({ isDirectory: () => true })),
-	readFile: mock(() => Promise.resolve("")),
-}));
-
 // Mock the logger
 mock.module("../../lib/logger.js", () => ({
 	logger: {
@@ -198,7 +189,9 @@ describe("SessionManager", () => {
 		mockConfig.walDbPath = `/tmp/mobvibe-test/events-${Date.now()}-${Math.random()
 			.toString(36)
 			.slice(2)}.db`;
-		sessionManager = new SessionManager(mockConfig);
+		sessionManager = new SessionManager(mockConfig, undefined, {
+			validateWorkspacePath: async () => true,
+		});
 		mockConnection = createMockConnection();
 		sessionUpdateCallback = undefined;
 		statusChangeCallback = undefined;
@@ -1625,7 +1618,59 @@ describe("SessionManager", () => {
 			}
 		});
 
-		it("rejects legacy session data that has no wrapped key to verify", async () => {
+		it("migrates a schema-v7 WAL with durable data to the current identity", async () => {
+			await initCrypto();
+			const legacyConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/schema-v7-key-identity-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const legacyStore = new WalStore(legacyConfig.walDbPath);
+			legacyStore.ensureSession({
+				sessionId: "legacy-session",
+				machineId: "test-machine-id",
+				backendId: "backend-1",
+			});
+			legacyStore.appendEvent({
+				sessionId: "legacy-session",
+				revision: 1,
+				kind: "user_message",
+				payload: { text: "created before identity binding" },
+			});
+			legacyStore.close();
+
+			const legacyDb = new Database(legacyConfig.walDbPath);
+			legacyDb.exec(`
+				DELETE FROM schema_version WHERE version > 7;
+				DROP TABLE message_send_results;
+				DROP TABLE session_revision_keys;
+				DROP TABLE message_send_claims;
+				DROP TABLE wal_encryption_identity;
+			`);
+			legacyDb.close();
+
+			const crypto = new CliCryptoService(generateMasterSecret());
+			const migrated = new SessionManager(legacyConfig, crypto);
+			try {
+				expect(migrated.listAllSessions()).toEqual([
+					expect.objectContaining({ sessionId: "legacy-session" }),
+				]);
+			} finally {
+				await migrated.shutdown();
+			}
+
+			const inspection = new WalStore(legacyConfig.walDbPath);
+			try {
+				expect(inspection.getEncryptionIdentity()).toBe(
+					crypto.getKeyIdentity(),
+				);
+			} finally {
+				inspection.close();
+			}
+		});
+
+		it("rejects current-schema session data after its identity is removed", async () => {
 			await initCrypto();
 			const legacyConfig = {
 				...mockConfig,
@@ -1656,7 +1701,7 @@ describe("SessionManager", () => {
 			}
 		});
 
-		it("rejects legacy agent-team data that has no wrapped key to verify", async () => {
+		it("rejects current-schema agent-team data after its identity is removed", async () => {
 			await initCrypto();
 			const legacyConfig = {
 				...mockConfig,
@@ -2470,6 +2515,37 @@ describe("SessionManager", () => {
 			});
 			expect(events.events.some((event) => event.kind === "user_message")).toBe(
 				true,
+			);
+		});
+
+		it("persists the active messageId on matching user message events", async () => {
+			const { sessionId, eventListener } = await setupSessionWithListener();
+			expect(sessionUpdateCallback).toBeDefined();
+			sessionManager.beginMessageSend(sessionId, "message-123");
+
+			sessionUpdateCallback?.({
+				sessionId,
+				update: {
+					sessionUpdate: "user_message_chunk",
+					content: { type: "text", text: "Hello" },
+				},
+			} as SessionNotification);
+			sessionManager.endMessageSend(sessionId, "message-123");
+
+			expect(eventListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId,
+					kind: "user_message",
+					payload: expect.objectContaining({ messageId: "message-123" }),
+				}),
+			);
+			const events = sessionManager.getSessionEvents({
+				sessionId,
+				revision: 1,
+				afterSeq: 0,
+			});
+			expect(events.events[0]?.payload).toEqual(
+				expect.objectContaining({ messageId: "message-123" }),
 			);
 		});
 

@@ -24,6 +24,7 @@ import {
 	createInternalError,
 	createSignedToken,
 	getPromptImageBlocks,
+	isEncryptedPayload,
 	validatePromptImageBlocks,
 } from "@mobvibe/shared";
 import ignore, { type Ignore } from "ignore";
@@ -59,6 +60,10 @@ type SocketClientOptions = {
 	/** Crypto service for E2EE */
 	cryptoService: CliCryptoService;
 	agentTeamStore?: AgentTeamStore;
+};
+
+type NormalizedSendMessageParams = Omit<SendMessageParams, "messageId"> & {
+	messageId: string;
 };
 
 const SESSION_ROOT_NAME = "Working Directory";
@@ -585,7 +590,10 @@ export class SocketClient extends EventEmitter {
 					},
 					"rpc_message_send_start",
 				);
-				const result = await this.getOrCreateMessageSend(request.params);
+				const result = await this.getOrCreateMessageSend(
+					request.params,
+					request.requestId,
+				);
 				this.sendRpcResponse<SendMessageResult>(request.requestId, result);
 				const durationMs =
 					Number(process.hrtime.bigint() - requestStart) / 1_000_000;
@@ -1449,11 +1457,10 @@ export class SocketClient extends EventEmitter {
 
 	private getOrCreateMessageSend(
 		params: SendMessageParams,
+		requestId: string,
 	): Promise<SendMessageResult> {
-		const messageId = params.messageId.trim();
-		if (!messageId) {
-			return Promise.reject(new Error("messageId is required"));
-		}
+		const suppliedMessageId = params.messageId?.trim();
+		const messageId = suppliedMessageId || `legacy-rpc:${requestId}`;
 		const key = `${params.sessionId}\u0000${messageId}`;
 		const inFlight = this.messageSendsInFlight.get(key);
 		if (inFlight) {
@@ -1474,8 +1481,12 @@ export class SocketClient extends EventEmitter {
 			);
 		}
 
+		const normalizedParams: NormalizedSendMessageParams = {
+			...params,
+			messageId,
+		};
 		const operation = this.enqueueSessionOperation(params.sessionId, () =>
-			this.executeMessageSend({ ...params, messageId }),
+			this.executeMessageSend(normalizedParams),
 		);
 		this.messageSendsInFlight.set(key, operation);
 		this.activeMessageIdBySession.set(params.sessionId, messageId);
@@ -1531,15 +1542,59 @@ export class SocketClient extends EventEmitter {
 	}
 
 	private async executeMessageSend(
-		params: SendMessageParams,
+		params: NormalizedSendMessageParams,
 	): Promise<SendMessageResult> {
 		const { sessionManager, cryptoService } = this.options;
+		if (
+			cryptoService.contentEncryptionEnabled &&
+			!isEncryptedPayload(params.prompt)
+		) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Encrypted prompt required for this session",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
 		const completed = sessionManager.getMessageSendResult(
 			params.sessionId,
 			params.messageId,
 		);
 		if (completed) {
 			return completed;
+		}
+		if (
+			params.expectedRevision !== undefined &&
+			(!Number.isSafeInteger(params.expectedRevision) ||
+				params.expectedRevision < 1)
+		) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "expectedRevision must be a positive safe integer",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		if (
+			params.expectedRevision !== undefined &&
+			sessionManager.getSessionRevision(params.sessionId) !==
+				params.expectedRevision
+		) {
+			throw new AppError(
+				createErrorDetail({
+					code: "SESSION_NOT_READY",
+					message: "Session revision changed; refresh before sending",
+					retryable: false,
+					scope: "session",
+				}),
+				409,
+			);
 		}
 
 		const prompt = cryptoService.decryptRpcPayload<ContentBlock[]>(
@@ -1567,28 +1622,33 @@ export class SocketClient extends EventEmitter {
 		}
 
 		let promptResult: Awaited<ReturnType<typeof record.connection.prompt>>;
+		sessionManager.beginMessageSend(params.sessionId, params.messageId);
 		try {
-			promptResult = await record.connection.prompt(params.sessionId, prompt);
-		} catch (error) {
-			throw createMessageOutcomeUnknownError(
-				error instanceof Error ? error.message : undefined,
-			);
+			try {
+				promptResult = await record.connection.prompt(params.sessionId, prompt);
+			} catch (error) {
+				throw createMessageOutcomeUnknownError(
+					error instanceof Error ? error.message : undefined,
+				);
+			}
+			const result = { stopReason: promptResult.stopReason as StopReason };
+			try {
+				sessionManager.completeMessageSend(
+					params.sessionId,
+					params.messageId,
+					claim.claimId,
+					result.stopReason,
+				);
+			} catch (error) {
+				throw createMessageOutcomeUnknownError(
+					error instanceof Error ? error.message : undefined,
+				);
+			}
+			sessionManager.touchSession(params.sessionId);
+			return result;
+		} finally {
+			sessionManager.endMessageSend(params.sessionId, params.messageId);
 		}
-		const result = { stopReason: promptResult.stopReason as StopReason };
-		try {
-			sessionManager.completeMessageSend(
-				params.sessionId,
-				params.messageId,
-				claim.claimId,
-				result.stopReason,
-			);
-		} catch (error) {
-			throw createMessageOutcomeUnknownError(
-				error instanceof Error ? error.message : undefined,
-			);
-		}
-		sessionManager.touchSession(params.sessionId);
-		return result;
 	}
 
 	private setupSessionManagerListeners() {
@@ -1844,6 +1904,10 @@ export class SocketClient extends EventEmitter {
 			machineId: config.machineId,
 			hostname: config.hostname,
 			version: config.clientVersion,
+			protocolCapabilities: {
+				messageIdempotency: true,
+				messageRevisionPinning: true,
+			},
 			backends: config.acpBackends.map((backend) => ({
 				backendId: backend.id,
 				backendLabel: backend.label,

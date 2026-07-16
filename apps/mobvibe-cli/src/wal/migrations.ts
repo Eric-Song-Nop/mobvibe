@@ -282,7 +282,7 @@ const MIGRATIONS = [
 	},
 ];
 
-export function runMigrations(db: Database): void {
+export function runMigrations(db: Database): number {
 	// Enable WAL mode for better concurrency
 	db.exec("PRAGMA journal_mode = WAL");
 	db.exec("PRAGMA synchronous = NORMAL");
@@ -297,6 +297,7 @@ export function runMigrations(db: Database): void {
 	} catch {
 		// Table doesn't exist yet, version is 0
 	}
+	const initialVersion = currentVersion;
 
 	// Run pending migrations
 	for (const migration of MIGRATIONS) {
@@ -307,4 +308,5 @@ export function runMigrations(db: Database): void {
 			);
 		}
 	}
+	return initialVersion;
 }
