@@ -8,11 +8,14 @@ export { runMigrations } from "./migrations.js";
 export { SeqGenerator } from "./seq-generator.js";
 export type {
 	AppendEventParams,
+	CommitReloadRevisionParams,
 	DiscoveredSession,
 	EnsureSessionParams,
+	MessageSendClaim,
 	QueryEventsParams,
 	UnackedSessionRevision,
 	WalEvent,
+	WalEventInput,
 	WalSession,
 } from "./wal-store.js";
 export { WalStore } from "./wal-store.js";

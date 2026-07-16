@@ -268,6 +268,46 @@ describe("WalStore", () => {
 	});
 
 	describe("message send idempotency", () => {
+		it("persists an indeterminate execution claim across store restarts", () => {
+			walStore.ensureSession({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				backendId: "backend-1",
+			});
+
+			const claim = walStore.claimMessageSend("session-1", "message-1");
+			expect(claim).toEqual({
+				status: "claimed",
+				claimId: expect.any(String),
+			});
+
+			walStore.close();
+			walStore = new WalStore(dbPath);
+
+			expect(walStore.claimMessageSend("session-1", "message-1")).toEqual({
+				status: "in_progress",
+			});
+		});
+
+		it("atomically replaces an execution claim with its completed result", () => {
+			const first = walStore.claimMessageSend("session-1", "message-1");
+			if (first.status !== "claimed") {
+				throw new Error("expected the first caller to own the claim");
+			}
+
+			walStore.completeMessageSend(
+				"session-1",
+				"message-1",
+				first.claimId,
+				"end_turn",
+			);
+
+			expect(walStore.claimMessageSend("session-1", "message-1")).toEqual({
+				status: "completed",
+				result: { stopReason: "end_turn" },
+			});
+		});
+
 		it("persists the first completed result across store restarts", () => {
 			walStore.ensureSession({
 				sessionId: "session-1",
@@ -381,6 +421,61 @@ describe("WalStore", () => {
 				"Session not found",
 			);
 		});
+
+		it("rolls back the revision and replay batch when one event cannot be inserted", () => {
+			walStore.ensureSession({
+				sessionId: "session-atomic-reload",
+				machineId: "machine-1",
+				backendId: "backend-1",
+			});
+			const faultDb = new Database(dbPath);
+			faultDb.exec(`
+				CREATE TRIGGER fail_second_reload_event
+				BEFORE INSERT ON session_events
+				WHEN NEW.session_id = 'session-atomic-reload' AND NEW.seq = 2
+				BEGIN
+					SELECT RAISE(ABORT, 'injected replay failure');
+				END;
+			`);
+			faultDb.close();
+
+			expect(() =>
+				walStore.commitReloadRevision({
+					sessionId: "session-atomic-reload",
+					expectedRevision: 1,
+					events: [
+						{ kind: "agent_message_chunk", payload: { text: "first" } },
+						{ kind: "terminal_output", payload: { data: "second" } },
+					],
+				}),
+			).toThrow("injected replay failure");
+
+			expect(
+				walStore.getSession("session-atomic-reload")?.currentRevision,
+			).toBe(1);
+			expect(
+				walStore.queryEvents({
+					sessionId: "session-atomic-reload",
+					revision: 2,
+				}),
+			).toHaveLength(0);
+			expect(walStore.getCurrentSeq("session-atomic-reload", 2)).toBe(0);
+
+			const recoveryDb = new Database(dbPath);
+			recoveryDb.exec("DROP TRIGGER fail_second_reload_event");
+			recoveryDb.close();
+			const recovered = walStore.commitReloadRevision({
+				sessionId: "session-atomic-reload",
+				expectedRevision: 1,
+				events: [
+					{ kind: "agent_message_chunk", payload: { text: "first" } },
+					{ kind: "terminal_output", payload: { data: "second" } },
+				],
+			});
+			expect(recovered.revision).toBe(2);
+			expect(recovered.events.map((event) => event.seq)).toEqual([1, 2]);
+			expect(walStore.getCurrentSeq("session-atomic-reload", 2)).toBe(2);
+		});
 	});
 
 	describe("getCurrentSeq", () => {
@@ -460,6 +555,59 @@ describe("WalStore", () => {
 			// Archiving again should not throw
 			walStore.archiveSession("non-existent");
 			expect(walStore.isArchived("non-existent")).toBe(true);
+		});
+
+		it("rolls back every deletion when the archive tombstone cannot be written", () => {
+			walStore.ensureSession({
+				sessionId: "session-rollback",
+				machineId: "machine-1",
+				backendId: "backend-1",
+			});
+			walStore.appendEvent({
+				sessionId: "session-rollback",
+				revision: 1,
+				kind: "agent_message_chunk",
+				payload: { text: "must survive" },
+			});
+			walStore.recordMessageSendResult(
+				"session-rollback",
+				"message-1",
+				"end_turn",
+			);
+			const pendingClaim = walStore.claimMessageSend(
+				"session-rollback",
+				"message-in-progress",
+			);
+			expect(pendingClaim.status).toBe("claimed");
+			const faultDb = new Database(dbPath);
+			faultDb.exec(`
+				CREATE TRIGGER fail_archive_tombstone
+				BEFORE INSERT ON archived_session_ids
+				WHEN NEW.session_id = 'session-rollback'
+				BEGIN
+					SELECT RAISE(ABORT, 'injected archive failure');
+				END;
+			`);
+			faultDb.close();
+
+			expect(() => walStore.archiveSession("session-rollback")).toThrow(
+				"injected archive failure",
+			);
+
+			expect(walStore.getSession("session-rollback")).not.toBeNull();
+			expect(
+				walStore.queryEvents({
+					sessionId: "session-rollback",
+					revision: 1,
+				}),
+			).toHaveLength(1);
+			expect(
+				walStore.getMessageSendResult("session-rollback", "message-1"),
+			).toEqual({ stopReason: "end_turn" });
+			expect(
+				walStore.claimMessageSend("session-rollback", "message-in-progress"),
+			).toEqual({ status: "in_progress" });
+			expect(walStore.isArchived("session-rollback")).toBe(false);
 		});
 	});
 

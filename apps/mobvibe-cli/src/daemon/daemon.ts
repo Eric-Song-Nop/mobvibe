@@ -19,6 +19,8 @@ type DaemonStatus = {
 	sessionCount?: number;
 };
 
+const COMPACTION_SHUTDOWN_TIMEOUT_MS = 4_000;
+
 export class DaemonManager {
 	constructor(private readonly config: CliConfig) {}
 
@@ -202,6 +204,21 @@ export class DaemonManager {
 		// P1-2: Track compactor resources for cleanup on shutdown
 		let compactorWalStore: WalStore | undefined;
 		let compactorDb: Database | undefined;
+		let compactorResourcesClosed = false;
+		const closeCompactorResources = () => {
+			if (compactorResourcesClosed) return;
+			compactorResourcesClosed = true;
+			try {
+				compactorWalStore?.close();
+			} catch (error) {
+				logger.error({ err: error }, "compactor_wal_store_close_error");
+			}
+			try {
+				compactorDb?.close();
+			} catch (error) {
+				logger.error({ err: error }, "compactor_db_close_error");
+			}
+		};
 		const compactionRuns = new Set<Promise<unknown>>();
 		const startCompaction = (source: "startup" | "scheduled") => {
 			if (!compactor) return;
@@ -279,15 +296,32 @@ export class DaemonManager {
 						{ count: pendingCompactions.length },
 						"compaction_shutdown_wait",
 					);
-					await Promise.allSettled(pendingCompactions);
-				}
-
-				// P1-2: Close compactor resources to prevent connection leak
-				if (compactorWalStore) {
-					compactorWalStore.close();
-				}
-				if (compactorDb) {
-					compactorDb.close();
+					const allCompactionsSettled = Promise.allSettled(pendingCompactions);
+					let timeoutId: NodeJS.Timeout | undefined;
+					const completedWithinDeadline = await Promise.race([
+						allCompactionsSettled.then(() => true),
+						new Promise<false>((resolve) => {
+							timeoutId = setTimeout(
+								() => resolve(false),
+								this.getCompactionShutdownTimeoutMs(),
+							);
+						}),
+					]);
+					if (timeoutId) clearTimeout(timeoutId);
+					if (!completedWithinDeadline) {
+						logger.warn(
+							{
+								count: pendingCompactions.length,
+								timeoutMs: this.getCompactionShutdownTimeoutMs(),
+							},
+							"compaction_shutdown_timeout",
+						);
+						void allCompactionsSettled.then(closeCompactorResources);
+					} else {
+						closeCompactorResources();
+					}
+				} else {
+					closeCompactorResources();
 				}
 
 				socketClient.disconnect();
@@ -325,6 +359,10 @@ export class DaemonManager {
 			process.off("SIGINT", handleSigint);
 			process.off("SIGTERM", handleSigterm);
 		}
+	}
+
+	protected getCompactionShutdownTimeoutMs(): number {
+		return COMPACTION_SHUTDOWN_TIMEOUT_MS;
 	}
 
 	protected async createRuntimeCryptoService(options?: {

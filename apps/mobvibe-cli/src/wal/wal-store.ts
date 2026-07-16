@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { SessionEventKind, StopReason } from "@mobvibe/shared";
@@ -34,11 +35,29 @@ export type UnackedSessionRevision = {
 	revision: number;
 };
 
+export type MessageSendClaim =
+	| { status: "claimed"; claimId: string }
+	| { status: "completed"; result: { stopReason: StopReason } }
+	| { status: "in_progress" };
+
 export type AppendEventParams = {
 	sessionId: string;
 	revision: number;
 	kind: SessionEventKind;
 	payload: unknown;
+};
+
+export type WalEventInput = Pick<AppendEventParams, "kind" | "payload">;
+
+export type CommitReloadRevisionParams = {
+	sessionId: string;
+	expectedRevision: number;
+	events: readonly WalEventInput[];
+};
+
+type PreparedWalEventInput = WalEventInput & {
+	serializedPayload: string;
+	createdAt: string;
 };
 
 export type QueryEventsParams = {
@@ -85,9 +104,13 @@ export class WalStore {
 	private stmtQueryUnackedEvents: ReturnType<Database["query"]>;
 	private stmtAckEvents: ReturnType<Database["query"]>;
 	private stmtIncrementRevision: ReturnType<Database["query"]>;
+	private stmtCommitReloadRevision: ReturnType<Database["query"]>;
 	private stmtGetMaxSeq: ReturnType<Database["query"]>;
 	private stmtGetMessageSendResult: ReturnType<Database["query"]>;
 	private stmtInsertMessageSendResult: ReturnType<Database["query"]>;
+	private stmtGetMessageSendClaim: ReturnType<Database["query"]>;
+	private stmtInsertMessageSendClaim: ReturnType<Database["query"]>;
+	private stmtDeleteMessageSendClaim: ReturnType<Database["query"]>;
 	private stmtGetSessionRevisionKey: ReturnType<Database["query"]>;
 	private stmtInsertSessionRevisionKey: ReturnType<Database["query"]>;
 	private stmtListUnackedSessionRevisions: ReturnType<Database["query"]>;
@@ -106,6 +129,7 @@ export class WalStore {
 	// Archive statements
 	private stmtDeleteSessionEvents: ReturnType<Database["query"]>;
 	private stmtDeleteMessageSendResults: ReturnType<Database["query"]>;
+	private stmtDeleteMessageSendClaims: ReturnType<Database["query"]>;
 	private stmtDeleteSessionRevisionKeys: ReturnType<Database["query"]>;
 	private stmtDeleteSession: ReturnType<Database["query"]>;
 	private stmtInsertArchivedSession: ReturnType<Database["query"]>;
@@ -190,6 +214,15 @@ export class WalStore {
       RETURNING current_revision
     `);
 
+		this.stmtCommitReloadRevision = this.db.query(`
+			UPDATE sessions
+			SET current_revision = current_revision + 1,
+				updated_at = $updatedAt
+			WHERE session_id = $sessionId
+				AND current_revision = $expectedRevision
+			RETURNING current_revision
+		`);
+
 		this.stmtGetMaxSeq = this.db.query(`
       SELECT MAX(seq) as max_seq
       FROM session_events
@@ -206,6 +239,25 @@ export class WalStore {
 			INSERT OR IGNORE INTO message_send_results (
 				session_id, message_id, stop_reason, completed_at
 			) VALUES ($sessionId, $messageId, $stopReason, $completedAt)
+		`);
+
+		this.stmtGetMessageSendClaim = this.db.query(`
+			SELECT claim_id
+			FROM message_send_claims
+			WHERE session_id = $sessionId AND message_id = $messageId
+		`);
+
+		this.stmtInsertMessageSendClaim = this.db.query(`
+			INSERT OR IGNORE INTO message_send_claims (
+				session_id, message_id, claim_id, claimed_at
+			) VALUES ($sessionId, $messageId, $claimId, $claimedAt)
+		`);
+
+		this.stmtDeleteMessageSendClaim = this.db.query(`
+			DELETE FROM message_send_claims
+			WHERE session_id = $sessionId
+				AND message_id = $messageId
+				AND claim_id = $claimId
 		`);
 
 		this.stmtGetSessionRevisionKey = this.db.query(`
@@ -298,6 +350,10 @@ export class WalStore {
 
 		this.stmtDeleteMessageSendResults = this.db.query(`
 			DELETE FROM message_send_results WHERE session_id = $sessionId
+		`);
+
+		this.stmtDeleteMessageSendClaims = this.db.query(`
+			DELETE FROM message_send_claims WHERE session_id = $sessionId
 		`);
 
 		this.stmtDeleteSessionRevisionKeys = this.db.query(`
@@ -421,68 +477,90 @@ export class WalStore {
 	 * Append an event to the WAL.
 	 */
 	appendEvent(params: AppendEventParams): WalEvent {
-		const serializedPayload = JSON.stringify(params.payload);
-		if (serializedPayload === undefined) {
-			throw new Error("WAL event payload must be JSON serializable");
+		const event = this.appendEventsAtomically(
+			params.sessionId,
+			params.revision,
+			[{ kind: params.kind, payload: params.payload }],
+		)[0];
+		if (!event) {
+			throw new Error("WAL append produced no event");
 		}
-		const seq = this.seqGenerator.next(params.sessionId, params.revision);
-		const now = new Date().toISOString();
+		return event;
+	}
 
-		logger.debug(
-			{
-				sessionId: params.sessionId,
-				revision: params.revision,
-				seq,
-				kind: params.kind,
-			},
-			"wal_append_event",
-		);
-
+	/**
+	 * Append a same-session, same-revision batch in one transaction. Sequence
+	 * state is updated only after the durable commit succeeds.
+	 */
+	appendEventsAtomically(
+		sessionId: string,
+		revision: number,
+		events: readonly WalEventInput[],
+	): WalEvent[] {
+		if (events.length === 0) {
+			return [];
+		}
+		const prepared = this.prepareEventInputs(events);
+		let inserted: WalEvent[];
 		try {
-			this.stmtInsertEvent.run({
-				$sessionId: params.sessionId,
-				$revision: params.revision,
-				$seq: seq,
-				$kind: params.kind,
-				$payload: serializedPayload,
-				$createdAt: now,
-			});
+			inserted = this.db
+				.transaction(() =>
+					this.insertPreparedEvents(sessionId, revision, prepared),
+				)
+				.immediate();
 		} catch (error) {
-			// Keep the in-memory generator aligned with durable state. Otherwise a
-			// failed insert permanently creates an apparent missing-message gap.
-			this.seqGenerator.initialize(
-				params.sessionId,
-				params.revision,
-				this.getMaxSeq(params.sessionId, params.revision),
-			);
+			this.syncSequenceFromDurableState(sessionId, revision);
 			throw error;
 		}
+		this.syncSequenceAfterCommit(sessionId, revision, inserted);
+		this.logAppendedEvents(inserted);
+		return inserted;
+	}
 
-		// Get the inserted row ID
-		const lastId = this.db.query("SELECT last_insert_rowid() as id").get() as {
-			id: number;
-		};
-
-		logger.info(
-			{
-				sessionId: params.sessionId,
-				revision: params.revision,
-				seq,
-				kind: params.kind,
-				eventId: lastId.id,
-			},
-			"wal_event_appended",
+	/**
+	 * Atomically advance an expected revision and persist its complete replay.
+	 */
+	commitReloadRevision(params: CommitReloadRevisionParams): {
+		revision: number;
+		events: WalEvent[];
+	} {
+		const prepared = this.prepareEventInputs(params.events);
+		const targetRevision = params.expectedRevision + 1;
+		let committed: { revision: number; events: WalEvent[] };
+		try {
+			committed = this.db
+				.transaction(() => {
+					const revisionRow = this.stmtCommitReloadRevision.get({
+						$sessionId: params.sessionId,
+						$expectedRevision: params.expectedRevision,
+						$updatedAt: new Date().toISOString(),
+					}) as { current_revision: number } | null;
+					if (!revisionRow) {
+						throw new Error(
+							`Session revision changed before reload commit: ${params.sessionId}`,
+						);
+					}
+					return {
+						revision: revisionRow.current_revision,
+						events: this.insertPreparedEvents(
+							params.sessionId,
+							revisionRow.current_revision,
+							prepared,
+						),
+					};
+				})
+				.immediate();
+		} catch (error) {
+			this.syncSequenceFromDurableState(params.sessionId, targetRevision);
+			throw error;
+		}
+		this.syncSequenceAfterCommit(
+			params.sessionId,
+			committed.revision,
+			committed.events,
 		);
-
-		return {
-			id: lastId.id,
-			sessionId: params.sessionId,
-			revision: params.revision,
-			seq,
-			kind: params.kind,
-			payload: params.payload,
-			createdAt: now,
-		};
+		this.logAppendedEvents(committed.events);
+		return committed;
 	}
 
 	/**
@@ -565,6 +643,65 @@ export class WalStore {
 			$messageId: messageId,
 		}) as { stop_reason: StopReason } | null;
 		return row ? { stopReason: row.stop_reason } : undefined;
+	}
+
+	/**
+	 * Atomically claim a message before invoking the external ACP prompt.
+	 * A pre-existing claim has an unknown outcome and must never be re-executed.
+	 */
+	claimMessageSend(sessionId: string, messageId: string): MessageSendClaim {
+		return this.db.transaction((): MessageSendClaim => {
+			const completed = this.getMessageSendResult(sessionId, messageId);
+			if (completed) {
+				return { status: "completed", result: completed };
+			}
+
+			const claimId = randomUUID();
+			const inserted = this.stmtInsertMessageSendClaim.run({
+				$sessionId: sessionId,
+				$messageId: messageId,
+				$claimId: claimId,
+				$claimedAt: new Date().toISOString(),
+			});
+			if (inserted.changes === 1) {
+				return { status: "claimed", claimId };
+			}
+
+			const completedAfterConflict = this.getMessageSendResult(
+				sessionId,
+				messageId,
+			);
+			if (completedAfterConflict) {
+				return { status: "completed", result: completedAfterConflict };
+			}
+			return { status: "in_progress" };
+		})();
+	}
+
+	/**
+	 * Atomically persist a completed result and remove its execution claim.
+	 */
+	completeMessageSend(
+		sessionId: string,
+		messageId: string,
+		claimId: string,
+		stopReason: StopReason,
+	): void {
+		this.db.transaction(() => {
+			const activeClaim = this.stmtGetMessageSendClaim.get({
+				$sessionId: sessionId,
+				$messageId: messageId,
+			}) as { claim_id: string } | null;
+			if (!activeClaim || activeClaim.claim_id !== claimId) {
+				throw new Error("Message send claim is no longer active");
+			}
+			this.recordMessageSendResult(sessionId, messageId, stopReason);
+			this.stmtDeleteMessageSendClaim.run({
+				$sessionId: sessionId,
+				$messageId: messageId,
+				$claimId: claimId,
+			});
+		})();
 	}
 
 	/**
@@ -756,14 +893,20 @@ export class WalStore {
 	 * Archive a session: delete WAL events, delete session record, mark as archived.
 	 */
 	archiveSession(sessionId: string): void {
-		this.stmtDeleteSessionEvents.run({ $sessionId: sessionId });
-		this.stmtDeleteMessageSendResults.run({ $sessionId: sessionId });
-		this.stmtDeleteSessionRevisionKeys.run({ $sessionId: sessionId });
-		this.stmtDeleteSession.run({ $sessionId: sessionId });
-		this.stmtInsertArchivedSession.run({
-			$sessionId: sessionId,
-			$archivedAt: new Date().toISOString(),
-		});
+		this.db
+			.transaction(() => {
+				this.stmtDeleteSessionEvents.run({ $sessionId: sessionId });
+				this.stmtDeleteMessageSendResults.run({ $sessionId: sessionId });
+				this.stmtDeleteMessageSendClaims.run({ $sessionId: sessionId });
+				this.stmtDeleteSessionRevisionKeys.run({ $sessionId: sessionId });
+				this.stmtDeleteSession.run({ $sessionId: sessionId });
+				this.stmtInsertArchivedSession.run({
+					$sessionId: sessionId,
+					$archivedAt: new Date().toISOString(),
+				});
+			})
+			.immediate();
+		this.seqGenerator.clearSession(sessionId);
 	}
 
 	/**
@@ -801,6 +944,92 @@ export class WalStore {
 	 */
 	close(): void {
 		this.db.close();
+	}
+
+	private prepareEventInputs(
+		events: readonly WalEventInput[],
+	): PreparedWalEventInput[] {
+		return events.map((event) => {
+			const serializedPayload = JSON.stringify(event.payload);
+			if (serializedPayload === undefined) {
+				throw new Error("WAL event payload must be JSON serializable");
+			}
+			return {
+				...event,
+				serializedPayload,
+				createdAt: new Date().toISOString(),
+			};
+		});
+	}
+
+	private insertPreparedEvents(
+		sessionId: string,
+		revision: number,
+		events: readonly PreparedWalEventInput[],
+	): WalEvent[] {
+		let seq = this.getMaxSeq(sessionId, revision);
+		return events.map((event) => {
+			seq += 1;
+			logger.debug(
+				{ sessionId, revision, seq, kind: event.kind },
+				"wal_append_event",
+			);
+			this.stmtInsertEvent.run({
+				$sessionId: sessionId,
+				$revision: revision,
+				$seq: seq,
+				$kind: event.kind,
+				$payload: event.serializedPayload,
+				$createdAt: event.createdAt,
+			});
+			const lastId = this.db
+				.query("SELECT last_insert_rowid() as id")
+				.get() as { id: number };
+			return {
+				id: lastId.id,
+				sessionId,
+				revision,
+				seq,
+				kind: event.kind,
+				payload: event.payload,
+				createdAt: event.createdAt,
+			};
+		});
+	}
+
+	private syncSequenceAfterCommit(
+		sessionId: string,
+		revision: number,
+		events: readonly WalEvent[],
+	): void {
+		const lastSeq = events.at(-1)?.seq ?? this.getMaxSeq(sessionId, revision);
+		this.seqGenerator.initialize(sessionId, revision, lastSeq);
+	}
+
+	private syncSequenceFromDurableState(
+		sessionId: string,
+		revision: number,
+	): void {
+		this.seqGenerator.initialize(
+			sessionId,
+			revision,
+			this.getMaxSeq(sessionId, revision),
+		);
+	}
+
+	private logAppendedEvents(events: readonly WalEvent[]): void {
+		for (const event of events) {
+			logger.info(
+				{
+					sessionId: event.sessionId,
+					revision: event.revision,
+					seq: event.seq,
+					kind: event.kind,
+					eventId: event.id,
+				},
+				"wal_event_appended",
+			);
+		}
 	}
 
 	private getMaxSeq(sessionId: string, revision: number): number {

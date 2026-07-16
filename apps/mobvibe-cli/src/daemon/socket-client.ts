@@ -18,6 +18,8 @@ import type {
 	StopReason,
 } from "@mobvibe/shared";
 import {
+	AppError,
+	createErrorDetail,
 	createSignedToken,
 	getPromptImageBlocks,
 	validatePromptImageBlocks,
@@ -59,6 +61,18 @@ type SocketClientOptions = {
 
 const SESSION_ROOT_NAME = "Working Directory";
 const MAX_RESOURCE_FILES = 2000;
+const createMessageOutcomeUnknownError = (detail?: string) =>
+	new AppError(
+		createErrorDetail({
+			code: "MESSAGE_OUTCOME_UNKNOWN",
+			message:
+				"Message execution outcome is unknown; send it again as a new message",
+			retryable: false,
+			scope: "request",
+			detail,
+		}),
+		409,
+	);
 const DEFAULT_IGNORES = [
 	"node_modules",
 	".git",
@@ -163,6 +177,7 @@ const filterVisibleEntries = (entries: FsEntry[]) =>
 
 /** Minimum interval between automatic discover calls (ms) */
 const DISCOVER_THROTTLE_MS = 60_000;
+const WAL_REPLAY_BATCH_SIZE = 100;
 
 export class SocketClient extends EventEmitter {
 	private socket: Socket<GatewayToCliEvents, CliToGatewayEvents>;
@@ -171,12 +186,13 @@ export class SocketClient extends EventEmitter {
 	private reconnectAttempts = 0;
 	private heartbeatInterval?: NodeJS.Timeout;
 	private lastDiscoverAt = 0;
+	private walReplayGeneration = 0;
 	private readonly agentTeamStore: AgentTeamStore;
 	private readonly messageSendsInFlight = new Map<
 		string,
 		Promise<SendMessageResult>
 	>();
-	private readonly sessionMessageTails = new Map<string, Promise<void>>();
+	private readonly sessionOperationTails = new Map<string, Promise<void>>();
 
 	constructor(private readonly options: SocketClientOptions) {
 		super();
@@ -206,6 +222,7 @@ export class SocketClient extends EventEmitter {
 		this.socket.on("disconnect", (reason) => {
 			logger.warn({ reason }, "gateway_disconnected");
 			this.connected = false;
+			this.walReplayGeneration += 1;
 			this.stopHeartbeat();
 			this.emit("disconnected", reason);
 		});
@@ -235,6 +252,11 @@ export class SocketClient extends EventEmitter {
 
 		this.socket.on("cli:registered", async (info) => {
 			logger.info({ machineId: info.machineId }, "gateway_registered");
+			const replayGeneration = ++this.walReplayGeneration;
+			await this.replayUnackedEvents(replayGeneration);
+			if (replayGeneration !== this.walReplayGeneration || !this.connected) {
+				return;
+			}
 
 			// Throttle automatic discover on reconnect
 			const now = Date.now();
@@ -799,10 +821,8 @@ export class SocketClient extends EventEmitter {
 					{ requestId: request.requestId, sessionId, cwd, backendId },
 					"rpc_session_load",
 				);
-				const session = await sessionManager.loadSession(
-					sessionId,
-					cwd,
-					backendId,
+				const session = await this.enqueueSessionOperation(sessionId, () =>
+					sessionManager.loadSession(sessionId, cwd, backendId),
 				);
 				this.sendRpcResponse(request.requestId, session);
 			} catch (error) {
@@ -826,10 +846,8 @@ export class SocketClient extends EventEmitter {
 					{ requestId: request.requestId, sessionId, cwd, backendId },
 					"rpc_session_reload",
 				);
-				const session = await sessionManager.reloadSession(
-					sessionId,
-					cwd,
-					backendId,
+				const session = await this.enqueueSessionOperation(sessionId, () =>
+					sessionManager.reloadSession(sessionId, cwd, backendId),
 				);
 				this.sendRpcResponse(request.requestId, session);
 			} catch (error) {
@@ -1299,7 +1317,9 @@ export class SocketClient extends EventEmitter {
 					{ requestId: request.requestId, sessionId },
 					"rpc_session_archive",
 				);
-				await sessionManager.archiveSession(sessionId);
+				await this.enqueueSessionOperation(sessionId, () =>
+					sessionManager.archiveSession(sessionId),
+				);
 				this.sendRpcResponse(request.requestId, { ok: true });
 			} catch (error) {
 				logger.error(
@@ -1325,7 +1345,9 @@ export class SocketClient extends EventEmitter {
 					},
 					"rpc_session_archive_all",
 				);
-				const result = await sessionManager.bulkArchiveSessions(sessionIds);
+				const result = await this.enqueueSessionOperations(sessionIds, () =>
+					sessionManager.bulkArchiveSessions(sessionIds),
+				);
 				this.sendRpcResponse(request.requestId, result);
 			} catch (error) {
 				logger.error(
@@ -1394,28 +1416,56 @@ export class SocketClient extends EventEmitter {
 			return inFlight;
 		}
 
-		const previous =
-			this.sessionMessageTails.get(params.sessionId) ?? Promise.resolve();
-		const operation = previous.then(() =>
+		const operation = this.enqueueSessionOperation(params.sessionId, () =>
 			this.executeMessageSend({ ...params, messageId }),
 		);
 		this.messageSendsInFlight.set(key, operation);
-		const tail = operation.then(
-			() => {},
-			() => {},
-		);
-		this.sessionMessageTails.set(params.sessionId, tail);
 		const clearInFlight = () => {
 			if (this.messageSendsInFlight.get(key) === operation) {
 				this.messageSendsInFlight.delete(key);
-			}
-			if (this.sessionMessageTails.get(params.sessionId) === tail) {
-				this.sessionMessageTails.delete(params.sessionId);
 			}
 		};
 		// Handle both outcomes without creating an unobserved rejected promise.
 		void operation.then(clearInFlight, clearInFlight);
 		return operation;
+	}
+
+	private enqueueSessionOperation<T>(
+		sessionId: string,
+		operation: () => Promise<T>,
+	): Promise<T> {
+		return this.enqueueSessionOperations([sessionId], operation);
+	}
+
+	private enqueueSessionOperations<T>(
+		sessionIds: readonly string[],
+		operation: () => Promise<T>,
+	): Promise<T> {
+		const uniqueSessionIds = [...new Set(sessionIds)].sort();
+		const previousTails = uniqueSessionIds
+			.map((sessionId) => this.sessionOperationTails.get(sessionId))
+			.filter((tail): tail is Promise<void> => tail !== undefined);
+		const previous =
+			previousTails.length === 0
+				? Promise.resolve()
+				: Promise.all(previousTails).then(() => {});
+		const result = previous.then(operation);
+		const tail = result.then(
+			() => {},
+			() => {},
+		);
+		for (const sessionId of uniqueSessionIds) {
+			this.sessionOperationTails.set(sessionId, tail);
+		}
+		const clearTail = () => {
+			for (const sessionId of uniqueSessionIds) {
+				if (this.sessionOperationTails.get(sessionId) === tail) {
+					this.sessionOperationTails.delete(sessionId);
+				}
+			}
+		};
+		void result.then(clearTail, clearTail);
+		return result;
 	}
 
 	private async executeMessageSend(
@@ -1443,18 +1493,34 @@ export class SocketClient extends EventEmitter {
 			record.connection.getSessionCapabilities().prompt?.image === true,
 		);
 		sessionManager.touchSession(params.sessionId);
-		const promptResult = await record.connection.prompt(
-			params.sessionId,
-			prompt,
-		);
-		sessionManager.touchSession(params.sessionId);
-		const result = { stopReason: promptResult.stopReason as StopReason };
-		sessionManager.recordTurnEnd(params.sessionId, result.stopReason);
-		sessionManager.recordMessageSendResult(
+		const claim = sessionManager.claimMessageSend(
 			params.sessionId,
 			params.messageId,
+		);
+		if (claim.status === "completed") {
+			return claim.result;
+		}
+		if (claim.status === "in_progress") {
+			throw createMessageOutcomeUnknownError();
+		}
+
+		let promptResult: Awaited<ReturnType<typeof record.connection.prompt>>;
+		try {
+			promptResult = await record.connection.prompt(params.sessionId, prompt);
+		} catch (error) {
+			throw createMessageOutcomeUnknownError(
+				error instanceof Error ? error.message : undefined,
+			);
+		}
+		const result = { stopReason: promptResult.stopReason as StopReason };
+		sessionManager.completeMessageSend(
+			params.sessionId,
+			params.messageId,
+			claim.claimId,
 			result.stopReason,
 		);
+		sessionManager.touchSession(params.sessionId);
+		sessionManager.recordTurnEnd(params.sessionId, result.stopReason);
 		return result;
 	}
 
@@ -1615,15 +1681,19 @@ export class SocketClient extends EventEmitter {
 			},
 			"rpc_response_error_sent",
 		);
+		const errorPayload =
+			error instanceof AppError
+				? error.detail
+				: {
+						code: "INTERNAL_ERROR" as const,
+						message,
+						retryable: true,
+						scope: "request" as const,
+						detail,
+					};
 		const response: RpcResponse<unknown> = {
 			requestId,
-			error: {
-				code: "INTERNAL_ERROR",
-				message,
-				retryable: true,
-				scope: "request",
-				detail,
-			},
+			error: errorPayload,
 		};
 		this.socket.emit("rpc:response", response);
 	}
@@ -1671,10 +1741,6 @@ export class SocketClient extends EventEmitter {
 		this.socket.emit("sessions:list", sessionManager.listAllSessions());
 		this.startHeartbeat();
 
-		// Durable WAL state can outlive the process, so the very first transport
-		// connection after a daemon restart must replay unacknowledged events too.
-		this.replayUnackedEvents();
-
 		this.emit("connected");
 	}
 
@@ -1701,9 +1767,10 @@ export class SocketClient extends EventEmitter {
 	/**
 	 * Replay unacked events for every durable current session revision.
 	 */
-	private replayUnackedEvents() {
+	private async replayUnackedEvents(generation: number): Promise<void> {
 		const { sessionManager } = this.options;
 		const revisions = sessionManager.listUnackedSessionRevisions();
+		let batchSize = 0;
 
 		for (const { sessionId, revision } of revisions) {
 			const unackedEvents = sessionManager.getUnackedEvents(
@@ -1722,8 +1789,16 @@ export class SocketClient extends EventEmitter {
 				);
 
 				for (const event of unackedEvents) {
+					if (!this.connected || generation !== this.walReplayGeneration) {
+						return;
+					}
 					const encrypted = this.options.cryptoService.encryptEvent(event);
 					this.socket.emit("session:event", encrypted);
+					batchSize += 1;
+					if (batchSize >= WAL_REPLAY_BATCH_SIZE) {
+						batchSize = 0;
+						await new Promise<void>((resolve) => setTimeout(resolve, 0));
+					}
 				}
 			}
 		}
@@ -1736,6 +1811,7 @@ export class SocketClient extends EventEmitter {
 	disconnect() {
 		this.stopHeartbeat();
 		this.connected = false;
+		this.walReplayGeneration += 1;
 		this.agentTeamStore.close();
 		this.socket.disconnect();
 	}

@@ -173,6 +173,12 @@ class CompactionShutdownHarness extends ShutdownHarness {
 	}
 }
 
+class BoundedCompactionShutdownHarness extends CompactionShutdownHarness {
+	protected override getCompactionShutdownTimeoutMs(): number {
+		return 10;
+	}
+}
+
 describe("DaemonManager no-e2ee", () => {
 	let startHarness: StartHarness;
 	let runtimeHarness: RuntimeHarness;
@@ -217,6 +223,54 @@ describe("DaemonManager no-e2ee", () => {
 });
 
 describe("DaemonManager shutdown", () => {
+	test("bounds the wait for a stuck in-flight compaction", async () => {
+		const config = createConfig();
+		config.walDbPath = `/tmp/mobvibe-test/compaction-timeout-${Date.now()}-${Math.random()
+			.toString(36)
+			.slice(2)}.db`;
+		config.compaction.enabled = true;
+		config.compaction.runOnStartup = true;
+		const harness = new BoundedCompactionShutdownHarness(config);
+		const previousSigterm = new Set(process.listeners("SIGTERM"));
+		const runPromise = harness.runForeground();
+		for (let attempt = 0; attempt < 10; attempt++) {
+			if (
+				process
+					.listeners("SIGTERM")
+					.some((listener) => !previousSigterm.has(listener))
+			) {
+				break;
+			}
+			await Promise.resolve();
+		}
+
+		const sigtermHandler = process
+			.listeners("SIGTERM")
+			.find((listener) => !previousSigterm.has(listener));
+		if (!sigtermHandler) {
+			throw new Error("SIGTERM handler was not registered");
+		}
+		sigtermHandler("SIGTERM");
+
+		try {
+			const completedWithinDeadline = await Promise.race([
+				runPromise.then(() => true),
+				new Promise<false>((resolve) => setTimeout(() => resolve(false), 100)),
+			]);
+			expect(completedWithinDeadline).toBe(true);
+			expect(harness.fakeSocketClient.disconnect).toHaveBeenCalledTimes(1);
+			expect(harness.fakeSessionManager.shutdown).toHaveBeenCalledTimes(1);
+		} finally {
+			harness.finishCompaction();
+			await runPromise;
+			for (const listener of process.listeners("SIGTERM")) {
+				if (!previousSigterm.has(listener)) {
+					process.removeListener("SIGTERM", listener);
+				}
+			}
+		}
+	});
+
 	test("waits for in-flight compaction before closing its databases", async () => {
 		const config = createConfig();
 		config.walDbPath = `/tmp/mobvibe-test/compaction-${Date.now()}-${Math.random()

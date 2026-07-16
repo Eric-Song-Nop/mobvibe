@@ -248,6 +248,25 @@ const MIGRATIONS = [
 				ON session_revision_keys (session_id, revision);
 		`,
 	},
+	{
+		version: 10,
+		up: `
+			-- A durable claim closes the crash window between starting an ACP
+			-- prompt and recording its terminal result. A claim left behind by a
+			-- terminated daemon is intentionally treated as indeterminate instead
+			-- of executing the same external side effects again.
+			CREATE TABLE IF NOT EXISTS message_send_claims (
+				session_id TEXT NOT NULL,
+				message_id TEXT NOT NULL,
+				claim_id TEXT NOT NULL,
+				claimed_at TEXT NOT NULL,
+				PRIMARY KEY (session_id, message_id)
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_message_send_claims_claimed_at
+				ON message_send_claims (claimed_at);
+		`,
+	},
 ];
 
 export function runMigrations(db: Database): void {

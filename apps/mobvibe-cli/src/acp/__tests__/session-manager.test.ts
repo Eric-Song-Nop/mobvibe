@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import {
@@ -75,6 +76,7 @@ let sessionUpdateCallback:
 	| ((notification: SessionNotification) => void)
 	| undefined;
 let statusChangeCallback: ((status: { error?: unknown }) => void) | undefined;
+let terminalOutputCallback: ((event: unknown) => void) | undefined;
 
 const createMockConnection = () => ({
 	connect: mock(() => Promise.resolve(undefined)),
@@ -135,7 +137,12 @@ const createMockConnection = () => ({
 			sessionUpdateCallback = undefined;
 		};
 	}),
-	onTerminalOutput: mock(() => () => {}),
+	onTerminalOutput: mock((cb: (event: unknown) => void) => {
+		terminalOutputCallback = cb;
+		return () => {
+			terminalOutputCallback = undefined;
+		};
+	}),
 	onStatusChange: mock((cb: (status: { error?: unknown }) => void) => {
 		statusChangeCallback = cb;
 		return () => {
@@ -194,6 +201,7 @@ describe("SessionManager", () => {
 		mockConnection = createMockConnection();
 		sessionUpdateCallback = undefined;
 		statusChangeCallback = undefined;
+		terminalOutputCallback = undefined;
 		mockIsGitRepo.mockClear();
 		mockCreateGitWorktree.mockClear();
 		mockResolveGitProjectContext.mockClear();
@@ -370,9 +378,169 @@ describe("SessionManager", () => {
 			);
 			expect(attachedListener).toHaveBeenCalledTimes(2);
 		});
+
+		it("never revives an archived session through load or reload", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			await sessionManager.archiveSession(created.sessionId);
+			mockConnection.loadSession.mockClear();
+
+			await expect(
+				sessionManager.loadSession(
+					created.sessionId,
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toMatchObject({
+				detail: expect.objectContaining({ code: "SESSION_NOT_FOUND" }),
+			});
+			await expect(
+				sessionManager.reloadSession(
+					created.sessionId,
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toMatchObject({
+				detail: expect.objectContaining({ code: "SESSION_NOT_FOUND" }),
+			});
+
+			expect(mockConnection.loadSession).not.toHaveBeenCalled();
+			expect(sessionManager.getSession(created.sessionId)).toBeUndefined();
+			const walStore = (
+				sessionManager as unknown as {
+					walStore: {
+						getSession: (sessionId: string) => unknown;
+						isArchived: (sessionId: string) => boolean;
+					};
+				}
+			).walStore;
+			expect(walStore.getSession(created.sessionId)).toBeNull();
+			expect(walStore.isArchived(created.sessionId)).toBe(true);
+		});
 	});
 
 	describe("reloadSession", () => {
+		it("buffers terminal and status events into the successful reload revision", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			mockConnection.loadSession.mockImplementationOnce(async () => {
+				terminalOutputCallback?.({ stream: "stdout", data: "replayed output" });
+				statusChangeCallback?.({ error: { message: "replayed failure" } });
+				return { modes: null, models: null };
+			});
+
+			await sessionManager.reloadSession(
+				created.sessionId,
+				"/home/user/project",
+				"backend-1",
+			);
+
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: created.sessionId,
+					revision: 1,
+					afterSeq: 0,
+				}).events,
+			).toHaveLength(0);
+			expect(
+				sessionManager
+					.getSessionEvents({
+						sessionId: created.sessionId,
+						revision: 2,
+						afterSeq: 0,
+					})
+					.events.map((event) => event.kind),
+			).toEqual(["terminal_output", "session_error"]);
+		});
+
+		it("serializes concurrent reloads and preserves each replay revision", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			let resolveFirstReload:
+				| ((value: { modes: null; models: null }) => void)
+				| undefined;
+			let resolveSecondReload:
+				| ((value: { modes: null; models: null }) => void)
+				| undefined;
+			let loadCount = 0;
+			mockConnection.loadSession.mockImplementation(() => {
+				loadCount += 1;
+				sessionUpdateCallback?.({
+					sessionId: created.sessionId,
+					update: {
+						sessionUpdate: "agent_message_chunk",
+						content: { type: "text", text: `reload ${loadCount}` },
+					},
+				} as SessionNotification);
+				if (loadCount === 1) {
+					return new Promise<{ modes: null; models: null }>((resolve) => {
+						resolveFirstReload = resolve;
+					});
+				}
+				return new Promise<{ modes: null; models: null }>((resolve) => {
+					resolveSecondReload = resolve;
+				});
+			});
+
+			const first = sessionManager.reloadSession(
+				created.sessionId,
+				"/home/user/project",
+				"backend-1",
+			);
+			const second = sessionManager.reloadSession(
+				created.sessionId,
+				"/home/user/project",
+				"backend-1",
+			);
+			await Promise.resolve();
+
+			expect(mockConnection.loadSession).toHaveBeenCalledTimes(1);
+			resolveFirstReload?.({ modes: null, models: null });
+			await first;
+			await Promise.resolve();
+
+			expect(mockConnection.loadSession).toHaveBeenCalledTimes(2);
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: created.sessionId,
+					revision: 2,
+					afterSeq: 0,
+				}).events,
+			).toEqual([
+				expect.objectContaining({
+					payload: expect.objectContaining({
+						update: expect.objectContaining({
+							content: { type: "text", text: "reload 1" },
+						}),
+					}),
+				}),
+			]);
+
+			resolveSecondReload?.({ modes: null, models: null });
+			await second;
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: created.sessionId,
+					revision: 3,
+					afterSeq: 0,
+				}).events,
+			).toEqual([
+				expect.objectContaining({
+					payload: expect.objectContaining({
+						update: expect.objectContaining({
+							content: { type: "text", text: "reload 2" },
+						}),
+					}),
+				}),
+			]);
+		});
+
 		it("writes replay updates to the new revision after reload succeeds", async () => {
 			const created = await sessionManager.createSession({
 				cwd: "/home/user/project",
@@ -421,7 +589,108 @@ describe("SessionManager", () => {
 			]);
 		});
 
-		it("discards partial replay but resumes live updates when reload fails", async () => {
+		it("durably commits the full replay before emitting buffered events", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			mockConnection.loadSession.mockImplementationOnce(async () => {
+				sessionUpdateCallback?.({
+					sessionId: created.sessionId,
+					update: {
+						sessionUpdate: "agent_message_chunk",
+						content: { type: "text", text: "first replay event" },
+					},
+				} as SessionNotification);
+				terminalOutputCallback?.({
+					stream: "stdout",
+					data: "second replay event",
+				});
+				return { modes: null, models: null };
+			});
+			sessionManager.onSessionEvent(() => {
+				throw new Error("injected subscriber failure");
+			});
+
+			await sessionManager.reloadSession(
+				created.sessionId,
+				"/home/user/project",
+				"backend-1",
+			);
+
+			expect(
+				sessionManager
+					.getSessionEvents({
+						sessionId: created.sessionId,
+						revision: 2,
+						afterSeq: 0,
+					})
+					.events.map((event) => event.kind),
+			).toEqual(["agent_message_chunk", "terminal_output"]);
+		});
+
+		it("closes the active session when the local replay commit fails", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const lateUpdate = sessionUpdateCallback;
+			mockConnection.loadSession.mockImplementationOnce(async () => {
+				sessionUpdateCallback?.({
+					sessionId: created.sessionId,
+					update: {
+						sessionUpdate: "agent_message_chunk",
+						content: { type: "text", text: "uncommitted replay" },
+					},
+				} as SessionNotification);
+				return { modes: null, models: null };
+			});
+			const faultDb = new Database(mockConfig.walDbPath);
+			faultDb.exec(`
+				CREATE TRIGGER fail_session_reload_commit
+				BEFORE INSERT ON session_events
+				WHEN NEW.session_id = '${created.sessionId}' AND NEW.revision = 2
+				BEGIN
+					SELECT RAISE(ABORT, 'injected session reload commit failure');
+				END;
+			`);
+			faultDb.close();
+
+			await expect(
+				sessionManager.reloadSession(
+					created.sessionId,
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toThrow("injected session reload commit failure");
+
+			expect(sessionManager.getSession(created.sessionId)).toBeUndefined();
+			expect(mockConnection.disconnect).toHaveBeenCalled();
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: created.sessionId,
+					revision: 1,
+					afterSeq: 0,
+				}).events,
+			).toHaveLength(0);
+
+			lateUpdate?.({
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "late after failed commit" },
+				},
+			} as SessionNotification);
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: created.sessionId,
+					revision: 1,
+					afterSeq: 0,
+				}).events,
+			).toHaveLength(0);
+		});
+
+		it("restores partial replay and resumes live updates when reload fails", async () => {
 			const created = await sessionManager.createSession({
 				cwd: "/home/user/project",
 				backendId: "backend-1",
@@ -457,13 +726,19 @@ describe("SessionManager", () => {
 				),
 			).rejects.toThrow("reload failed");
 
-			expect(
-				sessionManager.getSessionEvents({
-					sessionId: created.sessionId,
-					revision: 1,
-					afterSeq: 0,
-				}).events,
-			).toEqual(historyBefore.events);
+			const restoredHistory = sessionManager.getSessionEvents({
+				sessionId: created.sessionId,
+				revision: 1,
+				afterSeq: 0,
+			}).events;
+			expect(restoredHistory).toHaveLength(historyBefore.events.length + 1);
+			expect(restoredHistory.at(-1)?.payload).toEqual(
+				expect.objectContaining({
+					update: expect.objectContaining({
+						content: { type: "text", text: "partial failed replay" },
+					}),
+				}),
+			);
 
 			sessionUpdateCallback?.({
 				sessionId: created.sessionId,
@@ -477,7 +752,7 @@ describe("SessionManager", () => {
 				revision: 1,
 				afterSeq: 0,
 			}).events;
-			expect(resumedHistory).toHaveLength(historyBefore.events.length + 1);
+			expect(resumedHistory).toHaveLength(historyBefore.events.length + 2);
 			expect(resumedHistory.at(-1)?.payload).toEqual(
 				expect.objectContaining({
 					update: expect.objectContaining({
@@ -485,6 +760,49 @@ describe("SessionManager", () => {
 					}),
 				}),
 			);
+		});
+
+		it("restores every buffered event to the old revision when reload fails", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			mockConnection.loadSession.mockImplementationOnce(async () => {
+				sessionUpdateCallback?.({
+					sessionId: created.sessionId,
+					update: {
+						sessionUpdate: "agent_message_chunk",
+						content: { type: "text", text: "buffered update" },
+					},
+				} as SessionNotification);
+				terminalOutputCallback?.({ stream: "stdout", data: "buffered output" });
+				statusChangeCallback?.({ error: { message: "buffered status" } });
+				sessionManager.recordTurnEnd(created.sessionId, "end_turn");
+				throw new Error("reload failed");
+			});
+
+			await expect(
+				sessionManager.reloadSession(
+					created.sessionId,
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toThrow("reload failed");
+
+			expect(
+				sessionManager
+					.getSessionEvents({
+						sessionId: created.sessionId,
+						revision: 1,
+						afterSeq: 0,
+					})
+					.events.map((event) => event.kind),
+			).toEqual([
+				"agent_message_chunk",
+				"terminal_output",
+				"session_error",
+				"turn_end",
+			]);
 		});
 
 		it("emits session:attached event even if already attached", async () => {
@@ -679,6 +997,63 @@ describe("SessionManager", () => {
 						workspaceRootCwd: "/home/user/project",
 					}),
 				]),
+			);
+		});
+
+		it("prefers newer discovered metadata over a detached WAL summary", async () => {
+			mockResolveGitProjectContext.mockResolvedValueOnce({
+				isGitRepo: true,
+				repoRoot: "/home/user/project",
+				repoName: "project",
+				relativeCwd: "apps/webui",
+				isRepoRoot: false,
+			});
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project/apps/webui",
+				backendId: "backend-1",
+			});
+			await sessionManager.closeSession(created.sessionId);
+
+			(
+				sessionManager as unknown as {
+					walStore: {
+						saveDiscoveredSessions: (
+							sessions: Array<{
+								sessionId: string;
+								backendId: string;
+								cwd?: string;
+								workspaceRootCwd?: string;
+								title?: string;
+								agentUpdatedAt?: string;
+								discoveredAt: string;
+								isStale: boolean;
+							}>,
+						) => void;
+					};
+				}
+			).walStore.saveDiscoveredSessions([
+				{
+					sessionId: created.sessionId,
+					backendId: "backend-1",
+					cwd: "/home/user/project/apps/webui",
+					workspaceRootCwd: "/home/user/project",
+					title: "Agent title",
+					agentUpdatedAt: "2100-01-01T00:00:00.000Z",
+					discoveredAt: "2099-01-01T00:00:00.000Z",
+					isStale: false,
+				},
+			]);
+
+			const restored = sessionManager
+				.listAllSessions()
+				.find((session) => session.sessionId === created.sessionId);
+			expect(restored).toEqual(
+				expect.objectContaining({
+					title: "Agent title",
+					cwd: "/home/user/project/apps/webui",
+					workspaceRootCwd: "/home/user/project",
+					updatedAt: "2100-01-01T00:00:00.000Z",
+				}),
 			);
 		});
 	});
