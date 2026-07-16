@@ -440,6 +440,12 @@ export function useSessionMutations(store: ChatStoreActions) {
 			});
 		},
 		onError: (mutationError: unknown, variables) => {
+			const normalizedError = normalizeError(
+				mutationError,
+				createFallbackError(t("errors.sendFailed"), "session"),
+			);
+			const canReuseMessageId =
+				normalizedError.code !== "MESSAGE_OUTCOME_UNKNOWN";
 			if (variables?.messageId) {
 				store.markUserMessageFailed(variables.sessionId, variables.messageId);
 			}
@@ -447,16 +453,17 @@ export function useSessionMutations(store: ChatStoreActions) {
 				const { revision, ...draft } = variables.draft;
 				useUiStore.getState().setChatDraft(variables.sessionId, {
 					...draft,
-					messageId: variables.messageId,
-					...(revision !== undefined ? { messageRevision: revision } : {}),
+					...(canReuseMessageId
+						? {
+								messageId: variables.messageId,
+								...(revision !== undefined
+									? { messageRevision: revision }
+									: {}),
+							}
+						: {}),
 				});
 			}
-			store.setAppError(
-				normalizeError(
-					mutationError,
-					createFallbackError(t("errors.sendFailed"), "session"),
-				),
-			);
+			store.setAppError(normalizedError);
 		},
 		onSettled: (_data, _error, variables) => {
 			if (!variables) {

@@ -10,7 +10,7 @@ import {
 	DialogTrigger,
 } from "@mobvibe/ui/dialog";
 import { Separator } from "@mobvibe/ui/separator";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 interface GetStartedDialogProps {
@@ -32,18 +32,45 @@ export function GetStartedDialog({
 	const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">(
 		"idle",
 	);
+	const copyAttemptRef = useRef(0);
+	const resetCopyStatus = useCallback(() => {
+		copyAttemptRef.current += 1;
+		setCopyStatus("idle");
+	}, []);
+	useEffect(() => {
+		if (open === false) {
+			resetCopyStatus();
+		}
+	}, [open, resetCopyStatus]);
 
 	const handleCopy = useCallback(async () => {
+		const attempt = copyAttemptRef.current + 1;
+		copyAttemptRef.current = attempt;
 		try {
 			await navigator.clipboard.writeText(CLI_COMMAND);
+			if (copyAttemptRef.current !== attempt) {
+				return;
+			}
 			setCopyStatus("copied");
 		} catch {
+			if (copyAttemptRef.current !== attempt) {
+				return;
+			}
 			setCopyStatus("error");
 		}
 	}, []);
+	const handleOpenChange = useCallback(
+		(nextOpen: boolean) => {
+			if (!nextOpen) {
+				resetCopyStatus();
+			}
+			onOpenChange?.(nextOpen);
+		},
+		[onOpenChange, resetCopyStatus],
+	);
 
 	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
+		<Dialog open={open} onOpenChange={handleOpenChange}>
 			<DialogTrigger asChild>{children}</DialogTrigger>
 			<DialogContent className="sm:max-w-md">
 				<DialogHeader>

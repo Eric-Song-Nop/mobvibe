@@ -859,7 +859,7 @@ describe("useSessionMutations", () => {
 			expect(mockStore.setSending).toHaveBeenCalledWith("session-1", false);
 		});
 
-		it("marks the optimistic message failed and restores the draft on error", async () => {
+		it("retains the message id when restoring a draft after a transient transport error", async () => {
 			vi.mocked(apiModule.sendMessage).mockRejectedValue(new Error("offline"));
 
 			const { result } = renderHook(() => useSessionMutations(mockStore), {
@@ -890,6 +890,46 @@ describe("useSessionMutations", () => {
 				messageRevision: 4,
 			});
 			expect(mockStore.setAppError).toHaveBeenCalled();
+		});
+
+		it("restores an unknown-outcome draft without reusing the indeterminate message id", async () => {
+			const outcomeUnknown = {
+				code: "MESSAGE_OUTCOME_UNKNOWN" as const,
+				message:
+					"The previous delivery outcome is unknown. Send it again as a new message.",
+				retryable: false,
+				scope: "request" as const,
+			};
+			vi.mocked(apiModule.sendMessage).mockRejectedValue(
+				new apiModule.ApiError(outcomeUnknown),
+			);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await expect(
+				result.current.sendMessageMutation.mutateAsync({
+					sessionId: "session-1",
+					prompt: [{ type: "text", text: "Hello" }],
+					messageId: "indeterminate-msg-1",
+					draft: {
+						input: "Hello",
+						inputContents: [{ type: "text", text: "Hello" }],
+						revision: 4,
+					},
+				}),
+			).rejects.toThrow(outcomeUnknown.message);
+
+			expect(mockStore.markUserMessageFailed).toHaveBeenCalledWith(
+				"session-1",
+				"indeterminate-msg-1",
+			);
+			expect(mockUiStoreState.setChatDraft).toHaveBeenCalledWith("session-1", {
+				input: "Hello",
+				inputContents: [{ type: "text", text: "Hello" }],
+			});
+			expect(mockStore.setAppError).toHaveBeenCalledWith(outcomeUnknown);
 		});
 
 		it("should handle undefined variables gracefully", async () => {

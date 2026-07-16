@@ -1,7 +1,7 @@
 import { SidebarProvider } from "@mobvibe/ui/sidebar";
 import { ThemeProvider } from "@mobvibe/ui/theme-provider";
 import { ToggleGroup, ToggleGroupItem } from "@mobvibe/ui/toggle-group";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "@/App";
@@ -165,6 +165,114 @@ describe("website interaction semantics", () => {
 		expect(await screen.findByRole("alert")).toHaveTextContent(
 			"Copy failed. Select and copy the command manually.",
 		);
+	});
+
+	it("clears clipboard feedback before the onboarding dialog is reopened", async () => {
+		const user = userEvent.setup();
+		Object.defineProperty(navigator, "clipboard", {
+			configurable: true,
+			value: {
+				writeText: vi.fn().mockResolvedValue(undefined),
+			},
+		});
+		render(
+			<GetStartedDialog>
+				<button type="button">Open onboarding</button>
+			</GetStartedDialog>,
+		);
+
+		await user.click(screen.getByRole("button", { name: "Open onboarding" }));
+		await user.click(screen.getByRole("button", { name: "Copy command" }));
+		expect(await screen.findByRole("status")).toHaveTextContent(
+			"Command copied.",
+		);
+
+		await user.click(screen.getByRole("button", { name: "Close" }));
+		await waitFor(() =>
+			expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+		);
+		await user.click(screen.getByRole("button", { name: "Open onboarding" }));
+
+		expect(screen.queryByRole("status")).not.toBeInTheDocument();
+	});
+
+	it("clears clipboard feedback when a controlled dialog is closed by its parent", async () => {
+		const user = userEvent.setup();
+		Object.defineProperty(navigator, "clipboard", {
+			configurable: true,
+			value: {
+				writeText: vi.fn().mockResolvedValue(undefined),
+			},
+		});
+		const { rerender } = render(
+			<GetStartedDialog open>
+				<button type="button">Open onboarding</button>
+			</GetStartedDialog>,
+		);
+
+		await user.click(screen.getByRole("button", { name: "Copy command" }));
+		expect(await screen.findByRole("status")).toHaveTextContent(
+			"Command copied.",
+		);
+
+		rerender(
+			<GetStartedDialog open={false}>
+				<button type="button">Open onboarding</button>
+			</GetStartedDialog>,
+		);
+		await waitFor(() =>
+			expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+		);
+		rerender(
+			<GetStartedDialog open>
+				<button type="button">Open onboarding</button>
+			</GetStartedDialog>,
+		);
+
+		expect(screen.queryByRole("status")).not.toBeInTheDocument();
+	});
+
+	it.each([
+		"resolve",
+		"reject",
+	] as const)("ignores a pending clipboard %s after the dialog closes", async (outcome) => {
+		const user = userEvent.setup();
+		let settleClipboard: (() => void) | undefined;
+		const clipboardResult = new Promise<void>((resolve, reject) => {
+			settleClipboard = () => {
+				if (outcome === "resolve") {
+					resolve();
+					return;
+				}
+				reject(new Error("permission denied"));
+			};
+		});
+		Object.defineProperty(navigator, "clipboard", {
+			configurable: true,
+			value: {
+				writeText: vi.fn().mockReturnValue(clipboardResult),
+			},
+		});
+		render(
+			<GetStartedDialog>
+				<button type="button">Open onboarding</button>
+			</GetStartedDialog>,
+		);
+
+		await user.click(screen.getByRole("button", { name: "Open onboarding" }));
+		await user.click(screen.getByRole("button", { name: "Copy command" }));
+		await user.click(screen.getByRole("button", { name: "Close" }));
+		await waitFor(() =>
+			expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+		);
+		await act(async () => {
+			settleClipboard?.();
+			await clipboardResult.catch(() => undefined);
+		});
+
+		await user.click(screen.getByRole("button", { name: "Open onboarding" }));
+		expect(screen.queryByRole("status")).not.toBeInTheDocument();
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 	});
 
 	it("avoids smooth auto-scroll when reduced motion is requested", () => {
