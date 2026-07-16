@@ -57,6 +57,8 @@ export type ChatDraft = {
 	inputContents: ContentBlock[];
 	/** Reused only when retrying an unchanged failed send. */
 	messageId?: string;
+	/** Revision that originally attempted messageId. */
+	messageRevision?: number;
 };
 
 export const createEmptyChatDraft = (): ChatDraft => ({

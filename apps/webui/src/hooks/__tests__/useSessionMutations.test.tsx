@@ -874,6 +874,7 @@ describe("useSessionMutations", () => {
 					draft: {
 						input: "Hello",
 						inputContents: [{ type: "text", text: "Hello" }],
+						revision: 4,
 					},
 				}),
 			).rejects.toThrow("offline");
@@ -886,6 +887,7 @@ describe("useSessionMutations", () => {
 				input: "Hello",
 				inputContents: [{ type: "text", text: "Hello" }],
 				messageId: "user-msg-1",
+				messageRevision: 4,
 			});
 			expect(mockStore.setAppError).toHaveBeenCalled();
 		});

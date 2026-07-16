@@ -27,10 +27,7 @@ export function DemoHeader({
 		<header className="bg-background/80 border-b px-4 py-3 backdrop-blur shrink-0">
 			<div className="mx-auto flex w-full max-w-5xl items-center gap-2">
 				{showSidebarTrigger ? (
-					<SidebarTrigger
-						className="md:hidden"
-						aria-label={t("header.toggleMenu")}
-					/>
+					<SidebarTrigger aria-label={t("header.toggleMenu")} />
 				) : null}
 
 				<a href="/" className="flex items-center gap-2">

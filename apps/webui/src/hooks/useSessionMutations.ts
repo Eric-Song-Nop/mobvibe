@@ -78,6 +78,7 @@ type PermissionRequestPayload = {
 type SendMessageDraft = {
 	input: string;
 	inputContents: ContentBlock[];
+	revision?: number;
 };
 
 type SendMessageVariables = {
@@ -443,9 +444,11 @@ export function useSessionMutations(store: ChatStoreActions) {
 				store.markUserMessageFailed(variables.sessionId, variables.messageId);
 			}
 			if (variables?.draft) {
+				const { revision, ...draft } = variables.draft;
 				useUiStore.getState().setChatDraft(variables.sessionId, {
-					...variables.draft,
+					...draft,
 					messageId: variables.messageId,
+					...(revision !== undefined ? { messageRevision: revision } : {}),
 				});
 			}
 			store.setAppError(

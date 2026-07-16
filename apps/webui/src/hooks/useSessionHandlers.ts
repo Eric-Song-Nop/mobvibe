@@ -68,6 +68,7 @@ type Mutations = {
 			draft?: {
 				input: string;
 				inputContents: ChatSession["inputContents"];
+				revision?: number;
 			};
 		}) => void;
 	};
@@ -482,7 +483,12 @@ export function useSessionHandlers({
 			return;
 		}
 
-		const messageId = latestDraft?.messageId ?? crypto.randomUUID();
+		const messageId =
+			latestDraft?.messageId !== undefined &&
+			latestDraft.messageRevision !== undefined &&
+			latestDraft.messageRevision === readySession.revision
+				? latestDraft.messageId
+				: crypto.randomUUID();
 
 		chatActions.setSending(activeSessionId, true);
 		chatActions.setCanceling(activeSessionId, false);
@@ -501,6 +507,9 @@ export function useSessionHandlers({
 			draft: {
 				input: latestPromptText,
 				inputContents: latestPromptContents,
+				...(readySession.revision !== undefined
+					? { revision: readySession.revision }
+					: {}),
 			},
 		});
 	};

@@ -1,5 +1,6 @@
 import { SidebarProvider } from "@mobvibe/ui/sidebar";
 import { ThemeProvider } from "@mobvibe/ui/theme-provider";
+import { ToggleGroup, ToggleGroupItem } from "@mobvibe/ui/toggle-group";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -99,6 +100,21 @@ describe("website interaction semantics", () => {
 		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 	});
 
+	it("keeps a visible desktop control available after collapsing the sidebar", async () => {
+		const user = userEvent.setup();
+		renderWithTheme(<App pathname="/" />);
+
+		const toggle = screen.getByRole("button", { name: "Toggle menu" });
+		expect(toggle).not.toHaveClass("md:hidden");
+
+		await user.click(toggle);
+
+		expect(
+			document.querySelector('[data-slot="sidebar"][data-state]'),
+		).toHaveAttribute("data-state", "collapsed");
+		expect(screen.getByRole("button", { name: "Toggle menu" })).toBeVisible();
+	});
+
 	it("exposes the selected language through toggle-group semantics", () => {
 		renderWithTheme(<DemoHeader currentPathname="/pricing" />);
 
@@ -107,6 +123,26 @@ describe("website interaction semantics", () => {
 		for (const toggle of englishToggles) {
 			expect(toggle).toHaveAttribute("aria-checked", "true");
 		}
+	});
+
+	it("keeps horizontal toggle-group keyboard navigation on the horizontal axis", async () => {
+		const user = userEvent.setup();
+		render(
+			<ToggleGroup type="single" orientation="horizontal">
+				<ToggleGroupItem value="first">First</ToggleGroupItem>
+				<ToggleGroupItem value="second">Second</ToggleGroupItem>
+			</ToggleGroup>,
+		);
+
+		const first = screen.getByRole("radio", { name: "First" });
+		const second = screen.getByRole("radio", { name: "Second" });
+		await user.click(first);
+
+		await user.keyboard("{ArrowDown}");
+		expect(first).toHaveFocus();
+
+		await user.keyboard("{ArrowRight}");
+		expect(second).toHaveFocus();
 	});
 
 	it("reports clipboard failures instead of leaking a rejected promise", async () => {

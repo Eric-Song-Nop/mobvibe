@@ -34,6 +34,7 @@ const mockUiStoreState = vi.hoisted(() => ({
 			input: string;
 			inputContents: ReturnType<typeof createDefaultContentBlocks>;
 			messageId?: string;
+			messageRevision?: number;
 		}
 	>,
 	clearChatDraft: vi.fn<(sessionId: string) => void>(),
@@ -599,9 +600,12 @@ describe("useSessionHandlers — handleSend", () => {
 			input: "Retry exactly once",
 			inputContents: promptContents,
 			messageId: "failed-msg-1",
+			messageRevision: 7,
 		};
 
-		const { result } = renderHandlers();
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({ revision: 7 }),
+		});
 
 		await act(async () => {
 			await result.current.handleSend();
@@ -619,7 +623,38 @@ describe("useSessionHandlers — handleSend", () => {
 			draft: {
 				input: "Retry exactly once",
 				inputContents: promptContents,
+				revision: 7,
 			},
+		});
+	});
+
+	it("uses a new message id when a failed draft belongs to an older revision", async () => {
+		const promptContents = createDefaultContentBlocks(
+			"Run in the new revision",
+		);
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Run in the new revision",
+			inputContents: promptContents,
+			messageId: "failed-msg-from-revision-7",
+			messageRevision: 7,
+		};
+
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({ revision: 8 }),
+		});
+
+		await act(async () => {
+			await result.current.handleSend();
+		});
+
+		const variables = vi.mocked(mutations.sendMessageMutation.mutate).mock
+			.calls[0]?.[0];
+		expect(variables?.messageId).toEqual(expect.any(String));
+		expect(variables?.messageId).not.toBe("failed-msg-from-revision-7");
+		expect(variables?.draft).toEqual({
+			input: "Run in the new revision",
+			inputContents: promptContents,
+			revision: 8,
 		});
 	});
 
