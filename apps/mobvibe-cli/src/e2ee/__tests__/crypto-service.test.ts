@@ -22,6 +22,17 @@ beforeAll(async () => {
 });
 
 describe("CliCryptoService", () => {
+	test("exposes a stable, non-secret identity for one master secret", () => {
+		const sameSecret = new CliCryptoService(masterSecret);
+		const differentSecret = new CliCryptoService(generateMasterSecret());
+
+		expect(service.getKeyIdentity()).toBe(sameSecret.getKeyIdentity());
+		expect(service.getKeyIdentity()).not.toBe(differentSecret.getKeyIdentity());
+		expect(service.getKeyIdentity()).not.toContain(
+			Buffer.from(masterSecret).toString("base64"),
+		);
+	});
+
 	test("initSessionDek returns DEK and wrapped DEK string", () => {
 		const { dek, wrappedDek } = service.initSessionDek("session-1");
 		expect(dek).toBeInstanceOf(Uint8Array);

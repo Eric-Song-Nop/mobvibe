@@ -131,6 +131,7 @@ describe("SocketClient restore semantics", () => {
 		getSessionRevision: ReturnType<typeof mock>;
 		listUnackedSessionRevisions: ReturnType<typeof mock>;
 		getUnackedEvents: ReturnType<typeof mock>;
+		getUnackedEventsPage: ReturnType<typeof mock>;
 		ackEvents: ReturnType<typeof mock>;
 		claimMessageSend: ReturnType<typeof mock>;
 		completeMessageSend: ReturnType<typeof mock>;
@@ -191,6 +192,10 @@ describe("SocketClient restore semantics", () => {
 				{ sessionId: "session-1", revision: 2 },
 			]),
 			getUnackedEvents: mock(() => [createSessionEvent()]),
+			getUnackedEventsPage: mock(
+				(_sessionId: string, _revision: number, afterSeq: number) =>
+					afterSeq === 0 ? [createSessionEvent()] : [],
+			),
 			ackEvents: mock(() => {}),
 			claimMessageSend: mock(() => ({
 				status: "claimed",
@@ -260,9 +265,11 @@ describe("SocketClient restore semantics", () => {
 		)?.({ machineId: "machine-1" });
 
 		expect(sessionManager.listUnackedSessionRevisions).toHaveBeenCalled();
-		expect(sessionManager.getUnackedEvents).toHaveBeenCalledWith(
+		expect(sessionManager.getUnackedEventsPage).toHaveBeenCalledWith(
 			"session-1",
 			2,
+			0,
+			100,
 		);
 		expect(cryptoService.encryptEvent).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -297,7 +304,7 @@ describe("SocketClient restore semantics", () => {
 				| ((info: { machineId: string }) => Promise<void>)
 				| undefined
 		)?.({ machineId: "machine-1" });
-		sessionManager.getUnackedEvents.mockClear();
+		sessionManager.getUnackedEventsPage.mockClear();
 		socketMock.emit.mockClear();
 
 		disconnectHandler("transport close");
@@ -308,9 +315,11 @@ describe("SocketClient restore semantics", () => {
 				| undefined
 		)?.({ machineId: "machine-1" });
 
-		expect(sessionManager.getUnackedEvents).toHaveBeenCalledWith(
+		expect(sessionManager.getUnackedEventsPage).toHaveBeenCalledWith(
 			"session-1",
 			2,
+			0,
+			100,
 		);
 		expect(socketMock.emit).toHaveBeenCalledWith(
 			"session:event",
@@ -328,7 +337,7 @@ describe("SocketClient restore semantics", () => {
 		await (
 			socketHandlers.get("connect") as (() => Promise<void>) | undefined
 		)?.();
-		expect(sessionManager.getUnackedEvents).not.toHaveBeenCalled();
+		expect(sessionManager.getUnackedEventsPage).not.toHaveBeenCalled();
 		expect(socketMock.emit).not.toHaveBeenCalledWith(
 			"session:event",
 			expect.anything(),
@@ -340,9 +349,11 @@ describe("SocketClient restore semantics", () => {
 				| undefined
 		)?.({ machineId: "machine-1" });
 
-		expect(sessionManager.getUnackedEvents).toHaveBeenCalledWith(
+		expect(sessionManager.getUnackedEventsPage).toHaveBeenCalledWith(
 			"session-1",
 			2,
+			0,
+			100,
 		);
 		expect(socketMock.emit).toHaveBeenCalledWith(
 			"session:event",
@@ -350,11 +361,111 @@ describe("SocketClient restore semantics", () => {
 		);
 	});
 
-	test("replays a large backlog in bounded event-loop batches", async () => {
-		sessionManager.getUnackedEvents.mockReturnValueOnce(
-			Array.from({ length: 205 }, (_, index) =>
-				createSessionEvent({ seq: index + 1 }),
+	test("buffers live events from transport connect until registration replay completes", async () => {
+		sessionManager.getUnackedEventsPage.mockImplementation(
+			(_sessionId: string, _revision: number, afterSeq: number) =>
+				afterSeq === 0 ? [createSessionEvent({ seq: 1 })] : [],
+		);
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: { machineId: string }) => Promise<void>)
+			| undefined;
+		if (!connectHandler || !registeredHandler || !sessionEventListener) {
+			throw new Error("socket lifecycle handlers not registered");
+		}
+
+		await connectHandler();
+		sessionEventListener(createSessionEvent({ seq: 2 }));
+
+		expect(
+			socketMock.emit.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "session:event",
 			),
+		).toHaveLength(0);
+
+		await registeredHandler({ machineId: "machine-1" });
+
+		const emittedSeqs = socketMock.emit.mock.calls
+			.filter((call) => (call as unknown[])[0] === "session:event")
+			.map((call) => ((call as unknown[])[1] as SessionEvent).seq);
+		expect(emittedSeqs).toEqual([1, 2]);
+	});
+
+	test("does not flush pre-registration live events after registration fails", async () => {
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: { machineId: string }) => Promise<void>)
+			| undefined;
+		const registrationErrorHandler = socketHandlers.get("cli:error");
+		if (
+			!connectHandler ||
+			!registeredHandler ||
+			!registrationErrorHandler ||
+			!sessionEventListener
+		) {
+			throw new Error("socket lifecycle handlers not registered");
+		}
+
+		await connectHandler();
+		sessionEventListener(createSessionEvent({ seq: 2 }));
+		registrationErrorHandler({
+			code: "REGISTRATION_ERROR",
+			message: "registration failed",
+		});
+		await registeredHandler({ machineId: "machine-1" });
+
+		expect(client.isConnected()).toBe(false);
+		expect(
+			socketMock.emit.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "session:event",
+			),
+		).toHaveLength(0);
+	});
+
+	test("discards the pre-registration buffer when its transport disconnects", async () => {
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: { machineId: string }) => Promise<void>)
+			| undefined;
+		const disconnectHandler = socketHandlers.get("disconnect");
+		if (
+			!connectHandler ||
+			!registeredHandler ||
+			!disconnectHandler ||
+			!sessionEventListener
+		) {
+			throw new Error("socket lifecycle handlers not registered");
+		}
+
+		await connectHandler();
+		sessionEventListener(createSessionEvent({ seq: 2 }));
+		disconnectHandler("transport close");
+		await registeredHandler({ machineId: "machine-1" });
+
+		expect(
+			socketMock.emit.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "session:event",
+			),
+		).toHaveLength(0);
+	});
+
+	test("pages a large backlog and emits live events only after every older sequence", async () => {
+		const backlog = Array.from({ length: 205 }, (_, index) =>
+			createSessionEvent({ seq: index + 1 }),
+		);
+		sessionManager.getUnackedEventsPage.mockImplementation(
+			(
+				_sessionId: string,
+				_revision: number,
+				afterSeq: number,
+				limit: number,
+			) => backlog.filter((event) => event.seq > afterSeq).slice(0, limit),
 		);
 		await (
 			socketHandlers.get("connect") as (() => Promise<void>) | undefined
@@ -373,15 +484,34 @@ describe("SocketClient restore semantics", () => {
 			).length;
 
 		expect(replayedCount()).toBe(100);
+		sessionEventListener?.(createSessionEvent({ seq: 206 }));
+		expect(replayedCount()).toBe(100);
 		await registration;
-		expect(replayedCount()).toBe(205);
+		expect(replayedCount()).toBe(206);
+		const emittedSeqs = socketMock.emit.mock.calls
+			.filter((call) => (call as unknown[])[0] === "session:event")
+			.map((call) => ((call as unknown[])[1] as SessionEvent).seq);
+		expect(emittedSeqs).toEqual(
+			Array.from({ length: 206 }, (_, index) => index + 1),
+		);
+		expect(sessionManager.getUnackedEventsPage.mock.calls).toEqual([
+			["session-1", 2, 0, 100],
+			["session-1", 2, 100, 100],
+			["session-1", 2, 200, 100],
+		]);
 	});
 
-	test("cancels a stale replay when the transport reconnects", async () => {
-		sessionManager.getUnackedEvents.mockReturnValueOnce(
-			Array.from({ length: 205 }, (_, index) =>
-				createSessionEvent({ seq: index + 1 }),
-			),
+	test("cancels a stale replay without emitting a buffered live event", async () => {
+		const backlog = Array.from({ length: 205 }, (_, index) =>
+			createSessionEvent({ seq: index + 1 }),
+		);
+		sessionManager.getUnackedEventsPage.mockImplementation(
+			(
+				_sessionId: string,
+				_revision: number,
+				afterSeq: number,
+				limit: number,
+			) => backlog.filter((event) => event.seq > afterSeq).slice(0, limit),
 		);
 		const connectHandler = socketHandlers.get("connect") as
 			| (() => Promise<void>)
@@ -396,6 +526,7 @@ describe("SocketClient restore semantics", () => {
 
 		await connectHandler();
 		const staleRegistration = registeredHandler({ machineId: "machine-1" });
+		sessionEventListener?.(createSessionEvent({ seq: 206 }));
 		disconnectHandler("transport close");
 		await connectHandler();
 		await staleRegistration;
@@ -404,6 +535,189 @@ describe("SocketClient restore semantics", () => {
 			(call) => (call as unknown[])[0] === "session:event",
 		).length;
 		expect(replayedCount).toBe(100);
+	});
+
+	test("reconnects for durable replay when the live-event replay buffer fills", async () => {
+		const backlog = Array.from({ length: 205 }, (_, index) =>
+			createSessionEvent({ seq: index + 1 }),
+		);
+		sessionManager.getUnackedEventsPage.mockImplementation(
+			(
+				_sessionId: string,
+				_revision: number,
+				afterSeq: number,
+				limit: number,
+			) => backlog.filter((event) => event.seq > afterSeq).slice(0, limit),
+		);
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: { machineId: string }) => Promise<void>)
+			| undefined;
+		if (!connectHandler || !registeredHandler || !sessionEventListener) {
+			throw new Error("socket lifecycle handlers not registered");
+		}
+
+		await connectHandler();
+		const registration = registeredHandler({ machineId: "machine-1" });
+		for (let index = 0; index <= 1000; index += 1) {
+			sessionEventListener(createSessionEvent({ seq: 206 + index }));
+		}
+		await registration;
+
+		expect(socketMock.disconnect).toHaveBeenCalledTimes(1);
+		expect(socketMock.connect).toHaveBeenCalledTimes(1);
+		expect(
+			(client as unknown as { pendingLiveEvents: SessionEvent[] })
+				.pendingLiveEvents,
+		).toHaveLength(0);
+		const replayedCount = socketMock.emit.mock.calls.filter(
+			(call) => (call as unknown[])[0] === "session:event",
+		).length;
+		expect(replayedCount).toBe(100);
+	});
+
+	test("reconnects when buffered live-event payloads exceed the byte budget", async () => {
+		const backlog = Array.from({ length: 205 }, (_, index) =>
+			createSessionEvent({ seq: index + 1 }),
+		);
+		sessionManager.getUnackedEventsPage.mockImplementation(
+			(
+				_sessionId: string,
+				_revision: number,
+				afterSeq: number,
+				limit: number,
+			) => backlog.filter((event) => event.seq > afterSeq).slice(0, limit),
+		);
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: { machineId: string }) => Promise<void>)
+			| undefined;
+		if (!connectHandler || !registeredHandler || !sessionEventListener) {
+			throw new Error("socket lifecycle handlers not registered");
+		}
+
+		await connectHandler();
+		const registration = registeredHandler({ machineId: "machine-1" });
+		const largeText = "x".repeat(5 * 1024 * 1024);
+		sessionEventListener(
+			createSessionEvent({ seq: 206, payload: { text: largeText } }),
+		);
+		sessionEventListener(
+			createSessionEvent({ seq: 207, payload: { text: largeText } }),
+		);
+		await registration;
+
+		expect(socketMock.disconnect).toHaveBeenCalledTimes(1);
+		expect(socketMock.connect).toHaveBeenCalledTimes(1);
+		expect(
+			(
+				client as unknown as {
+					pendingLiveEvents: SessionEvent[];
+					pendingLiveEventBytes: number;
+				}
+			).pendingLiveEvents,
+		).toHaveLength(0);
+		expect(
+			(client as unknown as { pendingLiveEventBytes: number })
+				.pendingLiveEventBytes,
+		).toBe(0);
+		const replayedCount = socketMock.emit.mock.calls.filter(
+			(call) => (call as unknown[])[0] === "session:event",
+		).length;
+		expect(replayedCount).toBe(100);
+	});
+
+	test("reconnects when a buffered live event cannot be serialized", async () => {
+		const backlog = Array.from({ length: 205 }, (_, index) =>
+			createSessionEvent({ seq: index + 1 }),
+		);
+		sessionManager.getUnackedEventsPage.mockImplementation(
+			(
+				_sessionId: string,
+				_revision: number,
+				afterSeq: number,
+				limit: number,
+			) => backlog.filter((event) => event.seq > afterSeq).slice(0, limit),
+		);
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: { machineId: string }) => Promise<void>)
+			| undefined;
+		if (!connectHandler || !registeredHandler || !sessionEventListener) {
+			throw new Error("socket lifecycle handlers not registered");
+		}
+
+		await connectHandler();
+		const registration = registeredHandler({ machineId: "machine-1" });
+		const cyclicPayload: { self?: unknown } = {};
+		cyclicPayload.self = cyclicPayload;
+		sessionEventListener(
+			createSessionEvent({ seq: 206, payload: cyclicPayload }),
+		);
+		await registration;
+
+		expect(socketMock.disconnect).toHaveBeenCalledTimes(1);
+		expect(socketMock.connect).toHaveBeenCalledTimes(1);
+		expect(
+			(client as unknown as { pendingLiveEvents: SessionEvent[] })
+				.pendingLiveEvents,
+		).toHaveLength(0);
+		const replayedCount = socketMock.emit.mock.calls.filter(
+			(call) => (call as unknown[])[0] === "session:event",
+		).length;
+		expect(replayedCount).toBe(100);
+	});
+
+	test("keeps the replay barrier active while flushing buffered events", async () => {
+		const backlog = Array.from({ length: 101 }, (_, index) =>
+			createSessionEvent({ seq: index + 1 }),
+		);
+		sessionManager.getUnackedEventsPage.mockImplementation(
+			(
+				_sessionId: string,
+				_revision: number,
+				afterSeq: number,
+				limit: number,
+			) => backlog.filter((event) => event.seq > afterSeq).slice(0, limit),
+		);
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: { machineId: string }) => Promise<void>)
+			| undefined;
+		if (!connectHandler || !registeredHandler || !sessionEventListener) {
+			throw new Error("socket lifecycle handlers not registered");
+		}
+		let injectedDuringFlush = false;
+		cryptoService.encryptEvent.mockImplementation((event: SessionEvent) => {
+			if (event.seq === 102 && !injectedDuringFlush) {
+				injectedDuringFlush = true;
+				sessionEventListener?.(createSessionEvent({ seq: 103 }));
+			}
+			return {
+				...event,
+				payload: { encrypted: true, originalSeq: event.seq },
+			};
+		});
+
+		await connectHandler();
+		const registration = registeredHandler({ machineId: "machine-1" });
+		sessionEventListener(createSessionEvent({ seq: 102 }));
+		await registration;
+
+		const emittedSeqs = socketMock.emit.mock.calls
+			.filter((call) => (call as unknown[])[0] === "session:event")
+			.map((call) => ((call as unknown[])[1] as SessionEvent).seq);
+		expect(emittedSeqs).toEqual(
+			Array.from({ length: 103 }, (_, index) => index + 1),
+		);
 	});
 
 	test("acks replayed events through the session manager", () => {
@@ -434,7 +748,7 @@ describe("SocketClient restore semantics", () => {
 				| undefined
 		)?.({ machineId: "machine-1" });
 
-		expect(sessionManager.getUnackedEvents).not.toHaveBeenCalled();
+		expect(sessionManager.getUnackedEventsPage).not.toHaveBeenCalled();
 	});
 
 	test("forwards plaintext prompts through rpc:message:send", async () => {
@@ -459,10 +773,13 @@ describe("SocketClient restore semantics", () => {
 		);
 		expect(promptConnection.prompt).toHaveBeenCalledWith("session-1", prompt);
 		expect(sessionManager.touchSession).toHaveBeenCalledTimes(2);
-		expect(sessionManager.recordTurnEnd).toHaveBeenCalledWith(
+		expect(sessionManager.completeMessageSend).toHaveBeenCalledWith(
 			"session-1",
+			"message-1",
+			"claim-1",
 			"end_turn",
 		);
+		expect(sessionManager.recordTurnEnd).not.toHaveBeenCalled();
 		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
 			requestId: "req-1",
 			result: { stopReason: "end_turn" },
@@ -494,7 +811,7 @@ describe("SocketClient restore semantics", () => {
 		await Promise.all([first, second]);
 
 		expect(promptConnection.prompt).toHaveBeenCalledTimes(1);
-		expect(sessionManager.recordTurnEnd).toHaveBeenCalledTimes(1);
+		expect(sessionManager.recordTurnEnd).not.toHaveBeenCalled();
 		expect(sessionManager.completeMessageSend).toHaveBeenCalledTimes(1);
 		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
 			requestId: "req-concurrent-1",
@@ -538,6 +855,7 @@ describe("SocketClient restore semantics", () => {
 			error: expect.objectContaining({
 				code: "MESSAGE_OUTCOME_UNKNOWN",
 				retryable: false,
+				status: 409,
 			}),
 		});
 		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
@@ -546,8 +864,99 @@ describe("SocketClient restore semantics", () => {
 				code: "MESSAGE_OUTCOME_UNKNOWN",
 				message: expect.stringContaining("outcome is unknown"),
 				retryable: false,
+				status: 409,
 			}),
 		});
+	});
+
+	test("redacts prompt failure details from production RPC errors", async () => {
+		const previousNodeEnv = process.env.NODE_ENV;
+		process.env.NODE_ENV = "production";
+		try {
+			promptConnection.prompt.mockImplementationOnce(() =>
+				Promise.reject(
+					new Error("agent failed at /Users/private/.secrets/api-key"),
+				),
+			);
+			const handler = socketHandlers.get("rpc:message:send");
+			if (!handler) {
+				throw new Error("rpc:message:send handler not registered");
+			}
+
+			await handler({
+				requestId: "req-production-prompt-failure",
+				params: {
+					sessionId: "session-1",
+					messageId: "message-production-prompt-failure",
+					prompt: [{ type: "text", text: "run once" }],
+				},
+			});
+
+			expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+				requestId: "req-production-prompt-failure",
+				error: {
+					code: "MESSAGE_OUTCOME_UNKNOWN",
+					message:
+						"Message execution outcome is unknown; send it again as a new message",
+					retryable: false,
+					scope: "request",
+					status: 409,
+				},
+			});
+			expect(JSON.stringify(socketMock.emit.mock.calls)).not.toContain(
+				"/Users/private/.secrets/api-key",
+			);
+		} finally {
+			if (previousNodeEnv === undefined) {
+				delete process.env.NODE_ENV;
+			} else {
+				process.env.NODE_ENV = previousNodeEnv;
+			}
+		}
+	});
+
+	test("redacts terminal commit failure details from production RPC errors", async () => {
+		const previousNodeEnv = process.env.NODE_ENV;
+		process.env.NODE_ENV = "production";
+		try {
+			sessionManager.completeMessageSend.mockImplementationOnce(() => {
+				throw new Error("WAL failed at /var/private/mobvibe/events.db");
+			});
+			const handler = socketHandlers.get("rpc:message:send");
+			if (!handler) {
+				throw new Error("rpc:message:send handler not registered");
+			}
+
+			await handler({
+				requestId: "req-production-commit-failure",
+				params: {
+					sessionId: "session-1",
+					messageId: "message-production-commit-failure",
+					prompt: [{ type: "text", text: "run once" }],
+				},
+			});
+
+			expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+				requestId: "req-production-commit-failure",
+				error: {
+					code: "MESSAGE_OUTCOME_UNKNOWN",
+					message:
+						"Message execution outcome is unknown; send it again as a new message",
+					retryable: false,
+					scope: "request",
+					status: 409,
+				},
+			});
+			expect(JSON.stringify(socketMock.emit.mock.calls)).not.toContain(
+				"/var/private/mobvibe/events.db",
+			);
+		} finally {
+			if (previousNodeEnv === undefined) {
+				delete process.env.NODE_ENV;
+			} else {
+				process.env.NODE_ENV = previousNodeEnv;
+			}
+		}
 	});
 
 	test("does not prompt again after restart when execution outcome is indeterminate", async () => {
@@ -575,23 +984,13 @@ describe("SocketClient restore semantics", () => {
 				code: "MESSAGE_OUTCOME_UNKNOWN",
 				message: expect.stringContaining("outcome is unknown"),
 				retryable: false,
+				status: 409,
 			}),
 		});
 	});
 
-	test("persists completion before turn-end bookkeeping can fail", async () => {
-		let completedResult: { stopReason: "end_turn" } | undefined;
-		sessionManager.claimMessageSend.mockImplementation(() =>
-			completedResult
-				? { status: "completed", result: completedResult }
-				: { status: "claimed", claimId: "claim-post-processing" },
-		);
-		sessionManager.completeMessageSend.mockImplementation(
-			(_sessionId, _messageId, _claimId, stopReason) => {
-				completedResult = { stopReason };
-			},
-		);
-		sessionManager.recordTurnEnd.mockImplementationOnce(() => {
+	test("reports an unknown outcome when the atomic terminal commit fails", async () => {
+		sessionManager.completeMessageSend.mockImplementationOnce(() => {
 			throw new Error("WAL append failed");
 		});
 		const handler = socketHandlers.get("rpc:message:send");
@@ -605,14 +1004,84 @@ describe("SocketClient restore semantics", () => {
 		};
 
 		await handler({ requestId: "req-first", params });
-		await handler({ requestId: "req-retry", params });
 
 		expect(promptConnection.prompt).toHaveBeenCalledTimes(1);
 		expect(sessionManager.completeMessageSend).toHaveBeenCalledTimes(1);
 		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
-			requestId: "req-retry",
-			result: { stopReason: "end_turn" },
+			requestId: "req-first",
+			error: expect.objectContaining({
+				code: "MESSAGE_OUTCOME_UNKNOWN",
+				retryable: false,
+				status: 409,
+			}),
 		});
+	});
+
+	test("does not expose generic exception messages in RPC errors", async () => {
+		sessionManager.archiveSession.mockImplementationOnce(() =>
+			Promise.reject(new Error("secret database detail")),
+		);
+		const handler = socketHandlers.get("rpc:session:archive");
+		if (!handler) {
+			throw new Error("rpc:session:archive handler not registered");
+		}
+
+		await handler({
+			requestId: "req-generic-error",
+			params: { sessionId: "session-1" },
+		});
+
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-generic-error",
+			error: expect.objectContaining({
+				code: "INTERNAL_ERROR",
+				message: "Internal server error",
+				status: 500,
+			}),
+		});
+	});
+
+	test("rejects a different message ID while a session prompt is in flight", async () => {
+		let resolvePrompt: ((value: { stopReason: string }) => void) | undefined;
+		promptConnection.prompt.mockImplementationOnce(
+			() =>
+				new Promise<{ stopReason: string }>((resolve) => {
+					resolvePrompt = resolve;
+				}),
+		);
+		const handler = socketHandlers.get("rpc:message:send");
+		if (!handler) {
+			throw new Error("rpc:message:send handler not registered");
+		}
+
+		const first = handler({
+			requestId: "req-busy-1",
+			params: {
+				sessionId: "session-1",
+				messageId: "message-busy-1",
+				prompt: [{ type: "text", text: "still running" }],
+			},
+		});
+		await Promise.resolve();
+		await handler({
+			requestId: "req-busy-2",
+			params: {
+				sessionId: "session-1",
+				messageId: "message-busy-2",
+				prompt: [{ type: "text", text: "must not queue" }],
+			},
+		});
+
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-busy-2",
+			error: expect.objectContaining({
+				code: "SESSION_BUSY",
+				retryable: true,
+			}),
+		});
+		expect(promptConnection.prompt).toHaveBeenCalledTimes(1);
+		resolvePrompt?.({ stopReason: "end_turn" });
+		await first;
 	});
 
 	test("waits for an in-flight prompt before force reloading its session", async () => {
@@ -651,7 +1120,7 @@ describe("SocketClient restore semantics", () => {
 		resolvePrompt?.({ stopReason: "end_turn" });
 		await Promise.all([message, reload]);
 
-		expect(sessionManager.recordTurnEnd).toHaveBeenCalledTimes(1);
+		expect(sessionManager.completeMessageSend).toHaveBeenCalledTimes(1);
 		expect(sessionManager.reloadSession).toHaveBeenCalledTimes(1);
 	});
 
@@ -767,7 +1236,7 @@ describe("SocketClient restore semantics", () => {
 		]);
 	});
 
-	test("serializes distinct messages for the same session", async () => {
+	test("does not retain a queue of distinct messages for the same session", async () => {
 		let resolveFirstPrompt:
 			| ((value: { stopReason: string }) => void)
 			| undefined;
@@ -801,16 +1270,17 @@ describe("SocketClient restore semantics", () => {
 		await Promise.resolve();
 
 		expect(promptConnection.prompt).toHaveBeenCalledTimes(1);
-		resolveFirstPrompt?.({ stopReason: "end_turn" });
-		await Promise.all([first, second]);
-
-		expect(promptConnection.prompt).toHaveBeenCalledTimes(2);
+		await second;
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-serial-2",
+			error: expect.objectContaining({ code: "SESSION_BUSY", status: 409 }),
+		});
 		expect(promptConnection.prompt.mock.calls[0]?.[1]).toEqual([
 			{ type: "text", text: "first" },
 		]);
-		expect(promptConnection.prompt.mock.calls[1]?.[1]).toEqual([
-			{ type: "text", text: "second" },
-		]);
+		resolveFirstPrompt?.({ stopReason: "end_turn" });
+		await first;
+		expect(promptConnection.prompt).toHaveBeenCalledTimes(1);
 	});
 
 	test("replays a durable completed result without prompting again", async () => {
@@ -867,8 +1337,9 @@ describe("SocketClient restore semantics", () => {
 		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
 			requestId: "req-image-disabled",
 			error: expect.objectContaining({
-				code: "INTERNAL_ERROR",
+				code: "REQUEST_VALIDATION_FAILED",
 				message: "Selected backend does not support image prompts",
+				status: 400,
 			}),
 		});
 	});
@@ -911,8 +1382,9 @@ describe("SocketClient restore semantics", () => {
 		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
 			requestId: "req-image-too-large",
 			error: expect.objectContaining({
-				code: "INTERNAL_ERROR",
+				code: "REQUEST_VALIDATION_FAILED",
 				message: "Each image must be 512 KiB or smaller",
+				status: 400,
 			}),
 		});
 	});

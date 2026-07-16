@@ -35,6 +35,12 @@ export type UnackedSessionRevision = {
 	revision: number;
 };
 
+export type SessionRevisionKey = {
+	sessionId: string;
+	revision: number;
+	wrappedDek: string;
+};
+
 export type MessageSendClaim =
 	| { status: "claimed"; claimId: string }
 	| { status: "completed"; result: { stopReason: StopReason } }
@@ -53,6 +59,7 @@ export type CommitReloadRevisionParams = {
 	sessionId: string;
 	expectedRevision: number;
 	events: readonly WalEventInput[];
+	wrappedDek?: string;
 };
 
 type PreparedWalEventInput = WalEventInput & {
@@ -76,6 +83,12 @@ export type EnsureSessionParams = {
 	isTitlePinned?: boolean;
 };
 
+export type CommitSessionLoadParams = EnsureSessionParams & {
+	expectedRevision: number | null;
+	events: readonly WalEventInput[];
+	wrappedDek?: string;
+};
+
 export type DiscoveredSession = {
 	sessionId: string;
 	backendId: string;
@@ -90,6 +103,59 @@ export type DiscoveredSession = {
 
 const DEFAULT_QUERY_LIMIT = 100;
 
+/**
+ * Tables whose rows are tied to a user's local Mobvibe identity. Schema and
+ * migration metadata are deliberately excluded so a genuinely empty database
+ * can be claimed on first login.
+ */
+const DURABLE_DATA_TABLES = [
+	"wal_encryption_identity",
+	"sessions",
+	"session_events",
+	"discovered_sessions",
+	"archived_session_ids",
+	"compaction_log",
+	"message_send_results",
+	"message_send_claims",
+	"session_revision_keys",
+	"agent_teams",
+	"agent_team_members",
+	"agent_team_mcp_status",
+	"agent_team_mailbox_messages",
+	"agent_team_tasks",
+	"agent_team_summary_refs",
+] as const;
+
+const databaseHasDurableData = (db: Database): boolean => {
+	const existingTables = new Set(
+		(
+			db
+				.query("SELECT name FROM sqlite_master WHERE type = 'table'")
+				.all() as Array<{ name: string }>
+		).map((row) => row.name),
+	);
+
+	for (const table of DURABLE_DATA_TABLES) {
+		if (!existingTables.has(table)) continue;
+		// `table` comes exclusively from the constant allowlist above.
+		if (db.query(`SELECT 1 FROM ${table} LIMIT 1`).get()) {
+			return true;
+		}
+	}
+	return false;
+};
+
+/** Inspect an existing WAL without creating or migrating it. */
+export const hasDurableWalData = (dbPath: string): boolean => {
+	if (!fs.existsSync(dbPath)) return false;
+	const db = new Database(dbPath, { readonly: true });
+	try {
+		return databaseHasDurableData(db);
+	} finally {
+		db.close();
+	}
+};
+
 export class WalStore {
 	private db: Database;
 	private seqGenerator = new SeqGenerator();
@@ -102,6 +168,7 @@ export class WalStore {
 	private stmtInsertEvent: ReturnType<Database["query"]>;
 	private stmtQueryEvents: ReturnType<Database["query"]>;
 	private stmtQueryUnackedEvents: ReturnType<Database["query"]>;
+	private stmtQueryUnackedEventsPage: ReturnType<Database["query"]>;
 	private stmtAckEvents: ReturnType<Database["query"]>;
 	private stmtIncrementRevision: ReturnType<Database["query"]>;
 	private stmtCommitReloadRevision: ReturnType<Database["query"]>;
@@ -113,6 +180,7 @@ export class WalStore {
 	private stmtDeleteMessageSendClaim: ReturnType<Database["query"]>;
 	private stmtGetSessionRevisionKey: ReturnType<Database["query"]>;
 	private stmtInsertSessionRevisionKey: ReturnType<Database["query"]>;
+	private stmtListSessionRevisionKeysPage: ReturnType<Database["query"]>;
 	private stmtListUnackedSessionRevisions: ReturnType<Database["query"]>;
 
 	// Discovered sessions statements
@@ -197,6 +265,17 @@ export class WalStore {
       ORDER BY seq ASC
     `);
 
+		this.stmtQueryUnackedEventsPage = this.db.query(`
+			SELECT id, session_id, revision, seq, kind, payload, created_at, acked_at
+			FROM session_events
+			WHERE session_id = $sessionId
+				AND revision = $revision
+				AND seq > $afterSeq
+				AND acked_at IS NULL
+			ORDER BY seq ASC
+			LIMIT $limit
+		`);
+
 		this.stmtAckEvents = this.db.query(`
       UPDATE session_events
       SET acked_at = $ackedAt
@@ -270,6 +349,16 @@ export class WalStore {
 			INSERT OR IGNORE INTO session_revision_keys (
 				session_id, revision, wrapped_dek, created_at
 			) VALUES ($sessionId, $revision, $wrappedDek, $createdAt)
+		`);
+
+		this.stmtListSessionRevisionKeysPage = this.db.query(`
+			SELECT session_id, revision, wrapped_dek
+			FROM session_revision_keys
+			WHERE $afterSessionId IS NULL
+				OR session_id > $afterSessionId
+				OR (session_id = $afterSessionId AND revision > $afterRevision)
+			ORDER BY session_id ASC, revision ASC
+			LIMIT $limit
 		`);
 
 		this.stmtListUnackedSessionRevisions = this.db.query(`
@@ -376,6 +465,64 @@ export class WalStore {
 		this.stmtGetArchivedSessionIds = this.db.query(`
       SELECT session_id FROM archived_session_ids
     `);
+	}
+
+	/**
+	 * Bind this database to one public device-key identity. This value is not a
+	 * secret; it prevents a daemon started with another account's credentials
+	 * from exposing durable sessions that belong to the previous identity.
+	 */
+	bindEncryptionIdentity(keyIdentity: string): void {
+		const existing = this.getEncryptionIdentity();
+		if (existing) {
+			if (existing !== keyIdentity) {
+				throw new Error(
+					"WAL encryption identity mismatch; restore the original master secret or use a separate MOBVIBE_HOME",
+				);
+			}
+			return;
+		}
+		this.db
+			.query(`
+				INSERT INTO wal_encryption_identity (id, key_identity, bound_at)
+				VALUES (1, $keyIdentity, $boundAt)
+			`)
+			.run({
+				$keyIdentity: keyIdentity,
+				$boundAt: new Date().toISOString(),
+			});
+	}
+
+	getEncryptionIdentity(): string | undefined {
+		const row = this.db
+			.query("SELECT key_identity FROM wal_encryption_identity WHERE id = 1")
+			.get() as { key_identity: string } | null;
+		return row?.key_identity;
+	}
+
+	/** Return whether this database contains identity-bound user data. */
+	hasDurableData(): boolean {
+		return databaseHasDurableData(this.db);
+	}
+
+	getSessionRevisionKeysPage(
+		after: Pick<SessionRevisionKey, "sessionId" | "revision"> | undefined,
+		limit: number,
+	): SessionRevisionKey[] {
+		const rows = this.stmtListSessionRevisionKeysPage.all({
+			$afterSessionId: after?.sessionId ?? null,
+			$afterRevision: after?.revision ?? 0,
+			$limit: Math.max(1, limit),
+		}) as Array<{
+			session_id: string;
+			revision: number;
+			wrapped_dek: string;
+		}>;
+		return rows.map((row) => ({
+			sessionId: row.session_id,
+			revision: row.revision,
+			wrappedDek: row.wrapped_dek,
+		}));
 	}
 
 	/**
@@ -518,6 +665,97 @@ export class WalStore {
 	}
 
 	/**
+	 * Atomically create (or validate an empty existing revision of) a loaded
+	 * session and persist its key plus complete replay.
+	 */
+	commitSessionLoad(params: CommitSessionLoadParams): {
+		revision: number;
+		events: WalEvent[];
+	} {
+		const prepared = this.prepareEventInputs(params.events);
+		const targetRevision = params.expectedRevision ?? 1;
+		let committed: { revision: number; events: WalEvent[] };
+		try {
+			committed = this.db
+				.transaction(() => {
+					const existing = this.stmtGetSession.get({
+						$sessionId: params.sessionId,
+					}) as WalSessionRow | null;
+					const now = new Date().toISOString();
+					let revision: number;
+					if (params.expectedRevision === null) {
+						if (existing) {
+							throw new Error(
+								`Session appeared before load commit: ${params.sessionId}`,
+							);
+						}
+						this.stmtInsertSession.run({
+							$sessionId: params.sessionId,
+							$machineId: params.machineId,
+							$backendId: params.backendId,
+							$cwd: params.cwd ?? null,
+							$title: params.title ?? null,
+							$isTitlePinned: params.isTitlePinned ? 1 : 0,
+							$createdAt: now,
+							$updatedAt: now,
+						});
+						revision = 1;
+					} else {
+						if (
+							!existing ||
+							existing.current_revision !== params.expectedRevision ||
+							this.getMaxSeq(params.sessionId, params.expectedRevision) !== 0
+						) {
+							throw new Error(
+								`Session changed before load commit: ${params.sessionId}`,
+							);
+						}
+						this.stmtUpdateSession.run({
+							$sessionId: params.sessionId,
+							$cwd: params.cwd ?? null,
+							$title: params.title ?? null,
+							$isTitlePinned:
+								params.isTitlePinned === undefined
+									? null
+									: params.isTitlePinned
+										? 1
+										: 0,
+							$updatedAt: now,
+						});
+						revision = params.expectedRevision;
+					}
+					if (params.wrappedDek) {
+						this.stmtInsertSessionRevisionKey.run({
+							$sessionId: params.sessionId,
+							$revision: revision,
+							$wrappedDek: params.wrappedDek,
+							$createdAt: now,
+						});
+					}
+					return {
+						revision,
+						events: this.insertPreparedEvents(
+							params.sessionId,
+							revision,
+							prepared,
+						),
+					};
+				})
+				.immediate();
+		} catch (error) {
+			this.syncSequenceFromDurableState(params.sessionId, targetRevision);
+			throw error;
+		}
+		this.syncSequenceAfterCommit(
+			params.sessionId,
+			committed.revision,
+			committed.events,
+		);
+		this.logAppendedEvents(committed.events);
+		return committed;
+	}
+
+	/**
 	 * Atomically advance an expected revision and persist its complete replay.
 	 */
 	commitReloadRevision(params: CommitReloadRevisionParams): {
@@ -539,6 +777,14 @@ export class WalStore {
 						throw new Error(
 							`Session revision changed before reload commit: ${params.sessionId}`,
 						);
+					}
+					if (params.wrappedDek) {
+						this.stmtInsertSessionRevisionKey.run({
+							$sessionId: params.sessionId,
+							$revision: revisionRow.current_revision,
+							$wrappedDek: params.wrappedDek,
+							$createdAt: new Date().toISOString(),
+						});
 					}
 					return {
 						revision: revisionRow.current_revision,
@@ -609,6 +855,25 @@ export class WalStore {
 			$revision: revision,
 		}) as WalEventRow[];
 
+		return rows.map((row) => this.rowToEvent(row));
+	}
+
+	/**
+	 * Read one bounded page for reconnect replay. Sequence-key pagination stays
+	 * stable while acknowledgements are written concurrently.
+	 */
+	getUnackedEventsPage(
+		sessionId: string,
+		revision: number,
+		afterSeq: number,
+		limit: number,
+	): WalEvent[] {
+		const rows = this.stmtQueryUnackedEventsPage.all({
+			$sessionId: sessionId,
+			$revision: revision,
+			$afterSeq: afterSeq,
+			$limit: Math.max(1, limit),
+		}) as WalEventRow[];
 		return rows.map((row) => this.rowToEvent(row));
 	}
 
@@ -686,22 +951,53 @@ export class WalStore {
 		messageId: string,
 		claimId: string,
 		stopReason: StopReason,
-	): void {
-		this.db.transaction(() => {
-			const activeClaim = this.stmtGetMessageSendClaim.get({
-				$sessionId: sessionId,
-				$messageId: messageId,
-			}) as { claim_id: string } | null;
-			if (!activeClaim || activeClaim.claim_id !== claimId) {
-				throw new Error("Message send claim is no longer active");
+	): WalEvent {
+		const prepared = this.prepareEventInputs([
+			{ kind: "turn_end", payload: { stopReason } },
+		]);
+		let terminalEvent: WalEvent;
+		let revision = 0;
+		try {
+			terminalEvent = this.db
+				.transaction(() => {
+					const activeClaim = this.stmtGetMessageSendClaim.get({
+						$sessionId: sessionId,
+						$messageId: messageId,
+					}) as { claim_id: string } | null;
+					if (!activeClaim || activeClaim.claim_id !== claimId) {
+						throw new Error("Message send claim is no longer active");
+					}
+					const session = this.getSession(sessionId);
+					if (!session) {
+						throw new Error(`Session not found: ${sessionId}`);
+					}
+					revision = session.currentRevision;
+					this.recordMessageSendResult(sessionId, messageId, stopReason);
+					this.stmtDeleteMessageSendClaim.run({
+						$sessionId: sessionId,
+						$messageId: messageId,
+						$claimId: claimId,
+					});
+					const [event] = this.insertPreparedEvents(
+						sessionId,
+						revision,
+						prepared,
+					);
+					if (!event) {
+						throw new Error("Terminal event commit produced no event");
+					}
+					return event;
+				})
+				.immediate();
+		} catch (error) {
+			if (revision > 0) {
+				this.syncSequenceFromDurableState(sessionId, revision);
 			}
-			this.recordMessageSendResult(sessionId, messageId, stopReason);
-			this.stmtDeleteMessageSendClaim.run({
-				$sessionId: sessionId,
-				$messageId: messageId,
-				$claimId: claimId,
-			});
-		})();
+			throw error;
+		}
+		this.syncSequenceAfterCommit(sessionId, revision, [terminalEvent]);
+		this.logAppendedEvents([terminalEvent]);
+		return terminalEvent;
 	}
 
 	/**

@@ -22,7 +22,7 @@ type CliCryptoServiceOptions = {
 export class CliCryptoService {
 	readonly authKeyPair: CryptoKeyPair;
 	readonly contentEncryptionEnabled: boolean;
-	private contentKeyPair?: CryptoKeyPair;
+	private contentKeyPair: CryptoKeyPair;
 	private sessionDeks = new Map<string, Uint8Array>();
 	private wrappedDekCache = new Map<string, string>();
 	private revisionDeks = new Map<string, Uint8Array>();
@@ -31,9 +31,7 @@ export class CliCryptoService {
 	constructor(masterSecret: Uint8Array, options?: CliCryptoServiceOptions) {
 		this.authKeyPair = deriveAuthKeyPair(masterSecret);
 		this.contentEncryptionEnabled = options?.contentEncryptionEnabled !== false;
-		if (this.contentEncryptionEnabled) {
-			this.contentKeyPair = deriveContentKeyPair(masterSecret);
-		}
+		this.contentKeyPair = deriveContentKeyPair(masterSecret);
 	}
 
 	/**
@@ -146,6 +144,25 @@ export class CliCryptoService {
 	 */
 	getAuthPublicKeyBase64(): string {
 		return uint8ToBase64(this.authKeyPair.publicKey);
+	}
+
+	/** A stable public identity for binding local durable state to this key. */
+	getKeyIdentity(): string {
+		return `ed25519:${this.getAuthPublicKeyBase64()}`;
+	}
+
+	/** Validate a legacy sealed key without caching or exposing its plaintext. */
+	canUnwrapDek(wrappedDek: string): boolean {
+		try {
+			unwrapDEK(
+				wrappedDek,
+				this.contentKeyPair.publicKey,
+				this.contentKeyPair.secretKey,
+			);
+			return true;
+		} catch {
+			return false;
+		}
 	}
 
 	/**

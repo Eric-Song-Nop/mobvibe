@@ -11,6 +11,7 @@ import {
 } from "@mobvibe/shared";
 import type { CliConfig } from "../../config.js";
 import { CliCryptoService } from "../../e2ee/crypto-service.js";
+import { WalStore } from "../../wal/wal-store.js";
 import type { AcpConnection } from "../acp-connection.js";
 
 mock.module("node:fs/promises", () => ({
@@ -250,6 +251,13 @@ describe("SessionManager", () => {
 	});
 
 	describe("loadSession", () => {
+		const getWalStore = () =>
+			(
+				sessionManager as unknown as {
+					walStore: WalStore;
+				}
+			).walStore;
+
 		it("preserves the current WAL revision when loading fails", async () => {
 			const created = await sessionManager.createSession({
 				cwd: "/home/user/project",
@@ -305,6 +313,305 @@ describe("SessionManager", () => {
 			).rejects.toThrow("load failed");
 
 			expect(sessionUpdateCallback).toBeUndefined();
+		});
+
+		it("rejects an unattached load whose replay exceeds the event budget without advancing WAL", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			sessionUpdateCallback?.({
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "durable history" },
+				},
+			} as SessionNotification);
+			await sessionManager.closeSession(created.sessionId);
+			mockConnection.loadSession.mockImplementationOnce(async () => {
+				for (let index = 0; index <= 20_000; index += 1) {
+					sessionUpdateCallback?.({
+						sessionId: created.sessionId,
+						update: {
+							sessionUpdate: "agent_message_chunk",
+							content: { type: "text", text: `replay ${index}` },
+						},
+					} as SessionNotification);
+				}
+				return { modes: null, models: null };
+			});
+
+			await expect(
+				sessionManager.loadSession(
+					created.sessionId,
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toThrow("Reload replay exceeds local buffer limit");
+
+			expect(getWalStore().getSession(created.sessionId)?.currentRevision).toBe(
+				1,
+			);
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: created.sessionId,
+					revision: 2,
+					afterSeq: 0,
+				}).events,
+			).toHaveLength(0);
+			expect(sessionManager.getSession(created.sessionId)).toBeUndefined();
+			expect(mockConnection.disconnect).toHaveBeenCalled();
+		});
+
+		it("rejects an unattached load whose replay exceeds the byte budget without advancing WAL", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			sessionUpdateCallback?.({
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "durable history" },
+				},
+			} as SessionNotification);
+			await sessionManager.closeSession(created.sessionId);
+			mockConnection.loadSession.mockImplementationOnce(async () => {
+				sessionUpdateCallback?.({
+					sessionId: created.sessionId,
+					update: {
+						sessionUpdate: "agent_message_chunk",
+						content: { type: "text", text: "x".repeat(8 * 1024 * 1024) },
+					},
+				} as SessionNotification);
+				return { modes: null, models: null };
+			});
+
+			await expect(
+				sessionManager.loadSession(
+					created.sessionId,
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toThrow("Reload replay exceeds local buffer limit");
+
+			expect(getWalStore().getSession(created.sessionId)?.currentRevision).toBe(
+				1,
+			);
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: created.sessionId,
+					revision: 2,
+					afterSeq: 0,
+				}).events,
+			).toHaveLength(0);
+			expect(sessionManager.getSession(created.sessionId)).toBeUndefined();
+			expect(mockConnection.disconnect).toHaveBeenCalled();
+		});
+
+		it("does not expose a partial revision when a later replay event cannot be serialized", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			sessionUpdateCallback?.({
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "durable history" },
+				},
+			} as SessionNotification);
+			await sessionManager.closeSession(created.sessionId);
+			mockConnection.loadSession.mockImplementationOnce(async () => {
+				sessionUpdateCallback?.({
+					sessionId: created.sessionId,
+					update: {
+						sessionUpdate: "agent_message_chunk",
+						content: { type: "text", text: "first replay event" },
+					},
+				} as SessionNotification);
+				const cyclicNotification = {
+					sessionId: created.sessionId,
+					update: {
+						sessionUpdate: "agent_message_chunk",
+						content: { type: "text", text: "second replay event" },
+					},
+				} as SessionNotification & { cyclic?: unknown };
+				cyclicNotification.cyclic = cyclicNotification;
+				sessionUpdateCallback?.(cyclicNotification);
+				return { modes: null, models: null };
+			});
+
+			await expect(
+				sessionManager.loadSession(
+					created.sessionId,
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toThrow();
+
+			expect(getWalStore().getSession(created.sessionId)?.currentRevision).toBe(
+				1,
+			);
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: created.sessionId,
+					revision: 2,
+					afterSeq: 0,
+				}).events,
+			).toHaveLength(0);
+			expect(sessionManager.getSession(created.sessionId)).toBeUndefined();
+		});
+
+		it("rolls back the whole unattached replay when a later WAL insert fails", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			sessionUpdateCallback?.({
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "durable history" },
+				},
+			} as SessionNotification);
+			await sessionManager.closeSession(created.sessionId);
+			mockConnection.loadSession.mockImplementationOnce(async () => {
+				for (const text of ["first replay event", "second replay event"]) {
+					sessionUpdateCallback?.({
+						sessionId: created.sessionId,
+						update: {
+							sessionUpdate: "agent_message_chunk",
+							content: { type: "text", text },
+						},
+					} as SessionNotification);
+				}
+				return { modes: null, models: null };
+			});
+			const faultDb = new Database(mockConfig.walDbPath);
+			faultDb.exec(`
+				CREATE TRIGGER fail_second_unattached_load_event
+				BEFORE INSERT ON session_events
+				WHEN NEW.session_id = '${created.sessionId}' AND NEW.revision = 2 AND NEW.seq = 2
+				BEGIN
+					SELECT RAISE(ABORT, 'injected unattached replay failure');
+				END;
+			`);
+			faultDb.close();
+
+			await expect(
+				sessionManager.loadSession(
+					created.sessionId,
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toThrow("injected unattached replay failure");
+
+			expect(getWalStore().getSession(created.sessionId)?.currentRevision).toBe(
+				1,
+			);
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: created.sessionId,
+					revision: 2,
+					afterSeq: 0,
+				}).events,
+			).toHaveLength(0);
+			expect(sessionManager.getSession(created.sessionId)).toBeUndefined();
+		});
+
+		it("commits a fresh unattached replay to revision one", async () => {
+			mockConnection.loadSession.mockImplementationOnce(async () => {
+				sessionUpdateCallback?.({
+					sessionId: "fresh-session",
+					update: {
+						sessionUpdate: "agent_message_chunk",
+						content: { type: "text", text: "fresh replay" },
+					},
+				} as SessionNotification);
+				return { modes: null, models: null };
+			});
+
+			await sessionManager.loadSession(
+				"fresh-session",
+				"/home/user/project",
+				"backend-1",
+			);
+
+			expect(getWalStore().getSession("fresh-session")?.currentRevision).toBe(
+				1,
+			);
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: "fresh-session",
+					revision: 1,
+					afterSeq: 0,
+				}).events,
+			).toEqual([
+				expect.objectContaining({
+					revision: 1,
+					seq: 1,
+					payload: expect.objectContaining({
+						update: expect.objectContaining({
+							content: { type: "text", text: "fresh replay" },
+						}),
+					}),
+				}),
+			]);
+		});
+
+		it("does not expose a fresh session or revision key when its replay commit fails", async () => {
+			await initCrypto();
+			await sessionManager.shutdown();
+			sessionManager = new SessionManager(
+				mockConfig,
+				new CliCryptoService(generateMasterSecret()),
+			);
+			sessionManager.createConnection = () =>
+				mockConnection as unknown as AcpConnection;
+			mockConnection.loadSession.mockImplementationOnce(async () => {
+				for (const text of ["first replay event", "second replay event"]) {
+					sessionUpdateCallback?.({
+						sessionId: "fresh-failing-session",
+						update: {
+							sessionUpdate: "agent_message_chunk",
+							content: { type: "text", text },
+						},
+					} as SessionNotification);
+				}
+				return { modes: null, models: null };
+			});
+			const faultDb = new Database(mockConfig.walDbPath);
+			faultDb.exec(`
+				CREATE TRIGGER fail_fresh_session_second_event
+				BEFORE INSERT ON session_events
+				WHEN NEW.session_id = 'fresh-failing-session' AND NEW.revision = 1 AND NEW.seq = 2
+				BEGIN
+					SELECT RAISE(ABORT, 'injected fresh replay failure');
+				END;
+			`);
+			faultDb.close();
+
+			await expect(
+				sessionManager.loadSession(
+					"fresh-failing-session",
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toThrow("injected fresh replay failure");
+
+			expect(getWalStore().getSession("fresh-failing-session")).toBeNull();
+			expect(
+				getWalStore().getSessionRevisionKey("fresh-failing-session", 1),
+			).toBeUndefined();
+			expect(
+				sessionManager
+					.listAllSessions()
+					.find((session) => session.sessionId === "fresh-failing-session"),
+			).toBeUndefined();
+			expect(
+				sessionManager.getSession("fresh-failing-session"),
+			).toBeUndefined();
 		});
 
 		it("loads a historical session", async () => {
@@ -690,7 +997,7 @@ describe("SessionManager", () => {
 			).toHaveLength(0);
 		});
 
-		it("restores partial replay and resumes live updates when reload fails", async () => {
+		it("drops partial replay and closes an uncertain connection when reload fails", async () => {
 			const created = await sessionManager.createSession({
 				cwd: "/home/user/project",
 				backendId: "backend-1",
@@ -731,16 +1038,12 @@ describe("SessionManager", () => {
 				revision: 1,
 				afterSeq: 0,
 			}).events;
-			expect(restoredHistory).toHaveLength(historyBefore.events.length + 1);
-			expect(restoredHistory.at(-1)?.payload).toEqual(
-				expect.objectContaining({
-					update: expect.objectContaining({
-						content: { type: "text", text: "partial failed replay" },
-					}),
-				}),
-			);
+			expect(restoredHistory).toEqual(historyBefore.events);
+			expect(sessionManager.getSession(created.sessionId)).toBeUndefined();
+			expect(mockConnection.disconnect).toHaveBeenCalled();
 
-			sessionUpdateCallback?.({
+			const lateUpdate = sessionUpdateCallback;
+			lateUpdate?.({
 				sessionId: created.sessionId,
 				update: {
 					sessionUpdate: "agent_message_chunk",
@@ -752,17 +1055,10 @@ describe("SessionManager", () => {
 				revision: 1,
 				afterSeq: 0,
 			}).events;
-			expect(resumedHistory).toHaveLength(historyBefore.events.length + 2);
-			expect(resumedHistory.at(-1)?.payload).toEqual(
-				expect.objectContaining({
-					update: expect.objectContaining({
-						content: { type: "text", text: "live after failure" },
-					}),
-				}),
-			);
+			expect(resumedHistory).toEqual(historyBefore.events);
 		});
 
-		it("restores every buffered event to the old revision when reload fails", async () => {
+		it("drops every buffered replay event when reload fails", async () => {
 			const created = await sessionManager.createSession({
 				cwd: "/home/user/project",
 				backendId: "backend-1",
@@ -797,12 +1093,100 @@ describe("SessionManager", () => {
 						afterSeq: 0,
 					})
 					.events.map((event) => event.kind),
-			).toEqual([
-				"agent_message_chunk",
-				"terminal_output",
-				"session_error",
-				"turn_end",
-			]);
+			).toEqual([]);
+			expect(sessionManager.getSession(created.sessionId)).toBeUndefined();
+		});
+
+		it("rejects and closes a reload whose provisional replay exceeds its byte budget", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			mockConnection.loadSession.mockImplementationOnce(async () => {
+				sessionUpdateCallback?.({
+					sessionId: created.sessionId,
+					update: {
+						sessionUpdate: "agent_message_chunk",
+						content: { type: "text", text: "x".repeat(8 * 1024 * 1024) },
+					},
+				} as SessionNotification);
+				return { modes: null, models: null };
+			});
+
+			await expect(
+				sessionManager.reloadSession(
+					created.sessionId,
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toThrow("Reload replay exceeds local buffer limit");
+
+			expect(sessionManager.getSession(created.sessionId)).toBeUndefined();
+			expect(mockConnection.disconnect).toHaveBeenCalled();
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: created.sessionId,
+					revision: 1,
+					afterSeq: 0,
+				}).events,
+			).toHaveLength(0);
+		});
+
+		it("rechecks the replay budget after asynchronous project resolution", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			let resolveProject:
+				| ((value: {
+						isGitRepo: boolean;
+						repoRoot: string;
+						repoName: string;
+						relativeCwd: undefined;
+						isRepoRoot: boolean;
+				  }) => void)
+				| undefined;
+			mockResolveGitProjectContext.mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						resolveProject = resolve;
+					}),
+			);
+
+			const reload = sessionManager.reloadSession(
+				created.sessionId,
+				"/home/user/project",
+				"backend-1",
+			);
+			await Promise.resolve();
+			await Promise.resolve();
+			sessionUpdateCallback?.({
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "x".repeat(8 * 1024 * 1024) },
+				},
+			} as SessionNotification);
+			resolveProject?.({
+				isGitRepo: true,
+				repoRoot: "/home/user/project",
+				repoName: "project",
+				relativeCwd: undefined,
+				isRepoRoot: true,
+			});
+
+			await expect(reload).rejects.toThrow(
+				"Reload replay exceeds local buffer limit",
+			);
+			expect(sessionManager.getSession(created.sessionId)).toBeUndefined();
+			expect(mockConnection.disconnect).toHaveBeenCalled();
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: created.sessionId,
+					revision: 2,
+					afterSeq: 0,
+				}).events,
+			).toHaveLength(0);
 		});
 
 		it("emits session:attached event even if already attached", async () => {
@@ -1137,6 +1521,245 @@ describe("SessionManager", () => {
 			}
 		});
 
+		it("rejects a WAL opened with a different master-secret identity", async () => {
+			await initCrypto();
+			const identityConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/key-identity-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const firstManager = new SessionManager(
+				identityConfig,
+				new CliCryptoService(generateMasterSecret()),
+			);
+			firstManager.createConnection = () =>
+				createMockConnection() as unknown as AcpConnection;
+			await firstManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			await firstManager.shutdown();
+
+			expect(
+				() =>
+					new SessionManager(
+						identityConfig,
+						new CliCryptoService(generateMasterSecret()),
+					),
+			).toThrow("WAL encryption identity mismatch");
+		});
+
+		it("verifies a legacy wrapped key before binding the WAL identity", async () => {
+			await initCrypto();
+			const originalSecret = generateMasterSecret();
+			const originalCrypto = new CliCryptoService(originalSecret);
+			const legacyConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/legacy-key-identity-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const legacyStore = new WalStore(legacyConfig.walDbPath);
+			legacyStore.ensureSession({
+				sessionId: "legacy-session",
+				machineId: "test-machine-id",
+				backendId: "backend-1",
+			});
+			const { wrappedDek } = originalCrypto.initSessionDek("legacy-session", 1);
+			if (!wrappedDek) {
+				throw new Error("expected wrapped legacy key");
+			}
+			legacyStore.recordSessionRevisionKey("legacy-session", 1, wrappedDek);
+			legacyStore.close();
+
+			expect(
+				() =>
+					new SessionManager(
+						legacyConfig,
+						new CliCryptoService(generateMasterSecret()),
+					),
+			).toThrow("WAL encryption identity mismatch");
+			const inspectionDb = new Database(legacyConfig.walDbPath);
+			expect(
+				inspectionDb
+					.query(
+						"SELECT key_identity FROM wal_encryption_identity WHERE id = 1",
+					)
+					.get(),
+			).toBeNull();
+			inspectionDb.close();
+
+			const recovered = new SessionManager(legacyConfig, originalCrypto);
+			try {
+				expect(
+					recovered
+						.listAllSessions()
+						.find((session) => session.sessionId === "legacy-session")
+						?.wrappedDek,
+				).toBe(wrappedDek);
+			} finally {
+				await recovered.shutdown();
+			}
+		});
+
+		it("binds a genuinely empty legacy WAL to the first device identity", async () => {
+			await initCrypto();
+			const emptyConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/empty-key-identity-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const crypto = new CliCryptoService(generateMasterSecret());
+			const manager = new SessionManager(emptyConfig, crypto);
+			await manager.shutdown();
+
+			const inspection = new WalStore(emptyConfig.walDbPath);
+			try {
+				expect(inspection.getEncryptionIdentity()).toBe(
+					crypto.getKeyIdentity(),
+				);
+			} finally {
+				inspection.close();
+			}
+		});
+
+		it("rejects legacy session data that has no wrapped key to verify", async () => {
+			await initCrypto();
+			const legacyConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/unverifiable-key-identity-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const legacyStore = new WalStore(legacyConfig.walDbPath);
+			legacyStore.ensureSession({
+				sessionId: "legacy-session",
+				machineId: "test-machine-id",
+				backendId: "backend-1",
+			});
+			legacyStore.close();
+
+			expect(
+				() =>
+					new SessionManager(
+						legacyConfig,
+						new CliCryptoService(generateMasterSecret()),
+					),
+			).toThrow("cannot verify the original master secret");
+			const inspection = new WalStore(legacyConfig.walDbPath);
+			try {
+				expect(inspection.getEncryptionIdentity()).toBeUndefined();
+			} finally {
+				inspection.close();
+			}
+		});
+
+		it("rejects legacy agent-team data that has no wrapped key to verify", async () => {
+			await initCrypto();
+			const legacyConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/unverifiable-team-identity-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const legacyStore = new WalStore(legacyConfig.walDbPath);
+			legacyStore.close();
+			const db = new Database(legacyConfig.walDbPath);
+			const now = new Date().toISOString();
+			db.query(`
+				INSERT INTO agent_teams (
+					agent_team_id, machine_id, workspace_root_cwd, title, lifecycle,
+					leader_member_id, workspace_mode, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`).run(
+				"legacy-team",
+				"test-machine-id",
+				"/tmp/project",
+				"Legacy team",
+				"active",
+				"leader-1",
+				"shared",
+				now,
+				now,
+			);
+			db.close();
+
+			expect(
+				() =>
+					new SessionManager(
+						legacyConfig,
+						new CliCryptoService(generateMasterSecret()),
+					),
+			).toThrow("cannot verify the original master secret");
+		});
+
+		it("rejects a legacy WAL when any persisted revision key uses another secret", async () => {
+			await initCrypto();
+			const originalCrypto = new CliCryptoService(generateMasterSecret());
+			const foreignCrypto = new CliCryptoService(generateMasterSecret());
+			const legacyConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/legacy-mixed-key-identity-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const legacyStore = new WalStore(legacyConfig.walDbPath);
+			legacyStore.ensureSession({
+				sessionId: "legacy-session",
+				machineId: "test-machine-id",
+				backendId: "backend-1",
+			});
+			for (let revision = 1; revision <= 100; revision += 1) {
+				const { wrappedDek } = originalCrypto.initSessionDek(
+					"legacy-session",
+					revision,
+				);
+				if (!wrappedDek) {
+					throw new Error("expected wrapped legacy key");
+				}
+				legacyStore.recordSessionRevisionKey(
+					"legacy-session",
+					revision,
+					wrappedDek,
+				);
+			}
+			const foreignKey = foreignCrypto.initSessionDek("legacy-session", 101);
+			if (!foreignKey.wrappedDek) {
+				throw new Error("expected foreign wrapped legacy key");
+			}
+			legacyStore.recordSessionRevisionKey(
+				"legacy-session",
+				101,
+				foreignKey.wrappedDek,
+			);
+			legacyStore.close();
+
+			let opened: InstanceType<typeof SessionManager> | undefined;
+			let constructionError: unknown;
+			try {
+				opened = new SessionManager(legacyConfig, originalCrypto);
+			} catch (error) {
+				constructionError = error;
+			}
+			await opened?.shutdown();
+
+			expect(constructionError).toBeInstanceOf(Error);
+			expect((constructionError as Error).message).toContain(
+				"WAL encryption identity mismatch",
+			);
+			const inspectionDb = new Database(legacyConfig.walDbPath);
+			expect(
+				inspectionDb
+					.query(
+						"SELECT key_identity FROM wal_encryption_identity WHERE id = 1",
+					)
+					.get(),
+			).toBeNull();
+			inspectionDb.close();
+		});
+
 		it("includes wrappedDek and initializes a DEK when creating a session", async () => {
 			const cryptoService = {
 				initSessionDek: mock(() => ({
@@ -1442,6 +2065,45 @@ describe("SessionManager", () => {
 			});
 			expect(events.events.some((event) => event.kind === "turn_end")).toBe(
 				true,
+			);
+		});
+	});
+
+	describe("completeMessageSend", () => {
+		it("commits the result and emits its turn_end as one terminal operation", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const claim = sessionManager.claimMessageSend(
+				created.sessionId,
+				"message-atomic",
+			);
+			if (claim.status !== "claimed") {
+				throw new Error("expected message claim");
+			}
+			const eventListener = mock(() => {});
+			sessionManager.onSessionEvent(eventListener);
+
+			sessionManager.completeMessageSend(
+				created.sessionId,
+				"message-atomic",
+				claim.claimId,
+				"end_turn",
+			);
+
+			expect(
+				sessionManager.getMessageSendResult(
+					created.sessionId,
+					"message-atomic",
+				),
+			).toEqual({ stopReason: "end_turn" });
+			expect(eventListener).toHaveBeenCalledTimes(1);
+			expect(eventListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					kind: "turn_end",
+					payload: { stopReason: "end_turn" },
+				}),
 			);
 		});
 	});

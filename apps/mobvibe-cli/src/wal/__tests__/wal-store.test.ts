@@ -21,6 +21,94 @@ describe("WalStore", () => {
 		fs.rmSync(tempDir, { recursive: true, force: true });
 	});
 
+	describe("encryption identity", () => {
+		it("persists one identity and rejects a different account key", () => {
+			walStore.bindEncryptionIdentity("key-identity-a");
+			walStore.bindEncryptionIdentity("key-identity-a");
+
+			walStore.close();
+			walStore = new WalStore(dbPath);
+			expect(() => walStore.bindEncryptionIdentity("key-identity-b")).toThrow(
+				"WAL encryption identity mismatch",
+			);
+		});
+
+		it("does not treat an empty migrated schema as durable user data", () => {
+			expect(walStore.hasDurableData()).toBeFalse();
+		});
+
+		it("detects persisted sessions and events as durable user data", () => {
+			walStore.ensureSession({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				backendId: "backend-1",
+			});
+			walStore.appendEvent({
+				sessionId: "session-1",
+				revision: 1,
+				kind: "user_message",
+				payload: { text: "hello" },
+			});
+
+			expect(walStore.hasDurableData()).toBeTrue();
+		});
+
+		it("detects discovered sessions as durable user data", () => {
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: "discovered-1",
+					backendId: "backend-1",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+
+			expect(walStore.hasDurableData()).toBeTrue();
+		});
+
+		it("detects agent-team data in the shared WAL database", () => {
+			const db = new Database(dbPath);
+			const now = new Date().toISOString();
+			db.query(`
+				INSERT INTO agent_teams (
+					agent_team_id, machine_id, workspace_root_cwd, title, lifecycle,
+					leader_member_id, workspace_mode, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`).run(
+				"team-1",
+				"machine-1",
+				"/tmp/project",
+				"Team",
+				"active",
+				"leader-1",
+				"shared",
+				now,
+				now,
+			);
+			db.close();
+
+			expect(walStore.hasDurableData()).toBeTrue();
+		});
+
+		it("detects a compaction record left after session cleanup", () => {
+			const db = new Database(dbPath);
+			db.query(`
+				INSERT INTO compaction_log (
+					session_id, revision, operation, events_affected, started_at
+				) VALUES (?, ?, ?, ?, ?)
+			`).run(
+				"deleted-session",
+				1,
+				"delete_acked",
+				10,
+				new Date().toISOString(),
+			);
+			db.close();
+
+			expect(walStore.hasDurableData()).toBeTrue();
+		});
+	});
+
 	describe("ensureSession", () => {
 		it("should create a new session", () => {
 			const result = walStore.ensureSession({
@@ -265,6 +353,26 @@ describe("WalStore", () => {
 			const unackedEvents = walStore.getUnackedEvents("session-1", 1);
 			expect(unackedEvents.length).toBe(5);
 		});
+
+		it("reads unacknowledged events in stable sequence pages", () => {
+			const firstPage = walStore.getUnackedEventsPage("session-1", 1, 0, 2);
+			const secondPage = walStore.getUnackedEventsPage(
+				"session-1",
+				1,
+				firstPage.at(-1)?.seq ?? 0,
+				2,
+			);
+			const thirdPage = walStore.getUnackedEventsPage(
+				"session-1",
+				1,
+				secondPage.at(-1)?.seq ?? 0,
+				2,
+			);
+
+			expect(firstPage.map((event) => event.seq)).toEqual([1, 2]);
+			expect(secondPage.map((event) => event.seq)).toEqual([3, 4]);
+			expect(thirdPage.map((event) => event.seq)).toEqual([5]);
+		});
 	});
 
 	describe("message send idempotency", () => {
@@ -290,6 +398,11 @@ describe("WalStore", () => {
 		});
 
 		it("atomically replaces an execution claim with its completed result", () => {
+			walStore.ensureSession({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				backendId: "backend-1",
+			});
 			const first = walStore.claimMessageSend("session-1", "message-1");
 			if (first.status !== "claimed") {
 				throw new Error("expected the first caller to own the claim");
@@ -306,6 +419,58 @@ describe("WalStore", () => {
 				status: "completed",
 				result: { stopReason: "end_turn" },
 			});
+			expect(
+				walStore
+					.queryEvents({ sessionId: "session-1", revision: 1 })
+					.map((event) => ({ kind: event.kind, payload: event.payload })),
+			).toEqual([{ kind: "turn_end", payload: { stopReason: "end_turn" } }]);
+		});
+
+		it("rolls back the result and claim deletion when turn_end cannot persist", () => {
+			walStore.ensureSession({
+				sessionId: "session-atomic-failure",
+				machineId: "machine-1",
+				backendId: "backend-1",
+			});
+			const claim = walStore.claimMessageSend(
+				"session-atomic-failure",
+				"message-1",
+			);
+			if (claim.status !== "claimed") {
+				throw new Error("expected an active claim");
+			}
+			const faultDb = new Database(dbPath);
+			faultDb.exec(`
+				CREATE TRIGGER fail_terminal_event
+				BEFORE INSERT ON session_events
+				WHEN NEW.session_id = 'session-atomic-failure' AND NEW.kind = 'turn_end'
+				BEGIN
+					SELECT RAISE(ABORT, 'injected terminal event failure');
+				END;
+			`);
+			faultDb.close();
+
+			expect(() =>
+				walStore.completeMessageSend(
+					"session-atomic-failure",
+					"message-1",
+					claim.claimId,
+					"end_turn",
+				),
+			).toThrow("injected terminal event failure");
+
+			expect(
+				walStore.getMessageSendResult("session-atomic-failure", "message-1"),
+			).toBeUndefined();
+			expect(
+				walStore.claimMessageSend("session-atomic-failure", "message-1"),
+			).toEqual({ status: "in_progress" });
+			expect(
+				walStore.queryEvents({
+					sessionId: "session-atomic-failure",
+					revision: 1,
+				}),
+			).toHaveLength(0);
 		});
 
 		it("persists the first completed result across store restarts", () => {
@@ -350,6 +515,53 @@ describe("WalStore", () => {
 			expect(walStore.getSessionRevisionKey("session-1", 1)).toBe(
 				"wrapped-first",
 			);
+		});
+
+		it("pages every persisted revision key in stable composite-key order", () => {
+			for (const sessionId of ["session-b", "session-a"]) {
+				walStore.ensureSession({
+					sessionId,
+					machineId: "machine-1",
+					backendId: "backend-1",
+				});
+				for (const revision of [1, 2]) {
+					walStore.recordSessionRevisionKey(
+						sessionId,
+						revision,
+						`${sessionId}-wrapped-${revision}`,
+					);
+				}
+			}
+
+			const firstPage = walStore.getSessionRevisionKeysPage(undefined, 3);
+			const last = firstPage.at(-1);
+			const secondPage = walStore.getSessionRevisionKeysPage(
+				last && { sessionId: last.sessionId, revision: last.revision },
+				3,
+			);
+
+			expect([...firstPage, ...secondPage]).toEqual([
+				{
+					sessionId: "session-a",
+					revision: 1,
+					wrappedDek: "session-a-wrapped-1",
+				},
+				{
+					sessionId: "session-a",
+					revision: 2,
+					wrappedDek: "session-a-wrapped-2",
+				},
+				{
+					sessionId: "session-b",
+					revision: 1,
+					wrappedDek: "session-b-wrapped-1",
+				},
+				{
+					sessionId: "session-b",
+					revision: 2,
+					wrappedDek: "session-b-wrapped-2",
+				},
+			]);
 		});
 
 		it("lists only current revisions with unacknowledged events", () => {

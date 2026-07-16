@@ -53,6 +53,16 @@ type PendingReloadEvent =
 	| { type: "session_update"; notification: SessionNotification }
 	| { type: "wal_event"; kind: SessionEventKind; payload: unknown };
 
+type PendingReloadBuffer = {
+	events: PendingReloadEvent[];
+	bytes: number;
+	error?: Error;
+};
+
+const MAX_RELOAD_BUFFER_BYTES = 8 * 1024 * 1024;
+const MAX_RELOAD_BUFFER_EVENTS = 20_000;
+const LEGACY_KEY_VALIDATION_PAGE_SIZE = 100;
+
 const resolveSessionUpdateEventKind = (
 	notification: SessionNotification,
 ): SessionEventKind => {
@@ -104,7 +114,7 @@ type SessionRecord = {
 	unsubscribe?: () => void;
 	unsubscribeTerminal?: () => void;
 	unsubscribeStatus?: () => void;
-	pendingReloadEvents?: PendingReloadEvent[];
+	pendingReload?: PendingReloadBuffer;
 	isAttached?: boolean;
 	attachedAt?: Date;
 	/** Current WAL revision for this session */
@@ -287,6 +297,52 @@ export class SessionManager {
 		);
 		this.walStore = new WalStore(config.walDbPath);
 		this.cryptoService = cryptoService;
+		const keyIdentity = cryptoService?.getKeyIdentity?.();
+		if (keyIdentity && cryptoService) {
+			try {
+				if (!this.walStore.getEncryptionIdentity()) {
+					let verifiedLegacyKeyCount = 0;
+					let after: { sessionId: string; revision: number } | undefined;
+					while (true) {
+						const legacyKeys = this.walStore.getSessionRevisionKeysPage(
+							after,
+							LEGACY_KEY_VALIDATION_PAGE_SIZE,
+						);
+						for (const legacyKey of legacyKeys) {
+							verifiedLegacyKeyCount += 1;
+							if (
+								!cryptoService.canUnwrapDek ||
+								!cryptoService.canUnwrapDek(legacyKey.wrappedDek)
+							) {
+								throw new Error(
+									"WAL encryption identity mismatch; the persisted revision keys require the original master secret",
+								);
+							}
+						}
+						if (legacyKeys.length < LEGACY_KEY_VALIDATION_PAGE_SIZE) {
+							break;
+						}
+						const lastKey = legacyKeys.at(-1);
+						if (!lastKey) {
+							break;
+						}
+						after = {
+							sessionId: lastKey.sessionId,
+							revision: lastKey.revision,
+						};
+					}
+					if (verifiedLegacyKeyCount === 0 && this.walStore.hasDurableData()) {
+						throw new Error(
+							"WAL encryption identity is missing and durable data has no wrapped key, so Mobvibe cannot verify the original master secret; restore the original credentials or move the WAL to a separate MOBVIBE_HOME",
+						);
+					}
+				}
+				this.walStore.bindEncryptionIdentity(keyIdentity);
+			} catch (error) {
+				this.walStore.close();
+				throw error;
+			}
+		}
 	}
 
 	createConnection(backend: AcpBackendConfig): AcpConnection {
@@ -433,7 +489,7 @@ export class SessionManager {
 		return Array.from(merged.values());
 	}
 
-	private ensureSessionRevisionDek(
+	private prepareSessionRevisionDek(
 		sessionId: string,
 		revision: number,
 	): string | undefined {
@@ -461,13 +517,37 @@ export class SessionManager {
 				return undefined;
 			}
 		}
-
 		const { wrappedDek } = this.cryptoService.initSessionDek(
 			sessionId,
 			revision,
 		);
-		if (!wrappedDek) return undefined;
-		this.walStore.recordSessionRevisionKey(sessionId, revision, wrappedDek);
+		return wrappedDek ?? undefined;
+	}
+
+	private ensureSessionRevisionDek(
+		sessionId: string,
+		revision: number,
+	): string | undefined {
+		const wrappedDek = this.prepareSessionRevisionDek(sessionId, revision);
+		if (
+			wrappedDek &&
+			!this.walStore.getSessionRevisionKey(sessionId, revision)
+		) {
+			this.walStore.recordSessionRevisionKey(sessionId, revision, wrappedDek);
+		}
+		return wrappedDek;
+	}
+
+	private requirePreparedSessionRevisionDek(
+		sessionId: string,
+		revision: number,
+	): string | undefined {
+		const wrappedDek = this.prepareSessionRevisionDek(sessionId, revision);
+		if (this.cryptoService?.contentEncryptionEnabled && !wrappedDek) {
+			throw new Error(
+				`Unable to initialize encryption key for session ${sessionId} revision ${revision}`,
+			);
+		}
 		return wrappedDek;
 	}
 
@@ -716,6 +796,25 @@ export class SessionManager {
 		}));
 	}
 
+	getUnackedEventsPage(
+		sessionId: string,
+		revision: number,
+		afterSeq: number,
+		limit: number,
+	): SessionEvent[] {
+		const wrappedDek = this.ensureSessionRevisionDek(sessionId, revision);
+		if (this.cryptoService?.contentEncryptionEnabled && !wrappedDek) {
+			logger.error(
+				{ sessionId, revision },
+				"unacked_events_skipped_missing_revision_dek",
+			);
+			return [];
+		}
+		return this.walStore
+			.getUnackedEventsPage(sessionId, revision, afterSeq, limit)
+			.map((event) => this.toSessionEvent(event));
+	}
+
 	/**
 	 * Acknowledge events up to a given sequence.
 	 */
@@ -748,12 +847,23 @@ export class SessionManager {
 		claimId: string,
 		stopReason: StopReason,
 	): void {
-		this.walStore.completeMessageSend(
+		const record = this.sessions.get(sessionId);
+		if (!record) {
+			throw new Error(`Session not found: ${sessionId}`);
+		}
+		const terminalEvent = this.walStore.completeMessageSend(
 			sessionId,
 			messageId,
 			claimId,
 			stopReason,
 		);
+		record.updatedAt = new Date();
+		this.emitSessionEvent(this.toSessionEvent(terminalEvent));
+		this.emitSessionsChanged({
+			added: [],
+			updated: [this.buildSummary(record)],
+			removed: [],
+		});
 	}
 
 	recordTurnEnd(sessionId: string, stopReason: StopReason): void {
@@ -837,8 +947,12 @@ export class SessionManager {
 		if (this.closedSessionRecords.has(record)) {
 			return undefined;
 		}
-		if (record.pendingReloadEvents) {
-			record.pendingReloadEvents.push({ type: "wal_event", kind, payload });
+		if (record.pendingReload) {
+			this.bufferReloadEvent(record.pendingReload, {
+				type: "wal_event",
+				kind,
+				payload,
+			});
 			return undefined;
 		}
 		return this.writeAndEmitEvent(
@@ -1666,7 +1780,8 @@ export class SessionManager {
 					limit: 1,
 				}).length > 0;
 
-			const bufferedUpdates: SessionNotification[] = [];
+			const loadBuffer: PendingReloadBuffer = { events: [], bytes: 0 };
+			const bufferedEvents = loadBuffer.events;
 			unsubscribe = connection.onSessionUpdate(
 				(notification: SessionNotification) => {
 					logger.debug(
@@ -1681,9 +1796,12 @@ export class SessionManager {
 					if (recordRef) {
 						this.handleSessionUpdate(recordRef, notification);
 					} else {
-						bufferedUpdates.push(notification);
+						this.bufferReloadEvent(loadBuffer, {
+							type: "session_update",
+							notification,
+						});
 						logger.debug(
-							{ sessionId, bufferedCount: bufferedUpdates.length },
+							{ sessionId, bufferedCount: bufferedEvents.length },
 							"load_session_buffered",
 						);
 					}
@@ -1695,12 +1813,15 @@ export class SessionManager {
 			logger.debug(
 				{
 					sessionId,
-					bufferedCount: bufferedUpdates.length,
+					bufferedCount: bufferedEvents.length,
 					hasModels: !!response.models,
 					hasModes: !!response.modes,
 				},
 				"load_session_acp_returned",
 			);
+			if (loadBuffer.error) {
+				throw loadBuffer.error;
+			}
 			connection.setPermissionHandler((params) =>
 				this.handlePermissionRequest(sessionId, params),
 			);
@@ -1715,14 +1836,46 @@ export class SessionManager {
 			);
 			const discovered = this.discoveredSessions.get(sessionId);
 			const projectContext = await resolveGitProjectContext(cwd);
-			const revision = hasExistingHistory
-				? this.walStore.incrementRevision(sessionId)
-				: this.walStore.ensureSession({
-						sessionId,
-						machineId: this.config.machineId,
-						backendId: backend.id,
-						cwd,
-					}).revision;
+			if (loadBuffer.error) {
+				throw loadBuffer.error;
+			}
+
+			const walEvents = this.toWalEventInputs(bufferedEvents);
+			let revision: number;
+			let committedEvents: WalEvent[];
+			if (hasExistingHistory && existingWalSession) {
+				const targetRevision = existingWalSession.currentRevision + 1;
+				const wrappedDek = this.requirePreparedSessionRevisionDek(
+					sessionId,
+					targetRevision,
+				);
+				const committed = this.walStore.commitReloadRevision({
+					sessionId,
+					expectedRevision: existingWalSession.currentRevision,
+					events: walEvents,
+					wrappedDek,
+				});
+				revision = committed.revision;
+				committedEvents = committed.events;
+			} else {
+				const expectedRevision = existingWalSession?.currentRevision ?? null;
+				const targetRevision = expectedRevision ?? 1;
+				const wrappedDek = this.requirePreparedSessionRevisionDek(
+					sessionId,
+					targetRevision,
+				);
+				const committed = this.walStore.commitSessionLoad({
+					sessionId,
+					machineId: this.config.machineId,
+					backendId: backend.id,
+					cwd,
+					expectedRevision,
+					events: walEvents,
+					wrappedDek,
+				});
+				revision = committed.revision;
+				committedEvents = committed.events;
+			}
 			if (hasExistingHistory) {
 				logger.debug({ sessionId, revision }, "load_session_bump_revision");
 			}
@@ -1758,22 +1911,13 @@ export class SessionManager {
 			recordRef = record;
 			record.unsubscribe = unsubscribe;
 
-			// Initialize DEK for E2EE (new revision = new key)
-			this.requireSessionRevisionDek(sessionId, revision);
-
-			// Write buffered updates to WAL
+			// Apply and emit only after the complete replay is durably committed.
 			logger.debug(
-				{ sessionId, bufferedCount: bufferedUpdates.length },
+				{ sessionId, bufferedCount: bufferedEvents.length },
 				"load_session_writing_buffered",
 			);
-			for (const notification of bufferedUpdates) {
-				logger.debug(
-					{ sessionId, updateType: notification.update.sessionUpdate },
-					"load_session_writing_buffered_event",
-				);
-				this.writeSessionUpdateToWal(record, notification);
-				this.applySessionUpdateToRecord(record, notification);
-			}
+			this.applyReloadEventsToRecord(record, bufferedEvents);
+			this.emitCommittedReloadEvents(committedEvents);
 
 			this.setupSessionSubscriptions(record, { skipSessionUpdates: true });
 
@@ -1846,26 +1990,33 @@ export class SessionManager {
 			);
 		}
 
-		const bufferedEvents: PendingReloadEvent[] = [];
-		existing.pendingReloadEvents = bufferedEvents;
+		const reloadBuffer: PendingReloadBuffer = { events: [], bytes: 0 };
+		const bufferedEvents = reloadBuffer.events;
+		existing.pendingReload = reloadBuffer;
 		let response: Awaited<ReturnType<typeof existing.connection.loadSession>>;
 		let projectContext: Awaited<ReturnType<typeof resolveGitProjectContext>>;
 		try {
 			response = await existing.connection.loadSession(sessionId, cwd);
+			if (reloadBuffer.error) {
+				throw reloadBuffer.error;
+			}
 			projectContext = await resolveGitProjectContext(cwd);
+			if (reloadBuffer.error) {
+				throw reloadBuffer.error;
+			}
 		} catch (error) {
-			delete existing.pendingReloadEvents;
+			delete existing.pendingReload;
 			if (bufferedEvents.length > 0) {
 				logger.warn(
 					{
 						err: error,
 						sessionId,
-						restoredEvents: bufferedEvents.length,
+						discardedEvents: bufferedEvents.length,
 					},
-					"reload_failed_events_restored",
+					"reload_failed_events_discarded",
 				);
-				this.persistAndEmitReloadEvents(existing, bufferedEvents);
 			}
+			await this.closeSession(sessionId);
 			throw error;
 		}
 
@@ -1874,11 +2025,15 @@ export class SessionManager {
 			const modeState = resolveModeState(response.modes);
 			const agentInfo = existing.connection.getAgentInfo();
 			const targetRevision = existing.revision + 1;
-			this.requireSessionRevisionDek(sessionId, targetRevision);
+			const wrappedDek = this.requirePreparedSessionRevisionDek(
+				sessionId,
+				targetRevision,
+			);
 			const committed = this.walStore.commitReloadRevision({
 				sessionId,
 				expectedRevision: existing.revision,
 				events: this.toWalEventInputs(bufferedEvents),
+				wrappedDek,
 			});
 			return { agentInfo, committed, ...modelState, ...modeState };
 		};
@@ -1893,7 +2048,7 @@ export class SessionManager {
 			await this.closeSession(sessionId);
 			throw error;
 		} finally {
-			delete existing.pendingReloadEvents;
+			delete existing.pendingReload;
 		}
 		const {
 			agentInfo,
@@ -1935,19 +2090,6 @@ export class SessionManager {
 		);
 
 		return summary;
-	}
-
-	private persistAndEmitReloadEvents(
-		record: SessionRecord,
-		events: PendingReloadEvent[],
-	): void {
-		const committed = this.walStore.appendEventsAtomically(
-			record.sessionId,
-			record.revision,
-			this.toWalEventInputs(events),
-		);
-		this.applyReloadEventsToRecord(record, events);
-		this.emitCommittedReloadEvents(committed);
 	}
 
 	private toWalEventInputs(
@@ -2001,8 +2143,8 @@ export class SessionManager {
 		if (this.closedSessionRecords.has(record)) {
 			return;
 		}
-		if (record.pendingReloadEvents) {
-			record.pendingReloadEvents.push({
+		if (record.pendingReload) {
+			this.bufferReloadEvent(record.pendingReload, {
 				type: "session_update",
 				notification,
 			});
@@ -2011,6 +2153,39 @@ export class SessionManager {
 		record.updatedAt = new Date();
 		this.writeSessionUpdateToWal(record, notification);
 		this.applySessionUpdateToRecord(record, notification);
+	}
+
+	private bufferReloadEvent(
+		buffer: PendingReloadBuffer,
+		event: PendingReloadEvent,
+	): void {
+		if (buffer.error) {
+			return;
+		}
+		if (buffer.events.length >= MAX_RELOAD_BUFFER_EVENTS) {
+			buffer.error = new Error("Reload replay exceeds local buffer limit");
+			return;
+		}
+		let serialized: string | undefined;
+		try {
+			serialized = JSON.stringify(event);
+		} catch (error) {
+			buffer.error =
+				error instanceof Error
+					? error
+					: new Error("Reload replay event is not serializable");
+			return;
+		}
+		if (
+			serialized === undefined ||
+			buffer.bytes + Buffer.byteLength(serialized, "utf8") >
+				MAX_RELOAD_BUFFER_BYTES
+		) {
+			buffer.error = new Error("Reload replay exceeds local buffer limit");
+			return;
+		}
+		buffer.bytes += Buffer.byteLength(serialized, "utf8");
+		buffer.events.push(event);
 	}
 
 	private applySessionUpdateToRecord(

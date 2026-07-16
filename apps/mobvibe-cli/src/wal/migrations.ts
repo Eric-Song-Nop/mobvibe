@@ -267,6 +267,19 @@ const MIGRATIONS = [
 				ON message_send_claims (claimed_at);
 		`,
 	},
+	{
+		version: 11,
+		up: `
+			-- Bind a WAL database to the non-secret public identity derived from
+			-- the master secret. A daemon using another account/key must fail
+			-- closed instead of advertising or replaying the previous user's data.
+			CREATE TABLE IF NOT EXISTS wal_encryption_identity (
+				id INTEGER PRIMARY KEY CHECK (id = 1),
+				key_identity TEXT NOT NULL,
+				bound_at TEXT NOT NULL
+			);
+		`,
+	},
 ];
 
 export function runMigrations(db: Database): void {
