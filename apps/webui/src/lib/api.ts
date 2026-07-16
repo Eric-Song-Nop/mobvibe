@@ -671,17 +671,26 @@ export const sendMessage = async (payload: {
 	sessionId: string;
 	messageId: string;
 	prompt: ContentBlock[];
+	revision: number;
+	encryptionRequired: boolean;
 }): Promise<SendMessageResult> => {
+	const { revision, encryptionRequired, ...requestPayload } = payload;
 	const encryptedPrompt = e2ee.encryptPayloadForSession(
 		payload.sessionId,
 		payload.prompt,
+		revision,
+		encryptionRequired,
 	);
 	return requestJsonWithTimeout<SendMessageResult>(
 		"/acp/message",
 		SEND_MESSAGE_TIMEOUT_MS,
 		{
 			method: "POST",
-			body: JSON.stringify({ ...payload, prompt: encryptedPrompt }),
+			body: JSON.stringify({
+				...requestPayload,
+				prompt: encryptedPrompt,
+				expectedRevision: revision,
+			}),
 		},
 	);
 };

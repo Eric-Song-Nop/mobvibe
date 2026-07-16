@@ -440,6 +440,68 @@ describe("E2EEManager", () => {
 			});
 		});
 
+		it("fails closed instead of encrypting with a DEK from another revision", async () => {
+			await e2ee.addPairedSecret(btoa("test-secret"));
+			e2ee.unwrapSessionDek("session-1", "wrapped-revision-1", 1);
+
+			expect(() =>
+				e2ee.encryptPayloadForSession(
+					"session-1",
+					[{ type: "text", text: "revision two" }],
+					2,
+					true,
+				),
+			).toThrow("matching session encryption key");
+			expect(mockEncryptPayload).not.toHaveBeenCalled();
+		});
+
+		it("fails closed when an encrypted session has no DEK", () => {
+			expect(() =>
+				e2ee.encryptPayloadForSession(
+					"session-no-dek",
+					[{ type: "text", text: "secret" }],
+					3,
+					true,
+				),
+			).toThrow("matching session encryption key");
+			expect(mockEncryptPayload).not.toHaveBeenCalled();
+		});
+
+		it("fails closed when encryption is required without a revision", async () => {
+			await e2ee.addPairedSecret(btoa("test-secret"));
+			e2ee.unwrapSessionDek(
+				"session-unknown-revision",
+				"wrapped-revision-1",
+				1,
+			);
+
+			expect(() =>
+				e2ee.encryptPayloadForSession(
+					"session-unknown-revision",
+					[{ type: "text", text: "unknown revision" }],
+					undefined,
+					true,
+				),
+			).toThrow("matching session encryption key");
+			expect(mockEncryptPayload).not.toHaveBeenCalled();
+		});
+
+		it("keeps legacy plaintext sessions plaintext despite a stale cached DEK", async () => {
+			await e2ee.addPairedSecret(btoa("test-secret"));
+			e2ee.unwrapSessionDek("legacy-session", "wrapped-revision-1", 1);
+
+			const payload = [{ type: "text", text: "legacy gateway" }];
+			const result = e2ee.encryptPayloadForSession(
+				"legacy-session",
+				payload,
+				undefined,
+				false,
+			);
+
+			expect(result).toBe(payload);
+			expect(mockEncryptPayload).not.toHaveBeenCalled();
+		});
+
 		it("round-trip: encrypt then decrypt same DEK", async () => {
 			await e2ee.addPairedSecret(btoa("test-secret"));
 			e2ee.unwrapSessionDek("session-rt", "wrapped-dek", 1);

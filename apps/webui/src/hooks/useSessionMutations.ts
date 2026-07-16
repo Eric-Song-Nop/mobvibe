@@ -85,6 +85,8 @@ type SendMessageVariables = {
 	sessionId: string;
 	prompt: ContentBlock[];
 	messageId: string;
+	revision: number;
+	encryptionRequired: boolean;
 	draft?: SendMessageDraft;
 };
 
@@ -152,7 +154,12 @@ export interface ChatStoreActions {
 			provisional?: boolean;
 		},
 	) => void;
-	confirmOrAppendUserMessage: (sessionId: string, text: string) => void;
+	confirmOrAppendUserMessage: (
+		sessionId: string,
+		chunk: ContentBlock | string,
+		messageId?: string,
+		eventSeq?: number,
+	) => void;
 	markUserMessageFailed: (sessionId: string, messageId: string) => void;
 	addStatusMessage: (sessionId: string, status: StatusPayload) => void;
 	appendAssistantChunk: (sessionId: string, text: string) => void;
@@ -437,6 +444,8 @@ export function useSessionMutations(store: ChatStoreActions) {
 				sessionId: variables.sessionId,
 				prompt: variables.prompt,
 				messageId: variables.messageId,
+				revision: variables.revision,
+				encryptionRequired: variables.encryptionRequired,
 			});
 		},
 		onError: (mutationError: unknown, variables) => {
@@ -505,6 +514,13 @@ export function useSessionMutations(store: ChatStoreActions) {
 
 	const createSessionLoadCallbacks = (errorKey: string) => ({
 		onSuccess: (data: SessionSummary) => {
+			const e2eeStatus = bootstrapSessionE2EE(
+				data.sessionId,
+				data.wrappedDek,
+				data.revision,
+			);
+			store.setSessionE2EEStatus(data.sessionId, e2eeStatus);
+
 			// Only reset if revision actually changed (avoid wiping backfill results)
 			if (data.revision !== undefined) {
 				const current = useChatStore.getState().sessions[data.sessionId];

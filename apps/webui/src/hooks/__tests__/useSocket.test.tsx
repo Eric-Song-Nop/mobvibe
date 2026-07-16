@@ -2408,7 +2408,12 @@ describe("useSocket (webui)", () => {
 		expect(store.updateSessionCursor).toHaveBeenCalledWith("session-1", 1, 1);
 		expect(store.confirmOrAppendUserMessage).toHaveBeenCalledWith(
 			"session-1",
-			"Hello",
+			{
+				type: "text",
+				text: "Hello",
+			},
+			undefined,
+			1,
 		);
 	});
 
@@ -2466,7 +2471,12 @@ describe("useSocket (webui)", () => {
 		expect(store.updateSessionCursor).toHaveBeenCalledWith("session-1", 1, 1);
 		expect(store.confirmOrAppendUserMessage).toHaveBeenCalledWith(
 			"session-1",
-			"Hello from CLI",
+			{
+				type: "text",
+				text: "Hello from CLI",
+			},
+			undefined,
+			1,
 		);
 	});
 

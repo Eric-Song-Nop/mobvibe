@@ -75,6 +75,8 @@ describe("api Fly owner routing", () => {
 		await sendMessage({
 			sessionId: "session-1",
 			messageId: "message-1",
+			revision: 7,
+			encryptionRequired: false,
 			prompt: [{ type: "text", text: "x".repeat(1_100_000) }],
 		});
 
@@ -89,6 +91,16 @@ describe("api Fly owner routing", () => {
 			"owner-machine-1",
 		);
 		expect((largeRequest.body as string).length).toBeGreaterThan(1_000_000);
+		expect(JSON.parse(largeRequest.body as string)).toEqual(
+			expect.objectContaining({
+				sessionId: "session-1",
+				messageId: "message-1",
+				expectedRevision: 7,
+			}),
+		);
+		expect(JSON.parse(largeRequest.body as string)).not.toHaveProperty(
+			"revision",
+		);
 	});
 
 	it("caches owner resolution across later stateful requests", async () => {
@@ -117,6 +129,8 @@ describe("api Fly owner routing", () => {
 		await sendMessage({
 			sessionId: "session-1",
 			messageId: "message-1",
+			revision: 1,
+			encryptionRequired: false,
 			prompt: [{ type: "text", text: "x".repeat(1_100_000) }],
 		});
 
@@ -366,6 +380,8 @@ describe("api Fly owner routing", () => {
 			const messageRequest = sendMessage({
 				sessionId: "session-1",
 				messageId: "message-1",
+				revision: 1,
+				encryptionRequired: false,
 				prompt: [{ type: "text", text: "Hello" }],
 			});
 			await vi.waitFor(() => expect(resolveRouting).toBeTypeOf("function"));
@@ -480,6 +496,8 @@ describe("api Fly owner routing", () => {
 		await sendMessage({
 			sessionId: "session-1",
 			messageId: "idempotent-message-1",
+			revision: 1,
+			encryptionRequired: false,
 			prompt: [{ type: "text", text: "Hello" }],
 		});
 
@@ -683,6 +701,8 @@ describe("api Fly owner routing", () => {
 		const oldRequest = sendMessage({
 			sessionId: "session-old",
 			messageId: "message-old",
+			revision: 1,
+			encryptionRequired: false,
 			prompt: [{ type: "text", text: "Old gateway" }],
 		});
 		await vi.waitFor(() => {
@@ -696,6 +716,8 @@ describe("api Fly owner routing", () => {
 		await sendMessage({
 			sessionId: "session-new",
 			messageId: "message-new",
+			revision: 1,
+			encryptionRequired: false,
 			prompt: [{ type: "text", text: "New gateway" }],
 		});
 
@@ -716,6 +738,8 @@ describe("api Fly owner routing", () => {
 		await sendMessage({
 			sessionId: "session-new",
 			messageId: "message-new-2",
+			revision: 1,
+			encryptionRequired: false,
 			prompt: [{ type: "text", text: "Still on the new gateway" }],
 		});
 

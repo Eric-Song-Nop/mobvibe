@@ -112,6 +112,7 @@ const createBaseSession = (overrides: Partial<ChatSession> = {}): ChatSession =>
 		canceling: false,
 		isLoading: false,
 		e2eeStatus: "none",
+		revision: 1,
 		input: "",
 		inputContents: [],
 		messages: [],
@@ -587,9 +588,12 @@ describe("useSessionHandlers — handleSend", () => {
 			sessionId: "session-1",
 			prompt: promptContents,
 			messageId: expect.any(String),
+			revision: 1,
+			encryptionRequired: false,
 			draft: {
 				input: "Ship it",
 				inputContents: promptContents,
+				revision: 1,
 			},
 		});
 	});
@@ -620,6 +624,8 @@ describe("useSessionHandlers — handleSend", () => {
 			sessionId: "session-1",
 			prompt: promptContents,
 			messageId: "failed-msg-1",
+			revision: 7,
+			encryptionRequired: false,
 			draft: {
 				input: "Retry exactly once",
 				inputContents: promptContents,
@@ -628,7 +634,33 @@ describe("useSessionHandlers — handleSend", () => {
 		});
 	});
 
-	it("uses a new message id when a failed draft belongs to an older revision", async () => {
+	it("pins encrypted sends to the ready session revision", async () => {
+		const promptContents = createDefaultContentBlocks("Encrypted prompt");
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Encrypted prompt",
+			inputContents: promptContents,
+		};
+
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({
+				e2eeStatus: "ok",
+				revision: 12,
+			}),
+		});
+
+		await act(async () => {
+			await result.current.handleSend();
+		});
+
+		expect(mutations.sendMessageMutation.mutate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				revision: 12,
+				encryptionRequired: true,
+			}),
+		);
+	});
+
+	it("retries an older failed message id on the current revision", async () => {
 		const promptContents = createDefaultContentBlocks(
 			"Run in the new revision",
 		);
@@ -647,14 +679,17 @@ describe("useSessionHandlers — handleSend", () => {
 			await result.current.handleSend();
 		});
 
-		const variables = vi.mocked(mutations.sendMessageMutation.mutate).mock
-			.calls[0]?.[0];
-		expect(variables?.messageId).toEqual(expect.any(String));
-		expect(variables?.messageId).not.toBe("failed-msg-from-revision-7");
-		expect(variables?.draft).toEqual({
-			input: "Run in the new revision",
-			inputContents: promptContents,
+		expect(mutations.sendMessageMutation.mutate).toHaveBeenCalledWith({
+			sessionId: "session-1",
+			prompt: promptContents,
+			messageId: "failed-msg-from-revision-7",
 			revision: 8,
+			encryptionRequired: false,
+			draft: {
+				input: "Run in the new revision",
+				inputContents: promptContents,
+				revision: 8,
+			},
 		});
 	});
 
@@ -684,6 +719,56 @@ describe("useSessionHandlers — handleSend", () => {
 		const { result } = renderHandlers({
 			activeSession: createBaseSession({
 				e2eeStatus: undefined,
+			}),
+		});
+
+		await act(async () => {
+			await result.current.handleSend();
+		});
+
+		expect(chatActions.setError).toHaveBeenCalledWith(
+			"session-1",
+			buildSessionNotReadyError(),
+		);
+		expect(chatActions.setSending).not.toHaveBeenCalled();
+		expect(mutations.sendMessageMutation.mutate).not.toHaveBeenCalled();
+	});
+
+	it("does not send an encrypted session whose revision is unresolved", async () => {
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Top secret prompt",
+			inputContents: createDefaultContentBlocks("Top secret prompt"),
+		};
+
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({
+				e2eeStatus: "ok",
+				revision: undefined,
+			}),
+		});
+
+		await act(async () => {
+			await result.current.handleSend();
+		});
+
+		expect(chatActions.setError).toHaveBeenCalledWith(
+			"session-1",
+			buildSessionNotReadyError(),
+		);
+		expect(chatActions.setSending).not.toHaveBeenCalled();
+		expect(mutations.sendMessageMutation.mutate).not.toHaveBeenCalled();
+	});
+
+	it("does not send a no-E2EE session whose revision is unresolved", async () => {
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Plaintext prompt",
+			inputContents: createDefaultContentBlocks("Plaintext prompt"),
+		};
+
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({
+				e2eeStatus: "none",
+				revision: undefined,
 			}),
 		});
 
@@ -736,9 +821,12 @@ describe("useSessionHandlers — handleSend", () => {
 			sessionId: "session-1",
 			prompt: promptContents,
 			messageId: expect.any(String),
+			revision: 1,
+			encryptionRequired: false,
 			draft: {
 				input: "",
 				inputContents: promptContents,
+				revision: 1,
 			},
 		});
 	});
@@ -780,9 +868,12 @@ describe("useSessionHandlers — handleSend", () => {
 			sessionId: "session-1",
 			prompt: promptContents,
 			messageId: expect.any(String),
+			revision: 1,
+			encryptionRequired: false,
 			draft: {
 				input: "",
 				inputContents: promptContents,
+				revision: 1,
 			},
 		});
 	});
@@ -822,9 +913,12 @@ describe("useSessionHandlers — handleSend", () => {
 			sessionId: "session-1",
 			prompt: promptContents,
 			messageId: expect.any(String),
+			revision: 1,
+			encryptionRequired: false,
 			draft: {
 				input: "Ship it",
 				inputContents: promptContents,
+				revision: 1,
 			},
 		});
 	});

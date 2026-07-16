@@ -216,9 +216,32 @@ class E2EEManager {
 		return this.hasSessionDek(sessionId, revision) ? "ok" : "missing_key";
 	}
 
-	encryptPayloadForSession(sessionId: string, payload: unknown): unknown {
-		const dek = this.sessionDeks.get(sessionId);
-		if (!dek) return payload;
+	encryptPayloadForSession(
+		sessionId: string,
+		payload: unknown,
+		revision?: number,
+		encryptionRequired?: boolean,
+	): unknown {
+		if (encryptionRequired === false) {
+			return payload;
+		}
+		if (encryptionRequired === true && revision === undefined) {
+			throw new Error(
+				"Cannot send without a matching session encryption key. Reload the session or pair the correct device key, then try again.",
+			);
+		}
+
+		const dek = this.hasSessionDek(sessionId, revision)
+			? this.sessionDeks.get(sessionId)
+			: undefined;
+		if (!dek) {
+			if (encryptionRequired === true || this.sessionDeks.has(sessionId)) {
+				throw new Error(
+					"Cannot send without a matching session encryption key. Reload the session or pair the correct device key, then try again.",
+				);
+			}
+			return payload;
+		}
 		return encryptPayload(payload, dek);
 	}
 
