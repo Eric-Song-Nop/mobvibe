@@ -268,6 +268,13 @@ const isValidWorkspacePath = async (cwd: string): Promise<boolean> => {
 	}
 };
 
+export type SessionManagerDependencies = {
+	validateWorkspacePath?: (cwd: string) => Promise<boolean>;
+	createGitWorktree?: typeof createGitWorktree;
+	isGitRepo?: typeof isGitRepo;
+	resolveGitProjectContext?: typeof resolveGitProjectContext;
+};
+
 export class SessionManager {
 	private sessions = new Map<string, SessionRecord>();
 	private discoveredSessions = new Map<string, AcpSessionInfo>();
@@ -282,6 +289,9 @@ export class SessionManager {
 	private readonly walStore: WalStore;
 	private readonly cryptoService?: CliCryptoService;
 	private readonly validateWorkspacePath: (cwd: string) => Promise<boolean>;
+	private readonly createGitWorktree: typeof createGitWorktree;
+	private readonly isGitRepo: typeof isGitRepo;
+	private readonly resolveGitProjectContext: typeof resolveGitProjectContext;
 	private readonly activeMessageIdBySession = new Map<string, string>();
 	private readonly sessionReloadTails = new Map<string, Promise<void>>();
 	private readonly closedSessionRecords = new WeakSet<SessionRecord>();
@@ -294,9 +304,7 @@ export class SessionManager {
 	constructor(
 		private readonly config: CliConfig,
 		cryptoService?: CliCryptoService,
-		dependencies?: {
-			validateWorkspacePath?: (cwd: string) => Promise<boolean>;
-		},
+		dependencies?: SessionManagerDependencies,
 	) {
 		this.backendById = new Map(
 			config.acpBackends.map((backend) => [backend.id, backend]),
@@ -305,6 +313,11 @@ export class SessionManager {
 		this.cryptoService = cryptoService;
 		this.validateWorkspacePath =
 			dependencies?.validateWorkspacePath ?? isValidWorkspacePath;
+		this.createGitWorktree =
+			dependencies?.createGitWorktree ?? createGitWorktree;
+		this.isGitRepo = dependencies?.isGitRepo ?? isGitRepo;
+		this.resolveGitProjectContext =
+			dependencies?.resolveGitProjectContext ?? resolveGitProjectContext;
 		const keyIdentity = cryptoService?.getKeyIdentity?.();
 		if (keyIdentity && cryptoService) {
 			try {
@@ -599,7 +612,7 @@ export class SessionManager {
 			checked++;
 
 			try {
-				const projectContext = await resolveGitProjectContext(session.cwd);
+				const projectContext = await this.resolveGitProjectContext(session.cwd);
 				const workspaceRootCwd = projectContext.repoRoot ?? session.cwd;
 				this.walStore.saveDiscoveredSessions([
 					{
@@ -1121,7 +1134,7 @@ export class SessionManager {
 
 		if (options.worktree) {
 			const repoDir = options.worktree.sourceCwd;
-			if (!(await isGitRepo(repoDir))) {
+			if (!(await this.isGitRepo(repoDir))) {
 				throw new AppError(
 					createErrorDetail({
 						code: "REQUEST_VALIDATION_FAILED",
@@ -1153,7 +1166,7 @@ export class SessionManager {
 			);
 
 			try {
-				const result = await createGitWorktree(repoDir, {
+				const result = await this.createGitWorktree(repoDir, {
 					branch,
 					targetPath,
 					baseBranch: options.worktree.baseBranch,
@@ -1182,7 +1195,7 @@ export class SessionManager {
 			worktreeBranch = branch;
 			workspaceRootCwd = repoDir;
 		} else if (options.cwd) {
-			const projectContext = await resolveGitProjectContext(options.cwd);
+			const projectContext = await this.resolveGitProjectContext(options.cwd);
 			workspaceRootCwd = projectContext.repoRoot ?? options.cwd;
 		}
 
@@ -1669,7 +1682,7 @@ export class SessionManager {
 							? await this.validateWorkspacePath(session.cwd)
 							: false,
 						projectContext: session.cwd
-							? await resolveGitProjectContext(session.cwd)
+							? await this.resolveGitProjectContext(session.cwd)
 							: undefined,
 					})),
 				);
@@ -1864,7 +1877,7 @@ export class SessionManager {
 				response.modes,
 			);
 			const discovered = this.discoveredSessions.get(sessionId);
-			const projectContext = await resolveGitProjectContext(cwd);
+			const projectContext = await this.resolveGitProjectContext(cwd);
 			if (loadBuffer.error) {
 				throw loadBuffer.error;
 			}
@@ -2029,7 +2042,7 @@ export class SessionManager {
 			if (reloadBuffer.error) {
 				throw reloadBuffer.error;
 			}
-			projectContext = await resolveGitProjectContext(cwd);
+			projectContext = await this.resolveGitProjectContext(cwd);
 			if (reloadBuffer.error) {
 				throw reloadBuffer.error;
 			}

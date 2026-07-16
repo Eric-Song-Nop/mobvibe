@@ -13,6 +13,7 @@ import type { CliConfig } from "../../config.js";
 import { CliCryptoService } from "../../e2ee/crypto-service.js";
 import { WalStore } from "../../wal/wal-store.js";
 import type { AcpConnection } from "../acp-connection.js";
+import type { SessionManagerDependencies } from "../session-manager.js";
 
 // Mock the logger
 mock.module("../../lib/logger.js", () => ({
@@ -51,14 +52,29 @@ const mockResolveGitProjectContext = mock((cwd: string) =>
 	}),
 );
 
-mock.module("../../lib/git-utils.js", () => ({
+// Dynamic import so that the logger mock above is registered first.
+const { SessionManager: BaseSessionManager } = await import(
+	"../session-manager.js"
+);
+
+const gitDependencies = {
 	createGitWorktree: mockCreateGitWorktree,
 	isGitRepo: mockIsGitRepo,
 	resolveGitProjectContext: mockResolveGitProjectContext,
-}));
+} satisfies SessionManagerDependencies;
 
-// Dynamic import so that mock.module calls above are registered first
-const { SessionManager } = await import("../session-manager.js");
+class SessionManager extends BaseSessionManager {
+	constructor(
+		config: CliConfig,
+		cryptoService?: CliCryptoService,
+		dependencies?: SessionManagerDependencies,
+	) {
+		super(config, cryptoService, {
+			...gitDependencies,
+			...dependencies,
+		});
+	}
+}
 
 /**
  * Captured callback from `onSessionUpdate`.
