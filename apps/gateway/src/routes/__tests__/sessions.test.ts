@@ -30,12 +30,14 @@ describe("session message routes", () => {
 	let baseUrl: string;
 	let sessionRouter: {
 		sendMessage: ReturnType<typeof vi.fn>;
+		setSessionConfigOption: ReturnType<typeof vi.fn>;
 		setSessionMode: ReturnType<typeof vi.fn>;
 	};
 
 	beforeEach(async () => {
 		sessionRouter = {
 			sendMessage: vi.fn(async () => ({ stopReason: "end_turn" })),
+			setSessionConfigOption: vi.fn(async () => ({ sessionId: "session-1" })),
 			setSessionMode: vi.fn(async () => ({ sessionId: "session-1" })),
 		};
 		const app = express();
@@ -300,6 +302,121 @@ describe("session message routes", () => {
 			error: {
 				code: "REQUEST_VALIDATION_FAILED",
 				message: "Invalid mode ID",
+				retryable: false,
+				scope: "request",
+			},
+		});
+	});
+
+	it("forwards protocol-native select config values and metadata", async () => {
+		const response = await fetch(`${baseUrl}/acp/session/config-option`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				sessionId: "session-1",
+				configId: "thinking-level",
+				value: "high",
+				_meta: { source: "settings-menu" },
+			}),
+		});
+
+		expect(response.status).toBe(200);
+		expect(sessionRouter.setSessionConfigOption).toHaveBeenCalledWith(
+			{
+				sessionId: "session-1",
+				configId: "thinking-level",
+				value: "high",
+				_meta: { source: "settings-menu" },
+			},
+			"user-1",
+		);
+	});
+
+	it("forwards protocol-native boolean config values", async () => {
+		const response = await fetch(`${baseUrl}/acp/session/config-option`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				sessionId: "session-1",
+				configId: "auto-approve",
+				type: "boolean",
+				value: true,
+			}),
+		});
+
+		expect(response.status).toBe(200);
+		expect(sessionRouter.setSessionConfigOption).toHaveBeenCalledWith(
+			{
+				sessionId: "session-1",
+				configId: "auto-approve",
+				type: "boolean",
+				value: true,
+			},
+			"user-1",
+		);
+	});
+
+	it.each([
+		{ type: "boolean", value: "true" },
+		{ type: "boolean", value: 1 },
+		{ type: "future-select-variant", value: "high" },
+		{ value: false },
+		{ value: 1 },
+	])("rejects an invalid protocol-native config value %#", async (config) => {
+		const response = await fetch(`${baseUrl}/acp/session/config-option`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				sessionId: "session-1",
+				configId: "invalid-config",
+				...config,
+			}),
+		});
+
+		expect(response.status).toBe(400);
+		expect(sessionRouter.setSessionConfigOption).not.toHaveBeenCalled();
+	});
+
+	it("preserves structured config RPC errors", async () => {
+		sessionRouter.setSessionConfigOption.mockRejectedValueOnce(
+			new AppError(
+				{
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Invalid config value",
+					retryable: false,
+					scope: "request",
+				},
+				400,
+			),
+		);
+
+		const response = await fetch(`${baseUrl}/acp/session/config-option`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				sessionId: "session-1",
+				configId: "thinking-level",
+				value: "impossible",
+			}),
+		});
+
+		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({
+			error: {
+				code: "REQUEST_VALIDATION_FAILED",
+				message: "Invalid config value",
 				retryable: false,
 				scope: "request",
 			},

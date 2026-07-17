@@ -50,6 +50,7 @@ vi.mock("@/lib/api", async () => {
 		cancelSession: vi.fn(),
 		setSessionMode: vi.fn(),
 		setSessionModel: vi.fn(),
+		setSessionConfigOption: vi.fn(),
 		sendMessage: vi.fn(),
 		sendPermissionDecision: vi.fn(),
 		loadSession: vi.fn(),
@@ -762,6 +763,62 @@ describe("useSessionMutations", () => {
 					modelId: "model-1",
 					modelName: "GPT-4",
 				}),
+			);
+		});
+	});
+
+	describe("setSessionConfigOptionMutation", () => {
+		it("replaces session config state with the complete ordered response", async () => {
+			const configOptions = [
+				{
+					type: "boolean" as const,
+					id: "safe-mode",
+					name: "Safe mode",
+					currentValue: true,
+				},
+				{
+					type: "select" as const,
+					id: "model",
+					name: "Model",
+					currentValue: "model-1",
+					options: [{ value: "model-1", name: "Model 1" }],
+				},
+			];
+			const mockSummary = {
+				sessionId: "session-1",
+				title: "Session",
+				backendId: "backend-1",
+				backendLabel: "Backend",
+				createdAt: "2025-01-01T00:00:00Z",
+				updatedAt: "2025-01-01T00:00:00Z",
+				configOptions,
+			};
+
+			vi.mocked(apiModule.setSessionConfigOption).mockResolvedValue(
+				mockSummary,
+			);
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.setSessionConfigOptionMutation.mutateAsync({
+				sessionId: "session-1",
+				configId: "safe-mode",
+				type: "boolean",
+				value: true,
+			});
+
+			expect(
+				vi.mocked(apiModule.setSessionConfigOption).mock.calls[0]?.[0],
+			).toEqual({
+				sessionId: "session-1",
+				configId: "safe-mode",
+				type: "boolean",
+				value: true,
+			});
+			expect(mockStore.updateSessionMeta).toHaveBeenCalledWith(
+				"session-1",
+				expect.objectContaining({ configOptions }),
 			);
 		});
 	});

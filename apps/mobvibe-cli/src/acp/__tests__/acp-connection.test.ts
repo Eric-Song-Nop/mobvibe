@@ -319,6 +319,57 @@ describe("AcpConnection", () => {
 		});
 	});
 
+	describe("setSessionConfigOption", () => {
+		it("sends select and boolean values with their protocol-specific shapes", async () => {
+			const request = mock((_method: string, _params: unknown) =>
+				Promise.resolve({ configOptions: [] }),
+			);
+			const internal = connection as unknown as {
+				state: "ready";
+				connection: {
+					agent: {
+						request: typeof request;
+					};
+				};
+			};
+			internal.state = "ready";
+			internal.connection = { agent: { request } };
+
+			await connection.setSessionConfigOption(
+				"session-1",
+				"reasoning",
+				"deep",
+				{ requestSource: "webui" },
+			);
+			await connection.setSessionConfigOption(
+				"session-1",
+				"auto-approve",
+				true,
+				null,
+			);
+
+			expect(request.mock.calls[0]).toEqual([
+				"session/set_config_option",
+				{
+					sessionId: "session-1",
+					configId: "reasoning",
+					value: "deep",
+					_meta: { requestSource: "webui" },
+				},
+			]);
+			expect(request.mock.calls[1]).toEqual([
+				"session/set_config_option",
+				{
+					sessionId: "session-1",
+					configId: "auto-approve",
+					type: "boolean",
+					value: true,
+					_meta: null,
+				},
+			]);
+		});
+	});
+
 	describe("getStatus", () => {
 		it("returns backend info in status", () => {
 			const status = connection.getStatus();

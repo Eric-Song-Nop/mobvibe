@@ -1,4 +1,4 @@
-import type { AvailableCommand } from "./acp.js";
+import type { AvailableCommand, SessionConfigOption } from "./acp.js";
 import type { ErrorDetail } from "./errors.js";
 
 export type AcpConnectionState =
@@ -47,6 +47,8 @@ export type SessionSummary = {
 	modeName?: string;
 	availableModes?: SessionModeOption[];
 	availableModels?: SessionModelOption[];
+	/** Complete ordered ACP session configuration state. */
+	configOptions?: SessionConfigOption[];
 	availableCommands?: AvailableCommand[];
 	/** Machine ID that owns this session (populated by gateway) */
 	machineId?: string;

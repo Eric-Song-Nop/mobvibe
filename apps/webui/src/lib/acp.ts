@@ -23,6 +23,7 @@ export type {
 	PlanEntryStatus,
 	ResourceLink,
 	SessionAttachedPayload,
+	SessionConfigOption,
 	SessionDetachedPayload,
 	SessionEvent,
 	// Session types

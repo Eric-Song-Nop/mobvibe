@@ -113,6 +113,7 @@ type SessionRecord = {
 		name: string;
 		description?: string | null;
 	}>;
+	configOptions: SessionConfigOption[];
 	availableCommands?: AvailableCommand[];
 	unsubscribe?: () => void;
 	unsubscribeTerminal?: () => void;
@@ -223,6 +224,40 @@ const flattenConfigSelectOptions = (
 		"options" in option ? option.options : [option],
 	);
 
+const createSessionConfigValidationError = (message: string) =>
+	new AppError(
+		createErrorDetail({
+			code: "REQUEST_VALIDATION_FAILED",
+			message,
+			retryable: false,
+			scope: "request",
+		}),
+		400,
+	);
+
+const validateSessionConfigValue = (
+	configOption: SessionConfigOption,
+	value: string | boolean,
+) => {
+	if (configOption.type === "boolean") {
+		if (typeof value !== "boolean") {
+			throw createSessionConfigValidationError(
+				"Boolean session config option requires a boolean value",
+			);
+		}
+		return;
+	}
+	const allowedValues = flattenConfigSelectOptions(configOption.options);
+	if (
+		typeof value !== "string" ||
+		!allowedValues.some((option) => option.value === value)
+	) {
+		throw createSessionConfigValidationError(
+			"Invalid value for session config option",
+		);
+	}
+};
+
 const resolveModelState = (configOptions?: SessionConfigOption[] | null) => {
 	const modelConfig = configOptions?.find(
 		(option) => option.category === "model" && option.type === "select",
@@ -252,11 +287,16 @@ const resolveModelState = (configOptions?: SessionConfigOption[] | null) => {
 	};
 };
 
-const applyModelConfigOptionsToRecord = (
+const normalizeConfigOptions = (
+	configOptions?: SessionConfigOption[] | null,
+): SessionConfigOption[] => [...(configOptions ?? [])];
+
+const applyConfigOptionsToRecord = (
 	record: SessionRecord,
 	configOptions?: SessionConfigOption[] | null,
 ) => {
-	const state = resolveModelState(configOptions);
+	record.configOptions = normalizeConfigOptions(configOptions);
+	const state = resolveModelState(record.configOptions);
 	record.modelConfigId = state.modelConfigId;
 	record.modelId = state.modelId;
 	record.modelName = state.modelName;
@@ -1313,6 +1353,7 @@ export class SessionManager {
 				modeName,
 				availableModes,
 				availableModels,
+				configOptions: normalizeConfigOptions(session.configOptions),
 				availableCommands: undefined,
 				revision,
 				isTitlePinned: hasExplicitTitle,
@@ -1600,12 +1641,55 @@ export class SessionManager {
 				400,
 			);
 		}
-		const response = await record.connection.setSessionModel(
+		return this.setSessionConfigOption(
 			sessionId,
 			record.modelConfigId,
 			modelId,
 		);
-		applyModelConfigOptionsToRecord(record, response.configOptions);
+	}
+
+	async setSessionConfigOption(
+		sessionId: string,
+		configId: string,
+		value: string | boolean,
+		_meta?: Record<string, unknown> | null,
+	): Promise<SessionSummary> {
+		const record = this.sessions.get(sessionId);
+		if (!record) {
+			throw new AppError(
+				createErrorDetail({
+					code: "SESSION_NOT_FOUND",
+					message: "Session not found",
+					retryable: false,
+					scope: "session",
+				}),
+				404,
+			);
+		}
+		if (record.configOptions.length === 0) {
+			throw createCapabilityNotSupportedError(
+				"Current agent does not support session configuration",
+			);
+		}
+		const configOption = record.configOptions.find(
+			(option) => option.id === configId,
+		);
+		if (!configOption) {
+			throw createSessionConfigValidationError(
+				"Invalid session config option ID",
+			);
+		}
+		validateSessionConfigValue(configOption, value);
+
+		const response = await (_meta === undefined
+			? record.connection.setSessionConfigOption(sessionId, configId, value)
+			: record.connection.setSessionConfigOption(
+					sessionId,
+					configId,
+					value,
+					_meta,
+				));
+		applyConfigOptionsToRecord(record, response.configOptions);
 		record.updatedAt = new Date();
 		const summary = this.buildSummary(record);
 		this.emitSessionsChanged({
@@ -2030,6 +2114,7 @@ export class SessionManager {
 				modeName,
 				availableModes,
 				availableModels,
+				configOptions: normalizeConfigOptions(response.configOptions),
 				availableCommands: undefined,
 				revision,
 				isTitlePinned: walPinned,
@@ -2162,7 +2247,13 @@ export class SessionManager {
 				events: this.toWalEventInputs(bufferedEvents),
 				wrappedDek,
 			});
-			return { agentInfo, committed, ...modelState, ...modeState };
+			return {
+				agentInfo,
+				committed,
+				configOptions: normalizeConfigOptions(response.configOptions),
+				...modelState,
+				...modeState,
+			};
 		};
 		let reloadCommit: ReturnType<typeof commitReload>;
 		try {
@@ -2184,6 +2275,7 @@ export class SessionManager {
 			modelName,
 			modelConfigId,
 			availableModels,
+			configOptions,
 			modeId,
 			modeName,
 			availableModes,
@@ -2198,6 +2290,7 @@ export class SessionManager {
 		existing.modelId = modelId;
 		existing.modelName = modelName;
 		existing.availableModels = availableModels;
+		existing.configOptions = configOptions;
 		existing.modeId = modeId;
 		existing.modeName = modeName;
 		existing.availableModes = availableModes;
@@ -2282,6 +2375,13 @@ export class SessionManager {
 		record.updatedAt = new Date();
 		this.writeSessionUpdateToWal(record, notification);
 		this.applySessionUpdateToRecord(record, notification);
+		if (notification.update.sessionUpdate === "config_option_update") {
+			this.emitSessionsChanged({
+				added: [],
+				updated: [this.buildSummary(record)],
+				removed: [],
+			});
+		}
 	}
 
 	private bufferReloadEvent(
@@ -2365,7 +2465,7 @@ export class SessionManager {
 			return;
 		}
 		if (update.sessionUpdate === "config_option_update") {
-			applyModelConfigOptionsToRecord(record, update.configOptions);
+			applyConfigOptionsToRecord(record, update.configOptions);
 		}
 	}
 
@@ -2489,6 +2589,7 @@ export class SessionManager {
 			modeName: record.modeName,
 			availableModes: record.availableModes,
 			availableModels: record.availableModels,
+			configOptions: record.configOptions,
 			availableCommands: record.availableCommands,
 			revision: record.revision,
 			wrappedDek:

@@ -1,4 +1,7 @@
-import { resolveWorktreeBranchName } from "@mobvibe/shared";
+import {
+	resolveWorktreeBranchName,
+	type SetSessionConfigOptionParams,
+} from "@mobvibe/shared";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PermissionResultNotification } from "@/lib/acp";
@@ -59,6 +62,11 @@ type Mutations = {
 		mutate: (params: { sessionId: string; modelId: string }) => void;
 		isPending: boolean;
 		variables?: { sessionId: string };
+	};
+	setSessionConfigOptionMutation: {
+		mutate: (params: SetSessionConfigOptionParams) => void;
+		isPending: boolean;
+		variables?: SetSessionConfigOptionParams;
 	};
 	sendMessageMutation: {
 		mutate: (params: {
@@ -394,6 +402,47 @@ export function useSessionHandlers({
 		});
 	};
 
+	const handleSessionConfigChange = async (
+		configId: string,
+		value: string | boolean,
+	) => {
+		if (!activeSessionId || !activeSessionRef.current) {
+			return;
+		}
+		const readySession = await ensureSessionAttached();
+		if (!readySession) {
+			return;
+		}
+		const option = readySession.configOptions?.find(
+			(configOption) => configOption.id === configId,
+		);
+		if (!option || option.currentValue === value) {
+			return;
+		}
+		if (option.type === "boolean") {
+			if (typeof value !== "boolean") {
+				return;
+			}
+			chatActions.setError(activeSessionId, undefined);
+			mutations.setSessionConfigOptionMutation.mutate({
+				sessionId: activeSessionId,
+				configId,
+				type: "boolean",
+				value,
+			});
+			return;
+		}
+		if (typeof value !== "string") {
+			return;
+		}
+		chatActions.setError(activeSessionId, undefined);
+		mutations.setSessionConfigOptionMutation.mutate({
+			sessionId: activeSessionId,
+			configId,
+			value,
+		});
+	};
+
 	const handleCancel = () => {
 		if (!activeSessionId || !activeSession) {
 			return;
@@ -530,6 +579,7 @@ export function useSessionHandlers({
 		handlePermissionDecision,
 		handleModeChange,
 		handleModelChange,
+		handleSessionConfigChange,
 		handleCancel,
 		handleForceReload,
 		handleSyncHistory,

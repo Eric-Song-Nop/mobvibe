@@ -414,6 +414,70 @@ export function setupSessionRoutes(
 		},
 	);
 
+	// Set protocol-native session config option - with authorization check
+	router.post(
+		"/session/config-option",
+		async (request: AuthenticatedRequest, response) => {
+			const { sessionId, configId, type, value, _meta } = request.body ?? {};
+			const isBooleanValue = type === "boolean" && typeof value === "boolean";
+			const isSelectValue = type === undefined && typeof value === "string";
+			if (
+				typeof sessionId !== "string" ||
+				typeof configId !== "string" ||
+				(!isBooleanValue && !isSelectValue) ||
+				(_meta !== undefined &&
+					_meta !== null &&
+					(typeof _meta !== "object" || Array.isArray(_meta)))
+			) {
+				respondError(
+					response,
+					buildRequestValidationError(
+						"sessionId, configId, and a valid config value are required",
+					),
+					400,
+				);
+				return;
+			}
+
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+
+			const params = isBooleanValue
+				? { sessionId, configId, type: "boolean" as const, value, _meta }
+				: { sessionId, configId, value: value as string, _meta };
+			try {
+				logger.info(
+					{ sessionId, configId, type, userId },
+					"session_config_option_request",
+				);
+				const session = await sessionRouter.setSessionConfigOption(
+					params,
+					userId,
+				);
+				logger.info(
+					{ sessionId, configId, userId },
+					"session_config_option_success",
+				);
+				response.json(session);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				logger.error(
+					{ err: error, sessionId, configId },
+					"session_config_option_error",
+				);
+				if (respondAppError(response, error)) return;
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
+				} else {
+					respondError(response, createInternalError("session"));
+				}
+			}
+		},
+	);
+
 	// Set session model - with authorization check
 	router.post(
 		"/session/model",

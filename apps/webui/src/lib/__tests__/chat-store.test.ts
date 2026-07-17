@@ -727,6 +727,69 @@ describe("chat-store", () => {
 	});
 
 	describe("syncSessions (attached revision authority)", () => {
+		it("atomically replaces session config options, including with an empty list", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1", {
+				modelId: "model-old",
+				modelName: "Old model",
+				availableModels: [{ id: "model-old", name: "Old model" }],
+				configOptions: [
+					{
+						type: "boolean",
+						id: "safe-mode",
+						name: "Safe mode",
+						currentValue: true,
+					},
+				],
+			});
+
+			store.syncSessions([
+				{
+					sessionId: "s1",
+					title: "Session",
+					backendId: "backend-1",
+					backendLabel: "Backend",
+					createdAt: "2024-01-01T00:00:00Z",
+					updatedAt: "2024-01-01T00:00:00Z",
+					configOptions: [],
+				},
+			]);
+
+			expect(useChatStore.getState().sessions.s1.configOptions).toEqual([]);
+			expect(useChatStore.getState().sessions.s1.modelId).toBeUndefined();
+			expect(useChatStore.getState().sessions.s1.modelName).toBeUndefined();
+			expect(
+				useChatStore.getState().sessions.s1.availableModels,
+			).toBeUndefined();
+		});
+
+		it("clears legacy model projections when a config mutation removes them", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1", {
+				modelId: "model-old",
+				modelName: "Old model",
+				availableModels: [{ id: "model-old", name: "Old model" }],
+				configOptions: [
+					{
+						type: "select",
+						id: "model",
+						name: "Model",
+						category: "model",
+						currentValue: "model-old",
+						options: [{ value: "model-old", name: "Old model" }],
+					},
+				],
+			});
+
+			store.updateSessionMeta("s1", { configOptions: [] });
+
+			const session = useChatStore.getState().sessions.s1;
+			expect(session.configOptions).toEqual([]);
+			expect(session.modelId).toBeUndefined();
+			expect(session.modelName).toBeUndefined();
+			expect(session.availableModels).toBeUndefined();
+		});
+
 		it("resets attached transcript when the summary revision changes", () => {
 			const store = useChatStore.getState();
 			store.createLocalSession("s1", {

@@ -96,6 +96,7 @@ const createMockMutations = (): UseSessionHandlersParams["mutations"] => ({
 	cancelSessionMutation: { mutate: vi.fn(), mutateAsync: vi.fn() },
 	setSessionModeMutation: { mutate: vi.fn(), isPending: false },
 	setSessionModelMutation: { mutate: vi.fn(), isPending: false },
+	setSessionConfigOptionMutation: { mutate: vi.fn(), isPending: false },
 	sendMessageMutation: { mutate: vi.fn() },
 	permissionDecisionMutation: { mutate: vi.fn() },
 });
@@ -1064,6 +1065,77 @@ describe("useSessionHandlers — mode and model switching", () => {
 			sessionId: "session-1",
 			modelId: "model-new",
 		});
+	});
+
+	it("sets select and boolean session config options with protocol-native shapes", async () => {
+		const session = createBaseSession({
+			configOptions: [
+				{
+					type: "select",
+					id: "model",
+					name: "Model",
+					currentValue: "model-old",
+					options: [
+						{ value: "model-old", name: "Old" },
+						{ value: "model-new", name: "New" },
+					],
+				},
+				{
+					type: "boolean",
+					id: "safe-mode",
+					name: "Safe mode",
+					currentValue: false,
+				},
+			],
+		});
+		mockChatStoreState.sessions = { "session-1": session };
+		const { result } = renderHandlers({ activeSession: session });
+
+		await act(async () => {
+			await result.current.handleSessionConfigChange("model", "model-new");
+			await result.current.handleSessionConfigChange("safe-mode", true);
+		});
+
+		expect(
+			mutations.setSessionConfigOptionMutation.mutate,
+		).toHaveBeenNthCalledWith(1, {
+			sessionId: "session-1",
+			configId: "model",
+			value: "model-new",
+		});
+		expect(
+			mutations.setSessionConfigOptionMutation.mutate,
+		).toHaveBeenNthCalledWith(2, {
+			sessionId: "session-1",
+			configId: "safe-mode",
+			type: "boolean",
+			value: true,
+		});
+	});
+
+	it("ignores unchanged, unknown, or mismatched session config values", async () => {
+		const session = createBaseSession({
+			configOptions: [
+				{
+					type: "boolean",
+					id: "safe-mode",
+					name: "Safe mode",
+					currentValue: false,
+				},
+			],
+		});
+		mockChatStoreState.sessions = { "session-1": session };
+		const { result } = renderHandlers({ activeSession: session });
+
+		await act(async () => {
+			await result.current.handleSessionConfigChange("safe-mode", false);
+			await result.current.handleSessionConfigChange("safe-mode", "yes");
+			await result.current.handleSessionConfigChange("missing", true);
+		});
+
+		expect(
+			mutations.setSessionConfigOptionMutation.mutate,
+		).not.toHaveBeenCalled();
 	});
 
 	it("does not switch mode when activation does not attach", async () => {

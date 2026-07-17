@@ -217,6 +217,7 @@ export function useMainAppController() {
 		handlePermissionDecision,
 		handleModeChange,
 		handleModelChange,
+		handleSessionConfigChange,
 		handleCancel,
 		handleForceReload,
 		handleSyncHistory,
@@ -536,6 +537,13 @@ export function useMainAppController() {
 		) {
 			return t("session.switchingModel");
 		}
+		if (
+			mutations.setSessionConfigOptionMutation.isPending &&
+			mutations.setSessionConfigOptionMutation.variables?.sessionId ===
+				activeSessionId
+		) {
+			return t("chat.updatingSessionConfig");
+		}
 		if (activeSession?.historySyncing) {
 			return t("session.syncingHistory");
 		}
@@ -553,6 +561,8 @@ export function useMainAppController() {
 		mutations.setSessionModeMutation.variables,
 		mutations.setSessionModelMutation.isPending,
 		mutations.setSessionModelMutation.variables,
+		mutations.setSessionConfigOptionMutation.isPending,
+		mutations.setSessionConfigOptionMutation.variables?.sessionId,
 		selectedMachineId,
 		t,
 	]);
@@ -596,6 +606,12 @@ export function useMainAppController() {
 	const isModelSwitching =
 		mutations.setSessionModelMutation.isPending &&
 		mutations.setSessionModelMutation.variables?.sessionId === activeSessionId;
+	const pendingConfigId =
+		mutations.setSessionConfigOptionMutation.isPending &&
+		mutations.setSessionConfigOptionMutation.variables?.sessionId ===
+			activeSessionId
+			? mutations.setSessionConfigOptionMutation.variables.configId
+			: undefined;
 
 	return {
 		activeSession,
@@ -619,6 +635,7 @@ export function useMainAppController() {
 		handleForceReload,
 		handleModeChange,
 		handleModelChange,
+		handleSessionConfigChange,
 		handleOpenCreateDialog,
 		handlePermissionDecision,
 		handleRenameSubmit,
@@ -630,6 +647,7 @@ export function useMainAppController() {
 		isCreatingSession: mutations.createSessionMutation.isPending,
 		isModeSwitching,
 		isModelSwitching,
+		pendingConfigId,
 		loadingMessage,
 		mutationsSnapshot,
 		plan: activeSession?.plan,

@@ -6,6 +6,7 @@ import type {
 	PermissionOutcome,
 	PermissionToolCall,
 	PlanEntry,
+	SessionConfigOption,
 	SessionEvent,
 	SessionModelOption,
 	SessionModeOption,
@@ -154,6 +155,7 @@ export type ChatSession = {
 	modeName?: string;
 	availableModes?: SessionModeOption[];
 	availableModels?: SessionModelOption[];
+	configOptions?: SessionConfigOption[];
 	availableCommands?: AvailableCommand[];
 	/** Machine ID that owns this session */
 	machineId?: string;
@@ -283,6 +285,7 @@ type ChatState = {
 			modeName?: string;
 			availableModes?: SessionModeOption[];
 			availableModels?: SessionModelOption[];
+			configOptions?: SessionConfigOption[];
 			availableCommands?: AvailableCommand[];
 			createdAt?: string;
 			updatedAt?: string;
@@ -318,6 +321,7 @@ type ChatState = {
 				| "modeName"
 				| "availableModes"
 				| "availableModels"
+				| "configOptions"
 				| "availableCommands"
 				| "worktreeSourceCwd"
 				| "worktreeBranch"
@@ -661,6 +665,7 @@ const createSessionState = (
 		modeName?: string;
 		availableModes?: SessionModeOption[];
 		availableModels?: SessionModelOption[];
+		configOptions?: SessionConfigOption[];
 		availableCommands?: AvailableCommand[];
 		createdAt?: string;
 		updatedAt?: string;
@@ -696,6 +701,7 @@ const createSessionState = (
 	modeName: options?.modeName,
 	availableModes: options?.availableModes,
 	availableModels: options?.availableModels,
+	configOptions: options?.configOptions,
 	availableCommands: options?.availableCommands,
 	machineId: options?.machineId,
 	isCreating: options?.isCreating,
@@ -747,6 +753,7 @@ const mergeSessionFromSummary = (
 		modeName?: string | null;
 		availableModes?: ChatSession["availableModes"];
 		availableModels?: ChatSession["availableModels"];
+		configOptions?: ChatSession["configOptions"];
 		availableCommands?: ChatSession["availableCommands"];
 		machineId?: string;
 		worktreeSourceCwd?: string | null;
@@ -776,6 +783,7 @@ const mergeSessionFromSummary = (
 					: {}),
 			}
 		: {};
+	const replacesConfigState = summary.configOptions !== undefined;
 
 	return {
 		...baseSession,
@@ -788,12 +796,19 @@ const mergeSessionFromSummary = (
 		cwd: summary.cwd ?? baseSession.cwd,
 		workspaceRootCwd: summary.workspaceRootCwd ?? baseSession.workspaceRootCwd,
 		agentName: summary.agentName ?? baseSession.agentName,
-		modelId: summary.modelId ?? baseSession.modelId,
-		modelName: summary.modelName ?? baseSession.modelName,
+		modelId: replacesConfigState
+			? (summary.modelId ?? undefined)
+			: (summary.modelId ?? baseSession.modelId),
+		modelName: replacesConfigState
+			? (summary.modelName ?? undefined)
+			: (summary.modelName ?? baseSession.modelName),
 		modeId: summary.modeId ?? baseSession.modeId,
 		modeName: summary.modeName ?? baseSession.modeName,
 		availableModes: summary.availableModes ?? baseSession.availableModes,
-		availableModels: summary.availableModels ?? baseSession.availableModels,
+		availableModels: replacesConfigState
+			? (summary.availableModels ?? undefined)
+			: (summary.availableModels ?? baseSession.availableModels),
+		configOptions: summary.configOptions ?? baseSession.configOptions,
 		availableCommands:
 			summary.availableCommands ?? baseSession.availableCommands,
 		machineId: summary.machineId ?? baseSession.machineId,
@@ -1095,6 +1110,7 @@ export const useChatStore = create<ChatState>()(
 									modeName: added.modeName,
 									availableModes: added.availableModes,
 									availableModels: added.availableModels,
+									configOptions: added.configOptions,
 									availableCommands: added.availableCommands,
 									createdAt: added.createdAt,
 									updatedAt: added.updatedAt,
@@ -1208,6 +1224,7 @@ export const useChatStore = create<ChatState>()(
 								cwd: summary.cwd,
 								availableModes: summary.availableModes,
 								availableModels: summary.availableModels,
+								configOptions: summary.configOptions,
 								availableCommands: summary.availableCommands,
 								machineId: summary.machineId,
 								worktreeSourceCwd: summary.worktreeSourceCwd,
@@ -1353,6 +1370,12 @@ export const useChatStore = create<ChatState>()(
 					}
 					if (payload.agentName !== undefined) {
 						nextSession.agentName = payload.agentName;
+					}
+					if (payload.configOptions !== undefined) {
+						nextSession.configOptions = payload.configOptions;
+						nextSession.modelId = undefined;
+						nextSession.modelName = undefined;
+						nextSession.availableModels = undefined;
 					}
 					if (payload.modelId !== undefined) {
 						nextSession.modelId = payload.modelId;

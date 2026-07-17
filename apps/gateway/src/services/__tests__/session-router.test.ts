@@ -375,6 +375,81 @@ describe("SessionRouter", () => {
 		});
 	});
 
+	describe("setSessionConfigOption", () => {
+		it("routes a protocol-native config update to the session owner's CLI", async () => {
+			const socket = createMockSocket("socket-config");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-config" }),
+				{ userId: "user-config", deviceId: "device-config" },
+			);
+			cliRegistry.updateSessions(socket.id, [
+				createMockSessionSummary({ sessionId: "session-config" }),
+			]);
+			const updatedSession = createMockSessionSummary({
+				sessionId: "session-config",
+			});
+
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:session:config") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							result: updatedSession,
+						});
+					}, 0);
+				}
+			});
+
+			await expect(
+				sessionRouter.setSessionConfigOption(
+					{
+						sessionId: "session-config",
+						configId: "auto-approve",
+						type: "boolean",
+						value: true,
+					},
+					"user-config",
+				),
+			).resolves.toEqual(updatedSession);
+			expect(socket.emit).toHaveBeenCalledWith(
+				"rpc:session:config",
+				expect.objectContaining({
+					params: {
+						sessionId: "session-config",
+						configId: "auto-approve",
+						type: "boolean",
+						value: true,
+					},
+				}),
+			);
+		});
+
+		it("does not route config updates across users", async () => {
+			const socket = createMockSocket("socket-config-owner");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-config-owner" }),
+				{ userId: "owner", deviceId: "device-owner" },
+			);
+			cliRegistry.updateSessions(socket.id, [
+				createMockSessionSummary({ sessionId: "private-session" }),
+			]);
+
+			await expect(
+				sessionRouter.setSessionConfigOption(
+					{
+						sessionId: "private-session",
+						configId: "model",
+						value: "secret-model",
+					},
+					"attacker",
+				),
+			).rejects.toThrow("Session not found");
+			expect(socket.emit).not.toHaveBeenCalled();
+		});
+	});
+
 	describe("bulkArchiveSessions", () => {
 		it("sends archive-all RPC grouped by machine", async () => {
 			const socket = createMockSocket("socket-1");

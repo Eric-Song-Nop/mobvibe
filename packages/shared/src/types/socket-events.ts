@@ -4,6 +4,7 @@ import type {
 	PermissionOption,
 	PermissionOutcome,
 	PermissionToolCall,
+	SetSessionConfigOptionRequest,
 	StopReason,
 } from "./acp.js";
 import type {
@@ -209,6 +210,9 @@ export type SetSessionModelParams = {
 	modelId: string;
 };
 
+/** Protocol-native session configuration update (select or boolean). */
+export type SetSessionConfigOptionParams = SetSessionConfigOptionRequest;
+
 // File system RPC params
 export type FsEntriesParams = {
 	sessionId: string;
@@ -342,6 +346,9 @@ export interface GatewayToCliEvents {
 	// RPC requests
 	"rpc:session:create": (request: RpcRequest<CreateSessionParams>) => void;
 	"rpc:session:cancel": (request: RpcRequest<CancelSessionParams>) => void;
+	"rpc:session:config": (
+		request: RpcRequest<SetSessionConfigOptionParams>,
+	) => void;
 	"rpc:session:mode": (request: RpcRequest<SetSessionModeParams>) => void;
 	"rpc:session:model": (request: RpcRequest<SetSessionModelParams>) => void;
 	"rpc:message:send": (request: RpcRequest<SendMessageParams>) => void;

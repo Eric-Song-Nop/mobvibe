@@ -592,7 +592,14 @@ export class AcpConnection {
 						name: this.options.client.name,
 						version: this.options.client.version,
 					},
-					clientCapabilities: { terminal: true },
+					clientCapabilities: {
+						terminal: true,
+						session: {
+							configOptions: {
+								boolean: {},
+							},
+						},
+					},
 				},
 			);
 
@@ -681,17 +688,29 @@ export class AcpConnection {
 		});
 	}
 
+	async setSessionConfigOption(
+		sessionId: string,
+		configId: string,
+		value: string | boolean,
+		_meta?: Record<string, unknown> | null,
+	): Promise<SetSessionConfigOptionResponse> {
+		const connection = await this.ensureReady();
+		const metadata = _meta === undefined ? {} : { _meta };
+		return connection.agent.request(
+			methods.agent.session.setConfigOption,
+			typeof value === "boolean"
+				? { sessionId, configId, type: "boolean", value, ...metadata }
+				: { sessionId, configId, value, ...metadata },
+		);
+	}
+
 	async setSessionModel(
 		sessionId: string,
 		configId: string,
 		modelId: string,
+		_meta?: Record<string, unknown> | null,
 	): Promise<SetSessionConfigOptionResponse> {
-		const connection = await this.ensureReady();
-		return connection.agent.request(methods.agent.session.setConfigOption, {
-			sessionId,
-			configId,
-			value: modelId,
-		});
+		return this.setSessionConfigOption(sessionId, configId, modelId, _meta);
 	}
 
 	async createTerminal(

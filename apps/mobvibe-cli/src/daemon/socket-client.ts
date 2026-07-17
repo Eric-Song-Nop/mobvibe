@@ -539,6 +539,38 @@ export class SocketClient extends EventEmitter {
 			}
 		});
 
+		// Protocol-native session config option
+		this.socket.on("rpc:session:config", async (request) => {
+			try {
+				logger.info(
+					{
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+						configId: request.params.configId,
+					},
+					"rpc_session_config",
+				);
+				const session = await sessionManager.setSessionConfigOption(
+					request.params.sessionId,
+					request.params.configId,
+					request.params.value,
+					request.params._meta,
+				);
+				this.sendRpcResponse(request.requestId, session);
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+						configId: request.params.configId,
+					},
+					"rpc_session_config_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
 		// Session model
 		this.socket.on("rpc:session:model", async (request) => {
 			try {

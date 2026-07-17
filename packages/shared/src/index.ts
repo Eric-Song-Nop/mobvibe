@@ -276,6 +276,7 @@ export type {
 	SessionFsFilePreviewResponse,
 	SessionsDiscoveredPayload,
 	SessionsResponse,
+	SetSessionConfigOptionParams,
 	SetSessionModelParams,
 	SetSessionModeParams,
 	StreamErrorPayload,

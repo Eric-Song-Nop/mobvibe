@@ -2,10 +2,12 @@ import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type {
 	JsonRpcId,
+	LoadSessionResponse,
 	NewSessionResponse,
 	RequestPermissionRequest,
 	RequestPermissionResponse,
 	SessionNotification,
+	SetSessionConfigOptionResponse,
 } from "@agentclientprotocol/sdk";
 import {
 	decryptPayload,
@@ -146,14 +148,20 @@ const createMockConnection = () => ({
 			nextCursor: undefined,
 		}),
 	),
-	loadSession: mock(() =>
-		Promise.resolve({
-			modes: null,
-			configOptions: null,
-		}),
+	loadSession: mock(
+		(): Promise<LoadSessionResponse> =>
+			Promise.resolve({
+				modes: null,
+				configOptions: null,
+			}),
 	),
-	setSessionModel: mock(
-		(_sessionId: string, configId: string, modelId: string) =>
+	setSessionConfigOption: mock(
+		(
+			_sessionId: string,
+			configId: string,
+			value: string | boolean,
+			_meta?: Record<string, unknown> | null,
+		): Promise<SetSessionConfigOptionResponse> =>
 			Promise.resolve({
 				configOptions: [
 					{
@@ -161,7 +169,7 @@ const createMockConnection = () => ({
 						name: "Model",
 						category: "model",
 						type: "select" as const,
-						currentValue: modelId,
+						currentValue: String(value),
 						options: [
 							{ value: "fast", name: "Fast" },
 							{ value: "smart", name: "Smart" },
@@ -2159,13 +2167,302 @@ describe("SessionManager", () => {
 				"smart",
 			);
 
-			expect(mockConnection.setSessionModel).toHaveBeenCalledWith(
+			expect(mockConnection.setSessionConfigOption).toHaveBeenCalledWith(
 				created.sessionId,
 				"model-selector",
 				"smart",
 			);
 			expect(updated.modelId).toBe("smart");
 			expect(updated.modelName).toBe("Smart");
+		});
+	});
+
+	describe("generic session config options", () => {
+		it("preserves the complete ordered option list when creating a session", async () => {
+			mockConnection.createSession.mockResolvedValueOnce({
+				sessionId: "new-session-1",
+				modes: null,
+				configOptions: [
+					{
+						id: "reasoning",
+						name: "Reasoning",
+						category: "thought_level",
+						type: "select",
+						currentValue: "medium",
+						options: [
+							{ value: "low", name: "Low" },
+							{ value: "medium", name: "Medium" },
+						],
+					},
+					{
+						id: "auto-approve",
+						name: "Auto approve",
+						type: "boolean",
+						currentValue: false,
+					},
+					{
+						id: "custom-option",
+						name: "Custom",
+						category: "_vendor_custom",
+						type: "select",
+						currentValue: "one",
+						options: [{ value: "one", name: "One" }],
+					},
+				],
+			});
+
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			expect(
+				sessionManager
+					.getSession(created.sessionId)
+					?.configOptions.map((option) => option.id),
+			).toEqual(["reasoning", "auto-approve", "custom-option"]);
+			expect(created.configOptions?.map((option) => option.id)).toEqual([
+				"reasoning",
+				"auto-approve",
+				"custom-option",
+			]);
+		});
+
+		it("preserves the complete ordered option list when loading a session", async () => {
+			mockConnection.loadSession.mockResolvedValueOnce({
+				modes: null,
+				configOptions: [
+					{
+						id: "first",
+						name: "First",
+						type: "boolean",
+						currentValue: true,
+					},
+					{
+						id: "second",
+						name: "Second",
+						type: "select",
+						currentValue: "two",
+						options: [{ value: "two", name: "Two" }],
+					},
+				],
+			});
+
+			await sessionManager.loadSession(
+				"loaded-session",
+				"/home/user/project",
+				"backend-1",
+			);
+
+			expect(
+				sessionManager
+					.getSession("loaded-session")
+					?.configOptions.map((option) => option.id),
+			).toEqual(["first", "second"]);
+		});
+
+		it("validates select values and replaces the full list from the response", async () => {
+			mockConnection.createSession.mockResolvedValueOnce({
+				sessionId: "new-session-1",
+				modes: null,
+				configOptions: [
+					{
+						id: "model-selector",
+						name: "Model",
+						category: "model",
+						type: "select",
+						currentValue: "fast",
+						options: [{ value: "fast", name: "Fast" }],
+					},
+					{
+						id: "reasoning",
+						name: "Reasoning",
+						type: "select",
+						currentValue: "low",
+						options: [
+							{
+								group: "levels",
+								name: "Levels",
+								options: [
+									{ value: "low", name: "Low" },
+									{ value: "deep", name: "Deep" },
+								],
+							},
+						],
+					},
+				],
+			});
+			mockConnection.setSessionConfigOption.mockResolvedValueOnce({
+				configOptions: [
+					{
+						id: "reasoning",
+						name: "Reasoning",
+						type: "select",
+						currentValue: "deep",
+						options: [
+							{ value: "low", name: "Low" },
+							{ value: "deep", name: "Deep" },
+						],
+					},
+				],
+			});
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			await expect(
+				sessionManager.setSessionConfigOption(
+					created.sessionId,
+					"reasoning",
+					true,
+				),
+			).rejects.toMatchObject({
+				detail: expect.objectContaining({ code: "REQUEST_VALIDATION_FAILED" }),
+			});
+			await expect(
+				sessionManager.setSessionConfigOption(
+					created.sessionId,
+					"reasoning",
+					"unknown",
+				),
+			).rejects.toMatchObject({
+				detail: expect.objectContaining({ code: "REQUEST_VALIDATION_FAILED" }),
+			});
+			await expect(
+				sessionManager.setSessionConfigOption(
+					created.sessionId,
+					"unknown-option",
+					"deep",
+				),
+			).rejects.toMatchObject({
+				detail: expect.objectContaining({ code: "REQUEST_VALIDATION_FAILED" }),
+			});
+			expect(mockConnection.setSessionConfigOption).not.toHaveBeenCalled();
+
+			const updated = await sessionManager.setSessionConfigOption(
+				created.sessionId,
+				"reasoning",
+				"deep",
+				{ requestSource: "webui" },
+			);
+
+			expect(mockConnection.setSessionConfigOption).toHaveBeenCalledWith(
+				created.sessionId,
+				"reasoning",
+				"deep",
+				{ requestSource: "webui" },
+			);
+			expect(
+				sessionManager
+					.getSession(created.sessionId)
+					?.configOptions.map((option) => option.id),
+			).toEqual(["reasoning"]);
+			expect(updated.modelId).toBeUndefined();
+			expect(updated.availableModels).toBeUndefined();
+		});
+
+		it("validates boolean values before forwarding them", async () => {
+			mockConnection.createSession.mockResolvedValueOnce({
+				sessionId: "new-session-1",
+				modes: null,
+				configOptions: [
+					{
+						id: "auto-approve",
+						name: "Auto approve",
+						type: "boolean",
+						currentValue: false,
+					},
+				],
+			});
+			mockConnection.setSessionConfigOption.mockResolvedValueOnce({
+				configOptions: [
+					{
+						id: "auto-approve",
+						name: "Auto approve",
+						type: "boolean",
+						currentValue: true,
+					},
+				],
+			});
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			await expect(
+				sessionManager.setSessionConfigOption(
+					created.sessionId,
+					"auto-approve",
+					"true",
+				),
+			).rejects.toMatchObject({
+				detail: expect.objectContaining({ code: "REQUEST_VALIDATION_FAILED" }),
+			});
+			await sessionManager.setSessionConfigOption(
+				created.sessionId,
+				"auto-approve",
+				true,
+			);
+
+			expect(mockConnection.setSessionConfigOption).toHaveBeenCalledTimes(1);
+			expect(mockConnection.setSessionConfigOption).toHaveBeenCalledWith(
+				created.sessionId,
+				"auto-approve",
+				true,
+			);
+		});
+
+		it("replaces config state and emits sessions:changed for agent updates", async () => {
+			mockConnection.createSession.mockResolvedValueOnce({
+				sessionId: "new-session-1",
+				modes: null,
+				configOptions: [
+					{
+						id: "old-option",
+						name: "Old",
+						type: "boolean",
+						currentValue: false,
+					},
+				],
+			});
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const changedListener = mock(() => {});
+			sessionManager.onSessionsChanged(changedListener);
+
+			sessionUpdateCallback?.({
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "config_option_update",
+					configOptions: [
+						{
+							id: "replacement",
+							name: "Replacement",
+							type: "boolean",
+							currentValue: true,
+						},
+					],
+				},
+			} as SessionNotification);
+
+			expect(
+				sessionManager
+					.getSession(created.sessionId)
+					?.configOptions.map((option) => option.id),
+			).toEqual(["replacement"]);
+			expect(changedListener).toHaveBeenCalledWith({
+				added: [],
+				updated: [
+					expect.objectContaining({
+						sessionId: created.sessionId,
+						configOptions: [expect.objectContaining({ id: "replacement" })],
+					}),
+				],
+				removed: [],
+			});
 		});
 	});
 

@@ -142,6 +142,7 @@ describe("SocketClient restore semantics", () => {
 		getSession: ReturnType<typeof mock>;
 		loadSession: ReturnType<typeof mock>;
 		reloadSession: ReturnType<typeof mock>;
+		setSessionConfigOption: ReturnType<typeof mock>;
 		archiveSession: ReturnType<typeof mock>;
 		bulkArchiveSessions: ReturnType<typeof mock>;
 		touchSession: ReturnType<typeof mock>;
@@ -215,6 +216,9 @@ describe("SocketClient restore semantics", () => {
 			})),
 			loadSession: mock(() => Promise.resolve({ sessionId: "session-1" })),
 			reloadSession: mock(() => Promise.resolve({ sessionId: "session-1" })),
+			setSessionConfigOption: mock(() =>
+				Promise.resolve({ sessionId: "session-1" }),
+			),
 			archiveSession: mock(() => Promise.resolve()),
 			bulkArchiveSessions: mock(() => Promise.resolve({ archivedCount: 1 })),
 			touchSession: mock(() => {}),
@@ -256,6 +260,33 @@ describe("SocketClient restore semantics", () => {
 
 	afterEach(() => {
 		client.disconnect();
+	});
+
+	test("forwards protocol-native session config RPCs to SessionManager", async () => {
+		const handler = socketHandlers.get("rpc:session:config");
+		if (!handler) {
+			throw new Error("rpc:session:config handler not registered");
+		}
+		const params = {
+			sessionId: "session-1",
+			configId: "auto-approve",
+			type: "boolean",
+			value: true,
+			_meta: { requestSource: "webui" },
+		} as const;
+
+		await handler({ requestId: "req-config", params });
+
+		expect(sessionManager.setSessionConfigOption).toHaveBeenCalledWith(
+			"session-1",
+			"auto-approve",
+			true,
+			{ requestSource: "webui" },
+		);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-config",
+			result: { sessionId: "session-1" },
+		});
 	});
 
 	test("replays unacked events after reconnect using the durable revision", async () => {

@@ -24,6 +24,7 @@ export function SessionWorkspace({ controller }: SessionWorkspaceProps) {
 		handleForceReload,
 		handleModeChange,
 		handleModelChange,
+		handleSessionConfigChange,
 		handleOpenCreateDialog,
 		handlePermissionDecision,
 		handleScrollToMessage,
@@ -31,6 +32,7 @@ export function SessionWorkspace({ controller }: SessionWorkspaceProps) {
 		handleSyncHistory,
 		isModeSwitching,
 		isModelSwitching,
+		pendingConfigId,
 		loadingMessage,
 		plan,
 		selectedMachineId,
@@ -91,8 +93,10 @@ export function SessionWorkspace({ controller }: SessionWorkspaceProps) {
 				activeSessionId={activeSessionId}
 				isModeSwitching={isModeSwitching}
 				isModelSwitching={isModelSwitching}
+				pendingConfigId={pendingConfigId}
 				onModeChange={handleModeChange}
 				onModelChange={handleModelChange}
+				onSessionConfigChange={handleSessionConfigChange}
 				onSend={handleSend}
 				onCancel={handleCancel}
 			/>

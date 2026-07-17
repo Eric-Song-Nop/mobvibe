@@ -50,6 +50,7 @@ import type {
 	SessionEventsResponse,
 	SessionFsFilePreview,
 	SessionSummary,
+	SetSessionConfigOptionParams,
 	SetSessionModelParams,
 	SetSessionModeParams,
 	StopReason,
@@ -411,6 +412,35 @@ export class SessionRouter {
 		logger.info(
 			{ sessionId: params.sessionId, modeId: params.modeId, userId },
 			"session_mode_rpc_complete",
+		);
+
+		return result;
+	}
+
+	/**
+	 * Set a protocol-native session configuration option.
+	 * @param params - Session configuration parameters
+	 * @param userId - User ID for authorization
+	 */
+	async setSessionConfigOption(
+		params: SetSessionConfigOptionParams,
+		userId: string,
+	): Promise<SessionSummary> {
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+
+		logger.info(
+			{ sessionId: params.sessionId, configId: params.configId, userId },
+			"session_config_rpc_start",
+		);
+
+		const result = await this.sendRpc<
+			SetSessionConfigOptionParams,
+			SessionSummary
+		>(cli.socket, "rpc:session:config", params);
+
+		logger.info(
+			{ sessionId: params.sessionId, configId: params.configId, userId },
+			"session_config_rpc_complete",
 		);
 
 		return result;

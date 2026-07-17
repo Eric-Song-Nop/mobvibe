@@ -19,6 +19,7 @@ import {
 	type SessionSummary,
 	sendMessage,
 	sendPermissionDecision,
+	setSessionConfigOption,
 	setSessionMode,
 	setSessionModel,
 } from "@/lib/api";
@@ -51,6 +52,7 @@ type SessionMetadata = Partial<
 		| "modeName"
 		| "availableModes"
 		| "availableModels"
+		| "configOptions"
 		| "availableCommands"
 		| "worktreeSourceCwd"
 		| "worktreeBranch"
@@ -136,6 +138,7 @@ export interface ChatStoreActions {
 				| "modeName"
 				| "availableModes"
 				| "availableModels"
+				| "configOptions"
 				| "availableCommands"
 				| "worktreeSourceCwd"
 				| "worktreeBranch"
@@ -227,6 +230,7 @@ const applySessionSummary = (
 		modeName: summary.modeName,
 		availableModes: summary.availableModes,
 		availableModels: summary.availableModels,
+		configOptions: summary.configOptions,
 		availableCommands: summary.availableCommands,
 		worktreeSourceCwd: summary.worktreeSourceCwd,
 		worktreeBranch: summary.worktreeBranch,
@@ -284,6 +288,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 				modeName: data.modeName,
 				availableModes: data.availableModes,
 				availableModels: data.availableModels,
+				configOptions: data.configOptions,
 				availableCommands: data.availableCommands,
 				createdAt: data.createdAt,
 				updatedAt: data.updatedAt,
@@ -435,6 +440,22 @@ export function useSessionMutations(store: ChatStoreActions) {
 		},
 	});
 
+	const setSessionConfigOptionMutation = useMutation({
+		mutationFn: setSessionConfigOption,
+		onSuccess: (summary) => {
+			applySessionSummary(store, summary);
+			store.setAppError(undefined);
+		},
+		onError: (mutationError: unknown) => {
+			store.setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError(t("errors.updateSessionConfigFailed"), "session"),
+				),
+			);
+		},
+	});
+
 	const sendMessageMutation = useMutation({
 		mutationFn: (variables: SendMessageVariables) => {
 			if (!variables) {
@@ -540,6 +561,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 				modeName: data.modeName,
 				availableModes: data.availableModes,
 				availableModels: data.availableModels,
+				configOptions: data.configOptions,
 				availableCommands: data.availableCommands,
 				worktreeSourceCwd: data.worktreeSourceCwd,
 				worktreeBranch: data.worktreeBranch,
@@ -575,6 +597,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 		cancelSessionMutation,
 		setSessionModeMutation,
 		setSessionModelMutation,
+		setSessionConfigOptionMutation,
 		sendMessageMutation,
 		permissionDecisionMutation,
 		loadSessionMutation,

@@ -19,6 +19,7 @@ export type {
 	SessionFsResourceEntry,
 	SessionSummary,
 	SessionsResponse,
+	SetSessionConfigOptionParams,
 	TeamWorkspaceMode,
 } from "@mobvibe/shared";
 // Re-export isErrorDetail for local use
@@ -47,6 +48,7 @@ import type {
 	SessionFsFilePreviewResponse,
 	SessionSummary,
 	SessionsResponse,
+	SetSessionConfigOptionParams,
 	TeamWorkspaceMode,
 } from "@mobvibe/shared";
 import { isErrorDetail } from "@mobvibe/shared";
@@ -663,6 +665,14 @@ export const setSessionModel = async (payload: {
 	modelId: string;
 }): Promise<SessionSummary> =>
 	requestJson<SessionSummary>("/acp/session/model", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+
+export const setSessionConfigOption = async (
+	payload: SetSessionConfigOptionParams,
+): Promise<SessionSummary> =>
+	requestJson<SessionSummary>("/acp/session/config-option", {
 		method: "POST",
 		body: JSON.stringify(payload),
 	});
