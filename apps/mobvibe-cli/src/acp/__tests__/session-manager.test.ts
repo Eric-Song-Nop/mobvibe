@@ -93,7 +93,7 @@ const createMockConnection = () => ({
 		Promise.resolve({
 			sessionId: "new-session-1",
 			modes: null,
-			models: null,
+			configOptions: null,
 		}),
 	),
 	getStatus: mock(() => ({
@@ -135,8 +135,26 @@ const createMockConnection = () => ({
 	loadSession: mock(() =>
 		Promise.resolve({
 			modes: null,
-			models: null,
+			configOptions: null,
 		}),
+	),
+	setSessionModel: mock(
+		(_sessionId: string, configId: string, modelId: string) =>
+			Promise.resolve({
+				configOptions: [
+					{
+						id: configId,
+						name: "Model",
+						category: "model",
+						type: "select" as const,
+						currentValue: modelId,
+						options: [
+							{ value: "fast", name: "Fast" },
+							{ value: "smart", name: "Smart" },
+						],
+					},
+				],
+			}),
 	),
 	setPermissionHandler: mock(() => {}),
 	onSessionUpdate: mock((cb: (n: SessionNotification) => void) => {
@@ -347,7 +365,7 @@ describe("SessionManager", () => {
 						},
 					} as SessionNotification);
 				}
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 
 			await expect(
@@ -393,7 +411,7 @@ describe("SessionManager", () => {
 						content: { type: "text", text: "x".repeat(8 * 1024 * 1024) },
 					},
 				} as SessionNotification);
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 
 			await expect(
@@ -448,7 +466,7 @@ describe("SessionManager", () => {
 				} as SessionNotification & { cyclic?: unknown };
 				cyclicNotification.cyclic = cyclicNotification;
 				sessionUpdateCallback?.(cyclicNotification);
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 
 			await expect(
@@ -495,7 +513,7 @@ describe("SessionManager", () => {
 						},
 					} as SessionNotification);
 				}
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 			const faultDb = new Database(mockConfig.walDbPath);
 			faultDb.exec(`
@@ -538,7 +556,7 @@ describe("SessionManager", () => {
 						content: { type: "text", text: "fresh replay" },
 					},
 				} as SessionNotification);
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 
 			await sessionManager.loadSession(
@@ -588,7 +606,7 @@ describe("SessionManager", () => {
 						},
 					} as SessionNotification);
 				}
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 			const faultDb = new Database(mockConfig.walDbPath);
 			faultDb.exec(`
@@ -746,7 +764,7 @@ describe("SessionManager", () => {
 			mockConnection.loadSession.mockImplementationOnce(async () => {
 				terminalOutputCallback?.({ stream: "stdout", data: "replayed output" });
 				statusChangeCallback?.({ error: { message: "replayed failure" } });
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 
 			await sessionManager.reloadSession(
@@ -779,10 +797,10 @@ describe("SessionManager", () => {
 				backendId: "backend-1",
 			});
 			let resolveFirstReload:
-				| ((value: { modes: null; models: null }) => void)
+				| ((value: { modes: null; configOptions: null }) => void)
 				| undefined;
 			let resolveSecondReload:
-				| ((value: { modes: null; models: null }) => void)
+				| ((value: { modes: null; configOptions: null }) => void)
 				| undefined;
 			let loadCount = 0;
 			mockConnection.loadSession.mockImplementation(() => {
@@ -795,11 +813,13 @@ describe("SessionManager", () => {
 					},
 				} as SessionNotification);
 				if (loadCount === 1) {
-					return new Promise<{ modes: null; models: null }>((resolve) => {
-						resolveFirstReload = resolve;
-					});
+					return new Promise<{ modes: null; configOptions: null }>(
+						(resolve) => {
+							resolveFirstReload = resolve;
+						},
+					);
 				}
-				return new Promise<{ modes: null; models: null }>((resolve) => {
+				return new Promise<{ modes: null; configOptions: null }>((resolve) => {
 					resolveSecondReload = resolve;
 				});
 			});
@@ -817,7 +837,7 @@ describe("SessionManager", () => {
 			await Promise.resolve();
 
 			expect(mockConnection.loadSession).toHaveBeenCalledTimes(1);
-			resolveFirstReload?.({ modes: null, models: null });
+			resolveFirstReload?.({ modes: null, configOptions: null });
 			await first;
 			await Promise.resolve();
 
@@ -838,7 +858,7 @@ describe("SessionManager", () => {
 				}),
 			]);
 
-			resolveSecondReload?.({ modes: null, models: null });
+			resolveSecondReload?.({ modes: null, configOptions: null });
 			await second;
 			expect(
 				sessionManager.getSessionEvents({
@@ -877,7 +897,7 @@ describe("SessionManager", () => {
 						content: { type: "text", text: "revision two" },
 					},
 				} as SessionNotification);
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 
 			await sessionManager.reloadSession(
@@ -922,7 +942,7 @@ describe("SessionManager", () => {
 					stream: "stdout",
 					data: "second replay event",
 				});
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 			sessionManager.onSessionEvent(() => {
 				throw new Error("injected subscriber failure");
@@ -959,7 +979,7 @@ describe("SessionManager", () => {
 						content: { type: "text", text: "uncommitted replay" },
 					},
 				} as SessionNotification);
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 			const faultDb = new Database(mockConfig.walDbPath);
 			faultDb.exec(`
@@ -1119,7 +1139,7 @@ describe("SessionManager", () => {
 						content: { type: "text", text: "x".repeat(8 * 1024 * 1024) },
 					},
 				} as SessionNotification);
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 
 			await expect(
@@ -2059,6 +2079,71 @@ describe("SessionManager", () => {
 		});
 	});
 
+	describe("model config compatibility", () => {
+		it("derives and updates the model picker through session config options", async () => {
+			mockConnection.createSession.mockResolvedValueOnce({
+				sessionId: "new-session-1",
+				modes: null,
+				configOptions: [
+					{
+						id: "model-selector",
+						name: "Model",
+						category: "model",
+						type: "select",
+						currentValue: "fast",
+						options: [
+							{
+								group: "recommended",
+								name: "Recommended",
+								options: [
+									{ value: "fast", name: "Fast" },
+									{
+										value: "smart",
+										name: "Smart",
+										description: "More capable",
+									},
+								],
+							},
+						],
+					},
+				],
+			});
+
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			expect(created).toEqual(
+				expect.objectContaining({
+					modelId: "fast",
+					modelName: "Fast",
+					availableModels: [
+						{ id: "fast", name: "Fast" },
+						{
+							id: "smart",
+							name: "Smart",
+							description: "More capable",
+						},
+					],
+				}),
+			);
+
+			const updated = await sessionManager.setSessionModel(
+				created.sessionId,
+				"smart",
+			);
+
+			expect(mockConnection.setSessionModel).toHaveBeenCalledWith(
+				created.sessionId,
+				"model-selector",
+				"smart",
+			);
+			expect(updated.modelId).toBe("smart");
+			expect(updated.modelName).toBe("Smart");
+		});
+	});
+
 	describe("closeSession", () => {
 		it("closes and removes session", async () => {
 			const created = await sessionManager.createSession({
@@ -2927,7 +3012,7 @@ describe("SessionManager", () => {
 				return {
 					sessionId: "new-session-1",
 					modes: null,
-					models: null,
+					configOptions: null,
 				};
 			});
 

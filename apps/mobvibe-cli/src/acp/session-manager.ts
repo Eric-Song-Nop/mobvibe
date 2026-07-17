@@ -6,7 +6,7 @@ import type {
 	AvailableCommand,
 	RequestPermissionRequest,
 	RequestPermissionResponse,
-	SessionModelState,
+	SessionConfigOption,
 	SessionModeState,
 	SessionNotification,
 } from "@agentclientprotocol/sdk";
@@ -103,6 +103,7 @@ type SessionRecord = {
 	agentName?: string;
 	modelId?: string;
 	modelName?: string;
+	modelConfigId?: string;
 	modeId?: string;
 	modeName?: string;
 	availableModes?: Array<{ id: string; name: string }>;
@@ -206,24 +207,52 @@ const resolveWorktreeExecutionCwd = (
 const buildPermissionKey = (sessionId: string, requestId: string) =>
 	`${sessionId}:${requestId}`;
 
-const resolveModelState = (models?: SessionModelState | null) => {
-	if (!models) {
+const flattenConfigSelectOptions = (
+	options: Extract<SessionConfigOption, { type: "select" }>["options"],
+) =>
+	options.flatMap((option) =>
+		"options" in option ? option.options : [option],
+	);
+
+const resolveModelState = (configOptions?: SessionConfigOption[] | null) => {
+	const modelConfig = configOptions?.find(
+		(option) => option.category === "model" && option.type === "select",
+	);
+	if (!modelConfig || modelConfig.type !== "select") {
 		return {
+			modelConfigId: undefined,
 			modelId: undefined,
 			modelName: undefined,
 			availableModels: undefined,
 		};
 	}
-	const availableModels = models.availableModels?.map((model) => ({
-		id: model.modelId,
-		name: model.name,
-		description: model.description ?? undefined,
-	}));
-	const modelId = models.currentModelId ?? undefined;
-	const modelName = availableModels?.find(
-		(model) => model.id === modelId,
-	)?.name;
-	return { modelId, modelName, availableModels };
+	const availableModels = flattenConfigSelectOptions(modelConfig.options).map(
+		(model) => ({
+			id: model.value,
+			name: model.name,
+			description: model.description ?? undefined,
+		}),
+	);
+	const modelId = modelConfig.currentValue;
+	const modelName = availableModels.find((model) => model.id === modelId)?.name;
+	return {
+		modelConfigId: modelConfig.id,
+		modelId,
+		modelName,
+		availableModels,
+	};
+};
+
+const applyModelConfigOptionsToRecord = (
+	record: SessionRecord,
+	configOptions?: SessionConfigOption[] | null,
+) => {
+	const state = resolveModelState(configOptions);
+	record.modelConfigId = state.modelConfigId;
+	record.modelId = state.modelId;
+	record.modelName = state.modelName;
+	record.availableModels = state.availableModels;
+	return state;
 };
 
 const resolveModeState = (modes?: SessionModeState | null) => {
@@ -1226,9 +1255,8 @@ export class SessionManager {
 			);
 			const now = new Date();
 			const agentInfo = connection.getAgentInfo();
-			const { modelId, modelName, availableModels } = resolveModelState(
-				session.models,
-			);
+			const { modelConfigId, modelId, modelName, availableModels } =
+				resolveModelState(session.configOptions);
 			const { modeId, modeName, availableModes } = resolveModeState(
 				session.modes,
 			);
@@ -1264,6 +1292,7 @@ export class SessionManager {
 				worktreeSourceCwd,
 				worktreeBranch,
 				agentName: agentInfo?.title ?? agentInfo?.name,
+				modelConfigId,
 				modelId,
 				modelName,
 				modeId,
@@ -1500,7 +1529,11 @@ export class SessionManager {
 				404,
 			);
 		}
-		if (!record.availableModels || record.availableModels.length === 0) {
+		if (
+			!record.modelConfigId ||
+			!record.availableModels ||
+			record.availableModels.length === 0
+		) {
 			throw createCapabilityNotSupportedError(
 				"Current agent does not support model switching",
 			);
@@ -1519,9 +1552,12 @@ export class SessionManager {
 				400,
 			);
 		}
-		await record.connection.setSessionModel(sessionId, modelId);
-		record.modelId = selected.id;
-		record.modelName = selected.name;
+		const response = await record.connection.setSessionModel(
+			sessionId,
+			record.modelConfigId,
+			modelId,
+		);
+		applyModelConfigOptionsToRecord(record, response.configOptions);
 		record.updatedAt = new Date();
 		const summary = this.buildSummary(record);
 		this.emitSessionsChanged({
@@ -1856,7 +1892,8 @@ export class SessionManager {
 				{
 					sessionId,
 					bufferedCount: bufferedEvents.length,
-					hasModels: !!response.models,
+					hasModelConfig: !!resolveModelState(response.configOptions)
+						.modelConfigId,
 					hasModes: !!response.modes,
 				},
 				"load_session_acp_returned",
@@ -1870,9 +1907,8 @@ export class SessionManager {
 
 			const now = new Date();
 			const agentInfo = connection.getAgentInfo();
-			const { modelId, modelName, availableModels } = resolveModelState(
-				response.models,
-			);
+			const { modelConfigId, modelId, modelName, availableModels } =
+				resolveModelState(response.configOptions);
 			const { modeId, modeName, availableModes } = resolveModeState(
 				response.modes,
 			);
@@ -1939,6 +1975,7 @@ export class SessionManager {
 				cwd,
 				workspaceRootCwd: projectContext.repoRoot ?? cwd,
 				agentName: agentInfo?.title ?? agentInfo?.name,
+				modelConfigId,
 				modelId,
 				modelName,
 				modeId,
@@ -2063,7 +2100,7 @@ export class SessionManager {
 		}
 
 		const commitReload = () => {
-			const modelState = resolveModelState(response.models);
+			const modelState = resolveModelState(response.configOptions);
 			const modeState = resolveModeState(response.modes);
 			const agentInfo = existing.connection.getAgentInfo();
 			const targetRevision = existing.revision + 1;
@@ -2097,6 +2134,7 @@ export class SessionManager {
 			committed,
 			modelId,
 			modelName,
+			modelConfigId,
 			availableModels,
 			modeId,
 			modeName,
@@ -2108,6 +2146,7 @@ export class SessionManager {
 		existing.workspaceRootCwd = projectContext.repoRoot ?? cwd;
 		existing.agentName =
 			agentInfo?.title ?? agentInfo?.name ?? existing.agentName;
+		existing.modelConfigId = modelConfigId;
 		existing.modelId = modelId;
 		existing.modelName = modelName;
 		existing.availableModels = availableModels;
@@ -2275,6 +2314,10 @@ export class SessionManager {
 			if (update.availableCommands) {
 				record.availableCommands = update.availableCommands;
 			}
+			return;
+		}
+		if (update.sessionUpdate === "config_option_update") {
+			applyModelConfigOptionsToRecord(record, update.configOptions);
 		}
 	}
 

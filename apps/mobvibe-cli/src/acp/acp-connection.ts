@@ -23,6 +23,7 @@ import {
 	type RequestPermissionResponse,
 	type SessionInfo,
 	type SessionNotification,
+	type SetSessionConfigOptionResponse,
 	type TerminalExitStatus,
 	type TerminalOutputRequest,
 	type TerminalOutputResponse,
@@ -635,9 +636,17 @@ export class AcpConnection {
 		await connection.setSessionMode({ sessionId, modeId });
 	}
 
-	async setSessionModel(sessionId: string, modelId: string): Promise<void> {
+	async setSessionModel(
+		sessionId: string,
+		configId: string,
+		modelId: string,
+	): Promise<SetSessionConfigOptionResponse> {
 		const connection = await this.ensureReady();
-		await connection.unstable_setSessionModel({ sessionId, modelId });
+		return connection.setSessionConfigOption({
+			sessionId,
+			configId,
+			value: modelId,
+		});
 	}
 
 	async createTerminal(

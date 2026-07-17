@@ -20,15 +20,22 @@ export type {
 	RequestPermissionRequest,
 	RequestPermissionResponse,
 	ResourceLink,
+	SessionConfigBoolean,
+	SessionConfigOption,
 	// Session config option category (new in SDK 0.14.x)
 	SessionConfigOptionCategory,
+	SessionConfigSelect,
+	SessionConfigSelectGroup,
+	SessionConfigSelectOption,
+	SessionConfigValueId,
 	// Session info & state types
 	SessionInfo,
-	SessionModelState,
 	SessionModeState,
 	// Session types
 	SessionNotification,
 	SessionUpdate,
+	SetSessionConfigOptionRequest,
+	SetSessionConfigOptionResponse,
 	StopReason,
 	TerminalExitStatus,
 	TextContent,
