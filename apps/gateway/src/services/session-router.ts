@@ -54,21 +54,43 @@ import type {
 	SetSessionModeParams,
 	StopReason,
 } from "@mobvibe/shared";
+import {
+	AppError,
+	createErrorDetail,
+	isEncryptedPayload,
+} from "@mobvibe/shared";
 import type { Socket } from "socket.io";
 import { logger } from "../lib/logger.js";
 import type { CliRecord, CliRegistry } from "./cli-registry.js";
+import {
+	createMessageSendKey,
+	isMessageIdWithinLimit,
+} from "./message-send-safety.js";
+import { toRpcAppError } from "./rpc-errors.js";
 
 type PendingRpc<T> = {
 	requestId: string;
+	socketId: string;
 	resolve: (result: T) => void;
 	reject: (error: Error) => void;
 	timeout: NodeJS.Timeout;
 };
 
 const RPC_TIMEOUT = 120000; // 2 minutes for long operations like message sending
+const MAX_DURABLE_MESSAGE_SENDS = 10_000;
+const MAX_DURABLE_MESSAGE_SENDS_PER_OWNER = 1_000;
+
+type MessageSendResult = { stopReason: StopReason };
+
+type MessageSendEntry = {
+	promise: Promise<MessageSendResult>;
+	ownerId: string;
+};
 
 export class SessionRouter {
 	private pendingRpcs = new Map<string, PendingRpc<unknown>>();
+	/** In-flight sends for durable CLIs; settled entries are removed immediately. */
+	private durableMessageSends = new Map<string, MessageSendEntry>();
 
 	constructor(private readonly cliRegistry: CliRegistry) {}
 
@@ -100,9 +122,20 @@ export class SessionRouter {
 		return cli;
 	}
 
-	handleRpcResponse(response: RpcResponse<unknown>) {
+	handleRpcResponse(response: RpcResponse<unknown>, sourceSocketId?: string) {
 		const pending = this.pendingRpcs.get(response.requestId);
 		if (!pending) {
+			return;
+		}
+		if (sourceSocketId && pending.socketId !== sourceSocketId) {
+			logger.warn(
+				{
+					requestId: response.requestId,
+					expectedSocketId: pending.socketId,
+					sourceSocketId,
+				},
+				"rpc_response_socket_mismatch",
+			);
 			return;
 		}
 		this.pendingRpcs.delete(response.requestId);
@@ -119,14 +152,21 @@ export class SessionRouter {
 				},
 				"rpc_response_error",
 			);
-			const error = new Error(response.error.message);
-			if (response.error.detail) {
-				error.cause = response.error.detail;
-			}
-			pending.reject(error);
+			pending.reject(toRpcAppError(response.error));
 		} else {
 			logger.debug({ requestId: response.requestId }, "rpc_response_success");
 			pending.resolve(response.result);
+		}
+	}
+
+	handleCliDisconnect(socketId: string): void {
+		for (const [requestId, pending] of this.pendingRpcs) {
+			if (pending.socketId !== socketId) {
+				continue;
+			}
+			this.pendingRpcs.delete(requestId);
+			clearTimeout(pending.timeout);
+			pending.reject(new Error("CLI disconnected"));
 		}
 	}
 
@@ -415,21 +455,133 @@ export class SessionRouter {
 		params: SendMessageParams,
 		userId: string,
 	): Promise<{ stopReason: StopReason }> {
+		const messageId = params.messageId?.trim() || randomUUID();
+		if (!isMessageIdWithinLimit(messageId)) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "messageId must be at most 128 UTF-8 bytes",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		const normalizedParams = { ...params, messageId };
+		const key = createMessageSendKey(userId, params.sessionId, messageId);
+		const existing = this.durableMessageSends.get(key);
+		if (existing) {
+			return existing.promise;
+		}
+		if (
+			params.expectedRevision !== undefined &&
+			(!Number.isSafeInteger(params.expectedRevision) ||
+				params.expectedRevision < 1)
+		) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "expectedRevision must be a positive safe integer",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+
 		const cli = this.resolveCliForSession(params.sessionId, userId);
+		const session = cli.sessions.find(
+			(candidate) => candidate.sessionId === params.sessionId,
+		);
+		const supportsDurableMessageId =
+			cli.protocolCapabilities?.messageIdempotency === true;
+		if (!supportsDurableMessageId) {
+			throw new AppError(
+				createErrorDetail({
+					code: "CAPABILITY_NOT_SUPPORTED",
+					message:
+						"This CLI cannot safely deduplicate message retries; upgrade the CLI before sending",
+					retryable: false,
+					scope: "session",
+				}),
+				409,
+			);
+		}
+		if (params.expectedRevision !== undefined) {
+			if (cli.protocolCapabilities?.messageRevisionPinning !== true) {
+				throw new AppError(
+					createErrorDetail({
+						code: "CAPABILITY_NOT_SUPPORTED",
+						message:
+							"This CLI cannot enforce session revision pinning; upgrade the CLI before sending",
+						retryable: false,
+						scope: "session",
+					}),
+					409,
+				);
+			}
+		}
+		if (session?.wrappedDek && !isEncryptedPayload(params.prompt)) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Encrypted prompt required for this session",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		this.ensureDurableMessageSendCapacity(userId);
 
 		logger.info(
-			{ sessionId: params.sessionId, userId },
+			{ sessionId: params.sessionId, messageId, userId },
 			"message_send_requested",
 		);
 		logger.debug(
-			{ sessionId: params.sessionId, userId },
+			{ sessionId: params.sessionId, messageId, userId },
 			"message_send_rpc_start",
 		);
 
-		return this.sendRpc<SendMessageParams, { stopReason: StopReason }>(
+		const rpcOperation = this.sendRpc<SendMessageParams, MessageSendResult>(
 			cli.socket,
 			"rpc:message:send",
-			params,
+			normalizedParams,
+		);
+		const entry: MessageSendEntry = {
+			promise: rpcOperation,
+			ownerId: userId,
+		};
+		this.durableMessageSends.set(key, entry);
+		const clear = () => {
+			if (this.durableMessageSends.get(key) === entry) {
+				this.durableMessageSends.delete(key);
+			}
+		};
+		void rpcOperation.then(clear, clear);
+		return rpcOperation;
+	}
+
+	private ensureDurableMessageSendCapacity(ownerId: string): void {
+		let ownerCount = 0;
+		for (const entry of this.durableMessageSends.values()) {
+			if (entry.ownerId === ownerId) ownerCount += 1;
+		}
+		if (
+			this.durableMessageSends.size < MAX_DURABLE_MESSAGE_SENDS &&
+			ownerCount < MAX_DURABLE_MESSAGE_SENDS_PER_OWNER
+		) {
+			return;
+		}
+		throw new AppError(
+			createErrorDetail({
+				code: "SESSION_BUSY",
+				message:
+					"A new message is unavailable because active send capacity was reached",
+				retryable: false,
+				scope: "service",
+			}),
+			503,
 		);
 	}
 
@@ -1128,6 +1280,7 @@ export class SessionRouter {
 
 			this.pendingRpcs.set(requestId, {
 				requestId,
+				socketId: socket.id,
 				resolve: (result) => {
 					const durationMs =
 						Number(process.hrtime.bigint() - start) / 1_000_000;

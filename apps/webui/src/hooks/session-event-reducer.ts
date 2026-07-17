@@ -95,10 +95,27 @@ export function applySessionEvent({
 }: ApplySessionEventOptions) {
 	switch (event.kind) {
 		case "user_message": {
-			const notification = event.payload as SessionNotification;
-			const textChunk = extractTextChunk(notification);
-			if (textChunk?.role === "user") {
-				actions.confirmOrAppendUserMessage(event.sessionId, textChunk.text);
+			const notification = event.payload as SessionNotification & {
+				messageId?: string;
+			};
+			if (notification.update.sessionUpdate === "user_message_chunk") {
+				const messageId =
+					notification.messageId ?? notification.update.messageId ?? undefined;
+				if (messageId) {
+					actions.confirmOrAppendUserMessage(
+						event.sessionId,
+						notification.update.content,
+						messageId,
+						event.seq,
+					);
+				} else {
+					actions.confirmOrAppendUserMessage(
+						event.sessionId,
+						notification.update.content,
+						undefined,
+						event.seq,
+					);
+				}
 			}
 			break;
 		}

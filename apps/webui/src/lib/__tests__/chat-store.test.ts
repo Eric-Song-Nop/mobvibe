@@ -226,6 +226,294 @@ describe("chat-store", () => {
 				expect(msgs[0].provisional).toBe(true);
 			}
 		});
+
+		it("confirms the oldest matching provisional after an uncertain retry", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.addUserMessage("s1", "same prompt", {
+				messageId: "uncertain-attempt",
+				provisional: true,
+			});
+			store.markUserMessageFailed("s1", "uncertain-attempt");
+			store.addUserMessage("s1", "same prompt", {
+				messageId: "retry-attempt",
+				provisional: true,
+			});
+
+			store.confirmOrAppendUserMessage("s1", "same prompt");
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(2);
+			expect(messages[0]).toMatchObject({
+				id: "uncertain-attempt",
+				provisional: false,
+				failed: false,
+			});
+			expect(messages[1]).toMatchObject({
+				id: "retry-attempt",
+				provisional: true,
+				failed: false,
+			});
+		});
+
+		it("never confirms a newer provisional with different content", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.addUserMessage("s1", "first prompt", {
+				messageId: "first-attempt",
+				provisional: true,
+			});
+			store.addUserMessage("s1", "second prompt", {
+				messageId: "second-attempt",
+				provisional: true,
+			});
+
+			store.confirmOrAppendUserMessage("s1", "first prompt");
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages[0]).toMatchObject({
+				id: "first-attempt",
+				provisional: false,
+			});
+			expect(messages[1]).toMatchObject({
+				id: "second-attempt",
+				provisional: true,
+			});
+		});
+
+		it("uses an explicit message id instead of falling back to matching content", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.addUserMessage("s1", "same prompt", {
+				messageId: "first-attempt",
+				provisional: true,
+			});
+			store.addUserMessage("s1", "same prompt", {
+				messageId: "second-attempt",
+				provisional: true,
+			});
+
+			store.confirmOrAppendUserMessage("s1", "same prompt", "server-attempt");
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(3);
+			expect(messages[0]).toMatchObject({ provisional: true });
+			expect(messages[1]).toMatchObject({ provisional: true });
+			expect(messages[2]).toMatchObject({
+				id: "server-attempt",
+				content: "same prompt",
+			});
+			if (messages[2].kind === "text") {
+				expect(messages[2].provisional).toBeUndefined();
+			}
+		});
+
+		it("confirms the provisional selected by an explicit message id", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.addUserMessage("s1", "same prompt", {
+				messageId: "first-attempt",
+				provisional: true,
+			});
+			store.addUserMessage("s1", "same prompt", {
+				messageId: "second-attempt",
+				provisional: true,
+			});
+
+			store.confirmOrAppendUserMessage("s1", "same prompt", "second-attempt");
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages[0]).toMatchObject({ provisional: true });
+			expect(messages[1]).toMatchObject({ provisional: false });
+		});
+
+		it("replays a confirmed message idempotently", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+
+			store.confirmOrAppendUserMessage("s1", "persisted prompt", "message-1");
+			store.confirmOrAppendUserMessage("s1", "persisted prompt", "message-1");
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(1);
+			expect(messages[0]).toMatchObject({
+				id: "message-1",
+				content: "persisted prompt",
+			});
+		});
+
+		it("does not append when an explicit id is already confirmed", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.addUserMessage("s1", "persisted prompt", {
+				messageId: "message-1",
+			});
+
+			store.confirmOrAppendUserMessage("s1", "persisted prompt", "message-1");
+
+			expect(useChatStore.getState().sessions.s1.messages).toHaveLength(1);
+		});
+
+		it("joins streamed user chunks with the same message id during backfill", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+
+			store.confirmOrAppendUserMessage("s1", "ha", "message-stream", 1);
+			store.confirmOrAppendUserMessage("s1", "ha", "message-stream", 2);
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(1);
+			expect(messages[0]).toMatchObject({
+				id: "message-stream",
+				content: "haha",
+			});
+		});
+
+		it("preserves image-only and mixed user chunks during backfill", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			const image = {
+				type: "image" as const,
+				data: "aW1hZ2U=",
+				mimeType: "image/png",
+			};
+
+			store.confirmOrAppendUserMessage("s1", image, "message-media", 1);
+			let messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(1);
+			expect(messages[0]).toMatchObject({
+				id: "message-media",
+				content: "",
+				contentBlocks: [image],
+			});
+
+			store.confirmOrAppendUserMessage(
+				"s1",
+				{ type: "text", text: "caption" },
+				"message-media",
+				2,
+			);
+			messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(1);
+			expect(messages[0]).toMatchObject({
+				content: "caption",
+				contentBlocks: [image, { type: "text", text: "caption" }],
+			});
+		});
+
+		it("confirms an optimistic image-only message without replacing its blocks", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			const image = {
+				type: "image" as const,
+				data: "aW1hZ2U=",
+				mimeType: "image/png",
+			};
+			store.addUserMessage("s1", "", {
+				messageId: "message-image",
+				contentBlocks: [image],
+				provisional: true,
+			});
+
+			store.confirmOrAppendUserMessage("s1", image, "message-image", 1);
+
+			expect(useChatStore.getState().sessions.s1.messages).toEqual([
+				expect.objectContaining({
+					id: "message-image",
+					content: "",
+					contentBlocks: [image],
+					provisional: false,
+					failed: false,
+				}),
+			]);
+		});
+
+		it("folds legacy text chunks into the oldest matching provisional", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			const contentBlocks = [
+				{ type: "text" as const, text: "hello " },
+				{ type: "text" as const, text: "world" },
+			];
+			store.addUserMessage("s1", "hello world", {
+				messageId: "oldest-provisional",
+				contentBlocks,
+				provisional: true,
+			});
+			store.addUserMessage("s1", "newer prompt", {
+				messageId: "newer-provisional",
+				provisional: true,
+			});
+
+			store.confirmOrAppendUserMessage("s1", contentBlocks[0], undefined, 1);
+			store.confirmOrAppendUserMessage("s1", contentBlocks[1], undefined, 2);
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(2);
+			expect(messages[0]).toMatchObject({
+				id: "oldest-provisional",
+				content: "hello world",
+				contentBlocks,
+				provisional: false,
+				failed: false,
+			});
+			expect(messages[1]).toMatchObject({
+				id: "newer-provisional",
+				provisional: true,
+			});
+		});
+
+		it("folds legacy text and image chunks into one provisional message", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			const image = {
+				type: "image" as const,
+				data: "aW1hZ2U=",
+				mimeType: "image/png",
+			};
+			const contentBlocks = [{ type: "text" as const, text: "caption" }, image];
+			store.addUserMessage("s1", "caption", {
+				messageId: "mixed-provisional",
+				contentBlocks,
+				provisional: true,
+			});
+
+			store.confirmOrAppendUserMessage("s1", contentBlocks[0], undefined, 11);
+			store.confirmOrAppendUserMessage("s1", contentBlocks[1], undefined, 12);
+
+			expect(useChatStore.getState().sessions.s1.messages).toEqual([
+				expect.objectContaining({
+					id: "mixed-provisional",
+					content: "caption",
+					contentBlocks,
+					provisional: false,
+					failed: false,
+				}),
+			]);
+		});
+
+		it("does not merge independent legacy messages across a sequence gap", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+
+			store.confirmOrAppendUserMessage(
+				"s1",
+				{ type: "text", text: "first" },
+				undefined,
+				1,
+			);
+			store.confirmOrAppendUserMessage(
+				"s1",
+				{ type: "text", text: "second" },
+				undefined,
+				3,
+			);
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(2);
+			expect(messages[0]).toMatchObject({ content: "first" });
+			expect(messages[1]).toMatchObject({ content: "second" });
+		});
 	});
 
 	// ---------------------------------------------------------------------------
@@ -282,6 +570,30 @@ describe("chat-store", () => {
 				expect(msg.provisional).toBe(true);
 				expect(msg.failed).toBe(true);
 			}
+		});
+
+		it("reuses a failed optimistic message when retrying with the same id", () => {
+			const { createLocalSession, addUserMessage, markUserMessageFailed } =
+				useChatStore.getState();
+			createLocalSession("s1");
+			addUserMessage("s1", "hello", {
+				provisional: true,
+				messageId: "msg-1",
+			});
+			markUserMessageFailed("s1", "msg-1");
+
+			addUserMessage("s1", "hello", {
+				provisional: true,
+				messageId: "msg-1",
+			});
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(1);
+			expect(messages[0]).toMatchObject({
+				id: "msg-1",
+				provisional: true,
+				failed: false,
+			});
 		});
 	});
 
@@ -600,7 +912,7 @@ describe("chat-store", () => {
 			}
 		});
 
-		it("multiple provisional messages: confirms the last one (closest to tail)", () => {
+		it("appends an unmatched confirmation instead of confirming the newest provisional", () => {
 			const store = useChatStore.getState();
 			store.createLocalSession("s1");
 			store.addUserMessage("s1", "first prov", { provisional: true });
@@ -609,13 +921,16 @@ describe("chat-store", () => {
 			store.confirmOrAppendUserMessage("s1", "confirm");
 
 			const msgs = useChatStore.getState().sessions.s1.messages;
-			expect(msgs).toHaveLength(2);
-			// Backward search finds second (index 1) first
+			expect(msgs).toHaveLength(3);
 			if (msgs[0].kind === "text") {
-				expect(msgs[0].provisional).toBe(true); // first still provisional
+				expect(msgs[0].provisional).toBe(true);
 			}
 			if (msgs[1].kind === "text") {
-				expect(msgs[1].provisional).toBe(false); // second confirmed
+				expect(msgs[1].provisional).toBe(true);
+			}
+			if (msgs[2].kind === "text") {
+				expect(msgs[2].content).toBe("confirm");
+				expect(msgs[2].provisional).toBeUndefined();
 			}
 		});
 	});

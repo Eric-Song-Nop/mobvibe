@@ -33,13 +33,18 @@ class E2EEManager {
 	private contentKeyPairs: Map<string, CryptoKeyPair> = new Map();
 	private sessionToSecret: Map<string, string> = new Map();
 	private sessionDeks: Map<string, Uint8Array> = new Map();
-	private dekReadyListeners: Array<(sessionId: string) => void> = [];
+	private sessionDekRevisions: Map<string, number> = new Map();
+	private dekReadyListeners: Array<
+		(sessionId: string, revision?: number) => void
+	> = [];
 
 	/**
 	 * Register a listener invoked when a session DEK becomes available.
 	 * Returns an unsubscribe function.
 	 */
-	onDekReady(listener: (sessionId: string) => void): () => void {
+	onDekReady(
+		listener: (sessionId: string, revision?: number) => void,
+	): () => void {
 		this.dekReadyListeners.push(listener);
 		return () => {
 			this.dekReadyListeners = this.dekReadyListeners.filter(
@@ -48,17 +53,27 @@ class E2EEManager {
 		};
 	}
 
-	private notifyDekReady(sessionId: string): void {
+	private notifyDekReady(sessionId: string, revision?: number): void {
 		for (const listener of this.dekReadyListeners) {
-			listener(sessionId);
+			if (revision === undefined) {
+				listener(sessionId);
+			} else {
+				listener(sessionId, revision);
+			}
 		}
 	}
 
 	/**
 	 * Check whether a DEK has been unwrapped for the given session.
 	 */
-	hasSessionDek(sessionId: string): boolean {
-		return this.sessionDeks.has(sessionId);
+	hasSessionDek(sessionId: string, revision?: number): boolean {
+		if (!this.sessionDeks.has(sessionId)) {
+			return false;
+		}
+		return (
+			revision === undefined ||
+			this.sessionDekRevisions.get(sessionId) === revision
+		);
 	}
 
 	/**
@@ -66,12 +81,20 @@ class E2EEManager {
 	 * Skips sessions that already have a DEK or lack a wrappedDek.
 	 */
 	unwrapAllSessionDeks(
-		sessions: Array<{ sessionId: string; wrappedDek?: string }>,
+		sessions: Array<{
+			sessionId: string;
+			wrappedDek?: string;
+			revision?: number;
+		}>,
 	): void {
 		for (const session of sessions) {
 			if (!session.wrappedDek) continue;
-			if (this.sessionDeks.has(session.sessionId)) continue;
-			this.unwrapSessionDek(session.sessionId, session.wrappedDek);
+			if (this.hasSessionDek(session.sessionId, session.revision)) continue;
+			this.unwrapSessionDek(
+				session.sessionId,
+				session.wrappedDek,
+				session.revision,
+			);
 		}
 	}
 
@@ -108,6 +131,7 @@ class E2EEManager {
 			if (secret === base64Secret) {
 				this.sessionToSecret.delete(sessionId);
 				this.sessionDeks.delete(sessionId);
+				this.sessionDekRevisions.delete(sessionId);
 			}
 		}
 		await this.persistSecrets();
@@ -145,20 +169,25 @@ class E2EEManager {
 		this.contentKeyPairs.clear();
 		this.sessionToSecret.clear();
 		this.sessionDeks.clear();
+		this.sessionDekRevisions.clear();
 		await this.removeStoredSecrets();
 	}
 
-	unwrapSessionDek(sessionId: string, wrappedDek: string): boolean {
+	unwrapSessionDek(
+		sessionId: string,
+		wrappedDek: string,
+		revision?: number,
+	): boolean {
 		const cachedSecret = this.sessionToSecret.get(sessionId);
 		if (cachedSecret) {
 			const keypair = this.contentKeyPairs.get(cachedSecret);
-			if (keypair && this.tryUnwrap(sessionId, wrappedDek, keypair)) {
+			if (keypair && this.tryUnwrap(sessionId, wrappedDek, keypair, revision)) {
 				return true;
 			}
 		}
 
 		for (const [secret, keypair] of this.contentKeyPairs) {
-			if (this.tryUnwrap(sessionId, wrappedDek, keypair)) {
+			if (this.tryUnwrap(sessionId, wrappedDek, keypair, revision)) {
 				this.sessionToSecret.set(sessionId, secret);
 				return true;
 			}
@@ -169,26 +198,50 @@ class E2EEManager {
 	decryptEvent(event: SessionEvent): SessionEvent {
 		if (!isEncryptedPayload(event.payload)) return event;
 
-		const dek = this.sessionDeks.get(event.sessionId);
+		const dek = this.hasSessionDek(event.sessionId, event.revision)
+			? this.sessionDeks.get(event.sessionId)
+			: undefined;
 		if (!dek) return event;
 
-		try {
-			const decrypted = decryptPayload(event.payload, dek);
-			return { ...event, payload: decrypted };
-		} catch (error) {
-			console.warn("[E2EE] Failed to decrypt event", event.sessionId, error);
-			return event;
-		}
+		const decrypted = decryptPayload(event.payload, dek);
+		return { ...event, payload: decrypted };
 	}
 
-	getSessionE2EEStatus(sessionId: string, hasWrappedDek: boolean): E2EEStatus {
+	getSessionE2EEStatus(
+		sessionId: string,
+		hasWrappedDek: boolean,
+		revision?: number,
+	): E2EEStatus {
 		if (!hasWrappedDek) return "none";
-		return this.sessionDeks.has(sessionId) ? "ok" : "missing_key";
+		return this.hasSessionDek(sessionId, revision) ? "ok" : "missing_key";
 	}
 
-	encryptPayloadForSession(sessionId: string, payload: unknown): unknown {
-		const dek = this.sessionDeks.get(sessionId);
-		if (!dek) return payload;
+	encryptPayloadForSession(
+		sessionId: string,
+		payload: unknown,
+		revision?: number,
+		encryptionRequired?: boolean,
+	): unknown {
+		if (encryptionRequired === false) {
+			return payload;
+		}
+		if (encryptionRequired === true && revision === undefined) {
+			throw new Error(
+				"Cannot send without a matching session encryption key. Reload the session or pair the correct device key, then try again.",
+			);
+		}
+
+		const dek = this.hasSessionDek(sessionId, revision)
+			? this.sessionDeks.get(sessionId)
+			: undefined;
+		if (!dek) {
+			if (encryptionRequired === true || this.sessionDeks.has(sessionId)) {
+				throw new Error(
+					"Cannot send without a matching session encryption key. Reload the session or pair the correct device key, then try again.",
+				);
+			}
+			return payload;
+		}
 		return encryptPayload(payload, dek);
 	}
 
@@ -196,11 +249,17 @@ class E2EEManager {
 		sessionId: string,
 		wrappedDek: string,
 		keypair: CryptoKeyPair,
+		revision?: number,
 	): boolean {
 		try {
 			const dek = unwrapDEK(wrappedDek, keypair.publicKey, keypair.secretKey);
 			this.sessionDeks.set(sessionId, dek);
-			this.notifyDekReady(sessionId);
+			if (revision === undefined) {
+				this.sessionDekRevisions.delete(sessionId);
+			} else {
+				this.sessionDekRevisions.set(sessionId, revision);
+			}
+			this.notifyDekReady(sessionId, revision);
 			return true;
 		} catch {
 			return false;
@@ -300,10 +359,11 @@ export const e2ee = new E2EEManager();
 export const bootstrapSessionE2EE = (
 	sessionId: string,
 	wrappedDek?: string,
+	revision?: number,
 ): E2EEStatus => {
 	if (!wrappedDek) {
 		return "none";
 	}
-	e2ee.unwrapSessionDek(sessionId, wrappedDek);
-	return e2ee.getSessionE2EEStatus(sessionId, true);
+	e2ee.unwrapSessionDek(sessionId, wrappedDek, revision);
+	return e2ee.getSessionE2EEStatus(sessionId, true, revision);
 };

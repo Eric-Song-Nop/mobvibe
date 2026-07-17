@@ -10,14 +10,21 @@ import type {
 	GatewayToCliEvents,
 	GitBranchesForCwdResponse,
 	RpcResponse,
+	SendMessageParams,
+	SendMessageResult,
+	SessionEvent,
 	SessionEventsResponse,
 	SessionFsFilePreview,
 	SessionFsResourceEntry,
 	StopReason,
 } from "@mobvibe/shared";
 import {
+	AppError,
+	createErrorDetail,
+	createInternalError,
 	createSignedToken,
 	getPromptImageBlocks,
+	isEncryptedPayload,
 	validatePromptImageBlocks,
 } from "@mobvibe/shared";
 import ignore, { type Ignore } from "ignore";
@@ -55,8 +62,24 @@ type SocketClientOptions = {
 	agentTeamStore?: AgentTeamStore;
 };
 
+type NormalizedSendMessageParams = Omit<SendMessageParams, "messageId"> & {
+	messageId: string;
+};
+
 const SESSION_ROOT_NAME = "Working Directory";
 const MAX_RESOURCE_FILES = 2000;
+const createMessageOutcomeUnknownError = (detail?: string) =>
+	new AppError(
+		createErrorDetail({
+			code: "MESSAGE_OUTCOME_UNKNOWN",
+			message:
+				"Message execution outcome is unknown; send it again as a new message",
+			retryable: false,
+			scope: "request",
+			detail,
+		}),
+		409,
+	);
 const DEFAULT_IGNORES = [
 	"node_modules",
 	".git",
@@ -117,11 +140,27 @@ const validatePromptForBackend = (
 		return;
 	}
 	if (!supportsPromptImages) {
-		throw new Error("Selected backend does not support image prompts");
+		throw new AppError(
+			createErrorDetail({
+				code: "REQUEST_VALIDATION_FAILED",
+				message: "Selected backend does not support image prompts",
+				retryable: false,
+				scope: "request",
+			}),
+			400,
+		);
 	}
 	const validation = validatePromptImageBlocks(imageBlocks);
 	if (!validation.ok) {
-		throw new Error(validation.message);
+		throw new AppError(
+			createErrorDetail({
+				code: "REQUEST_VALIDATION_FAILED",
+				message: validation.message,
+				retryable: false,
+				scope: "request",
+			}),
+			400,
+		);
 	}
 };
 
@@ -161,14 +200,29 @@ const filterVisibleEntries = (entries: FsEntry[]) =>
 
 /** Minimum interval between automatic discover calls (ms) */
 const DISCOVER_THROTTLE_MS = 60_000;
+const WAL_REPLAY_BATCH_SIZE = 100;
+const MAX_PENDING_LIVE_EVENTS = 1000;
+const MAX_PENDING_LIVE_EVENT_BYTES = 8 * 1024 * 1024;
 
 export class SocketClient extends EventEmitter {
 	private socket: Socket<GatewayToCliEvents, CliToGatewayEvents>;
 	private connected = false;
+	private hasConnectedOnce = false;
 	private reconnectAttempts = 0;
 	private heartbeatInterval?: NodeJS.Timeout;
 	private lastDiscoverAt = 0;
+	private walReplayGeneration = 0;
+	private walReplayActiveGeneration?: number;
+	private walReplayStartedGeneration?: number;
+	private pendingLiveEvents: SessionEvent[] = [];
+	private pendingLiveEventBytes = 0;
 	private readonly agentTeamStore: AgentTeamStore;
+	private readonly messageSendsInFlight = new Map<
+		string,
+		Promise<SendMessageResult>
+	>();
+	private readonly activeMessageIdBySession = new Map<string, string>();
+	private readonly sessionOperationTails = new Map<string, Promise<void>>();
 
 	constructor(private readonly options: SocketClientOptions) {
 		super();
@@ -198,6 +252,7 @@ export class SocketClient extends EventEmitter {
 		this.socket.on("disconnect", (reason) => {
 			logger.warn({ reason }, "gateway_disconnected");
 			this.connected = false;
+			this.invalidateWalReplayBarrier();
 			this.stopHeartbeat();
 			this.emit("disconnected", reason);
 		});
@@ -227,6 +282,27 @@ export class SocketClient extends EventEmitter {
 
 		this.socket.on("cli:registered", async (info) => {
 			logger.info({ machineId: info.machineId }, "gateway_registered");
+			const replayGeneration = this.walReplayActiveGeneration;
+			if (
+				replayGeneration === undefined ||
+				replayGeneration !== this.walReplayGeneration ||
+				!this.connected ||
+				this.walReplayStartedGeneration === replayGeneration
+			) {
+				return;
+			}
+			this.walReplayStartedGeneration = replayGeneration;
+			try {
+				await this.replayUnackedEvents(replayGeneration);
+			} catch (error) {
+				if (replayGeneration === this.walReplayGeneration && this.connected) {
+					this.restartForWalReplay("wal_replay_failed", error);
+				}
+				return;
+			}
+			if (replayGeneration !== this.walReplayGeneration || !this.connected) {
+				return;
+			}
 
 			// Throttle automatic discover on reconnect
 			const now = Date.now();
@@ -280,6 +356,9 @@ export class SocketClient extends EventEmitter {
 		// Handle authentication errors
 		this.socket.on("cli:error", (error) => {
 			logger.error({ err: error }, "gateway_auth_error");
+			this.connected = false;
+			this.invalidateWalReplayBarrier();
+			this.stopHeartbeat();
 			this.emit("auth_error", error);
 		});
 
@@ -494,15 +573,12 @@ export class SocketClient extends EventEmitter {
 		this.socket.on("rpc:message:send", async (request) => {
 			const requestStart = process.hrtime.bigint();
 			try {
-				const { sessionId, prompt: rawPrompt } = request.params;
-				const prompt = this.options.cryptoService.decryptRpcPayload<
-					import("@agentclientprotocol/sdk").ContentBlock[]
-				>(sessionId, rawPrompt);
+				const { sessionId, messageId } = request.params;
 				logger.info(
 					{
 						requestId: request.requestId,
 						sessionId,
-						promptBlocks: prompt.length,
+						messageId,
 					},
 					"rpc_message_send",
 				);
@@ -510,34 +586,22 @@ export class SocketClient extends EventEmitter {
 					{
 						requestId: request.requestId,
 						sessionId,
-						promptBlocks: prompt.length,
+						messageId,
 					},
 					"rpc_message_send_start",
 				);
-				const record = sessionManager.getSession(sessionId);
-				if (!record) {
-					throw new Error("Session not found");
-				}
-				validatePromptForBackend(
-					prompt,
-					record.connection.getSessionCapabilities().prompt?.image === true,
+				const result = await this.getOrCreateMessageSend(
+					request.params,
+					request.requestId,
 				);
-				sessionManager.touchSession(sessionId);
-				const result = await record.connection.prompt(sessionId, prompt);
-				sessionManager.touchSession(sessionId);
-				sessionManager.recordTurnEnd(
-					sessionId,
-					result.stopReason as StopReason,
-				);
-				this.sendRpcResponse<{ stopReason: StopReason }>(request.requestId, {
-					stopReason: result.stopReason as StopReason,
-				});
+				this.sendRpcResponse<SendMessageResult>(request.requestId, result);
 				const durationMs =
 					Number(process.hrtime.bigint() - requestStart) / 1_000_000;
 				logger.info(
 					{
 						requestId: request.requestId,
 						sessionId,
+						messageId,
 						stopReason: result.stopReason,
 						durationMs,
 					},
@@ -547,6 +611,7 @@ export class SocketClient extends EventEmitter {
 					{
 						requestId: request.requestId,
 						sessionId,
+						messageId,
 						durationMs,
 					},
 					"rpc_message_send_finish",
@@ -808,10 +873,8 @@ export class SocketClient extends EventEmitter {
 					{ requestId: request.requestId, sessionId, cwd, backendId },
 					"rpc_session_load",
 				);
-				const session = await sessionManager.loadSession(
-					sessionId,
-					cwd,
-					backendId,
+				const session = await this.enqueueSessionOperation(sessionId, () =>
+					sessionManager.loadSession(sessionId, cwd, backendId),
 				);
 				this.sendRpcResponse(request.requestId, session);
 			} catch (error) {
@@ -835,10 +898,8 @@ export class SocketClient extends EventEmitter {
 					{ requestId: request.requestId, sessionId, cwd, backendId },
 					"rpc_session_reload",
 				);
-				const session = await sessionManager.reloadSession(
-					sessionId,
-					cwd,
-					backendId,
+				const session = await this.enqueueSessionOperation(sessionId, () =>
+					sessionManager.reloadSession(sessionId, cwd, backendId),
 				);
 				this.sendRpcResponse(request.requestId, session);
 			} catch (error) {
@@ -1308,7 +1369,9 @@ export class SocketClient extends EventEmitter {
 					{ requestId: request.requestId, sessionId },
 					"rpc_session_archive",
 				);
-				await sessionManager.archiveSession(sessionId);
+				await this.enqueueSessionOperation(sessionId, () =>
+					sessionManager.archiveSession(sessionId),
+				);
 				this.sendRpcResponse(request.requestId, { ok: true });
 			} catch (error) {
 				logger.error(
@@ -1334,7 +1397,9 @@ export class SocketClient extends EventEmitter {
 					},
 					"rpc_session_archive_all",
 				);
-				const result = await sessionManager.bulkArchiveSessions(sessionIds);
+				const result = await this.enqueueSessionOperations(sessionIds, () =>
+					sessionManager.bulkArchiveSessions(sessionIds),
+				);
 				this.sendRpcResponse(request.requestId, result);
 			} catch (error) {
 				logger.error(
@@ -1388,6 +1453,202 @@ export class SocketClient extends EventEmitter {
 				this.sendRpcError(request.requestId, error);
 			}
 		});
+	}
+
+	private getOrCreateMessageSend(
+		params: SendMessageParams,
+		requestId: string,
+	): Promise<SendMessageResult> {
+		const suppliedMessageId = params.messageId?.trim();
+		const messageId = suppliedMessageId || `legacy-rpc:${requestId}`;
+		const key = `${params.sessionId}\u0000${messageId}`;
+		const inFlight = this.messageSendsInFlight.get(key);
+		if (inFlight) {
+			return inFlight;
+		}
+		const activeMessageId = this.activeMessageIdBySession.get(params.sessionId);
+		if (activeMessageId && activeMessageId !== messageId) {
+			return Promise.reject(
+				new AppError(
+					createErrorDetail({
+						code: "SESSION_BUSY",
+						message: "Another message is already running for this session",
+						retryable: true,
+						scope: "session",
+					}),
+					409,
+				),
+			);
+		}
+
+		const normalizedParams: NormalizedSendMessageParams = {
+			...params,
+			messageId,
+		};
+		const operation = this.enqueueSessionOperation(params.sessionId, () =>
+			this.executeMessageSend(normalizedParams),
+		);
+		this.messageSendsInFlight.set(key, operation);
+		this.activeMessageIdBySession.set(params.sessionId, messageId);
+		const clearInFlight = () => {
+			if (this.messageSendsInFlight.get(key) === operation) {
+				this.messageSendsInFlight.delete(key);
+			}
+			if (this.activeMessageIdBySession.get(params.sessionId) === messageId) {
+				this.activeMessageIdBySession.delete(params.sessionId);
+			}
+		};
+		// Handle both outcomes without creating an unobserved rejected promise.
+		void operation.then(clearInFlight, clearInFlight);
+		return operation;
+	}
+
+	private enqueueSessionOperation<T>(
+		sessionId: string,
+		operation: () => Promise<T>,
+	): Promise<T> {
+		return this.enqueueSessionOperations([sessionId], operation);
+	}
+
+	private enqueueSessionOperations<T>(
+		sessionIds: readonly string[],
+		operation: () => Promise<T>,
+	): Promise<T> {
+		const uniqueSessionIds = [...new Set(sessionIds)].sort();
+		const previousTails = uniqueSessionIds
+			.map((sessionId) => this.sessionOperationTails.get(sessionId))
+			.filter((tail): tail is Promise<void> => tail !== undefined);
+		const previous =
+			previousTails.length === 0
+				? Promise.resolve()
+				: Promise.all(previousTails).then(() => {});
+		const result = previous.then(operation);
+		const tail = result.then(
+			() => {},
+			() => {},
+		);
+		for (const sessionId of uniqueSessionIds) {
+			this.sessionOperationTails.set(sessionId, tail);
+		}
+		const clearTail = () => {
+			for (const sessionId of uniqueSessionIds) {
+				if (this.sessionOperationTails.get(sessionId) === tail) {
+					this.sessionOperationTails.delete(sessionId);
+				}
+			}
+		};
+		void result.then(clearTail, clearTail);
+		return result;
+	}
+
+	private async executeMessageSend(
+		params: NormalizedSendMessageParams,
+	): Promise<SendMessageResult> {
+		const { sessionManager, cryptoService } = this.options;
+		if (
+			cryptoService.contentEncryptionEnabled &&
+			!isEncryptedPayload(params.prompt)
+		) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Encrypted prompt required for this session",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		const completed = sessionManager.getMessageSendResult(
+			params.sessionId,
+			params.messageId,
+		);
+		if (completed) {
+			return completed;
+		}
+		if (
+			params.expectedRevision !== undefined &&
+			(!Number.isSafeInteger(params.expectedRevision) ||
+				params.expectedRevision < 1)
+		) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "expectedRevision must be a positive safe integer",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		if (
+			params.expectedRevision !== undefined &&
+			sessionManager.getSessionRevision(params.sessionId) !==
+				params.expectedRevision
+		) {
+			throw new AppError(
+				createErrorDetail({
+					code: "SESSION_NOT_READY",
+					message: "Session revision changed; refresh before sending",
+					retryable: false,
+					scope: "session",
+				}),
+				409,
+			);
+		}
+
+		const prompt = cryptoService.decryptRpcPayload<ContentBlock[]>(
+			params.sessionId,
+			params.prompt,
+		);
+		const record = sessionManager.getSession(params.sessionId);
+		if (!record) {
+			throw new Error("Session not found");
+		}
+		validatePromptForBackend(
+			prompt,
+			record.connection.getSessionCapabilities().prompt?.image === true,
+		);
+		sessionManager.touchSession(params.sessionId);
+		const claim = sessionManager.claimMessageSend(
+			params.sessionId,
+			params.messageId,
+		);
+		if (claim.status === "completed") {
+			return claim.result;
+		}
+		if (claim.status === "in_progress") {
+			throw createMessageOutcomeUnknownError();
+		}
+
+		let promptResult: Awaited<ReturnType<typeof record.connection.prompt>>;
+		sessionManager.beginMessageSend(params.sessionId, params.messageId);
+		try {
+			try {
+				promptResult = await record.connection.prompt(params.sessionId, prompt);
+			} catch (error) {
+				throw createMessageOutcomeUnknownError(
+					error instanceof Error ? error.message : undefined,
+				);
+			}
+			const result = { stopReason: promptResult.stopReason as StopReason };
+			try {
+				sessionManager.completeMessageSend(
+					params.sessionId,
+					params.messageId,
+					claim.claimId,
+					result.stopReason,
+				);
+			} catch (error) {
+				throw createMessageOutcomeUnknownError(
+					error instanceof Error ? error.message : undefined,
+				);
+			}
+			sessionManager.touchSession(params.sessionId);
+			return result;
+		} finally {
+			sessionManager.endMessageSend(params.sessionId, params.messageId);
+		}
 	}
 
 	private setupSessionManagerListeners() {
@@ -1448,6 +1709,21 @@ export class SocketClient extends EventEmitter {
 				"session_event_received_from_manager",
 			);
 			if (this.connected) {
+				if (
+					this.walReplayActiveGeneration !== undefined &&
+					this.walReplayActiveGeneration === this.walReplayGeneration
+				) {
+					this.bufferLiveEventDuringReplay(event);
+					logger.debug(
+						{
+							sessionId: event.sessionId,
+							revision: event.revision,
+							seq: event.seq,
+						},
+						"session_event_buffered_during_replay",
+					);
+					return;
+				}
 				// Encrypt payload before sending to gateway
 				const encrypted = this.options.cryptoService.encryptEvent(event);
 				logger.debug(
@@ -1478,6 +1754,59 @@ export class SocketClient extends EventEmitter {
 				);
 			}
 		});
+	}
+
+	private bufferLiveEventDuringReplay(event: SessionEvent): void {
+		let eventBytes: number;
+		try {
+			eventBytes = Buffer.byteLength(JSON.stringify(event), "utf8");
+		} catch (error) {
+			this.restartForWalReplay("live_event_not_serializable", error);
+			return;
+		}
+		if (
+			this.pendingLiveEvents.length >= MAX_PENDING_LIVE_EVENTS ||
+			this.pendingLiveEventBytes + eventBytes > MAX_PENDING_LIVE_EVENT_BYTES
+		) {
+			this.restartForWalReplay("live_event_buffer_limit");
+			return;
+		}
+		this.pendingLiveEvents.push(event);
+		this.pendingLiveEventBytes += eventBytes;
+	}
+
+	private restartForWalReplay(reason: string, error?: unknown): void {
+		logger.error(
+			{
+				err: error,
+				reason,
+				bufferedEvents: this.pendingLiveEvents.length,
+				bufferedBytes: this.pendingLiveEventBytes,
+			},
+			"wal_replay_restart_required",
+		);
+		this.connected = false;
+		this.invalidateWalReplayBarrier();
+		this.stopHeartbeat();
+		this.socket.disconnect();
+		this.socket.connect();
+	}
+
+	private beginWalReplayBarrier(): number {
+		const generation = ++this.walReplayGeneration;
+		this.walReplayActiveGeneration = generation;
+		this.walReplayStartedGeneration = undefined;
+		this.pendingLiveEvents = [];
+		this.pendingLiveEventBytes = 0;
+		return generation;
+	}
+
+	private invalidateWalReplayBarrier(): void {
+		this.walReplayGeneration += 1;
+		this.walReplayActiveGeneration = undefined;
+		this.walReplayStartedGeneration = undefined;
+		this.pendingLiveEvents = [];
+		this.pendingLiveEventBytes = 0;
 	}
 
 	private async listSessionResources(
@@ -1547,15 +1876,23 @@ export class SocketClient extends EventEmitter {
 			},
 			"rpc_response_error_sent",
 		);
+		const errorPayload =
+			error instanceof AppError
+				? (() => {
+						const { detail: appErrorDetail, ...publicErrorDetail } =
+							error.detail;
+						return {
+							...publicErrorDetail,
+							...(process.env.NODE_ENV === "development" && appErrorDetail
+								? { detail: appErrorDetail }
+								: {}),
+							status: error.status,
+						};
+					})()
+				: { ...createInternalError("request", detail), status: 500 };
 		const response: RpcResponse<unknown> = {
 			requestId,
-			error: {
-				code: "INTERNAL_ERROR",
-				message,
-				retryable: true,
-				scope: "request",
-				detail,
-			},
+			error: errorPayload,
 		};
 		this.socket.emit("rpc:response", response);
 	}
@@ -1567,6 +1904,10 @@ export class SocketClient extends EventEmitter {
 			machineId: config.machineId,
 			hostname: config.hostname,
 			version: config.clientVersion,
+			protocolCapabilities: {
+				messageIdempotency: true,
+				messageRevisionPinning: true,
+			},
 			backends: config.acpBackends.map((backend) => ({
 				backendId: backend.id,
 				backendLabel: backend.label,
@@ -1578,7 +1919,12 @@ export class SocketClient extends EventEmitter {
 
 	private async handleConnect() {
 		const { config, sessionManager } = this.options;
-		const wasReconnect = this.reconnectAttempts > 0;
+		const connectionGeneration = this.beginWalReplayBarrier();
+		// A successful Socket.IO transport recovery does not necessarily emit a
+		// connect_error first. Track completed transport connections directly so
+		// WAL replay is not skipped after a clean reconnect.
+		const wasReconnect = this.hasConnectedOnce || this.reconnectAttempts > 0;
+		this.hasConnectedOnce = true;
 		logger.info(
 			{
 				gatewayUrl: config.gatewayUrl,
@@ -1595,13 +1941,12 @@ export class SocketClient extends EventEmitter {
 		} catch (error) {
 			logger.error({ err: error }, "cli_register_backfill_failed");
 		}
+		if (!this.connected || connectionGeneration !== this.walReplayGeneration) {
+			return;
+		}
 		logger.info({ machineId: config.machineId }, "cli_register_sessions_list");
 		this.socket.emit("sessions:list", sessionManager.listAllSessions());
 		this.startHeartbeat();
-
-		if (wasReconnect) {
-			this.replayUnackedEvents();
-		}
 
 		this.emit("connected");
 	}
@@ -1627,34 +1972,99 @@ export class SocketClient extends EventEmitter {
 	}
 
 	/**
-	 * Replay unacked events for all active sessions after reconnection.
+	 * Replay unacked events for every durable current session revision.
 	 */
-	private replayUnackedEvents() {
+	private async replayUnackedEvents(generation: number): Promise<void> {
 		const { sessionManager } = this.options;
-		const sessions = sessionManager.listSessions();
+		const revisions = sessionManager.listUnackedSessionRevisions();
+		let batchSize = 0;
+		let replayCompleted = false;
+		const replayedHighWater = new Map<string, number>();
 
-		for (const session of sessions) {
-			const revision = sessionManager.getSessionRevision(session.sessionId);
-			if (revision === undefined) continue;
-
-			const unackedEvents = sessionManager.getUnackedEvents(
-				session.sessionId,
-				revision,
-			);
-
-			if (unackedEvents.length > 0) {
-				logger.info(
-					{
-						sessionId: session.sessionId,
+		try {
+			for (const { sessionId, revision } of revisions) {
+				let afterSeq = 0;
+				let replayedCount = 0;
+				while (true) {
+					if (!this.connected || generation !== this.walReplayGeneration) {
+						return;
+					}
+					const page = sessionManager.getUnackedEventsPage(
+						sessionId,
 						revision,
-						count: unackedEvents.length,
-					},
-					"replaying_unacked_events",
-				);
-
-				for (const event of unackedEvents) {
-					const encrypted = this.options.cryptoService.encryptEvent(event);
-					this.socket.emit("session:event", encrypted);
+						afterSeq,
+						WAL_REPLAY_BATCH_SIZE,
+					);
+					if (page.length === 0) {
+						break;
+					}
+					for (const event of page) {
+						if (!this.connected || generation !== this.walReplayGeneration) {
+							return;
+						}
+						const encrypted = this.options.cryptoService.encryptEvent(event);
+						this.socket.emit("session:event", encrypted);
+						afterSeq = event.seq;
+						replayedCount += 1;
+						batchSize += 1;
+						replayedHighWater.set(
+							`${event.sessionId}\u0000${event.revision}`,
+							event.seq,
+						);
+						if (batchSize >= WAL_REPLAY_BATCH_SIZE) {
+							batchSize = 0;
+							await new Promise<void>((resolve) => setTimeout(resolve, 0));
+						}
+					}
+					if (page.length < WAL_REPLAY_BATCH_SIZE) {
+						break;
+					}
+				}
+				if (replayedCount > 0) {
+					logger.info(
+						{ sessionId, revision, count: replayedCount },
+						"replayed_unacked_events",
+					);
+				}
+			}
+			replayCompleted = true;
+		} finally {
+			const replayIsStale =
+				this.walReplayActiveGeneration !== generation ||
+				generation !== this.walReplayGeneration ||
+				!this.connected;
+			if (replayIsStale) {
+				if (this.walReplayActiveGeneration === generation) {
+					this.walReplayActiveGeneration = undefined;
+					this.pendingLiveEvents = [];
+					this.pendingLiveEventBytes = 0;
+				}
+			} else if (replayCompleted) {
+				while (
+					this.pendingLiveEvents.length > 0 &&
+					this.connected &&
+					generation === this.walReplayGeneration
+				) {
+					const buffered = this.pendingLiveEvents;
+					this.pendingLiveEvents = [];
+					this.pendingLiveEventBytes = 0;
+					for (const event of buffered) {
+						const highWater =
+							replayedHighWater.get(
+								`${event.sessionId}\u0000${event.revision}`,
+							) ?? 0;
+						if (event.seq <= highWater) {
+							continue;
+						}
+						const encrypted = this.options.cryptoService.encryptEvent(event);
+						if (!this.connected || generation !== this.walReplayGeneration) {
+							break;
+						}
+						this.socket.emit("session:event", encrypted);
+					}
+				}
+				if (generation === this.walReplayGeneration && this.connected) {
+					this.walReplayActiveGeneration = undefined;
 				}
 			}
 		}
@@ -1666,6 +2076,8 @@ export class SocketClient extends EventEmitter {
 
 	disconnect() {
 		this.stopHeartbeat();
+		this.connected = false;
+		this.invalidateWalReplayBarrier();
 		this.agentTeamStore.close();
 		this.socket.disconnect();
 	}

@@ -1240,8 +1240,12 @@ export function CodePreview({ payload, sessionId }: CodePreviewProps) {
 													line,
 													key: lineIndex,
 												});
-												const { className: lineClassName, ...restLineProps } =
-													lineProps;
+												const {
+													className: lineClassName,
+													key: linePropKey,
+													...restLineProps
+												} = lineProps;
+												void linePropKey;
 												const lineNum = lineIndex + 1;
 												const isAdded = addedLines.has(lineNum);
 												const isModified = modifiedLines.has(lineNum);
@@ -1284,12 +1288,20 @@ export function CodePreview({ payload, sessionId }: CodePreviewProps) {
 																lineClassName,
 															)}
 														>
-															{line.map((token: Token, tokenIndex: number) => (
-																<span
-																	key={`token-${lineIndex}-${tokenIndex}`}
-																	{...getTokenProps({ token, key: tokenIndex })}
-																/>
-															))}
+															{line.map((token: Token, tokenIndex: number) => {
+																const { key: tokenPropKey, ...tokenProps } =
+																	getTokenProps({
+																		token,
+																		key: tokenIndex,
+																	});
+																void tokenPropKey;
+																return (
+																	<span
+																		key={`token-${lineIndex}-${tokenIndex}`}
+																		{...tokenProps}
+																	/>
+																);
+															})}
 														</span>
 													</div>
 												);

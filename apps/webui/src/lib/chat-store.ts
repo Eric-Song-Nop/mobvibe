@@ -6,6 +6,7 @@ import type {
 	PermissionOutcome,
 	PermissionToolCall,
 	PlanEntry,
+	SessionEvent,
 	SessionModelOption,
 	SessionModeOption,
 	SessionSummary,
@@ -15,7 +16,7 @@ import type {
 	ToolCallStatus,
 	ToolCallUpdate,
 } from "@mobvibe/shared";
-import { create } from "zustand";
+import { create, type StateCreator } from "zustand";
 import { persist } from "zustand/middleware";
 import i18n from "@/i18n";
 import { createDefaultContentBlocks } from "./content-block-utils";
@@ -36,6 +37,14 @@ type TextMessage = {
 	provisional?: boolean;
 	/** Message failed to send and needs user attention */
 	failed?: boolean;
+	/** True when content is being reconstructed from persisted user chunks. */
+	serverChunked?: boolean;
+	/** Last persisted user chunk folded into this message. */
+	lastServerChunkSeq?: number;
+	/** Server-only message reconstructed from legacy chunks without messageId. */
+	legacyServerChunked?: boolean;
+	/** Legacy echo accumulated while confirming an optimistic multi-block prompt. */
+	legacyServerEchoBlocks?: ContentBlock[];
 };
 
 type ThoughtMessage = {
@@ -329,7 +338,12 @@ type ChatState = {
 		},
 	) => void;
 	/** Confirm a provisional user message or append a new one (backfill) */
-	confirmOrAppendUserMessage: (sessionId: string, text: string) => void;
+	confirmOrAppendUserMessage: (
+		sessionId: string,
+		chunk: ContentBlock | string,
+		messageId?: string,
+		eventSeq?: number,
+	) => void;
 	markUserMessageFailed: (sessionId: string, messageId: string) => void;
 	addStatusMessage: (
 		sessionId: string,
@@ -372,6 +386,11 @@ type ChatState = {
 		},
 	) => void;
 	finalizeAssistantMessage: (sessionId: string) => void;
+	/** Reduce one WAL event and advance its cursor in one state/persist commit. */
+	applySessionEventTransaction: (
+		event: Pick<SessionEvent, "sessionId" | "revision" | "seq">,
+		applyEvent: (actions: SessionEventTransactionActions) => void,
+	) => void;
 	/** Update session cursor (revision + lastAppliedSeq) */
 	updateSessionCursor: (
 		sessionId: string,
@@ -386,6 +405,24 @@ type ChatState = {
 		status: ChatSession["e2eeStatus"],
 	) => void;
 };
+
+export type SessionEventTransactionActions = Pick<
+	ChatState,
+	| "appendAssistantChunk"
+	| "appendThoughtChunk"
+	| "confirmOrAppendUserMessage"
+	| "updateSessionMeta"
+	| "setStreamError"
+	| "addPermissionRequest"
+	| "setPermissionDecisionState"
+	| "setPermissionOutcome"
+	| "addToolCall"
+	| "updateToolCall"
+	| "appendTerminalOutput"
+	| "finalizeAssistantMessage"
+	| "setSending"
+	| "setCanceling"
+>;
 
 export const selectTerminalOutputSnapshot = (
 	state: Pick<ChatState, "sessions">,
@@ -414,6 +451,71 @@ const createMessage = (role: ChatRole, content: string): TextMessage => ({
 	createdAt: new Date().toISOString(),
 	isStreaming: true,
 });
+
+const normalizeUserMessageChunk = (
+	chunk: ContentBlock | string,
+): ContentBlock =>
+	typeof chunk === "string" ? { type: "text", text: chunk } : chunk;
+
+const isSameContentBlock = (left: ContentBlock, right: ContentBlock): boolean =>
+	JSON.stringify(left) === JSON.stringify(right);
+
+const coalesceTextBlocks = (blocks: ContentBlock[]): ContentBlock[] => {
+	const result: ContentBlock[] = [];
+	for (const block of blocks) {
+		const previous = result.at(-1);
+		if (block.type === "text" && previous?.type === "text") {
+			result[result.length - 1] = {
+				type: "text",
+				text: `${previous.text}${block.text}`,
+			};
+		} else {
+			result.push(block);
+		}
+	}
+	return result;
+};
+
+const contentBlockMatches = (
+	left: ContentBlock,
+	right: ContentBlock,
+): boolean =>
+	left.type === "text" && right.type === "text"
+		? left.text === right.text
+		: isSameContentBlock(left, right);
+
+const isContentBlockSequencePrefix = (
+	candidateBlocks: ContentBlock[],
+	expectedBlocks: ContentBlock[],
+): boolean => {
+	const candidate = coalesceTextBlocks(candidateBlocks);
+	const expected = coalesceTextBlocks(expectedBlocks);
+	if (candidate.length > expected.length) return false;
+	return candidate.every((block, index) => {
+		const expectedBlock = expected[index];
+		if (!expectedBlock) return false;
+		if (
+			index === candidate.length - 1 &&
+			block.type === "text" &&
+			expectedBlock.type === "text"
+		) {
+			return expectedBlock.text.startsWith(block.text);
+		}
+		return contentBlockMatches(block, expectedBlock);
+	});
+};
+
+const areContentBlockSequencesEqual = (
+	leftBlocks: ContentBlock[],
+	rightBlocks: ContentBlock[],
+): boolean => {
+	const left = coalesceTextBlocks(leftBlocks);
+	const right = coalesceTextBlocks(rightBlocks);
+	return (
+		left.length === right.length &&
+		left.every((block, index) => contentBlockMatches(block, right[index]))
+	);
+};
 
 const isTextMessage = (message: ChatMessage): message is TextMessage =>
 	message.kind === "text" || message.kind === undefined;
@@ -768,9 +870,80 @@ const partializeChatState = (state: ChatState): PersistedChatState => ({
 	lastCreatedCwd: state.lastCreatedCwd,
 });
 
+type ChatStateSetter = Parameters<StateCreator<ChatState>>[0];
+type ChatStateUpdate =
+	| ChatState
+	| Partial<ChatState>
+	| ((state: ChatState) => ChatState | Partial<ChatState>);
+type FlexibleChatStateSetter = (
+	partial: ChatStateUpdate,
+	replace?: boolean,
+) => void;
+type ChatStateFactory = (
+	set: ChatStateSetter,
+	applySessionEventTransaction: ChatState["applySessionEventTransaction"],
+) => ChatState;
+
+const withSessionEventTransactions = (
+	createState: ChatStateFactory,
+): StateCreator<ChatState> => {
+	return (commitSet) => {
+		let transactionState: ChatState | undefined;
+		let actions: ChatState;
+		const commit = commitSet as unknown as FlexibleChatStateSetter;
+		const set = ((partial: ChatStateUpdate, replace?: boolean) => {
+			if (transactionState === undefined) {
+				commit(partial, replace);
+				return;
+			}
+
+			const nextState =
+				typeof partial === "function" ? partial(transactionState) : partial;
+			if (Object.is(nextState, transactionState)) return;
+			transactionState = replace
+				? (nextState as ChatState)
+				: { ...transactionState, ...nextState };
+		}) as ChatStateSetter;
+		const applySessionEventTransaction: ChatState["applySessionEventTransaction"] =
+			(event, applyEvent) =>
+				commitSet((state) => {
+					const session = state.sessions[event.sessionId];
+					if (!session) return state;
+					if (
+						session.revision !== undefined &&
+						event.revision < session.revision
+					) {
+						return state;
+					}
+					if (
+						session.revision === event.revision &&
+						(session.lastAppliedSeq ?? 0) >= event.seq
+					) {
+						return state;
+					}
+
+					transactionState = state;
+					try {
+						applyEvent(actions);
+						actions.updateSessionCursor(
+							event.sessionId,
+							event.revision,
+							event.seq,
+						);
+						return transactionState;
+					} finally {
+						transactionState = undefined;
+					}
+				});
+
+		actions = createState(set, applySessionEventTransaction);
+		return actions;
+	};
+};
+
 export const useChatStore = create<ChatState>()(
 	persist(
-		(set) => ({
+		withSessionEventTransactions((set, applySessionEventTransaction) => ({
 			sessions: {},
 			activeSessionId: undefined,
 			lastCreatedCwd: {},
@@ -1231,6 +1404,38 @@ export const useChatStore = create<ChatState>()(
 				set((state) => {
 					const session =
 						state.sessions[sessionId] ?? createSessionState(sessionId);
+					const existingMessageIndex = options?.messageId
+						? session.messages.findIndex(
+								(message) => message.id === options.messageId,
+							)
+						: -1;
+					if (existingMessageIndex >= 0) {
+						const existingMessage = session.messages[existingMessageIndex];
+						if (
+							existingMessage.role !== "user" ||
+							existingMessage.kind !== "text" ||
+							(!existingMessage.provisional && !existingMessage.failed)
+						) {
+							return state;
+						}
+
+						const messages = [...session.messages];
+						messages[existingMessageIndex] = {
+							...existingMessage,
+							content,
+							contentBlocks:
+								options?.contentBlocks ?? createDefaultContentBlocks(content),
+							provisional: options?.provisional ?? existingMessage.provisional,
+							failed: false,
+						};
+						return {
+							sessions: {
+								...state.sessions,
+								[sessionId]: { ...session, messages },
+							},
+						};
+					}
+
 					const nextMessage = {
 						...createMessage("user", content),
 						id: options?.messageId ?? createLocalId(),
@@ -1250,19 +1455,105 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
-			confirmOrAppendUserMessage: (sessionId, text) =>
+			confirmOrAppendUserMessage: (sessionId, chunk, messageId, eventSeq) =>
 				set((state: ChatState) => {
 					const session = state.sessions[sessionId];
 					if (!session) return state;
+					const contentBlock = normalizeUserMessageChunk(chunk);
+					const text = contentBlock.type === "text" ? contentBlock.text : "";
 
-					// Search backward for a provisional user message (stop at assistant boundary)
+					let boundary = 0;
 					for (let i = session.messages.length - 1; i >= 0; i--) {
-						const msg = session.messages[i];
-						if (msg.role === "assistant") break;
-						if (msg.role === "user" && msg.kind === "text" && msg.provisional) {
-							// Confirm the optimistic message
+						if (session.messages[i].role === "assistant") {
+							boundary = i + 1;
+							break;
+						}
+					}
+
+					if (!messageId && eventSeq !== undefined) {
+						let provisionalMatch:
+							| { index: number; echoBlocks: ContentBlock[] }
+							| undefined;
+						for (
+							let index = boundary;
+							index < session.messages.length;
+							index++
+						) {
+							const message = session.messages[index];
+							if (
+								message.role !== "user" ||
+								message.kind !== "text" ||
+								message.provisional !== true
+							) {
+								continue;
+							}
+							const previousEcho = message.legacyServerEchoBlocks ?? [];
+							if (
+								previousEcho.length > 0 &&
+								message.lastServerChunkSeq !== eventSeq - 1
+							) {
+								continue;
+							}
+							const echoBlocks = [...previousEcho, contentBlock];
+							const expectedBlocks =
+								message.contentBlocks ??
+								createDefaultContentBlocks(message.content);
+							if (isContentBlockSequencePrefix(echoBlocks, expectedBlocks)) {
+								provisionalMatch = { index, echoBlocks };
+								break;
+							}
+						}
+
+						if (provisionalMatch) {
+							const message = session.messages[provisionalMatch.index];
+							if (message.role !== "user" || message.kind !== "text") {
+								return state;
+							}
+							const expectedBlocks =
+								message.contentBlocks ??
+								createDefaultContentBlocks(message.content);
+							const confirmed = areContentBlockSequencesEqual(
+								provisionalMatch.echoBlocks,
+								expectedBlocks,
+							);
 							const messages = [...session.messages];
-							messages[i] = { ...msg, provisional: false, failed: false };
+							messages[provisionalMatch.index] = {
+								...message,
+								provisional: confirmed ? false : message.provisional,
+								failed: confirmed ? false : message.failed,
+								legacyServerChunked: confirmed ? undefined : true,
+								legacyServerEchoBlocks: confirmed
+									? undefined
+									: provisionalMatch.echoBlocks,
+								lastServerChunkSeq: confirmed ? undefined : eventSeq,
+							};
+							return {
+								sessions: {
+									...state.sessions,
+									[sessionId]: { ...session, messages },
+								},
+							};
+						}
+
+						const lastMessage = session.messages.at(-1);
+						if (
+							lastMessage?.role === "user" &&
+							lastMessage.kind === "text" &&
+							lastMessage.provisional !== true &&
+							lastMessage.legacyServerChunked === true &&
+							lastMessage.lastServerChunkSeq === eventSeq - 1
+						) {
+							const content = `${lastMessage.content}${text}`;
+							const messages = [...session.messages];
+							messages[messages.length - 1] = {
+								...lastMessage,
+								content,
+								contentBlocks: [
+									...(lastMessage.contentBlocks ?? []),
+									contentBlock,
+								],
+								lastServerChunkSeq: eventSeq,
+							};
 							return {
 								sessions: {
 									...state.sessions,
@@ -1272,15 +1563,113 @@ export const useChatStore = create<ChatState>()(
 						}
 					}
 
+					let matchIndex = -1;
+					if (messageId) {
+						matchIndex = session.messages.findIndex(
+							(message) =>
+								message.id === messageId &&
+								message.role === "user" &&
+								message.kind === "text",
+						);
+					} else {
+						matchIndex = session.messages.findIndex(
+							(message, index) =>
+								index >= boundary &&
+								message.role === "user" &&
+								message.kind === "text" &&
+								message.provisional === true &&
+								(contentBlock.type === "text"
+									? message.content === text
+									: (
+											message.contentBlocks ??
+											createDefaultContentBlocks(message.content)
+										).some((candidate) =>
+											isSameContentBlock(candidate, contentBlock),
+										)),
+						);
+					}
+
+					const matchedMessage =
+						matchIndex >= 0 ? session.messages[matchIndex] : undefined;
+					if (
+						matchedMessage?.role === "user" &&
+						matchedMessage.kind === "text"
+					) {
+						if (matchedMessage.provisional !== true) {
+							if (!matchedMessage.serverChunked) {
+								return state;
+							}
+							if (
+								eventSeq !== undefined &&
+								matchedMessage.lastServerChunkSeq !== undefined &&
+								eventSeq <= matchedMessage.lastServerChunkSeq
+							) {
+								return state;
+							}
+							const existingBlocks = matchedMessage.contentBlocks ?? [];
+							if (
+								eventSeq === undefined &&
+								existingBlocks.some((candidate) =>
+									isSameContentBlock(candidate, contentBlock),
+								)
+							) {
+								return state;
+							}
+
+							const content = `${matchedMessage.content}${text}`;
+							const messages = [...session.messages];
+							messages[matchIndex] = {
+								...matchedMessage,
+								content,
+								contentBlocks: [...existingBlocks, contentBlock],
+								...(eventSeq !== undefined
+									? { lastServerChunkSeq: eventSeq }
+									: {}),
+							};
+							return {
+								sessions: {
+									...state.sessions,
+									[sessionId]: { ...session, messages },
+								},
+							};
+						}
+						const messages = [...session.messages];
+						messages[matchIndex] = {
+							...matchedMessage,
+							provisional: false,
+							failed: false,
+						};
+						return {
+							sessions: {
+								...state.sessions,
+								[sessionId]: { ...session, messages },
+							},
+						};
+					}
+
 					// No provisional found → append new message (backfill scenario)
 					const newMsg: TextMessage = {
-						id: createLocalId(),
+						id: messageId ?? createLocalId(),
 						role: "user",
 						kind: "text",
 						content: text,
-						contentBlocks: createDefaultContentBlocks(text),
+						contentBlocks: [contentBlock],
 						createdAt: new Date().toISOString(),
 						isStreaming: false,
+						...(messageId
+							? {
+									serverChunked: true,
+									...(eventSeq !== undefined
+										? { lastServerChunkSeq: eventSeq }
+										: {}),
+								}
+							: eventSeq !== undefined
+								? {
+										serverChunked: true,
+										legacyServerChunked: true,
+										lastServerChunkSeq: eventSeq,
+									}
+								: {}),
 					};
 					return {
 						sessions: {
@@ -1616,6 +2005,7 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
+			applySessionEventTransaction,
 			updateSessionCursor: (sessionId, revision, lastAppliedSeq) =>
 				set((state: ChatState) => {
 					const session = state.sessions[sessionId];
@@ -1676,7 +2066,7 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
-		}),
+		})),
 		{
 			name: STORAGE_KEY,
 			version: 1,

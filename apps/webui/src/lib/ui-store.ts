@@ -55,6 +55,10 @@ const SESSION_WIDTH_MAX = 520;
 export type ChatDraft = {
 	input: string;
 	inputContents: ContentBlock[];
+	/** Reused only when retrying an unchanged failed send. */
+	messageId?: string;
+	/** Revision that originally attempted messageId. */
+	messageRevision?: number;
 };
 
 export const createEmptyChatDraft = (): ChatDraft => ({

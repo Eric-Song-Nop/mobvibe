@@ -1,18 +1,23 @@
 import { ThemeProvider } from "@mobvibe/ui/theme-provider";
 import { StrictMode } from "react";
-import { hydrateRoot } from "react-dom/client";
+import { createRoot, hydrateRoot } from "react-dom/client";
 import App from "@/App";
 import "@/i18n";
 import "@/index.css";
+import { mountClientRoot } from "@/lib/mount-client-root";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Root element not found");
 
-hydrateRoot(
-	root,
+const app = (
 	<StrictMode>
 		<ThemeProvider>
 			<App />
 		</ThemeProvider>
-	</StrictMode>,
+	</StrictMode>
 );
+
+mountClientRoot(root, {
+	render: () => createRoot(root).render(app),
+	hydrate: () => hydrateRoot(root, app),
+});

@@ -1,8 +1,4 @@
-import {
-	createErrorDetail,
-	createInternalError,
-	type ErrorDetail,
-} from "@mobvibe/shared";
+import { createErrorDetail, createInternalError } from "@mobvibe/shared";
 import type { Router } from "express";
 import { logger } from "../lib/logger.js";
 import {
@@ -12,6 +8,11 @@ import {
 } from "../middleware/auth.js";
 import type { CliRegistry } from "../services/cli-registry.js";
 import type { TeamRouter } from "../services/team-router.js";
+import {
+	type ErrorResponse,
+	respondAppError,
+	respondError,
+} from "./error-response.js";
 
 const FORBIDDEN_KEYS = new Set([
 	"prompt",
@@ -25,14 +26,6 @@ const FORBIDDEN_KEYS = new Set([
 	"dek",
 	"secret",
 ]);
-
-const respondError = (
-	response: { status: (code: number) => { json: (body: unknown) => void } },
-	detail: ErrorDetail,
-	status = 500,
-) => {
-	response.status(status).json({ error: detail });
-};
 
 const buildRequestValidationError = (message = "Invalid request") =>
 	createErrorDetail({
@@ -88,10 +81,10 @@ const optionalString = (value: unknown): string | undefined => {
 	return trimmed.length > 0 ? trimmed : undefined;
 };
 
-const mapRouteError = (
-	response: { status: (code: number) => { json: (body: unknown) => void } },
-	error: unknown,
-) => {
+const mapRouteError = (response: ErrorResponse, error: unknown) => {
+	if (respondAppError(response, error)) {
+		return;
+	}
 	const message = getErrorMessage(error);
 	if (message.includes("Machine not found")) {
 		respondError(response, buildAuthorizationError(message), 403);

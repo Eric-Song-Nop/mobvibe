@@ -22,6 +22,17 @@ beforeAll(async () => {
 });
 
 describe("CliCryptoService", () => {
+	test("exposes a stable, non-secret identity for one master secret", () => {
+		const sameSecret = new CliCryptoService(masterSecret);
+		const differentSecret = new CliCryptoService(generateMasterSecret());
+
+		expect(service.getKeyIdentity()).toBe(sameSecret.getKeyIdentity());
+		expect(service.getKeyIdentity()).not.toBe(differentSecret.getKeyIdentity());
+		expect(service.getKeyIdentity()).not.toContain(
+			Buffer.from(masterSecret).toString("base64"),
+		);
+	});
+
 	test("initSessionDek returns DEK and wrapped DEK string", () => {
 		const { dek, wrappedDek } = service.initSessionDek("session-1");
 		expect(dek).toBeInstanceOf(Uint8Array);
@@ -54,6 +65,35 @@ describe("CliCryptoService", () => {
 			contentKp.secretKey,
 		);
 		expect(unwrapped).toEqual(dek);
+	});
+
+	test("restores a revision DEK from its sealed representation", () => {
+		const creator = new CliCryptoService(masterSecret);
+		const { dek, wrappedDek } = creator.initSessionDek("session-restore", 3);
+		if (!wrappedDek) throw new Error("wrappedDek should not be null");
+		const recovered = new CliCryptoService(masterSecret);
+
+		expect(
+			recovered.restoreSessionDek("session-restore", 3, wrappedDek),
+		).toEqual(dek);
+		expect(recovered.getDek("session-restore", 3)).toEqual(dek);
+		expect(recovered.getWrappedDek("session-restore", 3)).toBe(wrappedDek);
+
+		const encrypted = recovered.encryptEvent({
+			sessionId: "session-restore",
+			machineId: "machine-1",
+			revision: 3,
+			seq: 1,
+			kind: "agent_message_chunk",
+			createdAt: new Date().toISOString(),
+			payload: { text: "recovered" },
+		});
+		if (!isEncryptedPayload(encrypted.payload)) {
+			throw new Error("restored revision should encrypt events");
+		}
+		expect(decryptPayload(encrypted.payload, dek)).toEqual({
+			text: "recovered",
+		});
 	});
 
 	test("getWrappedDek returns null for unknown session", () => {

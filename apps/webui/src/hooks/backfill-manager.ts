@@ -54,13 +54,11 @@ export function applyContiguousPendingEvents({
 	revision,
 	lastAppliedSeq,
 	applyEvent,
-	updateCursor,
 }: {
 	pending: SessionEvent[];
 	revision?: number;
 	lastAppliedSeq: number;
 	applyEvent: (event: SessionEvent) => void;
-	updateCursor: (sessionId: string, revision: number, seq: number) => void;
 }) {
 	const sorted = pending
 		.filter((event) =>
@@ -69,11 +67,15 @@ export function applyContiguousPendingEvents({
 		.sort((a, b) => a.seq - b.seq);
 
 	let lastSeq = lastAppliedSeq;
+	const remaining: SessionEvent[] = [];
 	for (const event of sorted) {
 		if (event.seq <= lastSeq) continue;
-		if (event.seq !== lastSeq + 1) break;
+		if (event.seq !== lastSeq + 1) {
+			remaining.push(event);
+			continue;
+		}
 		applyEvent(event);
 		lastSeq = event.seq;
-		updateCursor(event.sessionId, event.revision, event.seq);
 	}
+	return remaining;
 }

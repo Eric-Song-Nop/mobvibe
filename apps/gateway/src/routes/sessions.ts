@@ -1,11 +1,10 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type { SessionSummary } from "@mobvibe/shared";
+import type { ContentBlock, SessionSummary } from "@mobvibe/shared";
 import {
 	AppError,
 	createErrorDetail,
 	createInternalError,
-	type ErrorDetail,
 	isEncryptedPayload,
 } from "@mobvibe/shared";
 import type { Router } from "express";
@@ -16,21 +15,15 @@ import {
 	requireAuth,
 } from "../middleware/auth.js";
 import type { CliRegistry } from "../services/cli-registry.js";
+import { isMessageIdWithinLimit } from "../services/message-send-safety.js";
 import type { SessionRouter } from "../services/session-router.js";
+import { respondAppError, respondError } from "./error-response.js";
 
 const getErrorMessage = (error: unknown) => {
 	if (error instanceof Error) {
 		return error.message;
 	}
 	return String(error);
-};
-
-const respondError = (
-	response: { status: (code: number) => { json: (body: unknown) => void } },
-	detail: ErrorDetail,
-	status = 500,
-) => {
-	response.status(status).json({ error: detail });
 };
 
 const buildRequestValidationError = (message = "Invalid request") =>
@@ -48,6 +41,16 @@ const buildAuthorizationError = (message = "Not authorized") =>
 		retryable: false,
 		scope: "request",
 	});
+
+const isPlaintextPrompt = (value: unknown): value is ContentBlock[] =>
+	Array.isArray(value) &&
+	value.every(
+		(block) =>
+			typeof block === "object" &&
+			block !== null &&
+			"type" in block &&
+			typeof block.type === "string",
+	);
 
 const normalizeRelativeCwd = (value: unknown): string | undefined => {
 	if (typeof value !== "string") {
@@ -87,6 +90,12 @@ export function setupSessionRoutes(
 ) {
 	// Require authentication on all session routes
 	router.use(requireAuth);
+
+	// Bodyless preflight used by clients to learn the owning Fly Machine before
+	// sending a request that may be too large for fly-replay.
+	router.get("/routing", (_request, response) => {
+		response.status(204).end();
+	});
 
 	/**
 	 * Returns sessions currently held in the in-memory `cliRegistry`.
@@ -195,6 +204,7 @@ export function setupSessionRoutes(
 		} catch (error) {
 			const message = getErrorMessage(error);
 			logger.error({ err: error, userId }, "session_create_error");
+			if (respondAppError(response, error)) return;
 			if (
 				message.includes("No CLI connected") ||
 				message.includes("Machine not found")
@@ -234,6 +244,7 @@ export function setupSessionRoutes(
 		} catch (error) {
 			const message = getErrorMessage(error);
 			logger.error({ err: error, sessionId }, "session_rename_error");
+			if (respondAppError(response, error)) return;
 			if (message.includes("Session not found")) {
 				respondError(response, buildAuthorizationError(message), 404);
 			} else {
@@ -269,6 +280,7 @@ export function setupSessionRoutes(
 			} catch (error) {
 				const message = getErrorMessage(error);
 				logger.error({ err: error, sessionId }, "session_archive_error");
+				if (respondAppError(response, error)) return;
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
 				} else {
@@ -319,6 +331,7 @@ export function setupSessionRoutes(
 				response.json(result);
 			} catch (error) {
 				logger.error({ err: error, userId }, "session_bulk_archive_error");
+				if (respondAppError(response, error)) return;
 				respondError(response, createInternalError("session"));
 			}
 		},
@@ -351,6 +364,7 @@ export function setupSessionRoutes(
 			} catch (error) {
 				const message = getErrorMessage(error);
 				logger.error({ err: error, sessionId }, "session_cancel_error");
+				if (respondAppError(response, error)) return;
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
 				} else {
@@ -390,6 +404,7 @@ export function setupSessionRoutes(
 			} catch (error) {
 				const message = getErrorMessage(error);
 				logger.error({ err: error, sessionId, modeId }, "session_mode_error");
+				if (respondAppError(response, error)) return;
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
 				} else {
@@ -429,6 +444,7 @@ export function setupSessionRoutes(
 			} catch (error) {
 				const message = getErrorMessage(error);
 				logger.error({ err: error, sessionId, modelId }, "session_model_error");
+				if (respondAppError(response, error)) return;
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
 				} else {
@@ -458,15 +474,36 @@ export function setupSessionRoutes(
 
 	// Send message - with authorization check
 	router.post("/message", async (request: AuthenticatedRequest, response) => {
-		const { sessionId, prompt } = request.body ?? {};
-		if (typeof sessionId !== "string" || !isEncryptedPayload(prompt)) {
+		const {
+			sessionId,
+			messageId: requestedMessageId,
+			expectedRevision,
+			prompt,
+		} = request.body ?? {};
+		const canonicalMessageId =
+			typeof requestedMessageId === "string"
+				? requestedMessageId.trim()
+				: undefined;
+		if (
+			typeof sessionId !== "string" ||
+			(requestedMessageId !== undefined &&
+				(canonicalMessageId === undefined ||
+					canonicalMessageId.length === 0 ||
+					!isMessageIdWithinLimit(canonicalMessageId))) ||
+			(expectedRevision !== undefined &&
+				(!Number.isSafeInteger(expectedRevision) || expectedRevision < 1)) ||
+			(!isEncryptedPayload(prompt) && !isPlaintextPrompt(prompt))
+		) {
 			respondError(
 				response,
-				buildRequestValidationError("sessionId and prompt required"),
+				buildRequestValidationError(
+					"sessionId and prompt required; messageId must be non-empty and at most 128 UTF-8 bytes, and expectedRevision must be a positive integer when provided",
+				),
 				400,
 			);
 			return;
 		}
+		const messageId = canonicalMessageId ?? randomUUID();
 
 		const userId = getUserId(request);
 		if (!userId) {
@@ -482,6 +519,7 @@ export function setupSessionRoutes(
 			logger.info(
 				{
 					sessionId,
+					messageId,
 					userId,
 					promptBlocks: "encrypted",
 					requestId,
@@ -491,6 +529,7 @@ export function setupSessionRoutes(
 			logger.debug(
 				{
 					sessionId,
+					messageId,
 					userId,
 					promptBlocks: "encrypted",
 					requestId,
@@ -500,6 +539,7 @@ export function setupSessionRoutes(
 			logger.debug(
 				{
 					sessionId,
+					messageId,
 					userId,
 					requestId,
 					route: "/acp/message",
@@ -510,12 +550,18 @@ export function setupSessionRoutes(
 			);
 
 			const result = await sessionRouter.sendMessage(
-				{ sessionId, prompt },
+				{
+					sessionId,
+					messageId,
+					prompt,
+					...(expectedRevision !== undefined ? { expectedRevision } : {}),
+				},
 				userId,
 			);
 			logger.debug(
 				{
 					sessionId,
+					messageId,
 					userId,
 					requestId,
 					stopReason: result.stopReason,
@@ -525,6 +571,7 @@ export function setupSessionRoutes(
 			logger.info(
 				{
 					sessionId,
+					messageId,
 					userId,
 					stopReason: result.stopReason,
 					requestId,
@@ -534,6 +581,7 @@ export function setupSessionRoutes(
 			logger.debug(
 				{
 					sessionId,
+					messageId,
 					userId,
 					requestId,
 					stopReason: result.stopReason,
@@ -552,12 +600,14 @@ export function setupSessionRoutes(
 				{
 					err: error,
 					sessionId,
+					messageId,
 					userId: getUserId(request),
 					promptBlocks: Array.isArray(prompt) ? prompt.length : undefined,
 					requestId,
 				},
 				"message_send_error",
 			);
+			if (respondAppError(response, error)) return;
 			if (message.includes("Session not found")) {
 				respondError(response, buildAuthorizationError(message), 404);
 			} else {
@@ -605,6 +655,7 @@ export function setupSessionRoutes(
 					{ err: error, sessionId, requestId },
 					"permission_decision_error",
 				);
+				if (respondAppError(response, error)) return;
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
 				} else {
@@ -687,6 +738,7 @@ export function setupSessionRoutes(
 			} catch (error) {
 				const message = getErrorMessage(error);
 				logger.error({ err: error, userId }, "sessions_discover_error");
+				if (respondAppError(response, error)) return;
 				if (
 					message.includes("Machine not found") ||
 					message.includes("No CLI connected")
@@ -745,6 +797,7 @@ export function setupSessionRoutes(
 			} catch (error) {
 				const message = getErrorMessage(error);
 				logger.error({ err: error, sessionId }, "session_load_error");
+				if (respondAppError(response, error)) return;
 				if (
 					message.includes("Machine not found") ||
 					message.includes("No CLI connected")
@@ -814,6 +867,7 @@ export function setupSessionRoutes(
 			} catch (error) {
 				const message = getErrorMessage(error);
 				logger.error({ err: error, sessionId }, "session_reload_error");
+				if (respondAppError(response, error)) return;
 				if (
 					message.includes("Machine not found") ||
 					message.includes("No CLI connected")
@@ -903,6 +957,7 @@ export function setupSessionRoutes(
 			} catch (error) {
 				const message = getErrorMessage(error);
 				logger.error({ err: error, sessionId }, "session_events_error");
+				if (respondAppError(response, error)) return;
 				if (message.includes("Session not found")) {
 					respondError(
 						response,

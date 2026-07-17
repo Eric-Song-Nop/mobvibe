@@ -64,10 +64,13 @@ type Mutations = {
 		mutate: (params: {
 			sessionId: string;
 			prompt: ChatSession["inputContents"];
-			messageId?: string;
+			messageId: string;
+			revision: number;
+			encryptionRequired: boolean;
 			draft?: {
 				input: string;
 				inputContents: ChatSession["inputContents"];
+				revision?: number;
 			};
 		}) => void;
 	};
@@ -481,8 +484,16 @@ export function useSessionHandlers({
 			chatActions.setError(activeSessionId, buildSessionE2EEKeyMissingError());
 			return;
 		}
+		if (readySession.revision === undefined) {
+			chatActions.setError(activeSessionId, buildSessionNotReadyError());
+			return;
+		}
 
-		const messageId = crypto.randomUUID();
+		const messageId =
+			latestDraft?.messageId !== undefined &&
+			latestDraft.messageRevision !== undefined
+				? latestDraft.messageId
+				: crypto.randomUUID();
 
 		chatActions.setSending(activeSessionId, true);
 		chatActions.setCanceling(activeSessionId, false);
@@ -498,9 +509,12 @@ export function useSessionHandlers({
 			sessionId: activeSessionId,
 			prompt: latestPromptContents,
 			messageId,
+			revision: readySession.revision,
+			encryptionRequired: readySession.e2eeStatus === "ok",
 			draft: {
 				input: latestPromptText,
 				inputContents: latestPromptContents,
+				revision: readySession.revision,
 			},
 		});
 	};

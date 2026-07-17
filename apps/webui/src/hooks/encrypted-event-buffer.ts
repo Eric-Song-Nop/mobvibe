@@ -16,10 +16,34 @@ export function createEncryptedEventBuffer() {
 			events.push(event);
 			buffer.set(sessionId, events);
 		},
-		drain(sessionId: string) {
+		drain(sessionId: string, revision?: number) {
 			const events = buffer.get(sessionId) ?? [];
-			buffer.delete(sessionId);
-			return events;
+			if (revision === undefined) {
+				buffer.delete(sessionId);
+				return events;
+			}
+			const matching = events.filter(
+				({ event }) => event.revision === revision,
+			);
+			const remaining = events.filter(
+				({ event }) => event.revision !== revision,
+			);
+			if (remaining.length > 0) {
+				buffer.set(sessionId, remaining);
+			} else {
+				buffer.delete(sessionId);
+			}
+			return matching;
+		},
+		retainRevision(sessionId: string, revision: number) {
+			const matching = (buffer.get(sessionId) ?? []).filter(
+				({ event }) => event.revision === revision,
+			);
+			if (matching.length > 0) {
+				buffer.set(sessionId, matching);
+			} else {
+				buffer.delete(sessionId);
+			}
 		},
 		clear(sessionId: string) {
 			buffer.delete(sessionId);

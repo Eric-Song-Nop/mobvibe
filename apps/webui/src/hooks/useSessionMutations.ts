@@ -78,12 +78,15 @@ type PermissionRequestPayload = {
 type SendMessageDraft = {
 	input: string;
 	inputContents: ContentBlock[];
+	revision?: number;
 };
 
 type SendMessageVariables = {
 	sessionId: string;
 	prompt: ContentBlock[];
-	messageId?: string;
+	messageId: string;
+	revision: number;
+	encryptionRequired: boolean;
 	draft?: SendMessageDraft;
 };
 
@@ -151,7 +154,12 @@ export interface ChatStoreActions {
 			provisional?: boolean;
 		},
 	) => void;
-	confirmOrAppendUserMessage: (sessionId: string, text: string) => void;
+	confirmOrAppendUserMessage: (
+		sessionId: string,
+		chunk: ContentBlock | string,
+		messageId?: string,
+		eventSeq?: number,
+	) => void;
 	markUserMessageFailed: (sessionId: string, messageId: string) => void;
 	addStatusMessage: (sessionId: string, status: StatusPayload) => void;
 	appendAssistantChunk: (sessionId: string, text: string) => void;
@@ -286,7 +294,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 
 			store.setSessionE2EEStatus(
 				data.sessionId,
-				bootstrapSessionE2EE(data.sessionId, data.wrappedDek),
+				bootstrapSessionE2EE(data.sessionId, data.wrappedDek, data.revision),
 			);
 
 			// Switch to real session
@@ -435,23 +443,36 @@ export function useSessionMutations(store: ChatStoreActions) {
 			return sendMessage({
 				sessionId: variables.sessionId,
 				prompt: variables.prompt,
+				messageId: variables.messageId,
+				revision: variables.revision,
+				encryptionRequired: variables.encryptionRequired,
 			});
 		},
 		onError: (mutationError: unknown, variables) => {
+			const normalizedError = normalizeError(
+				mutationError,
+				createFallbackError(t("errors.sendFailed"), "session"),
+			);
+			const canReuseMessageId =
+				normalizedError.code !== "MESSAGE_OUTCOME_UNKNOWN";
 			if (variables?.messageId) {
 				store.markUserMessageFailed(variables.sessionId, variables.messageId);
 			}
 			if (variables?.draft) {
-				useUiStore
-					.getState()
-					.setChatDraft(variables.sessionId, variables.draft);
+				const { revision, ...draft } = variables.draft;
+				useUiStore.getState().setChatDraft(variables.sessionId, {
+					...draft,
+					...(canReuseMessageId
+						? {
+								messageId: variables.messageId,
+								...(revision !== undefined
+									? { messageRevision: revision }
+									: {}),
+							}
+						: {}),
+				});
 			}
-			store.setAppError(
-				normalizeError(
-					mutationError,
-					createFallbackError(t("errors.sendFailed"), "session"),
-				),
-			);
+			store.setAppError(normalizedError);
 		},
 		onSettled: (_data, _error, variables) => {
 			if (!variables) {
@@ -493,6 +514,13 @@ export function useSessionMutations(store: ChatStoreActions) {
 
 	const createSessionLoadCallbacks = (errorKey: string) => ({
 		onSuccess: (data: SessionSummary) => {
+			const e2eeStatus = bootstrapSessionE2EE(
+				data.sessionId,
+				data.wrappedDek,
+				data.revision,
+			);
+			store.setSessionE2EEStatus(data.sessionId, e2eeStatus);
+
 			// Only reset if revision actually changed (avoid wiping backfill results)
 			if (data.revision !== undefined) {
 				const current = useChatStore.getState().sessions[data.sessionId];

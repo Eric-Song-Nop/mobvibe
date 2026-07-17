@@ -3,17 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { RegistryData } from "@mobvibe/shared";
-
-// Restore real node:fs/promises — session-manager.test.ts mocks it globally
-// via Bun's mock.module which leaks across test files.
-// We derive the real implementation from node:fs (which is NOT mocked).
-mock.module("node:fs/promises", () => ({
-	default: fs.promises,
-	...fs.promises,
-}));
-
-// Dynamic import so registry-client.ts picks up the restored fs module
-const { getRegistry } = await import("../registry-client.js");
+import { getRegistry } from "../registry-client.js";
 
 const SAMPLE_REGISTRY: RegistryData = {
 	version: "1.0.0",

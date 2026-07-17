@@ -1,8 +1,15 @@
 import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Badge } from "@mobvibe/ui/badge";
+import { Bubble, BubbleContent } from "@mobvibe/ui/bubble";
 import { Button } from "@mobvibe/ui/button";
 import { Card, CardContent } from "@mobvibe/ui/card";
+import {
+	Message,
+	MessageAvatar,
+	MessageContent,
+	MessageHeader,
+} from "@mobvibe/ui/message";
 import { memo, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { UnifiedDiffView } from "@/components/chat/DiffView";
@@ -239,8 +246,10 @@ const renderImageContent = (
 				<img
 					src={source}
 					alt={label}
+					width={640}
+					height={360}
 					loading="lazy"
-					className="mt-2 max-h-48 rounded border border-border"
+					className="mt-2 h-auto max-h-48 max-w-full rounded border border-border"
 				/>
 			) : (
 				<div className="mt-2 text-[11px] text-muted-foreground">
@@ -967,77 +976,83 @@ const MessageItemInner = ({
 	// User messages: bubble style with hover-reveal copy button
 	if (isUser && message.kind === "text") {
 		return (
-			<div className="flex flex-col gap-1 items-end">
-				{isPendingUserMessage || isFailedUserMessage ? (
-					<div
-						className="flex max-w-[85%] items-center gap-2 self-end text-[11px]"
-						aria-live="polite"
-					>
-						<Badge variant={isFailedUserMessage ? "destructive" : "secondary"}>
-							{isFailedUserMessage
-								? t("chat.messageFailed")
-								: t("chat.messagePending")}
-						</Badge>
-						{isFailedUserMessage ? (
-							<span className="text-destructive">
-								{t("chat.messageFailedHint")}
-							</span>
-						) : null}
-					</div>
-				) : null}
-				<div className="group/user-msg flex items-center gap-1.5 max-w-[85%]">
-					{!message.isStreaming && (
-						<button
-							type="button"
-							className="shrink-0 flex items-center justify-center size-6 rounded-full border border-border bg-background text-muted-foreground shadow-sm transition-[opacity,background-color,color] hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 md:opacity-0 group-hover/user-msg:opacity-100 focus-visible:opacity-100"
-							onClick={(e) => {
-								e.stopPropagation();
-								handleCopy();
-							}}
-							aria-label={t("chat.copyMessage")}
+			<Message align="end">
+				<MessageContent className="items-end gap-1">
+					{isPendingUserMessage || isFailedUserMessage ? (
+						<MessageHeader
+							className="justify-end gap-2 px-0"
+							aria-live="polite"
 						>
-							<HugeiconsIcon
-								icon={copied ? Tick02Icon : Copy01Icon}
-								size={14}
-								aria-hidden="true"
-							/>
-						</button>
-					)}
-					<Card
-						size="sm"
-						className={cn(
-							"min-w-0",
-							isFailedUserMessage
-								? "border-destructive/40 bg-destructive/10"
-								: isPendingUserMessage
-									? "border-primary/30 border-dashed bg-primary/5"
-									: "border-primary/30 bg-primary/10",
-							message.isStreaming ? "opacity-90" : "opacity-100",
+							<Badge
+								variant={isFailedUserMessage ? "destructive" : "secondary"}
+							>
+								{isFailedUserMessage
+									? t("chat.messageFailed")
+									: t("chat.messagePending")}
+							</Badge>
+							{isFailedUserMessage ? (
+								<span className="text-destructive">
+									{t("chat.messageFailedHint")}
+								</span>
+							) : null}
+						</MessageHeader>
+					) : null}
+					<div className="group/user-msg flex w-full items-center justify-end gap-1.5">
+						{!message.isStreaming && (
+							<Button
+								type="button"
+								variant="outline"
+								size="icon-xs"
+								className="rounded-full text-muted-foreground md:opacity-0 group-hover/user-msg:opacity-100 focus-visible:opacity-100"
+								onClick={(event) => {
+									event.stopPropagation();
+									handleCopy();
+								}}
+								aria-label={t("chat.copyMessage")}
+								title={t("chat.copyMessage")}
+							>
+								<HugeiconsIcon
+									icon={copied ? Tick02Icon : Copy01Icon}
+									aria-hidden="true"
+								/>
+							</Button>
 						)}
-					>
-						<CardContent className="text-sm">
-							{renderUserContent(message, onOpenFilePreview)}
-						</CardContent>
-					</Card>
-				</div>
-			</div>
+						<Bubble
+							align="end"
+							variant={
+								isFailedUserMessage
+									? "destructive"
+									: isPendingUserMessage
+										? "outline"
+										: "tinted"
+							}
+							className={message.isStreaming ? "opacity-90" : "opacity-100"}
+						>
+							<BubbleContent>
+								{renderUserContent(message, onOpenFilePreview)}
+							</BubbleContent>
+						</Bubble>
+					</div>
+				</MessageContent>
+			</Message>
 		);
 	}
-	// Assistant messages: no bubble, just bullet point + content
+	// Assistant messages use the ghost bubble so rich markdown stays visually open.
 	return (
-		<div className="flex flex-col gap-1 items-start">
-			<div className="flex items-start gap-2 max-w-full">
+		<Message>
+			<MessageAvatar className="min-w-2 self-start bg-transparent">
 				<span className="mt-1.5 size-2 shrink-0 rounded-full bg-foreground" />
-				<div
-					className={cn(
-						"min-w-0 text-sm",
-						message.isStreaming ? "opacity-90" : "opacity-100",
-					)}
-				>
-					<LazyStreamdown>{message.content}</LazyStreamdown>
-				</div>
-			</div>
-		</div>
+			</MessageAvatar>
+			<MessageContent>
+				<Bubble variant="ghost" className="max-w-full">
+					<BubbleContent
+						className={message.isStreaming ? "opacity-90" : "opacity-100"}
+					>
+						<LazyStreamdown>{message.content}</LazyStreamdown>
+					</BubbleContent>
+				</Bubble>
+			</MessageContent>
+		</Message>
 	);
 };
 

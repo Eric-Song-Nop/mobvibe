@@ -73,6 +73,7 @@ function TauriPairHandler() {
 											e2ee.getSessionE2EEStatus(
 												session.sessionId,
 												Boolean(session.wrappedDek),
+												session.revision,
 											),
 										);
 									}

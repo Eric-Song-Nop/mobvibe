@@ -1,7 +1,7 @@
-import { Card, CardContent } from "@mobvibe/ui/card";
+import { Bubble, BubbleContent } from "@mobvibe/ui/bubble";
+import { Message, MessageAvatar, MessageContent } from "@mobvibe/ui/message";
 import { Streamdown } from "streamdown";
 import type { DisplayMessage } from "@/hooks/use-streaming-demo";
-import { cn } from "@/lib/utils";
 
 interface DemoMessageItemProps {
 	message: DisplayMessage;
@@ -10,32 +10,35 @@ interface DemoMessageItemProps {
 export function DemoMessageItem({ message }: DemoMessageItemProps) {
 	if (message.role === "user") {
 		return (
-			<div className="flex justify-end">
-				<Card
-					size="sm"
-					className="max-w-[85%] border-primary/30 bg-primary/10 py-2"
-				>
-					<CardContent className="px-3 py-0">
-						<p className="text-xs">{message.content}</p>
-					</CardContent>
-				</Card>
-			</div>
+			<Message align="end">
+				<MessageContent>
+					<Bubble variant="tinted" align="end" className="max-w-[85%]">
+						<BubbleContent>
+							<p className="text-xs">{message.content}</p>
+						</BubbleContent>
+					</Bubble>
+				</MessageContent>
+			</Message>
 		);
 	}
 
 	return (
-		<div
-			className={cn(
-				"flex gap-2 items-start",
-				message.isStreaming ? "opacity-90" : "opacity-100",
-			)}
-		>
-			<span className="mt-1.5 size-2 shrink-0 rounded-full bg-foreground" />
-			<div className="min-w-0 flex-1 text-sm">
-				<Streamdown mode={message.isStreaming ? "streaming" : "static"}>
-					{message.content}
-				</Streamdown>
-			</div>
-		</div>
+		<Message className={message.isStreaming ? "opacity-90" : "opacity-100"}>
+			<MessageAvatar className="mt-1 min-w-4 self-start bg-transparent">
+				<span
+					className="size-2 rounded-full bg-foreground"
+					aria-hidden="true"
+				/>
+			</MessageAvatar>
+			<MessageContent>
+				<Bubble variant="ghost">
+					<BubbleContent className="text-sm">
+						<Streamdown mode={message.isStreaming ? "streaming" : "static"}>
+							{message.content}
+						</Streamdown>
+					</BubbleContent>
+				</Bubble>
+			</MessageContent>
+		</Message>
 	);
 }

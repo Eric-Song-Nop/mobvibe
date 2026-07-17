@@ -1,5 +1,5 @@
 import type { SessionEvent, SessionEventsResponse } from "@mobvibe/shared";
-import { useCallback, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import { isInTauri } from "@/lib/auth";
 import { getAuthToken } from "@/lib/auth-token";
 import { platformFetch } from "@/lib/tauri-fetch";
@@ -194,14 +194,29 @@ export function useSessionBackfill({
 						return;
 					}
 
+					const eventAfterSeq = response.events.reduce(
+						(maxSeq, event) => Math.max(maxSeq, event.seq),
+						currentAfterSeq,
+					);
+					const nextAfterSeq = Math.max(
+						eventAfterSeq,
+						response.nextAfterSeq ?? currentAfterSeq,
+					);
+
+					if (response.hasMore && nextAfterSeq <= currentAfterSeq) {
+						throw new Error(
+							`Backfill cursor did not advance beyond seq ${currentAfterSeq}`,
+						);
+					}
+
 					if (response.events.length > 0) {
 						onEvents(sessionId, response.events);
 						totalEvents += response.events.length;
-						currentAfterSeq = response.nextAfterSeq ?? currentAfterSeq;
 					}
+					currentAfterSeq = nextAfterSeq;
 
 					// Guard against infinite loops
-					if (!response.hasMore || response.events.length === 0) {
+					if (!response.hasMore) {
 						break;
 					}
 				}
@@ -263,6 +278,8 @@ export function useSessionBackfill({
 		activeBackfills.current.clear();
 		bumpActiveVersion();
 	}, []);
+
+	useEffect(() => cancelAll, [cancelAll]);
 
 	return {
 		startBackfill,

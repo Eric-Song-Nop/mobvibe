@@ -15,6 +15,7 @@ const createMockSocket = (
 		on: vi.fn(),
 		join: vi.fn(),
 		leave: vi.fn(),
+		disconnect: vi.fn(),
 	}) as unknown as import("socket.io").Socket;
 
 const createMockRegistrationInfo = (
@@ -82,6 +83,7 @@ describe("CliRegistry", () => {
 
 			expect(registry.getCliBySocketId("socket-1")).toBeUndefined();
 			expect(registry.getCliBySocketId("socket-2")).toBe(newRecord);
+			expect(socket1.disconnect).toHaveBeenCalledWith(true);
 		});
 
 		it("unregisters and emits status event", () => {
@@ -153,6 +155,56 @@ describe("CliRegistry", () => {
 			expect(record?.sessions).toHaveLength(1);
 			expect(record?.sessions[0].sessionId).toBe("session-1");
 			expect(record?.sessions[0].title).toBe("Updated Title");
+		});
+
+		it("emits a user-scoped diff for full snapshots without repeating heartbeats", () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			registry.register(socket, info, {
+				userId: "user-1",
+				deviceId: "device-1",
+			});
+			const listener = vi.fn();
+			registry.onSessionsChanged(listener);
+			const session = createMockSessionSummary({
+				sessionId: "session-1",
+				title: "Initial",
+			});
+
+			registry.updateSessions(socket.id, [session]);
+
+			expect(listener).toHaveBeenCalledWith(
+				"machine-1",
+				{
+					added: [{ ...session, machineId: "machine-1" }],
+					updated: [],
+					removed: [],
+				},
+				"user-1",
+			);
+
+			listener.mockClear();
+			registry.updateSessions(socket.id, [{ ...session }]);
+			expect(listener).not.toHaveBeenCalled();
+
+			registry.updateSessions(socket.id, [
+				{ ...session, title: "Updated" },
+				createMockSessionSummary({ sessionId: "session-2" }),
+			]);
+			expect(listener).toHaveBeenCalledWith(
+				"machine-1",
+				expect.objectContaining({
+					added: [expect.objectContaining({ sessionId: "session-2" })],
+					updated: [
+						expect.objectContaining({
+							sessionId: "session-1",
+							title: "Updated",
+						}),
+					],
+					removed: [],
+				}),
+				"user-1",
+			);
 		});
 	});
 

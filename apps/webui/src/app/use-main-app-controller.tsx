@@ -249,7 +249,11 @@ export function useMainAppController() {
 			for (const session of sessionsQuery.data.sessions) {
 				setSessionE2EEStatus(
 					session.sessionId,
-					bootstrapSessionE2EE(session.sessionId, session.wrappedDek),
+					bootstrapSessionE2EE(
+						session.sessionId,
+						session.wrappedDek,
+						session.revision,
+					),
 				);
 			}
 		}

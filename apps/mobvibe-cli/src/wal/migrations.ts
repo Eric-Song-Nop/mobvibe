@@ -211,11 +211,78 @@ const MIGRATIONS = [
         ON agent_team_mailbox_messages (agent_team_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_agent_team_tasks_team
         ON agent_team_tasks (agent_team_id, updated_at);
-    `,
+		`,
+	},
+	{
+		version: 8,
+		up: `
+			-- Completed message sends are durable idempotency records. The prompt
+			-- itself remains in the session event WAL; only the terminal result is
+			-- stored here so a gateway retry cannot execute the agent twice.
+			CREATE TABLE IF NOT EXISTS message_send_results (
+				session_id TEXT NOT NULL,
+				message_id TEXT NOT NULL,
+				stop_reason TEXT NOT NULL,
+				completed_at TEXT NOT NULL,
+				PRIMARY KEY (session_id, message_id)
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_message_send_results_completed_at
+				ON message_send_results (completed_at);
+		`,
+	},
+	{
+		version: 9,
+		up: `
+			-- DEKs are never stored in plaintext. wrapped_dek is a sealed box
+			-- encrypted to the content keypair derived from the CLI master secret.
+			CREATE TABLE IF NOT EXISTS session_revision_keys (
+				session_id TEXT NOT NULL,
+				revision INTEGER NOT NULL,
+				wrapped_dek TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				PRIMARY KEY (session_id, revision)
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_session_revision_keys_session
+				ON session_revision_keys (session_id, revision);
+		`,
+	},
+	{
+		version: 10,
+		up: `
+			-- A durable claim closes the crash window between starting an ACP
+			-- prompt and recording its terminal result. A claim left behind by a
+			-- terminated daemon is intentionally treated as indeterminate instead
+			-- of executing the same external side effects again.
+			CREATE TABLE IF NOT EXISTS message_send_claims (
+				session_id TEXT NOT NULL,
+				message_id TEXT NOT NULL,
+				claim_id TEXT NOT NULL,
+				claimed_at TEXT NOT NULL,
+				PRIMARY KEY (session_id, message_id)
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_message_send_claims_claimed_at
+				ON message_send_claims (claimed_at);
+		`,
+	},
+	{
+		version: 11,
+		up: `
+			-- Bind a WAL database to the non-secret public identity derived from
+			-- the master secret. A daemon using another account/key must fail
+			-- closed instead of advertising or replaying the previous user's data.
+			CREATE TABLE IF NOT EXISTS wal_encryption_identity (
+				id INTEGER PRIMARY KEY CHECK (id = 1),
+				key_identity TEXT NOT NULL,
+				bound_at TEXT NOT NULL
+			);
+		`,
 	},
 ];
 
-export function runMigrations(db: Database): void {
+export function runMigrations(db: Database): number {
 	// Enable WAL mode for better concurrency
 	db.exec("PRAGMA journal_mode = WAL");
 	db.exec("PRAGMA synchronous = NORMAL");
@@ -230,6 +297,7 @@ export function runMigrations(db: Database): void {
 	} catch {
 		// Table doesn't exist yet, version is 0
 	}
+	const initialVersion = currentVersion;
 
 	// Run pending migrations
 	for (const migration of MIGRATIONS) {
@@ -240,4 +308,5 @@ export function runMigrations(db: Database): void {
 			);
 		}
 	}
+	return initialVersion;
 }

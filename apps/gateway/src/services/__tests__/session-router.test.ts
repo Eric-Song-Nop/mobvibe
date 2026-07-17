@@ -1,4 +1,5 @@
 import type {
+	AppError,
 	CliRegistrationInfo,
 	DiscoverSessionsRpcResult,
 	GitFileDiffResponse,
@@ -440,6 +441,502 @@ describe("SessionRouter", () => {
 		});
 	});
 
+	describe("sendMessage safety and in-flight deduplication", () => {
+		const registerSession = (
+			protocolCapabilities?: {
+				messageIdempotency?: boolean;
+				messageRevisionPinning?: boolean;
+			},
+			sessionOverrides: Parameters<typeof createMockSessionSummary>[0] = {},
+		) => {
+			const socket = createMockSocket("socket-message");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({
+					machineId: "machine-message",
+					protocolCapabilities,
+				}),
+				{ userId: "user-message", deviceId: "device-message" },
+			);
+			cliRegistry.updateSessions(socket.id, [
+				createMockSessionSummary({
+					sessionId: "session-message",
+					...sessionOverrides,
+				}),
+			]);
+			return socket;
+		};
+		const registerOwnedSession = ({
+			userId,
+			machineId,
+			sessionId,
+			protocolCapabilities,
+			revision,
+		}: {
+			userId: string;
+			machineId: string;
+			sessionId: string;
+			protocolCapabilities?: {
+				messageIdempotency?: boolean;
+				messageRevisionPinning?: boolean;
+			};
+			revision?: number;
+		}) => {
+			const socket = createMockSocket(`socket-${machineId}`);
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId, protocolCapabilities }),
+				{ userId, deviceId: `device-${machineId}` },
+			);
+			cliRegistry.updateSessions(socket.id, [
+				createMockSessionSummary({ sessionId, revision }),
+			]);
+			return socket;
+		};
+		const getDurableMessageSendCache = () =>
+			(
+				sessionRouter as unknown as {
+					durableMessageSends: Map<
+						string,
+						{
+							promise: Promise<{ stopReason: "end_turn" }>;
+							ownerId: string;
+						}
+					>;
+				}
+			).durableMessageSends;
+		it("rejects message IDs over 128 UTF-8 bytes at the router boundary", async () => {
+			const overlongMessageId = "界".repeat(43);
+			expect(Buffer.byteLength(overlongMessageId, "utf8")).toBe(129);
+			const error = await sessionRouter
+				.sendMessage(
+					{
+						sessionId: "session-message",
+						messageId: overlongMessageId,
+						prompt: { t: "encrypted", c: "ciphertext" },
+					},
+					"user-message",
+				)
+				.catch((caught: unknown) => caught as AppError);
+
+			expect(error).toMatchObject({
+				status: 400,
+				detail: { code: "REQUEST_VALIDATION_FAILED", retryable: false },
+			});
+		});
+
+		it("uses a fixed-length digest instead of the raw message ID as the cache key", async () => {
+			const socket = registerSession({ messageIdempotency: true });
+			const rawMessageId = "sensitive-client-message-id";
+			const operation = sessionRouter.sendMessage(
+				{
+					sessionId: "session-message",
+					messageId: rawMessageId,
+					prompt: { t: "encrypted", c: "ciphertext" },
+				},
+				"user-message",
+			);
+
+			const keys = [...getDurableMessageSendCache().keys()];
+			expect(keys).toHaveLength(1);
+			expect(keys[0]).toMatch(/^message-send:[0-9a-f]{64}$/);
+			expect(keys[0]).not.toContain(rawMessageId);
+
+			sessionRouter.handleCliDisconnect(socket.id);
+			await expect(operation).rejects.toThrow("CLI disconnected");
+		});
+
+		it("rejects a CLI without durable message ID support before execution", async () => {
+			const socket = registerSession();
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:message:send") {
+					sessionRouter.handleRpcResponse({
+						requestId: request.requestId,
+						result: { stopReason: "end_turn" },
+					});
+				}
+			});
+
+			const error = await sessionRouter
+				.sendMessage(
+					{
+						sessionId: "session-message",
+						messageId: "legacy-unsafe-message",
+						prompt: { t: "encrypted", c: "ciphertext" },
+					},
+					"user-message",
+				)
+				.catch((caught: unknown) => caught as AppError);
+
+			expect(error).toMatchObject({
+				status: 409,
+				detail: { code: "CAPABILITY_NOT_SUPPORTED", retryable: false },
+			});
+			expect(socket.emit).not.toHaveBeenCalled();
+			expect(getDurableMessageSendCache().size).toBe(0);
+		});
+
+		it("shares an in-flight send for a durable CLI", async () => {
+			const socket = registerSession({ messageIdempotency: true });
+			let requestId: string | undefined;
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:message:send") requestId = request.requestId;
+			});
+			const params = {
+				sessionId: "session-message",
+				messageId: "stable-message",
+				prompt: { t: "encrypted" as const, c: "ciphertext" },
+			};
+
+			const first = sessionRouter.sendMessage(params, "user-message");
+			const inFlightRetry = sessionRouter.sendMessage(params, "user-message");
+			expect(socket.emit).toHaveBeenCalledTimes(1);
+			sessionRouter.handleRpcResponse({
+				requestId: requestId ?? "missing",
+				result: { stopReason: "end_turn" },
+			});
+
+			await expect(first).resolves.toEqual({ stopReason: "end_turn" });
+			await expect(inFlightRetry).resolves.toEqual({ stopReason: "end_turn" });
+			expect(socket.emit).toHaveBeenCalledTimes(1);
+			expect(getDurableMessageSendCache().size).toBe(0);
+		});
+
+		it("rejects a plaintext downgrade for a session that advertises E2EE", async () => {
+			const socket = registerSession(
+				{ messageIdempotency: true },
+				{ wrappedDek: "wrapped-dek" },
+			);
+
+			const error = await sessionRouter
+				.sendMessage(
+					{
+						sessionId: "session-message",
+						messageId: "plaintext-downgrade",
+						prompt: [{ type: "text", text: "must remain encrypted" }],
+					},
+					"user-message",
+				)
+				.catch((caught: unknown) => caught as AppError);
+
+			expect(error).toMatchObject({
+				status: 400,
+				detail: { code: "REQUEST_VALIDATION_FAILED", retryable: false },
+			});
+			expect(socket.emit).not.toHaveBeenCalled();
+		});
+
+		it("rejects a pinned send when the CLI cannot enforce its revision", async () => {
+			const socket = registerSession(
+				{ messageIdempotency: true },
+				{ revision: 4 },
+			);
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:message:send") {
+					sessionRouter.handleRpcResponse({
+						requestId: request.requestId,
+						result: { stopReason: "end_turn" },
+					});
+				}
+			});
+
+			const error = await sessionRouter
+				.sendMessage(
+					{
+						sessionId: "session-message",
+						messageId: "unsupported-revision-pin",
+						expectedRevision: 4,
+						prompt: { t: "encrypted", c: "ciphertext" },
+					},
+					"user-message",
+				)
+				.catch((caught: unknown) => caught as AppError);
+
+			expect(error).toMatchObject({
+				status: 409,
+				detail: { code: "CAPABILITY_NOT_SUPPORTED", retryable: false },
+			});
+			expect(socket.emit).not.toHaveBeenCalled();
+		});
+
+		it("rejects an invalid expected revision at the router boundary", async () => {
+			const socket = registerSession(
+				{
+					messageIdempotency: true,
+					messageRevisionPinning: true,
+				},
+				{ revision: 4 },
+			);
+
+			const error = await sessionRouter
+				.sendMessage(
+					{
+						sessionId: "session-message",
+						messageId: "invalid-revision-pin",
+						expectedRevision: 1.5,
+						prompt: { t: "encrypted", c: "ciphertext" },
+					},
+					"user-message",
+				)
+				.catch((caught: unknown) => caught as AppError);
+
+			expect(error).toMatchObject({
+				status: 400,
+				detail: { code: "REQUEST_VALIDATION_FAILED", retryable: false },
+			});
+			expect(socket.emit).not.toHaveBeenCalled();
+		});
+
+		it("forwards a stale revision so the CLI can replay a completed send", async () => {
+			const socket = registerSession(
+				{
+					messageIdempotency: true,
+					messageRevisionPinning: true,
+				},
+				{ revision: 5 },
+			);
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:message:send") {
+					sessionRouter.handleRpcResponse({
+						requestId: request.requestId,
+						result: { stopReason: "end_turn" },
+					});
+				}
+			});
+
+			await expect(
+				sessionRouter.sendMessage(
+					{
+						sessionId: "session-message",
+						messageId: "completed-on-prior-revision",
+						expectedRevision: 4,
+						prompt: { t: "encrypted", c: "ciphertext" },
+					},
+					"user-message",
+				),
+			).resolves.toEqual({ stopReason: "end_turn" });
+			expect(socket.emit).toHaveBeenCalledWith(
+				"rpc:message:send",
+				expect.objectContaining({
+					params: expect.objectContaining({
+						messageId: "completed-on-prior-revision",
+						expectedRevision: 4,
+					}),
+				}),
+			);
+		});
+
+		it("preserves an authoritative stale revision rejection from the CLI", async () => {
+			const socket = registerSession(
+				{
+					messageIdempotency: true,
+					messageRevisionPinning: true,
+				},
+				{ revision: 5 },
+			);
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:message:send") {
+					sessionRouter.handleRpcResponse({
+						requestId: request.requestId,
+						error: {
+							code: "SESSION_NOT_READY",
+							message: "Session revision changed; refresh before sending",
+							retryable: false,
+							scope: "session",
+							status: 409,
+						},
+					});
+				}
+			});
+
+			await expect(
+				sessionRouter.sendMessage(
+					{
+						sessionId: "session-message",
+						messageId: "uncompleted-on-prior-revision",
+						expectedRevision: 4,
+						prompt: { t: "encrypted", c: "ciphertext" },
+					},
+					"user-message",
+				),
+			).rejects.toMatchObject({
+				status: 409,
+				detail: { code: "SESSION_NOT_READY", retryable: false },
+			});
+			expect(socket.emit).toHaveBeenCalledTimes(1);
+		});
+
+		it("forwards a pin when the cached session revision is unavailable", async () => {
+			const socket = registerSession({
+				messageIdempotency: true,
+				messageRevisionPinning: true,
+			});
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:message:send") {
+					sessionRouter.handleRpcResponse({
+						requestId: request.requestId,
+						result: { stopReason: "end_turn" },
+					});
+				}
+			});
+
+			await expect(
+				sessionRouter.sendMessage(
+					{
+						sessionId: "session-message",
+						messageId: "unavailable-summary-revision",
+						expectedRevision: 1,
+						prompt: { t: "encrypted", c: "ciphertext" },
+					},
+					"user-message",
+				),
+			).resolves.toEqual({ stopReason: "end_turn" });
+			expect(socket.emit).toHaveBeenCalledWith(
+				"rpc:message:send",
+				expect.objectContaining({
+					params: expect.objectContaining({
+						messageId: "unavailable-summary-revision",
+						expectedRevision: 1,
+					}),
+				}),
+			);
+		});
+
+		it("forwards a matching revision only to a capable CLI", async () => {
+			const socket = registerSession(
+				{
+					messageIdempotency: true,
+					messageRevisionPinning: true,
+				},
+				{ revision: 6 },
+			);
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:message:send") {
+					sessionRouter.handleRpcResponse({
+						requestId: request.requestId,
+						result: { stopReason: "end_turn" },
+					});
+				}
+			});
+
+			await expect(
+				sessionRouter.sendMessage(
+					{
+						sessionId: "session-message",
+						messageId: "matching-revision-pin",
+						expectedRevision: 6,
+						prompt: { t: "encrypted", c: "ciphertext" },
+					},
+					"user-message",
+				),
+			).resolves.toEqual({ stopReason: "end_turn" });
+			expect(socket.emit).toHaveBeenCalledWith(
+				"rpc:message:send",
+				expect.objectContaining({
+					params: expect.objectContaining({ expectedRevision: 6 }),
+				}),
+			);
+		});
+
+		it("clears a durable Gateway entry as soon as the send settles", async () => {
+			const socket = registerSession({ messageIdempotency: true });
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:message:send") {
+					sessionRouter.handleRpcResponse({
+						requestId: request.requestId,
+						result: { stopReason: "end_turn" },
+					});
+				}
+			});
+			const params = {
+				sessionId: "session-message",
+				messageId: "settled-message",
+				prompt: { t: "encrypted" as const, c: "ciphertext" },
+			};
+
+			await sessionRouter.sendMessage(params, "user-message");
+			expect(getDurableMessageSendCache().size).toBe(0);
+			await sessionRouter.sendMessage(params, "user-message");
+
+			expect(socket.emit).toHaveBeenCalledTimes(2);
+		});
+
+		it("bounds durable active sends per owner without blocking another owner", async () => {
+			const firstSocket = registerSession({ messageIdempotency: true });
+			const activeSends = getDurableMessageSendCache();
+			for (let index = 0; index < 1_000; index++) {
+				activeSends.set(`active-${index}`, {
+					promise: Promise.resolve({ stopReason: "end_turn" }),
+					ownerId: "user-message",
+				});
+			}
+
+			const error = await sessionRouter
+				.sendMessage(
+					{
+						sessionId: "session-message",
+						messageId: "active-owner-over-quota",
+						prompt: { t: "encrypted", c: "ciphertext" },
+					},
+					"user-message",
+				)
+				.catch((caught: unknown) => caught as AppError);
+			expect(error).toMatchObject({
+				status: 503,
+				detail: {
+					code: "SESSION_BUSY",
+					retryable: false,
+					message: expect.stringContaining("unavailable"),
+				},
+			});
+			expect(firstSocket.emit).not.toHaveBeenCalled();
+
+			const secondSocket = registerOwnedSession({
+				userId: "other-durable-user",
+				machineId: "other-durable-machine",
+				sessionId: "other-durable-session",
+				protocolCapabilities: { messageIdempotency: true },
+			});
+			secondSocket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:message:send") {
+					sessionRouter.handleRpcResponse({
+						requestId: request.requestId,
+						result: { stopReason: "end_turn" },
+					});
+				}
+			});
+			await expect(
+				sessionRouter.sendMessage(
+					{
+						sessionId: "other-durable-session",
+						messageId: "other-durable-owner",
+						prompt: { t: "encrypted", c: "ciphertext" },
+					},
+					"other-durable-user",
+				),
+			).resolves.toEqual({ stopReason: "end_turn" });
+			expect(secondSocket.emit).toHaveBeenCalledTimes(1);
+		});
+
+		it("allows a capable CLI to retry a failed send with its durable key", async () => {
+			const socket = registerSession({ messageIdempotency: true });
+			const params = {
+				sessionId: "session-message",
+				messageId: "durable-message",
+				prompt: { t: "encrypted" as const, c: "ciphertext" },
+			};
+
+			const first = sessionRouter.sendMessage(params, "user-message");
+			sessionRouter.handleCliDisconnect(socket.id);
+			await expect(first).rejects.toThrow("CLI disconnected");
+			void sessionRouter
+				.sendMessage(params, "user-message")
+				.catch(() => undefined);
+
+			expect(socket.emit).toHaveBeenCalledTimes(2);
+		});
+	});
+
 	describe("RPC error handling", () => {
 		it("rejects promise when RPC returns error", async () => {
 			const socket = createMockSocket("socket-1");
@@ -466,6 +963,164 @@ describe("SessionRouter", () => {
 			await expect(
 				sessionRouter.discoverSessions("machine-1", undefined, "user-1"),
 			).rejects.toThrow("Agent does not support session listing");
+		});
+
+		it("preserves structured RPC error details and HTTP status", async () => {
+			const socket = createMockSocket("socket-1");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-1" }),
+				{
+					userId: "user-1",
+					deviceId: "device-123",
+				},
+			);
+
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:sessions:discover") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							error: {
+								code: "MESSAGE_OUTCOME_UNKNOWN",
+								message: "Send it again as a new message",
+								retryable: false,
+								scope: "request",
+								status: 409,
+								detail: "The previous outcome could not be proven",
+							},
+						});
+					}, 0);
+				}
+			});
+
+			const error = await sessionRouter
+				.discoverSessions("machine-1", undefined, "user-1")
+				.catch((caught: unknown) => caught as AppError);
+
+			expect(error).toMatchObject({
+				status: 409,
+				detail: {
+					code: "MESSAGE_OUTCOME_UNKNOWN",
+					message: "Send it again as a new message",
+					retryable: false,
+					scope: "request",
+					detail: "The previous outcome could not be proven",
+				},
+			});
+		});
+
+		it("sanitizes generic internal RPC failures", async () => {
+			const socket = createMockSocket("socket-1");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-1" }),
+				{ userId: "user-1", deviceId: "device-123" },
+			);
+
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:sessions:discover") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							error: {
+								code: "INTERNAL_ERROR",
+								message: "ENOENT /Users/alice/private/token.txt",
+								retryable: true,
+								scope: "request",
+								status: 500,
+								detail: "secret stack trace",
+							},
+						});
+					}, 0);
+				}
+			});
+
+			const error = await sessionRouter
+				.discoverSessions("machine-1", undefined, "user-1")
+				.catch((caught: unknown) => caught as AppError);
+
+			expect(error).toMatchObject({
+				status: 500,
+				detail: {
+					code: "INTERNAL_ERROR",
+					message: "Internal server error",
+					retryable: true,
+					scope: "request",
+				},
+			});
+			expect((error as AppError).detail.detail).toBeUndefined();
+		});
+
+		it("rejects pending RPCs immediately when their CLI disconnects", async () => {
+			const disconnectAwareRouter = sessionRouter as SessionRouter & {
+				handleCliDisconnect: (socketId: string) => void;
+			};
+			expect(disconnectAwareRouter.handleCliDisconnect).toBeTypeOf("function");
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			cliRegistry.register(socket, info, {
+				userId: "user-1",
+				deviceId: "device-123",
+			});
+			const pending = sessionRouter.discoverSessions(
+				"machine-1",
+				undefined,
+				"user-1",
+			);
+
+			disconnectAwareRouter.handleCliDisconnect(socket.id);
+
+			await expect(pending).rejects.toThrow("CLI disconnected");
+		});
+
+		it("ignores RPC responses from a different authenticated CLI socket", async () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			cliRegistry.register(socket, info, {
+				userId: "user-1",
+				deviceId: "device-123",
+			});
+			let requestId: string | undefined;
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:sessions:discover") requestId = request.requestId;
+			});
+			const pending = sessionRouter.discoverSessions(
+				"machine-1",
+				undefined,
+				"user-1",
+			);
+			expect(requestId).toBeDefined();
+			const sourceAwareRouter = sessionRouter as SessionRouter & {
+				handleRpcResponse: (
+					response: {
+						requestId: string;
+						result: DiscoverSessionsRpcResult;
+					},
+					socketId: string,
+				) => void;
+			};
+
+			sourceAwareRouter.handleRpcResponse(
+				{
+					requestId: requestId as string,
+					result: { ...createMockDiscoverResult(), sessions: [] },
+				},
+				"attacker-socket",
+			);
+			sourceAwareRouter.handleRpcResponse(
+				{
+					requestId: requestId as string,
+					result: createMockDiscoverResult(),
+				},
+				socket.id,
+			);
+
+			await expect(pending).resolves.toMatchObject({
+				sessions: expect.arrayContaining([
+					expect.objectContaining({ sessionId: "discovered-session-1" }),
+				]),
+			});
 		});
 	});
 

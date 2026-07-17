@@ -28,10 +28,5 @@
 		"ios:build:sim": "pnpm --filter webui ios:build:sim",
 		"ios:build:testflight": "pnpm --filter webui ios:build:testflight",
 		"ios:build:app-store": "pnpm --filter webui ios:build:app-store"
-	},
-	"pnpm": {
-		"overrides": {
-			"@types/react": "~19.0.10"
-		}
 	}
 }

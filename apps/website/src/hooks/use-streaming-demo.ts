@@ -100,16 +100,21 @@ export function useStreamingDemo(features: DemoFeature[]) {
 }
 
 function delay(ms: number, signal: AbortSignal): Promise<void> {
-	return new Promise((resolve, reject) => {
-		const timer = setTimeout(resolve, ms);
-		signal.addEventListener(
-			"abort",
-			() => {
-				clearTimeout(timer);
-				reject(new DOMException("Aborted", "AbortError"));
-			},
-			{ once: true },
-		);
+	return new Promise((resolve) => {
+		if (signal.aborted) {
+			resolve();
+			return;
+		}
+
+		const handleAbort = () => {
+			clearTimeout(timer);
+			resolve();
+		};
+		const timer = setTimeout(() => {
+			signal.removeEventListener("abort", handleAbort);
+			resolve();
+		}, ms);
+		signal.addEventListener("abort", handleAbort, { once: true });
 	});
 }
 

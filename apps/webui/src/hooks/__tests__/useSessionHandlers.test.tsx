@@ -33,6 +33,8 @@ const mockUiStoreState = vi.hoisted(() => ({
 		{
 			input: string;
 			inputContents: ReturnType<typeof createDefaultContentBlocks>;
+			messageId?: string;
+			messageRevision?: number;
 		}
 	>,
 	clearChatDraft: vi.fn<(sessionId: string) => void>(),
@@ -110,6 +112,7 @@ const createBaseSession = (overrides: Partial<ChatSession> = {}): ChatSession =>
 		canceling: false,
 		isLoading: false,
 		e2eeStatus: "none",
+		revision: 1,
 		input: "",
 		inputContents: [],
 		messages: [],
@@ -585,9 +588,107 @@ describe("useSessionHandlers — handleSend", () => {
 			sessionId: "session-1",
 			prompt: promptContents,
 			messageId: expect.any(String),
+			revision: 1,
+			encryptionRequired: false,
 			draft: {
 				input: "Ship it",
 				inputContents: promptContents,
+				revision: 1,
+			},
+		});
+	});
+
+	it("reuses the failed send id when retrying an unchanged restored draft", async () => {
+		const promptContents = createDefaultContentBlocks("Retry exactly once");
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Retry exactly once",
+			inputContents: promptContents,
+			messageId: "failed-msg-1",
+			messageRevision: 7,
+		};
+
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({ revision: 7 }),
+		});
+
+		await act(async () => {
+			await result.current.handleSend();
+		});
+
+		expect(chatActions.addUserMessage).toHaveBeenCalledWith(
+			"session-1",
+			"Retry exactly once",
+			expect.objectContaining({ messageId: "failed-msg-1" }),
+		);
+		expect(mutations.sendMessageMutation.mutate).toHaveBeenCalledWith({
+			sessionId: "session-1",
+			prompt: promptContents,
+			messageId: "failed-msg-1",
+			revision: 7,
+			encryptionRequired: false,
+			draft: {
+				input: "Retry exactly once",
+				inputContents: promptContents,
+				revision: 7,
+			},
+		});
+	});
+
+	it("pins encrypted sends to the ready session revision", async () => {
+		const promptContents = createDefaultContentBlocks("Encrypted prompt");
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Encrypted prompt",
+			inputContents: promptContents,
+		};
+
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({
+				e2eeStatus: "ok",
+				revision: 12,
+			}),
+		});
+
+		await act(async () => {
+			await result.current.handleSend();
+		});
+
+		expect(mutations.sendMessageMutation.mutate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				revision: 12,
+				encryptionRequired: true,
+			}),
+		);
+	});
+
+	it("retries an older failed message id on the current revision", async () => {
+		const promptContents = createDefaultContentBlocks(
+			"Run in the new revision",
+		);
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Run in the new revision",
+			inputContents: promptContents,
+			messageId: "failed-msg-from-revision-7",
+			messageRevision: 7,
+		};
+
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({ revision: 8 }),
+		});
+
+		await act(async () => {
+			await result.current.handleSend();
+		});
+
+		expect(mutations.sendMessageMutation.mutate).toHaveBeenCalledWith({
+			sessionId: "session-1",
+			prompt: promptContents,
+			messageId: "failed-msg-from-revision-7",
+			revision: 8,
+			encryptionRequired: false,
+			draft: {
+				input: "Run in the new revision",
+				inputContents: promptContents,
+				revision: 8,
 			},
 		});
 	});
@@ -618,6 +719,56 @@ describe("useSessionHandlers — handleSend", () => {
 		const { result } = renderHandlers({
 			activeSession: createBaseSession({
 				e2eeStatus: undefined,
+			}),
+		});
+
+		await act(async () => {
+			await result.current.handleSend();
+		});
+
+		expect(chatActions.setError).toHaveBeenCalledWith(
+			"session-1",
+			buildSessionNotReadyError(),
+		);
+		expect(chatActions.setSending).not.toHaveBeenCalled();
+		expect(mutations.sendMessageMutation.mutate).not.toHaveBeenCalled();
+	});
+
+	it("does not send an encrypted session whose revision is unresolved", async () => {
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Top secret prompt",
+			inputContents: createDefaultContentBlocks("Top secret prompt"),
+		};
+
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({
+				e2eeStatus: "ok",
+				revision: undefined,
+			}),
+		});
+
+		await act(async () => {
+			await result.current.handleSend();
+		});
+
+		expect(chatActions.setError).toHaveBeenCalledWith(
+			"session-1",
+			buildSessionNotReadyError(),
+		);
+		expect(chatActions.setSending).not.toHaveBeenCalled();
+		expect(mutations.sendMessageMutation.mutate).not.toHaveBeenCalled();
+	});
+
+	it("does not send a no-E2EE session whose revision is unresolved", async () => {
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Plaintext prompt",
+			inputContents: createDefaultContentBlocks("Plaintext prompt"),
+		};
+
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({
+				e2eeStatus: "none",
+				revision: undefined,
 			}),
 		});
 
@@ -670,9 +821,12 @@ describe("useSessionHandlers — handleSend", () => {
 			sessionId: "session-1",
 			prompt: promptContents,
 			messageId: expect.any(String),
+			revision: 1,
+			encryptionRequired: false,
 			draft: {
 				input: "",
 				inputContents: promptContents,
+				revision: 1,
 			},
 		});
 	});
@@ -714,9 +868,12 @@ describe("useSessionHandlers — handleSend", () => {
 			sessionId: "session-1",
 			prompt: promptContents,
 			messageId: expect.any(String),
+			revision: 1,
+			encryptionRequired: false,
 			draft: {
 				input: "",
 				inputContents: promptContents,
+				revision: 1,
 			},
 		});
 	});
@@ -756,9 +913,12 @@ describe("useSessionHandlers — handleSend", () => {
 			sessionId: "session-1",
 			prompt: promptContents,
 			messageId: expect.any(String),
+			revision: 1,
+			encryptionRequired: false,
 			draft: {
 				input: "Ship it",
 				inputContents: promptContents,
+				revision: 1,
 			},
 		});
 	});

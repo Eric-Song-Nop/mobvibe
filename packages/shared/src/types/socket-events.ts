@@ -1,5 +1,6 @@
 import type { EncryptedPayload } from "../crypto/types.js";
 import type {
+	ContentBlock,
 	PermissionOption,
 	PermissionOutcome,
 	PermissionToolCall,
@@ -102,6 +103,13 @@ export type CliRegistrationInfo = {
 	hostname: string;
 	version?: string;
 	backends?: AcpBackendSummary[];
+	/** Optional wire-protocol features supported by this CLI version. */
+	protocolCapabilities?: {
+		/** The CLI durably deduplicates message sends by messageId. */
+		messageIdempotency?: boolean;
+		/** The CLI rejects message sends whose expected session revision is stale. */
+		messageRevisionPinning?: boolean;
+	};
 };
 
 // CLI error payload (sent when auth fails)
@@ -134,11 +142,16 @@ export type RpcRequest<TParams> = {
 	params: TParams;
 };
 
+/** RPC-only error metadata. `status` is transport metadata, not part of ErrorDetail. */
+export type RpcError = ErrorDetail & {
+	status?: number;
+};
+
 // RPC response wrapper
 export type RpcResponse<TResult> = {
 	requestId: string;
 	result?: TResult;
-	error?: ErrorDetail;
+	error?: RpcError;
 };
 
 // Worktree options for session creation
@@ -166,7 +179,12 @@ export type CreateSessionParams = {
 // Send message RPC params
 export type SendMessageParams = {
 	sessionId: string;
-	prompt: EncryptedPayload;
+	/** Stable client-generated ID used to deduplicate retries. Optional on legacy wire messages. */
+	messageId?: string;
+	/** Session revision the prompt was composed and encrypted for. */
+	expectedRevision?: number;
+	/** Encrypted for E2EE sessions; plaintext is allowed only for explicitly no-E2EE CLIs. */
+	prompt: EncryptedPayload | ContentBlock[];
 };
 
 // Send message RPC result

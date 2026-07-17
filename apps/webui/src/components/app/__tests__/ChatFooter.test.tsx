@@ -21,6 +21,7 @@ vi.mock("@hugeicons/react", () => ({
 
 vi.mock("@hugeicons/core-free-icons", () => ({
 	ArrowUp01Icon: {},
+	Cancel01Icon: {},
 	Image01Icon: {},
 	StopIcon: {},
 	File01Icon: {},
@@ -428,6 +429,16 @@ describe("ChatFooter", () => {
 
 		expect(screen.getByAltText("Attached image 1")).toBeInTheDocument();
 		expect(screen.getByAltText("Attached image 2")).toBeInTheDocument();
+		expect(
+			screen
+				.getByAltText("Attached image 1")
+				.closest('[data-slot="attachment"]'),
+		).toHaveAttribute("data-size", "sm");
+		expect(
+			screen
+				.getByAltText("Attached image 1")
+				.closest('[data-slot="attachment-group"]'),
+		).toBeInTheDocument();
 	});
 
 	it("shows a validation error when merged attachments exceed shared limits", async () => {

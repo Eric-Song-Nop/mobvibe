@@ -4,9 +4,14 @@ import type {
 	CliRegistrationInfo,
 	SessionSummary,
 } from "@mobvibe/shared";
+import { verifySignedToken } from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CliRegistry } from "../../services/cli-registry.js";
+import {
+	findDeviceByPublicKey,
+	upsertMachine,
+} from "../../services/db-service.js";
 import type { NotificationService } from "../../services/notification-service.js";
 import type { SessionRouter } from "../../services/session-router.js";
 import type { TeamRouter } from "../../services/team-router.js";
@@ -85,21 +90,37 @@ describe("setupCliHandlers", () => {
 		notifyPermissionRequest: ReturnType<typeof vi.fn>;
 		notifySessionEvent: ReturnType<typeof vi.fn>;
 	};
-	let sessionRouter: { handleRpcResponse: ReturnType<typeof vi.fn> };
-	let teamRouter: { handleRpcResponse: ReturnType<typeof vi.fn> };
+	let sessionRouter: {
+		handleRpcResponse: ReturnType<typeof vi.fn>;
+		handleCliDisconnect: ReturnType<typeof vi.fn>;
+	};
+	let teamRouter: {
+		handleRpcResponse: ReturnType<typeof vi.fn>;
+		handleCliDisconnect: ReturnType<typeof vi.fn>;
+	};
 	let connectionHandler: ((socket: Socket) => void) | undefined;
 	let socketHandlers: Record<string, (payload?: unknown) => void>;
 	let socket: Socket;
 
 	beforeEach(() => {
+		vi.mocked(upsertMachine).mockResolvedValue({
+			machineId: "machine-1",
+			userId: "user-1",
+		});
 		registry = new CliRegistry();
 		emitToWebui = vi.fn();
 		notificationService = {
 			notifyPermissionRequest: vi.fn(),
 			notifySessionEvent: vi.fn(),
 		};
-		sessionRouter = { handleRpcResponse: vi.fn() };
-		teamRouter = { handleRpcResponse: vi.fn() };
+		sessionRouter = {
+			handleRpcResponse: vi.fn(),
+			handleCliDisconnect: vi.fn(),
+		};
+		teamRouter = {
+			handleRpcResponse: vi.fn(),
+			handleCliDisconnect: vi.fn(),
+		};
 		socketHandlers = {};
 		socket = {
 			id: "socket-1",
@@ -131,7 +152,7 @@ describe("setupCliHandlers", () => {
 			sessionRouter as unknown as SessionRouter,
 			teamRouter as unknown as TeamRouter,
 			emitToWebui,
-			null,
+			() => null,
 			undefined,
 			notificationService as unknown as NotificationService,
 		);
@@ -163,6 +184,58 @@ describe("setupCliHandlers", () => {
 		);
 	});
 
+	it("contains direct registered-event handler failures and disconnects for replay", () => {
+		registry.register(socket, createMockRegistrationInfo(), {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+		emitToWebui.mockImplementation(() => {
+			throw new Error("relay failed");
+		});
+		const event = {
+			sessionId: "session-1",
+			machineId: "machine-spoofed",
+			revision: 1,
+			seq: 1,
+			kind: "user_message",
+			createdAt: "2026-07-16T00:00:00.000Z",
+			payload: {},
+		};
+
+		expect(() => socketHandlers["session:event"]?.(event)).not.toThrow();
+
+		expect(socket.disconnect).toHaveBeenCalledWith(true);
+		expect(socket.emit).not.toHaveBeenCalledWith(
+			"events:ack",
+			expect.anything(),
+		);
+	});
+
+	it("replaces spoofed agent-team machine IDs with the authenticated machine", () => {
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+		const payload: AgentTeamsChangedPayload = {
+			machineId: "victim-machine",
+			added: [createMockAgentTeam({ machineId: "victim-machine" })],
+			updated: [],
+			removed: [],
+		};
+
+		socketHandlers["agent-teams:changed"]?.(payload);
+
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"agent-teams:changed",
+			expect.objectContaining({
+				machineId: "machine-1",
+				added: [expect.objectContaining({ machineId: "machine-1" })],
+			}),
+			"user-1",
+		);
+	});
+
 	it("does not broadcast agent team changes from unknown CLI sockets", () => {
 		const payload: AgentTeamsChangedPayload = {
 			added: [createMockAgentTeam()],
@@ -184,8 +257,215 @@ describe("setupCliHandlers", () => {
 
 		socketHandlers["rpc:response"]?.(response);
 
-		expect(sessionRouter.handleRpcResponse).toHaveBeenCalledWith(response);
-		expect(teamRouter.handleRpcResponse).toHaveBeenCalledWith(response);
+		expect(sessionRouter.handleRpcResponse).toHaveBeenCalledWith(
+			response,
+			socket.id,
+		);
+		expect(teamRouter.handleRpcResponse).toHaveBeenCalledWith(
+			response,
+			socket.id,
+		);
+	});
+
+	it("preserves the initial session list while CLI registration is pending", async () => {
+		let finishUpsert:
+			| ((value: { machineId: string; userId: string }) => void)
+			| undefined;
+		vi.mocked(upsertMachine).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finishUpsert = resolve;
+				}),
+		);
+		const session = createMockSessionSummary({
+			sessionId: "session-during-init",
+		});
+
+		socketHandlers["cli:register"]?.(
+			createMockRegistrationInfo({ machineId: "raw-machine-1" }),
+		);
+		socketHandlers["sessions:list"]?.([session]);
+		finishUpsert?.({ machineId: "machine-1", userId: "user-1" });
+
+		await vi.waitFor(() => {
+			expect(registry.getCliBySocketId(socket.id)?.sessions).toEqual([session]);
+		});
+	});
+
+	it("relays and acknowledges WAL events received while registration is pending", async () => {
+		let finishUpsert:
+			| ((value: { machineId: string; userId: string }) => void)
+			| undefined;
+		vi.mocked(upsertMachine).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finishUpsert = resolve;
+				}),
+		);
+		const event = {
+			sessionId: "session-during-init",
+			machineId: "machine-1",
+			revision: 2,
+			seq: 7,
+			kind: "agent_message_chunk" as const,
+			createdAt: "2026-07-16T00:00:00.000Z",
+			payload: { text: "not lost" },
+		};
+
+		socketHandlers["cli:register"]?.(
+			createMockRegistrationInfo({ machineId: "raw-machine-1" }),
+		);
+		socketHandlers["session:event"]?.(event);
+		finishUpsert?.({ machineId: "machine-1", userId: "user-1" });
+
+		await vi.waitFor(() => {
+			expect(emitToWebui).toHaveBeenCalledWith(
+				"session:event",
+				event,
+				"user-1",
+			);
+			expect(socket.emit).toHaveBeenCalledWith("events:ack", {
+				sessionId: event.sessionId,
+				revision: event.revision,
+				upToSeq: event.seq,
+			});
+		});
+	});
+
+	it("does not create a ghost CLI when the socket disconnects during registration", async () => {
+		let finishUpsert:
+			| ((value: { machineId: string; userId: string }) => void)
+			| undefined;
+		vi.mocked(upsertMachine).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finishUpsert = resolve;
+				}),
+		);
+
+		socketHandlers["cli:register"]?.(
+			createMockRegistrationInfo({ machineId: "raw-machine-1" }),
+		);
+		await socketHandlers.disconnect?.("transport close");
+		finishUpsert?.({ machineId: "machine-1", userId: "user-1" });
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(registry.getCliBySocketId(socket.id)).toBeUndefined();
+		expect(socket.emit).not.toHaveBeenCalledWith(
+			"cli:registered",
+			expect.anything(),
+		);
+	});
+
+	it("disconnects instead of buffering an unbounded pre-registration flood", async () => {
+		let finishUpsert:
+			| ((value: { machineId: string; userId: string }) => void)
+			| undefined;
+		vi.mocked(upsertMachine).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finishUpsert = resolve;
+				}),
+		);
+
+		socketHandlers["cli:register"]?.(
+			createMockRegistrationInfo({ machineId: "raw-machine-1" }),
+		);
+		for (let seq = 1; seq <= 1_001; seq += 1) {
+			socketHandlers["session:event"]?.({
+				sessionId: "session-flood",
+				machineId: "machine-1",
+				revision: 1,
+				seq,
+				kind: "agent_message_chunk",
+				createdAt: "2026-07-16T00:00:00.000Z",
+				payload: {},
+			});
+		}
+		finishUpsert?.({ machineId: "machine-1", userId: "user-1" });
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(socket.disconnect).toHaveBeenCalledWith(true);
+		expect(registry.getCliBySocketId(socket.id)).toBeUndefined();
+		expect(socket.emit).not.toHaveBeenCalledWith(
+			"events:ack",
+			expect.anything(),
+		);
+	});
+
+	it("disconnects when pre-registration payload bytes exceed the queue budget", async () => {
+		let finishUpsert:
+			| ((value: { machineId: string; userId: string }) => void)
+			| undefined;
+		vi.mocked(upsertMachine).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finishUpsert = resolve;
+				}),
+		);
+
+		socketHandlers["cli:register"]?.(
+			createMockRegistrationInfo({ machineId: "raw-machine-1" }),
+		);
+		for (let seq = 1; seq <= 5; seq += 1) {
+			socketHandlers["session:event"]?.({
+				sessionId: "session-byte-flood",
+				machineId: "machine-1",
+				revision: 1,
+				seq,
+				kind: "agent_message_chunk",
+				createdAt: "2026-07-16T00:00:00.000Z",
+				payload: { text: "x".repeat(1024 * 1024) },
+			});
+		}
+		finishUpsert?.({ machineId: "machine-1", userId: "user-1" });
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(socket.disconnect).toHaveBeenCalledWith(true);
+		expect(socket.emit).toHaveBeenCalledWith("cli:error", {
+			code: "REGISTRATION_BACKPRESSURE",
+			message: "Registration event buffer exceeded its byte limit.",
+		});
+		expect(emitToWebui).not.toHaveBeenCalledWith(
+			"session:event",
+			expect.anything(),
+			expect.anything(),
+		);
+	});
+
+	it("disconnects on an unserializable pre-registration payload", async () => {
+		let finishUpsert:
+			| ((value: { machineId: string; userId: string }) => void)
+			| undefined;
+		vi.mocked(upsertMachine).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finishUpsert = resolve;
+				}),
+		);
+
+		socketHandlers["cli:register"]?.(createMockRegistrationInfo());
+		const payload: Record<string, unknown> = {
+			sessionId: "session-cyclic",
+			revision: 1,
+			seq: 1,
+			kind: "agent_message_chunk",
+			createdAt: "2026-07-16T00:00:00.000Z",
+		};
+		payload.payload = payload;
+		socketHandlers["session:event"]?.(payload);
+		finishUpsert?.({ machineId: "machine-1", userId: "user-1" });
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(socket.disconnect).toHaveBeenCalledWith(true);
+		expect(socket.emit).toHaveBeenCalledWith("cli:error", {
+			code: "INVALID_EVENT_PAYLOAD",
+			message: "Event payload must be JSON serializable.",
+		});
 	});
 
 	it("forwards session:attached events to webui", () => {
@@ -309,6 +589,30 @@ describe("setupCliHandlers", () => {
 		);
 	});
 
+	it("replaces spoofed session-event machine IDs with the authenticated machine", () => {
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+
+		socketHandlers["session:event"]?.({
+			sessionId: "session-1",
+			machineId: "victim-machine",
+			revision: 1,
+			seq: 9,
+			kind: "turn_end",
+			createdAt: new Date().toISOString(),
+			payload: {},
+		});
+
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"session:event",
+			expect.objectContaining({ machineId: "machine-1" }),
+			"user-1",
+		);
+	});
+
 	it("does not dispatch session notifications for inactive sessions", () => {
 		const info = createMockRegistrationInfo({ machineId: "machine-1" });
 		registry.register(socket, info, {
@@ -406,6 +710,125 @@ describe("setupCliHandlers", () => {
 				detachedAt: expect.any(String),
 			}),
 			"user-1",
+		);
+	});
+
+	it("uses user affinity initialized after handlers are installed", async () => {
+		const localRegistry = new CliRegistry();
+		const localHandlers: Record<string, (payload?: unknown) => void> = {};
+		let localConnectionHandler: ((socket: Socket) => void) | undefined;
+		const namespace = {
+			use: vi.fn(),
+			on: vi.fn((event: string, handler: (connectedSocket: Socket) => void) => {
+				if (event === "connection") localConnectionHandler = handler;
+			}),
+			sockets: new Map(),
+		};
+		const localIo = { of: vi.fn(() => namespace) } as unknown as Server;
+		let affinity: {
+			claimUser: ReturnType<typeof vi.fn>;
+			releaseUser: ReturnType<typeof vi.fn>;
+		} | null = null;
+		setupCliHandlers(
+			localIo,
+			localRegistry,
+			sessionRouter as unknown as SessionRouter,
+			teamRouter as unknown as TeamRouter,
+			vi.fn(),
+			(() => affinity) as never,
+			undefined,
+		);
+		const localSocket = {
+			id: "socket-late-affinity",
+			handshake: { headers: {} },
+			data: { userId: "user-1", deviceId: "device-1" },
+			on: vi.fn((event: string, handler: (payload?: unknown) => void) => {
+				localHandlers[event] = handler;
+			}),
+			emit: vi.fn(),
+			disconnect: vi.fn(),
+		} as unknown as Socket;
+		localConnectionHandler?.(localSocket);
+		affinity = {
+			claimUser: vi.fn(async () => true),
+			releaseUser: vi.fn(async () => undefined),
+		};
+
+		localHandlers["cli:register"]?.(
+			createMockRegistrationInfo({ machineId: "raw-machine-1" }),
+		);
+
+		await vi.waitFor(() => {
+			expect(affinity?.claimUser).toHaveBeenCalledWith("user-1");
+		});
+		await localHandlers.disconnect?.("transport close");
+
+		expect(affinity.releaseUser).not.toHaveBeenCalled();
+	});
+
+	it("atomically claims affinity before accepting a CLI connection", async () => {
+		let authMiddleware:
+			| ((socket: Socket, next: (error?: Error) => void) => Promise<void>)
+			| undefined;
+		const namespace = {
+			use: vi.fn(
+				(
+					middleware: (
+						socket: Socket,
+						next: (error?: Error) => void,
+					) => Promise<void>,
+				) => {
+					authMiddleware = middleware;
+				},
+			),
+			on: vi.fn(),
+		};
+		const localIo = { of: vi.fn(() => namespace) } as unknown as Server;
+		let claimAttempted = false;
+		const affinity = {
+			claimUser: vi.fn(async () => {
+				claimAttempted = true;
+				return false;
+			}),
+			getUserInstance: vi.fn(async () =>
+				claimAttempted ? { instanceId: "instance-owner", region: "ord" } : null,
+			),
+			releaseUser: vi.fn(),
+		};
+		setupCliHandlers(
+			localIo,
+			new CliRegistry(),
+			sessionRouter as unknown as SessionRouter,
+			teamRouter as unknown as TeamRouter,
+			vi.fn(),
+			() => affinity as never,
+			{ instanceId: "instance-local" } as never,
+		);
+		vi.mocked(verifySignedToken).mockReturnValue({ publicKey: "public-key" });
+		vi.mocked(findDeviceByPublicKey).mockResolvedValue({
+			id: "device-1",
+			userId: "user-1",
+		});
+		const socket = {
+			id: "socket-affinity-race",
+			handshake: {
+				auth: {
+					payload: {
+						publicKey: "public-key",
+						timestamp: "2026-07-16T00:00:00.000Z",
+					},
+					signature: "signature",
+				},
+			},
+			data: {},
+		} as unknown as Socket;
+		const next = vi.fn();
+
+		await authMiddleware?.(socket, next);
+
+		expect(affinity.claimUser).toHaveBeenCalledWith("user-1");
+		expect(next).toHaveBeenCalledWith(
+			expect.objectContaining({ message: "WRONG_INSTANCE:instance-owner" }),
 		);
 	});
 });

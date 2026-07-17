@@ -1,7 +1,8 @@
 import { Database } from "bun:sqlite";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { SessionEventKind } from "@mobvibe/shared";
+import type { SessionEventKind, StopReason } from "@mobvibe/shared";
 import { logger } from "../lib/logger.js";
 import { runMigrations } from "./migrations.js";
 import { SeqGenerator } from "./seq-generator.js";
@@ -29,11 +30,41 @@ export type WalEvent = {
 	ackedAt?: string;
 };
 
+export type UnackedSessionRevision = {
+	sessionId: string;
+	revision: number;
+};
+
+export type SessionRevisionKey = {
+	sessionId: string;
+	revision: number;
+	wrappedDek: string;
+};
+
+export type MessageSendClaim =
+	| { status: "claimed"; claimId: string }
+	| { status: "completed"; result: { stopReason: StopReason } }
+	| { status: "in_progress" };
+
 export type AppendEventParams = {
 	sessionId: string;
 	revision: number;
 	kind: SessionEventKind;
 	payload: unknown;
+};
+
+export type WalEventInput = Pick<AppendEventParams, "kind" | "payload">;
+
+export type CommitReloadRevisionParams = {
+	sessionId: string;
+	expectedRevision: number;
+	events: readonly WalEventInput[];
+	wrappedDek?: string;
+};
+
+type PreparedWalEventInput = WalEventInput & {
+	serializedPayload: string;
+	createdAt: string;
 };
 
 export type QueryEventsParams = {
@@ -52,6 +83,12 @@ export type EnsureSessionParams = {
 	isTitlePinned?: boolean;
 };
 
+export type CommitSessionLoadParams = EnsureSessionParams & {
+	expectedRevision: number | null;
+	events: readonly WalEventInput[];
+	wrappedDek?: string;
+};
+
 export type DiscoveredSession = {
 	sessionId: string;
 	backendId: string;
@@ -66,20 +103,86 @@ export type DiscoveredSession = {
 
 const DEFAULT_QUERY_LIMIT = 100;
 
+/**
+ * Tables whose rows are tied to a user's local Mobvibe identity. Schema and
+ * migration metadata are deliberately excluded so a genuinely empty database
+ * can be claimed on first login.
+ */
+const DURABLE_DATA_TABLES = [
+	"wal_encryption_identity",
+	"sessions",
+	"session_events",
+	"discovered_sessions",
+	"archived_session_ids",
+	"compaction_log",
+	"message_send_results",
+	"message_send_claims",
+	"session_revision_keys",
+	"agent_teams",
+	"agent_team_members",
+	"agent_team_mcp_status",
+	"agent_team_mailbox_messages",
+	"agent_team_tasks",
+	"agent_team_summary_refs",
+] as const;
+
+const databaseHasDurableData = (db: Database): boolean => {
+	const existingTables = new Set(
+		(
+			db
+				.query("SELECT name FROM sqlite_master WHERE type = 'table'")
+				.all() as Array<{ name: string }>
+		).map((row) => row.name),
+	);
+
+	for (const table of DURABLE_DATA_TABLES) {
+		if (!existingTables.has(table)) continue;
+		// `table` comes exclusively from the constant allowlist above.
+		if (db.query(`SELECT 1 FROM ${table} LIMIT 1`).get()) {
+			return true;
+		}
+	}
+	return false;
+};
+
+/** Inspect an existing WAL without creating or migrating it. */
+export const hasDurableWalData = (dbPath: string): boolean => {
+	if (!fs.existsSync(dbPath)) return false;
+	const db = new Database(dbPath, { readonly: true });
+	try {
+		return databaseHasDurableData(db);
+	} finally {
+		db.close();
+	}
+};
+
 export class WalStore {
 	private db: Database;
+	private readonly initialSchemaVersion: number;
 	private seqGenerator = new SeqGenerator();
 
 	// Prepared statements for performance
 	private stmtGetSession: ReturnType<Database["query"]>;
+	private stmtGetSessions: ReturnType<Database["query"]>;
 	private stmtInsertSession: ReturnType<Database["query"]>;
 	private stmtUpdateSession: ReturnType<Database["query"]>;
 	private stmtInsertEvent: ReturnType<Database["query"]>;
 	private stmtQueryEvents: ReturnType<Database["query"]>;
 	private stmtQueryUnackedEvents: ReturnType<Database["query"]>;
+	private stmtQueryUnackedEventsPage: ReturnType<Database["query"]>;
 	private stmtAckEvents: ReturnType<Database["query"]>;
 	private stmtIncrementRevision: ReturnType<Database["query"]>;
+	private stmtCommitReloadRevision: ReturnType<Database["query"]>;
 	private stmtGetMaxSeq: ReturnType<Database["query"]>;
+	private stmtGetMessageSendResult: ReturnType<Database["query"]>;
+	private stmtInsertMessageSendResult: ReturnType<Database["query"]>;
+	private stmtGetMessageSendClaim: ReturnType<Database["query"]>;
+	private stmtInsertMessageSendClaim: ReturnType<Database["query"]>;
+	private stmtDeleteMessageSendClaim: ReturnType<Database["query"]>;
+	private stmtGetSessionRevisionKey: ReturnType<Database["query"]>;
+	private stmtInsertSessionRevisionKey: ReturnType<Database["query"]>;
+	private stmtListSessionRevisionKeysPage: ReturnType<Database["query"]>;
+	private stmtListUnackedSessionRevisions: ReturnType<Database["query"]>;
 
 	// Discovered sessions statements
 	private stmtUpsertDiscoveredSession: ReturnType<Database["query"]>;
@@ -94,6 +197,9 @@ export class WalStore {
 
 	// Archive statements
 	private stmtDeleteSessionEvents: ReturnType<Database["query"]>;
+	private stmtDeleteMessageSendResults: ReturnType<Database["query"]>;
+	private stmtDeleteMessageSendClaims: ReturnType<Database["query"]>;
+	private stmtDeleteSessionRevisionKeys: ReturnType<Database["query"]>;
 	private stmtDeleteSession: ReturnType<Database["query"]>;
 	private stmtInsertArchivedSession: ReturnType<Database["query"]>;
 	private stmtIsArchived: ReturnType<Database["query"]>;
@@ -107,7 +213,7 @@ export class WalStore {
 		}
 
 		this.db = new Database(dbPath);
-		runMigrations(this.db);
+		this.initialSchemaVersion = runMigrations(this.db);
 
 		// Prepare statements
 		this.stmtGetSession = this.db.query(`
@@ -115,6 +221,12 @@ export class WalStore {
       FROM sessions
       WHERE session_id = $sessionId
     `);
+
+		this.stmtGetSessions = this.db.query(`
+			SELECT session_id, machine_id, backend_id, current_revision, cwd, title, is_title_pinned, created_at, updated_at
+			FROM sessions
+			ORDER BY updated_at DESC, session_id ASC
+		`);
 
 		this.stmtInsertSession = this.db.query(`
       INSERT INTO sessions (session_id, machine_id, backend_id, current_revision, cwd, title, is_title_pinned, created_at, updated_at)
@@ -154,6 +266,17 @@ export class WalStore {
       ORDER BY seq ASC
     `);
 
+		this.stmtQueryUnackedEventsPage = this.db.query(`
+			SELECT id, session_id, revision, seq, kind, payload, created_at, acked_at
+			FROM session_events
+			WHERE session_id = $sessionId
+				AND revision = $revision
+				AND seq > $afterSeq
+				AND acked_at IS NULL
+			ORDER BY seq ASC
+			LIMIT $limit
+		`);
+
 		this.stmtAckEvents = this.db.query(`
       UPDATE session_events
       SET acked_at = $ackedAt
@@ -171,11 +294,83 @@ export class WalStore {
       RETURNING current_revision
     `);
 
+		this.stmtCommitReloadRevision = this.db.query(`
+			UPDATE sessions
+			SET current_revision = current_revision + 1,
+				updated_at = $updatedAt
+			WHERE session_id = $sessionId
+				AND current_revision = $expectedRevision
+			RETURNING current_revision
+		`);
+
 		this.stmtGetMaxSeq = this.db.query(`
       SELECT MAX(seq) as max_seq
       FROM session_events
       WHERE session_id = $sessionId AND revision = $revision
-    `);
+		`);
+
+		this.stmtGetMessageSendResult = this.db.query(`
+			SELECT stop_reason
+			FROM message_send_results
+			WHERE session_id = $sessionId AND message_id = $messageId
+		`);
+
+		this.stmtInsertMessageSendResult = this.db.query(`
+			INSERT OR IGNORE INTO message_send_results (
+				session_id, message_id, stop_reason, completed_at
+			) VALUES ($sessionId, $messageId, $stopReason, $completedAt)
+		`);
+
+		this.stmtGetMessageSendClaim = this.db.query(`
+			SELECT claim_id
+			FROM message_send_claims
+			WHERE session_id = $sessionId AND message_id = $messageId
+		`);
+
+		this.stmtInsertMessageSendClaim = this.db.query(`
+			INSERT OR IGNORE INTO message_send_claims (
+				session_id, message_id, claim_id, claimed_at
+			) VALUES ($sessionId, $messageId, $claimId, $claimedAt)
+		`);
+
+		this.stmtDeleteMessageSendClaim = this.db.query(`
+			DELETE FROM message_send_claims
+			WHERE session_id = $sessionId
+				AND message_id = $messageId
+				AND claim_id = $claimId
+		`);
+
+		this.stmtGetSessionRevisionKey = this.db.query(`
+			SELECT wrapped_dek
+			FROM session_revision_keys
+			WHERE session_id = $sessionId AND revision = $revision
+		`);
+
+		this.stmtInsertSessionRevisionKey = this.db.query(`
+			INSERT OR IGNORE INTO session_revision_keys (
+				session_id, revision, wrapped_dek, created_at
+			) VALUES ($sessionId, $revision, $wrappedDek, $createdAt)
+		`);
+
+		this.stmtListSessionRevisionKeysPage = this.db.query(`
+			SELECT session_id, revision, wrapped_dek
+			FROM session_revision_keys
+			WHERE $afterSessionId IS NULL
+				OR session_id > $afterSessionId
+				OR (session_id = $afterSessionId AND revision > $afterRevision)
+			ORDER BY session_id ASC, revision ASC
+			LIMIT $limit
+		`);
+
+		this.stmtListUnackedSessionRevisions = this.db.query(`
+			SELECT DISTINCT e.session_id, e.revision
+			FROM session_events e
+			INNER JOIN sessions s
+				ON s.session_id = e.session_id
+				AND s.current_revision = e.revision
+			WHERE e.acked_at IS NULL
+			ORDER BY e.session_id ASC, e.revision ASC
+		`);
 
 		// Consolidation statements
 		this.stmtQueryBySeqRange = this.db.query(`
@@ -243,6 +438,18 @@ export class WalStore {
       DELETE FROM session_events WHERE session_id = $sessionId
     `);
 
+		this.stmtDeleteMessageSendResults = this.db.query(`
+			DELETE FROM message_send_results WHERE session_id = $sessionId
+		`);
+
+		this.stmtDeleteMessageSendClaims = this.db.query(`
+			DELETE FROM message_send_claims WHERE session_id = $sessionId
+		`);
+
+		this.stmtDeleteSessionRevisionKeys = this.db.query(`
+			DELETE FROM session_revision_keys WHERE session_id = $sessionId
+		`);
+
 		this.stmtDeleteSession = this.db.query(`
       DELETE FROM sessions WHERE session_id = $sessionId
     `);
@@ -259,6 +466,69 @@ export class WalStore {
 		this.stmtGetArchivedSessionIds = this.db.query(`
       SELECT session_id FROM archived_session_ids
     `);
+	}
+
+	/**
+	 * Bind this database to one public device-key identity. This value is not a
+	 * secret; it prevents a daemon started with another account's credentials
+	 * from exposing durable sessions that belong to the previous identity.
+	 */
+	bindEncryptionIdentity(keyIdentity: string): void {
+		const existing = this.getEncryptionIdentity();
+		if (existing) {
+			if (existing !== keyIdentity) {
+				throw new Error(
+					"WAL encryption identity mismatch; restore the original master secret or use a separate MOBVIBE_HOME",
+				);
+			}
+			return;
+		}
+		this.db
+			.query(`
+				INSERT INTO wal_encryption_identity (id, key_identity, bound_at)
+				VALUES (1, $keyIdentity, $boundAt)
+			`)
+			.run({
+				$keyIdentity: keyIdentity,
+				$boundAt: new Date().toISOString(),
+			});
+	}
+
+	getEncryptionIdentity(): string | undefined {
+		const row = this.db
+			.query("SELECT key_identity FROM wal_encryption_identity WHERE id = 1")
+			.get() as { key_identity: string } | null;
+		return row?.key_identity;
+	}
+
+	/** Schema version observed before this process applied pending migrations. */
+	getInitialSchemaVersion(): number {
+		return this.initialSchemaVersion;
+	}
+
+	/** Return whether this database contains identity-bound user data. */
+	hasDurableData(): boolean {
+		return databaseHasDurableData(this.db);
+	}
+
+	getSessionRevisionKeysPage(
+		after: Pick<SessionRevisionKey, "sessionId" | "revision"> | undefined,
+		limit: number,
+	): SessionRevisionKey[] {
+		const rows = this.stmtListSessionRevisionKeysPage.all({
+			$afterSessionId: after?.sessionId ?? null,
+			$afterRevision: after?.revision ?? 0,
+			$limit: Math.max(1, limit),
+		}) as Array<{
+			session_id: string;
+			revision: number;
+			wrapped_dek: string;
+		}>;
+		return rows.map((row) => ({
+			sessionId: row.session_id,
+			revision: row.revision,
+			wrappedDek: row.wrapped_dek,
+		}));
 	}
 
 	/**
@@ -349,56 +619,200 @@ export class WalStore {
 	}
 
 	/**
+	 * Get all durable WAL sessions, including sessions that are not attached.
+	 */
+	getSessions(): WalSession[] {
+		const rows = this.stmtGetSessions.all() as WalSessionRow[];
+		return rows.map((row) => this.rowToSession(row));
+	}
+
+	/**
 	 * Append an event to the WAL.
 	 */
 	appendEvent(params: AppendEventParams): WalEvent {
-		const seq = this.seqGenerator.next(params.sessionId, params.revision);
-		const now = new Date().toISOString();
+		const event = this.appendEventsAtomically(
+			params.sessionId,
+			params.revision,
+			[{ kind: params.kind, payload: params.payload }],
+		)[0];
+		if (!event) {
+			throw new Error("WAL append produced no event");
+		}
+		return event;
+	}
 
-		logger.debug(
-			{
-				sessionId: params.sessionId,
-				revision: params.revision,
-				seq,
-				kind: params.kind,
-			},
-			"wal_append_event",
+	/**
+	 * Append a same-session, same-revision batch in one transaction. Sequence
+	 * state is updated only after the durable commit succeeds.
+	 */
+	appendEventsAtomically(
+		sessionId: string,
+		revision: number,
+		events: readonly WalEventInput[],
+	): WalEvent[] {
+		if (events.length === 0) {
+			return [];
+		}
+		const prepared = this.prepareEventInputs(events);
+		let inserted: WalEvent[];
+		try {
+			inserted = this.db
+				.transaction(() =>
+					this.insertPreparedEvents(sessionId, revision, prepared),
+				)
+				.immediate();
+		} catch (error) {
+			this.syncSequenceFromDurableState(sessionId, revision);
+			throw error;
+		}
+		this.syncSequenceAfterCommit(sessionId, revision, inserted);
+		this.logAppendedEvents(inserted);
+		return inserted;
+	}
+
+	/**
+	 * Atomically create (or validate an empty existing revision of) a loaded
+	 * session and persist its key plus complete replay.
+	 */
+	commitSessionLoad(params: CommitSessionLoadParams): {
+		revision: number;
+		events: WalEvent[];
+	} {
+		const prepared = this.prepareEventInputs(params.events);
+		const targetRevision = params.expectedRevision ?? 1;
+		let committed: { revision: number; events: WalEvent[] };
+		try {
+			committed = this.db
+				.transaction(() => {
+					const existing = this.stmtGetSession.get({
+						$sessionId: params.sessionId,
+					}) as WalSessionRow | null;
+					const now = new Date().toISOString();
+					let revision: number;
+					if (params.expectedRevision === null) {
+						if (existing) {
+							throw new Error(
+								`Session appeared before load commit: ${params.sessionId}`,
+							);
+						}
+						this.stmtInsertSession.run({
+							$sessionId: params.sessionId,
+							$machineId: params.machineId,
+							$backendId: params.backendId,
+							$cwd: params.cwd ?? null,
+							$title: params.title ?? null,
+							$isTitlePinned: params.isTitlePinned ? 1 : 0,
+							$createdAt: now,
+							$updatedAt: now,
+						});
+						revision = 1;
+					} else {
+						if (
+							!existing ||
+							existing.current_revision !== params.expectedRevision ||
+							this.getMaxSeq(params.sessionId, params.expectedRevision) !== 0
+						) {
+							throw new Error(
+								`Session changed before load commit: ${params.sessionId}`,
+							);
+						}
+						this.stmtUpdateSession.run({
+							$sessionId: params.sessionId,
+							$cwd: params.cwd ?? null,
+							$title: params.title ?? null,
+							$isTitlePinned:
+								params.isTitlePinned === undefined
+									? null
+									: params.isTitlePinned
+										? 1
+										: 0,
+							$updatedAt: now,
+						});
+						revision = params.expectedRevision;
+					}
+					if (params.wrappedDek) {
+						this.stmtInsertSessionRevisionKey.run({
+							$sessionId: params.sessionId,
+							$revision: revision,
+							$wrappedDek: params.wrappedDek,
+							$createdAt: now,
+						});
+					}
+					return {
+						revision,
+						events: this.insertPreparedEvents(
+							params.sessionId,
+							revision,
+							prepared,
+						),
+					};
+				})
+				.immediate();
+		} catch (error) {
+			this.syncSequenceFromDurableState(params.sessionId, targetRevision);
+			throw error;
+		}
+		this.syncSequenceAfterCommit(
+			params.sessionId,
+			committed.revision,
+			committed.events,
 		);
+		this.logAppendedEvents(committed.events);
+		return committed;
+	}
 
-		this.stmtInsertEvent.run({
-			$sessionId: params.sessionId,
-			$revision: params.revision,
-			$seq: seq,
-			$kind: params.kind,
-			$payload: JSON.stringify(params.payload),
-			$createdAt: now,
-		});
-
-		// Get the inserted row ID
-		const lastId = this.db.query("SELECT last_insert_rowid() as id").get() as {
-			id: number;
-		};
-
-		logger.info(
-			{
-				sessionId: params.sessionId,
-				revision: params.revision,
-				seq,
-				kind: params.kind,
-				eventId: lastId.id,
-			},
-			"wal_event_appended",
+	/**
+	 * Atomically advance an expected revision and persist its complete replay.
+	 */
+	commitReloadRevision(params: CommitReloadRevisionParams): {
+		revision: number;
+		events: WalEvent[];
+	} {
+		const prepared = this.prepareEventInputs(params.events);
+		const targetRevision = params.expectedRevision + 1;
+		let committed: { revision: number; events: WalEvent[] };
+		try {
+			committed = this.db
+				.transaction(() => {
+					const revisionRow = this.stmtCommitReloadRevision.get({
+						$sessionId: params.sessionId,
+						$expectedRevision: params.expectedRevision,
+						$updatedAt: new Date().toISOString(),
+					}) as { current_revision: number } | null;
+					if (!revisionRow) {
+						throw new Error(
+							`Session revision changed before reload commit: ${params.sessionId}`,
+						);
+					}
+					if (params.wrappedDek) {
+						this.stmtInsertSessionRevisionKey.run({
+							$sessionId: params.sessionId,
+							$revision: revisionRow.current_revision,
+							$wrappedDek: params.wrappedDek,
+							$createdAt: new Date().toISOString(),
+						});
+					}
+					return {
+						revision: revisionRow.current_revision,
+						events: this.insertPreparedEvents(
+							params.sessionId,
+							revisionRow.current_revision,
+							prepared,
+						),
+					};
+				})
+				.immediate();
+		} catch (error) {
+			this.syncSequenceFromDurableState(params.sessionId, targetRevision);
+			throw error;
+		}
+		this.syncSequenceAfterCommit(
+			params.sessionId,
+			committed.revision,
+			committed.events,
 		);
-
-		return {
-			id: lastId.id,
-			sessionId: params.sessionId,
-			revision: params.revision,
-			seq,
-			kind: params.kind,
-			payload: params.payload,
-			createdAt: now,
-		};
+		this.logAppendedEvents(committed.events);
+		return committed;
 	}
 
 	/**
@@ -451,6 +865,25 @@ export class WalStore {
 	}
 
 	/**
+	 * Read one bounded page for reconnect replay. Sequence-key pagination stays
+	 * stable while acknowledgements are written concurrently.
+	 */
+	getUnackedEventsPage(
+		sessionId: string,
+		revision: number,
+		afterSeq: number,
+		limit: number,
+	): WalEvent[] {
+		const rows = this.stmtQueryUnackedEventsPage.all({
+			$sessionId: sessionId,
+			$revision: revision,
+			$afterSeq: afterSeq,
+			$limit: Math.max(1, limit),
+		}) as WalEventRow[];
+		return rows.map((row) => this.rowToEvent(row));
+	}
+
+	/**
 	 * Mark events as acknowledged up to a given sequence.
 	 */
 	ackEvents(sessionId: string, revision: number, upToSeq: number): void {
@@ -467,6 +900,173 @@ export class WalStore {
 			{ sessionId, revision, upToSeq, changes: result.changes },
 			"wal_ack_events_result",
 		);
+	}
+
+	/**
+	 * Return a completed message send result for gateway retry deduplication.
+	 */
+	getMessageSendResult(
+		sessionId: string,
+		messageId: string,
+	): { stopReason: StopReason } | undefined {
+		const row = this.stmtGetMessageSendResult.get({
+			$sessionId: sessionId,
+			$messageId: messageId,
+		}) as { stop_reason: StopReason } | null;
+		return row ? { stopReason: row.stop_reason } : undefined;
+	}
+
+	/**
+	 * Atomically claim a message before invoking the external ACP prompt.
+	 * A pre-existing claim has an unknown outcome and must never be re-executed.
+	 */
+	claimMessageSend(sessionId: string, messageId: string): MessageSendClaim {
+		return this.db.transaction((): MessageSendClaim => {
+			const completed = this.getMessageSendResult(sessionId, messageId);
+			if (completed) {
+				return { status: "completed", result: completed };
+			}
+
+			const claimId = randomUUID();
+			const inserted = this.stmtInsertMessageSendClaim.run({
+				$sessionId: sessionId,
+				$messageId: messageId,
+				$claimId: claimId,
+				$claimedAt: new Date().toISOString(),
+			});
+			if (inserted.changes === 1) {
+				return { status: "claimed", claimId };
+			}
+
+			const completedAfterConflict = this.getMessageSendResult(
+				sessionId,
+				messageId,
+			);
+			if (completedAfterConflict) {
+				return { status: "completed", result: completedAfterConflict };
+			}
+			return { status: "in_progress" };
+		})();
+	}
+
+	/**
+	 * Atomically persist a completed result and remove its execution claim.
+	 */
+	completeMessageSend(
+		sessionId: string,
+		messageId: string,
+		claimId: string,
+		stopReason: StopReason,
+	): WalEvent {
+		const prepared = this.prepareEventInputs([
+			{ kind: "turn_end", payload: { stopReason } },
+		]);
+		let terminalEvent: WalEvent;
+		let revision = 0;
+		try {
+			terminalEvent = this.db
+				.transaction(() => {
+					const activeClaim = this.stmtGetMessageSendClaim.get({
+						$sessionId: sessionId,
+						$messageId: messageId,
+					}) as { claim_id: string } | null;
+					if (!activeClaim || activeClaim.claim_id !== claimId) {
+						throw new Error("Message send claim is no longer active");
+					}
+					const session = this.getSession(sessionId);
+					if (!session) {
+						throw new Error(`Session not found: ${sessionId}`);
+					}
+					revision = session.currentRevision;
+					this.recordMessageSendResult(sessionId, messageId, stopReason);
+					this.stmtDeleteMessageSendClaim.run({
+						$sessionId: sessionId,
+						$messageId: messageId,
+						$claimId: claimId,
+					});
+					const [event] = this.insertPreparedEvents(
+						sessionId,
+						revision,
+						prepared,
+					);
+					if (!event) {
+						throw new Error("Terminal event commit produced no event");
+					}
+					return event;
+				})
+				.immediate();
+		} catch (error) {
+			if (revision > 0) {
+				this.syncSequenceFromDurableState(sessionId, revision);
+			}
+			throw error;
+		}
+		this.syncSequenceAfterCommit(sessionId, revision, [terminalEvent]);
+		this.logAppendedEvents([terminalEvent]);
+		return terminalEvent;
+	}
+
+	/**
+	 * Persist the first terminal result. Retries cannot overwrite it.
+	 */
+	recordMessageSendResult(
+		sessionId: string,
+		messageId: string,
+		stopReason: StopReason,
+	): void {
+		this.stmtInsertMessageSendResult.run({
+			$sessionId: sessionId,
+			$messageId: messageId,
+			$stopReason: stopReason,
+			$completedAt: new Date().toISOString(),
+		});
+	}
+
+	/**
+	 * Return the sealed DEK for one durable session revision.
+	 */
+	getSessionRevisionKey(
+		sessionId: string,
+		revision: number,
+	): string | undefined {
+		const row = this.stmtGetSessionRevisionKey.get({
+			$sessionId: sessionId,
+			$revision: revision,
+		}) as { wrapped_dek: string } | null;
+		return row?.wrapped_dek;
+	}
+
+	/**
+	 * Persist the first sealed DEK generated for a revision. A later retry must
+	 * not replace it or already-delivered ciphertext would become undecryptable.
+	 */
+	recordSessionRevisionKey(
+		sessionId: string,
+		revision: number,
+		wrappedDek: string,
+	): void {
+		this.stmtInsertSessionRevisionKey.run({
+			$sessionId: sessionId,
+			$revision: revision,
+			$wrappedDek: wrappedDek,
+			$createdAt: new Date().toISOString(),
+		});
+	}
+
+	/**
+	 * List current revisions with durable, unacknowledged events. Obsolete
+	 * revisions are intentionally excluded because clients reset on revision
+	 * changes and must not receive stale history after the reset.
+	 */
+	listUnackedSessionRevisions(): UnackedSessionRevision[] {
+		const rows = this.stmtListUnackedSessionRevisions.all() as Array<{
+			session_id: string;
+			revision: number;
+		}>;
+		return rows.map((row) => ({
+			sessionId: row.session_id,
+			revision: row.revision,
+		}));
 	}
 
 	/**
@@ -595,12 +1195,20 @@ export class WalStore {
 	 * Archive a session: delete WAL events, delete session record, mark as archived.
 	 */
 	archiveSession(sessionId: string): void {
-		this.stmtDeleteSessionEvents.run({ $sessionId: sessionId });
-		this.stmtDeleteSession.run({ $sessionId: sessionId });
-		this.stmtInsertArchivedSession.run({
-			$sessionId: sessionId,
-			$archivedAt: new Date().toISOString(),
-		});
+		this.db
+			.transaction(() => {
+				this.stmtDeleteSessionEvents.run({ $sessionId: sessionId });
+				this.stmtDeleteMessageSendResults.run({ $sessionId: sessionId });
+				this.stmtDeleteMessageSendClaims.run({ $sessionId: sessionId });
+				this.stmtDeleteSessionRevisionKeys.run({ $sessionId: sessionId });
+				this.stmtDeleteSession.run({ $sessionId: sessionId });
+				this.stmtInsertArchivedSession.run({
+					$sessionId: sessionId,
+					$archivedAt: new Date().toISOString(),
+				});
+			})
+			.immediate();
+		this.seqGenerator.clearSession(sessionId);
 	}
 
 	/**
@@ -638,6 +1246,92 @@ export class WalStore {
 	 */
 	close(): void {
 		this.db.close();
+	}
+
+	private prepareEventInputs(
+		events: readonly WalEventInput[],
+	): PreparedWalEventInput[] {
+		return events.map((event) => {
+			const serializedPayload = JSON.stringify(event.payload);
+			if (serializedPayload === undefined) {
+				throw new Error("WAL event payload must be JSON serializable");
+			}
+			return {
+				...event,
+				serializedPayload,
+				createdAt: new Date().toISOString(),
+			};
+		});
+	}
+
+	private insertPreparedEvents(
+		sessionId: string,
+		revision: number,
+		events: readonly PreparedWalEventInput[],
+	): WalEvent[] {
+		let seq = this.getMaxSeq(sessionId, revision);
+		return events.map((event) => {
+			seq += 1;
+			logger.debug(
+				{ sessionId, revision, seq, kind: event.kind },
+				"wal_append_event",
+			);
+			this.stmtInsertEvent.run({
+				$sessionId: sessionId,
+				$revision: revision,
+				$seq: seq,
+				$kind: event.kind,
+				$payload: event.serializedPayload,
+				$createdAt: event.createdAt,
+			});
+			const lastId = this.db
+				.query("SELECT last_insert_rowid() as id")
+				.get() as { id: number };
+			return {
+				id: lastId.id,
+				sessionId,
+				revision,
+				seq,
+				kind: event.kind,
+				payload: event.payload,
+				createdAt: event.createdAt,
+			};
+		});
+	}
+
+	private syncSequenceAfterCommit(
+		sessionId: string,
+		revision: number,
+		events: readonly WalEvent[],
+	): void {
+		const lastSeq = events.at(-1)?.seq ?? this.getMaxSeq(sessionId, revision);
+		this.seqGenerator.initialize(sessionId, revision, lastSeq);
+	}
+
+	private syncSequenceFromDurableState(
+		sessionId: string,
+		revision: number,
+	): void {
+		this.seqGenerator.initialize(
+			sessionId,
+			revision,
+			this.getMaxSeq(sessionId, revision),
+		);
+	}
+
+	private logAppendedEvents(events: readonly WalEvent[]): void {
+		for (const event of events) {
+			logger.info(
+				{
+					sessionId: event.sessionId,
+					revision: event.revision,
+					seq: event.seq,
+					kind: event.kind,
+					eventId: event.id,
+				},
+				"wal_event_appended",
+			);
+		}
 	}
 
 	private getMaxSeq(sessionId: string, revision: number): number {
