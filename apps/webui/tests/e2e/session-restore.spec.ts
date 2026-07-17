@@ -448,14 +448,14 @@ test("sidebar session load switches to the selected session transcript without m
 	await page.goto("/");
 	await expect(page.getByText("Alpha final transcript")).toBeVisible();
 
-	await page.getByRole("button", { name: /Session Beta/ }).click();
+	await page.getByRole("button", { name: /^Session Beta/ }).click();
 
 	await expect(page.getByText("Beta first line")).toBeVisible();
 	await expect(page.getByText("Beta second line")).toBeVisible();
 	await expect(page.getByText("Alpha final transcript")).toHaveCount(0);
 	await expectTextOrder(page, "Beta first line", "Beta second line");
 
-	await page.getByRole("button", { name: /Session Alpha/ }).click();
+	await page.getByRole("button", { name: /^Session Alpha/ }).click();
 	await expect(page.getByText("Alpha final transcript")).toBeVisible();
 	await expect(page.getByText("Beta first line")).toHaveCount(0);
 });
@@ -498,7 +498,7 @@ test("sidebar session load replaces the transcript when backfill is consolidated
 	await page.goto("/");
 	await expect(page.getByText("Alpha final transcript")).toBeVisible();
 
-	await page.getByRole("button", { name: /Session Beta/ }).click();
+	await page.getByRole("button", { name: /^Session Beta/ }).click();
 
 	await expectTranscript(page, {
 		present: ["Beta consolidated transcript"],
@@ -542,7 +542,7 @@ test("sidebar load keeps the current chat visible when the target session fails 
 	});
 
 	await page.goto("/");
-	await page.getByRole("button", { name: /Session Beta/ }).click();
+	await page.getByRole("button", { name: /^Session Beta/ }).click();
 
 	await expectTranscript(page, {
 		present: ["Alpha survives load failure"],
@@ -593,7 +593,7 @@ test("sidebar selection prefers cached detached transcripts until sync is reques
 	});
 
 	await page.goto("/");
-	await page.getByRole("button", { name: /Session Beta/ }).click();
+	await page.getByRole("button", { name: /^Session Beta/ }).click();
 
 	await expectTranscript(page, {
 		present: ["Beta cached transcript"],
@@ -659,8 +659,8 @@ test("sidebar load does not let a stale delayed load steal focus from a newer se
 	});
 
 	await page.goto("/");
-	await page.getByRole("button", { name: /Session Beta/ }).click();
-	await page.getByRole("button", { name: /Session Gamma/ }).click();
+	await page.getByRole("button", { name: /^Session Beta/ }).click();
+	await page.getByRole("button", { name: /^Session Gamma/ }).click();
 
 	await expect(page.getByText("Gamma final transcript")).toBeVisible();
 	await expect(page.getByText("Beta delayed transcript")).toHaveCount(0);
@@ -702,7 +702,7 @@ test("sidebar session switching keeps old-session live events out of the visible
 	});
 
 	await page.goto("/");
-	await page.getByRole("button", { name: /Session Beta/ }).click();
+	await page.getByRole("button", { name: /^Session Beta/ }).click();
 	await expect(page.getByText("Beta second line")).toBeVisible();
 
 	await request.post(`${gatewayUrl}/__test__/emit-event`, {
@@ -829,7 +829,7 @@ test("mobile chat flows keep the final transcript correct for sync, reload, and 
 	});
 	await page.goto("/");
 	await page.getByLabel("Toggle menu").click();
-	await page.getByRole("button", { name: /Session Beta/ }).click();
+	await page.getByRole("button", { name: /^Session Beta/ }).click();
 	await expect(page.getByText("Beta second line")).toBeVisible();
 	await expectTranscript(page, {
 		present: ["Beta first line", "Beta second line"],

@@ -115,6 +115,21 @@ describe("E2EEManager", () => {
 		);
 	});
 
+	it("forgetSession zeroizes only the selected session DEK", async () => {
+		const sessionDek = new Uint8Array([10, 20, 30]);
+		mockUnwrapDEK.mockReturnValueOnce(sessionDek);
+		await e2ee.addPairedSecret(btoa("test-secret"));
+		e2ee.unwrapSessionDek("session-forget", "wrapped-dek", 1);
+		e2ee.unwrapSessionDek("session-keep", "wrapped-dek", 1);
+
+		e2ee.forgetSession("session-forget");
+
+		expect(sessionDek).toEqual(new Uint8Array([0, 0, 0]));
+		expect(e2ee.hasSessionDek("session-forget", 1)).toBe(false);
+		expect(e2ee.hasSessionDek("session-keep", 1)).toBe(true);
+		expect(e2ee.isEnabled()).toBe(true);
+	});
+
 	it("bootstrapSessionE2EE returns none without wrappedDek", () => {
 		expect(bootstrapSessionE2EE("session-none")).toBe("none");
 		expect(mockUnwrapDEK).not.toHaveBeenCalled();

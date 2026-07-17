@@ -25,12 +25,22 @@ vi.mock("@/lib/chat-store", async (importOriginal) => {
 });
 
 const mockBootstrapSessionE2EE = vi.hoisted(() => vi.fn(() => "ok"));
+const mockForgetSession = vi.hoisted(() => vi.fn());
+const mockPushNotification = vi.hoisted(() => vi.fn());
 const mockUiStoreState = vi.hoisted(() => ({
 	setChatDraft: vi.fn(),
+	clearChatDraft: vi.fn(),
 }));
 
 vi.mock("@/lib/e2ee", () => ({
 	bootstrapSessionE2EE: mockBootstrapSessionE2EE,
+	e2ee: { forgetSession: mockForgetSession },
+}));
+
+vi.mock("@/lib/notification-store", () => ({
+	useNotificationStore: {
+		getState: () => ({ pushNotification: mockPushNotification }),
+	},
 }));
 
 vi.mock("@/lib/ui-store", () => ({
@@ -48,6 +58,7 @@ vi.mock("@/lib/api", async () => {
 		renameSession: vi.fn(),
 		archiveSession: vi.fn(),
 		closeSession: vi.fn(),
+		deleteSession: vi.fn(),
 		cancelSession: vi.fn(),
 		setSessionMode: vi.fn(),
 		setSessionModel: vi.fn(),
@@ -122,6 +133,7 @@ describe("useSessionMutations", () => {
 		mockStore = createMockStore();
 		mockChatStoreState.sessions = {};
 		mockUiStoreState.setChatDraft.mockReset();
+		mockUiStoreState.clearChatDraft.mockReset();
 		vi.clearAllMocks();
 	});
 
@@ -690,6 +702,99 @@ describe("useSessionMutations", () => {
 				expect.objectContaining({
 					title: "Session closed; local history was kept",
 				}),
+			);
+		});
+	});
+
+	describe("deleteSessionMutation", () => {
+		it("cancels an in-flight sessions snapshot before starting deletion", async () => {
+			let finishCancellation: (() => void) | undefined;
+			const cancelQueries = vi
+				.spyOn(queryClient, "cancelQueries")
+				.mockImplementationOnce(
+					() =>
+						new Promise<void>((resolve) => {
+							finishCancellation = resolve;
+						}),
+				);
+			vi.mocked(apiModule.deleteSession).mockResolvedValue({ ok: true });
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			let deletion: Promise<unknown> | undefined;
+			act(() => {
+				deletion = result.current.deleteSessionMutation.mutateAsync({
+					sessionId: "session-1",
+				});
+			});
+			await act(async () => {
+				await Promise.resolve();
+			});
+
+			expect(cancelQueries).toHaveBeenCalledWith({ queryKey: ["sessions"] });
+			expect(apiModule.deleteSession).not.toHaveBeenCalled();
+			finishCancellation?.();
+			await deletion;
+			expect(vi.mocked(apiModule.deleteSession).mock.calls[0]?.[0]).toEqual({
+				sessionId: "session-1",
+			});
+		});
+
+		it("clears cached history, draft, and session key only after success", async () => {
+			vi.mocked(apiModule.deleteSession).mockResolvedValue({ ok: true });
+			const onSessionDeleted = vi.fn();
+			queryClient.setQueryData(["sessions"], {
+				sessions: [
+					{ sessionId: "session-1", title: "Delete me" },
+					{ sessionId: "session-2", title: "Keep me" },
+				],
+			});
+			const { result } = renderHook(
+				() => useSessionMutations(mockStore, { onSessionDeleted }),
+				{ wrapper },
+			);
+
+			await result.current.deleteSessionMutation.mutateAsync({
+				sessionId: "session-1",
+			});
+
+			expect(mockStore.removeSession).toHaveBeenCalledWith("session-1");
+			expect(onSessionDeleted).toHaveBeenCalledWith("session-1");
+			expect(mockUiStoreState.clearChatDraft).toHaveBeenCalledWith("session-1");
+			expect(mockForgetSession).toHaveBeenCalledWith("session-1");
+			expect(queryClient.getQueryData(["sessions"])).toEqual({
+				sessions: [{ sessionId: "session-2", title: "Keep me" }],
+			});
+		});
+
+		it("preserves cached history, draft, and session key when remote delete fails", async () => {
+			vi.mocked(apiModule.deleteSession).mockRejectedValue(
+				new Error("Agent unavailable"),
+			);
+			const cached = {
+				sessions: [{ sessionId: "session-1", title: "Keep me" }],
+			};
+			queryClient.setQueryData(["sessions"], cached);
+			const onSessionDeleted = vi.fn();
+			const { result } = renderHook(
+				() => useSessionMutations(mockStore, { onSessionDeleted }),
+				{ wrapper },
+			);
+
+			await expect(
+				result.current.deleteSessionMutation.mutateAsync({
+					sessionId: "session-1",
+				}),
+			).rejects.toThrow("Agent unavailable");
+
+			expect(mockStore.removeSession).not.toHaveBeenCalled();
+			expect(onSessionDeleted).not.toHaveBeenCalled();
+			expect(mockUiStoreState.clearChatDraft).not.toHaveBeenCalled();
+			expect(mockForgetSession).not.toHaveBeenCalled();
+			expect(queryClient.getQueryData(["sessions"])).toEqual(cached);
+			expect(mockPushNotification).toHaveBeenCalledWith(
+				expect.objectContaining({ variant: "error" }),
 			);
 		});
 	});

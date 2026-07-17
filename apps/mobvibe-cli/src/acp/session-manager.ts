@@ -67,6 +67,28 @@ const MAX_RELOAD_BUFFER_BYTES = 8 * 1024 * 1024;
 const MAX_RELOAD_BUFFER_EVENTS = 20_000;
 const LEGACY_KEY_VALIDATION_PAGE_SIZE = 100;
 const WAL_ENCRYPTION_IDENTITY_SCHEMA_VERSION = 11;
+const RECENT_SESSION_DELETE_TTL_MS = 5 * 60 * 1000;
+const MAX_RECENT_SESSION_DELETES = 1024;
+const MAX_ACTIVE_AGENT_SESSION_OBSERVATIONS = 128;
+const MAX_DELETES_PER_AGENT_SESSION_OBSERVATION = 1024;
+const MAX_SESSION_ID_BYTES = 1024;
+
+type RecentSessionDelete = {
+	generation: number;
+	expiresAt: number;
+};
+
+type AgentSessionObservation = {
+	generation: number;
+	deletedSessionIds: Set<string>;
+	invalidated: boolean;
+	tracked: boolean;
+};
+
+const isValidSessionId = (sessionId: unknown): sessionId is string =>
+	typeof sessionId === "string" &&
+	sessionId.trim().length > 0 &&
+	Buffer.byteLength(sessionId, "utf8") <= MAX_SESSION_ID_BYTES;
 
 const resolveSessionUpdateEventKind = (
 	notification: SessionNotification,
@@ -428,6 +450,23 @@ export class SessionManager {
 	private readonly activeMessageIdBySession = new Map<string, string>();
 	private readonly sessionReloadTails = new Map<string, Promise<void>>();
 	private readonly closedSessionRecords = new WeakSet<SessionRecord>();
+	private readonly sessionDeletesInFlight = new Map<string, Promise<void>>();
+	private readonly remoteDeleteCleanupPending = new Set<string>();
+	private readonly recentlyDeletedSessions = new Map<
+		string,
+		RecentSessionDelete
+	>();
+	private readonly latestDeleteGenerationBySession = new Map<string, number>();
+	private readonly activeAgentSessionObservations =
+		new Set<AgentSessionObservation>();
+	private readonly sessionIncarnationGenerationBySession = new Map<
+		string,
+		number
+	>();
+	private readonly currentSessionIncarnationIds = new Set<string>();
+	private evictedSessionIncarnationFloor = 0;
+	private reuseQuarantineUntil = 0;
+	private sessionLifecycleGeneration = 0;
 	/** Per-backend idle connections (initialized but no session bound) */
 	private idleConnections = new Map<string, AcpConnection>();
 
@@ -443,6 +482,16 @@ export class SessionManager {
 			config.acpBackends.map((backend) => [backend.id, backend]),
 		);
 		this.walStore = new WalStore(config.walDbPath);
+		for (const session of this.walStore.getSessions()) {
+			if (isValidSessionId(session.sessionId)) {
+				this.currentSessionIncarnationIds.add(session.sessionId);
+			}
+		}
+		for (const session of this.walStore.getDiscoveredSessions()) {
+			if (isValidSessionId(session.sessionId)) {
+				this.currentSessionIncarnationIds.add(session.sessionId);
+			}
+		}
 		this.cryptoService = cryptoService;
 		this.validateWorkspacePath =
 			dependencies?.validateWorkspacePath ?? isValidWorkspacePath;
@@ -571,10 +620,282 @@ export class SessionManager {
 		}
 	}
 
-	listSessions(): SessionSummary[] {
-		return Array.from(this.sessions.values()).map((record) =>
-			this.buildSummary(record),
+	private getRecentSessionDelete(
+		sessionId: string,
+	): RecentSessionDelete | undefined {
+		const recentDelete = this.recentlyDeletedSessions.get(sessionId);
+		if (!recentDelete) {
+			return undefined;
+		}
+		if (recentDelete.expiresAt <= Date.now()) {
+			this.recentlyDeletedSessions.delete(sessionId);
+			return undefined;
+		}
+		return recentDelete;
+	}
+
+	private beginAgentSessionObservation(): AgentSessionObservation {
+		if (
+			this.activeAgentSessionObservations.size >=
+			MAX_ACTIVE_AGENT_SESSION_OBSERVATIONS
+		) {
+			return {
+				generation: this.sessionLifecycleGeneration,
+				deletedSessionIds: new Set(),
+				invalidated: true,
+				tracked: false,
+			};
+		}
+		const observation: AgentSessionObservation = {
+			generation: this.sessionLifecycleGeneration,
+			deletedSessionIds: new Set(),
+			invalidated: false,
+			tracked: true,
+		};
+		this.activeAgentSessionObservations.add(observation);
+		return observation;
+	}
+
+	private finishAgentSessionObservation(
+		observation: AgentSessionObservation,
+	): void {
+		if (observation.tracked) {
+			this.activeAgentSessionObservations.delete(observation);
+		}
+		observation.deletedSessionIds.clear();
+	}
+
+	private invalidateObservationsForDeletedSession(
+		sessionId: string,
+		generation: number,
+	): void {
+		for (const observation of this.activeAgentSessionObservations) {
+			if (observation.generation >= generation || observation.invalidated) {
+				continue;
+			}
+			if (
+				observation.deletedSessionIds.size >=
+				MAX_DELETES_PER_AGENT_SESSION_OBSERVATION
+			) {
+				observation.invalidated = true;
+				observation.deletedSessionIds.clear();
+				continue;
+			}
+			observation.deletedSessionIds.add(sessionId);
+		}
+	}
+
+	private pruneSessionIncarnationHistory(): void {
+		let historicalCount = 0;
+		for (const sessionId of this.sessionIncarnationGenerationBySession.keys()) {
+			if (!this.currentSessionIncarnationIds.has(sessionId)) {
+				historicalCount++;
+			}
+		}
+		while (historicalCount > MAX_RECENT_SESSION_DELETES) {
+			const oldestEntry = Array.from(
+				this.sessionIncarnationGenerationBySession.entries(),
+			).find(
+				([sessionId]) => !this.currentSessionIncarnationIds.has(sessionId),
+			);
+			if (!oldestEntry) {
+				break;
+			}
+			const [oldestSessionId, oldestGeneration] = oldestEntry;
+			this.sessionIncarnationGenerationBySession.delete(oldestSessionId);
+			this.evictedSessionIncarnationFloor = Math.max(
+				this.evictedSessionIncarnationFloor,
+				oldestGeneration,
+			);
+			historicalCount--;
+		}
+	}
+
+	private registerCurrentSessionIncarnation(sessionId: string): void {
+		if (
+			!this.currentSessionIncarnationIds.has(sessionId) &&
+			!this.sessionIncarnationGenerationBySession.has(sessionId) &&
+			this.evictedSessionIncarnationFloor > 0
+		) {
+			this.sessionIncarnationGenerationBySession.set(
+				sessionId,
+				++this.sessionLifecycleGeneration,
+			);
+		}
+		this.currentSessionIncarnationIds.add(sessionId);
+		this.pruneSessionIncarnationHistory();
+	}
+
+	private markSessionRecentlyDeleted(sessionId: string): void {
+		const generation = ++this.sessionLifecycleGeneration;
+		this.invalidateObservationsForDeletedSession(sessionId, generation);
+		this.currentSessionIncarnationIds.delete(sessionId);
+		this.sessionIncarnationGenerationBySession.delete(sessionId);
+		this.sessionIncarnationGenerationBySession.set(sessionId, generation);
+		this.pruneSessionIncarnationHistory();
+		this.recentlyDeletedSessions.delete(sessionId);
+		this.recentlyDeletedSessions.set(sessionId, {
+			generation,
+			expiresAt: Date.now() + RECENT_SESSION_DELETE_TTL_MS,
+		});
+		while (this.recentlyDeletedSessions.size > MAX_RECENT_SESSION_DELETES) {
+			const oldestSessionId = this.recentlyDeletedSessions.keys().next().value;
+			if (typeof oldestSessionId !== "string") {
+				break;
+			}
+			const evictedDelete = this.recentlyDeletedSessions.get(oldestSessionId);
+			if (evictedDelete) {
+				this.reuseQuarantineUntil = Math.max(
+					this.reuseQuarantineUntil,
+					evictedDelete.expiresAt,
+				);
+			}
+			this.recentlyDeletedSessions.delete(oldestSessionId);
+		}
+		this.latestDeleteGenerationBySession.delete(sessionId);
+		this.latestDeleteGenerationBySession.set(sessionId, generation);
+		while (
+			this.latestDeleteGenerationBySession.size > MAX_RECENT_SESSION_DELETES
+		) {
+			const oldestSessionId = this.latestDeleteGenerationBySession
+				.keys()
+				.next().value;
+			if (typeof oldestSessionId !== "string") {
+				break;
+			}
+			this.latestDeleteGenerationBySession.delete(oldestSessionId);
+		}
+	}
+
+	/**
+	 * Whether durable data or outbound events for a session must be suppressed.
+	 * Socket replay calls this immediately before every emit because a page may
+	 * have been read before deletion began.
+	 */
+	isSessionDeletionGuarded(sessionId: string): boolean {
+		return (
+			this.sessionDeletesInFlight.has(sessionId) ||
+			this.remoteDeleteCleanupPending.has(sessionId) ||
+			this.latestDeleteGenerationBySession.has(sessionId)
 		);
+	}
+
+	/** Stable token for the current local incarnation of a session ID. */
+	getSessionIncarnationGeneration(sessionId: string): number {
+		const explicitGeneration =
+			this.sessionIncarnationGenerationBySession.get(sessionId);
+		if (explicitGeneration !== undefined) {
+			return explicitGeneration;
+		}
+		return this.currentSessionIncarnationIds.has(sessionId)
+			? 0
+			: this.evictedSessionIncarnationFloor;
+	}
+
+	private isSessionTemporarilyHidden(sessionId: string): boolean {
+		return (
+			this.sessionDeletesInFlight.has(sessionId) ||
+			this.getRecentSessionDelete(sessionId) !== undefined
+		);
+	}
+
+	private assertValidSessionId(sessionId: string): void {
+		if (isValidSessionId(sessionId)) {
+			return;
+		}
+		throw new AppError(
+			createErrorDetail({
+				code: "REQUEST_VALIDATION_FAILED",
+				message:
+					"A non-empty sessionId of at most 1024 UTF-8 bytes is required",
+				retryable: false,
+				scope: "request",
+			}),
+			400,
+		);
+	}
+
+	private assertSessionMutable(sessionId: string): void {
+		this.assertValidSessionId(sessionId);
+		if (
+			this.sessionDeletesInFlight.has(sessionId) ||
+			this.remoteDeleteCleanupPending.has(sessionId)
+		) {
+			throw new AppError(
+				createErrorDetail({
+					code: "SESSION_BUSY",
+					message: "Session is deleting",
+					retryable: true,
+					scope: "session",
+				}),
+				409,
+			);
+		}
+		if (this.latestDeleteGenerationBySession.has(sessionId)) {
+			throw new AppError(
+				createErrorDetail({
+					code: "SESSION_NOT_FOUND",
+					message: "Session not found",
+					retryable: false,
+					scope: "session",
+				}),
+				404,
+			);
+		}
+	}
+
+	/**
+	 * Accept a session identity observed directly from the Agent. An observation
+	 * that started before deletion completed is stale and cannot recreate local
+	 * state. A later session/new or session/list response is authoritative proof
+	 * that the Agent now owns this ID again, so it may clear the short-lived
+	 * retry tombstone.
+	 */
+	private acceptAgentSessionObservation(
+		sessionId: string,
+		observation: AgentSessionObservation,
+	): boolean {
+		if (this.isAgentSessionObservationStale(sessionId, observation)) {
+			return false;
+		}
+		// Keep the ID quarantined while a timed-out delete response can still be
+		// retried by the Gateway/WebUI using only the bare session ID.
+		if (this.getRecentSessionDelete(sessionId)) {
+			return false;
+		}
+		if (this.reuseQuarantineUntil > Date.now()) {
+			return false;
+		}
+		const latestDeleteGeneration =
+			this.latestDeleteGenerationBySession.get(sessionId);
+		if (latestDeleteGeneration === undefined) {
+			return true;
+		}
+		this.recentlyDeletedSessions.delete(sessionId);
+		this.latestDeleteGenerationBySession.delete(sessionId);
+		logger.info({ sessionId }, "session_delete_tombstone_cleared_by_agent");
+		return true;
+	}
+
+	private isAgentSessionObservationStale(
+		sessionId: string,
+		observation: AgentSessionObservation,
+	): boolean {
+		if (
+			this.sessionDeletesInFlight.has(sessionId) ||
+			this.remoteDeleteCleanupPending.has(sessionId)
+		) {
+			return true;
+		}
+		return (
+			observation.invalidated || observation.deletedSessionIds.has(sessionId)
+		);
+	}
+
+	listSessions(): SessionSummary[] {
+		return Array.from(this.sessions.values())
+			.filter((record) => !this.isSessionTemporarilyHidden(record.sessionId))
+			.map((record) => this.buildSummary(record));
 	}
 
 	/**
@@ -593,6 +914,7 @@ export class SessionManager {
 
 		for (const session of this.walStore.getSessions()) {
 			if (merged.has(session.sessionId)) continue;
+			if (this.isSessionTemporarilyHidden(session.sessionId)) continue;
 			const backend = this.backendById.get(session.backendId);
 			merged.set(session.sessionId, {
 				sessionId: session.sessionId,
@@ -616,6 +938,7 @@ export class SessionManager {
 
 		for (const s of this.walStore.getDiscoveredSessions()) {
 			if (s.cwd === undefined) continue;
+			if (this.isSessionTemporarilyHidden(s.sessionId)) continue;
 			const existing = merged.get(s.sessionId);
 			if (existing) {
 				// Active connection state is authoritative. A detached discovery result
@@ -665,6 +988,7 @@ export class SessionManager {
 		sessionId: string,
 		revision: number,
 	): string | undefined {
+		if (this.isSessionDeletionGuarded(sessionId)) return undefined;
 		if (!this.cryptoService) return undefined;
 		if (this.cryptoService.contentEncryptionEnabled === false) return undefined;
 
@@ -700,6 +1024,7 @@ export class SessionManager {
 		sessionId: string,
 		revision: number,
 	): string | undefined {
+		if (this.isSessionDeletionGuarded(sessionId)) return undefined;
 		const wrappedDek = this.prepareSessionRevisionDek(sessionId, revision);
 		if (
 			wrappedDek &&
@@ -737,56 +1062,78 @@ export class SessionManager {
 	}
 
 	async backfillDiscoveredWorkspaceRoots(): Promise<void> {
-		const discoveredSessions = this.walStore.getDiscoveredSessions();
-		let checked = 0;
-		let updated = 0;
-		let skippedMissingCwd = 0;
-		let failed = 0;
+		const observation = this.beginAgentSessionObservation();
+		try {
+			const discoveredSessions = this.walStore.getDiscoveredSessions();
+			let checked = 0;
+			let updated = 0;
+			let skippedMissingCwd = 0;
+			let failed = 0;
 
-		for (const session of discoveredSessions) {
-			if (!session.cwd) {
-				skippedMissingCwd++;
-				continue;
-			}
-			if (
-				session.workspaceRootCwd &&
-				session.workspaceRootCwd !== session.cwd
-			) {
-				continue;
+			for (const session of discoveredSessions) {
+				if (
+					this.isSessionDeletionGuarded(session.sessionId) ||
+					this.isAgentSessionObservationStale(session.sessionId, observation)
+				) {
+					continue;
+				}
+				if (!session.cwd) {
+					skippedMissingCwd++;
+					continue;
+				}
+				if (
+					session.workspaceRootCwd &&
+					session.workspaceRootCwd !== session.cwd
+				) {
+					continue;
+				}
+
+				checked++;
+
+				try {
+					const projectContext = await this.resolveGitProjectContext(
+						session.cwd,
+					);
+					if (
+						this.isSessionDeletionGuarded(session.sessionId) ||
+						this.isAgentSessionObservationStale(session.sessionId, observation)
+					) {
+						continue;
+					}
+					const workspaceRootCwd = projectContext.repoRoot ?? session.cwd;
+					this.walStore.saveDiscoveredSessions([
+						{
+							...session,
+							workspaceRootCwd,
+						},
+					]);
+					updated++;
+				} catch (error) {
+					failed++;
+					logger.warn(
+						{
+							sessionId: session.sessionId,
+							cwd: session.cwd,
+							err: error,
+						},
+						"discovered_workspace_root_backfill_failed",
+					);
+				}
 			}
 
-			checked++;
-
-			try {
-				const projectContext = await this.resolveGitProjectContext(session.cwd);
-				const workspaceRootCwd = projectContext.repoRoot ?? session.cwd;
-				this.walStore.saveDiscoveredSessions([
-					{
-						...session,
-						workspaceRootCwd,
-					},
-				]);
-				updated++;
-			} catch (error) {
-				failed++;
-				logger.warn(
-					{
-						sessionId: session.sessionId,
-						cwd: session.cwd,
-						err: error,
-					},
-					"discovered_workspace_root_backfill_failed",
-				);
-			}
+			logger.info(
+				{ checked, updated, skippedMissingCwd, failed },
+				"discovered_workspace_root_backfill_complete",
+			);
+		} finally {
+			this.finishAgentSessionObservation(observation);
 		}
-
-		logger.info(
-			{ checked, updated, skippedMissingCwd, failed },
-			"discovered_workspace_root_backfill_complete",
-		);
 	}
 
 	getSession(sessionId: string): SessionRecord | undefined {
+		if (this.isSessionDeletionGuarded(sessionId)) {
+			return undefined;
+		}
 		return this.sessions.get(sessionId);
 	}
 
@@ -794,6 +1141,9 @@ export class SessionManager {
 	 * Get the current WAL revision for a session.
 	 */
 	getSessionRevision(sessionId: string): number | undefined {
+		if (this.isSessionDeletionGuarded(sessionId)) {
+			return undefined;
+		}
 		return this.sessions.get(sessionId)?.revision;
 	}
 
@@ -864,6 +1214,15 @@ export class SessionManager {
 	 * Query session events from the WAL.
 	 */
 	getSessionEvents(params: SessionEventsParams): SessionEventsResponse {
+		if (this.isSessionDeletionGuarded(params.sessionId)) {
+			return {
+				sessionId: params.sessionId,
+				machineId: this.config.machineId,
+				revision: params.revision,
+				events: [],
+				hasMore: false,
+			};
+		}
 		const record = this.sessions.get(params.sessionId);
 
 		// Determine the actual revision from WAL or active session
@@ -934,13 +1293,18 @@ export class SessionManager {
 		sessionId: string;
 		revision: number;
 	}> {
-		return this.walStore.listUnackedSessionRevisions();
+		return this.walStore
+			.listUnackedSessionRevisions()
+			.filter(({ sessionId }) => !this.isSessionDeletionGuarded(sessionId));
 	}
 
 	/**
 	 * Get unacked events for a session/revision (for reconnection replay).
 	 */
 	getUnackedEvents(sessionId: string, revision: number): SessionEvent[] {
+		if (this.isSessionDeletionGuarded(sessionId)) {
+			return [];
+		}
 		const wrappedDek = this.ensureSessionRevisionDek(sessionId, revision);
 		if (this.cryptoService?.contentEncryptionEnabled && !wrappedDek) {
 			logger.error(
@@ -959,6 +1323,9 @@ export class SessionManager {
 		afterSeq: number,
 		limit: number,
 	): SessionEvent[] {
+		if (this.isSessionDeletionGuarded(sessionId)) {
+			return [];
+		}
 		const wrappedDek = this.ensureSessionRevisionDek(sessionId, revision);
 		if (this.cryptoService?.contentEncryptionEnabled && !wrappedDek) {
 			logger.error(
@@ -975,7 +1342,23 @@ export class SessionManager {
 	/**
 	 * Acknowledge events up to a given sequence.
 	 */
-	ackEvents(sessionId: string, revision: number, upToSeq: number): void {
+	ackEvents(
+		sessionId: string,
+		revision: number,
+		upToSeq: number,
+		incarnationGeneration?: number,
+	): void {
+		if (this.isSessionDeletionGuarded(sessionId)) {
+			return;
+		}
+		const currentIncarnation = this.getSessionIncarnationGeneration(sessionId);
+		if (incarnationGeneration === undefined) {
+			if (this.sessionIncarnationGenerationBySession.has(sessionId)) {
+				return;
+			}
+		} else if (incarnationGeneration !== currentIncarnation) {
+			return;
+		}
 		this.walStore.ackEvents(sessionId, revision, upToSeq);
 	}
 
@@ -983,6 +1366,9 @@ export class SessionManager {
 		sessionId: string,
 		messageId: string,
 	): { stopReason: StopReason } | undefined {
+		if (this.isSessionDeletionGuarded(sessionId)) {
+			return undefined;
+		}
 		return this.walStore.getMessageSendResult(sessionId, messageId);
 	}
 
@@ -991,14 +1377,19 @@ export class SessionManager {
 		messageId: string,
 		stopReason: StopReason,
 	): void {
+		if (this.isSessionDeletionGuarded(sessionId)) {
+			return;
+		}
 		this.walStore.recordMessageSendResult(sessionId, messageId, stopReason);
 	}
 
 	claimMessageSend(sessionId: string, messageId: string): MessageSendClaim {
+		this.assertSessionMutable(sessionId);
 		return this.walStore.claimMessageSend(sessionId, messageId);
 	}
 
 	beginMessageSend(sessionId: string, messageId: string): void {
+		this.assertSessionMutable(sessionId);
 		const activeMessageId = this.activeMessageIdBySession.get(sessionId);
 		if (activeMessageId && activeMessageId !== messageId) {
 			throw new Error(
@@ -1020,6 +1411,9 @@ export class SessionManager {
 		claimId: string,
 		stopReason: StopReason,
 	): void {
+		if (this.isSessionDeletionGuarded(sessionId)) {
+			return;
+		}
 		const record = this.sessions.get(sessionId);
 		if (!record) {
 			throw new Error(`Session not found: ${sessionId}`);
@@ -1040,6 +1434,9 @@ export class SessionManager {
 	}
 
 	recordTurnEnd(sessionId: string, stopReason: StopReason): void {
+		if (this.isSessionDeletionGuarded(sessionId)) {
+			return;
+		}
 		const record = this.sessions.get(sessionId);
 		if (!record) {
 			return;
@@ -1064,7 +1461,10 @@ export class SessionManager {
 		revision: number,
 		kind: SessionEventKind,
 		payload: unknown,
-	): SessionEvent {
+	): SessionEvent | undefined {
+		if (this.isSessionDeletionGuarded(sessionId)) {
+			return undefined;
+		}
 		logger.debug(
 			{ sessionId, revision, kind },
 			"session_write_and_emit_event_start",
@@ -1086,6 +1486,9 @@ export class SessionManager {
 		return {
 			sessionId: walEvent.sessionId,
 			machineId: this.config.machineId,
+			incarnationGeneration: this.getSessionIncarnationGeneration(
+				walEvent.sessionId,
+			),
 			revision: walEvent.revision,
 			seq: walEvent.seq,
 			kind: walEvent.kind,
@@ -1131,7 +1534,10 @@ export class SessionManager {
 		kind: SessionEventKind,
 		payload: unknown,
 	): SessionEvent | undefined {
-		if (this.closedSessionRecords.has(record)) {
+		if (
+			this.closedSessionRecords.has(record) ||
+			this.isSessionDeletionGuarded(record.sessionId)
+		) {
 			return undefined;
 		}
 		if (record.pendingReload) {
@@ -1368,6 +1774,8 @@ export class SessionManager {
 		const connection = await this.acquireConnection(backend);
 		const bufferedUpdates: SessionNotification[] = [];
 		let recordRef: SessionRecord | undefined;
+		let observation: AgentSessionObservation | undefined;
+		let quarantinedSessionId: string | undefined;
 		const unsubscribe = connection.onSessionUpdate(
 			(notification: SessionNotification) => {
 				logger.debug(
@@ -1386,10 +1794,34 @@ export class SessionManager {
 			},
 		);
 		try {
+			observation = this.beginAgentSessionObservation();
 			const session = await connection.createSession({
 				cwd: effectiveCwd,
 				additionalDirectories,
 			});
+			if (!isValidSessionId(session.sessionId)) {
+				throw new AppError(
+					createErrorDetail({
+						code: "REQUEST_VALIDATION_FAILED",
+						message: "Agent returned an invalid session ID",
+						retryable: false,
+						scope: "session",
+					}),
+					502,
+				);
+			}
+			if (!this.acceptAgentSessionObservation(session.sessionId, observation)) {
+				quarantinedSessionId = session.sessionId;
+				throw new AppError(
+					createErrorDetail({
+						code: "SESSION_BUSY",
+						message: "Session was deleted while it was being created",
+						retryable: true,
+						scope: "session",
+					}),
+					409,
+				);
+			}
 			connection.setPermissionHandler((params, requestId, signal) =>
 				this.handlePermissionRequest(
 					session.sessionId,
@@ -1421,6 +1853,7 @@ export class SessionManager {
 				title: sessionTitle,
 				isTitlePinned: hasExplicitTitle,
 			});
+			this.registerCurrentSessionIncarnation(session.sessionId);
 
 			// Initialize DEK for E2EE
 			this.requireSessionRevisionDek(session.sessionId, revision);
@@ -1493,12 +1926,30 @@ export class SessionManager {
 					"session_creation_failed_after_worktree_created",
 				);
 			}
+			if (quarantinedSessionId) {
+				try {
+					if (connection.supportsSessionDelete()) {
+						await connection.deleteSession(quarantinedSessionId);
+					} else if (connection.supportsSessionClose()) {
+						await connection.closeSession(quarantinedSessionId);
+					}
+				} catch (cleanupError) {
+					logger.warn(
+						{ err: cleanupError, sessionId: quarantinedSessionId },
+						"quarantined_session_cleanup_failed",
+					);
+				}
+			}
 			const status = connection.getStatus();
 			await connection.disconnect();
 			if (status.error) {
 				throw new AppError(status.error, 500);
 			}
 			throw error;
+		} finally {
+			if (observation) {
+				this.finishAgentSessionObservation(observation);
+			}
 		}
 	}
 
@@ -1520,6 +1971,9 @@ export class SessionManager {
 		protocolRequestId: JsonRpcId,
 		signal: AbortSignal,
 	): Promise<RequestPermissionResponse> {
+		if (this.isSessionDeletionGuarded(sessionId)) {
+			return Promise.resolve({ outcome: { outcome: "cancelled" } });
+		}
 		const requestId = encodeProtocolRequestId(
 			protocolRequestId,
 			params.toolCall?.toolCallId ?? randomUUID(),
@@ -1606,6 +2060,7 @@ export class SessionManager {
 	}
 
 	updateTitle(sessionId: string, title: string): SessionSummary {
+		this.assertSessionMutable(sessionId);
 		const record = this.sessions.get(sessionId);
 		if (!record) {
 			throw new AppError(
@@ -1643,6 +2098,9 @@ export class SessionManager {
 	}
 
 	touchSession(sessionId: string) {
+		if (this.isSessionDeletionGuarded(sessionId)) {
+			return;
+		}
 		const record = this.sessions.get(sessionId);
 		if (!record) {
 			return;
@@ -1654,6 +2112,7 @@ export class SessionManager {
 		sessionId: string,
 		modeId: string,
 	): Promise<SessionSummary> {
+		this.assertSessionMutable(sessionId);
 		const record = this.sessions.get(sessionId);
 		if (!record) {
 			throw new AppError(
@@ -1684,6 +2143,7 @@ export class SessionManager {
 			);
 		}
 		await record.connection.setSessionMode(sessionId, modeId);
+		this.assertSessionMutable(sessionId);
 		record.modeId = selected.id;
 		record.modeName = selected.name;
 		record.updatedAt = new Date();
@@ -1700,6 +2160,7 @@ export class SessionManager {
 		sessionId: string,
 		modelId: string,
 	): Promise<SessionSummary> {
+		this.assertSessionMutable(sessionId);
 		const record = this.sessions.get(sessionId);
 		if (!record) {
 			throw new AppError(
@@ -1748,6 +2209,7 @@ export class SessionManager {
 		value: string | boolean,
 		_meta?: Record<string, unknown> | null,
 	): Promise<SessionSummary> {
+		this.assertSessionMutable(sessionId);
 		const record = this.sessions.get(sessionId);
 		if (!record) {
 			throw new AppError(
@@ -1783,6 +2245,7 @@ export class SessionManager {
 					value,
 					_meta,
 				));
+		this.assertSessionMutable(sessionId);
 		applyConfigOptionsToRecord(record, response.configOptions);
 		record.updatedAt = new Date();
 		const summary = this.buildSummary(record);
@@ -1795,6 +2258,7 @@ export class SessionManager {
 	}
 
 	async cancelSession(sessionId: string): Promise<boolean> {
+		this.assertSessionMutable(sessionId);
 		const record = this.sessions.get(sessionId);
 		if (!record) {
 			return false;
@@ -1831,6 +2295,7 @@ export class SessionManager {
 	}
 
 	private requireClosableSession(sessionId: string): SessionRecord {
+		this.assertSessionMutable(sessionId);
 		const record = this.sessions.get(sessionId);
 		if (!record) {
 			throw new AppError(
@@ -1849,6 +2314,156 @@ export class SessionManager {
 			);
 		}
 		return record;
+	}
+
+	/** Validate active-session delete support before cancelling pending work. */
+	assertSessionDeleteSupported(sessionId: string): void {
+		if (
+			this.getRecentSessionDelete(sessionId) ||
+			this.sessionDeletesInFlight.has(sessionId) ||
+			this.isUnknownSessionWithinReuseQuarantine(sessionId)
+		) {
+			return;
+		}
+		const target = this.resolveSessionDeleteTarget(sessionId);
+		if (target.record && !target.record.connection.supportsSessionDelete()) {
+			throw createCapabilityNotSupportedError(
+				"Agent does not support session/delete capability",
+			);
+		}
+	}
+
+	/**
+	 * Delete the agent-owned session first, then permanently remove local state.
+	 * Keeping the local record until both steps succeed makes a remote-success /
+	 * local-failure outcome safely retryable against ACP's idempotent method.
+	 */
+	async deleteSession(sessionId: string): Promise<void> {
+		if (this.getRecentSessionDelete(sessionId)) {
+			return;
+		}
+		const existingDelete = this.sessionDeletesInFlight.get(sessionId);
+		if (existingDelete) {
+			await existingDelete;
+			return;
+		}
+		if (this.isUnknownSessionWithinReuseQuarantine(sessionId)) {
+			return;
+		}
+		const target = this.resolveSessionDeleteTarget(sessionId);
+		const operation = Promise.resolve().then(() =>
+			this.executeSessionDelete(sessionId, target),
+		);
+		this.sessionDeletesInFlight.set(sessionId, operation);
+		try {
+			await operation;
+			this.markSessionRecentlyDeleted(sessionId);
+		} finally {
+			if (this.sessionDeletesInFlight.get(sessionId) === operation) {
+				this.sessionDeletesInFlight.delete(sessionId);
+			}
+		}
+	}
+
+	private isUnknownSessionWithinReuseQuarantine(sessionId: string): boolean {
+		this.assertValidSessionId(sessionId);
+		return (
+			this.reuseQuarantineUntil > Date.now() &&
+			!this.sessions.has(sessionId) &&
+			this.walStore.getSession(sessionId) === null &&
+			this.walStore.getDiscoveredSessionBackendId(sessionId) === undefined
+		);
+	}
+
+	private async executeSessionDelete(
+		sessionId: string,
+		target: { backend: AcpBackendConfig; record?: SessionRecord },
+	): Promise<void> {
+		const connection =
+			target.record?.connection ??
+			(await this.acquireConnection(target.backend));
+		const shouldRelease = target.record === undefined;
+
+		try {
+			if (!connection.supportsSessionDelete()) {
+				throw createCapabilityNotSupportedError(
+					"Agent does not support session/delete capability",
+				);
+			}
+			await connection.deleteSession(sessionId);
+			this.remoteDeleteCleanupPending.add(sessionId);
+
+			// Do not alter memory or cached keys until the entire WAL transaction commits.
+			this.walStore.deleteSession(sessionId);
+			this.cryptoService?.forgetSession(sessionId);
+			this.discoveredSessions.delete(sessionId);
+
+			if (target.record) {
+				await this.disposeAttachedSession(sessionId);
+			} else {
+				try {
+					this.emitSessionsChanged({
+						added: [],
+						updated: [],
+						removed: [sessionId],
+					});
+				} catch (error) {
+					logger.error(
+						{ err: error, sessionId },
+						"session_delete_change_emit_failed",
+					);
+				}
+			}
+			this.remoteDeleteCleanupPending.delete(sessionId);
+		} finally {
+			if (shouldRelease) {
+				this.releaseConnection(target.backend.id, connection);
+			}
+		}
+	}
+
+	private resolveSessionDeleteTarget(sessionId: string): {
+		backend: AcpBackendConfig;
+		record?: SessionRecord;
+	} {
+		this.assertValidSessionId(sessionId);
+
+		const record = this.sessions.get(sessionId);
+		const walSession = this.walStore.getSession(sessionId);
+		const discoveredBackendId =
+			this.walStore.getDiscoveredSessionBackendId(sessionId);
+		const backendIds = new Set(
+			[record?.backendId, walSession?.backendId, discoveredBackendId].filter(
+				(value): value is string => value !== undefined,
+			),
+		);
+		if (backendIds.size === 0) {
+			throw new AppError(
+				createErrorDetail({
+					code: "SESSION_NOT_FOUND",
+					message: "Session not found",
+					retryable: false,
+					scope: "session",
+				}),
+				404,
+			);
+		}
+		if (backendIds.size > 1) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Session has conflicting backend affinity",
+					retryable: false,
+					scope: "session",
+				}),
+				409,
+			);
+		}
+		const [backendId] = backendIds;
+		if (!backendId) {
+			throw new Error("Session backend affinity was not resolved");
+		}
+		return { backend: this.resolveBackend(backendId), record };
 	}
 
 	/** Dispose a local ACP connection without invoking protocol session/close. */
@@ -1934,11 +2549,13 @@ export class SessionManager {
 	 * Archive a session: close if active, delete WAL messages, mark as archived.
 	 */
 	async archiveSession(sessionId: string): Promise<void> {
+		this.assertSessionMutable(sessionId);
 		if (this.sessions.has(sessionId)) {
 			await this.disposeAttachedSession(sessionId);
 		}
 		this.walStore.archiveSession(sessionId);
 		this.discoveredSessions.delete(sessionId);
+		this.currentSessionIncarnationIds.delete(sessionId);
 	}
 
 	/**
@@ -1947,6 +2564,9 @@ export class SessionManager {
 	async bulkArchiveSessions(
 		sessionIds: string[],
 	): Promise<{ archivedCount: number }> {
+		for (const sessionId of sessionIds) {
+			this.assertSessionMutable(sessionId);
+		}
 		await Promise.allSettled(
 			sessionIds
 				.filter((id) => this.sessions.has(id))
@@ -1955,6 +2575,7 @@ export class SessionManager {
 		const archivedCount = this.walStore.bulkArchiveSessions(sessionIds);
 		for (const id of sessionIds) {
 			this.discoveredSessions.delete(id);
+			this.currentSessionIncarnationIds.delete(id);
 		}
 		return { archivedCount };
 	}
@@ -1994,122 +2615,157 @@ export class SessionManager {
 			let nextCursor: string | undefined;
 
 			if (capabilities.list) {
-				const response = await connection.listSessions({
-					cwd: options?.cwd,
-					cursor: options?.cursor,
-				});
-				nextCursor = response.nextCursor;
+				const observation = this.beginAgentSessionObservation();
+				try {
+					const response = await connection.listSessions({
+						cwd: options?.cwd,
+						cursor: options?.cursor,
+					});
+					nextCursor = response.nextCursor;
 
-				// Get archived IDs to filter them out
-				const archivedIds = new Set(this.walStore.getArchivedSessionIds());
-
-				const validity = await Promise.all(
-					response.sessions.map(async (session) => {
-						try {
-							const additionalDirectories = normalizeAdditionalDirectories(
-								session.cwd,
-								session.additionalDirectories ?? undefined,
-							);
-							return {
-								session,
-								additionalDirectories,
-								isValid: session.cwd
-									? await this.validateWorkspacePath(session.cwd)
-									: false,
-								projectContext: session.cwd
-									? await this.resolveGitProjectContext(session.cwd)
-									: undefined,
-							};
-						} catch (error) {
-							logger.warn(
-								{ err: error, sessionId: session.sessionId },
-								"discovered_session_invalid_additional_directories",
-							);
-							return {
-								session,
-								additionalDirectories: [],
-								isValid: false,
-								projectContext: undefined,
-							};
+					// Get archived IDs to filter them out
+					const archivedIds = new Set(this.walStore.getArchivedSessionIds());
+					const sessionsWithValidIds = response.sessions.filter((session) => {
+						if (isValidSessionId(session.sessionId)) {
+							return true;
 						}
-					}),
-				);
+						logger.warn(
+							{ backendId: backend.id },
+							"discovered_session_invalid_id",
+						);
+						return false;
+					});
 
-				const now = new Date().toISOString();
-				const discoveredRecords: Array<{
-					sessionId: string;
-					backendId: string;
-					cwd?: string;
-					additionalDirectories: string[];
-					workspaceRootCwd?: string;
-					title?: string | null;
-					agentUpdatedAt?: string | null;
-					_meta?: Record<string, unknown> | null;
-					discoveredAt: string;
-					isStale: boolean;
-				}> = [];
+					const validity = await Promise.all(
+						sessionsWithValidIds.map(async (session) => {
+							try {
+								const additionalDirectories = normalizeAdditionalDirectories(
+									session.cwd,
+									session.additionalDirectories ?? undefined,
+								);
+								return {
+									session,
+									additionalDirectories,
+									isValid: session.cwd
+										? await this.validateWorkspacePath(session.cwd)
+										: false,
+									projectContext: session.cwd
+										? await this.resolveGitProjectContext(session.cwd)
+										: undefined,
+								};
+							} catch (error) {
+								logger.warn(
+									{ err: error, sessionId: session.sessionId },
+									"discovered_session_invalid_additional_directories",
+								);
+								return {
+									session,
+									additionalDirectories: [],
+									isValid: false,
+									projectContext: undefined,
+								};
+							}
+						}),
+					);
 
-				for (const {
-					session,
-					additionalDirectories,
-					isValid,
-					projectContext,
-				} of validity) {
-					if (!isValid) {
-						this.discoveredSessions.delete(session.sessionId);
-						// Mark as stale in WAL
-						this.walStore.markDiscoveredSessionStale(session.sessionId);
-						continue;
+					const now = new Date().toISOString();
+					const discoveredRecords: Array<{
+						sessionId: string;
+						backendId: string;
+						cwd?: string;
+						additionalDirectories: string[];
+						workspaceRootCwd?: string;
+						title?: string | null;
+						agentUpdatedAt?: string | null;
+						_meta?: Record<string, unknown> | null;
+						discoveredAt: string;
+						isStale: boolean;
+					}> = [];
+
+					for (const {
+						session,
+						additionalDirectories,
+						isValid,
+						projectContext,
+					} of validity) {
+						if (
+							this.isAgentSessionObservationStale(
+								session.sessionId,
+								observation,
+							)
+						) {
+							continue;
+						}
+						if (!isValid) {
+							if (this.isSessionTemporarilyHidden(session.sessionId)) {
+								continue;
+							}
+							this.discoveredSessions.delete(session.sessionId);
+							// Mark as stale in WAL
+							this.walStore.markDiscoveredSessionStale(session.sessionId);
+							continue;
+						}
+
+						// Skip archived sessions
+						if (archivedIds.has(session.sessionId)) {
+							continue;
+						}
+						if (
+							!this.acceptAgentSessionObservation(
+								session.sessionId,
+								observation,
+							)
+						) {
+							continue;
+						}
+						this.registerCurrentSessionIncarnation(session.sessionId);
+
+						const previous = this.discoveredSessions.get(session.sessionId);
+						const metadata = Object.hasOwn(session, "_meta")
+							? { _meta: session._meta }
+							: previous && Object.hasOwn(previous, "_meta")
+								? { _meta: previous._meta }
+								: {};
+						this.discoveredSessions.set(session.sessionId, {
+							sessionId: session.sessionId,
+							cwd: session.cwd,
+							additionalDirectories,
+							workspaceRootCwd: projectContext?.repoRoot ?? session.cwd,
+							title: session.title,
+							updatedAt: session.updatedAt,
+							...metadata,
+						});
+						sessions.push({
+							sessionId: session.sessionId,
+							cwd: session.cwd,
+							additionalDirectories,
+							workspaceRootCwd: projectContext?.repoRoot ?? session.cwd,
+							title: session.title,
+							updatedAt: session.updatedAt,
+							...metadata,
+						});
+
+						// Collect for WAL persistence
+						discoveredRecords.push({
+							sessionId: session.sessionId,
+							backendId: backend.id,
+							cwd: session.cwd,
+							additionalDirectories,
+							workspaceRootCwd: projectContext?.repoRoot ?? session.cwd,
+							title: session.title ?? null,
+							agentUpdatedAt: session.updatedAt ?? null,
+							...metadata,
+							discoveredAt: now,
+							isStale: false,
+						});
 					}
 
-					// Skip archived sessions
-					if (archivedIds.has(session.sessionId)) {
-						continue;
+					// Persist to WAL
+					if (discoveredRecords.length > 0) {
+						this.walStore.saveDiscoveredSessions(discoveredRecords);
 					}
-
-					const previous = this.discoveredSessions.get(session.sessionId);
-					const metadata = Object.hasOwn(session, "_meta")
-						? { _meta: session._meta }
-						: previous && Object.hasOwn(previous, "_meta")
-							? { _meta: previous._meta }
-							: {};
-					this.discoveredSessions.set(session.sessionId, {
-						sessionId: session.sessionId,
-						cwd: session.cwd,
-						additionalDirectories,
-						workspaceRootCwd: projectContext?.repoRoot ?? session.cwd,
-						title: session.title,
-						updatedAt: session.updatedAt,
-						...metadata,
-					});
-					sessions.push({
-						sessionId: session.sessionId,
-						cwd: session.cwd,
-						additionalDirectories,
-						workspaceRootCwd: projectContext?.repoRoot ?? session.cwd,
-						title: session.title,
-						updatedAt: session.updatedAt,
-						...metadata,
-					});
-
-					// Collect for WAL persistence
-					discoveredRecords.push({
-						sessionId: session.sessionId,
-						backendId: backend.id,
-						cwd: session.cwd,
-						additionalDirectories,
-						workspaceRootCwd: projectContext?.repoRoot ?? session.cwd,
-						title: session.title ?? null,
-						agentUpdatedAt: session.updatedAt ?? null,
-						...metadata,
-						discoveredAt: now,
-						isStale: false,
-					});
-				}
-
-				// Persist to WAL
-				if (discoveredRecords.length > 0) {
-					this.walStore.saveDiscoveredSessions(discoveredRecords);
+				} finally {
+					this.finishAgentSessionObservation(observation);
 				}
 			}
 
@@ -2157,6 +2813,7 @@ export class SessionManager {
 				400,
 			);
 		}
+		this.assertSessionMutable(sessionId);
 		if (this.walStore.isArchived(sessionId)) {
 			throw new AppError(
 				createErrorDetail({
@@ -2298,6 +2955,7 @@ export class SessionManager {
 			if (resumeBuffer.error) {
 				throw resumeBuffer.error;
 			}
+			this.assertSessionMutable(sessionId);
 
 			const now = new Date();
 			const agentInfo = connection.getAgentInfo();
@@ -2396,6 +3054,7 @@ export class SessionManager {
 			throw new Error("Resumed session record was not initialized");
 		}
 		this.applyReloadEventsToRecord(recordRef, resumeBuffer.events);
+		this.registerCurrentSessionIncarnation(sessionId);
 		this.emitCommittedReloadEvents(committedEvents);
 		this.sessions.set(sessionId, recordRef);
 		const summary = this.buildSummary(recordRef);
@@ -2441,6 +3100,7 @@ export class SessionManager {
 		additionalDirectories?: string[],
 	): Promise<SessionSummary> {
 		logger.info({ sessionId, cwd, backendId }, "load_session_start");
+		this.assertSessionMutable(sessionId);
 		if (this.walStore.isArchived(sessionId)) {
 			throw new AppError(
 				createErrorDetail({
@@ -2569,6 +3229,7 @@ export class SessionManager {
 			if (loadBuffer.error) {
 				throw loadBuffer.error;
 			}
+			this.assertSessionMutable(sessionId);
 
 			const walEvents = this.toWalEventInputs(bufferedEvents);
 			let revision: number;
@@ -2649,6 +3310,7 @@ export class SessionManager {
 				"load_session_writing_buffered",
 			);
 			this.applyReloadEventsToRecord(record, bufferedEvents);
+			this.registerCurrentSessionIncarnation(sessionId);
 			this.emitCommittedReloadEvents(committedEvents);
 
 			this.setupSessionSubscriptions(record, { skipSessionUpdates: true });
@@ -2718,6 +3380,7 @@ export class SessionManager {
 		backendId: string,
 		additionalDirectories?: string[],
 	): Promise<SessionSummary> {
+		this.assertSessionMutable(sessionId);
 		const normalizedAdditionalDirectories = normalizeAdditionalDirectories(
 			cwd,
 			additionalDirectories,
@@ -2756,6 +3419,7 @@ export class SessionManager {
 			if (reloadBuffer.error) {
 				throw reloadBuffer.error;
 			}
+			this.assertSessionMutable(sessionId);
 		} catch (error) {
 			delete existing.pendingReload;
 			if (bufferedEvents.length > 0) {
@@ -2904,7 +3568,10 @@ export class SessionManager {
 		record: SessionRecord,
 		notification: SessionNotification,
 	): void {
-		if (this.closedSessionRecords.has(record)) {
+		if (
+			this.closedSessionRecords.has(record) ||
+			this.isSessionDeletionGuarded(record.sessionId)
+		) {
 			return;
 		}
 		if (record.pendingReload) {

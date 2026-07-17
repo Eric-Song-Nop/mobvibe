@@ -5,6 +5,7 @@ import type {
 	CancelSessionParams,
 	CloseSessionParams,
 	CreateSessionParams,
+	DeleteSessionParams,
 	DiscoverSessionsRpcParams,
 	DiscoverSessionsRpcResult,
 	FsEntriesParams,
@@ -88,6 +89,9 @@ type PendingRpc<T> = {
 const RPC_TIMEOUT = 120000; // 2 minutes for long operations like message sending
 const MAX_DURABLE_MESSAGE_SENDS = 10_000;
 const MAX_DURABLE_MESSAGE_SENDS_PER_OWNER = 1_000;
+const RECENT_SESSION_DELETE_TTL_MS = 5 * 60 * 1000;
+const MAX_DURABLE_SESSION_DELETES = 10_000;
+const MAX_DURABLE_SESSION_DELETES_PER_OWNER = 1_000;
 
 type MessageSendResult = { stopReason: StopReason };
 
@@ -96,10 +100,22 @@ type MessageSendEntry = {
 	ownerId: string;
 };
 
+type SessionDeleteEntry = {
+	promise: Promise<{ ok: true }>;
+	ownerId: string;
+	/** Undefined while the delete RPC is still in flight. */
+	expiresAt?: number;
+};
+
+const createSessionDeleteKey = (ownerId: string, sessionId: string): string =>
+	JSON.stringify([ownerId, sessionId]);
+
 export class SessionRouter {
 	private pendingRpcs = new Map<string, PendingRpc<unknown>>();
 	/** In-flight sends for durable CLIs; settled entries are removed immediately. */
 	private durableMessageSends = new Map<string, MessageSendEntry>();
+	/** In-flight deletes plus short-lived successes for response-loss retries. */
+	private durableSessionDeletes = new Map<string, SessionDeleteEntry>();
 
 	constructor(private readonly cliRegistry: CliRegistry) {}
 
@@ -311,6 +327,137 @@ export class SessionRouter {
 			"session_close_rpc_complete",
 		);
 		return { ...result, machineId: cli.machineId };
+	}
+
+	/**
+	 * Request Agent deletion and purge the CLI's durable local storage.
+	 * Registry removal intentionally happens only after the CLI confirms that the
+	 * entire operation succeeded, so failed remote deletes remain retryable.
+	 */
+	async deleteSession(
+		params: DeleteSessionParams,
+		userId: string,
+	): Promise<{ ok: true }> {
+		const key = createSessionDeleteKey(userId, params.sessionId);
+		this.pruneExpiredSessionDeletes();
+		const existing = this.durableSessionDeletes.get(key);
+		if (existing) {
+			if (existing.expiresAt === undefined) {
+				return existing.promise;
+			}
+			// A registry entry appearing after a completed delete is authoritative
+			// evidence that the Agent reused the same session ID. Do not let an old
+			// success tombstone suppress deletion of the new incarnation.
+			if (!this.cliRegistry.getCliForSessionByUser(params.sessionId, userId)) {
+				this.durableSessionDeletes.delete(key);
+				this.durableSessionDeletes.set(key, existing);
+				return existing.promise;
+			}
+			this.durableSessionDeletes.delete(key);
+		}
+
+		this.ensureDurableSessionDeleteCapacity(userId);
+		const operation = this.executeSessionDelete(params, userId);
+		const entry: SessionDeleteEntry = {
+			promise: operation,
+			ownerId: userId,
+		};
+		this.durableSessionDeletes.set(key, entry);
+		void operation.then(
+			() => {
+				if (this.durableSessionDeletes.get(key) !== entry) return;
+				entry.expiresAt = Date.now() + RECENT_SESSION_DELETE_TTL_MS;
+				this.durableSessionDeletes.delete(key);
+				this.durableSessionDeletes.set(key, entry);
+			},
+			() => {
+				if (this.durableSessionDeletes.get(key) === entry) {
+					this.durableSessionDeletes.delete(key);
+				}
+			},
+		);
+		return operation;
+	}
+
+	private async executeSessionDelete(
+		params: DeleteSessionParams,
+		userId: string,
+	): Promise<{ ok: true }> {
+		logger.info(
+			{ sessionId: params.sessionId, userId },
+			"session_delete_rpc_start",
+		);
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+		const result = await this.sendRpc<DeleteSessionParams, { ok: true }>(
+			cli.socket,
+			"rpc:session:delete",
+			params,
+		);
+		if (result?.ok !== true) {
+			throw new Error("CLI returned an invalid session delete response");
+		}
+
+		this.cliRegistry.updateSessionsIncremental(cli.socket.id, {
+			added: [],
+			updated: [],
+			removed: [params.sessionId],
+		});
+		logger.info(
+			{ sessionId: params.sessionId, userId },
+			"session_delete_rpc_complete",
+		);
+		return { ok: true };
+	}
+
+	private pruneExpiredSessionDeletes(now = Date.now()): void {
+		for (const [key, entry] of this.durableSessionDeletes) {
+			if (entry.expiresAt !== undefined && entry.expiresAt <= now) {
+				this.durableSessionDeletes.delete(key);
+			}
+		}
+	}
+
+	private ensureDurableSessionDeleteCapacity(ownerId: string): void {
+		const countOwnerEntries = () => {
+			let count = 0;
+			for (const entry of this.durableSessionDeletes.values()) {
+				if (entry.ownerId === ownerId) count += 1;
+			}
+			return count;
+		};
+		let ownerCount = countOwnerEntries();
+		while (
+			this.durableSessionDeletes.size >= MAX_DURABLE_SESSION_DELETES ||
+			ownerCount >= MAX_DURABLE_SESSION_DELETES_PER_OWNER
+		) {
+			let evicted = false;
+			const ownerAtCapacity =
+				ownerCount >= MAX_DURABLE_SESSION_DELETES_PER_OWNER;
+			for (const [key, entry] of this.durableSessionDeletes) {
+				if (
+					entry.expiresAt === undefined ||
+					(ownerAtCapacity && entry.ownerId !== ownerId)
+				) {
+					continue;
+				}
+				this.durableSessionDeletes.delete(key);
+				evicted = true;
+				break;
+			}
+			if (!evicted) {
+				throw new AppError(
+					createErrorDetail({
+						code: "SESSION_BUSY",
+						message:
+							"A new session delete is unavailable because active delete capacity was reached",
+						retryable: false,
+						scope: "service",
+					}),
+					503,
+				);
+			}
+			ownerCount = countOwnerEntries();
+		}
 	}
 
 	/**

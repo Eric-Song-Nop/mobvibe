@@ -177,6 +177,28 @@ export class CliCryptoService {
 		return this.sessionDeks.get(sessionId) ?? null;
 	}
 
+	/** Zero and forget every cached content-encryption key for one session. */
+	forgetSession(sessionId: string): void {
+		const sessionDek = this.sessionDeks.get(sessionId);
+		sessionDek?.fill(0);
+		this.sessionDeks.delete(sessionId);
+		this.wrappedDekCache.delete(sessionId);
+
+		const revisionPrefix = `${sessionId}\u0000`;
+		for (const [key, dek] of this.revisionDeks) {
+			if (!key.startsWith(revisionPrefix)) {
+				continue;
+			}
+			dek.fill(0);
+			this.revisionDeks.delete(key);
+		}
+		for (const key of this.revisionWrappedDekCache.keys()) {
+			if (key.startsWith(revisionPrefix)) {
+				this.revisionWrappedDekCache.delete(key);
+			}
+		}
+	}
+
 	private revisionKey(sessionId: string, revision: number): string {
 		return `${sessionId}\u0000${revision}`;
 	}

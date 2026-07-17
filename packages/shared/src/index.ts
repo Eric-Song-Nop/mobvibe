@@ -225,6 +225,7 @@ export type {
 	CreateSessionParams,
 	CreateSessionResponse,
 	CreateSessionWorktreeOptions,
+	DeleteSessionParams,
 	DiscoverSessionsRpcParams,
 	DiscoverSessionsRpcResult,
 	EventsAckPayload,

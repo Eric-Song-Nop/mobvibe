@@ -5,6 +5,7 @@ export type {
 	AgentTeamSummary,
 	CreateAgentTeamRpcResult,
 	CreateSessionResponse,
+	DeleteSessionParams,
 	ErrorDetail,
 	FsEntriesResponse,
 	FsEntry,
@@ -32,6 +33,7 @@ import type {
 	ContentBlock,
 	CreateAgentTeamRpcResult,
 	CreateSessionResponse,
+	DeleteSessionParams,
 	DiscoverSessionsResult,
 	ErrorDetail,
 	FsEntriesResponse,
@@ -641,6 +643,14 @@ export const closeSession = async (payload: {
 	sessionId: string;
 }): Promise<SessionSummary> =>
 	requestJson<SessionSummary>("/acp/session/close", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+
+export const deleteSession = async (
+	payload: DeleteSessionParams,
+): Promise<{ ok: true }> =>
+	requestJson<{ ok: true }>("/acp/session/delete", {
 		method: "POST",
 		body: JSON.stringify(payload),
 	});

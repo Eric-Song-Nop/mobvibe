@@ -598,6 +598,9 @@ export function useSocket({
 		for (const reset of getRevisionResetSessions(addedOrUpdated)) {
 			clearRevisionRuntimeState(reset.sessionId, reset.revision);
 		}
+		for (const sessionId of payload.removed) {
+			clearTrackedSession(sessionId);
+		}
 		handleSessionsChanged(payload);
 
 		// Bootstrap session DEKs and keep runtime E2EE status in sync.
@@ -908,6 +911,7 @@ export function useSocket({
 	return {
 		syncSessionSummaries,
 		syncSessionHistory,
+		clearTrackedSession,
 		isBackfilling,
 	};
 }

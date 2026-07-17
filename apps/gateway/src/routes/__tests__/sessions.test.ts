@@ -31,6 +31,7 @@ describe("session message routes", () => {
 	let sessionRouter: {
 		createSession: ReturnType<typeof vi.fn>;
 		closeSession: ReturnType<typeof vi.fn>;
+		deleteSession: ReturnType<typeof vi.fn>;
 		discoverSessions: ReturnType<typeof vi.fn>;
 		loadSession: ReturnType<typeof vi.fn>;
 		resumeSession: ReturnType<typeof vi.fn>;
@@ -51,6 +52,7 @@ describe("session message routes", () => {
 				sessionId: "session-1",
 				isAttached: false,
 			})),
+			deleteSession: vi.fn(async () => ({ ok: true })),
 			discoverSessions: vi.fn(async () => ({ sessions: [] })),
 			loadSession: vi.fn(async () => ({ sessionId: "session-loaded" })),
 			resumeSession: vi.fn(async () => ({ sessionId: "session-resumed" })),
@@ -492,6 +494,102 @@ describe("session message routes", () => {
 			new Error("Session not found"),
 		);
 		const response = await fetch(`${baseUrl}/acp/session/close`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ sessionId: "session-other" }),
+		});
+
+		expect(response.status).toBe(404);
+		expect(await response.json()).toEqual({
+			error: expect.objectContaining({ code: "AUTHORIZATION_FAILED" }),
+		});
+	});
+
+	it("deletes a session and returns an explicit success result", async () => {
+		const response = await fetch(`${baseUrl}/acp/session/delete`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ sessionId: "session-1" }),
+		});
+
+		expect(response.status).toBe(200);
+		expect(sessionRouter.deleteSession).toHaveBeenCalledWith(
+			{ sessionId: "session-1" },
+			"user-1",
+		);
+		expect(await response.json()).toEqual({ ok: true });
+	});
+
+	it("rejects an invalid session delete request", async () => {
+		const response = await fetch(`${baseUrl}/acp/session/delete`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ sessionId: "" }),
+		});
+
+		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({
+			error: expect.objectContaining({ code: "REQUEST_VALIDATION_FAILED" }),
+		});
+		expect(sessionRouter.deleteSession).not.toHaveBeenCalled();
+	});
+
+	it("requires authorization for session delete", async () => {
+		const response = await fetch(`${baseUrl}/acp/session/delete`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ sessionId: "session-1" }),
+		});
+
+		expect(response.status).toBe(401);
+		expect(sessionRouter.deleteSession).not.toHaveBeenCalled();
+	});
+
+	it("maps session delete capability failures to 409", async () => {
+		sessionRouter.deleteSession.mockRejectedValueOnce(
+			new AppError(
+				{
+					code: "CAPABILITY_NOT_SUPPORTED",
+					message: "Agent does not support session/delete capability",
+					retryable: false,
+					scope: "session",
+				},
+				409,
+			),
+		);
+		const response = await fetch(`${baseUrl}/acp/session/delete`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ sessionId: "session-1" }),
+		});
+
+		expect(response.status).toBe(409);
+		expect(await response.json()).toEqual({
+			error: expect.objectContaining({
+				code: "CAPABILITY_NOT_SUPPORTED",
+				retryable: false,
+				scope: "session",
+			}),
+		});
+	});
+
+	it("does not reveal a missing or unauthorized session during delete", async () => {
+		sessionRouter.deleteSession.mockRejectedValueOnce(
+			new Error("Session not found"),
+		);
+		const response = await fetch(`${baseUrl}/acp/session/delete`, {
 			method: "POST",
 			headers: {
 				authorization: "Bearer user-1",

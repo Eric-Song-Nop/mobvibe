@@ -72,9 +72,11 @@ type SessionSidebarProps = {
 	onSelectSession: (sessionId: string) => void;
 	onEditSubmit: () => void;
 	onCloseSessionRequest: (sessionId: string) => void;
+	onDeleteSessionRequest: (sessionId: string) => void;
 	onArchiveSessionRequest: (sessionId: string) => void;
 	onArchiveAllSessionsRequest: (sessionIds: string[]) => void;
 	isBulkArchiving?: boolean;
+	deletingSessionId?: string;
 	isCreating: boolean;
 	mutations: SessionMutationsSnapshot;
 };
@@ -86,9 +88,11 @@ export const SessionSidebar = ({
 	onSelectSession,
 	onEditSubmit,
 	onCloseSessionRequest,
+	onDeleteSessionRequest,
 	onArchiveSessionRequest,
 	onArchiveAllSessionsRequest,
 	isBulkArchiving,
+	deletingSessionId,
 	isCreating,
 	mutations,
 }: SessionSidebarProps) => {
@@ -360,6 +364,21 @@ export const SessionSidebar = ({
 															onArchive={() =>
 																onArchiveSessionRequest(session.sessionId)
 															}
+															onDelete={
+																getBackendCapability(
+																	session.machineId
+																		? machines[session.machineId]
+																		: undefined,
+																	session.backendId,
+																	"delete",
+																) === true
+																	? () =>
+																			onDeleteSessionRequest(session.sessionId)
+																	: undefined
+															}
+															isDeleting={
+																deletingSessionId === session.sessionId
+															}
 														/>
 													))}
 												</div>
@@ -402,6 +421,8 @@ type SessionListItemProps = {
 	onEditingTitleChange: (value: string) => void;
 	onClose?: () => void;
 	onArchive: () => void;
+	onDelete?: () => void;
+	isDeleting: boolean;
 };
 
 const SessionListItem = ({
@@ -417,6 +438,8 @@ const SessionListItem = ({
 	onEditingTitleChange,
 	onClose,
 	onArchive,
+	onDelete,
+	isDeleting,
 }: SessionListItemProps) => {
 	const { t, i18n } = useTranslation();
 	const inputRef = useRef<HTMLInputElement>(null);
@@ -537,6 +560,7 @@ const SessionListItem = ({
 								icon={MoreHorizontalIcon}
 								strokeWidth={2}
 								className="h-3.5 w-3.5"
+								aria-hidden="true"
 							/>
 						</Button>
 					</DropdownMenuTrigger>
@@ -549,9 +573,18 @@ const SessionListItem = ({
 								{t("common.close")}
 							</DropdownMenuItem>
 						) : null}
-						<DropdownMenuItem variant="destructive" onClick={onArchive}>
+						<DropdownMenuItem onClick={onArchive}>
 							{t("common.archive")}
 						</DropdownMenuItem>
+						{onDelete ? (
+							<DropdownMenuItem
+								variant="destructive"
+								disabled={isDeleting}
+								onClick={onDelete}
+							>
+								{isDeleting ? t("session.deleting") : t("common.delete")}
+							</DropdownMenuItem>
+						) : null}
 					</DropdownMenuContent>
 				</DropdownMenu>
 			) : null}

@@ -63,7 +63,6 @@ describe("WalStore", () => {
 					isStale: false,
 				},
 			]);
-
 			expect(walStore.hasDurableData()).toBeTrue();
 		});
 
@@ -1097,7 +1096,7 @@ describe("WalStore", () => {
 	});
 
 	describe("archiveSession", () => {
-		it("should delete session events and session record, mark as archived", () => {
+		it("should delete session events, discovery, and session record, mark as archived", () => {
 			walStore.ensureSession({
 				sessionId: "session-1",
 				machineId: "machine-1",
@@ -1112,6 +1111,23 @@ describe("WalStore", () => {
 			});
 			walStore.recordMessageSendResult("session-1", "message-1", "end_turn");
 			walStore.recordSessionRevisionKey("session-1", 1, "wrapped-dek");
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: "session-1",
+					backendId: "backend-1",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+			const compactionDb = new Database(dbPath);
+			compactionDb
+				.query(`
+				INSERT INTO compaction_log (
+					session_id, revision, operation, events_affected, started_at
+				) VALUES (?, ?, ?, ?, ?)
+			`)
+				.run("session-1", 1, "delete_acked", 1, new Date().toISOString());
+			compactionDb.close();
 			expect(walStore.getMessageSendResult("session-1", "message-1")).toEqual({
 				stopReason: "end_turn",
 			});
@@ -1131,6 +1147,14 @@ describe("WalStore", () => {
 				walStore.getMessageSendResult("session-1", "message-1"),
 			).toBeUndefined();
 			expect(walStore.getSessionRevisionKey("session-1", 1)).toBeUndefined();
+			expect(walStore.getDiscoveredSessions()).toEqual([]);
+			const verifyDb = new Database(dbPath, { readonly: true });
+			expect(
+				verifyDb
+					.query("SELECT 1 FROM compaction_log WHERE session_id = 'session-1'")
+					.get(),
+			).toBeNull();
+			verifyDb.close();
 
 			// Should be marked as archived
 			expect(walStore.isArchived("session-1")).toBe(true);
@@ -1196,6 +1220,179 @@ describe("WalStore", () => {
 				walStore.claimMessageSend("session-rollback", "message-in-progress"),
 			).toEqual({ status: "in_progress" });
 			expect(walStore.isArchived("session-rollback")).toBe(false);
+		});
+	});
+
+	describe("deleteSession", () => {
+		it("atomically removes durable state and an archive tombstone", () => {
+			walStore.ensureSession({
+				sessionId: "session-delete",
+				machineId: "machine-1",
+				backendId: "backend-1",
+			});
+			walStore.appendEvent({
+				sessionId: "session-delete",
+				revision: 1,
+				kind: "user_message",
+				payload: { text: "remove me" },
+			});
+			walStore.recordMessageSendResult(
+				"session-delete",
+				"message-complete",
+				"end_turn",
+			);
+			expect(
+				walStore.claimMessageSend("session-delete", "message-pending").status,
+			).toBe("claimed");
+			walStore.recordSessionRevisionKey("session-delete", 1, "wrapped-dek");
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: "session-delete",
+					backendId: "backend-1",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+			const seedDb = new Database(dbPath);
+			seedDb.exec(`
+				INSERT INTO agent_teams (
+					agent_team_id, machine_id, workspace_root_cwd, title, lifecycle,
+					leader_member_id, workspace_mode, created_at, updated_at
+				) VALUES (
+					'team-delete', 'machine-1', '/tmp/project', 'Delete team',
+					'active', 'member-delete', 'shared_workspace',
+					'2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO agent_team_members (
+					member_id, agent_team_id, role, name, backend_id, session_id,
+					lifecycle, health, created_at, updated_at
+				) VALUES (
+					'member-delete', 'team-delete', 'leader', 'Leader', 'backend-1',
+					'session-delete', 'active', 'healthy',
+					'2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO archived_session_ids (session_id, archived_at)
+				VALUES ('session-delete', '2026-01-01T00:00:00.000Z');
+				INSERT INTO compaction_log (
+					session_id, revision, operation, events_affected, started_at
+				) VALUES (
+					'session-delete', 1, 'delete_acked', 1,
+					'2026-01-01T00:00:00.000Z'
+				);
+			`);
+			seedDb.close();
+
+			walStore.deleteSession("session-delete");
+
+			const verifyDb = new Database(dbPath, { readonly: true });
+			for (const table of [
+				"sessions",
+				"session_events",
+				"message_send_results",
+				"message_send_claims",
+				"session_revision_keys",
+				"discovered_sessions",
+				"archived_session_ids",
+				"compaction_log",
+			]) {
+				const row = verifyDb
+					.query(`SELECT COUNT(*) AS count FROM ${table} WHERE session_id = ?`)
+					.get("session-delete") as { count: number };
+				expect(row.count).toBe(0);
+			}
+			verifyDb.close();
+			expect(walStore.isArchived("session-delete")).toBe(false);
+			const teamDb = new Database(dbPath, { readonly: true });
+			const member = teamDb
+				.query(`
+					SELECT session_id
+					FROM agent_team_members
+					WHERE member_id = 'member-delete'
+				`)
+				.get() as { session_id: string | null } | null;
+			teamDb.close();
+			expect(member).toEqual({ session_id: null });
+		});
+
+		it("rolls back every deletion if local cleanup fails", () => {
+			walStore.ensureSession({
+				sessionId: "session-delete-rollback",
+				machineId: "machine-1",
+				backendId: "backend-1",
+			});
+			walStore.appendEvent({
+				sessionId: "session-delete-rollback",
+				revision: 1,
+				kind: "user_message",
+				payload: { text: "survive" },
+			});
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: "session-delete-rollback",
+					backendId: "backend-1",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+			const faultDb = new Database(dbPath);
+			faultDb.exec(`
+				INSERT INTO agent_teams (
+					agent_team_id, machine_id, workspace_root_cwd, title, lifecycle,
+					leader_member_id, workspace_mode, created_at, updated_at
+				) VALUES (
+					'team-rollback', 'machine-1', '/tmp/project', 'Rollback team',
+					'active', 'member-rollback', 'shared_workspace',
+					'2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO agent_team_members (
+					member_id, agent_team_id, role, name, backend_id, session_id,
+					lifecycle, health, created_at, updated_at
+				) VALUES (
+					'member-rollback', 'team-rollback', 'leader', 'Leader', 'backend-1',
+					'session-delete-rollback', 'active', 'healthy',
+					'2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+				);
+				CREATE TRIGGER fail_permanent_session_delete
+				BEFORE DELETE ON sessions
+				WHEN OLD.session_id = 'session-delete-rollback'
+				BEGIN
+					SELECT RAISE(ABORT, 'injected permanent delete failure');
+				END;
+			`);
+			faultDb.close();
+
+			expect(() => walStore.deleteSession("session-delete-rollback")).toThrow(
+				"injected permanent delete failure",
+			);
+
+			expect(walStore.getSession("session-delete-rollback")).not.toBeNull();
+			expect(
+				walStore.queryEvents({
+					sessionId: "session-delete-rollback",
+					revision: 1,
+				}),
+			).toHaveLength(1);
+			expect(
+				walStore
+					.getDiscoveredSessions()
+					.some((session) => session.sessionId === "session-delete-rollback"),
+			).toBe(true);
+			const verifyDb = new Database(dbPath, { readonly: true });
+			const member = verifyDb
+				.query(`
+					SELECT session_id
+					FROM agent_team_members
+					WHERE member_id = 'member-rollback'
+				`)
+				.get() as { session_id: string | null } | null;
+			verifyDb.close();
+			expect(member).toEqual({ session_id: "session-delete-rollback" });
+		});
+
+		it("is idempotent when local state is already absent", () => {
+			walStore.deleteSession("missing-session");
+			walStore.deleteSession("missing-session");
+			expect(walStore.isArchived("missing-session")).toBe(false);
 		});
 	});
 

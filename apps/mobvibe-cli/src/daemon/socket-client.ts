@@ -216,6 +216,7 @@ export class SocketClient extends EventEmitter {
 	private walReplayActiveGeneration?: number;
 	private walReplayStartedGeneration?: number;
 	private pendingLiveEvents: SessionEvent[] = [];
+	private pendingLiveEventIncarnations: number[] = [];
 	private pendingLiveEventBytes = 0;
 	private readonly agentTeamStore: AgentTeamStore;
 	private readonly messageSendsInFlight = new Map<
@@ -226,6 +227,10 @@ export class SocketClient extends EventEmitter {
 	private readonly sessionClosesInFlight = new Map<
 		string,
 		Promise<SessionSummary>
+	>();
+	private readonly sessionDeletesInFlight = new Map<
+		string,
+		Promise<{ ok: true }>
 	>();
 	private readonly sessionOperationTails = new Map<string, Promise<void>>();
 
@@ -381,6 +386,7 @@ export class SocketClient extends EventEmitter {
 				payload.sessionId,
 				payload.revision,
 				payload.upToSeq,
+				payload.incarnationGeneration,
 			);
 		});
 	}
@@ -522,6 +528,9 @@ export class SocketClient extends EventEmitter {
 					{ requestId: request.requestId, sessionId },
 					"rpc_session_close",
 				);
+				if (this.sessionDeletesInFlight.has(sessionId)) {
+					throw this.createSessionBusyError("Session is deleting");
+				}
 				let closeOperation = this.sessionClosesInFlight.get(sessionId);
 				if (!closeOperation) {
 					sessionManager.assertSessionCloseSupported(sessionId);
@@ -563,6 +572,76 @@ export class SocketClient extends EventEmitter {
 			}
 		});
 
+		// Permanently delete a session from the Agent and local Mobvibe storage.
+		this.socket.on("rpc:session:delete", async (request) => {
+			const { sessionId } = request.params;
+			try {
+				logger.info(
+					{ requestId: request.requestId, sessionId },
+					"rpc_session_delete",
+				);
+				let deleteOperation = this.sessionDeletesInFlight.get(sessionId);
+				if (!deleteOperation) {
+					if (this.sessionClosesInFlight.has(sessionId)) {
+						throw this.createSessionBusyError("Session is closing");
+					}
+					// Active sessions must advertise support before any prompt or
+					// permission cancellation is attempted.
+					sessionManager.assertSessionDeleteSupported(sessionId);
+
+					let beginDelete: (() => void) | undefined;
+					const deleteBarrier = new Promise<void>((resolve) => {
+						beginDelete = resolve;
+					});
+					let finishCancellation: (() => void) | undefined;
+					const cancellationFinished = new Promise<void>((resolve) => {
+						finishCancellation = resolve;
+					});
+					deleteOperation = deleteBarrier.then(() =>
+						this.enqueueSessionOperation(
+							sessionId,
+							async () => {
+								await cancellationFinished;
+								await sessionManager.deleteSession(sessionId);
+								return { ok: true as const };
+							},
+							{ allowDeleting: true },
+						),
+					);
+					// Publish the barrier synchronously before adding the delete to the
+					// per-session queue, so later operations cannot revive the session.
+					this.sessionDeletesInFlight.set(sessionId, deleteOperation);
+					beginDelete?.();
+					void sessionManager
+						.cancelSession(sessionId)
+						.catch((error: unknown) => {
+							logger.warn(
+								{ err: error, requestId: request.requestId, sessionId },
+								"rpc_session_delete_pre_cancel_failed",
+							);
+						})
+						.finally(() => {
+							finishCancellation?.();
+						});
+					const clearDelete = () => {
+						if (
+							this.sessionDeletesInFlight.get(sessionId) === deleteOperation
+						) {
+							this.sessionDeletesInFlight.delete(sessionId);
+						}
+					};
+					void deleteOperation.then(clearDelete, clearDelete);
+				}
+				this.sendRpcResponse(request.requestId, await deleteOperation);
+			} catch (error) {
+				logger.error(
+					{ err: error, requestId: request.requestId, sessionId },
+					"rpc_session_delete_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
 		// Session mode
 		this.socket.on("rpc:session:mode", async (request) => {
 			try {
@@ -574,9 +653,13 @@ export class SocketClient extends EventEmitter {
 					},
 					"rpc_session_mode",
 				);
-				const session = await sessionManager.setSessionMode(
+				const session = await this.enqueueSessionOperation(
 					request.params.sessionId,
-					request.params.modeId,
+					() =>
+						sessionManager.setSessionMode(
+							request.params.sessionId,
+							request.params.modeId,
+						),
 				);
 				this.sendRpcResponse(request.requestId, session);
 			} catch (error) {
@@ -604,11 +687,15 @@ export class SocketClient extends EventEmitter {
 					},
 					"rpc_session_config",
 				);
-				const session = await sessionManager.setSessionConfigOption(
+				const session = await this.enqueueSessionOperation(
 					request.params.sessionId,
-					request.params.configId,
-					request.params.value,
-					request.params._meta,
+					() =>
+						sessionManager.setSessionConfigOption(
+							request.params.sessionId,
+							request.params.configId,
+							request.params.value,
+							request.params._meta,
+						),
 				);
 				this.sendRpcResponse(request.requestId, session);
 			} catch (error) {
@@ -636,9 +723,13 @@ export class SocketClient extends EventEmitter {
 					},
 					"rpc_session_model",
 				);
-				const session = await sessionManager.setSessionModel(
+				const session = await this.enqueueSessionOperation(
 					request.params.sessionId,
-					request.params.modelId,
+					() =>
+						sessionManager.setSessionModel(
+							request.params.sessionId,
+							request.params.modelId,
+						),
 				);
 				this.sendRpcResponse(request.requestId, session);
 			} catch (error) {
@@ -1475,7 +1566,10 @@ export class SocketClient extends EventEmitter {
 					{ requestId: request.requestId, sessionId, title },
 					"rpc_session_rename",
 				);
-				const summary = sessionManager.updateTitle(sessionId, title);
+				const summary = await this.enqueueSessionOperation(
+					sessionId,
+					async () => sessionManager.updateTitle(sessionId, title),
+				);
 				this.sendRpcResponse(request.requestId, summary);
 			} catch (error) {
 				logger.error(
@@ -1591,6 +1685,9 @@ export class SocketClient extends EventEmitter {
 		const suppliedMessageId = params.messageId?.trim();
 		const messageId = suppliedMessageId || `legacy-rpc:${requestId}`;
 		const key = `${params.sessionId}\u0000${messageId}`;
+		if (this.sessionDeletesInFlight.has(params.sessionId)) {
+			return Promise.reject(this.createSessionBusyError("Session is deleting"));
+		}
 		const inFlight = this.messageSendsInFlight.get(key);
 		if (inFlight) {
 			return inFlight;
@@ -1648,15 +1745,25 @@ export class SocketClient extends EventEmitter {
 	private enqueueSessionOperation<T>(
 		sessionId: string,
 		operation: () => Promise<T>,
+		options?: { allowDeleting?: boolean },
 	): Promise<T> {
-		return this.enqueueSessionOperations([sessionId], operation);
+		return this.enqueueSessionOperations([sessionId], operation, options);
 	}
 
 	private enqueueSessionOperations<T>(
 		sessionIds: readonly string[],
 		operation: () => Promise<T>,
+		options?: { allowDeleting?: boolean },
 	): Promise<T> {
 		const uniqueSessionIds = [...new Set(sessionIds)].sort();
+		if (
+			!options?.allowDeleting &&
+			uniqueSessionIds.some((sessionId) =>
+				this.sessionDeletesInFlight.has(sessionId),
+			)
+		) {
+			return Promise.reject(this.createSessionBusyError("Session is deleting"));
+		}
 		const previousTails = uniqueSessionIds
 			.map((sessionId) => this.sessionOperationTails.get(sessionId))
 			.filter((tail): tail is Promise<void> => tail !== undefined);
@@ -1681,6 +1788,18 @@ export class SocketClient extends EventEmitter {
 		};
 		void result.then(clearTail, clearTail);
 		return result;
+	}
+
+	private createSessionBusyError(message: string): AppError {
+		return new AppError(
+			createErrorDetail({
+				code: "SESSION_BUSY",
+				message,
+				retryable: true,
+				scope: "session",
+			}),
+			409,
+		);
 	}
 
 	private async executeMessageSend(
@@ -1840,6 +1959,13 @@ export class SocketClient extends EventEmitter {
 		// Unified event channel - all content updates (messages, tool calls,
 		// terminal output, errors) are WAL-persisted and emitted via session:event
 		sessionManager.onSessionEvent((event) => {
+			if (sessionManager.isSessionDeletionGuarded(event.sessionId)) {
+				logger.debug(
+					{ sessionId: event.sessionId, seq: event.seq },
+					"session_event_suppressed_after_delete",
+				);
+				return;
+			}
 			logger.info(
 				{
 					sessionId: event.sessionId,
@@ -1914,6 +2040,12 @@ export class SocketClient extends EventEmitter {
 			return;
 		}
 		this.pendingLiveEvents.push(event);
+		this.pendingLiveEventIncarnations.push(
+			event.incarnationGeneration ??
+				this.options.sessionManager.getSessionIncarnationGeneration(
+					event.sessionId,
+				),
+		);
 		this.pendingLiveEventBytes += eventBytes;
 	}
 
@@ -1939,6 +2071,7 @@ export class SocketClient extends EventEmitter {
 		this.walReplayActiveGeneration = generation;
 		this.walReplayStartedGeneration = undefined;
 		this.pendingLiveEvents = [];
+		this.pendingLiveEventIncarnations = [];
 		this.pendingLiveEventBytes = 0;
 		return generation;
 	}
@@ -1948,6 +2081,7 @@ export class SocketClient extends EventEmitter {
 		this.walReplayActiveGeneration = undefined;
 		this.walReplayStartedGeneration = undefined;
 		this.pendingLiveEvents = [];
+		this.pendingLiveEventIncarnations = [];
 		this.pendingLiveEventBytes = 0;
 	}
 
@@ -2122,15 +2256,29 @@ export class SocketClient extends EventEmitter {
 		let batchSize = 0;
 		let replayCompleted = false;
 		const replayedHighWater = new Map<string, number>();
+		const highWaterKey = (
+			sessionId: string,
+			revision: number,
+			incarnation: number,
+		) => `${sessionId}\u0000${incarnation}\u0000${revision}`;
 
 		try {
 			for (const { sessionId, revision } of revisions) {
+				if (sessionManager.isSessionDeletionGuarded(sessionId)) {
+					continue;
+				}
 				let afterSeq = 0;
 				let replayedCount = 0;
+				let incarnationMismatch = false;
 				while (true) {
 					if (!this.connected || generation !== this.walReplayGeneration) {
 						return;
 					}
+					if (sessionManager.isSessionDeletionGuarded(sessionId)) {
+						break;
+					}
+					const pageIncarnation =
+						sessionManager.getSessionIncarnationGeneration(sessionId);
 					const page = sessionManager.getUnackedEventsPage(
 						sessionId,
 						revision,
@@ -2144,19 +2292,34 @@ export class SocketClient extends EventEmitter {
 						if (!this.connected || generation !== this.walReplayGeneration) {
 							return;
 						}
+						if (
+							event.sessionId !== sessionId ||
+							(event.incarnationGeneration !== undefined &&
+								event.incarnationGeneration !== pageIncarnation) ||
+							sessionManager.isSessionDeletionGuarded(event.sessionId) ||
+							sessionManager.getSessionIncarnationGeneration(
+								event.sessionId,
+							) !== pageIncarnation
+						) {
+							incarnationMismatch = true;
+							break;
+						}
 						const encrypted = this.options.cryptoService.encryptEvent(event);
 						this.socket.emit("session:event", encrypted);
 						afterSeq = event.seq;
 						replayedCount += 1;
 						batchSize += 1;
 						replayedHighWater.set(
-							`${event.sessionId}\u0000${event.revision}`,
+							highWaterKey(event.sessionId, event.revision, pageIncarnation),
 							event.seq,
 						);
 						if (batchSize >= WAL_REPLAY_BATCH_SIZE) {
 							batchSize = 0;
 							await new Promise<void>((resolve) => setTimeout(resolve, 0));
 						}
+					}
+					if (incarnationMismatch) {
+						break;
 					}
 					if (page.length < WAL_REPLAY_BATCH_SIZE) {
 						break;
@@ -2179,6 +2342,7 @@ export class SocketClient extends EventEmitter {
 				if (this.walReplayActiveGeneration === generation) {
 					this.walReplayActiveGeneration = undefined;
 					this.pendingLiveEvents = [];
+					this.pendingLiveEventIncarnations = [];
 					this.pendingLiveEventBytes = 0;
 				}
 			} else if (replayCompleted) {
@@ -2188,12 +2352,25 @@ export class SocketClient extends EventEmitter {
 					generation === this.walReplayGeneration
 				) {
 					const buffered = this.pendingLiveEvents;
+					const bufferedIncarnations = this.pendingLiveEventIncarnations;
 					this.pendingLiveEvents = [];
+					this.pendingLiveEventIncarnations = [];
 					this.pendingLiveEventBytes = 0;
-					for (const event of buffered) {
+					for (const [index, event] of buffered.entries()) {
+						if (
+							sessionManager.isSessionDeletionGuarded(event.sessionId) ||
+							bufferedIncarnations[index] !==
+								sessionManager.getSessionIncarnationGeneration(event.sessionId)
+						) {
+							continue;
+						}
 						const highWater =
 							replayedHighWater.get(
-								`${event.sessionId}\u0000${event.revision}`,
+								highWaterKey(
+									event.sessionId,
+									event.revision,
+									bufferedIncarnations[index] ?? 0,
+								),
 							) ?? 0;
 						if (event.seq <= highWater) {
 							continue;

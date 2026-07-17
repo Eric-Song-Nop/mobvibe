@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as apiModule from "@/lib/api";
 import type { ChatSession } from "@/lib/chat-store";
 import { createDefaultContentBlocks } from "@/lib/content-block-utils";
@@ -79,6 +79,7 @@ const createMockUiActions = (): UseSessionHandlersParams["uiActions"] => ({
 });
 
 const createMockChatActions = (): UseSessionHandlersParams["chatActions"] => ({
+	setActiveSessionId: vi.fn(),
 	setAppError: vi.fn(),
 	renameSession: vi.fn(),
 	setError: vi.fn(),
@@ -95,6 +96,11 @@ const createMockMutations = (): UseSessionHandlersParams["mutations"] => ({
 	renameSessionMutation: { mutate: vi.fn() },
 	archiveSessionMutation: { mutateAsync: vi.fn() },
 	closeSessionMutation: { mutateAsync: vi.fn() },
+	deleteSessionMutation: {
+		mutateAsync: vi.fn(),
+		isPending: false,
+		variables: undefined,
+	},
 	bulkArchiveSessionsMutation: { mutateAsync: vi.fn(), isPending: false },
 	cancelSessionMutation: { mutate: vi.fn(), mutateAsync: vi.fn() },
 	setSessionModeMutation: { mutate: vi.fn(), isPending: false },
@@ -355,6 +361,79 @@ describe("useSessionHandlers — handleOpenCreateDialog", () => {
 		expect(uiActions.setDraftCwd).toHaveBeenCalledWith(
 			"/projects/repo/apps/webui",
 		);
+	});
+
+	describe("handleDeleteSession", () => {
+		afterEach(() => {
+			mockChatStoreState.sessions = {};
+		});
+
+		it("rejects calls when the backend did not advertise delete", async () => {
+			const session = createBaseSession();
+			mockChatStoreState.sessions = { "session-1": session };
+			const { result } = renderHandlers({
+				activeSessionId: "session-1",
+				activeSession: session,
+				sessionList: [session],
+				machines: {
+					"machine-1": {
+						machineId: "machine-1",
+						connected: true,
+						backendCapabilities: {
+							"backend-1": { list: true, load: true, delete: false },
+						},
+					},
+				},
+			});
+
+			let deleted = true;
+			await act(async () => {
+				deleted = await result.current.handleDeleteSession("session-1");
+			});
+
+			expect(deleted).toBe(false);
+			expect(
+				mutations.deleteSessionMutation.mutateAsync,
+			).not.toHaveBeenCalled();
+			expect(chatActions.setAppError).toHaveBeenCalled();
+		});
+
+		it("selects the adjacent session after deleting the active session", async () => {
+			const session = createBaseSession();
+			const nextSession = createBaseSession({
+				sessionId: "session-2",
+				title: "Session 2",
+			});
+			mockChatStoreState.sessions = {
+				"session-1": session,
+				"session-2": nextSession,
+			};
+			vi.mocked(mutations.deleteSessionMutation.mutateAsync).mockResolvedValue({
+				ok: true,
+			});
+			const { result } = renderHandlers({
+				activeSessionId: "session-1",
+				activeSession: session,
+				sessionList: [session, nextSession],
+				machines: {
+					"machine-1": {
+						machineId: "machine-1",
+						connected: true,
+						backendCapabilities: {
+							"backend-1": { list: true, load: true, delete: true },
+						},
+					},
+				},
+			});
+
+			let deleted = false;
+			await act(async () => {
+				deleted = await result.current.handleDeleteSession("session-1");
+			});
+
+			expect(deleted).toBe(true);
+			expect(chatActions.setActiveSessionId).toHaveBeenCalledWith("session-2");
+		});
 	});
 });
 

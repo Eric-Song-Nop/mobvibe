@@ -133,12 +133,15 @@ const createMockConnection = () => ({
 		load: true,
 		resume: true,
 		close: true,
+		delete: true,
 	})),
 	supportsSessionList: mock(() => true),
 	supportsSessionLoad: mock(() => true),
 	supportsSessionResume: mock(() => true),
 	supportsSessionClose: mock(() => true),
+	supportsSessionDelete: mock(() => true),
 	closeSession: mock(() => Promise.resolve({})),
+	deleteSession: mock(() => Promise.resolve({})),
 	listSessions: mock(
 		(): Promise<ListSessionsResponse> =>
 			Promise.resolve({
@@ -318,6 +321,35 @@ describe("SessionManager", () => {
 			});
 
 			expect(result.sessions).toHaveLength(2);
+		});
+
+		it("drops overlong Agent session IDs before local persistence", async () => {
+			const overlongSessionId = "x".repeat(1025);
+			mockConnection.listSessions.mockResolvedValueOnce({
+				sessions: [
+					{
+						sessionId: overlongSessionId,
+						cwd: "/home/user/project1",
+					},
+					{
+						sessionId: "bounded-session",
+						cwd: "/home/user/project2",
+					},
+				],
+			});
+
+			const result = await sessionManager.discoverSessions({
+				backendId: "backend-1",
+			});
+
+			expect(result.sessions.map((session) => session.sessionId)).toEqual([
+				"bounded-session",
+			]);
+			expect(
+				(
+					sessionManager as unknown as { walStore: WalStore }
+				).walStore.getDiscoveredSessionBackendId(overlongSessionId),
+			).toBeUndefined();
 		});
 
 		it("preserves and clears complete session list metadata snapshots", async () => {
@@ -900,6 +932,7 @@ describe("SessionManager", () => {
 				load: true,
 				resume: false,
 				close: true,
+				delete: true,
 			});
 			mockConnection.supportsSessionResume.mockReturnValueOnce(false);
 
@@ -1936,6 +1969,32 @@ describe("SessionManager", () => {
 	});
 
 	describe("listSessions", () => {
+		it("rejects an overlong session/new ID without persisting it", async () => {
+			const overlongSessionId = "x".repeat(1025);
+			mockConnection.createSession.mockResolvedValueOnce({
+				sessionId: overlongSessionId,
+				modes: null,
+				configOptions: null,
+			});
+
+			await expect(
+				sessionManager.createSession({
+					cwd: "/home/user/project",
+					backendId: "backend-1",
+				}),
+			).rejects.toMatchObject({ status: 502 });
+
+			expect(sessionManager.listAllSessions()).toEqual([]);
+			expect(mockConnection.disconnect).toHaveBeenCalled();
+			expect(
+				(
+					sessionManager as unknown as {
+						currentSessionIncarnationIds: Set<string>;
+					}
+				).currentSessionIncarnationIds.has(overlongSessionId),
+			).toBe(false);
+		});
+
 		it("returns empty array initially", () => {
 			const sessions = sessionManager.listSessions();
 			expect(sessions).toEqual([]);
@@ -3338,6 +3397,446 @@ describe("SessionManager", () => {
 				}),
 			]);
 			expect(mockConnection.disconnect).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("deleteSession", () => {
+		it("drops a discovery response that was requested before deletion", async () => {
+			await sessionManager.discoverSessions({ backendId: "backend-1" });
+			let resolveList: ((response: ListSessionsResponse) => void) | undefined;
+			let markListStarted: (() => void) | undefined;
+			const listStarted = new Promise<void>((resolve) => {
+				markListStarted = resolve;
+			});
+			mockConnection.listSessions.mockImplementationOnce(
+				() =>
+					new Promise<ListSessionsResponse>((resolve) => {
+						resolveList = resolve;
+						markListStarted?.();
+					}),
+			);
+			const staleDiscovery = sessionManager.discoverSessions({
+				backendId: "backend-1",
+			});
+			await listStarted;
+
+			await sessionManager.deleteSession("discovered-1");
+			const recentDeletes = (
+				sessionManager as unknown as {
+					recentlyDeletedSessions: Map<
+						string,
+						{ generation: number; expiresAt: number }
+					>;
+				}
+			).recentlyDeletedSessions;
+			const recentDelete = recentDeletes.get("discovered-1");
+			if (!recentDelete) {
+				throw new Error("recent delete tombstone missing");
+			}
+			recentDelete.expiresAt = 0;
+			resolveList?.({
+				sessions: [
+					{
+						sessionId: "discovered-1",
+						cwd: "/home/user/project1",
+						title: "Stale discovery",
+					},
+				],
+			});
+
+			expect((await staleDiscovery).sessions).toEqual([]);
+			expect(
+				(
+					sessionManager as unknown as { walStore: WalStore }
+				).walStore.getDiscoveredSessionBackendId("discovered-1"),
+			).toBeUndefined();
+			expect(
+				sessionManager
+					.listAllSessions()
+					.some((session) => session.sessionId === "discovered-1"),
+			).toBe(false);
+		});
+
+		it("invalidates a bounded old observation without changing unrelated current tokens", async () => {
+			const current = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const internals = sessionManager as unknown as {
+				beginAgentSessionObservation: () => {
+					generation: number;
+					deletedSessionIds: Set<string>;
+					invalidated: boolean;
+					tracked: boolean;
+				};
+				finishAgentSessionObservation: (observation: unknown) => void;
+				markSessionRecentlyDeleted: (sessionId: string) => void;
+				acceptAgentSessionObservation: (
+					sessionId: string,
+					observation: unknown,
+				) => boolean;
+				reuseQuarantineUntil: number;
+				sessionIncarnationGenerationBySession: Map<string, number>;
+			};
+			const currentToken = sessionManager.getSessionIncarnationGeneration(
+				current.sessionId,
+			);
+			const oldObservation = internals.beginAgentSessionObservation();
+			for (let index = 0; index < 1025; index++) {
+				internals.markSessionRecentlyDeleted(`overflow-delete-${index}`);
+			}
+
+			expect(oldObservation.invalidated).toBe(true);
+			expect(oldObservation.deletedSessionIds.size).toBe(0);
+			expect(
+				internals.sessionIncarnationGenerationBySession.size,
+			).toBeLessThanOrEqual(1024);
+			expect(
+				sessionManager.getSessionIncarnationGeneration(current.sessionId),
+			).toBe(currentToken);
+			internals.reuseQuarantineUntil = 0;
+			expect(
+				internals.acceptAgentSessionObservation(
+					"overflow-delete-0",
+					oldObservation,
+				),
+			).toBe(false);
+			internals.finishAgentSessionObservation(oldObservation);
+		});
+
+		it("keeps an evicted delete tombstone retry-idempotent during quarantine", async () => {
+			const internals = sessionManager as unknown as {
+				markSessionRecentlyDeleted: (sessionId: string) => void;
+				recentlyDeletedSessions: Map<string, unknown>;
+				reuseQuarantineUntil: number;
+			};
+			for (let index = 0; index < 1025; index++) {
+				internals.markSessionRecentlyDeleted(`overflow-delete-${index}`);
+			}
+
+			expect(internals.recentlyDeletedSessions.has("overflow-delete-0")).toBe(
+				false,
+			);
+			expect(internals.reuseQuarantineUntil).toBeGreaterThan(Date.now());
+			expect(() =>
+				sessionManager.assertSessionDeleteSupported("overflow-delete-0"),
+			).not.toThrow();
+			await sessionManager.deleteSession("overflow-delete-0");
+
+			expect(mockConnection.deleteSession).not.toHaveBeenCalled();
+		});
+
+		it("treats an immediate retry after a completed delete as successful", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			await sessionManager.deleteSession(created.sessionId);
+			await sessionManager.deleteSession(created.sessionId);
+
+			expect(mockConnection.deleteSession).toHaveBeenCalledTimes(1);
+		});
+
+		it("quarantines immediate session/new ID reuse and accepts it after TTL", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			await sessionManager.deleteSession(created.sessionId);
+			const deletedIncarnation = sessionManager.getSessionIncarnationGeneration(
+				created.sessionId,
+			);
+
+			await expect(
+				sessionManager.createSession({
+					cwd: "/home/user/project",
+					backendId: "backend-1",
+				}),
+			).rejects.toMatchObject({ status: 409 });
+			expect(mockConnection.deleteSession).toHaveBeenCalledTimes(2);
+			expect(
+				(
+					sessionManager as unknown as { walStore: WalStore }
+				).walStore.getSession(created.sessionId),
+			).toBeNull();
+
+			const recentDeletes = (
+				sessionManager as unknown as {
+					recentlyDeletedSessions: Map<
+						string,
+						{ generation: number; expiresAt: number }
+					>;
+				}
+			).recentlyDeletedSessions;
+			const recentDelete = recentDeletes.get(created.sessionId);
+			if (!recentDelete) {
+				throw new Error("recent delete tombstone missing");
+			}
+			recentDelete.expiresAt = 0;
+
+			const recreated = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			expect(recreated.sessionId).toBe(created.sessionId);
+			expect(
+				sessionManager.getSessionIncarnationGeneration(created.sessionId),
+			).toBe(deletedIncarnation);
+			expect(sessionManager.isSessionDeletionGuarded(created.sessionId)).toBe(
+				false,
+			);
+		});
+
+		it("does not apply an old-incarnation ACK to a reused session ID", async () => {
+			const first = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const oldIncarnation = sessionManager.getSessionIncarnationGeneration(
+				first.sessionId,
+			);
+			await sessionManager.deleteSession(first.sessionId);
+			const recentDeletes = (
+				sessionManager as unknown as {
+					recentlyDeletedSessions: Map<
+						string,
+						{ generation: number; expiresAt: number }
+					>;
+				}
+			).recentlyDeletedSessions;
+			const recentDelete = recentDeletes.get(first.sessionId);
+			if (!recentDelete) {
+				throw new Error("recent delete tombstone missing");
+			}
+			recentDelete.expiresAt = 0;
+			const second = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const currentIncarnation = sessionManager.getSessionIncarnationGeneration(
+				second.sessionId,
+			);
+			sessionManager.recordTurnEnd(second.sessionId, "end_turn");
+
+			expect(sessionManager.getUnackedEvents(second.sessionId, 1)).toHaveLength(
+				1,
+			);
+			sessionManager.ackEvents(second.sessionId, 1, 100, oldIncarnation);
+			sessionManager.ackEvents(second.sessionId, 1, 100);
+			expect(sessionManager.getUnackedEvents(second.sessionId, 1)).toHaveLength(
+				1,
+			);
+
+			sessionManager.ackEvents(second.sessionId, 1, 100, currentIncarnation);
+			expect(sessionManager.getUnackedEvents(second.sessionId, 1)).toHaveLength(
+				0,
+			);
+		});
+
+		it("zeroes cached session keys only after local deletion commits", async () => {
+			await initCrypto();
+			const secureConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/delete-crypto-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const crypto = new CliCryptoService(generateMasterSecret());
+			const secureManager = new SessionManager(secureConfig, crypto, {
+				validateWorkspacePath: async () => true,
+			});
+			const secureConnection = createMockConnection();
+			secureManager.createConnection = () =>
+				secureConnection as unknown as AcpConnection;
+			try {
+				const created = await secureManager.createSession({
+					cwd: "/home/user/project",
+					backendId: "backend-1",
+				});
+				const dek = crypto.getDek(created.sessionId, 1);
+				expect(dek).not.toBeNull();
+
+				await secureManager.deleteSession(created.sessionId);
+
+				expect(dek?.every((byte) => byte === 0)).toBe(true);
+				expect(crypto.getDek(created.sessionId)).toBeNull();
+				expect(crypto.getDek(created.sessionId, 1)).toBeNull();
+			} finally {
+				await secureManager.shutdown();
+			}
+		});
+
+		it("deletes remotely before removing an active session locally", async () => {
+			const changedListener = mock(() => {});
+			sessionManager.onSessionsChanged(changedListener);
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			await sessionManager.deleteSession(created.sessionId);
+
+			expect(mockConnection.deleteSession).toHaveBeenCalledWith(
+				created.sessionId,
+			);
+			expect(mockConnection.closeSession).not.toHaveBeenCalled();
+			expect(sessionManager.getSession(created.sessionId)).toBeUndefined();
+			expect(
+				(
+					sessionManager as unknown as { walStore: WalStore }
+				).walStore.getSession(created.sessionId),
+			).toBeNull();
+			expect(changedListener).toHaveBeenCalledWith(
+				expect.objectContaining({ removed: [created.sessionId] }),
+			);
+		});
+
+		it("uses durable backend affinity for a detached session", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			await sessionManager.closeSession(created.sessionId);
+			mockConnection.deleteSession.mockClear();
+			mockConnection.disconnect.mockClear();
+
+			await sessionManager.deleteSession(created.sessionId);
+
+			expect(mockConnection.deleteSession).toHaveBeenCalledWith(
+				created.sessionId,
+			);
+			expect(mockConnection.closeSession).toHaveBeenCalledTimes(1);
+			expect(sessionManager.listAllSessions()).toEqual([]);
+		});
+
+		it("uses discovered backend affinity without loading the session", async () => {
+			await sessionManager.discoverSessions({ backendId: "backend-1" });
+			mockConnection.deleteSession.mockClear();
+			mockConnection.loadSession.mockClear();
+
+			await sessionManager.deleteSession("discovered-1");
+
+			expect(mockConnection.deleteSession).toHaveBeenCalledWith("discovered-1");
+			expect(mockConnection.loadSession).not.toHaveBeenCalled();
+			expect(
+				sessionManager
+					.listAllSessions()
+					.some((session) => session.sessionId === "discovered-1"),
+			).toBe(false);
+		});
+
+		it("quarantines immediate session/list ID reuse and accepts it after TTL", async () => {
+			await sessionManager.discoverSessions({ backendId: "backend-1" });
+			await sessionManager.deleteSession("discovered-1");
+
+			const quarantined = await sessionManager.discoverSessions({
+				backendId: "backend-1",
+			});
+			expect(
+				quarantined.sessions.some(
+					(session) => session.sessionId === "discovered-1",
+				),
+			).toBe(false);
+
+			const recentDeletes = (
+				sessionManager as unknown as {
+					recentlyDeletedSessions: Map<
+						string,
+						{ generation: number; expiresAt: number }
+					>;
+				}
+			).recentlyDeletedSessions;
+			const recentDelete = recentDeletes.get("discovered-1");
+			if (!recentDelete) {
+				throw new Error("recent delete tombstone missing");
+			}
+			recentDelete.expiresAt = 0;
+
+			const accepted = await sessionManager.discoverSessions({
+				backendId: "backend-1",
+			});
+			expect(
+				accepted.sessions.some(
+					(session) => session.sessionId === "discovered-1",
+				),
+			).toBe(true);
+		});
+
+		it("preserves active and durable state when the agent rejects deletion", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			mockConnection.deleteSession.mockImplementationOnce(() =>
+				Promise.reject(new Error("agent refused delete")),
+			);
+
+			await expect(
+				sessionManager.deleteSession(created.sessionId),
+			).rejects.toThrow("agent refused delete");
+
+			expect(sessionManager.getSession(created.sessionId)).toBeDefined();
+			expect(
+				(
+					sessionManager as unknown as { walStore: WalStore }
+				).walStore.getSession(created.sessionId),
+			).not.toBeNull();
+			expect(mockConnection.disconnect).not.toHaveBeenCalled();
+		});
+
+		it("keeps local state retryable when WAL cleanup fails after remote success", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const walStore = (sessionManager as unknown as { walStore: WalStore })
+				.walStore;
+			const originalDelete = walStore.deleteSession.bind(walStore);
+			walStore.deleteSession = mock(() => {
+				throw new Error("local cleanup failed");
+			});
+
+			await expect(
+				sessionManager.deleteSession(created.sessionId),
+			).rejects.toThrow("local cleanup failed");
+			expect(sessionManager.getSession(created.sessionId)).toBeUndefined();
+			expect(walStore.getSession(created.sessionId)).not.toBeNull();
+			expect(
+				sessionManager
+					.listAllSessions()
+					.some((session) => session.sessionId === created.sessionId),
+			).toBe(true);
+			expect(() =>
+				sessionManager.updateTitle(created.sessionId, "blocked"),
+			).toThrow("Session is deleting");
+			await expect(
+				sessionManager.closeSession(created.sessionId),
+			).rejects.toThrow("Session is deleting");
+			await expect(
+				sessionManager.archiveSession(created.sessionId),
+			).rejects.toThrow("Session is deleting");
+
+			walStore.deleteSession = originalDelete;
+			await sessionManager.deleteSession(created.sessionId);
+			expect(mockConnection.deleteSession).toHaveBeenCalledTimes(2);
+			expect(sessionManager.getSession(created.sessionId)).toBeUndefined();
+		});
+
+		it("rejects unsupported and unknown sessions before remote deletion", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			mockConnection.supportsSessionDelete.mockReturnValueOnce(false);
+
+			expect(() =>
+				sessionManager.assertSessionDeleteSupported(created.sessionId),
+			).toThrow();
+			await expect(
+				sessionManager.deleteSession("unknown-session"),
+			).rejects.toMatchObject({ status: 404 });
+			expect(mockConnection.deleteSession).not.toHaveBeenCalled();
 		});
 	});
 

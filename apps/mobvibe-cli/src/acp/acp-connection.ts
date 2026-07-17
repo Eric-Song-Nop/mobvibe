@@ -21,6 +21,7 @@ import {
 	type CreateTerminalRequest,
 	type CreateTerminalResponse,
 	client,
+	type DeleteSessionResponse,
 	type Implementation,
 	type InitializeRequest,
 	type JsonRpcId,
@@ -438,6 +439,7 @@ export class AcpConnection {
 			load: this.agentCapabilities?.loadSession === true,
 			resume: this.agentCapabilities?.sessionCapabilities?.resume != null,
 			close: this.agentCapabilities?.sessionCapabilities?.close != null,
+			delete: this.agentCapabilities?.sessionCapabilities?.delete != null,
 			additionalDirectories:
 				this.agentCapabilities?.sessionCapabilities?.additionalDirectories !=
 				null,
@@ -474,6 +476,11 @@ export class AcpConnection {
 	/** Check if the agent supports session/close. */
 	supportsSessionClose(): boolean {
 		return this.agentCapabilities?.sessionCapabilities?.close != null;
+	}
+
+	/** Check if the agent supports session/delete. */
+	supportsSessionDelete(): boolean {
+		return this.agentCapabilities?.sessionCapabilities?.delete != null;
 	}
 
 	supportsAdditionalDirectories(): boolean {
@@ -607,6 +614,20 @@ export class AcpConnection {
 		);
 		this.clearActiveSession(sessionId);
 		return response;
+	}
+
+	/** Delete a session from the agent's session/list storage. */
+	async deleteSession(sessionId: string): Promise<DeleteSessionResponse> {
+		if (!this.supportsSessionDelete()) {
+			throw new Error("Agent does not support session/delete capability");
+		}
+		const connection = await this.ensureReady();
+		return this.sanitizeAgentPayload<DeleteSessionResponse>(
+			await connection.agent.request(methods.agent.session.delete, {
+				sessionId,
+			}),
+			"session/delete",
+		);
 	}
 
 	setPermissionHandler(

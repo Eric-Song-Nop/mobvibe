@@ -15,6 +15,7 @@ import {
 	normalizeError,
 } from "@/lib/error-utils";
 import { getBackendCapability, type Machine } from "@/lib/machines-store";
+import { shouldActivateSessionOnSelect } from "@/lib/session-selection";
 import { useUiStore } from "@/lib/ui-store";
 import { buildSessionTitle } from "@/lib/ui-utils";
 
@@ -48,6 +49,11 @@ type Mutations = {
 	};
 	closeSessionMutation: {
 		mutateAsync: (params: { sessionId: string }) => Promise<unknown>;
+	};
+	deleteSessionMutation: {
+		mutateAsync: (params: { sessionId: string }) => Promise<unknown>;
+		isPending: boolean;
+		variables?: { sessionId: string };
 	};
 	bulkArchiveSessionsMutation: {
 		mutateAsync: (params: { sessionIds: string[] }) => Promise<unknown>;
@@ -96,6 +102,7 @@ type Mutations = {
 };
 
 type ChatActions = {
+	setActiveSessionId: (sessionId: string | undefined) => void;
 	setAppError: (error: ChatSession["error"]) => void;
 	renameSession: (sessionId: string, title: string) => void;
 	setError: (sessionId: string, error: ChatSession["error"]) => void;
@@ -163,6 +170,7 @@ export function useSessionHandlers({
 }: UseSessionHandlersParams) {
 	const { t } = useTranslation();
 	const [isForceReloading, setIsForceReloading] = useState(false);
+	const deletingSessionIdRef = useRef<string | null>(null);
 	const activeSessionRef = useRef(activeSession);
 	activeSessionRef.current = activeSession;
 
@@ -361,6 +369,64 @@ export function useSessionHandlers({
 			}
 		},
 		[mutations.closeSessionMutation],
+	);
+
+	const handleDeleteSession = useCallback(
+		async (sessionId: string): Promise<boolean> => {
+			if (deletingSessionIdRef.current !== null) {
+				return false;
+			}
+			const session = useChatStore.getState().sessions[sessionId];
+			const machine = session?.machineId
+				? machines[session.machineId]
+				: undefined;
+			if (
+				!session ||
+				getBackendCapability(machine, session.backendId, "delete") !== true
+			) {
+				chatActions.setAppError(
+					createFallbackError(t("errors.sessionDeleteNotSupported"), "session"),
+				);
+				return false;
+			}
+
+			const currentIndex = sessionList.findIndex(
+				(candidate) => candidate.sessionId === sessionId,
+			);
+			const nextSessionId =
+				sessionId === activeSessionId && currentIndex >= 0
+					? (sessionList[currentIndex + 1]?.sessionId ??
+						sessionList[currentIndex - 1]?.sessionId)
+					: undefined;
+
+			deletingSessionIdRef.current = sessionId;
+			try {
+				await mutations.deleteSessionMutation.mutateAsync({ sessionId });
+				if (nextSessionId) {
+					const nextSession = useChatStore.getState().sessions[nextSessionId];
+					if (nextSession) {
+						chatActions.setActiveSessionId(nextSessionId);
+						if (shouldActivateSessionOnSelect(nextSession)) {
+							void activateSession(nextSession);
+						}
+					}
+				}
+				return true;
+			} catch {
+				return false;
+			} finally {
+				deletingSessionIdRef.current = null;
+			}
+		},
+		[
+			activateSession,
+			activeSessionId,
+			chatActions,
+			machines,
+			mutations.deleteSessionMutation,
+			sessionList,
+			t,
+		],
 	);
 
 	const handleBulkArchiveSessions = useCallback(
@@ -602,11 +668,15 @@ export function useSessionHandlers({
 	return {
 		isForceReloading,
 		isBulkArchiving: mutations.bulkArchiveSessionsMutation.isPending,
+		deletingSessionId: mutations.deleteSessionMutation.isPending
+			? mutations.deleteSessionMutation.variables?.sessionId
+			: undefined,
 		handleOpenCreateDialog,
 		handleCreateSession,
 		handleRenameSubmit,
 		handleArchiveSession,
 		handleCloseSession,
+		handleDeleteSession,
 		handleBulkArchiveSessions,
 		handlePermissionDecision,
 		handleModeChange,

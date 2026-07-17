@@ -376,6 +376,53 @@ export function setupSessionRoutes(
 		},
 	);
 
+	// Request Agent deletion and purge Mobvibe's local session storage
+	router.post(
+		"/session/delete",
+		async (request: AuthenticatedRequest, response) => {
+			const { sessionId } = request.body ?? {};
+			if (typeof sessionId !== "string" || sessionId.length === 0) {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId required"),
+					400,
+				);
+				return;
+			}
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			try {
+				logger.info({ sessionId, userId }, "session_delete_request");
+				const result = await sessionRouter.deleteSession({ sessionId }, userId);
+				logger.info({ sessionId, userId }, "session_delete_success");
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				logger.error({ err: error, sessionId }, "session_delete_error");
+				if (respondAppError(response, error)) return;
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
+				} else if (message.includes("does not support")) {
+					respondError(
+						response,
+						createErrorDetail({
+							code: "CAPABILITY_NOT_SUPPORTED",
+							message,
+							retryable: false,
+							scope: "session",
+						}),
+						409,
+					);
+				} else {
+					respondError(response, createInternalError("session"));
+				}
+			}
+		},
+	);
+
 	// Archive session - with authorization check
 	router.post(
 		"/session/archive",

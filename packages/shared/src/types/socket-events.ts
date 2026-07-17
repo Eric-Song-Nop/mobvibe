@@ -51,6 +51,8 @@ export type SessionEventKind =
 export type SessionEvent = {
 	sessionId: string;
 	machineId: string;
+	/** Process-local session incarnation used to reject stale replay ACKs. */
+	incarnationGeneration?: number;
 	revision: number;
 	seq: number;
 	kind: SessionEventKind;
@@ -81,6 +83,8 @@ export type SessionEventsResponse = {
 /** Acknowledgment payload for events received by gateway */
 export type EventsAckPayload = {
 	sessionId: string;
+	/** Echoed from SessionEvent when the CLI supports incarnation-safe ACKs. */
+	incarnationGeneration?: number;
 	revision: number;
 	upToSeq: number;
 };
@@ -308,6 +312,9 @@ export type ResumeSessionRpcParams = ResumeSessionParams;
 /** Close an active ACP session while preserving its durable local history. */
 export type CloseSessionParams = { sessionId: string };
 
+/** Request Agent deletion and purge Mobvibe's local session storage. */
+export type DeleteSessionParams = { sessionId: string };
+
 // Reload session RPC params
 export type ReloadSessionRpcParams = {
 	sessionId: string;
@@ -401,6 +408,7 @@ export interface GatewayToCliEvents {
 	"rpc:session:load": (request: RpcRequest<LoadSessionRpcParams>) => void;
 	"rpc:session:resume": (request: RpcRequest<ResumeSessionRpcParams>) => void;
 	"rpc:session:close": (request: RpcRequest<CloseSessionParams>) => void;
+	"rpc:session:delete": (request: RpcRequest<DeleteSessionParams>) => void;
 	"rpc:session:reload": (request: RpcRequest<ReloadSessionRpcParams>) => void;
 	"rpc:agent-team:create": (
 		request: RpcRequest<CreateAgentTeamRpcParams>,

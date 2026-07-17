@@ -37,6 +37,31 @@ describe("api (browser environment)", () => {
 		const callHeaders = mockFetch.mock.calls[0][1].headers;
 		expect(callHeaders.Authorization).toBeUndefined();
 	});
+
+	it("posts session delete to the stable ACP endpoint", async () => {
+		mockFetch
+			.mockResolvedValueOnce({ headers: new Headers() })
+			.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				headers: new Headers(),
+				json: () => Promise.resolve({ ok: true }),
+			});
+
+		const { deleteSession } = await import("../api");
+		await expect(
+			deleteSession({ sessionId: "session-delete" }),
+		).resolves.toEqual({ ok: true });
+
+		expect(mockFetch).toHaveBeenLastCalledWith(
+			"http://localhost:3005/acp/session/delete",
+			expect.objectContaining({
+				method: "POST",
+				body: JSON.stringify({ sessionId: "session-delete" }),
+				credentials: "include",
+			}),
+		);
+	});
 });
 
 describe("api Fly owner routing", () => {

@@ -123,6 +123,7 @@ type BooleanBackendCapability =
 	| "load"
 	| "resume"
 	| "close"
+	| "delete"
 	| "additionalDirectories";
 
 /** Check boolean capability for a specific backend. Returns undefined if unknown. */

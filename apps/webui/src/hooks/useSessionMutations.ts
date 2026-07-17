@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type {
 	ContentBlock,
@@ -14,11 +14,13 @@ import {
 	cancelSession,
 	closeSession,
 	createSession,
+	deleteSession,
 	loadSession,
 	reloadSession,
 	renameSession,
 	resumeSession,
 	type SessionSummary,
+	type SessionsResponse,
 	sendMessage,
 	sendPermissionDecision,
 	setSessionConfigOption,
@@ -33,8 +35,9 @@ import type {
 	StatusVariant,
 } from "@/lib/chat-store";
 import { useChatStore } from "@/lib/chat-store";
-import { bootstrapSessionE2EE } from "@/lib/e2ee";
+import { bootstrapSessionE2EE, e2ee } from "@/lib/e2ee";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
+import { useNotificationStore } from "@/lib/notification-store";
 import { useUiStore } from "@/lib/ui-store";
 
 type SessionMetadata = Partial<
@@ -261,8 +264,12 @@ const applySessionSummary = (
  * Provides methods for creating, renaming, closing, canceling sessions,
  * as well as setting mode, model, sending messages, and handling permissions.
  */
-export function useSessionMutations(store: ChatStoreActions) {
+export function useSessionMutations(
+	store: ChatStoreActions,
+	options: { onSessionDeleted?: (sessionId: string) => void } = {},
+) {
 	const { t } = useTranslation();
+	const queryClient = useQueryClient();
 	const createSessionMutation = useMutation({
 		mutationFn: createSession,
 		onMutate: async (variables) => {
@@ -405,6 +412,51 @@ export function useSessionMutations(store: ChatStoreActions) {
 					createFallbackError(t("errors.closeSessionFailed"), "session"),
 				),
 			);
+		},
+	});
+
+	const deleteSessionMutation = useMutation({
+		mutationFn: deleteSession,
+		onMutate: async () => {
+			// A sessions request started before the delete must not restore its stale
+			// snapshot after the remote operation succeeds and local keys are forgotten.
+			await queryClient.cancelQueries({ queryKey: ["sessions"] });
+		},
+		onSuccess: (_, variables) => {
+			try {
+				options.onSessionDeleted?.(variables.sessionId);
+			} catch (error) {
+				console.error("Failed to clear deleted session runtime state", error);
+			}
+			queryClient.setQueryData<SessionsResponse>(["sessions"], (current) =>
+				current
+					? {
+							sessions: current.sessions.filter(
+								(session) => session.sessionId !== variables.sessionId,
+							),
+						}
+					: current,
+			);
+			useUiStore.getState().clearChatDraft(variables.sessionId);
+			e2ee.forgetSession(variables.sessionId);
+			store.removeSession(variables.sessionId);
+			store.setAppError(undefined);
+			useNotificationStore.getState().pushNotification({
+				title: t("notifications.sessionDeleted"),
+				variant: "success",
+			});
+		},
+		onError: (mutationError: unknown) => {
+			const error = normalizeError(
+				mutationError,
+				createFallbackError(t("errors.deleteSessionFailed"), "session"),
+			);
+			store.setAppError(error);
+			useNotificationStore.getState().pushNotification({
+				title: t("notifications.sessionDeleteFailed"),
+				description: t("session.deleteFailurePreserved"),
+				variant: "error",
+			});
 		},
 	});
 
@@ -649,6 +701,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 		renameSessionMutation,
 		archiveSessionMutation,
 		closeSessionMutation,
+		deleteSessionMutation,
 		bulkArchiveSessionsMutation,
 		cancelSessionMutation,
 		setSessionModeMutation,

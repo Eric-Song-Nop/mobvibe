@@ -580,6 +580,311 @@ describe("SessionRouter", () => {
 		});
 	});
 
+	describe("deleteSession", () => {
+		it("removes the session from the registry only after the CLI succeeds", async () => {
+			const socket = createMockSocket("socket-delete");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-delete" }),
+				{ userId: "user-delete", deviceId: "device-delete" },
+			);
+			cliRegistry.updateSessions(socket.id, [
+				createMockSessionSummary({ sessionId: "session-delete" }),
+			]);
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:session:delete") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							result: { ok: true },
+						});
+					}, 0);
+				}
+			});
+
+			await expect(
+				sessionRouter.deleteSession(
+					{ sessionId: "session-delete" },
+					"user-delete",
+				),
+			).resolves.toEqual({ ok: true });
+			expect(socket.emit).toHaveBeenCalledWith(
+				"rpc:session:delete",
+				expect.objectContaining({
+					params: { sessionId: "session-delete" },
+				}),
+			);
+			expect(
+				cliRegistry.getCliForSessionByUser("session-delete", "user-delete"),
+			).toBeUndefined();
+
+			// A lost HTTP response can be retried after the registry entry is gone.
+			await expect(
+				sessionRouter.deleteSession(
+					{ sessionId: "session-delete" },
+					"user-delete",
+				),
+			).resolves.toEqual({ ok: true });
+			expect(socket.emit).toHaveBeenCalledTimes(1);
+		});
+
+		it("shares one in-flight delete across concurrent retries", async () => {
+			const socket = createMockSocket("socket-delete-concurrent");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-delete-concurrent" }),
+				{ userId: "user-delete", deviceId: "device-delete" },
+			);
+			cliRegistry.updateSessions(socket.id, [
+				createMockSessionSummary({ sessionId: "session-delete-concurrent" }),
+			]);
+			let requestId: string | undefined;
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:session:delete") {
+					requestId = request.requestId;
+				}
+			});
+
+			const first = sessionRouter.deleteSession(
+				{ sessionId: "session-delete-concurrent" },
+				"user-delete",
+			);
+			const second = sessionRouter.deleteSession(
+				{ sessionId: "session-delete-concurrent" },
+				"user-delete",
+			);
+			expect(socket.emit).toHaveBeenCalledTimes(1);
+			expect(requestId).toBeDefined();
+			sessionRouter.handleRpcResponse({
+				requestId: requestId ?? "missing",
+				result: { ok: true },
+			});
+
+			await expect(Promise.all([first, second])).resolves.toEqual([
+				{ ok: true },
+				{ ok: true },
+			]);
+		});
+
+		it("does not expose a successful delete tombstone to another user", async () => {
+			const socket = createMockSocket("socket-delete-private-tombstone");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({
+					machineId: "machine-delete-private-tombstone",
+				}),
+				{ userId: "owner", deviceId: "device-owner" },
+			);
+			cliRegistry.updateSessions(socket.id, [
+				createMockSessionSummary({ sessionId: "private-deleted-session" }),
+			]);
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:session:delete") {
+					sessionRouter.handleRpcResponse({
+						requestId: request.requestId,
+						result: { ok: true },
+					});
+				}
+			});
+
+			await sessionRouter.deleteSession(
+				{ sessionId: "private-deleted-session" },
+				"owner",
+			);
+			await expect(
+				sessionRouter.deleteSession(
+					{ sessionId: "private-deleted-session" },
+					"other-user",
+				),
+			).rejects.toThrow("Session not found");
+			expect(socket.emit).toHaveBeenCalledTimes(1);
+		});
+
+		it("does not apply an old success tombstone to a reused session ID", async () => {
+			const socket = createMockSocket("socket-delete-reused");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-delete-reused" }),
+				{ userId: "user-delete", deviceId: "device-delete" },
+			);
+			const session = createMockSessionSummary({
+				sessionId: "session-delete-reused",
+			});
+			cliRegistry.updateSessions(socket.id, [session]);
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:session:delete") {
+					sessionRouter.handleRpcResponse({
+						requestId: request.requestId,
+						result: { ok: true },
+					});
+				}
+			});
+
+			await sessionRouter.deleteSession(
+				{ sessionId: session.sessionId },
+				"user-delete",
+			);
+			cliRegistry.updateSessions(socket.id, [session]);
+			await sessionRouter.deleteSession(
+				{ sessionId: session.sessionId },
+				"user-delete",
+			);
+
+			expect(socket.emit).toHaveBeenCalledTimes(2);
+		});
+
+		it("expires successful delete tombstones", async () => {
+			const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+			const socket = createMockSocket("socket-delete-expiry");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-delete-expiry" }),
+				{ userId: "user-delete", deviceId: "device-delete" },
+			);
+			cliRegistry.updateSessions(socket.id, [
+				createMockSessionSummary({ sessionId: "session-delete-expiry" }),
+			]);
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:session:delete") {
+					sessionRouter.handleRpcResponse({
+						requestId: request.requestId,
+						result: { ok: true },
+					});
+				}
+			});
+
+			await sessionRouter.deleteSession(
+				{ sessionId: "session-delete-expiry" },
+				"user-delete",
+			);
+			now.mockReturnValue(5 * 60 * 1000 + 1_001);
+			await expect(
+				sessionRouter.deleteSession(
+					{ sessionId: "session-delete-expiry" },
+					"user-delete",
+				),
+			).rejects.toThrow("Session not found");
+			now.mockRestore();
+		});
+
+		it("evicts a settled owner tombstone before rejecting new work", async () => {
+			const deletes = (
+				sessionRouter as unknown as {
+					durableSessionDeletes: Map<
+						string,
+						{
+							promise: Promise<{ ok: true }>;
+							ownerId: string;
+							expiresAt: number;
+						}
+					>;
+				}
+			).durableSessionDeletes;
+			for (let index = 0; index < 1_000; index++) {
+				deletes.set(`old-${index}`, {
+					promise: Promise.resolve({ ok: true }),
+					ownerId: "user-delete",
+					expiresAt: Date.now() + 60_000,
+				});
+			}
+			const socket = createMockSocket("socket-delete-capacity");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-delete-capacity" }),
+				{ userId: "user-delete", deviceId: "device-delete" },
+			);
+			cliRegistry.updateSessions(socket.id, [
+				createMockSessionSummary({ sessionId: "session-delete-capacity" }),
+			]);
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:session:delete") {
+					sessionRouter.handleRpcResponse({
+						requestId: request.requestId,
+						result: { ok: true },
+					});
+				}
+			});
+
+			await expect(
+				sessionRouter.deleteSession(
+					{ sessionId: "session-delete-capacity" },
+					"user-delete",
+				),
+			).resolves.toEqual({ ok: true });
+			expect(deletes.size).toBe(1_000);
+			expect(deletes.has("old-0")).toBe(false);
+		});
+
+		it("preserves the registry entry when the CLI delete fails", async () => {
+			const socket = createMockSocket("socket-delete-failure");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-delete-failure" }),
+				{ userId: "user-delete", deviceId: "device-delete" },
+			);
+			cliRegistry.updateSessions(socket.id, [
+				createMockSessionSummary({ sessionId: "session-delete-failure" }),
+			]);
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:session:delete") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							error: {
+								code: "SESSION_BUSY",
+								message: "Agent delete failed",
+								retryable: true,
+								scope: "session",
+							},
+						});
+					}, 0);
+				}
+			});
+
+			await expect(
+				sessionRouter.deleteSession(
+					{ sessionId: "session-delete-failure" },
+					"user-delete",
+				),
+			).rejects.toThrow("Agent delete failed");
+			expect(
+				cliRegistry.getCliForSessionByUser(
+					"session-delete-failure",
+					"user-delete",
+				),
+			).toBeDefined();
+		});
+
+		it("uses the same private not-found response for unknown and cross-user sessions", async () => {
+			const socket = createMockSocket("socket-delete-private");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-delete-private" }),
+				{ userId: "owner", deviceId: "device-owner" },
+			);
+			cliRegistry.updateSessions(socket.id, [
+				createMockSessionSummary({ sessionId: "session-delete-private" }),
+			]);
+
+			await expect(
+				sessionRouter.deleteSession(
+					{ sessionId: "session-delete-private" },
+					"other-user",
+				),
+			).rejects.toThrow("Session not found");
+			await expect(
+				sessionRouter.deleteSession(
+					{ sessionId: "session-delete-unknown" },
+					"owner",
+				),
+			).rejects.toThrow("Session not found");
+			expect(socket.emit).not.toHaveBeenCalledWith(
+				"rpc:session:delete",
+				expect.anything(),
+			);
+		});
+	});
+
 	describe("setSessionConfigOption", () => {
 		it("routes a protocol-native config update to the session owner's CLI", async () => {
 			const socket = createMockSocket("socket-config");

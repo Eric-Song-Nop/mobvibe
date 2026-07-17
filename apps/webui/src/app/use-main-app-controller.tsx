@@ -137,42 +137,47 @@ export function useMainAppController() {
 	const defaultBackendId = availableBackends[0]?.backendId;
 	useMachinesQuery();
 
-	const mutations = useSessionMutations(chatActions);
-
 	const { activateSession, activationState } =
 		useSessionActivation(chatActions);
 
 	const isActivating = activationState.phase !== "idle";
 
-	const { syncSessionSummaries, syncSessionHistory, isBackfilling } = useSocket(
-		{
-			syncSessions: chatActions.syncSessions,
-			setSending: chatActions.setSending,
-			setCanceling: chatActions.setCanceling,
-			finalizeAssistantMessage: chatActions.finalizeAssistantMessage,
-			appendAssistantChunk: chatActions.appendAssistantChunk,
-			appendThoughtChunk: chatActions.appendThoughtChunk,
-			confirmOrAppendUserMessage: chatActions.confirmOrAppendUserMessage,
-			updateSessionMeta: chatActions.updateSessionMeta,
-			setStreamError: chatActions.setStreamError,
-			addPermissionRequest: chatActions.addPermissionRequest,
-			setPermissionDecisionState: chatActions.setPermissionDecisionState,
-			setPermissionOutcome: chatActions.setPermissionOutcome,
-			addToolCall: chatActions.addToolCall,
-			updateToolCall: chatActions.updateToolCall,
-			appendTerminalOutput: chatActions.appendTerminalOutput,
-			handleSessionsChanged: chatActions.handleSessionsChanged,
-			markSessionAttached: chatActions.markSessionAttached,
-			markSessionDetached: chatActions.markSessionDetached,
-			createLocalSession: chatActions.createLocalSession,
-			updateSessionCursor: chatActions.updateSessionCursor,
-			resetSessionForRevision: chatActions.resetSessionForRevision,
-			onReconnect: () => {
-				queryClient.invalidateQueries({ queryKey: ["sessions"] });
-				queryClient.invalidateQueries({ queryKey: ["acp-backends"] });
-			},
+	const {
+		syncSessionSummaries,
+		syncSessionHistory,
+		clearTrackedSession,
+		isBackfilling,
+	} = useSocket({
+		syncSessions: chatActions.syncSessions,
+		setSending: chatActions.setSending,
+		setCanceling: chatActions.setCanceling,
+		finalizeAssistantMessage: chatActions.finalizeAssistantMessage,
+		appendAssistantChunk: chatActions.appendAssistantChunk,
+		appendThoughtChunk: chatActions.appendThoughtChunk,
+		confirmOrAppendUserMessage: chatActions.confirmOrAppendUserMessage,
+		updateSessionMeta: chatActions.updateSessionMeta,
+		setStreamError: chatActions.setStreamError,
+		addPermissionRequest: chatActions.addPermissionRequest,
+		setPermissionDecisionState: chatActions.setPermissionDecisionState,
+		setPermissionOutcome: chatActions.setPermissionOutcome,
+		addToolCall: chatActions.addToolCall,
+		updateToolCall: chatActions.updateToolCall,
+		appendTerminalOutput: chatActions.appendTerminalOutput,
+		handleSessionsChanged: chatActions.handleSessionsChanged,
+		markSessionAttached: chatActions.markSessionAttached,
+		markSessionDetached: chatActions.markSessionDetached,
+		createLocalSession: chatActions.createLocalSession,
+		updateSessionCursor: chatActions.updateSessionCursor,
+		resetSessionForRevision: chatActions.resetSessionForRevision,
+		onReconnect: () => {
+			queryClient.invalidateQueries({ queryKey: ["sessions"] });
+			queryClient.invalidateQueries({ queryKey: ["acp-backends"] });
 		},
-	);
+	});
+
+	const mutations = useSessionMutations(chatActions, {
+		onSessionDeleted: clearTrackedSession,
+	});
 
 	const { machines, selectedMachineId, setSelectedMachineId } =
 		useMachinesStore(
@@ -210,11 +215,13 @@ export function useMainAppController() {
 	const {
 		isForceReloading,
 		isBulkArchiving,
+		deletingSessionId,
 		handleOpenCreateDialog,
 		handleCreateSession,
 		handleRenameSubmit,
 		handleArchiveSession,
 		handleCloseSession,
+		handleDeleteSession,
 		handleBulkArchiveSessions,
 		handlePermissionDecision,
 		handleModeChange,
@@ -632,6 +639,7 @@ export function useMainAppController() {
 		forceReloadDisabled,
 		handleArchiveSession,
 		handleCloseSession,
+		handleDeleteSession,
 		handleBulkArchiveSessions,
 		handleCancel,
 		handleCreateSession,
@@ -647,6 +655,7 @@ export function useMainAppController() {
 		handleSend,
 		handleSyncHistory,
 		isBulkArchiving,
+		deletingSessionId,
 		isCreatingSession: mutations.createSessionMutation.isPending,
 		isModeSwitching,
 		isModelSwitching,

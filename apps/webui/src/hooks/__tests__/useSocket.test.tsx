@@ -622,6 +622,58 @@ describe("useSocket (webui)", () => {
 		});
 	});
 
+	it("explicitly clears detached backfill runtime after permanent deletion", () => {
+		const store = createStore();
+		setMockSessions({
+			"session-deleted": buildSession({
+				sessionId: "session-deleted",
+				isAttached: false,
+			}),
+		});
+		const { result } = renderHook(() =>
+			useSocket({
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		act(() => result.current.clearTrackedSession("session-deleted"));
+
+		expect(mockBackfill.cancelBackfill).toHaveBeenCalledWith("session-deleted");
+		expect(mockGatewaySocket.unsubscribeFromSession).toHaveBeenCalledWith(
+			"session-deleted",
+		);
+
+		mockBackfill.cancelBackfill.mockClear();
+		mockGatewaySocket.unsubscribeFromSession.mockClear();
+		act(() => {
+			handlers.sessionsChanged?.({
+				added: [],
+				updated: [],
+				removed: ["session-removed"],
+			});
+		});
+		expect(mockBackfill.cancelBackfill).toHaveBeenCalledWith("session-removed");
+		expect(mockGatewaySocket.unsubscribeFromSession).toHaveBeenCalledWith(
+			"session-removed",
+		);
+	});
+
 	it("marks session attached on session:attached event", async () => {
 		const store = createStore();
 

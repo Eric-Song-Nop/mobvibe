@@ -721,6 +721,11 @@ export function setupCliHandlers(
 				// Send acknowledgment back to CLI only after the event has been relayed.
 				socket.emit("events:ack", {
 					sessionId: sessionEvent.sessionId,
+					...(sessionEvent.incarnationGeneration === undefined
+						? {}
+						: {
+								incarnationGeneration: sessionEvent.incarnationGeneration,
+							}),
 					revision: sessionEvent.revision,
 					upToSeq: sessionEvent.seq,
 				});

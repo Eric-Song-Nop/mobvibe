@@ -115,6 +115,7 @@ const renderSidebar = (
 					onSelectSession={options?.onSelectSession ?? (() => {})}
 					onEditSubmit={options?.onEditSubmit ?? (() => {})}
 					onCloseSessionRequest={options?.onCloseSessionRequest ?? (() => {})}
+					onDeleteSessionRequest={options?.onDeleteSessionRequest ?? (() => {})}
 					onArchiveSessionRequest={
 						options?.onArchiveSessionRequest ?? (() => {})
 					}
@@ -122,6 +123,7 @@ const renderSidebar = (
 						options?.onArchiveAllSessionsRequest ?? (() => {})
 					}
 					isBulkArchiving={options?.isBulkArchiving ?? false}
+					deletingSessionId={options?.deletingSessionId}
 					isCreating={options?.isCreating ?? false}
 					mutations={options?.mutations ?? defaultMutations}
 				/>
@@ -630,6 +632,54 @@ describe("SessionSidebar", () => {
 
 			expect(
 				screen.queryByText(i18n.t("common.close")),
+			).not.toBeInTheDocument();
+		});
+	});
+
+	describe("Delete session", () => {
+		it("shows the destructive action only when the backend advertises delete", async () => {
+			mockMachinesStoreState.machines = {
+				"machine-1": {
+					backendCapabilities: {
+						"backend-1": { delete: true },
+					},
+				},
+			};
+			const onDeleteSessionRequest = vi.fn();
+			const user = userEvent.setup();
+			renderSidebar(
+				[
+					buildSession({
+						sessionId: "session-delete",
+						machineId: "machine-1",
+						backendId: "backend-1",
+					}),
+				],
+				{ onDeleteSessionRequest },
+			);
+
+			await user.click(screen.getByText(i18n.t("common.delete")));
+
+			expect(onDeleteSessionRequest).toHaveBeenCalledWith("session-delete");
+		});
+
+		it("hides delete when support is false or unknown", () => {
+			mockMachinesStoreState.machines = {
+				"machine-1": {
+					backendCapabilities: {
+						"backend-1": { delete: false },
+					},
+				},
+			};
+			renderSidebar([
+				buildSession({
+					machineId: "machine-1",
+					backendId: "backend-1",
+				}),
+			]);
+
+			expect(
+				screen.queryByText(i18n.t("common.delete")),
 			).not.toBeInTheDocument();
 		});
 	});

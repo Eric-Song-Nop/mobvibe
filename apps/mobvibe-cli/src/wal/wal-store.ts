@@ -226,8 +226,10 @@ export class WalStore {
 	private stmtUpsertDiscoveredSession: ReturnType<Database["query"]>;
 	private stmtGetDiscoveredSessions: ReturnType<Database["query"]>;
 	private stmtGetDiscoveredSessionsByBackend: ReturnType<Database["query"]>;
+	private stmtGetDiscoveredSessionBackend: ReturnType<Database["query"]>;
 	private stmtMarkDiscoveredSessionStale: ReturnType<Database["query"]>;
 	private stmtDeleteStaleDiscoveredSessions: ReturnType<Database["query"]>;
+	private stmtDeleteDiscoveredSession: ReturnType<Database["query"]>;
 
 	// Consolidation statements
 	private stmtQueryBySeqRange: ReturnType<Database["query"]>;
@@ -238,8 +240,11 @@ export class WalStore {
 	private stmtDeleteMessageSendResults: ReturnType<Database["query"]>;
 	private stmtDeleteMessageSendClaims: ReturnType<Database["query"]>;
 	private stmtDeleteSessionRevisionKeys: ReturnType<Database["query"]>;
+	private stmtDeleteCompactionLog: ReturnType<Database["query"]>;
+	private stmtClearAgentTeamMemberSession: ReturnType<Database["query"]>;
 	private stmtDeleteSession: ReturnType<Database["query"]>;
 	private stmtInsertArchivedSession: ReturnType<Database["query"]>;
+	private stmtDeleteArchivedSession: ReturnType<Database["query"]>;
 	private stmtIsArchived: ReturnType<Database["query"]>;
 	private stmtGetArchivedSessionIds: ReturnType<Database["query"]>;
 
@@ -464,6 +469,12 @@ export class WalStore {
       ORDER BY d.discovered_at DESC
     `);
 
+		this.stmtGetDiscoveredSessionBackend = this.db.query(`
+			SELECT backend_id
+			FROM discovered_sessions
+			WHERE session_id = $sessionId
+		`);
+
 		this.stmtMarkDiscoveredSessionStale = this.db.query(`
       UPDATE discovered_sessions
       SET is_stale = 1
@@ -474,6 +485,10 @@ export class WalStore {
       DELETE FROM discovered_sessions
       WHERE is_stale = 1 AND discovered_at < $olderThan
     `);
+
+		this.stmtDeleteDiscoveredSession = this.db.query(`
+			DELETE FROM discovered_sessions WHERE session_id = $sessionId
+		`);
 
 		// Archive statements
 		this.stmtDeleteSessionEvents = this.db.query(`
@@ -492,6 +507,16 @@ export class WalStore {
 			DELETE FROM session_revision_keys WHERE session_id = $sessionId
 		`);
 
+		this.stmtDeleteCompactionLog = this.db.query(`
+			DELETE FROM compaction_log WHERE session_id = $sessionId
+		`);
+
+		this.stmtClearAgentTeamMemberSession = this.db.query(`
+			UPDATE agent_team_members
+			SET session_id = NULL, updated_at = $updatedAt
+			WHERE session_id = $sessionId
+		`);
+
 		this.stmtDeleteSession = this.db.query(`
       DELETE FROM sessions WHERE session_id = $sessionId
     `);
@@ -500,6 +525,10 @@ export class WalStore {
       INSERT OR IGNORE INTO archived_session_ids (session_id, archived_at)
       VALUES ($sessionId, $archivedAt)
     `);
+
+		this.stmtDeleteArchivedSession = this.db.query(`
+			DELETE FROM archived_session_ids WHERE session_id = $sessionId
+		`);
 
 		this.stmtIsArchived = this.db.query(`
       SELECT 1 FROM archived_session_ids WHERE session_id = $sessionId
@@ -1339,6 +1368,14 @@ export class WalStore {
 		return rows.map((row) => this.rowToDiscoveredSession(row));
 	}
 
+	/** Resolve durable backend affinity even for a legacy archived snapshot. */
+	getDiscoveredSessionBackendId(sessionId: string): string | undefined {
+		const row = this.stmtGetDiscoveredSessionBackend.get({
+			$sessionId: sessionId,
+		}) as { backend_id: string } | null;
+		return row?.backend_id;
+	}
+
 	/**
 	 * Mark a discovered session as stale (cwd no longer exists).
 	 */
@@ -1370,11 +1407,35 @@ export class WalStore {
 				this.stmtDeleteMessageSendResults.run({ $sessionId: sessionId });
 				this.stmtDeleteMessageSendClaims.run({ $sessionId: sessionId });
 				this.stmtDeleteSessionRevisionKeys.run({ $sessionId: sessionId });
+				this.stmtDeleteCompactionLog.run({ $sessionId: sessionId });
+				this.stmtDeleteDiscoveredSession.run({ $sessionId: sessionId });
 				this.stmtDeleteSession.run({ $sessionId: sessionId });
 				this.stmtInsertArchivedSession.run({
 					$sessionId: sessionId,
 					$archivedAt: new Date().toISOString(),
 				});
+			})
+			.immediate();
+		this.seqGenerator.clearSession(sessionId);
+	}
+
+	/** Permanently remove every local WAL record associated with a session. */
+	deleteSession(sessionId: string): void {
+		const deletedAt = new Date().toISOString();
+		this.db
+			.transaction(() => {
+				this.stmtDeleteSessionEvents.run({ $sessionId: sessionId });
+				this.stmtDeleteMessageSendResults.run({ $sessionId: sessionId });
+				this.stmtDeleteMessageSendClaims.run({ $sessionId: sessionId });
+				this.stmtDeleteSessionRevisionKeys.run({ $sessionId: sessionId });
+				this.stmtDeleteCompactionLog.run({ $sessionId: sessionId });
+				this.stmtDeleteDiscoveredSession.run({ $sessionId: sessionId });
+				this.stmtClearAgentTeamMemberSession.run({
+					$sessionId: sessionId,
+					$updatedAt: deletedAt,
+				});
+				this.stmtDeleteSession.run({ $sessionId: sessionId });
+				this.stmtDeleteArchivedSession.run({ $sessionId: sessionId });
 			})
 			.immediate();
 		this.seqGenerator.clearSession(sessionId);

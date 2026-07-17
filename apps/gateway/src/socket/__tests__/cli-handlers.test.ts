@@ -610,6 +610,32 @@ describe("setupCliHandlers", () => {
 		});
 	});
 
+	it("echoes the session incarnation when acknowledging a WAL event", () => {
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+
+		socketHandlers["session:event"]?.({
+			sessionId: "session-incarnation",
+			machineId: "machine-1",
+			incarnationGeneration: 4,
+			revision: 1,
+			seq: 3,
+			kind: "agent_message_chunk",
+			createdAt: "2026-07-16T00:00:00.000Z",
+			payload: { text: "current" },
+		});
+
+		expect(socket.emit).toHaveBeenCalledWith("events:ack", {
+			sessionId: "session-incarnation",
+			incarnationGeneration: 4,
+			revision: 1,
+			upToSeq: 3,
+		});
+	});
+
 	it("does not create a ghost CLI when the socket disconnects during registration", async () => {
 		let finishUpsert:
 			| ((value: { machineId: string; userId: string }) => void)

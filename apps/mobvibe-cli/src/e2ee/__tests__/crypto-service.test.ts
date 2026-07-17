@@ -22,6 +22,30 @@ beforeAll(async () => {
 });
 
 describe("CliCryptoService", () => {
+	test("zeroes and forgets all cached keys for one session", () => {
+		service.initSessionDek("session-1", 1);
+		const currentDek = service.getDek("session-1");
+		const revisionDek = service.getDek("session-1", 1);
+		service.initSessionDek("session-10", 1);
+		// Simulate a cache restored from durable metadata before its DEK is unwrapped.
+		(
+			service as unknown as { revisionDeks: Map<string, Uint8Array> }
+		).revisionDeks.delete("session-1\u00001");
+		expect(service.getWrappedDek("session-1", 1)).not.toBeNull();
+
+		service.forgetSession("session-1");
+
+		expect(currentDek).not.toBeNull();
+		expect(revisionDek).not.toBeNull();
+		expect(currentDek?.every((byte) => byte === 0)).toBe(true);
+		expect(revisionDek?.every((byte) => byte === 0)).toBe(true);
+		expect(service.getDek("session-1")).toBeNull();
+		expect(service.getDek("session-1", 1)).toBeNull();
+		expect(service.getWrappedDek("session-1")).toBeNull();
+		expect(service.getWrappedDek("session-1", 1)).toBeNull();
+		expect(service.getDek("session-10", 1)).not.toBeNull();
+	});
+
 	test("exposes a stable, non-secret identity for one master secret", () => {
 		const sameSecret = new CliCryptoService(masterSecret);
 		const differentSecret = new CliCryptoService(generateMasterSecret());

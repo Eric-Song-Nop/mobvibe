@@ -22,6 +22,7 @@ mock.module("@agentclientprotocol/sdk", () => ({
 			session: {
 				cancel: "session/cancel",
 				close: "session/close",
+				delete: "session/delete",
 				list: "session/list",
 				load: "session/load",
 				new: "session/new",
@@ -238,6 +239,63 @@ describe("AcpConnection", () => {
 
 			expect(connection.getSessionCapabilities().close).toBe(true);
 			expect(connection.supportsSessionClose()).toBe(true);
+		});
+
+		it("maps the delete session capability", () => {
+			// @ts-expect-error - accessing private property for testing
+			connection.agentCapabilities = {
+				sessionCapabilities: { delete: {} },
+			};
+
+			expect(connection.getSessionCapabilities().delete).toBe(true);
+			expect(connection.supportsSessionDelete()).toBe(true);
+		});
+	});
+
+	describe("deleteSession", () => {
+		it("gates and forwards session/delete", async () => {
+			const request = mock(() =>
+				Promise.resolve({ _meta: { retained: true } }),
+			);
+			const internal = connection as unknown as {
+				state: "ready";
+				sessionId?: string;
+				agentCapabilities: {
+					sessionCapabilities: { delete: Record<string, never> };
+				};
+				connection: { agent: { request: typeof request } };
+			};
+			internal.state = "ready";
+			internal.sessionId = "session-1";
+			internal.agentCapabilities = {
+				sessionCapabilities: { delete: {} },
+			};
+			internal.connection = { agent: { request } };
+
+			expect(await connection.deleteSession("session-1")).toEqual({
+				_meta: { retained: true },
+			});
+			expect(request).toHaveBeenCalledWith("session/delete", {
+				sessionId: "session-1",
+			});
+			expect(connection.getStatus().sessionId).toBe("session-1");
+		});
+
+		it("rejects before sending when session/delete is not advertised", async () => {
+			const request = mock(() => Promise.resolve({}));
+			const internal = connection as unknown as {
+				state: "ready";
+				agentCapabilities: Record<string, never>;
+				connection: { agent: { request: typeof request } };
+			};
+			internal.state = "ready";
+			internal.agentCapabilities = {};
+			internal.connection = { agent: { request } };
+
+			await expect(connection.deleteSession("session-1")).rejects.toThrow(
+				"session/delete capability",
+			);
+			expect(request).not.toHaveBeenCalled();
 		});
 	});
 
