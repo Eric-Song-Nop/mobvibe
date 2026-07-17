@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type {
 	ContentBlock,
@@ -12,13 +12,18 @@ import {
 	archiveSession,
 	bulkArchiveSessions,
 	cancelSession,
+	closeSession,
 	createSession,
+	deleteSession,
 	loadSession,
 	reloadSession,
 	renameSession,
+	resumeSession,
 	type SessionSummary,
+	type SessionsResponse,
 	sendMessage,
 	sendPermissionDecision,
+	setSessionConfigOption,
 	setSessionMode,
 	setSessionModel,
 } from "@/lib/api";
@@ -30,8 +35,9 @@ import type {
 	StatusVariant,
 } from "@/lib/chat-store";
 import { useChatStore } from "@/lib/chat-store";
-import { bootstrapSessionE2EE } from "@/lib/e2ee";
+import { bootstrapSessionE2EE, e2ee } from "@/lib/e2ee";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
+import { useNotificationStore } from "@/lib/notification-store";
 import { useUiStore } from "@/lib/ui-store";
 
 type SessionMetadata = Partial<
@@ -43,6 +49,7 @@ type SessionMetadata = Partial<
 		| "backendId"
 		| "backendLabel"
 		| "cwd"
+		| "additionalDirectories"
 		| "workspaceRootCwd"
 		| "agentName"
 		| "modelId"
@@ -51,11 +58,14 @@ type SessionMetadata = Partial<
 		| "modeName"
 		| "availableModes"
 		| "availableModels"
+		| "configOptions"
 		| "availableCommands"
 		| "worktreeSourceCwd"
 		| "worktreeBranch"
 		| "isCreating"
 		| "machineId"
+		| "_meta"
+		| "isTitlePinned"
 	>
 >;
 
@@ -128,6 +138,7 @@ export interface ChatStoreActions {
 				| "title"
 				| "updatedAt"
 				| "cwd"
+				| "additionalDirectories"
 				| "workspaceRootCwd"
 				| "agentName"
 				| "modelId"
@@ -136,15 +147,23 @@ export interface ChatStoreActions {
 				| "modeName"
 				| "availableModes"
 				| "availableModels"
+				| "configOptions"
 				| "availableCommands"
 				| "worktreeSourceCwd"
 				| "worktreeBranch"
 				| "usage"
+				| "reportedTokenUsage"
 				| "_meta"
 				| "plan"
+				| "isTitlePinned"
 			>
 		>,
 	) => void;
+	upsertPlan: (
+		sessionId: string,
+		plan: NonNullable<ChatSession["plans"]>[number],
+	) => void;
+	removePlan: (sessionId: string, planId: string) => void;
 	addUserMessage: (
 		sessionId: string,
 		content: string,
@@ -157,13 +176,22 @@ export interface ChatStoreActions {
 	confirmOrAppendUserMessage: (
 		sessionId: string,
 		chunk: ContentBlock | string,
-		messageId?: string,
+		sendMessageId?: string,
 		eventSeq?: number,
+		protocolMessageId?: string,
 	) => void;
 	markUserMessageFailed: (sessionId: string, messageId: string) => void;
 	addStatusMessage: (sessionId: string, status: StatusPayload) => void;
-	appendAssistantChunk: (sessionId: string, text: string) => void;
-	appendThoughtChunk: (sessionId: string, text: string) => void;
+	appendAssistantChunk: (
+		sessionId: string,
+		content: ContentBlock | string,
+		protocolMessageId?: string,
+	) => void;
+	appendThoughtChunk: (
+		sessionId: string,
+		content: ContentBlock | string,
+		protocolMessageId?: string,
+	) => void;
 	finalizeAssistantMessage: (sessionId: string) => void;
 	addPermissionRequest: (
 		sessionId: string,
@@ -219,6 +247,7 @@ const applySessionSummary = (
 		title: summary.title,
 		updatedAt: summary.updatedAt,
 		cwd: summary.cwd,
+		additionalDirectories: summary.additionalDirectories,
 		workspaceRootCwd: summary.workspaceRootCwd,
 		agentName: summary.agentName,
 		modelId: summary.modelId,
@@ -227,9 +256,12 @@ const applySessionSummary = (
 		modeName: summary.modeName,
 		availableModes: summary.availableModes,
 		availableModels: summary.availableModels,
+		configOptions: summary.configOptions,
 		availableCommands: summary.availableCommands,
 		worktreeSourceCwd: summary.worktreeSourceCwd,
 		worktreeBranch: summary.worktreeBranch,
+		_meta: summary._meta,
+		isTitlePinned: summary.isTitlePinned,
 	});
 };
 
@@ -238,8 +270,12 @@ const applySessionSummary = (
  * Provides methods for creating, renaming, closing, canceling sessions,
  * as well as setting mode, model, sending messages, and handling permissions.
  */
-export function useSessionMutations(store: ChatStoreActions) {
+export function useSessionMutations(
+	store: ChatStoreActions,
+	options: { onSessionDeleted?: (sessionId: string) => void } = {},
+) {
 	const { t } = useTranslation();
+	const queryClient = useQueryClient();
 	const createSessionMutation = useMutation({
 		mutationFn: createSession,
 		onMutate: async (variables) => {
@@ -276,6 +312,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 				backendId: data.backendId,
 				backendLabel: data.backendLabel,
 				cwd: data.cwd,
+				additionalDirectories: data.additionalDirectories,
 				workspaceRootCwd: data.workspaceRootCwd,
 				agentName: data.agentName,
 				modelId: data.modelId,
@@ -284,12 +321,15 @@ export function useSessionMutations(store: ChatStoreActions) {
 				modeName: data.modeName,
 				availableModes: data.availableModes,
 				availableModels: data.availableModels,
+				configOptions: data.configOptions,
 				availableCommands: data.availableCommands,
 				createdAt: data.createdAt,
 				updatedAt: data.updatedAt,
 				worktreeSourceCwd: data.worktreeSourceCwd,
 				worktreeBranch: data.worktreeBranch,
 				machineId: data.machineId,
+				_meta: data._meta,
+				isTitlePinned: data.isTitlePinned,
 			});
 
 			store.setSessionE2EEStatus(
@@ -353,6 +393,76 @@ export function useSessionMutations(store: ChatStoreActions) {
 					createFallbackError(t("errors.archiveSessionFailed"), "session"),
 				),
 			);
+		},
+	});
+
+	const closeSessionMutation = useMutation({
+		mutationFn: closeSession,
+		onSuccess: (summary) => {
+			applySessionSummary(store, summary);
+			store.markSessionDetached({
+				sessionId: summary.sessionId,
+				machineId: summary.machineId,
+				detachedAt: new Date().toISOString(),
+				reason: "session_close",
+			});
+			store.addStatusMessage(summary.sessionId, {
+				title: t("statusMessages.sessionClosed"),
+			});
+			store.setAppError(undefined);
+		},
+		onError: (mutationError: unknown) => {
+			store.setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError(t("errors.closeSessionFailed"), "session"),
+				),
+			);
+		},
+	});
+
+	const deleteSessionMutation = useMutation({
+		mutationFn: deleteSession,
+		onMutate: async () => {
+			// A sessions request started before the delete must not restore its stale
+			// snapshot after the remote operation succeeds and local keys are forgotten.
+			await queryClient.cancelQueries({ queryKey: ["sessions"] });
+		},
+		onSuccess: (_, variables) => {
+			try {
+				options.onSessionDeleted?.(variables.sessionId);
+			} catch (error) {
+				console.error("Failed to clear deleted session runtime state", error);
+			}
+			queryClient.setQueryData<SessionsResponse>(["sessions"], (current) =>
+				current
+					? {
+							sessions: current.sessions.filter(
+								(session) => session.sessionId !== variables.sessionId,
+							),
+						}
+					: current,
+			);
+			useUiStore.getState().clearChatDraft(variables.sessionId);
+			e2ee.forgetSession(variables.sessionId);
+			store.removeSession(variables.sessionId);
+			store.setAppError(undefined);
+			useNotificationStore.getState().pushNotification({
+				title: t("notifications.sessionDeleted"),
+				variant: "success",
+			});
+		},
+		onError: (mutationError: unknown) => {
+			const error = normalizeError(
+				mutationError,
+				createFallbackError(t("errors.deleteSessionFailed"), "session"),
+			);
+			store.setAppError(error);
+			useNotificationStore.getState().pushNotification({
+				title: t("notifications.sessionDeleteFailed"),
+				description: t("session.deleteFailurePreserved"),
+				variant: "error",
+			});
 		},
 	});
 
@@ -430,6 +540,22 @@ export function useSessionMutations(store: ChatStoreActions) {
 				normalizeError(
 					mutationError,
 					createFallbackError(t("errors.switchModelFailed"), "session"),
+				),
+			);
+		},
+	});
+
+	const setSessionConfigOptionMutation = useMutation({
+		mutationFn: setSessionConfigOption,
+		onSuccess: (summary) => {
+			applySessionSummary(store, summary);
+			store.setAppError(undefined);
+		},
+		onError: (mutationError: unknown) => {
+			store.setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError(t("errors.updateSessionConfigFailed"), "session"),
 				),
 			);
 		},
@@ -532,6 +658,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 			store.updateSessionMeta(data.sessionId, {
 				updatedAt: data.updatedAt,
 				cwd: data.cwd,
+				additionalDirectories: data.additionalDirectories,
 				workspaceRootCwd: data.workspaceRootCwd,
 				agentName: data.agentName,
 				modelId: data.modelId,
@@ -540,9 +667,12 @@ export function useSessionMutations(store: ChatStoreActions) {
 				modeName: data.modeName,
 				availableModes: data.availableModes,
 				availableModels: data.availableModels,
+				configOptions: data.configOptions,
 				availableCommands: data.availableCommands,
 				worktreeSourceCwd: data.worktreeSourceCwd,
 				worktreeBranch: data.worktreeBranch,
+				_meta: data._meta,
+				isTitlePinned: data.isTitlePinned,
 			});
 			store.setActiveSessionId(data.sessionId);
 			store.setAppError(undefined);
@@ -562,6 +692,11 @@ export function useSessionMutations(store: ChatStoreActions) {
 		...createSessionLoadCallbacks("errors.loadSessionFailed"),
 	});
 
+	const resumeSessionMutation = useMutation({
+		mutationFn: resumeSession,
+		...createSessionLoadCallbacks("errors.resumeSessionFailed"),
+	});
+
 	const reloadSessionMutation = useMutation({
 		mutationFn: reloadSession,
 		...createSessionLoadCallbacks("errors.reloadSessionFailed"),
@@ -571,13 +706,17 @@ export function useSessionMutations(store: ChatStoreActions) {
 		createSessionMutation,
 		renameSessionMutation,
 		archiveSessionMutation,
+		closeSessionMutation,
+		deleteSessionMutation,
 		bulkArchiveSessionsMutation,
 		cancelSessionMutation,
 		setSessionModeMutation,
 		setSessionModelMutation,
+		setSessionConfigOptionMutation,
 		sendMessageMutation,
 		permissionDecisionMutation,
 		loadSessionMutation,
+		resumeSessionMutation,
 		reloadSessionMutation,
 	};
 }

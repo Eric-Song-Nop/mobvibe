@@ -7,6 +7,7 @@ import type {
 import { verifySignedToken } from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { logger } from "../../lib/logger.js";
 import { CliRegistry } from "../../services/cli-registry.js";
 import {
 	findDeviceByPublicKey,
@@ -17,7 +18,8 @@ import type { SessionRouter } from "../../services/session-router.js";
 import type { TeamRouter } from "../../services/team-router.js";
 import { setupCliHandlers } from "../cli-handlers.js";
 
-vi.mock("@mobvibe/shared", () => ({
+vi.mock("@mobvibe/shared", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@mobvibe/shared")>()),
 	initCrypto: vi.fn().mockResolvedValue(undefined),
 	verifySignedToken: vi.fn(),
 }));
@@ -267,6 +269,374 @@ describe("setupCliHandlers", () => {
 		);
 	});
 
+	it("drops invalid list metadata without dropping core sessions", () => {
+		registry.register(socket, createMockRegistrationInfo(), {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+		const opaque = `must-not-leak-${"x".repeat(66 * 1024)}`;
+		const validMeta = { nested: { retained: true } };
+		vi.mocked(logger.warn).mockClear();
+
+		socketHandlers["sessions:list"]?.([
+			createMockSessionSummary({
+				sessionId: "oversized-meta",
+				title: "Core session survives",
+				_meta: { opaque },
+			}),
+			createMockSessionSummary({
+				sessionId: "valid-meta",
+				_meta: validMeta,
+			}),
+		]);
+		validMeta.nested.retained = false;
+
+		const sessions = registry.getCliBySocketId(socket.id)?.sessions;
+		expect(sessions).toHaveLength(2);
+		const oversized = sessions?.find(
+			(session) => session.sessionId === "oversized-meta",
+		);
+		expect(oversized?.title).toBe("Core session survives");
+		expect(Object.hasOwn(oversized ?? {}, "_meta")).toBe(false);
+		expect(
+			sessions?.find((session) => session.sessionId === "valid-meta")?._meta,
+		).toEqual({ nested: { retained: true } });
+		expect(logger.warn).toHaveBeenCalledWith(
+			{
+				event: "sessions:list",
+				socketId: socket.id,
+				reason: "session_meta_rejected",
+				rejectedCount: 1,
+			},
+			"session_meta_sanitization_warning",
+		);
+		expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain(
+			"must-not-leak",
+		);
+	});
+
+	it("shares the metadata envelope budget across added and updated sessions", () => {
+		registry.register(socket, createMockRegistrationInfo(), {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+		registry.updateSessions(socket.id, [
+			createMockSessionSummary({
+				sessionId: "updated-after-budget",
+				title: "Before",
+			}),
+		]);
+		vi.mocked(logger.warn).mockClear();
+
+		socketHandlers["sessions:changed"]?.({
+			added: Array.from({ length: 64 }, (_, index) =>
+				createMockSessionSummary({
+					sessionId: `added-${index}`,
+					_meta: { index },
+				}),
+			),
+			updated: [
+				createMockSessionSummary({
+					sessionId: "updated-after-budget",
+					title: "After",
+					_meta: { envelope: 65 },
+				}),
+			],
+			removed: [],
+		});
+
+		const updated = registry
+			.getCliBySocketId(socket.id)
+			?.sessions.find(
+				(session) => session.sessionId === "updated-after-budget",
+			);
+		expect(updated?.title).toBe("After");
+		expect(Object.hasOwn(updated ?? {}, "_meta")).toBe(false);
+		expect(registry.getCliBySocketId(socket.id)?.sessions).toHaveLength(65);
+		expect(logger.warn).toHaveBeenCalledWith(
+			{
+				event: "sessions:changed",
+				socketId: socket.id,
+				reason: "session_meta_rejected",
+				rejectedCount: 1,
+			},
+			"session_meta_sanitization_warning",
+		);
+	});
+
+	it("keeps discovered session state when its metadata is rejected", () => {
+		registry.register(socket, createMockRegistrationInfo(), {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+		vi.mocked(logger.warn).mockClear();
+
+		socketHandlers["sessions:discovered"]?.({
+			sessions: [
+				{
+					sessionId: "discovered-invalid-meta",
+					cwd: "/repo",
+					title: "Discovered core state",
+					_meta: { oversized: "x".repeat(66 * 1024) },
+				},
+			],
+			backendId: "backend-1",
+			backendLabel: "Claude Code",
+		});
+
+		const discovered = registry
+			.getCliBySocketId(socket.id)
+			?.sessions.find(
+				(session) => session.sessionId === "discovered-invalid-meta",
+			);
+		expect(discovered?.title).toBe("Discovered core state");
+		expect(Object.hasOwn(discovered ?? {}, "_meta")).toBe(false);
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"sessions:changed",
+			expect.objectContaining({
+				added: [
+					expect.objectContaining({
+						sessionId: "discovered-invalid-meta",
+					}),
+				],
+			}),
+			"user-1",
+		);
+	});
+
+	it("rejects discovery for a backend registered only on another machine", () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({
+				machineId: "machine-1",
+				backends: [{ backendId: "backend-1", backendLabel: "Machine One" }],
+			}),
+			{ userId: "user-1", deviceId: "device-1" },
+		);
+		const otherSocket = {
+			id: "socket-2",
+			disconnect: vi.fn(),
+		} as unknown as Socket;
+		registry.register(
+			otherSocket,
+			createMockRegistrationInfo({
+				machineId: "machine-2",
+				backends: [
+					{ backendId: "other-machine-only", backendLabel: "Machine Two" },
+				],
+			}),
+			{ userId: "user-1", deviceId: "device-2" },
+		);
+		emitToWebui.mockClear();
+		vi.mocked(logger.warn).mockClear();
+
+		socketHandlers["sessions:discovered"]?.({
+			sessions: [
+				{
+					sessionId: "cross-machine-session",
+					cwd: "/private/repo",
+					title: "Must not be accepted",
+				},
+			],
+			capabilities: {
+				list: true,
+				load: true,
+			},
+			backendId: "other-machine-only",
+			backendLabel: "Spoofed label",
+		});
+
+		expect(
+			registry
+				.getCliBySocketId(socket.id)
+				?.sessions.some(
+					(session) => session.sessionId === "cross-machine-session",
+				),
+		).toBe(false);
+		expect(
+			registry.getCliBySocketId(socket.id)?.backendCapabilities,
+		).toBeUndefined();
+		expect(emitToWebui).not.toHaveBeenCalled();
+		expect(logger.warn).toHaveBeenCalledWith(
+			{
+				socketId: socket.id,
+				machineId: "machine-1",
+				backendId: "other-machine-only",
+			},
+			"sessions_discovered_unknown_backend",
+		);
+	});
+
+	it("uses the registered backend label for discovered sessions", () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({
+				backends: [{ backendId: "backend-1", backendLabel: "Trusted label" }],
+			}),
+			{ userId: "user-1", deviceId: "device-1" },
+		);
+
+		socketHandlers["sessions:discovered"]?.({
+			sessions: [
+				{
+					sessionId: "trusted-backend-label",
+					cwd: "/repo",
+				},
+			],
+			backendId: "backend-1",
+			backendLabel: "Spoofed label",
+		});
+
+		expect(
+			registry
+				.getCliBySocketId(socket.id)
+				?.sessions.find(
+					(session) => session.sessionId === "trusted-backend-label",
+				)?.backendLabel,
+		).toBe("Trusted label");
+	});
+
+	it("preserves additional directories when mapping discovered sessions", () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({ machineId: "machine-1" }),
+			{
+				userId: "user-1",
+				deviceId: "device-123",
+			},
+		);
+
+		socketHandlers["sessions:discovered"]?.({
+			sessions: [
+				{
+					sessionId: "discovered-roots",
+					cwd: "/repo",
+					additionalDirectories: ["/shared", "/data"],
+					title: "Discovered roots",
+					_meta: { source: "agent", keep: null },
+				},
+			],
+			capabilities: {
+				list: true,
+				load: true,
+				resume: true,
+				additionalDirectories: true,
+			},
+			backendId: "backend-1",
+			backendLabel: "Claude Code",
+		});
+
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"sessions:changed",
+			expect.objectContaining({
+				added: [
+					expect.objectContaining({
+						sessionId: "discovered-roots",
+						additionalDirectories: ["/shared", "/data"],
+						_meta: { source: "agent", keep: null },
+					}),
+				],
+			}),
+			"user-1",
+		);
+	});
+
+	it("emits refreshed metadata for a previously discovered session", () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({ machineId: "machine-1" }),
+			{
+				userId: "user-1",
+				deviceId: "device-123",
+			},
+		);
+		const initial = {
+			sessions: [
+				{
+					sessionId: "discovered-refresh",
+					cwd: "/repo",
+					title: "Initial title",
+					updatedAt: "2026-07-01T00:00:00.000Z",
+					_meta: { version: 1 },
+				},
+			],
+			backendId: "backend-1",
+			backendLabel: "Claude Code",
+		};
+		socketHandlers["sessions:discovered"]?.(initial);
+		emitToWebui.mockClear();
+
+		socketHandlers["sessions:discovered"]?.({
+			...initial,
+			sessions: [
+				{
+					...initial.sessions[0],
+					title: "Refreshed title",
+					updatedAt: "2026-07-02T00:00:00.000Z",
+					_meta: { version: 2 },
+				},
+			],
+		});
+
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"sessions:changed",
+			expect.objectContaining({
+				added: [],
+				updated: [
+					expect.objectContaining({
+						sessionId: "discovered-refresh",
+						title: "Refreshed title",
+						updatedAt: "2026-07-02T00:00:00.000Z",
+						_meta: { version: 2 },
+					}),
+				],
+			}),
+			"user-1",
+		);
+	});
+
+	it("uses a stable timestamp when a discovered session has no agent time", () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({ machineId: "machine-1" }),
+			{
+				userId: "user-1",
+				deviceId: "device-123",
+			},
+		);
+
+		socketHandlers["sessions:discovered"]?.({
+			sessions: [
+				{
+					sessionId: "without-agent-time",
+					cwd: "/repo",
+					updatedAt: null,
+				},
+			],
+			backendId: "backend-1",
+			backendLabel: "Claude Code",
+		});
+
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"sessions:changed",
+			expect.objectContaining({
+				added: [
+					expect.objectContaining({
+						sessionId: "without-agent-time",
+						createdAt: expect.any(String),
+						updatedAt: expect.any(String),
+					}),
+				],
+			}),
+			"user-1",
+		);
+		const discovered = registry
+			.getCliBySocketId("socket-1")
+			?.sessions.find((session) => session.sessionId === "without-agent-time");
+		expect(discovered?.updatedAt).not.toBe("1970-01-01T00:00:00.000Z");
+		expect(discovered?.createdAt).toBe(discovered?.updatedAt);
+	});
+
 	it("preserves the initial session list while CLI registration is pending", async () => {
 		let finishUpsert:
 			| ((value: { machineId: string; userId: string }) => void)
@@ -329,6 +699,32 @@ describe("setupCliHandlers", () => {
 				revision: event.revision,
 				upToSeq: event.seq,
 			});
+		});
+	});
+
+	it("echoes the session incarnation when acknowledging a WAL event", () => {
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+
+		socketHandlers["session:event"]?.({
+			sessionId: "session-incarnation",
+			machineId: "machine-1",
+			incarnationGeneration: 4,
+			revision: 1,
+			seq: 3,
+			kind: "agent_message_chunk",
+			createdAt: "2026-07-16T00:00:00.000Z",
+			payload: { text: "current" },
+		});
+
+		expect(socket.emit).toHaveBeenCalledWith("events:ack", {
+			sessionId: "session-incarnation",
+			incarnationGeneration: 4,
+			revision: 1,
+			upToSeq: 3,
 		});
 	});
 
@@ -542,6 +938,39 @@ describe("setupCliHandlers", () => {
 		);
 	});
 
+	it("sanitizes permission metadata before relaying or notifying", () => {
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+
+		socketHandlers["permission:request"]?.({
+			sessionId: "session-1",
+			requestId: "request-1",
+			options: [],
+			toolCall: {
+				toolCallId: "tool-1",
+				title: "Preserved title",
+				_meta: JSON.parse('{"constructor":{"polluted":true}}'),
+			},
+		});
+
+		const expected = expect.objectContaining({
+			sessionId: "session-1",
+			toolCall: { toolCallId: "tool-1", title: "Preserved title" },
+		});
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"permission:request",
+			expected,
+			"user-1",
+		);
+		expect(notificationService.notifyPermissionRequest).toHaveBeenCalledWith(
+			"user-1",
+			expected,
+		);
+	});
+
 	it("does not dispatch permission notifications for inactive sessions", () => {
 		const info = createMockRegistrationInfo({ machineId: "machine-1" });
 		registry.register(socket, info, {
@@ -587,6 +1016,47 @@ describe("setupCliHandlers", () => {
 				kind: "turn_end",
 			}),
 		);
+	});
+
+	it("sanitizes plaintext event metadata before relay and acknowledgment", () => {
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+
+		socketHandlers["session:event"]?.({
+			sessionId: "session-1",
+			revision: 1,
+			seq: 9,
+			kind: "session_update",
+			createdAt: new Date().toISOString(),
+			payload: {
+				update: {
+					sessionUpdate: "session_info_update",
+					title: "Preserved title",
+					_meta: { value: Number.NaN },
+				},
+			},
+		});
+
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"session:event",
+			expect.objectContaining({
+				payload: {
+					update: {
+						sessionUpdate: "session_info_update",
+						title: "Preserved title",
+					},
+				},
+			}),
+			"user-1",
+		);
+		expect(socket.emit).toHaveBeenCalledWith("events:ack", {
+			sessionId: "session-1",
+			revision: 1,
+			upToSeq: 9,
+		});
 	});
 
 	it("replaces spoofed session-event machine IDs with the authenticated machine", () => {

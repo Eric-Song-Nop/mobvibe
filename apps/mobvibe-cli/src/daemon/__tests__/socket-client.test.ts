@@ -132,6 +132,8 @@ describe("SocketClient restore semantics", () => {
 		listUnackedSessionRevisions: ReturnType<typeof mock>;
 		getUnackedEvents: ReturnType<typeof mock>;
 		getUnackedEventsPage: ReturnType<typeof mock>;
+		isSessionDeletionGuarded: ReturnType<typeof mock>;
+		getSessionIncarnationGeneration: ReturnType<typeof mock>;
 		ackEvents: ReturnType<typeof mock>;
 		claimMessageSend: ReturnType<typeof mock>;
 		completeMessageSend: ReturnType<typeof mock>;
@@ -140,8 +142,21 @@ describe("SocketClient restore semantics", () => {
 		getMessageSendResult: ReturnType<typeof mock>;
 		recordMessageSendResult: ReturnType<typeof mock>;
 		getSession: ReturnType<typeof mock>;
+		getAgentCapabilities: ReturnType<typeof mock>;
+		authenticateAgent: ReturnType<typeof mock>;
+		logoutAgent: ReturnType<typeof mock>;
 		loadSession: ReturnType<typeof mock>;
+		resumeSession: ReturnType<typeof mock>;
 		reloadSession: ReturnType<typeof mock>;
+		setSessionConfigOption: ReturnType<typeof mock>;
+		setSessionMode: ReturnType<typeof mock>;
+		setSessionModel: ReturnType<typeof mock>;
+		updateTitle: ReturnType<typeof mock>;
+		cancelSession: ReturnType<typeof mock>;
+		assertSessionCloseSupported: ReturnType<typeof mock>;
+		assertSessionDeleteSupported: ReturnType<typeof mock>;
+		closeSession: ReturnType<typeof mock>;
+		deleteSession: ReturnType<typeof mock>;
 		archiveSession: ReturnType<typeof mock>;
 		bulkArchiveSessions: ReturnType<typeof mock>;
 		touchSession: ReturnType<typeof mock>;
@@ -199,6 +214,8 @@ describe("SocketClient restore semantics", () => {
 				(_sessionId: string, _revision: number, afterSeq: number) =>
 					afterSeq === 0 ? [createSessionEvent()] : [],
 			),
+			isSessionDeletionGuarded: mock(() => false),
+			getSessionIncarnationGeneration: mock(() => 0),
 			ackEvents: mock(() => {}),
 			claimMessageSend: mock(() => ({
 				status: "claimed",
@@ -213,8 +230,36 @@ describe("SocketClient restore semantics", () => {
 				connection: promptConnection,
 				cwd: "/tmp/project",
 			})),
+			getAgentCapabilities: mock(() =>
+				Promise.resolve({
+					list: false,
+					load: false,
+					auth: {
+						methods: [{ id: "browser", name: "Browser sign-in" }],
+						logout: true,
+					},
+				}),
+			),
+			authenticateAgent: mock(() =>
+				Promise.resolve({ list: false, load: false }),
+			),
+			logoutAgent: mock(() => Promise.resolve({ list: false, load: false })),
 			loadSession: mock(() => Promise.resolve({ sessionId: "session-1" })),
+			resumeSession: mock(() => Promise.resolve({ sessionId: "session-1" })),
 			reloadSession: mock(() => Promise.resolve({ sessionId: "session-1" })),
+			setSessionConfigOption: mock(() =>
+				Promise.resolve({ sessionId: "session-1" }),
+			),
+			setSessionMode: mock(() => Promise.resolve({ sessionId: "session-1" })),
+			setSessionModel: mock(() => Promise.resolve({ sessionId: "session-1" })),
+			updateTitle: mock(() => ({ sessionId: "session-1" })),
+			cancelSession: mock(() => Promise.resolve(true)),
+			assertSessionCloseSupported: mock(() => {}),
+			assertSessionDeleteSupported: mock(() => {}),
+			closeSession: mock(() =>
+				Promise.resolve({ sessionId: "session-1", isAttached: false }),
+			),
+			deleteSession: mock(() => Promise.resolve()),
 			archiveSession: mock(() => Promise.resolve()),
 			bulkArchiveSessions: mock(() => Promise.resolve({ archivedCount: 1 })),
 			touchSession: mock(() => {}),
@@ -258,6 +303,95 @@ describe("SocketClient restore semantics", () => {
 		client.disconnect();
 	});
 
+	test("forwards protocol-native session config RPCs to SessionManager", async () => {
+		const handler = socketHandlers.get("rpc:session:config");
+		if (!handler) {
+			throw new Error("rpc:session:config handler not registered");
+		}
+		const params = {
+			sessionId: "session-1",
+			configId: "auto-approve",
+			type: "boolean",
+			value: true,
+			_meta: { requestSource: "webui" },
+		} as const;
+
+		await handler({ requestId: "req-config", params });
+
+		expect(sessionManager.setSessionConfigOption).toHaveBeenCalledWith(
+			"session-1",
+			"auto-approve",
+			true,
+			{ requestSource: "webui" },
+		);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-config",
+			result: { sessionId: "session-1" },
+		});
+	});
+
+	test("serves backend authentication capabilities over RPC", async () => {
+		const handler = socketHandlers.get("rpc:agent:capabilities");
+		if (!handler) throw new Error("Agent capabilities handler not registered");
+
+		await handler({
+			requestId: "req-agent-capabilities",
+			params: { backendId: "backend-1" },
+		});
+
+		expect(sessionManager.getAgentCapabilities).toHaveBeenCalledWith(
+			"backend-1",
+		);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-agent-capabilities",
+			result: {
+				capabilities: {
+					list: false,
+					load: false,
+					auth: {
+						methods: [{ id: "browser", name: "Browser sign-in" }],
+						logout: true,
+					},
+				},
+			},
+		});
+	});
+
+	test("forwards Agent authentication without credential payloads", async () => {
+		const handler = socketHandlers.get("rpc:agent:authenticate");
+		if (!handler) throw new Error("Agent authenticate handler not registered");
+
+		await handler({
+			requestId: "req-agent-authenticate",
+			params: { backendId: "backend-1", methodId: "browser" },
+		});
+
+		expect(sessionManager.authenticateAgent).toHaveBeenCalledWith(
+			"backend-1",
+			"browser",
+		);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-agent-authenticate",
+			result: { capabilities: { list: false, load: false } },
+		});
+	});
+
+	test("forwards Agent logout and returns the refreshed snapshot", async () => {
+		const handler = socketHandlers.get("rpc:agent:logout");
+		if (!handler) throw new Error("Agent logout handler not registered");
+
+		await handler({
+			requestId: "req-agent-logout",
+			params: { backendId: "backend-1" },
+		});
+
+		expect(sessionManager.logoutAgent).toHaveBeenCalledWith("backend-1");
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-agent-logout",
+			result: { capabilities: { list: false, load: false } },
+		});
+	});
+
 	test("replays unacked events after reconnect using the durable revision", async () => {
 		(client as unknown as { reconnectAttempts: number }).reconnectAttempts = 1;
 
@@ -291,6 +425,63 @@ describe("SocketClient restore semantics", () => {
 				revision: 2,
 				payload: { encrypted: true, originalSeq: 4 },
 			}),
+		);
+	});
+
+	test("does not emit a replay page when deletion starts after the page read", async () => {
+		let deletionStarted = false;
+		sessionManager.isSessionDeletionGuarded.mockImplementation(
+			() => deletionStarted,
+		);
+		sessionManager.getUnackedEventsPage.mockImplementationOnce(() => {
+			const page = [createSessionEvent({ seq: 4 })];
+			deletionStarted = true;
+			return page;
+		});
+
+		await (
+			socketHandlers.get("connect") as (() => Promise<void>) | undefined
+		)?.();
+		await (
+			socketHandlers.get("cli:registered") as
+				| ((info: { machineId: string }) => Promise<void>)
+				| undefined
+		)?.({ machineId: "machine-1" });
+
+		expect(cryptoService.encryptEvent).not.toHaveBeenCalled();
+		expect(socketMock.emit).not.toHaveBeenCalledWith(
+			"session:event",
+			expect.anything(),
+		);
+	});
+
+	test("does not emit an old replay page after the session ID is reused", async () => {
+		let incarnation = 0;
+		sessionManager.getSessionIncarnationGeneration.mockImplementation(
+			() => incarnation,
+		);
+		sessionManager.getUnackedEventsPage.mockImplementationOnce(() => {
+			const oldPage = [createSessionEvent({ seq: 4 })];
+			// Model a completed delete followed by authoritative session/new or
+			// session/list reuse: the guard is clear, but the incarnation advanced.
+			incarnation = 1;
+			return oldPage;
+		});
+
+		await (
+			socketHandlers.get("connect") as (() => Promise<void>) | undefined
+		)?.();
+		await (
+			socketHandlers.get("cli:registered") as
+				| ((info: { machineId: string }) => Promise<void>)
+				| undefined
+		)?.({ machineId: "machine-1" });
+
+		expect(cryptoService.encryptEvent).not.toHaveBeenCalled();
+		sessionEventListener?.(createSessionEvent({ seq: 5 }));
+		expect(socketMock.emit).toHaveBeenCalledWith(
+			"session:event",
+			expect.objectContaining({ seq: 5 }),
 		);
 	});
 
@@ -505,6 +696,55 @@ describe("SocketClient restore semantics", () => {
 			["session-1", 2, 100, 100],
 			["session-1", 2, 200, 100],
 		]);
+	});
+
+	test("flushes only buffered events from the current session incarnation", async () => {
+		let incarnation = 0;
+		const backlog = Array.from({ length: 100 }, (_, index) =>
+			createSessionEvent({ seq: index + 1 }),
+		);
+		sessionManager.getSessionIncarnationGeneration.mockImplementation(
+			() => incarnation,
+		);
+		sessionManager.getUnackedEventsPage.mockImplementation(
+			(
+				_sessionId: string,
+				_revision: number,
+				afterSeq: number,
+				limit: number,
+			) => backlog.filter((event) => event.seq > afterSeq).slice(0, limit),
+		);
+		await (
+			socketHandlers.get("connect") as (() => Promise<void>) | undefined
+		)?.();
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: { machineId: string }) => Promise<void>)
+			| undefined;
+		if (!registeredHandler || !sessionEventListener) {
+			throw new Error("replay handlers not registered");
+		}
+
+		const registration = registeredHandler({ machineId: "machine-1" });
+		sessionEventListener(
+			createSessionEvent({ seq: 150, kind: "agent_thought_chunk" }),
+		);
+		incarnation = 1;
+		sessionEventListener(
+			createSessionEvent({ seq: 1, kind: "terminal_output" }),
+		);
+		await registration;
+
+		const emittedEvents = socketMock.emit.mock.calls
+			.filter((call) => (call as unknown[])[0] === "session:event")
+			.map((call) => (call as unknown[])[1] as SessionEvent);
+		expect(
+			emittedEvents.some((event) => event.kind === "agent_thought_chunk"),
+		).toBe(false);
+		expect(
+			emittedEvents.some(
+				(event) => event.kind === "terminal_output" && event.seq === 1,
+			),
+		).toBe(true);
 	});
 
 	test("cancels a stale replay without emitting a buffered live event", async () => {
@@ -738,7 +978,25 @@ describe("SocketClient restore semantics", () => {
 			upToSeq: 4,
 		});
 
-		expect(sessionManager.ackEvents).toHaveBeenCalledWith("session-1", 2, 4);
+		expect(sessionManager.ackEvents).toHaveBeenCalledWith(
+			"session-1",
+			2,
+			4,
+			undefined,
+		);
+
+		ackHandler({
+			sessionId: "session-1",
+			incarnationGeneration: 7,
+			revision: 2,
+			upToSeq: 5,
+		});
+		expect(sessionManager.ackEvents).toHaveBeenLastCalledWith(
+			"session-1",
+			2,
+			5,
+			7,
+		);
 	});
 
 	test("skips replay when no durable revision has unacked events", async () => {
@@ -758,6 +1016,16 @@ describe("SocketClient restore semantics", () => {
 	});
 
 	test("forwards plaintext prompts through rpc:message:send", async () => {
+		promptConnection.prompt.mockResolvedValueOnce({
+			stopReason: "end_turn",
+			usage: {
+				totalTokens: 120,
+				inputTokens: 80,
+				outputTokens: 40,
+				thoughtTokens: null,
+				cachedReadTokens: 10,
+			},
+		});
 		const prompt = [{ type: "text", text: "plain prompt" }] as const;
 		const handler = socketHandlers.get("rpc:message:send");
 		if (!handler) {
@@ -792,10 +1060,53 @@ describe("SocketClient restore semantics", () => {
 			"message-1",
 			"claim-1",
 			"end_turn",
+			{
+				totalTokens: 120,
+				inputTokens: 80,
+				outputTokens: 40,
+				cachedReadTokens: 10,
+			},
 		);
 		expect(sessionManager.recordTurnEnd).not.toHaveBeenCalled();
 		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
 			requestId: "req-1",
+			result: {
+				stopReason: "end_turn",
+				usage: {
+					totalTokens: 120,
+					inputTokens: 80,
+					outputTokens: 40,
+					cachedReadTokens: 10,
+				},
+			},
+		});
+	});
+
+	test("omits an invalid agent usage snapshot without failing the prompt", async () => {
+		promptConnection.prompt.mockResolvedValueOnce({
+			stopReason: "end_turn",
+			usage: { totalTokens: -1, inputTokens: 1, outputTokens: 0 },
+		});
+		const handler = socketHandlers.get("rpc:message:send");
+		if (!handler) throw new Error("rpc:message:send handler not registered");
+
+		await handler({
+			requestId: "req-invalid-usage",
+			params: {
+				sessionId: "session-1",
+				messageId: "message-invalid-usage",
+				prompt: [{ type: "text", text: "prompt" }],
+			},
+		});
+
+		expect(sessionManager.completeMessageSend).toHaveBeenCalledWith(
+			"session-1",
+			"message-invalid-usage",
+			"claim-1",
+			"end_turn",
+		);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-invalid-usage",
 			result: { stopReason: "end_turn" },
 		});
 	});
@@ -1420,6 +1731,308 @@ describe("SocketClient restore semantics", () => {
 		expect(sessionManager.archiveSession).toHaveBeenCalledWith("session-1");
 	});
 
+	test("pre-cancels work before closing a session through ACP", async () => {
+		const calls: string[] = [];
+		sessionManager.cancelSession.mockImplementationOnce(() => {
+			calls.push("cancel");
+			return Promise.resolve(true);
+		});
+		sessionManager.closeSession.mockImplementationOnce(() => {
+			calls.push("close");
+			return Promise.resolve({ sessionId: "session-1", isAttached: false });
+		});
+		const closeHandler = socketHandlers.get("rpc:session:close");
+		if (!closeHandler) {
+			throw new Error("session close RPC handler not registered");
+		}
+
+		await closeHandler({
+			requestId: "req-close",
+			params: { sessionId: "session-1" },
+		});
+
+		expect(calls).toEqual(["cancel", "close"]);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-close",
+			result: { sessionId: "session-1", isAttached: false },
+		});
+	});
+
+	test("reserves close before awaiting cancellation and rejects a new prompt", async () => {
+		let finishCancel: (() => void) | undefined;
+		sessionManager.cancelSession.mockImplementationOnce(
+			() =>
+				new Promise<boolean>((resolve) => {
+					finishCancel = () => resolve(true);
+				}),
+		);
+		const closeHandler = socketHandlers.get("rpc:session:close");
+		const messageHandler = socketHandlers.get("rpc:message:send");
+		if (!closeHandler || !messageHandler) {
+			throw new Error("session close or message RPC handler not registered");
+		}
+
+		const close = closeHandler({
+			requestId: "req-close-reserved",
+			params: { sessionId: "session-1" },
+		});
+		await Promise.resolve();
+		await messageHandler({
+			requestId: "req-message-during-close",
+			params: {
+				sessionId: "session-1",
+				messageId: "message-during-close",
+				prompt: [{ type: "text", text: "do not start" }],
+			},
+		});
+
+		expect(promptConnection.prompt).not.toHaveBeenCalled();
+		expect(sessionManager.closeSession).not.toHaveBeenCalled();
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-message-during-close",
+			error: expect.objectContaining({
+				code: "SESSION_BUSY",
+				status: 409,
+			}),
+		});
+
+		finishCancel?.();
+		await close;
+		expect(sessionManager.closeSession).toHaveBeenCalledWith("session-1");
+	});
+
+	test("does not cancel when close capability validation fails", async () => {
+		sessionManager.assertSessionCloseSupported.mockImplementationOnce(() => {
+			throw new Error("Agent does not support session/close capability");
+		});
+		const closeHandler = socketHandlers.get("rpc:session:close");
+		if (!closeHandler) {
+			throw new Error("session close RPC handler not registered");
+		}
+
+		await closeHandler({
+			requestId: "req-close-unsupported",
+			params: { sessionId: "session-1" },
+		});
+
+		expect(sessionManager.cancelSession).not.toHaveBeenCalled();
+		expect(sessionManager.closeSession).not.toHaveBeenCalled();
+	});
+
+	test("pre-cancels work before permanently deleting a session", async () => {
+		const calls: string[] = [];
+		sessionManager.cancelSession.mockImplementationOnce(() => {
+			calls.push("cancel");
+			return Promise.resolve(true);
+		});
+		sessionManager.deleteSession.mockImplementationOnce(() => {
+			calls.push("delete");
+			return Promise.resolve();
+		});
+		const deleteHandler = socketHandlers.get("rpc:session:delete");
+		if (!deleteHandler) {
+			throw new Error("session delete RPC handler not registered");
+		}
+
+		await deleteHandler({
+			requestId: "req-delete",
+			params: { sessionId: "session-1" },
+		});
+
+		expect(sessionManager.assertSessionDeleteSupported).toHaveBeenCalledWith(
+			"session-1",
+		);
+		expect(calls).toEqual(["cancel", "delete"]);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-delete",
+			result: { ok: true },
+		});
+	});
+
+	test("shares one in-flight permanent deletion across duplicate RPCs", async () => {
+		let finishDelete: (() => void) | undefined;
+		sessionManager.deleteSession.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					finishDelete = resolve;
+				}),
+		);
+		const deleteHandler = socketHandlers.get("rpc:session:delete");
+		if (!deleteHandler) {
+			throw new Error("session delete RPC handler not registered");
+		}
+
+		const first = deleteHandler({
+			requestId: "req-delete-first",
+			params: { sessionId: "session-1" },
+		});
+		const second = deleteHandler({
+			requestId: "req-delete-second",
+			params: { sessionId: "session-1" },
+		});
+		for (let attempt = 0; attempt < 10 && !finishDelete; attempt++) {
+			await Promise.resolve();
+		}
+
+		expect(sessionManager.assertSessionDeleteSupported).toHaveBeenCalledTimes(
+			1,
+		);
+		expect(sessionManager.cancelSession).toHaveBeenCalledTimes(1);
+		expect(sessionManager.deleteSession).toHaveBeenCalledTimes(1);
+		finishDelete?.();
+		await Promise.all([first, second]);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-delete-first",
+			result: { ok: true },
+		});
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-delete-second",
+			result: { ok: true },
+		});
+	});
+
+	test("rejects mutating session operations once permanent deletion is reserved", async () => {
+		let finishCancel: (() => void) | undefined;
+		sessionManager.cancelSession.mockImplementationOnce(
+			() =>
+				new Promise<boolean>((resolve) => {
+					finishCancel = () => resolve(true);
+				}),
+		);
+		const deleteHandler = socketHandlers.get("rpc:session:delete");
+		if (!deleteHandler) {
+			throw new Error("session delete RPC handler not registered");
+		}
+		const deletion = deleteHandler({
+			requestId: "req-delete-reserved",
+			params: { sessionId: "session-1" },
+		});
+
+		const requests: Array<[string, string, Record<string, unknown>]> = [
+			[
+				"rpc:session:load",
+				"req-load-during-delete",
+				{
+					sessionId: "session-1",
+					cwd: "/tmp/project",
+					backendId: "backend-1",
+				},
+			],
+			[
+				"rpc:session:resume",
+				"req-resume-during-delete",
+				{
+					sessionId: "session-1",
+					cwd: "/tmp/project",
+					backendId: "backend-1",
+				},
+			],
+			[
+				"rpc:session:reload",
+				"req-reload-during-delete",
+				{
+					sessionId: "session-1",
+					cwd: "/tmp/project",
+					backendId: "backend-1",
+				},
+			],
+			[
+				"rpc:session:archive",
+				"req-archive-during-delete",
+				{ sessionId: "session-1" },
+			],
+			[
+				"rpc:session:close",
+				"req-close-during-delete",
+				{ sessionId: "session-1" },
+			],
+			[
+				"rpc:session:mode",
+				"req-mode-during-delete",
+				{ sessionId: "session-1", modeId: "plan" },
+			],
+			[
+				"rpc:session:model",
+				"req-model-during-delete",
+				{ sessionId: "session-1", modelId: "model-1" },
+			],
+			[
+				"rpc:session:config",
+				"req-config-during-delete",
+				{ sessionId: "session-1", configId: "mode", value: "fast" },
+			],
+			[
+				"rpc:session:rename",
+				"req-rename-during-delete",
+				{ sessionId: "session-1", title: "Do not revive" },
+			],
+		];
+
+		await Promise.all(
+			requests.map(async ([event, requestId, params]) => {
+				const handler = socketHandlers.get(event);
+				if (!handler) throw new Error(`${event} handler not registered`);
+				await handler({ requestId, params });
+			}),
+		);
+		const messageHandler = socketHandlers.get("rpc:message:send");
+		if (!messageHandler) throw new Error("message handler not registered");
+		await messageHandler({
+			requestId: "req-message-during-delete",
+			params: {
+				sessionId: "session-1",
+				messageId: "message-during-delete",
+				prompt: [{ type: "text", text: "do not run" }],
+			},
+		});
+
+		for (const [, requestId] of requests) {
+			expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+				requestId,
+				error: expect.objectContaining({
+					code: "SESSION_BUSY",
+					status: 409,
+				}),
+			});
+		}
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-message-during-delete",
+			error: expect.objectContaining({ code: "SESSION_BUSY", status: 409 }),
+		});
+		expect(sessionManager.loadSession).not.toHaveBeenCalled();
+		expect(sessionManager.resumeSession).not.toHaveBeenCalled();
+		expect(sessionManager.reloadSession).not.toHaveBeenCalled();
+		expect(sessionManager.archiveSession).not.toHaveBeenCalled();
+		expect(sessionManager.closeSession).not.toHaveBeenCalled();
+		expect(sessionManager.setSessionMode).not.toHaveBeenCalled();
+		expect(sessionManager.setSessionModel).not.toHaveBeenCalled();
+		expect(sessionManager.setSessionConfigOption).not.toHaveBeenCalled();
+		expect(sessionManager.updateTitle).not.toHaveBeenCalled();
+		expect(promptConnection.prompt).not.toHaveBeenCalled();
+
+		finishCancel?.();
+		await deletion;
+		expect(sessionManager.deleteSession).toHaveBeenCalledWith("session-1");
+	});
+
+	test("does not cancel when permanent delete capability validation fails", async () => {
+		sessionManager.assertSessionDeleteSupported.mockImplementationOnce(() => {
+			throw new Error("Agent does not support session/delete capability");
+		});
+		const deleteHandler = socketHandlers.get("rpc:session:delete");
+		if (!deleteHandler) {
+			throw new Error("session delete RPC handler not registered");
+		}
+
+		await deleteHandler({
+			requestId: "req-delete-unsupported",
+			params: { sessionId: "session-1" },
+		});
+
+		expect(sessionManager.cancelSession).not.toHaveBeenCalled();
+		expect(sessionManager.deleteSession).not.toHaveBeenCalled();
+	});
+
 	test("waits for archive completion before loading the same session", async () => {
 		let resolveArchive: (() => void) | undefined;
 		sessionManager.archiveSession.mockImplementationOnce(
@@ -1456,7 +2069,37 @@ describe("SocketClient restore semantics", () => {
 			"session-1",
 			"/tmp/project",
 			"backend-1",
+			undefined,
 		);
+	});
+
+	test("forwards resume RPC parameters through the per-session queue", async () => {
+		const resumeHandler = socketHandlers.get("rpc:session:resume");
+		if (!resumeHandler) {
+			throw new Error("rpc:session:resume handler not registered");
+		}
+
+		await resumeHandler({
+			requestId: "req-resume",
+			params: {
+				sessionId: "session-1",
+				cwd: "/tmp/project",
+				additionalDirectories: ["/tmp/shared"],
+				backendId: "backend-1",
+				machineId: "machine-1",
+			},
+		});
+
+		expect(sessionManager.resumeSession).toHaveBeenCalledWith(
+			"session-1",
+			"/tmp/project",
+			"backend-1",
+			["/tmp/shared"],
+		);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-resume",
+			result: { sessionId: "session-1" },
+		});
 	});
 
 	test("waits for every included session before bulk archiving", async () => {

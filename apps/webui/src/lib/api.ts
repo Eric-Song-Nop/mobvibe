@@ -2,9 +2,15 @@
 export type {
 	AcpBackendSummary,
 	AcpBackendsResponse,
+	AgentAuthenticationCapabilities,
+	AgentAuthMethod,
+	AgentBackendRpcParams,
+	AgentCapabilitiesRpcResult,
 	AgentTeamSummary,
+	AuthenticateAgentRpcParams,
 	CreateAgentTeamRpcResult,
 	CreateSessionResponse,
+	DeleteSessionParams,
 	ErrorDetail,
 	FsEntriesResponse,
 	FsEntry,
@@ -19,6 +25,7 @@ export type {
 	SessionFsResourceEntry,
 	SessionSummary,
 	SessionsResponse,
+	SetSessionConfigOptionParams,
 	TeamWorkspaceMode,
 } from "@mobvibe/shared";
 // Re-export isErrorDetail for local use
@@ -27,10 +34,14 @@ export { isErrorDetail } from "@mobvibe/shared";
 // Import types for API functions
 import type {
 	AcpBackendsResponse,
+	AgentBackendRpcParams,
+	AgentCapabilitiesRpcResult,
+	AuthenticateAgentRpcParams,
 	CancelSessionResponse,
 	ContentBlock,
 	CreateAgentTeamRpcResult,
 	CreateSessionResponse,
+	DeleteSessionParams,
 	DiscoverSessionsResult,
 	ErrorDetail,
 	FsEntriesResponse,
@@ -43,10 +54,12 @@ import type {
 	MachinesResponse,
 	PermissionDecisionPayload,
 	PermissionDecisionResponse,
+	ResumeSessionParams,
 	SendMessageResult,
 	SessionFsFilePreviewResponse,
 	SessionSummary,
 	SessionsResponse,
+	SetSessionConfigOptionParams,
 	TeamWorkspaceMode,
 } from "@mobvibe/shared";
 import { isErrorDetail } from "@mobvibe/shared";
@@ -60,6 +73,9 @@ import { platformFetch } from "./tauri-fetch";
 let API_BASE_URL = getDefaultGatewayUrl();
 const SEND_MESSAGE_TIMEOUT_MS = 120_000;
 const SESSION_LOAD_TIMEOUT_MS = 30_000;
+const AGENT_CAPABILITIES_TIMEOUT_MS = 30_000;
+const AGENT_AUTHENTICATE_TIMEOUT_MS = 130_000;
+const AGENT_LOGOUT_TIMEOUT_MS = 30_000;
 const OWNER_ROUTING_PATH = "/acp/routing";
 const OWNER_RESPONSE_HEADER = "x-mobvibe-instance-id";
 const FORCE_INSTANCE_HEADER = "fly-force-instance-id";
@@ -378,10 +394,21 @@ const isAbortError = (error: unknown): boolean =>
 const requestJsonWithTimeout = async <ResponseType>(
 	path: string,
 	timeoutMs: number,
-	options?: Omit<RequestInit, "signal">,
+	options?: RequestInit,
 ): Promise<ResponseType> => {
 	const controller = new AbortController();
+	const externalSignal = options?.signal;
+	let timedOut = false;
+	const handleExternalAbort = () => controller.abort();
+	if (externalSignal?.aborted) {
+		controller.abort();
+	} else {
+		externalSignal?.addEventListener("abort", handleExternalAbort, {
+			once: true,
+		});
+	}
 	const timeoutId = setTimeout(() => {
+		timedOut = true;
 		controller.abort();
 	}, timeoutMs);
 
@@ -391,7 +418,7 @@ const requestJsonWithTimeout = async <ResponseType>(
 			signal: controller.signal,
 		});
 	} catch (error) {
-		if (isAbortError(error)) {
+		if (isAbortError(error) && (timedOut || !externalSignal)) {
 			throw new ApiError(
 				createFallbackError(
 					`Request timed out after ${timeoutMs}ms`,
@@ -402,6 +429,7 @@ const requestJsonWithTimeout = async <ResponseType>(
 		throw error;
 	} finally {
 		clearTimeout(timeoutId);
+		externalSignal?.removeEventListener("abort", handleExternalAbort);
 	}
 };
 
@@ -413,6 +441,53 @@ export const fetchSessions = async (): Promise<SessionsResponse> =>
 
 export const fetchMachines = async (): Promise<MachinesResponse> =>
 	requestJson<MachinesResponse>("/api/machines");
+
+const buildAgentCapabilitiesPath = (payload: AgentBackendRpcParams) => {
+	const params = new URLSearchParams();
+	if (payload.machineId) {
+		params.set("machineId", payload.machineId);
+	}
+	params.set("backendId", payload.backendId);
+	return `/acp/backend/capabilities?${params.toString()}`;
+};
+
+export const fetchAgentCapabilities = async (
+	payload: AgentBackendRpcParams,
+	signal?: AbortSignal,
+): Promise<AgentCapabilitiesRpcResult> =>
+	requestJsonWithTimeout<AgentCapabilitiesRpcResult>(
+		buildAgentCapabilitiesPath(payload),
+		AGENT_CAPABILITIES_TIMEOUT_MS,
+		{ signal },
+	);
+
+export const authenticateAgent = async (
+	payload: AuthenticateAgentRpcParams,
+	signal?: AbortSignal,
+): Promise<AgentCapabilitiesRpcResult> =>
+	requestJsonWithTimeout<AgentCapabilitiesRpcResult>(
+		"/acp/backend/authenticate",
+		AGENT_AUTHENTICATE_TIMEOUT_MS,
+		{
+			method: "POST",
+			body: JSON.stringify(payload),
+			signal,
+		},
+	);
+
+export const logoutAgent = async (
+	payload: AgentBackendRpcParams,
+	signal?: AbortSignal,
+): Promise<AgentCapabilitiesRpcResult> =>
+	requestJsonWithTimeout<AgentCapabilitiesRpcResult>(
+		"/acp/backend/logout",
+		AGENT_LOGOUT_TIMEOUT_MS,
+		{
+			method: "POST",
+			body: JSON.stringify(payload),
+			signal,
+		},
+	);
 
 const buildAgentTeamsPath = (machineId?: string) => {
 	if (!machineId) {
@@ -601,6 +676,7 @@ export const fetchSessionFsResources = async (payload: {
 
 export const createSession = async (payload?: {
 	cwd?: string;
+	additionalDirectories?: string[];
 	title?: string;
 	backendId?: string;
 	machineId?: string;
@@ -629,6 +705,22 @@ export const archiveSession = async (payload: {
 	sessionId: string;
 }): Promise<{ ok: boolean }> =>
 	requestJson<{ ok: boolean }>("/acp/session/archive", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+
+export const closeSession = async (payload: {
+	sessionId: string;
+}): Promise<SessionSummary> =>
+	requestJson<SessionSummary>("/acp/session/close", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+
+export const deleteSession = async (
+	payload: DeleteSessionParams,
+): Promise<{ ok: true }> =>
+	requestJson<{ ok: true }>("/acp/session/delete", {
 		method: "POST",
 		body: JSON.stringify(payload),
 	});
@@ -663,6 +755,14 @@ export const setSessionModel = async (payload: {
 	modelId: string;
 }): Promise<SessionSummary> =>
 	requestJson<SessionSummary>("/acp/session/model", {
+		method: "POST",
+		body: JSON.stringify(payload),
+	});
+
+export const setSessionConfigOption = async (
+	payload: SetSessionConfigOptionParams,
+): Promise<SessionSummary> =>
+	requestJson<SessionSummary>("/acp/session/config-option", {
 		method: "POST",
 		body: JSON.stringify(payload),
 	});
@@ -706,6 +806,7 @@ export const sendPermissionDecision = async (
 export const loadSession = async (payload: {
 	sessionId: string;
 	cwd: string;
+	additionalDirectories?: string[];
 	backendId: string;
 	machineId?: string;
 }): Promise<SessionSummary> =>
@@ -718,9 +819,22 @@ export const loadSession = async (payload: {
 		},
 	);
 
+export const resumeSession = async (
+	payload: ResumeSessionParams,
+): Promise<SessionSummary> =>
+	requestJsonWithTimeout<SessionSummary>(
+		"/acp/session/resume",
+		SESSION_LOAD_TIMEOUT_MS,
+		{
+			method: "POST",
+			body: JSON.stringify(payload),
+		},
+	);
+
 export const reloadSession = async (payload: {
 	sessionId: string;
 	cwd: string;
+	additionalDirectories?: string[];
 	backendId: string;
 	machineId?: string;
 }): Promise<SessionSummary> =>

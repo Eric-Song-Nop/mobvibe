@@ -1,9 +1,11 @@
 import type { EncryptedPayload } from "../crypto/types.js";
+import type { ReportedTokenUsage } from "../reported-token-usage.js";
 import type {
 	ContentBlock,
 	PermissionOption,
 	PermissionOutcome,
 	PermissionToolCall,
+	SetSessionConfigOptionRequest,
 	StopReason,
 } from "./acp.js";
 import type {
@@ -42,6 +44,8 @@ export type SessionEventKind =
 	| "permission_result"
 	| "terminal_output"
 	| "session_info_update"
+	| "plan_update"
+	| "plan_removed"
 	| "session_error"
 	| "usage_update"
 	| "unknown_update";
@@ -50,9 +54,13 @@ export type SessionEventKind =
 export type SessionEvent = {
 	sessionId: string;
 	machineId: string;
+	/** Process-local session incarnation used to reject stale replay ACKs. */
+	incarnationGeneration?: number;
 	revision: number;
 	seq: number;
 	kind: SessionEventKind;
+	/** ACP message boundary identifier; distinct from SendMessageParams.messageId. */
+	protocolMessageId?: string;
 	createdAt: string;
 	payload: unknown;
 };
@@ -78,6 +86,8 @@ export type SessionEventsResponse = {
 /** Acknowledgment payload for events received by gateway */
 export type EventsAckPayload = {
 	sessionId: string;
+	/** Echoed from SessionEvent when the CLI supports incarnation-safe ACKs. */
+	incarnationGeneration?: number;
 	revision: number;
 	upToSeq: number;
 };
@@ -169,6 +179,8 @@ export type CreateSessionWorktreeOptions = {
 // Create session RPC params
 export type CreateSessionParams = {
 	cwd?: string;
+	/** Complete ordered ACP additional directory roots. */
+	additionalDirectories?: string[];
 	title?: string;
 	backendId: AcpBackendId;
 	machineId?: string;
@@ -190,6 +202,8 @@ export type SendMessageParams = {
 // Send message RPC result
 export type SendMessageResult = {
 	stopReason: StopReason;
+	/** Optional bounded snapshot reported by the Agent for this prompt response. */
+	usage?: ReportedTokenUsage;
 };
 
 // Cancel session RPC params
@@ -208,6 +222,9 @@ export type SetSessionModelParams = {
 	sessionId: string;
 	modelId: string;
 };
+
+/** Protocol-native session configuration update (select or boolean). */
+export type SetSessionConfigOptionParams = SetSessionConfigOptionRequest;
 
 // File system RPC params
 export type FsEntriesParams = {
@@ -279,13 +296,52 @@ export type DiscoverSessionsRpcResult = {
 export type LoadSessionRpcParams = {
 	sessionId: string;
 	cwd: string;
+	/** Complete ordered ACP additional directory roots. */
+	additionalDirectories?: string[];
 	backendId: string;
+};
+
+/** HTTP/API parameters for resuming a session without replaying its history. */
+export type ResumeSessionParams = {
+	sessionId: string;
+	cwd: string;
+	/** Complete ordered ACP additional directory roots. */
+	additionalDirectories?: string[];
+	backendId: string;
+	machineId?: string;
+};
+
+/** CLI RPC parameters for resuming a session without history replay. */
+export type ResumeSessionRpcParams = ResumeSessionParams;
+
+/** Close an active ACP session while preserving its durable local history. */
+export type CloseSessionParams = { sessionId: string };
+
+/** Request Agent deletion and purge Mobvibe's local session storage. */
+export type DeleteSessionParams = { sessionId: string };
+
+/** Selects an Agent backend on a machine. `machineId` is stripped by Gateway. */
+export type AgentBackendRpcParams = {
+	backendId: string;
+	machineId?: string;
+};
+
+/** Starts one of the stable Agent-managed ACP authentication methods. */
+export type AuthenticateAgentRpcParams = AgentBackendRpcParams & {
+	methodId: string;
+};
+
+/** Sanitized backend capability snapshot returned after an Agent auth action. */
+export type AgentCapabilitiesRpcResult = {
+	capabilities: AgentSessionCapabilities;
 };
 
 // Reload session RPC params
 export type ReloadSessionRpcParams = {
 	sessionId: string;
 	cwd: string;
+	/** Complete ordered ACP additional directory roots. */
+	additionalDirectories?: string[];
 	backendId: string;
 };
 
@@ -310,7 +366,12 @@ export type SessionDetachedPayload = {
 	sessionId: string;
 	machineId: string;
 	detachedAt: string;
-	reason: "agent_exit" | "cli_disconnect" | "gateway_disconnect" | "unknown";
+	reason:
+		| "agent_exit"
+		| "cli_disconnect"
+		| "gateway_disconnect"
+		| "session_close"
+		| "unknown";
 };
 
 // CLI -> Gateway events
@@ -342,6 +403,9 @@ export interface GatewayToCliEvents {
 	// RPC requests
 	"rpc:session:create": (request: RpcRequest<CreateSessionParams>) => void;
 	"rpc:session:cancel": (request: RpcRequest<CancelSessionParams>) => void;
+	"rpc:session:config": (
+		request: RpcRequest<SetSessionConfigOptionParams>,
+	) => void;
 	"rpc:session:mode": (request: RpcRequest<SetSessionModeParams>) => void;
 	"rpc:session:model": (request: RpcRequest<SetSessionModelParams>) => void;
 	"rpc:message:send": (request: RpcRequest<SendMessageParams>) => void;
@@ -363,6 +427,16 @@ export interface GatewayToCliEvents {
 		request: RpcRequest<DiscoverSessionsRpcParams>,
 	) => void;
 	"rpc:session:load": (request: RpcRequest<LoadSessionRpcParams>) => void;
+	"rpc:session:resume": (request: RpcRequest<ResumeSessionRpcParams>) => void;
+	"rpc:session:close": (request: RpcRequest<CloseSessionParams>) => void;
+	"rpc:session:delete": (request: RpcRequest<DeleteSessionParams>) => void;
+	"rpc:agent:capabilities": (
+		request: RpcRequest<AgentBackendRpcParams>,
+	) => void;
+	"rpc:agent:authenticate": (
+		request: RpcRequest<AuthenticateAgentRpcParams>,
+	) => void;
+	"rpc:agent:logout": (request: RpcRequest<AgentBackendRpcParams>) => void;
 	"rpc:session:reload": (request: RpcRequest<ReloadSessionRpcParams>) => void;
 	"rpc:agent-team:create": (
 		request: RpcRequest<CreateAgentTeamRpcParams>,

@@ -16,12 +16,18 @@ import { initCrypto, verifySignedToken } from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
 import type { GatewayConfig } from "../config.js";
 import { logger } from "../lib/logger.js";
+import { sanitizeAgentSessionCapabilities } from "../services/agent-capability-sanitizer.js";
 import type { CliRecord, CliRegistry } from "../services/cli-registry.js";
 import {
 	findDeviceByPublicKey,
 	upsertMachine,
 } from "../services/db-service.js";
 import type { NotificationService } from "../services/notification-service.js";
+import {
+	sanitizeAcpMetaPayload,
+	sanitizeSessionMetaEnvelopes,
+	warnSessionMetaSanitization,
+} from "../services/session-meta-sanitizer.js";
 import type { SessionRouter } from "../services/session-router.js";
 import type { TeamRouter } from "../services/team-router.js";
 import type { UserAffinityProvider } from "../services/user-affinity.js";
@@ -36,6 +42,25 @@ interface SocketData {
 
 const MAX_PRE_REGISTRATION_EVENTS = 1_000;
 const MAX_PRE_REGISTRATION_BYTES = 4 * 1024 * 1024;
+
+const selectDiscoveredSessionTimestamp = (
+	existing: string | undefined,
+	provided: string | null | undefined,
+	discoveredAt: string,
+): string => {
+	const validValues = [existing, provided].filter(
+		(value): value is string =>
+			typeof value === "string" && !Number.isNaN(Date.parse(value)),
+	);
+	return (
+		validValues.reduce<string | undefined>((latest, value) => {
+			if (latest === undefined || Date.parse(value) > Date.parse(latest)) {
+				return value;
+			}
+			return latest;
+		}, undefined) ?? discoveredAt
+	);
+};
 
 const getSerializedPayloadBytes = (payload: unknown): number | undefined => {
 	try {
@@ -434,7 +459,9 @@ export function setupCliHandlers(
 		// Sessions list update (initial sync and heartbeat)
 		socket.on("sessions:list", (sessions: SessionSummary[]) => {
 			withRegisteredCli("sessions:list", sessions, () => {
-				cliRegistry.updateSessions(socket.id, sessions);
+				const sanitized = sanitizeSessionMetaEnvelopes(sessions);
+				warnSessionMetaSanitization("sessions:list", socket.id, sanitized);
+				cliRegistry.updateSessions(socket.id, sanitized.values);
 				logger.debug(
 					{ socketId: socket.id, sessionCount: sessions.length },
 					"cli_sessions_list",
@@ -444,7 +471,35 @@ export function setupCliHandlers(
 
 		// Incremental sessions update
 		socket.on("sessions:changed", (payload: SessionsChangedPayload) => {
-			withRegisteredCli("sessions:changed", payload, () => {
+			withRegisteredCli("sessions:changed", payload, (cliRecord) => {
+				const addedCount = payload.added.length;
+				const sanitized = sanitizeSessionMetaEnvelopes([
+					...payload.added,
+					...payload.updated,
+				]);
+				warnSessionMetaSanitization("sessions:changed", socket.id, sanitized);
+				const backendCapabilities = payload.backendCapabilities
+					? Object.fromEntries(
+							cliRecord.backends.flatMap((backend) => {
+								const snapshot =
+									payload.backendCapabilities?.[backend.backendId];
+								return snapshot
+									? [
+											[
+												backend.backendId,
+												sanitizeAgentSessionCapabilities(snapshot),
+											] as const,
+										]
+									: [];
+							}),
+						)
+					: undefined;
+				const sanitizedPayload: SessionsChangedPayload = {
+					...payload,
+					added: sanitized.values.slice(0, addedCount),
+					updated: sanitized.values.slice(addedCount),
+					backendCapabilities,
+				};
 				logger.info(
 					{
 						socketId: socket.id,
@@ -454,14 +509,40 @@ export function setupCliHandlers(
 					},
 					"cli_sessions_changed",
 				);
-				cliRegistry.updateSessionsIncremental(socket.id, payload);
+				if (backendCapabilities) {
+					cliRegistry.updateBackendCapabilities(socket.id, backendCapabilities);
+				}
+				cliRegistry.updateSessionsIncremental(socket.id, sanitizedPayload);
 			});
 		});
 
 		// Historical sessions discovered from ACP agent
 		socket.on("sessions:discovered", (payload: SessionsDiscoveredPayload) => {
 			withRegisteredCli("sessions:discovered", payload, (cliRecord) => {
-				const { sessions, capabilities } = payload;
+				const registeredBackend = cliRecord.backends.find(
+					(backend) => backend.backendId === payload.backendId,
+				);
+				if (!registeredBackend) {
+					logger.warn(
+						{
+							socketId: socket.id,
+							machineId: cliRecord.machineId,
+							backendId: payload.backendId,
+						},
+						"sessions_discovered_unknown_backend",
+					);
+					return;
+				}
+				const capabilities = sanitizeAgentSessionCapabilities(
+					payload.capabilities,
+				);
+				const sanitized = sanitizeSessionMetaEnvelopes(payload.sessions);
+				warnSessionMetaSanitization(
+					"sessions:discovered",
+					socket.id,
+					sanitized,
+				);
+				const sessions = sanitized.values;
 
 				// Update per-backend capabilities from discovery result
 				if (capabilities && payload.backendId) {
@@ -471,32 +552,48 @@ export function setupCliHandlers(
 				}
 
 				// Transform AcpSessionInfo to SessionSummary with historical markers
-				const historicalSessions: SessionSummary[] = sessions.map((s) => ({
-					sessionId: s.sessionId,
-					title: s.title ?? `Session ${s.sessionId.slice(0, 8)}`,
-					cwd: s.cwd,
-					workspaceRootCwd: s.workspaceRootCwd,
-					updatedAt: s.updatedAt ?? new Date().toISOString(),
-					createdAt: s.updatedAt ?? new Date().toISOString(),
-					backendId: payload.backendId,
-					backendLabel: payload.backendLabel,
-					machineId: cliRecord.machineId,
-				}));
+				const existingSessions = new Map(
+					cliRecord.sessions.map((session) => [session.sessionId, session]),
+				);
+				const discoveredAt = new Date().toISOString();
+				const historicalSessions: SessionSummary[] = sessions.map((s) => {
+					const existing = existingSessions.get(s.sessionId);
+					const updatedAt = selectDiscoveredSessionTimestamp(
+						existing?.updatedAt,
+						s.updatedAt,
+						discoveredAt,
+					);
+					return {
+						sessionId: s.sessionId,
+						title: s.title ?? `Session ${s.sessionId.slice(0, 8)}`,
+						cwd: s.cwd,
+						workspaceRootCwd: s.workspaceRootCwd,
+						updatedAt,
+						createdAt: existing?.createdAt ?? updatedAt,
+						backendId: registeredBackend.backendId,
+						backendLabel: registeredBackend.backendLabel,
+						machineId: cliRecord.machineId,
+						additionalDirectories: s.additionalDirectories ?? [],
+						...(Object.hasOwn(s, "_meta") ? { _meta: s._meta } : {}),
+					};
+				});
 
-				// Add to CLI registry (returns only actually new sessions)
-				const added = cliRegistry.addDiscoveredSessions(
+				const changes = cliRegistry.addDiscoveredSessions(
 					socket.id,
 					historicalSessions,
 				);
 
-				// Emit sessions:changed to webui (with capabilities even if no new sessions)
-				if (cliRecord.userId && (added.length > 0 || capabilities)) {
+				// Emit sessions:changed to webui (with capabilities even if no metadata changed)
+				if (
+					cliRecord.userId &&
+					(changes.added.length > 0 ||
+						changes.updated.length > 0 ||
+						capabilities)
+				) {
 					emitToWebui(
 						"sessions:changed",
 						{
-							added,
-							updated: [],
-							removed: [],
+							...changes,
 							backendCapabilities: payload.backendId
 								? { [payload.backendId]: capabilities }
 								: undefined,
@@ -583,19 +680,25 @@ export function setupCliHandlers(
 		// Permission request from CLI
 		socket.on("permission:request", (payload: PermissionRequestPayload) => {
 			withRegisteredCli("permission:request", payload, (record) => {
+				const sanitized = sanitizeAcpMetaPayload(payload);
+				warnSessionMetaSanitization("permission:request", socket.id, sanitized);
+				const permission = sanitized.value;
 				logger.info(
-					{ sessionId: payload.sessionId, requestId: payload.requestId },
+					{
+						sessionId: permission.sessionId,
+						requestId: permission.requestId,
+					},
 					"permission_request_received",
 				);
-				emitToWebui("permission:request", payload, record.userId);
+				emitToWebui("permission:request", permission, record.userId);
 				if (
 					record.userId &&
 					notificationService &&
-					isActiveCliSession(record, payload.sessionId)
+					isActiveCliSession(record, permission.sessionId)
 				) {
 					void notificationService.notifyPermissionRequest(
 						record.userId,
-						payload,
+						permission,
 					);
 				}
 			});
@@ -617,16 +720,19 @@ export function setupCliHandlers(
 		// session:event with kind="terminal_output"
 		socket.on("session:event", (event: SessionEvent) => {
 			withRegisteredCli("session:event", event, (record) => {
+				const sanitized = sanitizeAcpMetaPayload(event);
+				warnSessionMetaSanitization("session:event", socket.id, sanitized);
+				const sessionEvent = sanitized.value;
 				const eventWithMachineId: SessionEvent = {
-					...event,
+					...sessionEvent,
 					machineId: record.machineId,
 				};
 				logger.debug(
 					{
-						sessionId: event.sessionId,
-						revision: event.revision,
-						seq: event.seq,
-						kind: event.kind,
+						sessionId: sessionEvent.sessionId,
+						revision: sessionEvent.revision,
+						seq: sessionEvent.seq,
+						kind: sessionEvent.kind,
 						socketId: socket.id,
 					},
 					"session_event_received",
@@ -635,7 +741,7 @@ export function setupCliHandlers(
 				if (
 					record.userId &&
 					notificationService &&
-					isActiveCliSession(record, event.sessionId)
+					isActiveCliSession(record, sessionEvent.sessionId)
 				) {
 					void notificationService.notifySessionEvent(
 						record.userId,
@@ -645,9 +751,14 @@ export function setupCliHandlers(
 
 				// Send acknowledgment back to CLI only after the event has been relayed.
 				socket.emit("events:ack", {
-					sessionId: event.sessionId,
-					revision: event.revision,
-					upToSeq: event.seq,
+					sessionId: sessionEvent.sessionId,
+					...(sessionEvent.incarnationGeneration === undefined
+						? {}
+						: {
+								incarnationGeneration: sessionEvent.incarnationGeneration,
+							}),
+					revision: sessionEvent.revision,
+					upToSeq: sessionEvent.seq,
 				});
 			});
 		});

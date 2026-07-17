@@ -31,12 +31,14 @@ const makeEvent = (
 const makeChunkPayload = (
 	text: string,
 	kind: "agent_message_chunk" | "agent_thought_chunk",
+	messageId?: string | null,
 ): SessionNotification =>
 	({
 		sessionId: SESSION_ID,
 		update: {
 			sessionUpdate: kind,
 			content: { type: "text", text },
+			...(messageId !== undefined ? { messageId } : {}),
 		},
 	}) as unknown as SessionNotification;
 
@@ -144,6 +146,49 @@ describe("consolidateEventsForRead", () => {
 		>;
 		const content = update.content as { text: string };
 		expect(content.text).toBe("Hello world!");
+	});
+
+	it("merges only chunks with the same ACP messageId", () => {
+		const e1 = makeEvent(
+			"agent_message_chunk",
+			makeChunkPayload("first ", "agent_message_chunk", "acp-message-1"),
+		);
+		const e2 = makeEvent(
+			"agent_message_chunk",
+			makeChunkPayload("message", "agent_message_chunk", "acp-message-1"),
+		);
+		const e3 = makeEvent(
+			"agent_message_chunk",
+			makeChunkPayload("second", "agent_message_chunk", "acp-message-2"),
+		);
+
+		const result = consolidateEventsForRead([e1, e2, e3]);
+
+		expect(result).toHaveLength(2);
+		const firstUpdate = (result[0].payload as SessionNotification).update as {
+			messageId?: string;
+			content: { text: string };
+		};
+		const secondUpdate = (result[1].payload as SessionNotification).update as {
+			messageId?: string;
+		};
+		expect(firstUpdate.messageId).toBe("acp-message-1");
+		expect(secondUpdate.messageId).toBe("acp-message-2");
+		const firstContent = firstUpdate.content;
+		expect(firstContent.text).toBe("first message");
+	});
+
+	it("does not merge identified chunks with legacy chunks", () => {
+		const identified = makeEvent(
+			"agent_thought_chunk",
+			makeChunkPayload("identified", "agent_thought_chunk", "thought-1"),
+		);
+		const legacy = makeEvent(
+			"agent_thought_chunk",
+			makeChunkPayload("legacy", "agent_thought_chunk"),
+		);
+
+		expect(consolidateEventsForRead([identified, legacy])).toHaveLength(2);
 	});
 
 	// 4. Consecutive agent_thought_chunk
@@ -314,6 +359,61 @@ describe("consolidateEventsForRead", () => {
 		expect(result[0]).toBe(e3);
 	});
 
+	it("passes plan operations through in order alongside legacy plans", () => {
+		const legacyPlan = makeEvent("session_info_update", {
+			sessionId: SESSION_ID,
+			update: {
+				sessionUpdate: "plan",
+				entries: [
+					{
+						content: "Legacy step",
+						priority: "medium",
+						status: "pending",
+					},
+				],
+			},
+		});
+		const firstUpdate = makeEvent("plan_update", {
+			sessionId: SESSION_ID,
+			update: {
+				sessionUpdate: "plan_update",
+				plan: {
+					type: "markdown",
+					planId: "design",
+					content: "## First revision",
+				},
+			},
+		});
+		const secondUpdate = makeEvent("plan_update", {
+			sessionId: SESSION_ID,
+			update: {
+				sessionUpdate: "plan_update",
+				plan: {
+					type: "markdown",
+					planId: "design",
+					content: "## Second revision",
+				},
+			},
+		});
+		const removed = makeEvent("plan_removed", {
+			sessionId: SESSION_ID,
+			update: { sessionUpdate: "plan_removed", planId: "design" },
+		});
+
+		const result = consolidateEventsForRead([
+			legacyPlan,
+			firstUpdate,
+			secondUpdate,
+			removed,
+		]);
+
+		expect(result).toEqual([legacyPlan, firstUpdate, secondUpdate, removed]);
+		expect(result.map((event) => event.seq)).toEqual([1, 2, 3, 4]);
+		expect(result[1]).toBe(firstUpdate);
+		expect(result[2]).toBe(secondUpdate);
+		expect(result[3]).toBe(removed);
+	});
+
 	// 12. Stub payloads are filtered
 	it("should filter out legacy {_c:true} stub payloads", () => {
 		const e1 = makeEvent(
@@ -417,30 +517,32 @@ describe("consolidateEventsForRead", () => {
 		expect(content.text).toBe("你好 🌍🎉 café");
 	});
 
-	// 17. Non-text chunk (image) — no text extracted
-	it("should handle non-text content chunks gracefully", () => {
+	// 17. Non-text chunks form boundaries and are never rewritten as text.
+	it("does not merge across non-text content boundaries", () => {
+		const before = makeEvent(
+			"agent_message_chunk",
+			makeChunkPayload("before", "agent_message_chunk", "message-1"),
+		);
 		const imagePayload = {
 			sessionId: SESSION_ID,
 			update: {
 				sessionUpdate: "agent_message_chunk",
 				content: { type: "image", url: "http://example.com/img.png" },
+				messageId: "message-1",
 			},
 		} as unknown as SessionNotification;
 
-		const e1 = makeEvent("agent_message_chunk", imagePayload);
-		const textPayload = makeChunkPayload("after", "agent_message_chunk");
-		const e2 = makeEvent("agent_message_chunk", textPayload);
+		const image = makeEvent("agent_message_chunk", imagePayload);
+		const after = makeEvent(
+			"agent_message_chunk",
+			makeChunkPayload("after", "agent_message_chunk", "message-1"),
+		);
 
-		const result = consolidateEventsForRead([e1, e2]);
-		// Both are agent_message_chunk so they get merged
-		expect(result).toHaveLength(1);
-		// Only text from e2 is extracted
-		const update = (result[0].payload as SessionNotification).update as Record<
-			string,
-			unknown
-		>;
-		const content = update.content as { text: string };
-		expect(content.text).toBe("after");
+		const result = consolidateEventsForRead([before, image, after]);
+		expect(result).toHaveLength(3);
+		expect(result[0]).toBe(before);
+		expect(result[1]).toBe(image);
+		expect(result[2]).toBe(after);
 	});
 
 	// 18. Empty string delta / text

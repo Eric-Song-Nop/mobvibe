@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionEvent } from "@/lib/acp";
+import type { ContentBlock, SessionEvent } from "@/lib/acp";
 import type {
 	ChatSession,
 	SessionEventTransactionActions,
@@ -280,6 +280,9 @@ const createStore = (): ChatStoreActions => {
 				...(snapshot?.streamingThoughtId !== undefined
 					? { streamingThoughtId: snapshot.streamingThoughtId }
 					: {}),
+				...(snapshot?.reportedTokenUsage !== undefined
+					? { reportedTokenUsage: snapshot.reportedTokenUsage }
+					: {}),
 			}));
 		},
 	);
@@ -305,35 +308,38 @@ const createStore = (): ChatStoreActions => {
 		}));
 	});
 
-	const appendAssistantChunk = vi.fn((sessionId: string, text: string) => {
-		updateSession(sessionId, (session) => {
-			const lastMessage = session.messages.at(-1);
-			const messages =
-				lastMessage?.kind === "text" && lastMessage.role === "assistant"
-					? [
-							...session.messages.slice(0, -1),
-							{
-								...lastMessage,
-								content: `${lastMessage.content}${text}`,
-								contentBlocks: [
-									{
-										type: "text" as const,
-										text: `${lastMessage.content}${text}`,
-									},
-								],
-							},
-						]
-					: [
-							...session.messages,
-							buildTextMessage(
-								"assistant",
-								text,
-								`assistant-${session.messages.length + 1}`,
-							),
-						];
-			return { ...session, messages };
-		});
-	});
+	const appendAssistantChunk = vi.fn(
+		(sessionId: string, chunk: ContentBlock | string) => {
+			const block: ContentBlock =
+				typeof chunk === "string" ? { type: "text", text: chunk } : chunk;
+			const text = block.type === "text" ? block.text : "";
+			updateSession(sessionId, (session) => {
+				const lastMessage = session.messages.at(-1);
+				const messages =
+					lastMessage?.kind === "text" && lastMessage.role === "assistant"
+						? [
+								...session.messages.slice(0, -1),
+								{
+									...lastMessage,
+									content: `${lastMessage.content}${text}`,
+									contentBlocks: [...(lastMessage.contentBlocks ?? []), block],
+								},
+							]
+						: [
+								...session.messages,
+								{
+									...buildTextMessage(
+										"assistant",
+										text,
+										`assistant-${session.messages.length + 1}`,
+									),
+									contentBlocks: [block],
+								},
+							];
+				return { ...session, messages };
+			});
+		},
+	);
 
 	const confirmOrAppendUserMessage = vi.fn(
 		(sessionId: string, text: string) => {
@@ -366,6 +372,8 @@ const createStore = (): ChatStoreActions => {
 		setCanceling: vi.fn(),
 		setStreamError: vi.fn(),
 		updateSessionMeta: vi.fn(),
+		upsertPlan: vi.fn(),
+		removePlan: vi.fn(),
 		addUserMessage: vi.fn(),
 		addStatusMessage: vi.fn(),
 		appendAssistantChunk,
@@ -619,6 +627,58 @@ describe("useSocket (webui)", () => {
 		});
 	});
 
+	it("explicitly clears detached backfill runtime after permanent deletion", () => {
+		const store = createStore();
+		setMockSessions({
+			"session-deleted": buildSession({
+				sessionId: "session-deleted",
+				isAttached: false,
+			}),
+		});
+		const { result } = renderHook(() =>
+			useSocket({
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		act(() => result.current.clearTrackedSession("session-deleted"));
+
+		expect(mockBackfill.cancelBackfill).toHaveBeenCalledWith("session-deleted");
+		expect(mockGatewaySocket.unsubscribeFromSession).toHaveBeenCalledWith(
+			"session-deleted",
+		);
+
+		mockBackfill.cancelBackfill.mockClear();
+		mockGatewaySocket.unsubscribeFromSession.mockClear();
+		act(() => {
+			handlers.sessionsChanged?.({
+				added: [],
+				updated: [],
+				removed: ["session-removed"],
+			});
+		});
+		expect(mockBackfill.cancelBackfill).toHaveBeenCalledWith("session-removed");
+		expect(mockGatewaySocket.unsubscribeFromSession).toHaveBeenCalledWith(
+			"session-removed",
+		);
+	});
+
 	it("marks session attached on session:attached event", async () => {
 		const store = createStore();
 
@@ -866,6 +926,11 @@ describe("useSocket (webui)", () => {
 				isAttached: true,
 				revision: 1,
 				lastAppliedSeq: 2,
+				reportedTokenUsage: {
+					totalTokens: 100,
+					inputTokens: 70,
+					outputTokens: 30,
+				},
 				messages: [
 					{
 						id: "msg-1",
@@ -931,6 +996,11 @@ describe("useSocket (webui)", () => {
 			expect.objectContaining({
 				revision: 1,
 				lastAppliedSeq: 2,
+				reportedTokenUsage: {
+					totalTokens: 100,
+					inputTokens: 70,
+					outputTokens: 30,
+				},
 			}),
 		);
 		expect(mockStoreState.setHistorySyncing).toHaveBeenCalledWith(
@@ -1176,14 +1246,14 @@ describe("useSocket (webui)", () => {
 		expect(store.updateSessionCursor).toHaveBeenCalledTimes(1);
 		// The event with gap should NOT trigger appendAssistantChunk for "fifth"
 		// (it should be buffered until backfill fills the gap)
-		expect(store.appendAssistantChunk).toHaveBeenCalledWith(
-			"session-1",
-			"first",
-		);
-		expect(store.appendAssistantChunk).not.toHaveBeenCalledWith(
-			"session-1",
-			"fifth",
-		);
+		expect(store.appendAssistantChunk).toHaveBeenCalledWith("session-1", {
+			type: "text",
+			text: "first",
+		});
+		expect(store.appendAssistantChunk).not.toHaveBeenCalledWith("session-1", {
+			type: "text",
+			text: "fifth",
+		});
 	});
 
 	it("retains a buffered live event when gap backfill fails", () => {
@@ -1225,10 +1295,10 @@ describe("useSocket (webui)", () => {
 				buildAssistantBackfillEvent({ seq: 5, text: "5" }),
 			),
 		);
-		expect(store.appendAssistantChunk).not.toHaveBeenCalledWith(
-			"session-1",
-			"5",
-		);
+		expect(store.appendAssistantChunk).not.toHaveBeenCalledWith("session-1", {
+			type: "text",
+			text: "5",
+		});
 
 		act(() =>
 			backfillOptionsRef.current?.onError?.(
@@ -1245,7 +1315,10 @@ describe("useSocket (webui)", () => {
 			}
 		});
 
-		expect(store.appendAssistantChunk).toHaveBeenCalledWith("session-1", "5");
+		expect(store.appendAssistantChunk).toHaveBeenCalledWith("session-1", {
+			type: "text",
+			text: "5",
+		});
 		expect(mockStoreState.sessions["session-1"].lastAppliedSeq).toBe(5);
 	});
 
@@ -1303,10 +1376,10 @@ describe("useSocket (webui)", () => {
 			]);
 		});
 
-		expect(appendAssistantChunkMock).toHaveBeenCalledWith(
-			"session-1",
-			"Consolidated assistant reply",
-		);
+		expect(appendAssistantChunkMock).toHaveBeenCalledWith("session-1", {
+			type: "text",
+			text: "Consolidated assistant reply",
+		});
 		expect(updateSessionCursorMock).toHaveBeenCalledWith("session-1", 1, 3);
 	});
 
@@ -1530,10 +1603,10 @@ describe("useSocket (webui)", () => {
 			emitDekReady("session-1");
 		});
 
-		expect(appendAssistantChunkMock).toHaveBeenCalledWith(
-			"session-1",
-			"Encrypted consolidated reply",
-		);
+		expect(appendAssistantChunkMock).toHaveBeenCalledWith("session-1", {
+			type: "text",
+			text: "Encrypted consolidated reply",
+		});
 		expect(updateSessionCursorMock).toHaveBeenCalledWith("session-1", 1, 3);
 	});
 
@@ -1604,10 +1677,10 @@ describe("useSocket (webui)", () => {
 			emitDekReady("session-1");
 		});
 
-		expect(store.appendAssistantChunk).toHaveBeenCalledWith(
-			"session-1",
-			"secret restored",
-		);
+		expect(store.appendAssistantChunk).toHaveBeenCalledWith("session-1", {
+			type: "text",
+			text: "secret restored",
+		});
 		expect(store.updateSessionCursor).toHaveBeenCalledWith("session-1", 1, 1);
 	});
 
@@ -1751,16 +1824,14 @@ describe("useSocket (webui)", () => {
 		mockE2EE.hasSessionDek.mockReturnValue(true);
 		act(() => emitDekReady("session-1"));
 
-		expect(store.appendAssistantChunk).toHaveBeenNthCalledWith(
-			1,
-			"session-1",
-			"backfilled through third",
-		);
-		expect(store.appendAssistantChunk).toHaveBeenNthCalledWith(
-			2,
-			"session-1",
-			"live fourth",
-		);
+		expect(store.appendAssistantChunk).toHaveBeenNthCalledWith(1, "session-1", {
+			type: "text",
+			text: "backfilled through third",
+		});
+		expect(store.appendAssistantChunk).toHaveBeenNthCalledWith(2, "session-1", {
+			type: "text",
+			text: "live fourth",
+		});
 		expect(mockStoreState.sessions["session-1"].lastAppliedSeq).toBe(4);
 	});
 
@@ -1872,10 +1943,10 @@ describe("useSocket (webui)", () => {
 			emitDekReady("session-1");
 		});
 
-		expect(appendAssistantChunkMock).toHaveBeenCalledWith(
-			"session-1",
-			"secret after reconnect",
-		);
+		expect(appendAssistantChunkMock).toHaveBeenCalledWith("session-1", {
+			type: "text",
+			text: "secret after reconnect",
+		});
 		expect(updateSessionCursorMock).toHaveBeenCalledWith("session-1", 1, 1);
 	});
 
@@ -2035,10 +2106,10 @@ describe("useSocket (webui)", () => {
 		});
 
 		expect(store.appendAssistantChunk).toHaveBeenCalledTimes(1);
-		expect(store.appendAssistantChunk).toHaveBeenCalledWith(
-			"session-1",
-			"revision two decrypted",
-		);
+		expect(store.appendAssistantChunk).toHaveBeenCalledWith("session-1", {
+			type: "text",
+			text: "revision two decrypted",
+		});
 		expect(store.updateSessionCursor).toHaveBeenCalledWith("session-1", 2, 1);
 	});
 
@@ -2414,6 +2485,7 @@ describe("useSocket (webui)", () => {
 			},
 			undefined,
 			1,
+			undefined,
 		);
 	});
 
@@ -2458,10 +2530,12 @@ describe("useSocket (webui)", () => {
 			revision: 1,
 			seq: 1,
 			kind: "user_message",
+			protocolMessageId: "user-live-1",
 			payload: {
 				sessionId: "session-1",
 				update: {
 					sessionUpdate: "user_message_chunk",
+					messageId: "user-live-1",
 					content: { type: "text", text: "Hello from CLI" },
 				},
 			},
@@ -2477,6 +2551,7 @@ describe("useSocket (webui)", () => {
 			},
 			undefined,
 			1,
+			"user-live-1",
 		);
 	});
 
@@ -2545,15 +2620,15 @@ describe("useSocket (webui)", () => {
 			const store = setupAndFire("agent_thought_chunk", {
 				sessionId: "session-1",
 				update: {
-					sessionUpdate: "agent_message_chunk",
+					sessionUpdate: "agent_thought_chunk",
 					content: { type: "text", text: "I'm thinking" },
 				},
 			});
 
-			expect(store.appendThoughtChunk).toHaveBeenCalledWith(
-				"session-1",
-				"I'm thinking",
-			);
+			expect(store.appendThoughtChunk).toHaveBeenCalledWith("session-1", {
+				type: "text",
+				text: "I'm thinking",
+			});
 		});
 
 		it("dispatches tool_call to addToolCall", () => {

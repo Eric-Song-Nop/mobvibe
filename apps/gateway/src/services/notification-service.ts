@@ -79,9 +79,10 @@ export class NotificationService {
 		payload: PermissionRequestPayload,
 	): Promise<void> {
 		const sessionTitle = this.resolveSessionTitle(userId, payload.sessionId);
+		const metadataName = payload.toolCall?._meta?.name;
 		const toolLabel =
 			payload.toolCall?.title ??
-			(payload.toolCall?._meta?.name as string | undefined) ??
+			(typeof metadataName === "string" ? metadataName : undefined) ??
 			"Action required";
 		await this.sendBrowserPush(userId, {
 			title: sessionTitle

@@ -28,6 +28,16 @@ vi.mock("react-i18next", () => ({
 				"session.context.branchLabel": "Branch",
 				"session.context.subdirectoryLabel": "Subdirectory",
 				"session.context.contextLeftLabel": "Context Left",
+				"session.context.contextTokensLabel": "Context Tokens (Used / Size)",
+				"session.context.cumulativeCostLabel": "Cumulative Cost",
+				"session.context.reportedTokenUsageLabel":
+					"Agent-reported Token Usage — semantics may vary (Total / Input / Output)",
+				"session.context.reportedThoughtTokensLabel":
+					"Agent-reported Thought Tokens",
+				"session.context.reportedCacheReadTokensLabel":
+					"Agent-reported Cache Read Tokens",
+				"session.context.reportedCacheWriteTokensLabel":
+					"Agent-reported Cache Write Tokens",
 				"session.context.local": "Local",
 				"session.context.worktree": "Worktree",
 				"session.context.subdir": `Subdir: ${options?.path ?? ""}`,
@@ -38,6 +48,7 @@ vi.mock("react-i18next", () => ({
 		},
 		i18n: {
 			language: "en",
+			resolvedLanguage: "en",
 			changeLanguage: vi.fn(),
 		},
 	}),
@@ -368,6 +379,13 @@ describe("AppHeader", () => {
 			expect(screen.getByTestId("plan-indicator")).toBeInTheDocument();
 		});
 
+		it("shows plan indicator when only a plan operation projection exists", () => {
+			renderAppHeader({
+				plans: [{ type: "markdown", planId: "design", content: "" }],
+			});
+			expect(screen.getByTestId("plan-indicator")).toBeInTheDocument();
+		});
+
 		it("shows sync history button when enabled", () => {
 			renderAppHeader({ showSyncHistory: true });
 			expect(screen.getByLabelText("Sync History")).toBeInTheDocument();
@@ -460,6 +478,42 @@ describe("AppHeader", () => {
 			).toBeInTheDocument();
 		});
 
+		it("shows a clearly qualified agent-reported usage snapshot", async () => {
+			const user = userEvent.setup();
+			renderAppHeader({
+				backendLabel: "Claude Agent",
+				reportedTokenUsage: {
+					totalTokens: 1_200,
+					inputTokens: 800,
+					outputTokens: 400,
+					thoughtTokens: 75,
+					cachedReadTokens: 125,
+					cachedWriteTokens: 25,
+				},
+			});
+
+			await user.click(screen.getByRole("button", { name: "Session Details" }));
+
+			expect(
+				screen.getByText(
+					"Agent-reported Token Usage — semantics may vary (Total / Input / Output)",
+				),
+			).toBeInTheDocument();
+			expect(screen.getByText("1,200 / 800 / 400")).toHaveClass("tabular-nums");
+			expect(
+				screen.getByText("Agent-reported Thought Tokens"),
+			).toBeInTheDocument();
+			expect(screen.getByText("75")).toBeInTheDocument();
+			expect(
+				screen.getByText("Agent-reported Cache Read Tokens"),
+			).toBeInTheDocument();
+			expect(screen.getByText("125")).toBeInTheDocument();
+			expect(
+				screen.getByText("Agent-reported Cache Write Tokens"),
+			).toBeInTheDocument();
+			expect(screen.getByText("25")).toBeInTheDocument();
+		});
+
 		it("opens a desktop popover with session details", async () => {
 			const user = userEvent.setup();
 			renderAppHeader({
@@ -470,6 +524,11 @@ describe("AppHeader", () => {
 				branchLabel: "feat/detection-fix",
 				subdirectoryLabel: "apps/webui",
 				contextLeftPercent: 74,
+				sessionUsage: {
+					used: 260,
+					size: 1_000,
+					cost: { amount: 0.05, currency: "USD" },
+				},
 			});
 
 			await user.click(screen.getByRole("button", { name: "Session Details" }));
@@ -485,6 +544,28 @@ describe("AppHeader", () => {
 			expect(screen.getByText("apps/webui")).toBeInTheDocument();
 			expect(screen.getByText("Context Left")).toBeInTheDocument();
 			expect(screen.getByText("74%")).toBeInTheDocument();
+			expect(
+				screen.getByText("Context Tokens (Used / Size)"),
+			).toBeInTheDocument();
+			expect(screen.getByText("260 / 1,000")).toHaveClass("tabular-nums");
+			expect(screen.getByText("Cumulative Cost")).toBeInTheDocument();
+			expect(screen.getByText(/USD.*0\.05/)).toHaveClass("tabular-nums");
+		});
+
+		it("renders malformed currency codes as text without invoking currency formatting", async () => {
+			const user = userEvent.setup();
+			renderAppHeader({
+				backendLabel: "Claude Agent",
+				sessionUsage: {
+					used: 260,
+					size: 1_000,
+					cost: { amount: 0.05, currency: "not-a-currency" },
+				},
+			});
+
+			await user.click(screen.getByRole("button", { name: "Session Details" }));
+
+			expect(screen.getByText("0.05 not-a-currency")).toBeInTheDocument();
 		});
 
 		it("opens a mobile sheet with session details", async () => {

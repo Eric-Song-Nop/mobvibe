@@ -1,4 +1,4 @@
-import type { AvailableCommand } from "./acp.js";
+import type { AvailableCommand, SessionConfigOption } from "./acp.js";
 import type { ErrorDetail } from "./errors.js";
 
 export type AcpConnectionState =
@@ -38,6 +38,8 @@ export type SessionSummary = {
 	createdAt: string;
 	updatedAt: string;
 	cwd?: string;
+	/** Complete ordered ACP additional directory roots for this session. */
+	additionalDirectories?: string[];
 	/** Stable workspace/project root for grouping and navigation */
 	workspaceRootCwd?: string;
 	agentName?: string;
@@ -47,6 +49,8 @@ export type SessionSummary = {
 	modeName?: string;
 	availableModes?: SessionModeOption[];
 	availableModels?: SessionModelOption[];
+	/** Complete ordered ACP session configuration state. */
+	configOptions?: SessionConfigOption[];
 	availableCommands?: AvailableCommand[];
 	/** Machine ID that owns this session (populated by gateway) */
 	machineId?: string;
@@ -111,10 +115,12 @@ export type SessionFsResourceEntry = {
 export type AcpSessionInfo = {
 	sessionId: string;
 	cwd: string;
+	/** Complete ordered ACP additional directory roots for this session. */
+	additionalDirectories?: string[];
 	/** Stable workspace/project root for grouping and navigation */
 	workspaceRootCwd?: string;
-	title?: string;
-	updatedAt?: string;
+	title?: string | null;
+	updatedAt?: string | null;
 	/** Agent-defined metadata from session_info_update RFD */
 	_meta?: Record<string, unknown> | null;
 };
@@ -132,11 +138,29 @@ export type AgentMcpCapabilities = {
 	perSessionBridge?: boolean;
 };
 
+/** A stable, Agent-managed ACP authentication method. */
+export type AgentAuthMethod = {
+	id: string;
+	name: string;
+	description?: string | null;
+};
+
+/** Backend-scoped stable ACP authentication capabilities. */
+export type AgentAuthenticationCapabilities = {
+	methods: AgentAuthMethod[];
+	logout: boolean;
+};
+
 export type AgentSessionCapabilities = {
 	list: boolean;
 	load: boolean;
+	resume?: boolean;
+	close?: boolean;
+	delete?: boolean;
+	additionalDirectories?: boolean;
 	prompt?: AgentPromptCapabilities;
 	mcp?: AgentMcpCapabilities;
+	auth?: AgentAuthenticationCapabilities;
 };
 
 /** Result of discovering sessions */

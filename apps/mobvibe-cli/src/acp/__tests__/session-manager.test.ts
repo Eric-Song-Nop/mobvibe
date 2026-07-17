@@ -1,7 +1,20 @@
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it, mock } from "bun:test";
-import type { SessionNotification } from "@agentclientprotocol/sdk";
+import type {
+	JsonRpcId,
+	ListSessionsResponse,
+	LoadSessionResponse,
+	NewSessionResponse,
+	RequestPermissionRequest,
+	RequestPermissionResponse,
+	ResumeSessionResponse,
+	SessionNotification,
+	SetSessionConfigOptionResponse,
+} from "@agentclientprotocol/sdk";
+import { RequestError } from "@agentclientprotocol/sdk";
 import {
+	ACP_PLAN_MARKDOWN_MAX_BYTES,
+	type AgentSessionCapabilities,
 	decryptPayload,
 	deriveContentKeyPair,
 	generateMasterSecret,
@@ -12,7 +25,7 @@ import {
 import type { CliConfig } from "../../config.js";
 import { CliCryptoService } from "../../e2ee/crypto-service.js";
 import { WalStore } from "../../wal/wal-store.js";
-import type { AcpConnection } from "../acp-connection.js";
+import type { AcpBackendStatus, AcpConnection } from "../acp-connection.js";
 import type { SessionManagerDependencies } from "../session-manager.js";
 
 // Mock the logger
@@ -85,60 +98,129 @@ let sessionUpdateCallback:
 	| undefined;
 let statusChangeCallback: ((status: { error?: unknown }) => void) | undefined;
 let terminalOutputCallback: ((event: unknown) => void) | undefined;
+let permissionHandlerCallback:
+	| ((
+			params: RequestPermissionRequest,
+			requestId: JsonRpcId,
+			signal: AbortSignal,
+	  ) => Promise<RequestPermissionResponse>)
+	| undefined;
 
 const createMockConnection = () => ({
 	connect: mock(() => Promise.resolve(undefined)),
 	disconnect: mock(() => Promise.resolve(undefined)),
-	createSession: mock(() =>
-		Promise.resolve({
-			sessionId: "new-session-1",
-			modes: null,
-			models: null,
+	createSession: mock(
+		(): Promise<NewSessionResponse> =>
+			Promise.resolve({
+				sessionId: "new-session-1",
+				modes: null,
+				configOptions: null,
+			}),
+	),
+	getStatus: mock(
+		(): AcpBackendStatus => ({
+			backendId: "backend-1",
+			backendLabel: "Claude Code",
+			state: "ready",
+			command: "claude-code",
+			args: [],
+			pid: 12345,
 		}),
 	),
-	getStatus: mock(() => ({
-		backendId: "backend-1",
-		backendLabel: "Claude Code",
-		state: "ready",
-		command: "claude-code",
-		args: [],
-		pid: 12345,
-	})),
 	getAgentInfo: mock(() => ({
 		name: "claude-code",
 		title: "Claude Code",
 	})),
-	getSessionCapabilities: mock(() => ({
-		list: true,
-		load: true,
+	getSessionCapabilities: mock(
+		(): AgentSessionCapabilities => ({
+			list: true,
+			load: true,
+			resume: true,
+			close: true,
+			delete: true,
+		}),
+	),
+	getAuthenticationCapabilities: mock(() => ({
+		methods: [{ id: "browser", name: "Browser sign-in" }],
+		logout: true,
 	})),
+	supportsLogout: mock(() => true),
+	authenticate: mock((): Promise<void> => Promise.resolve()),
+	logout: mock((): Promise<void> => Promise.resolve()),
 	supportsSessionList: mock(() => true),
 	supportsSessionLoad: mock(() => true),
-	listSessions: mock(() =>
-		Promise.resolve({
-			sessions: [
-				{
-					sessionId: "discovered-1",
-					cwd: "/home/user/project1",
-					title: "Project 1",
-					updatedAt: new Date().toISOString(),
-				},
-				{
-					sessionId: "discovered-2",
-					cwd: "/home/user/project2",
-					title: "Project 2",
-				},
-			],
-			nextCursor: undefined,
-		}),
+	supportsSessionResume: mock(() => true),
+	supportsSessionClose: mock(() => true),
+	supportsSessionDelete: mock(() => true),
+	closeSession: mock(() => Promise.resolve({})),
+	deleteSession: mock(() => Promise.resolve({})),
+	listSessions: mock(
+		(): Promise<ListSessionsResponse> =>
+			Promise.resolve({
+				sessions: [
+					{
+						sessionId: "discovered-1",
+						cwd: "/home/user/project1",
+						title: "Project 1",
+						updatedAt: new Date().toISOString(),
+					},
+					{
+						sessionId: "discovered-2",
+						cwd: "/home/user/project2",
+						title: "Project 2",
+					},
+				],
+				nextCursor: undefined,
+			}),
 	),
-	loadSession: mock(() =>
-		Promise.resolve({
-			modes: null,
-			models: null,
-		}),
+	loadSession: mock(
+		(): Promise<LoadSessionResponse> =>
+			Promise.resolve({
+				modes: null,
+				configOptions: null,
+			}),
 	),
-	setPermissionHandler: mock(() => {}),
+	resumeSession: mock(
+		(): Promise<ResumeSessionResponse> =>
+			Promise.resolve({
+				modes: null,
+				configOptions: null,
+			}),
+	),
+	setSessionConfigOption: mock(
+		(
+			_sessionId: string,
+			configId: string,
+			value: string | boolean,
+			_meta?: Record<string, unknown> | null,
+		): Promise<SetSessionConfigOptionResponse> =>
+			Promise.resolve({
+				configOptions: [
+					{
+						id: configId,
+						name: "Model",
+						category: "model",
+						type: "select" as const,
+						currentValue: String(value),
+						options: [
+							{ value: "fast", name: "Fast" },
+							{ value: "smart", name: "Smart" },
+						],
+					},
+				],
+			}),
+	),
+	setPermissionHandler: mock(
+		(
+			handler?: (
+				params: RequestPermissionRequest,
+				requestId: JsonRpcId,
+				signal: AbortSignal,
+			) => Promise<RequestPermissionResponse>,
+		) => {
+			permissionHandlerCallback = handler;
+		},
+	),
 	onSessionUpdate: mock((cb: (n: SessionNotification) => void) => {
 		sessionUpdateCallback = cb;
 		return () => {
@@ -212,11 +294,231 @@ describe("SessionManager", () => {
 		sessionUpdateCallback = undefined;
 		statusChangeCallback = undefined;
 		terminalOutputCallback = undefined;
+		permissionHandlerCallback = undefined;
 		mockIsGitRepo.mockClear();
 		mockCreateGitWorktree.mockClear();
 		mockResolveGitProjectContext.mockClear();
 		sessionManager.createConnection = () =>
 			mockConnection as unknown as AcpConnection;
+	});
+
+	describe("Agent-managed authentication", () => {
+		it("probes capabilities without creating a session", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValue({
+				list: true,
+				load: false,
+				auth: {
+					methods: [{ id: "browser", name: "Browser sign-in" }],
+					logout: true,
+				},
+			});
+
+			const capabilities =
+				await sessionManager.getAgentCapabilities("backend-1");
+
+			expect(capabilities.auth).toEqual({
+				methods: [{ id: "browser", name: "Browser sign-in" }],
+				logout: true,
+			});
+			expect(mockConnection.connect).toHaveBeenCalledTimes(1);
+			expect(mockConnection.createSession).not.toHaveBeenCalled();
+		});
+
+		it("reuses the authenticated process for the next session", async () => {
+			await sessionManager.authenticateAgent("backend-1", "browser");
+			await sessionManager.createSession({
+				backendId: "backend-1",
+				cwd: "/home/user/project",
+			});
+
+			expect(mockConnection.authenticate).toHaveBeenCalledWith("browser");
+			expect(mockConnection.connect).toHaveBeenCalledTimes(1);
+			expect(mockConnection.createSession).toHaveBeenCalledTimes(1);
+		});
+
+		it("discards a connection when authentication fails", async () => {
+			mockConnection.authenticate.mockRejectedValueOnce(
+				new Error("agent failed"),
+			);
+
+			await expect(
+				sessionManager.authenticateAgent("backend-1", "browser"),
+			).rejects.toMatchObject({
+				detail: { code: "AGENT_AUTHENTICATION_FAILED" },
+			});
+			expect(mockConnection.disconnect).toHaveBeenCalledTimes(1);
+
+			await sessionManager.getAgentCapabilities("backend-1");
+			expect(mockConnection.connect).toHaveBeenCalledTimes(2);
+		});
+
+		it("rejects logout while that backend has an active session", async () => {
+			await sessionManager.createSession({
+				backendId: "backend-1",
+				cwd: "/home/user/project",
+			});
+
+			await expect(
+				sessionManager.logoutAgent("backend-1"),
+			).rejects.toMatchObject({ detail: { code: "SESSION_BUSY" } });
+			expect(mockConnection.logout).not.toHaveBeenCalled();
+		});
+
+		it("disconnects the process after logout success or failure", async () => {
+			await sessionManager.logoutAgent("backend-1");
+			expect(mockConnection.logout).toHaveBeenCalledTimes(1);
+			expect(mockConnection.disconnect).toHaveBeenCalledTimes(1);
+
+			mockConnection.logout.mockRejectedValueOnce(new Error("logout failed"));
+			await expect(
+				sessionManager.logoutAgent("backend-1"),
+			).rejects.toMatchObject({
+				detail: { code: "AGENT_AUTHENTICATION_FAILED" },
+			});
+			expect(mockConnection.disconnect).toHaveBeenCalledTimes(2);
+		});
+
+		it("serializes process lifecycle operations for one backend", async () => {
+			let markConnectStarted = () => {};
+			const connectStarted = new Promise<void>((resolve) => {
+				markConnectStarted = resolve;
+			});
+			let releaseConnect = () => {};
+			const connectGate = new Promise<void>((resolve) => {
+				releaseConnect = resolve;
+			});
+			mockConnection.connect.mockImplementationOnce(async () => {
+				markConnectStarted();
+				await connectGate;
+			});
+
+			const first = sessionManager.getAgentCapabilities("backend-1");
+			await connectStarted;
+			const second = sessionManager.getAgentCapabilities("backend-1");
+			await Promise.resolve();
+			expect(mockConnection.connect).toHaveBeenCalledTimes(1);
+
+			releaseConnect();
+			await Promise.all([first, second]);
+			expect(mockConnection.connect).toHaveBeenCalledTimes(1);
+		});
+
+		it("does not serialize different backend IDs together", async () => {
+			const secondBackendConfig: CliConfig = {
+				...mockConfig,
+				walDbPath: `${mockConfig.walDbPath}-backend-isolation`,
+				acpBackends: [
+					...mockConfig.acpBackends,
+					{
+						id: "backend-2",
+						label: "Second",
+						command: "second",
+						args: [],
+					},
+				],
+			};
+			const manager = new SessionManager(secondBackendConfig);
+			const firstConnection = createMockConnection();
+			const secondConnection = createMockConnection();
+			let markFirstStarted = () => {};
+			const firstStarted = new Promise<void>((resolve) => {
+				markFirstStarted = resolve;
+			});
+			let releaseFirst = () => {};
+			const firstGate = new Promise<void>((resolve) => {
+				releaseFirst = resolve;
+			});
+			firstConnection.connect.mockImplementationOnce(async () => {
+				markFirstStarted();
+				await firstGate;
+			});
+			manager.createConnection = (backend) =>
+				(backend.id === "backend-1"
+					? firstConnection
+					: secondConnection) as unknown as AcpConnection;
+
+			const first = manager.getAgentCapabilities("backend-1");
+			await firstStarted;
+			const second = manager.getAgentCapabilities("backend-2");
+			await Promise.resolve();
+			expect(secondConnection.connect).toHaveBeenCalledTimes(1);
+			releaseFirst();
+			await Promise.all([first, second]);
+			await manager.shutdown();
+		});
+
+		it("waits for backend lifecycle tails during shutdown", async () => {
+			let markConnectStarted = () => {};
+			const connectStarted = new Promise<void>((resolve) => {
+				markConnectStarted = resolve;
+			});
+			let releaseConnect = () => {};
+			const connectGate = new Promise<void>((resolve) => {
+				releaseConnect = resolve;
+			});
+			mockConnection.connect.mockImplementationOnce(async () => {
+				markConnectStarted();
+				await connectGate;
+			});
+
+			const probe = sessionManager.getAgentCapabilities("backend-1");
+			await connectStarted;
+			let shutdownComplete = false;
+			const shutdown = sessionManager.shutdown().then(() => {
+				shutdownComplete = true;
+			});
+			await Promise.resolve();
+			expect(shutdownComplete).toBe(false);
+
+			releaseConnect();
+			await Promise.all([probe, shutdown]);
+			expect(mockConnection.disconnect).toHaveBeenCalled();
+		});
+
+		it("times out an Agent authentication flow and discards the process", async () => {
+			const timeoutManager = new SessionManager(
+				{
+					...mockConfig,
+					walDbPath: `${mockConfig.walDbPath}-auth-timeout`,
+				},
+				undefined,
+				{ agentAuthOperationTimeoutMs: 5 },
+			);
+			const timeoutConnection = createMockConnection();
+			timeoutConnection.authenticate.mockImplementationOnce(
+				() => new Promise<void>(() => {}),
+			);
+			timeoutManager.createConnection = () =>
+				timeoutConnection as unknown as AcpConnection;
+
+			await expect(
+				timeoutManager.authenticateAgent("backend-1", "browser"),
+			).rejects.toMatchObject({
+				detail: { code: "AGENT_AUTHENTICATION_FAILED" },
+			});
+			expect(timeoutConnection.disconnect).toHaveBeenCalledTimes(1);
+			await timeoutManager.shutdown();
+		});
+
+		it("maps ACP auth_required without exposing protocol error data", async () => {
+			mockConnection.createSession.mockRejectedValueOnce(
+				new RequestError(-32000, "private agent detail", {
+					tokenHint: "must-not-cross",
+				}),
+			);
+
+			await expect(
+				sessionManager.createSession({
+					backendId: "backend-1",
+					cwd: "/home/user/project",
+				}),
+			).rejects.toMatchObject({
+				detail: {
+					code: "AGENT_AUTHENTICATION_REQUIRED",
+					message: "Agent authentication is required",
+				},
+			});
+		});
 	});
 
 	describe("discoverSessions", () => {
@@ -252,10 +554,629 @@ describe("SessionManager", () => {
 			expect(result.sessions).toHaveLength(2);
 		});
 
+		it("drops overlong Agent session IDs before local persistence", async () => {
+			const overlongSessionId = "x".repeat(1025);
+			mockConnection.listSessions.mockResolvedValueOnce({
+				sessions: [
+					{
+						sessionId: overlongSessionId,
+						cwd: "/home/user/project1",
+					},
+					{
+						sessionId: "bounded-session",
+						cwd: "/home/user/project2",
+					},
+				],
+			});
+
+			const result = await sessionManager.discoverSessions({
+				backendId: "backend-1",
+			});
+
+			expect(result.sessions.map((session) => session.sessionId)).toEqual([
+				"bounded-session",
+			]);
+			expect(
+				(
+					sessionManager as unknown as { walStore: WalStore }
+				).walStore.getDiscoveredSessionBackendId(overlongSessionId),
+			).toBeUndefined();
+		});
+
+		it("preserves and clears complete session list metadata snapshots", async () => {
+			mockConnection.listSessions.mockResolvedValueOnce({
+				sessions: [
+					{
+						sessionId: "discovered-meta",
+						cwd: "/home/user/project1",
+						title: "Metadata session",
+						updatedAt: "2026-07-01T00:00:00.000Z",
+						_meta: { source: "agent", nested: { keep: null } },
+					},
+				],
+			});
+			const first = await sessionManager.discoverSessions({
+				backendId: "backend-1",
+			});
+			expect(first.sessions[0]?._meta).toEqual({
+				source: "agent",
+				nested: { keep: null },
+			});
+			expect(
+				sessionManager
+					.listAllSessions()
+					.find((session) => session.sessionId === "discovered-meta")?._meta,
+			).toEqual({ source: "agent", nested: { keep: null } });
+
+			mockConnection.listSessions.mockResolvedValueOnce({
+				sessions: [
+					{
+						sessionId: "discovered-meta",
+						cwd: "/home/user/project1",
+						title: null,
+						updatedAt: null,
+						_meta: null,
+					},
+				],
+			});
+			const cleared = await sessionManager.discoverSessions({
+				backendId: "backend-1",
+			});
+			expect(cleared.sessions[0]).toEqual(
+				expect.objectContaining({
+					title: null,
+					updatedAt: null,
+					_meta: null,
+				}),
+			);
+			expect(
+				sessionManager
+					.listAllSessions()
+					.find((session) => session.sessionId === "discovered-meta")?._meta,
+			).toBeNull();
+		});
+
 		it("throws error for invalid backend", async () => {
 			await expect(
 				sessionManager.discoverSessions({ backendId: "invalid-backend" }),
 			).rejects.toThrow("Invalid backend ID");
+		});
+	});
+
+	describe("additional directories", () => {
+		const getWalStore = () =>
+			(
+				sessionManager as unknown as {
+					walStore: WalStore;
+				}
+			).walStore;
+
+		it("normalizes create roots and persists them in summaries and WAL", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				additionalDirectories: [
+					"/home/user/project",
+					"/data",
+					"/data/nested",
+					"/data",
+				],
+				backendId: "backend-1",
+			});
+
+			expect(mockConnection.createSession).toHaveBeenCalledWith({
+				cwd: "/home/user/project",
+				additionalDirectories: ["/data", "/data/nested"],
+			});
+			expect(created.additionalDirectories).toEqual(["/data", "/data/nested"]);
+			expect(
+				getWalStore().getSession(created.sessionId)?.additionalDirectories,
+			).toEqual(["/data", "/data/nested"]);
+			expect(
+				sessionManager
+					.listAllSessions()
+					.find((session) => session.sessionId === created.sessionId)
+					?.additionalDirectories,
+			).toEqual(["/data", "/data/nested"]);
+		});
+
+		it("persists discovered ordered roots into listAllSessions", async () => {
+			mockConnection.listSessions.mockResolvedValueOnce({
+				sessions: [
+					{
+						sessionId: "discovered-roots",
+						cwd: "/home/user/project1",
+						additionalDirectories: ["/shared", "/shared/nested"],
+						title: "Roots",
+					},
+				],
+				nextCursor: undefined,
+			});
+
+			const discovered = await sessionManager.discoverSessions({
+				backendId: "backend-1",
+			});
+
+			expect(discovered.sessions[0]?.additionalDirectories).toEqual([
+				"/shared",
+				"/shared/nested",
+			]);
+			expect(
+				getWalStore().getDiscoveredSessions()[0]?.additionalDirectories,
+			).toEqual(["/shared", "/shared/nested"]);
+			expect(
+				sessionManager
+					.listAllSessions()
+					.find((session) => session.sessionId === "discovered-roots")
+					?.additionalDirectories,
+			).toEqual(["/shared", "/shared/nested"]);
+		});
+	});
+
+	describe("resumeSession", () => {
+		const getWalStore = () =>
+			(
+				sessionManager as unknown as {
+					walStore: WalStore;
+				}
+			).walStore;
+
+		it("rejects a relative cwd before acquiring an agent connection", async () => {
+			await expect(
+				sessionManager.resumeSession(
+					"resume-only",
+					"relative/project",
+					"backend-1",
+				),
+			).rejects.toMatchObject({ status: 400 });
+			expect(mockConnection.connect).not.toHaveBeenCalled();
+			expect(getWalStore().getSession("resume-only")).toBeNull();
+		});
+
+		it("preserves durable revision and history while attaching", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			sessionUpdateCallback?.({
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "durable history" },
+				},
+			} as SessionNotification);
+			const historyBefore = sessionManager.getSessionEvents({
+				sessionId: created.sessionId,
+				revision: 1,
+				afterSeq: 0,
+			});
+			await sessionManager.closeSession(created.sessionId);
+
+			const resumed = await sessionManager.resumeSession(
+				created.sessionId,
+				"/home/user/project",
+				"backend-1",
+				["/shared"],
+			);
+
+			expect(mockConnection.resumeSession).toHaveBeenCalledWith(
+				created.sessionId,
+				"/home/user/project",
+				["/shared"],
+			);
+			expect(resumed.revision).toBe(1);
+			expect(resumed.additionalDirectories).toEqual(["/shared"]);
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: created.sessionId,
+					revision: 1,
+					afterSeq: 0,
+				}),
+			).toEqual(historyBefore);
+		});
+
+		it("rejects a cwd change before calling the agent or mutating WAL", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			await sessionManager.closeSession(created.sessionId);
+			mockConnection.resumeSession.mockClear();
+
+			await expect(
+				sessionManager.resumeSession(
+					created.sessionId,
+					"/home/user/project2",
+					"backend-1",
+				),
+			).rejects.toMatchObject({ status: 400 });
+
+			expect(mockConnection.resumeSession).not.toHaveBeenCalled();
+			expect(getWalStore().getSession(created.sessionId)?.cwd).toBe(
+				"/home/user/project",
+			);
+		});
+
+		it("validates persisted discovery affinity after a daemon restart", async () => {
+			const persistedConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/resume-discovery-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const seedStore = new WalStore(persistedConfig.walDbPath);
+			seedStore.saveDiscoveredSessions([
+				{
+					sessionId: "persisted-discovery",
+					backendId: "backend-1",
+					cwd: "/home/user/project",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+			seedStore.close();
+			const restartedManager = new SessionManager(persistedConfig, undefined, {
+				validateWorkspacePath: async () => true,
+			});
+			const restartedConnection = createMockConnection();
+			restartedManager.createConnection = () =>
+				restartedConnection as unknown as AcpConnection;
+
+			try {
+				await expect(
+					restartedManager.resumeSession(
+						"persisted-discovery",
+						"/home/user/project2",
+						"backend-1",
+					),
+				).rejects.toMatchObject({ status: 400 });
+				await expect(
+					restartedManager.resumeSession(
+						"persisted-discovery",
+						"/home/user/project",
+						"backend-2",
+					),
+				).rejects.toMatchObject({ status: 400 });
+				expect(restartedConnection.resumeSession).not.toHaveBeenCalled();
+			} finally {
+				await restartedManager.shutdown();
+			}
+		});
+
+		it("uses a durable discovery snapshot after restart and clears a stale unpinned WAL title", async () => {
+			const persistedConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/resume-title-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const sessionId = "persisted-resume-title";
+			const seedStore = new WalStore(persistedConfig.walDbPath);
+			seedStore.ensureSession({
+				sessionId,
+				machineId: persistedConfig.machineId,
+				backendId: "backend-1",
+				cwd: "/home/user/project",
+				title: "Stale WAL title",
+				isTitlePinned: false,
+			});
+			seedStore.saveDiscoveredSessions([
+				{
+					sessionId,
+					backendId: "backend-1",
+					cwd: "/home/user/project",
+					title: null,
+					_meta: { source: "durable discovery" },
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+			seedStore.close();
+
+			const restartedManager = new SessionManager(persistedConfig, undefined, {
+				validateWorkspacePath: async () => true,
+			});
+			const restartedConnection = createMockConnection();
+			restartedManager.createConnection = () =>
+				restartedConnection as unknown as AcpConnection;
+
+			try {
+				const resumed = await restartedManager.resumeSession(
+					sessionId,
+					"/home/user/project",
+					"backend-1",
+				);
+
+				expect(resumed.title).toBe("Session persiste");
+				expect(resumed._meta).toEqual({ source: "durable discovery" });
+				const persisted = (
+					restartedManager as unknown as {
+						walStore: WalStore;
+					}
+				).walStore.getSession(sessionId);
+				expect(persisted?.title).toBe("Session persiste");
+				expect(persisted?.isTitlePinned).not.toBe(true);
+			} finally {
+				await restartedManager.shutdown();
+			}
+		});
+
+		it("preserves a pinned WAL title over a durable discovery snapshot", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+				title: "Pinned local title",
+			});
+			await sessionManager.closeSession(created.sessionId);
+			getWalStore().saveDiscoveredSessions([
+				{
+					sessionId: created.sessionId,
+					backendId: "backend-1",
+					cwd: "/home/user/project",
+					title: "New agent title",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+
+			const resumed = await sessionManager.resumeSession(
+				created.sessionId,
+				"/home/user/project",
+				"backend-1",
+			);
+
+			expect(resumed.title).toBe("Pinned local title");
+			expect(resumed.isTitlePinned).toBe(true);
+		});
+
+		it("replaces an attached session when the requested root list changes", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				additionalDirectories: ["/old"],
+				backendId: "backend-1",
+			});
+			mockConnection.getStatus.mockReturnValue({
+				backendId: "backend-1",
+				backendLabel: "Claude Code",
+				state: "ready",
+				command: "claude-code",
+				args: [],
+				pid: 12345,
+				sessionId: created.sessionId,
+			});
+			const replacement = createMockConnection();
+			sessionManager.createConnection = () =>
+				replacement as unknown as AcpConnection;
+			getWalStore().saveDiscoveredSessions([
+				{
+					sessionId: created.sessionId,
+					backendId: "backend-1",
+					cwd: "/home/user/project",
+					title: "Stale discovered title",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+
+			const resumed = await sessionManager.resumeSession(
+				created.sessionId,
+				"/home/user/project",
+				"backend-1",
+				["/new"],
+			);
+
+			expect(mockConnection.disconnect).toHaveBeenCalledTimes(1);
+			expect(replacement.resumeSession).toHaveBeenCalledWith(
+				created.sessionId,
+				"/home/user/project",
+				["/new"],
+			);
+			expect(resumed.additionalDirectories).toEqual(["/new"]);
+			expect(resumed.title).toBe(created.title);
+		});
+
+		it("leaves a failed replacement detached and permits a later resume", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const detachedListener = mock(() => {});
+			sessionManager.onSessionDetached(detachedListener);
+			mockConnection.getStatus.mockReturnValue({
+				backendId: "backend-1",
+				backendLabel: "Claude Code",
+				state: "error",
+				command: "claude-code",
+				args: [],
+				pid: 12345,
+			});
+			const failedConnection = createMockConnection();
+			failedConnection.connect.mockRejectedValueOnce(
+				new Error("replacement failed"),
+			);
+			sessionManager.createConnection = () =>
+				failedConnection as unknown as AcpConnection;
+
+			await expect(
+				sessionManager.resumeSession(
+					created.sessionId,
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toThrow("replacement failed");
+			expect(detachedListener).toHaveBeenCalledWith(
+				expect.objectContaining({ sessionId: created.sessionId }),
+			);
+			expect(
+				sessionManager
+					.listAllSessions()
+					.find((session) => session.sessionId === created.sessionId)
+					?.isAttached,
+			).toBe(false);
+
+			const recoveredConnection = createMockConnection();
+			sessionManager.createConnection = () =>
+				recoveredConnection as unknown as AcpConnection;
+			const resumed = await sessionManager.resumeSession(
+				created.sessionId,
+				"/home/user/project",
+				"backend-1",
+			);
+
+			expect(resumed.isAttached).toBe(true);
+			expect(recoveredConnection.resumeSession).toHaveBeenCalledTimes(1);
+		});
+
+		it("clears stale model and mode projections when resume returns null", async () => {
+			mockConnection.createSession.mockResolvedValueOnce({
+				sessionId: "new-session-1",
+				configOptions: [
+					{
+						id: "model-selector",
+						name: "Model",
+						category: "model",
+						type: "select",
+						currentValue: "fast",
+						options: [{ value: "fast", name: "Fast" }],
+					},
+				],
+				modes: {
+					currentModeId: "architect",
+					availableModes: [{ id: "architect", name: "Architect" }],
+				},
+			});
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			mockConnection.getStatus.mockReturnValue({
+				backendId: "backend-1",
+				backendLabel: "Claude Code",
+				state: "error",
+				command: "claude-code",
+				args: [],
+				pid: 12345,
+			});
+			const resumedConnection = createMockConnection();
+			resumedConnection.resumeSession.mockResolvedValueOnce({
+				configOptions: null,
+				modes: null,
+			});
+			sessionManager.createConnection = () =>
+				resumedConnection as unknown as AcpConnection;
+
+			const resumed = await sessionManager.resumeSession(
+				created.sessionId,
+				"/home/user/project",
+				"backend-1",
+			);
+
+			expect(resumed.configOptions).toEqual([]);
+			expect(resumed.modelId).toBeUndefined();
+			expect(resumed.availableModels).toBeUndefined();
+			expect(resumed.modeId).toBeUndefined();
+			expect(resumed.availableModes).toBeUndefined();
+		});
+
+		it("keeps the wrapped DEK for the existing WAL revision", async () => {
+			await initCrypto();
+			const secureConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/resume-dek-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const secureManager = new SessionManager(
+				secureConfig,
+				new CliCryptoService(generateMasterSecret()),
+				{ validateWorkspacePath: async () => true },
+			);
+			const secureConnection = createMockConnection();
+			secureManager.createConnection = () =>
+				secureConnection as unknown as AcpConnection;
+			try {
+				const created = await secureManager.createSession({
+					cwd: "/home/user/project",
+					backendId: "backend-1",
+				});
+				const secureWal = (secureManager as unknown as { walStore: WalStore })
+					.walStore;
+				const keyBefore = secureWal.getSessionRevisionKey(created.sessionId, 1);
+				expect(created.wrappedDek).toBe(keyBefore);
+				await secureManager.closeSession(created.sessionId);
+
+				const resumed = await secureManager.resumeSession(
+					created.sessionId,
+					"/home/user/project",
+					"backend-1",
+				);
+
+				expect(resumed.revision).toBe(1);
+				expect(resumed.wrappedDek).toBe(created.wrappedDek);
+				expect(secureWal.getSessionRevisionKey(created.sessionId, 1)).toBe(
+					keyBefore,
+				);
+			} finally {
+				await secureManager.shutdown();
+			}
+		});
+
+		it("creates revision one for a resume-only session without local history", async () => {
+			const resumed = await sessionManager.resumeSession(
+				"resume-only",
+				"/home/user/project",
+				"backend-1",
+			);
+
+			expect(resumed.revision).toBe(1);
+			expect(getWalStore().getSession("resume-only")?.currentRevision).toBe(1);
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: "resume-only",
+					revision: 1,
+					afterSeq: 0,
+				}).events,
+			).toEqual([]);
+		});
+
+		it("rejects archived sessions before calling the agent", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			await sessionManager.archiveSession(created.sessionId);
+			expect(mockConnection.closeSession).not.toHaveBeenCalled();
+			mockConnection.resumeSession.mockClear();
+
+			await expect(
+				sessionManager.resumeSession(
+					created.sessionId,
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toMatchObject({ status: 410 });
+			expect(mockConnection.resumeSession).not.toHaveBeenCalled();
+		});
+
+		it("caches and rejects an explicitly unsupported capability", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValueOnce({
+				list: true,
+				load: true,
+				resume: false,
+				close: true,
+				delete: true,
+			});
+			mockConnection.supportsSessionResume.mockReturnValueOnce(false);
+
+			await expect(
+				sessionManager.resumeSession(
+					"unsupported",
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toMatchObject({ status: 409 });
+			expect(sessionManager.getBackendCapabilities()["backend-1"]?.resume).toBe(
+				false,
+			);
 		});
 	});
 
@@ -347,7 +1268,7 @@ describe("SessionManager", () => {
 						},
 					} as SessionNotification);
 				}
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 
 			await expect(
@@ -393,7 +1314,7 @@ describe("SessionManager", () => {
 						content: { type: "text", text: "x".repeat(8 * 1024 * 1024) },
 					},
 				} as SessionNotification);
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 
 			await expect(
@@ -448,7 +1369,7 @@ describe("SessionManager", () => {
 				} as SessionNotification & { cyclic?: unknown };
 				cyclicNotification.cyclic = cyclicNotification;
 				sessionUpdateCallback?.(cyclicNotification);
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 
 			await expect(
@@ -495,7 +1416,7 @@ describe("SessionManager", () => {
 						},
 					} as SessionNotification);
 				}
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 			const faultDb = new Database(mockConfig.walDbPath);
 			faultDb.exec(`
@@ -538,7 +1459,7 @@ describe("SessionManager", () => {
 						content: { type: "text", text: "fresh replay" },
 					},
 				} as SessionNotification);
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 
 			await sessionManager.loadSession(
@@ -588,7 +1509,7 @@ describe("SessionManager", () => {
 						},
 					} as SessionNotification);
 				}
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 			const faultDb = new Database(mockConfig.walDbPath);
 			faultDb.exec(`
@@ -631,9 +1552,65 @@ describe("SessionManager", () => {
 			);
 
 			expect(result.sessionId).toBe("session-to-load");
-			expect(result.title).toBe("session-to-load");
+			expect(result.title).toBe("Session session-");
 			expect(result.cwd).toBe("/home/user/project");
 			expect(result.sessionId).toBeDefined();
+		});
+
+		it("restores durable discovered title and metadata when loading after restart", async () => {
+			const persistedConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/load-discovery-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const sessionId = "persisted-load-session";
+			const seedStore = new WalStore(persistedConfig.walDbPath);
+			seedStore.saveDiscoveredSessions([
+				{
+					sessionId,
+					backendId: "backend-1",
+					cwd: "/home/user/project",
+					title: "Durable discovered title",
+					_meta: {
+						source: "durable discovery",
+						nested: { keep: null },
+					},
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+			seedStore.close();
+
+			const restartedManager = new SessionManager(persistedConfig, undefined, {
+				validateWorkspacePath: async () => true,
+			});
+			const restartedConnection = createMockConnection();
+			restartedManager.createConnection = () =>
+				restartedConnection as unknown as AcpConnection;
+
+			try {
+				const loaded = await restartedManager.loadSession(
+					sessionId,
+					"/home/user/project",
+					"backend-1",
+				);
+
+				expect(loaded.title).toBe("Durable discovered title");
+				expect(loaded._meta).toEqual({
+					source: "durable discovery",
+					nested: { keep: null },
+				});
+				expect(
+					(
+						restartedManager as unknown as {
+							walStore: WalStore;
+						}
+					).walStore.getSession(sessionId)?.title,
+				).toBe("Durable discovered title");
+			} finally {
+				await restartedManager.shutdown();
+			}
 		});
 
 		it("returns existing session if already loaded", async () => {
@@ -746,7 +1723,7 @@ describe("SessionManager", () => {
 			mockConnection.loadSession.mockImplementationOnce(async () => {
 				terminalOutputCallback?.({ stream: "stdout", data: "replayed output" });
 				statusChangeCallback?.({ error: { message: "replayed failure" } });
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 
 			await sessionManager.reloadSession(
@@ -773,16 +1750,92 @@ describe("SessionManager", () => {
 			).toEqual(["terminal_output", "session_error"]);
 		});
 
+		it("replays plan operations in order alongside legacy plans", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const planUpdate = {
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "plan_update",
+					plan: {
+						type: "markdown",
+						planId: "implementation",
+						content: "## Implementation\n\nShip the WAL mapping.",
+					},
+				},
+			} as SessionNotification;
+			const legacyPlan = {
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "plan",
+					entries: [
+						{
+							content: "Keep legacy clients working",
+							priority: "high",
+							status: "in_progress",
+						},
+					],
+				},
+			} as SessionNotification;
+			const planRemoved = {
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "plan_removed",
+					planId: "implementation",
+				},
+			} as SessionNotification;
+			mockConnection.loadSession.mockImplementationOnce(async () => {
+				sessionUpdateCallback?.(planUpdate);
+				sessionUpdateCallback?.(legacyPlan);
+				sessionUpdateCallback?.(planRemoved);
+				return { modes: null, configOptions: null };
+			});
+
+			await sessionManager.reloadSession(
+				created.sessionId,
+				"/home/user/project",
+				"backend-1",
+			);
+
+			const events = sessionManager.getSessionEvents({
+				sessionId: created.sessionId,
+				revision: 2,
+				afterSeq: 0,
+			}).events;
+			expect(events).toEqual([
+				expect.objectContaining({
+					revision: 2,
+					seq: 1,
+					kind: "plan_update",
+					payload: planUpdate,
+				}),
+				expect.objectContaining({
+					revision: 2,
+					seq: 2,
+					kind: "session_info_update",
+					payload: legacyPlan,
+				}),
+				expect.objectContaining({
+					revision: 2,
+					seq: 3,
+					kind: "plan_removed",
+					payload: planRemoved,
+				}),
+			]);
+		});
+
 		it("serializes concurrent reloads and preserves each replay revision", async () => {
 			const created = await sessionManager.createSession({
 				cwd: "/home/user/project",
 				backendId: "backend-1",
 			});
 			let resolveFirstReload:
-				| ((value: { modes: null; models: null }) => void)
+				| ((value: { modes: null; configOptions: null }) => void)
 				| undefined;
 			let resolveSecondReload:
-				| ((value: { modes: null; models: null }) => void)
+				| ((value: { modes: null; configOptions: null }) => void)
 				| undefined;
 			let loadCount = 0;
 			mockConnection.loadSession.mockImplementation(() => {
@@ -795,11 +1848,13 @@ describe("SessionManager", () => {
 					},
 				} as SessionNotification);
 				if (loadCount === 1) {
-					return new Promise<{ modes: null; models: null }>((resolve) => {
-						resolveFirstReload = resolve;
-					});
+					return new Promise<{ modes: null; configOptions: null }>(
+						(resolve) => {
+							resolveFirstReload = resolve;
+						},
+					);
 				}
-				return new Promise<{ modes: null; models: null }>((resolve) => {
+				return new Promise<{ modes: null; configOptions: null }>((resolve) => {
 					resolveSecondReload = resolve;
 				});
 			});
@@ -817,7 +1872,7 @@ describe("SessionManager", () => {
 			await Promise.resolve();
 
 			expect(mockConnection.loadSession).toHaveBeenCalledTimes(1);
-			resolveFirstReload?.({ modes: null, models: null });
+			resolveFirstReload?.({ modes: null, configOptions: null });
 			await first;
 			await Promise.resolve();
 
@@ -838,7 +1893,7 @@ describe("SessionManager", () => {
 				}),
 			]);
 
-			resolveSecondReload?.({ modes: null, models: null });
+			resolveSecondReload?.({ modes: null, configOptions: null });
 			await second;
 			expect(
 				sessionManager.getSessionEvents({
@@ -877,7 +1932,7 @@ describe("SessionManager", () => {
 						content: { type: "text", text: "revision two" },
 					},
 				} as SessionNotification);
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 
 			await sessionManager.reloadSession(
@@ -922,7 +1977,7 @@ describe("SessionManager", () => {
 					stream: "stdout",
 					data: "second replay event",
 				});
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 			sessionManager.onSessionEvent(() => {
 				throw new Error("injected subscriber failure");
@@ -959,7 +2014,7 @@ describe("SessionManager", () => {
 						content: { type: "text", text: "uncommitted replay" },
 					},
 				} as SessionNotification);
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 			const faultDb = new Database(mockConfig.walDbPath);
 			faultDb.exec(`
@@ -1119,7 +2174,7 @@ describe("SessionManager", () => {
 						content: { type: "text", text: "x".repeat(8 * 1024 * 1024) },
 					},
 				} as SessionNotification);
-				return { modes: null, models: null };
+				return { modes: null, configOptions: null };
 			});
 
 			await expect(
@@ -1221,6 +2276,32 @@ describe("SessionManager", () => {
 	});
 
 	describe("listSessions", () => {
+		it("rejects an overlong session/new ID without persisting it", async () => {
+			const overlongSessionId = "x".repeat(1025);
+			mockConnection.createSession.mockResolvedValueOnce({
+				sessionId: overlongSessionId,
+				modes: null,
+				configOptions: null,
+			});
+
+			await expect(
+				sessionManager.createSession({
+					cwd: "/home/user/project",
+					backendId: "backend-1",
+				}),
+			).rejects.toMatchObject({ status: 502 });
+
+			expect(sessionManager.listAllSessions()).toEqual([]);
+			expect(mockConnection.disconnect).toHaveBeenCalled();
+			expect(
+				(
+					sessionManager as unknown as {
+						currentSessionIncarnationIds: Set<string>;
+					}
+				).currentSessionIncarnationIds.has(overlongSessionId),
+			).toBe(false);
+		});
+
 		it("returns empty array initially", () => {
 			const sessions = sessionManager.listSessions();
 			expect(sessions).toEqual([]);
@@ -1449,6 +2530,38 @@ describe("SessionManager", () => {
 				}),
 			);
 		});
+
+		it("clears detached agent metadata without reordering local activity", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const detached = await sessionManager.closeSession(created.sessionId);
+			const walStore = (sessionManager as unknown as { walStore: WalStore })
+				.walStore;
+
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: created.sessionId,
+					backendId: "backend-1",
+					cwd: "/home/user/project",
+					title: null,
+					agentUpdatedAt: null,
+					discoveredAt: "2100-01-01T00:00:00.000Z",
+					isStale: false,
+				},
+			]);
+
+			const restored = sessionManager
+				.listAllSessions()
+				.find((session) => session.sessionId === created.sessionId);
+			expect(restored).toEqual(
+				expect.objectContaining({
+					title: `Session ${created.sessionId.slice(0, 8)}`,
+					updatedAt: detached.updatedAt,
+				}),
+			);
+		});
 	});
 
 	describe("E2EE session summaries", () => {
@@ -1658,6 +2771,9 @@ describe("SessionManager", () => {
 
 			const legacyDb = new Database(legacyConfig.walDbPath);
 			legacyDb.exec(`
+				ALTER TABLE sessions DROP COLUMN additional_directories_json;
+				ALTER TABLE discovered_sessions DROP COLUMN additional_directories_json;
+				ALTER TABLE discovered_sessions DROP COLUMN meta_json;
 				DELETE FROM schema_version WHERE version > 7;
 				DROP TABLE message_send_results;
 				DROP TABLE session_revision_keys;
@@ -2059,8 +3175,433 @@ describe("SessionManager", () => {
 		});
 	});
 
+	describe("model config compatibility", () => {
+		it("derives and updates the model picker through session config options", async () => {
+			mockConnection.createSession.mockResolvedValueOnce({
+				sessionId: "new-session-1",
+				modes: null,
+				configOptions: [
+					{
+						id: "model-selector",
+						name: "Model",
+						category: "model",
+						type: "select",
+						currentValue: "fast",
+						options: [
+							{
+								group: "recommended",
+								name: "Recommended",
+								options: [
+									{ value: "fast", name: "Fast" },
+									{
+										value: "smart",
+										name: "Smart",
+										description: "More capable",
+									},
+								],
+							},
+						],
+					},
+				],
+			});
+
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			expect(created).toEqual(
+				expect.objectContaining({
+					modelId: "fast",
+					modelName: "Fast",
+					availableModels: [
+						{ id: "fast", name: "Fast" },
+						{
+							id: "smart",
+							name: "Smart",
+							description: "More capable",
+						},
+					],
+				}),
+			);
+
+			const updated = await sessionManager.setSessionModel(
+				created.sessionId,
+				"smart",
+			);
+
+			expect(mockConnection.setSessionConfigOption).toHaveBeenCalledWith(
+				created.sessionId,
+				"model-selector",
+				"smart",
+			);
+			expect(updated.modelId).toBe("smart");
+			expect(updated.modelName).toBe("Smart");
+		});
+	});
+
+	describe("generic session config options", () => {
+		it("preserves the complete ordered option list when creating a session", async () => {
+			mockConnection.createSession.mockResolvedValueOnce({
+				sessionId: "new-session-1",
+				modes: null,
+				configOptions: [
+					{
+						id: "reasoning",
+						name: "Reasoning",
+						category: "thought_level",
+						type: "select",
+						currentValue: "medium",
+						options: [
+							{ value: "low", name: "Low" },
+							{ value: "medium", name: "Medium" },
+						],
+					},
+					{
+						id: "auto-approve",
+						name: "Auto approve",
+						type: "boolean",
+						currentValue: false,
+					},
+					{
+						id: "custom-option",
+						name: "Custom",
+						category: "_vendor_custom",
+						type: "select",
+						currentValue: "one",
+						options: [{ value: "one", name: "One" }],
+					},
+				],
+			});
+
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			expect(
+				sessionManager
+					.getSession(created.sessionId)
+					?.configOptions.map((option) => option.id),
+			).toEqual(["reasoning", "auto-approve", "custom-option"]);
+			expect(created.configOptions?.map((option) => option.id)).toEqual([
+				"reasoning",
+				"auto-approve",
+				"custom-option",
+			]);
+		});
+
+		it("preserves the complete ordered option list when loading a session", async () => {
+			mockConnection.loadSession.mockResolvedValueOnce({
+				modes: null,
+				configOptions: [
+					{
+						id: "first",
+						name: "First",
+						type: "boolean",
+						currentValue: true,
+					},
+					{
+						id: "second",
+						name: "Second",
+						type: "select",
+						currentValue: "two",
+						options: [{ value: "two", name: "Two" }],
+					},
+				],
+			});
+
+			await sessionManager.loadSession(
+				"loaded-session",
+				"/home/user/project",
+				"backend-1",
+			);
+
+			expect(
+				sessionManager
+					.getSession("loaded-session")
+					?.configOptions.map((option) => option.id),
+			).toEqual(["first", "second"]);
+		});
+
+		it("validates select values and replaces the full list from the response", async () => {
+			mockConnection.createSession.mockResolvedValueOnce({
+				sessionId: "new-session-1",
+				modes: null,
+				configOptions: [
+					{
+						id: "model-selector",
+						name: "Model",
+						category: "model",
+						type: "select",
+						currentValue: "fast",
+						options: [{ value: "fast", name: "Fast" }],
+					},
+					{
+						id: "reasoning",
+						name: "Reasoning",
+						type: "select",
+						currentValue: "low",
+						options: [
+							{
+								group: "levels",
+								name: "Levels",
+								options: [
+									{ value: "low", name: "Low" },
+									{ value: "deep", name: "Deep" },
+								],
+							},
+						],
+					},
+				],
+			});
+			mockConnection.setSessionConfigOption.mockResolvedValueOnce({
+				configOptions: [
+					{
+						id: "reasoning",
+						name: "Reasoning",
+						type: "select",
+						currentValue: "deep",
+						options: [
+							{ value: "low", name: "Low" },
+							{ value: "deep", name: "Deep" },
+						],
+					},
+				],
+			});
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			await expect(
+				sessionManager.setSessionConfigOption(
+					created.sessionId,
+					"reasoning",
+					true,
+				),
+			).rejects.toMatchObject({
+				detail: expect.objectContaining({ code: "REQUEST_VALIDATION_FAILED" }),
+			});
+			await expect(
+				sessionManager.setSessionConfigOption(
+					created.sessionId,
+					"reasoning",
+					"unknown",
+				),
+			).rejects.toMatchObject({
+				detail: expect.objectContaining({ code: "REQUEST_VALIDATION_FAILED" }),
+			});
+			await expect(
+				sessionManager.setSessionConfigOption(
+					created.sessionId,
+					"unknown-option",
+					"deep",
+				),
+			).rejects.toMatchObject({
+				detail: expect.objectContaining({ code: "REQUEST_VALIDATION_FAILED" }),
+			});
+			expect(mockConnection.setSessionConfigOption).not.toHaveBeenCalled();
+
+			const updated = await sessionManager.setSessionConfigOption(
+				created.sessionId,
+				"reasoning",
+				"deep",
+				{ requestSource: "webui" },
+			);
+
+			expect(mockConnection.setSessionConfigOption).toHaveBeenCalledWith(
+				created.sessionId,
+				"reasoning",
+				"deep",
+				{ requestSource: "webui" },
+			);
+			expect(
+				sessionManager
+					.getSession(created.sessionId)
+					?.configOptions.map((option) => option.id),
+			).toEqual(["reasoning"]);
+			expect(updated.modelId).toBeUndefined();
+			expect(updated.availableModels).toBeUndefined();
+		});
+
+		it("validates boolean values before forwarding them", async () => {
+			mockConnection.createSession.mockResolvedValueOnce({
+				sessionId: "new-session-1",
+				modes: null,
+				configOptions: [
+					{
+						id: "auto-approve",
+						name: "Auto approve",
+						type: "boolean",
+						currentValue: false,
+					},
+				],
+			});
+			mockConnection.setSessionConfigOption.mockResolvedValueOnce({
+				configOptions: [
+					{
+						id: "auto-approve",
+						name: "Auto approve",
+						type: "boolean",
+						currentValue: true,
+					},
+				],
+			});
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			await expect(
+				sessionManager.setSessionConfigOption(
+					created.sessionId,
+					"auto-approve",
+					"true",
+				),
+			).rejects.toMatchObject({
+				detail: expect.objectContaining({ code: "REQUEST_VALIDATION_FAILED" }),
+			});
+			await sessionManager.setSessionConfigOption(
+				created.sessionId,
+				"auto-approve",
+				true,
+			);
+
+			expect(mockConnection.setSessionConfigOption).toHaveBeenCalledTimes(1);
+			expect(mockConnection.setSessionConfigOption).toHaveBeenCalledWith(
+				created.sessionId,
+				"auto-approve",
+				true,
+			);
+		});
+
+		it("replaces config state and emits sessions:changed for agent updates", async () => {
+			mockConnection.createSession.mockResolvedValueOnce({
+				sessionId: "new-session-1",
+				modes: null,
+				configOptions: [
+					{
+						id: "old-option",
+						name: "Old",
+						type: "boolean",
+						currentValue: false,
+					},
+				],
+			});
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const changedListener = mock(() => {});
+			sessionManager.onSessionsChanged(changedListener);
+
+			sessionUpdateCallback?.({
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "config_option_update",
+					configOptions: [
+						{
+							id: "replacement",
+							name: "Replacement",
+							type: "boolean",
+							currentValue: true,
+						},
+					],
+				},
+			} as SessionNotification);
+
+			expect(
+				sessionManager
+					.getSession(created.sessionId)
+					?.configOptions.map((option) => option.id),
+			).toEqual(["replacement"]);
+			expect(changedListener).toHaveBeenCalledWith({
+				added: [],
+				updated: [
+					expect.objectContaining({
+						sessionId: created.sessionId,
+						configOptions: [expect.objectContaining({ id: "replacement" })],
+					}),
+				],
+				removed: [],
+			});
+		});
+	});
+
+	describe("permission request cancellation", () => {
+		it("keeps numeric and string request IDs distinct and clears both on abort", async () => {
+			const requestIds: string[] = [];
+			const resultIds: string[] = [];
+			sessionManager.onPermissionRequest((payload) => {
+				requestIds.push(payload.requestId);
+			});
+			sessionManager.onPermissionResult((payload) => {
+				resultIds.push(payload.requestId);
+			});
+			await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			if (!permissionHandlerCallback) {
+				throw new Error("Permission handler was not registered");
+			}
+			const params: RequestPermissionRequest = {
+				sessionId: "new-session-1",
+				toolCall: { toolCallId: "tool-1" },
+				options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+			};
+			const numericController = new AbortController();
+			const stringController = new AbortController();
+
+			const numericResult = permissionHandlerCallback(
+				params,
+				1,
+				numericController.signal,
+			);
+			const stringResult = permissionHandlerCallback(
+				params,
+				"1",
+				stringController.signal,
+			);
+
+			expect(requestIds).toEqual(["number:1", "string:1"]);
+			numericController.abort();
+			stringController.abort();
+
+			await expect(numericResult).resolves.toEqual({
+				outcome: { outcome: "cancelled" },
+			});
+			await expect(stringResult).resolves.toEqual({
+				outcome: { outcome: "cancelled" },
+			});
+			expect(resultIds).toEqual(["number:1", "string:1"]);
+		});
+	});
+
 	describe("closeSession", () => {
-		it("closes and removes session", async () => {
+		it("publishes close support when a fresh session initializes the backend", async () => {
+			const changedListener = mock(() => {});
+			sessionManager.onSessionsChanged(changedListener);
+
+			await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			expect(sessionManager.getBackendCapabilities()).toEqual({
+				"backend-1": expect.objectContaining({ close: true }),
+			});
+			expect(changedListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					backendCapabilities: {
+						"backend-1": expect.objectContaining({ close: true }),
+					},
+				}),
+			);
+		});
+
+		it("closes the agent session and keeps durable history detached", async () => {
 			const created = await sessionManager.createSession({
 				cwd: "/home/user/project",
 				backendId: "backend-1",
@@ -2068,8 +3609,22 @@ describe("SessionManager", () => {
 
 			const result = await sessionManager.closeSession(created.sessionId);
 
-			expect(result).toBe(true);
+			expect(result).toEqual(
+				expect.objectContaining({
+					sessionId: created.sessionId,
+					isAttached: false,
+				}),
+			);
+			expect(mockConnection.closeSession).toHaveBeenCalledWith(
+				created.sessionId,
+			);
 			expect(sessionManager.listSessions()).toHaveLength(0);
+			expect(sessionManager.listAllSessions()).toEqual([
+				expect.objectContaining({
+					sessionId: created.sessionId,
+					isAttached: false,
+				}),
+			]);
 		});
 
 		it("emits sessions:changed event when session closed", async () => {
@@ -2086,15 +3641,515 @@ describe("SessionManager", () => {
 			expect(changedListener).toHaveBeenCalledWith(
 				expect.objectContaining({
 					added: [],
-					updated: [],
-					removed: [created.sessionId],
+					updated: [
+						expect.objectContaining({
+							sessionId: created.sessionId,
+							isAttached: false,
+						}),
+					],
+					removed: [],
 				}),
 			);
 		});
 
-		it("returns false for unknown session", async () => {
-			const result = await sessionManager.closeSession("unknown-session");
-			expect(result).toBe(false);
+		it("returns session metadata emitted while protocol close completes", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			mockConnection.closeSession.mockImplementationOnce(() => {
+				sessionUpdateCallback?.({
+					sessionId: created.sessionId,
+					update: {
+						sessionUpdate: "session_info_update",
+						title: "Final agent title",
+					},
+				} as SessionNotification);
+				return Promise.resolve({});
+			});
+
+			const result = await sessionManager.closeSession(created.sessionId);
+
+			expect(result).toEqual(
+				expect.objectContaining({
+					title: "Final agent title",
+					isAttached: false,
+				}),
+			);
+		});
+
+		it("rejects an unknown session", async () => {
+			await expect(
+				sessionManager.closeSession("unknown-session"),
+			).rejects.toMatchObject({ status: 404 });
+		});
+
+		it("keeps the active session intact when protocol close fails", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			mockConnection.closeSession.mockImplementationOnce(() =>
+				Promise.reject(new Error("agent refused close")),
+			);
+
+			await expect(
+				sessionManager.closeSession(created.sessionId),
+			).rejects.toThrow("agent refused close");
+
+			expect(sessionManager.listSessions()).toEqual([
+				expect.objectContaining({
+					sessionId: created.sessionId,
+					isAttached: true,
+				}),
+			]);
+			expect(mockConnection.disconnect).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("deleteSession", () => {
+		it("serializes detached deletion while suppressing in-flight discovery", async () => {
+			await sessionManager.discoverSessions({ backendId: "backend-1" });
+			let resolveList: ((response: ListSessionsResponse) => void) | undefined;
+			let markListStarted: (() => void) | undefined;
+			const listStarted = new Promise<void>((resolve) => {
+				markListStarted = resolve;
+			});
+			mockConnection.listSessions.mockImplementationOnce(
+				() =>
+					new Promise<ListSessionsResponse>((resolve) => {
+						resolveList = resolve;
+						markListStarted?.();
+					}),
+			);
+			const staleDiscovery = sessionManager.discoverSessions({
+				backendId: "backend-1",
+			});
+			await listStarted;
+
+			let deletionSettled = false;
+			const deletion = sessionManager.deleteSession("discovered-1").then(() => {
+				deletionSettled = true;
+			});
+			await Promise.resolve();
+			expect(deletionSettled).toBe(false);
+
+			resolveList?.({
+				sessions: [
+					{
+						sessionId: "discovered-1",
+						cwd: "/home/user/project1",
+						title: "Discovery before delete",
+					},
+				],
+			});
+			expect((await staleDiscovery).sessions).toEqual([]);
+			await deletion;
+			const recentDeletes = (
+				sessionManager as unknown as {
+					recentlyDeletedSessions: Map<
+						string,
+						{ generation: number; expiresAt: number }
+					>;
+				}
+			).recentlyDeletedSessions;
+			const recentDelete = recentDeletes.get("discovered-1");
+			if (!recentDelete) {
+				throw new Error("recent delete tombstone missing");
+			}
+			recentDelete.expiresAt = 0;
+			expect(
+				(
+					sessionManager as unknown as { walStore: WalStore }
+				).walStore.getDiscoveredSessionBackendId("discovered-1"),
+			).toBeUndefined();
+			expect(
+				sessionManager
+					.listAllSessions()
+					.some((session) => session.sessionId === "discovered-1"),
+			).toBe(false);
+		});
+
+		it("invalidates a bounded old observation without changing unrelated current tokens", async () => {
+			const current = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const internals = sessionManager as unknown as {
+				beginAgentSessionObservation: () => {
+					generation: number;
+					deletedSessionIds: Set<string>;
+					invalidated: boolean;
+					tracked: boolean;
+				};
+				finishAgentSessionObservation: (observation: unknown) => void;
+				markSessionRecentlyDeleted: (sessionId: string) => void;
+				acceptAgentSessionObservation: (
+					sessionId: string,
+					observation: unknown,
+				) => boolean;
+				reuseQuarantineUntil: number;
+				sessionIncarnationGenerationBySession: Map<string, number>;
+			};
+			const currentToken = sessionManager.getSessionIncarnationGeneration(
+				current.sessionId,
+			);
+			const oldObservation = internals.beginAgentSessionObservation();
+			for (let index = 0; index < 1025; index++) {
+				internals.markSessionRecentlyDeleted(`overflow-delete-${index}`);
+			}
+
+			expect(oldObservation.invalidated).toBe(true);
+			expect(oldObservation.deletedSessionIds.size).toBe(0);
+			expect(
+				internals.sessionIncarnationGenerationBySession.size,
+			).toBeLessThanOrEqual(1024);
+			expect(
+				sessionManager.getSessionIncarnationGeneration(current.sessionId),
+			).toBe(currentToken);
+			internals.reuseQuarantineUntil = 0;
+			expect(
+				internals.acceptAgentSessionObservation(
+					"overflow-delete-0",
+					oldObservation,
+				),
+			).toBe(false);
+			internals.finishAgentSessionObservation(oldObservation);
+		});
+
+		it("keeps an evicted delete tombstone retry-idempotent during quarantine", async () => {
+			const internals = sessionManager as unknown as {
+				markSessionRecentlyDeleted: (sessionId: string) => void;
+				recentlyDeletedSessions: Map<string, unknown>;
+				reuseQuarantineUntil: number;
+			};
+			for (let index = 0; index < 1025; index++) {
+				internals.markSessionRecentlyDeleted(`overflow-delete-${index}`);
+			}
+
+			expect(internals.recentlyDeletedSessions.has("overflow-delete-0")).toBe(
+				false,
+			);
+			expect(internals.reuseQuarantineUntil).toBeGreaterThan(Date.now());
+			expect(() =>
+				sessionManager.assertSessionDeleteSupported("overflow-delete-0"),
+			).not.toThrow();
+			await sessionManager.deleteSession("overflow-delete-0");
+
+			expect(mockConnection.deleteSession).not.toHaveBeenCalled();
+		});
+
+		it("treats an immediate retry after a completed delete as successful", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			await sessionManager.deleteSession(created.sessionId);
+			await sessionManager.deleteSession(created.sessionId);
+
+			expect(mockConnection.deleteSession).toHaveBeenCalledTimes(1);
+		});
+
+		it("quarantines immediate session/new ID reuse and accepts it after TTL", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			await sessionManager.deleteSession(created.sessionId);
+			const deletedIncarnation = sessionManager.getSessionIncarnationGeneration(
+				created.sessionId,
+			);
+
+			await expect(
+				sessionManager.createSession({
+					cwd: "/home/user/project",
+					backendId: "backend-1",
+				}),
+			).rejects.toMatchObject({ status: 409 });
+			expect(mockConnection.deleteSession).toHaveBeenCalledTimes(2);
+			expect(
+				(
+					sessionManager as unknown as { walStore: WalStore }
+				).walStore.getSession(created.sessionId),
+			).toBeNull();
+
+			const recentDeletes = (
+				sessionManager as unknown as {
+					recentlyDeletedSessions: Map<
+						string,
+						{ generation: number; expiresAt: number }
+					>;
+				}
+			).recentlyDeletedSessions;
+			const recentDelete = recentDeletes.get(created.sessionId);
+			if (!recentDelete) {
+				throw new Error("recent delete tombstone missing");
+			}
+			recentDelete.expiresAt = 0;
+
+			const recreated = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			expect(recreated.sessionId).toBe(created.sessionId);
+			expect(
+				sessionManager.getSessionIncarnationGeneration(created.sessionId),
+			).toBe(deletedIncarnation);
+			expect(sessionManager.isSessionDeletionGuarded(created.sessionId)).toBe(
+				false,
+			);
+		});
+
+		it("does not apply an old-incarnation ACK to a reused session ID", async () => {
+			const first = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const oldIncarnation = sessionManager.getSessionIncarnationGeneration(
+				first.sessionId,
+			);
+			await sessionManager.deleteSession(first.sessionId);
+			const recentDeletes = (
+				sessionManager as unknown as {
+					recentlyDeletedSessions: Map<
+						string,
+						{ generation: number; expiresAt: number }
+					>;
+				}
+			).recentlyDeletedSessions;
+			const recentDelete = recentDeletes.get(first.sessionId);
+			if (!recentDelete) {
+				throw new Error("recent delete tombstone missing");
+			}
+			recentDelete.expiresAt = 0;
+			const second = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const currentIncarnation = sessionManager.getSessionIncarnationGeneration(
+				second.sessionId,
+			);
+			sessionManager.recordTurnEnd(second.sessionId, "end_turn");
+
+			expect(sessionManager.getUnackedEvents(second.sessionId, 1)).toHaveLength(
+				1,
+			);
+			sessionManager.ackEvents(second.sessionId, 1, 100, oldIncarnation);
+			sessionManager.ackEvents(second.sessionId, 1, 100);
+			expect(sessionManager.getUnackedEvents(second.sessionId, 1)).toHaveLength(
+				1,
+			);
+
+			sessionManager.ackEvents(second.sessionId, 1, 100, currentIncarnation);
+			expect(sessionManager.getUnackedEvents(second.sessionId, 1)).toHaveLength(
+				0,
+			);
+		});
+
+		it("zeroes cached session keys only after local deletion commits", async () => {
+			await initCrypto();
+			const secureConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/delete-crypto-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const crypto = new CliCryptoService(generateMasterSecret());
+			const secureManager = new SessionManager(secureConfig, crypto, {
+				validateWorkspacePath: async () => true,
+			});
+			const secureConnection = createMockConnection();
+			secureManager.createConnection = () =>
+				secureConnection as unknown as AcpConnection;
+			try {
+				const created = await secureManager.createSession({
+					cwd: "/home/user/project",
+					backendId: "backend-1",
+				});
+				const dek = crypto.getDek(created.sessionId, 1);
+				expect(dek).not.toBeNull();
+
+				await secureManager.deleteSession(created.sessionId);
+
+				expect(dek?.every((byte) => byte === 0)).toBe(true);
+				expect(crypto.getDek(created.sessionId)).toBeNull();
+				expect(crypto.getDek(created.sessionId, 1)).toBeNull();
+			} finally {
+				await secureManager.shutdown();
+			}
+		});
+
+		it("deletes remotely before removing an active session locally", async () => {
+			const changedListener = mock(() => {});
+			sessionManager.onSessionsChanged(changedListener);
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			await sessionManager.deleteSession(created.sessionId);
+
+			expect(mockConnection.deleteSession).toHaveBeenCalledWith(
+				created.sessionId,
+			);
+			expect(mockConnection.closeSession).not.toHaveBeenCalled();
+			expect(sessionManager.getSession(created.sessionId)).toBeUndefined();
+			expect(
+				(
+					sessionManager as unknown as { walStore: WalStore }
+				).walStore.getSession(created.sessionId),
+			).toBeNull();
+			expect(changedListener).toHaveBeenCalledWith(
+				expect.objectContaining({ removed: [created.sessionId] }),
+			);
+		});
+
+		it("uses durable backend affinity for a detached session", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			await sessionManager.closeSession(created.sessionId);
+			mockConnection.deleteSession.mockClear();
+			mockConnection.disconnect.mockClear();
+
+			await sessionManager.deleteSession(created.sessionId);
+
+			expect(mockConnection.deleteSession).toHaveBeenCalledWith(
+				created.sessionId,
+			);
+			expect(mockConnection.closeSession).toHaveBeenCalledTimes(1);
+			expect(sessionManager.listAllSessions()).toEqual([]);
+		});
+
+		it("uses discovered backend affinity without loading the session", async () => {
+			await sessionManager.discoverSessions({ backendId: "backend-1" });
+			mockConnection.deleteSession.mockClear();
+			mockConnection.loadSession.mockClear();
+
+			await sessionManager.deleteSession("discovered-1");
+
+			expect(mockConnection.deleteSession).toHaveBeenCalledWith("discovered-1");
+			expect(mockConnection.loadSession).not.toHaveBeenCalled();
+			expect(
+				sessionManager
+					.listAllSessions()
+					.some((session) => session.sessionId === "discovered-1"),
+			).toBe(false);
+		});
+
+		it("quarantines immediate session/list ID reuse and accepts it after TTL", async () => {
+			await sessionManager.discoverSessions({ backendId: "backend-1" });
+			await sessionManager.deleteSession("discovered-1");
+
+			const quarantined = await sessionManager.discoverSessions({
+				backendId: "backend-1",
+			});
+			expect(
+				quarantined.sessions.some(
+					(session) => session.sessionId === "discovered-1",
+				),
+			).toBe(false);
+
+			const recentDeletes = (
+				sessionManager as unknown as {
+					recentlyDeletedSessions: Map<
+						string,
+						{ generation: number; expiresAt: number }
+					>;
+				}
+			).recentlyDeletedSessions;
+			const recentDelete = recentDeletes.get("discovered-1");
+			if (!recentDelete) {
+				throw new Error("recent delete tombstone missing");
+			}
+			recentDelete.expiresAt = 0;
+
+			const accepted = await sessionManager.discoverSessions({
+				backendId: "backend-1",
+			});
+			expect(
+				accepted.sessions.some(
+					(session) => session.sessionId === "discovered-1",
+				),
+			).toBe(true);
+		});
+
+		it("preserves active and durable state when the agent rejects deletion", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			mockConnection.deleteSession.mockImplementationOnce(() =>
+				Promise.reject(new Error("agent refused delete")),
+			);
+
+			await expect(
+				sessionManager.deleteSession(created.sessionId),
+			).rejects.toThrow("agent refused delete");
+
+			expect(sessionManager.getSession(created.sessionId)).toBeDefined();
+			expect(
+				(
+					sessionManager as unknown as { walStore: WalStore }
+				).walStore.getSession(created.sessionId),
+			).not.toBeNull();
+			expect(mockConnection.disconnect).not.toHaveBeenCalled();
+		});
+
+		it("keeps local state retryable when WAL cleanup fails after remote success", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const walStore = (sessionManager as unknown as { walStore: WalStore })
+				.walStore;
+			const originalDelete = walStore.deleteSession.bind(walStore);
+			walStore.deleteSession = mock(() => {
+				throw new Error("local cleanup failed");
+			});
+
+			await expect(
+				sessionManager.deleteSession(created.sessionId),
+			).rejects.toThrow("local cleanup failed");
+			expect(sessionManager.getSession(created.sessionId)).toBeUndefined();
+			expect(walStore.getSession(created.sessionId)).not.toBeNull();
+			expect(
+				sessionManager
+					.listAllSessions()
+					.some((session) => session.sessionId === created.sessionId),
+			).toBe(true);
+			expect(() =>
+				sessionManager.updateTitle(created.sessionId, "blocked"),
+			).toThrow("Session is deleting");
+			await expect(
+				sessionManager.closeSession(created.sessionId),
+			).rejects.toThrow("Session is deleting");
+			await expect(
+				sessionManager.archiveSession(created.sessionId),
+			).rejects.toThrow("Session is deleting");
+
+			walStore.deleteSession = originalDelete;
+			await sessionManager.deleteSession(created.sessionId);
+			expect(mockConnection.deleteSession).toHaveBeenCalledTimes(2);
+			expect(sessionManager.getSession(created.sessionId)).toBeUndefined();
+		});
+
+		it("rejects unsupported and unknown sessions before remote deletion", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			mockConnection.supportsSessionDelete.mockReturnValueOnce(false);
+
+			expect(() =>
+				sessionManager.assertSessionDeleteSupported(created.sessionId),
+			).toThrow();
+			await expect(
+				sessionManager.deleteSession("unknown-session"),
+			).rejects.toMatchObject({ status: 404 });
+			expect(mockConnection.deleteSession).not.toHaveBeenCalled();
 		});
 	});
 
@@ -2534,7 +4589,7 @@ describe("SessionManager", () => {
 			);
 		});
 
-		it("persists the active messageId on matching user message events", async () => {
+		it("keeps send idempotency and ACP message IDs distinct", async () => {
 			const { sessionId, eventListener } = await setupSessionWithListener();
 			expect(sessionUpdateCallback).toBeDefined();
 			sessionManager.beginMessageSend(sessionId, "message-123");
@@ -2544,6 +4599,7 @@ describe("SessionManager", () => {
 				update: {
 					sessionUpdate: "user_message_chunk",
 					content: { type: "text", text: "Hello" },
+					messageId: "acp-user-message-1",
 				},
 			} as SessionNotification);
 			sessionManager.endMessageSend(sessionId, "message-123");
@@ -2552,6 +4608,7 @@ describe("SessionManager", () => {
 				expect.objectContaining({
 					sessionId,
 					kind: "user_message",
+					protocolMessageId: "acp-user-message-1",
 					payload: expect.objectContaining({ messageId: "message-123" }),
 				}),
 			);
@@ -2560,8 +4617,16 @@ describe("SessionManager", () => {
 				revision: 1,
 				afterSeq: 0,
 			});
-			expect(events.events[0]?.payload).toEqual(
-				expect.objectContaining({ messageId: "message-123" }),
+			expect(events.events[0]).toEqual(
+				expect.objectContaining({
+					protocolMessageId: "acp-user-message-1",
+					payload: expect.objectContaining({
+						messageId: "message-123",
+						update: expect.objectContaining({
+							messageId: "acp-user-message-1",
+						}),
+					}),
+				}),
 			);
 		});
 
@@ -2573,6 +4638,7 @@ describe("SessionManager", () => {
 				update: {
 					sessionUpdate: "agent_message_chunk",
 					content: { type: "text", text: "Hello from assistant" },
+					messageId: "acp-assistant-message-1",
 				},
 			} as SessionNotification);
 
@@ -2580,6 +4646,7 @@ describe("SessionManager", () => {
 				expect.objectContaining({
 					sessionId,
 					kind: "agent_message_chunk",
+					protocolMessageId: "acp-assistant-message-1",
 				}),
 			);
 		});
@@ -2592,6 +4659,7 @@ describe("SessionManager", () => {
 				update: {
 					sessionUpdate: "agent_thought_chunk",
 					content: { type: "text", text: "Thinking..." },
+					messageId: "acp-thought-message-1",
 				},
 			} as SessionNotification);
 
@@ -2599,6 +4667,7 @@ describe("SessionManager", () => {
 				expect.objectContaining({
 					sessionId,
 					kind: "agent_thought_chunk",
+					protocolMessageId: "acp-thought-message-1",
 				}),
 			);
 		});
@@ -2644,6 +4713,66 @@ describe("SessionManager", () => {
 			);
 		});
 
+		it("maps plan operations to dedicated WAL events without rewriting them", async () => {
+			const { sessionId, eventListener } = await setupSessionWithListener();
+			const planUpdate = {
+				sessionId,
+				update: {
+					sessionUpdate: "plan_update",
+					plan: {
+						type: "file",
+						planId: "release",
+						uri: "file:///workspace/RELEASE.md",
+					},
+				},
+			} as SessionNotification;
+			const planRemoved = {
+				sessionId,
+				update: {
+					sessionUpdate: "plan_removed",
+					planId: "release",
+				},
+			} as SessionNotification;
+
+			sessionUpdateCallback?.(planUpdate);
+			sessionUpdateCallback?.(planRemoved);
+
+			expect(eventListener).toHaveBeenNthCalledWith(
+				1,
+				expect.objectContaining({
+					sessionId,
+					kind: "plan_update",
+					payload: planUpdate,
+				}),
+			);
+			expect(eventListener).toHaveBeenNthCalledWith(
+				2,
+				expect.objectContaining({
+					sessionId,
+					kind: "plan_removed",
+					payload: planRemoved,
+				}),
+			);
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId,
+					revision: 1,
+					afterSeq: 0,
+				}).events,
+			).toEqual([
+				expect.objectContaining({
+					seq: 1,
+					kind: "plan_update",
+					payload: planUpdate,
+				}),
+				expect.objectContaining({
+					seq: 2,
+					kind: "plan_removed",
+					payload: planRemoved,
+				}),
+			]);
+		});
+
 		it("maps session_info_update → session_info_update WAL event", async () => {
 			const { sessionId, eventListener } = await setupSessionWithListener();
 
@@ -2660,6 +4789,132 @@ describe("SessionManager", () => {
 					sessionId,
 					kind: "session_info_update",
 				}),
+			);
+		});
+
+		it("replaces opaque session metadata without interpreting null keys", async () => {
+			const { sessionId } = await setupSessionWithListener();
+
+			sessionUpdateCallback?.({
+				sessionId,
+				update: {
+					sessionUpdate: "session_info_update",
+					_meta: { stale: true, nested: { old: 1 } },
+				},
+			} as SessionNotification);
+			sessionUpdateCallback?.({
+				sessionId,
+				update: {
+					sessionUpdate: "session_info_update",
+					_meta: {
+						fresh: true,
+						nested: { keep: null },
+						preservedNull: null,
+					},
+				},
+			} as SessionNotification);
+
+			expect(sessionManager.listSessions()[0]._meta).toEqual({
+				fresh: true,
+				nested: { keep: null },
+				preservedNull: null,
+			});
+
+			sessionUpdateCallback?.({
+				sessionId,
+				update: {
+					sessionUpdate: "session_info_update",
+					title: "Metadata unchanged",
+				},
+			} as SessionNotification);
+			expect(sessionManager.listSessions()[0]._meta).toEqual({
+				fresh: true,
+				nested: { keep: null },
+				preservedNull: null,
+			});
+
+			sessionUpdateCallback?.({
+				sessionId,
+				update: { sessionUpdate: "session_info_update", _meta: {} },
+			} as SessionNotification);
+			expect(sessionManager.listSessions()[0]._meta).toEqual({});
+
+			sessionUpdateCallback?.({
+				sessionId,
+				update: { sessionUpdate: "session_info_update", _meta: null },
+			} as SessionNotification);
+			expect(sessionManager.listSessions()[0]._meta).toBeNull();
+		});
+
+		it("clears only unpinned agent titles", async () => {
+			const unpinned = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			sessionUpdateCallback?.({
+				sessionId: unpinned.sessionId,
+				update: {
+					sessionUpdate: "session_info_update",
+					title: "Agent title",
+				},
+			} as SessionNotification);
+			sessionUpdateCallback?.({
+				sessionId: unpinned.sessionId,
+				update: { sessionUpdate: "session_info_update", title: null },
+			} as SessionNotification);
+			expect(sessionManager.listSessions()[0].title).toBe(
+				`Session ${unpinned.sessionId.slice(0, 8)}`,
+			);
+
+			await sessionManager.closeSession(unpinned.sessionId);
+			const pinned = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+				title: "Pinned title",
+			});
+			for (const title of ["Ignored agent title", null]) {
+				sessionUpdateCallback?.({
+					sessionId: pinned.sessionId,
+					update: { sessionUpdate: "session_info_update", title },
+				} as SessionNotification);
+			}
+			expect(sessionManager.listSessions()[0]).toEqual(
+				expect.objectContaining({
+					title: "Pinned title",
+					isTitlePinned: true,
+				}),
+			);
+		});
+
+		it("keeps local activity monotonic across invalid and null timestamps", async () => {
+			const { sessionId } = await setupSessionWithListener();
+			const initial = sessionManager.listSessions()[0].updatedAt;
+
+			for (const updatedAt of ["2000-01-01T00:00:00.000Z", "not-a-timestamp"]) {
+				sessionUpdateCallback?.({
+					sessionId,
+					update: { sessionUpdate: "session_info_update", updatedAt },
+				} as SessionNotification);
+			}
+			expect(sessionManager.listSessions()[0].updatedAt >= initial).toBe(true);
+
+			sessionUpdateCallback?.({
+				sessionId,
+				update: {
+					sessionUpdate: "session_info_update",
+					updatedAt: "2100-01-01T00:00:00.000Z",
+				},
+			} as SessionNotification);
+			expect(sessionManager.listSessions()[0].updatedAt).toBe(
+				"2100-01-01T00:00:00.000Z",
+			);
+
+			sessionUpdateCallback?.({
+				sessionId,
+				update: { sessionUpdate: "session_info_update", updatedAt: null },
+			} as SessionNotification);
+			expect(sessionManager.listSessions()[0].updatedAt).toBe(
+				"2100-01-01T00:00:00.000Z",
 			);
 		});
 
@@ -2927,7 +5182,7 @@ describe("SessionManager", () => {
 				return {
 					sessionId: "new-session-1",
 					modes: null,
-					models: null,
+					configOptions: null,
 				};
 			});
 
@@ -2952,6 +5207,119 @@ describe("SessionManager", () => {
 					}),
 				}),
 			]);
+		});
+
+		it("persists ordered plan operations emitted during session creation", async () => {
+			const planUpdate = {
+				sessionId: "new-session-1",
+				update: {
+					sessionUpdate: "plan_update",
+					plan: {
+						type: "markdown",
+						planId: "implementation",
+						content: "## Implementation\n\nShip the bounded creation buffer.",
+					},
+				},
+			} as SessionNotification;
+			const replacementPlan = {
+				sessionId: "new-session-1",
+				update: {
+					sessionUpdate: "plan_update",
+					plan: {
+						type: "markdown",
+						planId: "implementation",
+						content: "## Implementation\n\nVerify the bounded creation buffer.",
+					},
+				},
+			} as SessionNotification;
+			const planRemoved = {
+				sessionId: "new-session-1",
+				update: {
+					sessionUpdate: "plan_removed",
+					planId: "implementation",
+				},
+			} as SessionNotification;
+			mockConnection.createSession.mockImplementationOnce(async () => {
+				sessionUpdateCallback?.(planUpdate);
+				sessionUpdateCallback?.(replacementPlan);
+				sessionUpdateCallback?.(planRemoved);
+				return {
+					sessionId: "new-session-1",
+					modes: null,
+					configOptions: null,
+				};
+			});
+
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			const events = sessionManager.getSessionEvents({
+				sessionId: created.sessionId,
+				revision: 1,
+				afterSeq: 0,
+			}).events;
+			expect(events).toEqual([
+				expect.objectContaining({
+					seq: 1,
+					kind: "plan_update",
+					payload: planUpdate,
+				}),
+				expect.objectContaining({
+					seq: 2,
+					kind: "plan_update",
+					payload: replacementPlan,
+				}),
+				expect.objectContaining({
+					seq: 3,
+					kind: "plan_removed",
+					payload: planRemoved,
+				}),
+			]);
+		});
+
+		it("rejects an oversized creation replay without exposing partial state", async () => {
+			mockConnection.createSession.mockImplementationOnce(async () => {
+				// Each update is independently valid at the ACP boundary; their
+				// aggregate exceeds the creation replay's 8 MiB local cap.
+				for (let index = 0; index < 33; index += 1) {
+					sessionUpdateCallback?.({
+						sessionId: "new-session-1",
+						update: {
+							sessionUpdate: "plan_update",
+							plan: {
+								type: "markdown",
+								planId: "bounded",
+								content: "x".repeat(ACP_PLAN_MARKDOWN_MAX_BYTES),
+							},
+						},
+					} as SessionNotification);
+				}
+				return {
+					sessionId: "new-session-1",
+					modes: null,
+					configOptions: null,
+				};
+			});
+
+			await expect(
+				sessionManager.createSession({
+					cwd: "/home/user/project",
+					backendId: "backend-1",
+				}),
+			).rejects.toThrow("Reload replay exceeds local buffer limit");
+
+			const walStore = (
+				sessionManager as unknown as {
+					walStore: WalStore;
+				}
+			).walStore;
+			expect(walStore.getSession("new-session-1")).toBeNull();
+			expect(sessionManager.getSession("new-session-1")).toBeUndefined();
+			expect(sessionManager.listSessions()).toEqual([]);
+			expect(sessionUpdateCallback).toBeUndefined();
+			expect(mockConnection.disconnect).toHaveBeenCalledTimes(1);
 		});
 
 		it("subscribes to onSessionUpdate when session is created", async () => {

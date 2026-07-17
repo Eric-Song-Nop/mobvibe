@@ -1,6 +1,23 @@
 // ACP types - re-exported from SDK
 
 export type {
+	AcpMessageMetaSanitizeOptions,
+	AcpMessageMetaSanitizeResult,
+	AcpMetaLimits,
+	AcpMetaRejection,
+	AcpMetaRejectionReason,
+	AcpMetaSanitizeResult,
+	AcpMetaValue,
+} from "./acp-meta.js";
+export {
+	ACP_META_DEFAULT_LIMITS,
+	ACP_META_MESSAGE_DEFAULT_LIMITS,
+	ACP_META_REJECTION_REASONS,
+	sanitizeAcpMessageMeta,
+	sanitizeAcpMeta,
+} from "./acp-meta.js";
+
+export type {
 	CryptoKeyPair,
 	EncryptedPayload,
 	SignedAuthToken,
@@ -37,6 +54,22 @@ export {
 	legalDocumentsById,
 } from "./legal/index.js";
 export type {
+	PlanOperationSessionUpdate,
+	PlanSessionUpdate,
+} from "./plan-operations.js";
+export {
+	ACP_MAX_ACTIVE_PLANS,
+	ACP_PLAN_ENTRIES_MAX_BYTES,
+	ACP_PLAN_ENTRY_MAX_BYTES,
+	ACP_PLAN_ID_MAX_BYTES,
+	ACP_PLAN_MARKDOWN_MAX_BYTES,
+	ACP_PLAN_MAX_ENTRIES,
+	ACP_PLAN_UPDATE_MAX_BYTES,
+	ACP_PLAN_URI_MAX_BYTES,
+	sanitizePlanOperationUpdate,
+	sanitizePlanSessionUpdate,
+} from "./plan-operations.js";
+export type {
 	PromptImageMimeType,
 	PromptImageValidationFailure,
 	PromptImageValidationResult,
@@ -54,6 +87,11 @@ export {
 	resolvePromptImageMimeTypeFromPath,
 	validatePromptImageBlocks,
 } from "./prompt-images.js";
+export type { ReportedTokenUsage } from "./reported-token-usage.js";
+export {
+	REPORTED_TOKEN_USAGE_MAX_SERIALIZED_BYTES,
+	sanitizeReportedTokenUsage,
+} from "./reported-token-usage.js";
 export type {
 	// SDK types (directly from SDK)
 	AgentCapabilities,
@@ -72,9 +110,17 @@ export type {
 	PermissionToolCall,
 	// Plan types (SDK exports)
 	Plan,
+	PlanCapabilities,
 	PlanEntry,
 	PlanEntryPriority,
 	PlanEntryStatus,
+	PlanFile,
+	PlanId,
+	PlanItems,
+	PlanMarkdown,
+	PlanRemoved,
+	PlanUpdate,
+	PlanUpdateContent,
 	RequestPermissionOutcome,
 	RequestPermissionRequest,
 	RequestPermissionResponse,
@@ -82,14 +128,21 @@ export type {
 	ResourceContent,
 	ResourceLink,
 	ResourceLinkContent,
+	SessionConfigBoolean,
+	SessionConfigOption,
 	// Session config option category (new in SDK 0.14.x)
 	SessionConfigOptionCategory,
+	SessionConfigSelect,
+	SessionConfigSelectGroup,
+	SessionConfigSelectOption,
+	SessionConfigValueId,
 	// Session info & state types
-	SessionModelState,
 	SessionModeState,
 	SessionNotification,
 	SessionUpdate,
 	SessionUpdateType,
+	SetSessionConfigOptionRequest,
+	SetSessionConfigOptionResponse,
 	StopReason,
 	TerminalExitStatus,
 	TerminalOutputEvent,
@@ -170,6 +223,8 @@ export type {
 	AcpBackendSummary,
 	AcpConnectionState,
 	AcpSessionInfo,
+	AgentAuthenticationCapabilities,
+	AgentAuthMethod,
 	AgentMcpCapabilities,
 	AgentPromptCapabilities,
 	AgentSessionCapabilities,
@@ -188,8 +243,11 @@ export type {
 export type {
 	// HTTP API response types
 	AcpBackendsResponse,
+	AgentBackendRpcParams,
+	AgentCapabilitiesRpcResult,
 	AgentTeamRpcResult,
 	ArchiveSessionParams,
+	AuthenticateAgentRpcParams,
 	BulkArchiveSessionsParams,
 	CancelSessionParams,
 	CancelSessionResponse,
@@ -197,9 +255,11 @@ export type {
 	CliRegistrationInfo,
 	CliStatusPayload,
 	CliToGatewayEvents,
+	CloseSessionParams,
 	CreateSessionParams,
 	CreateSessionResponse,
 	CreateSessionWorktreeOptions,
+	DeleteSessionParams,
 	DiscoverSessionsRpcParams,
 	DiscoverSessionsRpcResult,
 	EventsAckPayload,
@@ -255,6 +315,8 @@ export type {
 	PermissionRequestPayload,
 	ReloadSessionRpcParams,
 	RenameSessionParams,
+	ResumeSessionParams,
+	ResumeSessionRpcParams,
 	RpcError,
 	RpcRequest,
 	RpcResponse,
@@ -269,6 +331,7 @@ export type {
 	SessionFsFilePreviewResponse,
 	SessionsDiscoveredPayload,
 	SessionsResponse,
+	SetSessionConfigOptionParams,
 	SetSessionModelParams,
 	SetSessionModeParams,
 	StreamErrorPayload,

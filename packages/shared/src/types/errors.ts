@@ -5,6 +5,8 @@ export type ErrorCode =
 	| "ACP_PROCESS_EXITED"
 	| "ACP_CONNECTION_CLOSED"
 	| "ACP_PROTOCOL_MISMATCH"
+	| "AGENT_AUTHENTICATION_REQUIRED"
+	| "AGENT_AUTHENTICATION_FAILED"
 	| "SESSION_NOT_FOUND"
 	| "SESSION_NOT_READY"
 	| "SESSION_BUSY"
@@ -56,9 +58,9 @@ export const createInternalError = (
 
 export const isProtocolMismatch = (error: unknown): boolean => {
 	if (error instanceof Error) {
-		// Check JSON-RPC error code -32002 (protocol version mismatch)
+		// ACP reserves -32002 for resource_not_found, not version negotiation.
 		if ("code" in error && (error as { code: number }).code === -32002) {
-			return true;
+			return false;
 		}
 		return /protocol.*version|version.*mismatch|protocol/i.test(error.message);
 	}

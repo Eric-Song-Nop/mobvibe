@@ -37,9 +37,12 @@ export type AppSidebarProps = {
 	onCreateSession: (mode: "workspace" | "session") => void;
 	onSelectSession: (sessionId: string) => void;
 	onEditSubmit: () => void;
+	onCloseSession: (sessionId: string) => void;
+	onDeleteSession: (sessionId: string) => Promise<boolean>;
 	onArchiveSession: (sessionId: string) => void;
 	onArchiveAllSessions: (sessionIds: string[]) => void;
 	isBulkArchiving?: boolean;
+	deletingSessionId?: string;
 	isCreating: boolean;
 	mutations: SessionMutationsSnapshot;
 };
@@ -61,9 +64,12 @@ export const AppSidebar = memo(function AppSidebar({
 	onCreateSession,
 	onSelectSession,
 	onEditSubmit,
+	onCloseSession,
+	onDeleteSession,
 	onArchiveSession,
 	onArchiveAllSessions,
 	isBulkArchiving,
+	deletingSessionId,
 	isCreating,
 	mutations,
 }: AppSidebarProps) {
@@ -76,6 +82,9 @@ export const AppSidebar = memo(function AppSidebar({
 	} = useUiStore();
 	const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
 	const [archiveTarget, setArchiveTarget] = useState<ArchiveTarget>(null);
+	const [closeTarget, setCloseTarget] = useState<string | null>(null);
+	const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+	const [isDeleteSubmitting, setIsDeleteSubmitting] = useState(false);
 
 	const handleCreateSessionRequest = useCallback(
 		(mode: "workspace" | "session") => {
@@ -101,6 +110,22 @@ export const AppSidebar = memo(function AppSidebar({
 		[setMobileMenuOpen],
 	);
 
+	const handleCloseSessionRequest = useCallback(
+		(sessionId: string) => {
+			setMobileMenuOpen(false);
+			setCloseTarget(sessionId);
+		},
+		[setMobileMenuOpen],
+	);
+
+	const handleDeleteSessionRequest = useCallback(
+		(sessionId: string) => {
+			setMobileMenuOpen(false);
+			setDeleteTarget(sessionId);
+		},
+		[setMobileMenuOpen],
+	);
+
 	const handleArchiveConfirm = useCallback(() => {
 		if (!archiveTarget) {
 			return;
@@ -113,6 +138,28 @@ export const AppSidebar = memo(function AppSidebar({
 		setArchiveTarget(null);
 	}, [archiveTarget, onArchiveAllSessions, onArchiveSession]);
 
+	const handleCloseConfirm = useCallback(() => {
+		if (!closeTarget) {
+			return;
+		}
+		onCloseSession(closeTarget);
+		setCloseTarget(null);
+	}, [closeTarget, onCloseSession]);
+
+	const handleDeleteConfirm = useCallback(async () => {
+		if (!deleteTarget || isDeleteSubmitting) {
+			return;
+		}
+		setIsDeleteSubmitting(true);
+		try {
+			if (await onDeleteSession(deleteTarget)) {
+				setDeleteTarget(null);
+			}
+		} finally {
+			setIsDeleteSubmitting(false);
+		}
+	}, [deleteTarget, isDeleteSubmitting, onDeleteSession]);
+
 	const handleOpenRegisterMachineDialog = useCallback(() => {
 		setMobileMenuOpen(false);
 		setRegisterDialogOpen(true);
@@ -124,6 +171,65 @@ export const AppSidebar = memo(function AppSidebar({
 				open={registerDialogOpen}
 				onOpenChange={setRegisterDialogOpen}
 			/>
+			<AlertDialog
+				open={deleteTarget !== null}
+				onOpenChange={(open) => {
+					if (!open && !isDeleteSubmitting) {
+						setDeleteTarget(null);
+					}
+				}}
+			>
+				<AlertDialogContent size="sm" className="overscroll-contain">
+					<AlertDialogHeader>
+						<AlertDialogTitle>{t("session.deleteTitle")}</AlertDialogTitle>
+						<AlertDialogDescription>
+							{t("session.deleteDescription")}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel
+							disabled={isDeleteSubmitting}
+							onClick={() => setDeleteTarget(null)}
+						>
+							{t("common.cancel")}
+						</AlertDialogCancel>
+						<AlertDialogAction
+							variant="destructive"
+							disabled={isDeleteSubmitting}
+							onClick={() => {
+								void handleDeleteConfirm();
+							}}
+						>
+							{isDeleteSubmitting
+								? t("session.deleting")
+								: t("session.deleteConfirm")}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+			<AlertDialog
+				open={closeTarget !== null}
+				onOpenChange={(open) => {
+					if (!open) {
+						setCloseTarget(null);
+					}
+				}}
+			>
+				<AlertDialogContent size="sm">
+					<AlertDialogHeader>
+						<AlertDialogTitle>{t("session.closeTitle")}</AlertDialogTitle>
+						<AlertDialogDescription>
+							{t("session.closeDescription")}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+						<AlertDialogAction onClick={handleCloseConfirm}>
+							{t("session.closeConfirm")}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 			<AlertDialog
 				open={archiveTarget !== null}
 				onOpenChange={(open) => {
@@ -167,9 +273,12 @@ export const AppSidebar = memo(function AppSidebar({
 					onCreateSession={handleCreateSessionRequest}
 					onSelectSession={onSelectSession}
 					onEditSubmit={onEditSubmit}
+					onCloseSessionRequest={handleCloseSessionRequest}
+					onDeleteSessionRequest={handleDeleteSessionRequest}
 					onArchiveSessionRequest={handleArchiveSessionRequest}
 					onArchiveAllSessionsRequest={handleArchiveAllSessionsRequest}
 					isBulkArchiving={isBulkArchiving}
+					deletingSessionId={deletingSessionId}
 					isCreating={isCreating}
 					mutations={mutations}
 				/>
@@ -197,9 +306,12 @@ export const AppSidebar = memo(function AppSidebar({
 									setMobileMenuOpen(false);
 								}}
 								onEditSubmit={onEditSubmit}
+								onCloseSessionRequest={handleCloseSessionRequest}
+								onDeleteSessionRequest={handleDeleteSessionRequest}
 								onArchiveSessionRequest={handleArchiveSessionRequest}
 								onArchiveAllSessionsRequest={handleArchiveAllSessionsRequest}
 								isBulkArchiving={isBulkArchiving}
+								deletingSessionId={deletingSessionId}
 								isCreating={isCreating}
 								mutations={mutations}
 							/>

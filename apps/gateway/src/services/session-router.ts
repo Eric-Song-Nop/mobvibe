@@ -1,9 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type {
+	AgentBackendRpcParams,
+	AgentCapabilitiesRpcResult,
 	ArchiveSessionParams,
+	AuthenticateAgentRpcParams,
 	BulkArchiveSessionsParams,
 	CancelSessionParams,
+	CloseSessionParams,
 	CreateSessionParams,
+	DeleteSessionParams,
 	DiscoverSessionsRpcParams,
 	DiscoverSessionsRpcResult,
 	FsEntriesParams,
@@ -43,30 +48,40 @@ import type {
 	PermissionDecisionPayload,
 	ReloadSessionRpcParams,
 	RenameSessionParams,
+	ResumeSessionParams,
+	ResumeSessionRpcParams,
 	RpcRequest,
 	RpcResponse,
 	SendMessageParams,
+	SendMessageResult,
 	SessionEventsParams,
 	SessionEventsResponse,
 	SessionFsFilePreview,
 	SessionSummary,
+	SetSessionConfigOptionParams,
 	SetSessionModelParams,
 	SetSessionModeParams,
-	StopReason,
 } from "@mobvibe/shared";
 import {
 	AppError,
 	createErrorDetail,
 	isEncryptedPayload,
+	sanitizeReportedTokenUsage,
 } from "@mobvibe/shared";
 import type { Socket } from "socket.io";
 import { logger } from "../lib/logger.js";
+import { sanitizeAgentSessionCapabilities } from "./agent-capability-sanitizer.js";
 import type { CliRecord, CliRegistry } from "./cli-registry.js";
 import {
 	createMessageSendKey,
 	isMessageIdWithinLimit,
 } from "./message-send-safety.js";
 import { toRpcAppError } from "./rpc-errors.js";
+import {
+	sanitizeAcpMetaPayload,
+	sanitizeSessionMetaEnvelopes,
+	warnSessionMetaSanitization,
+} from "./session-meta-sanitizer.js";
 
 type PendingRpc<T> = {
 	requestId: string;
@@ -77,22 +92,113 @@ type PendingRpc<T> = {
 };
 
 const RPC_TIMEOUT = 120000; // 2 minutes for long operations like message sending
+const AGENT_CAPABILITIES_RPC_TIMEOUT = 15_000;
+const AGENT_AUTHENTICATE_RPC_TIMEOUT = 125_000;
+const AGENT_LOGOUT_RPC_TIMEOUT = 30_000;
 const MAX_DURABLE_MESSAGE_SENDS = 10_000;
 const MAX_DURABLE_MESSAGE_SENDS_PER_OWNER = 1_000;
+const RECENT_SESSION_DELETE_TTL_MS = 5 * 60 * 1000;
+const MAX_DURABLE_SESSION_DELETES = 10_000;
+const MAX_DURABLE_SESSION_DELETES_PER_OWNER = 1_000;
+const STOP_REASONS = new Set([
+	"end_turn",
+	"max_tokens",
+	"max_turn_requests",
+	"refusal",
+	"cancelled",
+]);
 
-type MessageSendResult = { stopReason: StopReason };
+const sanitizeMessageSendResult = (value: unknown): SendMessageResult => {
+	if (
+		typeof value !== "object" ||
+		value === null ||
+		!("stopReason" in value) ||
+		typeof value.stopReason !== "string" ||
+		!STOP_REASONS.has(value.stopReason)
+	) {
+		throw new AppError(
+			createErrorDetail({
+				code: "ACP_PROTOCOL_MISMATCH",
+				message: "CLI returned an invalid message result",
+				retryable: false,
+				scope: "service",
+			}),
+			502,
+		);
+	}
+	const usage = sanitizeReportedTokenUsage(
+		"usage" in value ? value.usage : undefined,
+	);
+	return {
+		stopReason: value.stopReason as SendMessageResult["stopReason"],
+		...(usage ? { usage } : {}),
+	};
+};
 
 type MessageSendEntry = {
-	promise: Promise<MessageSendResult>;
+	promise: Promise<SendMessageResult>;
 	ownerId: string;
+};
+
+type SessionDeleteEntry = {
+	promise: Promise<{ ok: true }>;
+	ownerId: string;
+	/** Undefined while the delete RPC is still in flight. */
+	expiresAt?: number;
+};
+
+const createSessionDeleteKey = (ownerId: string, sessionId: string): string =>
+	JSON.stringify([ownerId, sessionId]);
+
+const getRpcRejectionLogContext = (event: string, error: Error) => {
+	if (!event.startsWith("rpc:agent:")) return { err: error };
+	return error instanceof AppError
+		? {
+				errorCode: error.detail.code,
+				errorStatus: error.status,
+				retryable: error.detail.retryable,
+			}
+		: { errorType: error.name };
 };
 
 export class SessionRouter {
 	private pendingRpcs = new Map<string, PendingRpc<unknown>>();
 	/** In-flight sends for durable CLIs; settled entries are removed immediately. */
 	private durableMessageSends = new Map<string, MessageSendEntry>();
+	/** In-flight deletes plus short-lived successes for response-loss retries. */
+	private durableSessionDeletes = new Map<string, SessionDeleteEntry>();
 
 	constructor(private readonly cliRegistry: CliRegistry) {}
+
+	private sanitizeInboundSessionSummaries<T extends { _meta?: unknown }>(
+		event: string,
+		socketId: string,
+		values: readonly T[],
+	): T[] {
+		const result = sanitizeSessionMetaEnvelopes(values);
+		warnSessionMetaSanitization(event, socketId, result);
+		return result.values;
+	}
+
+	private async sendSessionSummaryRpc<Params>(
+		socket: Socket,
+		event: string,
+		params: Params,
+	): Promise<SessionSummary> {
+		const value = await this.sendRpc<Params, SessionSummary>(
+			socket,
+			event,
+			params,
+		);
+		const sanitized = this.sanitizeInboundSessionSummaries(event, socket.id, [
+			value,
+		]);
+		const first = sanitized[0];
+		if (!first) {
+			throw new Error("Invalid session payload from CLI");
+		}
+		return first;
+	}
 
 	/**
 	 * Resolve the CLI that owns a session, scoped to the given user.
@@ -122,6 +228,58 @@ export class SessionRouter {
 		return cli;
 	}
 
+	/** Resolve one registered backend without leaking another user's topology. */
+	private resolveBackendForUser(
+		machineId: string,
+		backendId: string,
+		userId: string,
+	): CliRecord {
+		const cli = this.cliRegistry.getCliByMachineIdForUser(machineId, userId);
+		if (
+			!cli ||
+			!cli.backends.some((backend) => backend.backendId === backendId)
+		) {
+			throw new AppError(
+				createErrorDetail({
+					code: "AUTHORIZATION_FAILED",
+					message: "Machine or backend not found",
+					retryable: false,
+					scope: "request",
+				}),
+				404,
+			);
+		}
+		return cli;
+	}
+
+	private updateAgentCapabilities(
+		cli: CliRecord,
+		backendId: string,
+		result: AgentCapabilitiesRpcResult,
+	): AgentCapabilitiesRpcResult {
+		if (
+			typeof result !== "object" ||
+			result === null ||
+			typeof result.capabilities !== "object" ||
+			result.capabilities === null
+		) {
+			throw new AppError(
+				createErrorDetail({
+					code: "ACP_PROTOCOL_MISMATCH",
+					message: "CLI returned an invalid Agent capability response",
+					retryable: false,
+					scope: "service",
+				}),
+				502,
+			);
+		}
+		const capabilities = sanitizeAgentSessionCapabilities(result.capabilities);
+		this.cliRegistry.updateBackendCapabilities(cli.socket.id, {
+			[backendId]: capabilities,
+		});
+		return { capabilities };
+	}
+
 	handleRpcResponse(response: RpcResponse<unknown>, sourceSocketId?: string) {
 		const pending = this.pendingRpcs.get(response.requestId);
 		if (!pending) {
@@ -148,7 +306,6 @@ export class SessionRouter {
 					code: response.error.code,
 					scope: response.error.scope,
 					retryable: response.error.retryable,
-					detail: response.error.detail,
 				},
 				"rpc_response_error",
 			);
@@ -194,11 +351,12 @@ export class SessionRouter {
 
 		const rpcParams: CreateSessionParams = {
 			cwd: params.cwd,
+			additionalDirectories: params.additionalDirectories,
 			title: params.title,
 			backendId: params.backendId,
 			worktree: params.worktree,
 		};
-		const result = await this.sendRpc<CreateSessionParams, SessionSummary>(
+		const result = await this.sendSessionSummaryRpc(
 			cli.socket,
 			"rpc:session:create",
 			rpcParams,
@@ -210,6 +368,215 @@ export class SessionRouter {
 		);
 
 		return result;
+	}
+
+	/** Probe stable Agent-managed authentication capabilities for one backend. */
+	async getAgentCapabilities(
+		params: AgentBackendRpcParams,
+		userId: string,
+	): Promise<AgentCapabilitiesRpcResult> {
+		if (!params.machineId) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "machineId is required",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		const cli = this.resolveBackendForUser(
+			params.machineId,
+			params.backendId,
+			userId,
+		);
+		logger.info(
+			{
+				machineId: params.machineId,
+				backendId: params.backendId,
+				userId,
+			},
+			"agent_capabilities_rpc_start",
+		);
+		const result = await this.sendRpc<
+			AgentBackendRpcParams,
+			AgentCapabilitiesRpcResult
+		>(
+			cli.socket,
+			"rpc:agent:capabilities",
+			{ backendId: params.backendId },
+			AGENT_CAPABILITIES_RPC_TIMEOUT,
+		);
+		const sanitized = this.updateAgentCapabilities(
+			cli,
+			params.backendId,
+			result,
+		);
+		logger.info(
+			{
+				machineId: params.machineId,
+				backendId: params.backendId,
+				methodCount: sanitized.capabilities.auth?.methods.length ?? 0,
+				logout: sanitized.capabilities.auth?.logout ?? false,
+			},
+			"agent_capabilities_rpc_complete",
+		);
+		return sanitized;
+	}
+
+	/** Run a stable Agent-managed authentication flow. */
+	async authenticateAgent(
+		params: AuthenticateAgentRpcParams,
+		userId: string,
+	): Promise<AgentCapabilitiesRpcResult> {
+		if (!params.machineId) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "machineId is required",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		const cli = this.resolveBackendForUser(
+			params.machineId,
+			params.backendId,
+			userId,
+		);
+		const capabilities =
+			cli.backendCapabilities?.[params.backendId] ??
+			(
+				await this.getAgentCapabilities(
+					{ machineId: params.machineId, backendId: params.backendId },
+					userId,
+				)
+			).capabilities;
+		const methods = capabilities.auth?.methods ?? [];
+		if (methods.length === 0) {
+			throw new AppError(
+				createErrorDetail({
+					code: "CAPABILITY_NOT_SUPPORTED",
+					message: "Agent does not offer a stable authentication method",
+					retryable: false,
+					scope: "request",
+				}),
+				409,
+			);
+		}
+		if (!methods.some((method) => method.id === params.methodId)) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Unknown Agent authentication method",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		logger.info(
+			{
+				machineId: params.machineId,
+				backendId: params.backendId,
+				methodId: params.methodId,
+				userId,
+			},
+			"agent_authenticate_rpc_start",
+		);
+		const result = await this.sendRpc<
+			AuthenticateAgentRpcParams,
+			AgentCapabilitiesRpcResult
+		>(
+			cli.socket,
+			"rpc:agent:authenticate",
+			{
+				backendId: params.backendId,
+				methodId: params.methodId,
+			},
+			AGENT_AUTHENTICATE_RPC_TIMEOUT,
+		);
+		const sanitized = this.updateAgentCapabilities(
+			cli,
+			params.backendId,
+			result,
+		);
+		logger.info(
+			{ machineId: params.machineId, backendId: params.backendId, userId },
+			"agent_authenticate_rpc_complete",
+		);
+		return sanitized;
+	}
+
+	/** End the stable Agent-managed authentication state for one backend. */
+	async logoutAgent(
+		params: AgentBackendRpcParams,
+		userId: string,
+	): Promise<AgentCapabilitiesRpcResult> {
+		if (!params.machineId) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "machineId is required",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		const cli = this.resolveBackendForUser(
+			params.machineId,
+			params.backendId,
+			userId,
+		);
+		const capabilities =
+			cli.backendCapabilities?.[params.backendId] ??
+			(
+				await this.getAgentCapabilities(
+					{ machineId: params.machineId, backendId: params.backendId },
+					userId,
+				)
+			).capabilities;
+		if (capabilities.auth?.logout !== true) {
+			throw new AppError(
+				createErrorDetail({
+					code: "CAPABILITY_NOT_SUPPORTED",
+					message: "Agent does not support logout",
+					retryable: false,
+					scope: "request",
+				}),
+				409,
+			);
+		}
+		logger.info(
+			{
+				machineId: params.machineId,
+				backendId: params.backendId,
+				userId,
+			},
+			"agent_logout_rpc_start",
+		);
+		const result = await this.sendRpc<
+			AgentBackendRpcParams,
+			AgentCapabilitiesRpcResult
+		>(
+			cli.socket,
+			"rpc:agent:logout",
+			{ backendId: params.backendId },
+			AGENT_LOGOUT_RPC_TIMEOUT,
+		);
+		const sanitized = this.updateAgentCapabilities(
+			cli,
+			params.backendId,
+			result,
+		);
+		logger.info(
+			{ machineId: params.machineId, backendId: params.backendId, userId },
+			"agent_logout_rpc_complete",
+		);
+		return sanitized;
 	}
 
 	/**
@@ -249,6 +616,159 @@ export class SessionRouter {
 		);
 
 		return result;
+	}
+
+	/** Close an active ACP session while retaining its durable local history. */
+	async closeSession(
+		params: CloseSessionParams,
+		userId: string,
+	): Promise<SessionSummary> {
+		logger.info(
+			{ sessionId: params.sessionId, userId },
+			"session_close_rpc_start",
+		);
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+		const result = await this.sendSessionSummaryRpc(
+			cli.socket,
+			"rpc:session:close",
+			params,
+		);
+		logger.info(
+			{ sessionId: params.sessionId, userId },
+			"session_close_rpc_complete",
+		);
+		return { ...result, machineId: cli.machineId };
+	}
+
+	/**
+	 * Request Agent deletion and purge the CLI's durable local storage.
+	 * Registry removal intentionally happens only after the CLI confirms that the
+	 * entire operation succeeded, so failed remote deletes remain retryable.
+	 */
+	async deleteSession(
+		params: DeleteSessionParams,
+		userId: string,
+	): Promise<{ ok: true }> {
+		const key = createSessionDeleteKey(userId, params.sessionId);
+		this.pruneExpiredSessionDeletes();
+		const existing = this.durableSessionDeletes.get(key);
+		if (existing) {
+			if (existing.expiresAt === undefined) {
+				return existing.promise;
+			}
+			// A registry entry appearing after a completed delete is authoritative
+			// evidence that the Agent reused the same session ID. Do not let an old
+			// success tombstone suppress deletion of the new incarnation.
+			if (!this.cliRegistry.getCliForSessionByUser(params.sessionId, userId)) {
+				this.durableSessionDeletes.delete(key);
+				this.durableSessionDeletes.set(key, existing);
+				return existing.promise;
+			}
+			this.durableSessionDeletes.delete(key);
+		}
+
+		this.ensureDurableSessionDeleteCapacity(userId);
+		const operation = this.executeSessionDelete(params, userId);
+		const entry: SessionDeleteEntry = {
+			promise: operation,
+			ownerId: userId,
+		};
+		this.durableSessionDeletes.set(key, entry);
+		void operation.then(
+			() => {
+				if (this.durableSessionDeletes.get(key) !== entry) return;
+				entry.expiresAt = Date.now() + RECENT_SESSION_DELETE_TTL_MS;
+				this.durableSessionDeletes.delete(key);
+				this.durableSessionDeletes.set(key, entry);
+			},
+			() => {
+				if (this.durableSessionDeletes.get(key) === entry) {
+					this.durableSessionDeletes.delete(key);
+				}
+			},
+		);
+		return operation;
+	}
+
+	private async executeSessionDelete(
+		params: DeleteSessionParams,
+		userId: string,
+	): Promise<{ ok: true }> {
+		logger.info(
+			{ sessionId: params.sessionId, userId },
+			"session_delete_rpc_start",
+		);
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+		const result = await this.sendRpc<DeleteSessionParams, { ok: true }>(
+			cli.socket,
+			"rpc:session:delete",
+			params,
+		);
+		if (result?.ok !== true) {
+			throw new Error("CLI returned an invalid session delete response");
+		}
+
+		this.cliRegistry.updateSessionsIncremental(cli.socket.id, {
+			added: [],
+			updated: [],
+			removed: [params.sessionId],
+		});
+		logger.info(
+			{ sessionId: params.sessionId, userId },
+			"session_delete_rpc_complete",
+		);
+		return { ok: true };
+	}
+
+	private pruneExpiredSessionDeletes(now = Date.now()): void {
+		for (const [key, entry] of this.durableSessionDeletes) {
+			if (entry.expiresAt !== undefined && entry.expiresAt <= now) {
+				this.durableSessionDeletes.delete(key);
+			}
+		}
+	}
+
+	private ensureDurableSessionDeleteCapacity(ownerId: string): void {
+		const countOwnerEntries = () => {
+			let count = 0;
+			for (const entry of this.durableSessionDeletes.values()) {
+				if (entry.ownerId === ownerId) count += 1;
+			}
+			return count;
+		};
+		let ownerCount = countOwnerEntries();
+		while (
+			this.durableSessionDeletes.size >= MAX_DURABLE_SESSION_DELETES ||
+			ownerCount >= MAX_DURABLE_SESSION_DELETES_PER_OWNER
+		) {
+			let evicted = false;
+			const ownerAtCapacity =
+				ownerCount >= MAX_DURABLE_SESSION_DELETES_PER_OWNER;
+			for (const [key, entry] of this.durableSessionDeletes) {
+				if (
+					entry.expiresAt === undefined ||
+					(ownerAtCapacity && entry.ownerId !== ownerId)
+				) {
+					continue;
+				}
+				this.durableSessionDeletes.delete(key);
+				evicted = true;
+				break;
+			}
+			if (!evicted) {
+				throw new AppError(
+					createErrorDetail({
+						code: "SESSION_BUSY",
+						message:
+							"A new session delete is unavailable because active delete capacity was reached",
+						retryable: false,
+						scope: "service",
+					}),
+					503,
+				);
+			}
+			ownerCount = countOwnerEntries();
+		}
 	}
 
 	/**
@@ -342,7 +862,7 @@ export class SessionRouter {
 			"session_rename_rpc_start",
 		);
 
-		const result = await this.sendRpc<RenameSessionParams, SessionSummary>(
+		const result = await this.sendSessionSummaryRpc(
 			cli.socket,
 			"rpc:session:rename",
 			params,
@@ -402,7 +922,7 @@ export class SessionRouter {
 			"session_mode_rpc_start",
 		);
 
-		const result = await this.sendRpc<SetSessionModeParams, SessionSummary>(
+		const result = await this.sendSessionSummaryRpc(
 			cli.socket,
 			"rpc:session:mode",
 			params,
@@ -411,6 +931,36 @@ export class SessionRouter {
 		logger.info(
 			{ sessionId: params.sessionId, modeId: params.modeId, userId },
 			"session_mode_rpc_complete",
+		);
+
+		return result;
+	}
+
+	/**
+	 * Set a protocol-native session configuration option.
+	 * @param params - Session configuration parameters
+	 * @param userId - User ID for authorization
+	 */
+	async setSessionConfigOption(
+		params: SetSessionConfigOptionParams,
+		userId: string,
+	): Promise<SessionSummary> {
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+
+		logger.info(
+			{ sessionId: params.sessionId, configId: params.configId, userId },
+			"session_config_rpc_start",
+		);
+
+		const result = await this.sendSessionSummaryRpc(
+			cli.socket,
+			"rpc:session:config",
+			params,
+		);
+
+		logger.info(
+			{ sessionId: params.sessionId, configId: params.configId, userId },
+			"session_config_rpc_complete",
 		);
 
 		return result;
@@ -432,7 +982,7 @@ export class SessionRouter {
 			"session_model_rpc_start",
 		);
 
-		const result = await this.sendRpc<SetSessionModelParams, SessionSummary>(
+		const result = await this.sendSessionSummaryRpc(
 			cli.socket,
 			"rpc:session:model",
 			params,
@@ -454,7 +1004,7 @@ export class SessionRouter {
 	async sendMessage(
 		params: SendMessageParams,
 		userId: string,
-	): Promise<{ stopReason: StopReason }> {
+	): Promise<SendMessageResult> {
 		const messageId = params.messageId?.trim() || randomUUID();
 		if (!isMessageIdWithinLimit(messageId)) {
 			throw new AppError(
@@ -543,11 +1093,11 @@ export class SessionRouter {
 			"message_send_rpc_start",
 		);
 
-		const rpcOperation = this.sendRpc<SendMessageParams, MessageSendResult>(
+		const rpcOperation = this.sendRpc<SendMessageParams, unknown>(
 			cli.socket,
 			"rpc:message:send",
 			normalizedParams,
-		);
+		).then(sanitizeMessageSendResult);
 		const entry: MessageSendEntry = {
 			promise: rpcOperation,
 			ownerId: userId,
@@ -814,17 +1364,23 @@ export class SessionRouter {
 			DiscoverSessionsRpcParams,
 			DiscoverSessionsRpcResult
 		>(cli.socket, "rpc:sessions:discover", params);
+		const sessions = this.sanitizeInboundSessionSummaries(
+			"rpc:sessions:discover",
+			cli.socket.id,
+			result.sessions,
+		);
+		const capabilities = sanitizeAgentSessionCapabilities(result.capabilities);
 
 		logger.info(
 			{
 				machineId: cli.machineId,
 				sessionCount: result.sessions.length,
-				capabilities: result.capabilities,
+				capabilities,
 			},
 			"sessions_discover_rpc_complete",
 		);
 
-		return result;
+		return { ...result, sessions, capabilities };
 	}
 
 	/**
@@ -838,6 +1394,7 @@ export class SessionRouter {
 		params: {
 			sessionId: string;
 			cwd: string;
+			additionalDirectories?: string[];
 			backendId: string;
 			machineId?: string;
 		},
@@ -865,9 +1422,10 @@ export class SessionRouter {
 		const rpcParams: LoadSessionRpcParams = {
 			sessionId: params.sessionId,
 			cwd: params.cwd,
+			additionalDirectories: params.additionalDirectories,
 			backendId: params.backendId,
 		};
-		const result = await this.sendRpc<LoadSessionRpcParams, SessionSummary>(
+		const result = await this.sendSessionSummaryRpc(
 			cli.socket,
 			"rpc:session:load",
 			rpcParams,
@@ -878,6 +1436,53 @@ export class SessionRouter {
 			"session_load_rpc_complete",
 		);
 
+		return result;
+	}
+
+	/** Resume a durable session without replaying its history. */
+	async resumeSession(
+		params: ResumeSessionParams,
+		userId: string,
+	): Promise<SessionSummary> {
+		const owner = this.cliRegistry.getCliForSessionByUser(
+			params.sessionId,
+			userId,
+		);
+		if (owner && params.machineId && owner.machineId !== params.machineId) {
+			throw new Error("Session not found");
+		}
+		const cli = owner
+			? owner
+			: params.machineId
+				? this.resolveMachineForUser(params.machineId, userId)
+				: this.cliRegistry.getFirstCliForUser(userId);
+		if (!cli) {
+			throw new Error("No CLI connected for this user");
+		}
+
+		logger.info(
+			{
+				sessionId: params.sessionId,
+				machineId: cli.machineId,
+				cwd: params.cwd,
+				backendId: params.backendId,
+				userId,
+			},
+			"session_resume_rpc_start",
+		);
+		const rpcParams: ResumeSessionRpcParams = {
+			...params,
+			machineId: cli.machineId,
+		};
+		const result = await this.sendSessionSummaryRpc(
+			cli.socket,
+			"rpc:session:resume",
+			rpcParams,
+		);
+		logger.info(
+			{ sessionId: result.sessionId, userId },
+			"session_resume_rpc_complete",
+		);
 		return result;
 	}
 
@@ -892,6 +1497,7 @@ export class SessionRouter {
 		params: {
 			sessionId: string;
 			cwd: string;
+			additionalDirectories?: string[];
 			backendId: string;
 			machineId?: string;
 		},
@@ -919,9 +1525,10 @@ export class SessionRouter {
 		const rpcParams: ReloadSessionRpcParams = {
 			sessionId: params.sessionId,
 			cwd: params.cwd,
+			additionalDirectories: params.additionalDirectories,
 			backendId: params.backendId,
 		};
-		const result = await this.sendRpc<ReloadSessionRpcParams, SessionSummary>(
+		const result = await this.sendSessionSummaryRpc(
 			cli.socket,
 			"rpc:session:reload",
 			rpcParams,
@@ -1246,24 +1853,27 @@ export class SessionRouter {
 			SessionEventsParams,
 			SessionEventsResponse
 		>(cli.socket, "rpc:session:events", params);
+		const sanitized = sanitizeAcpMetaPayload(result);
+		warnSessionMetaSanitization("rpc:session:events", cli.socket.id, sanitized);
 
 		logger.debug(
 			{
 				sessionId: params.sessionId,
 				revision: params.revision,
-				eventCount: result.events.length,
-				hasMore: result.hasMore,
+				eventCount: sanitized.value.events.length,
+				hasMore: sanitized.value.hasMore,
 				userId,
 			},
 			"session_events_rpc_complete",
 		);
-		return result;
+		return sanitized.value;
 	}
 
 	private sendRpc<TParams, TResult>(
 		socket: Socket,
 		event: string,
 		params: TParams,
+		timeoutMs = RPC_TIMEOUT,
 	): Promise<TResult> {
 		return new Promise((resolve, reject) => {
 			const requestId = randomUUID();
@@ -1271,12 +1881,9 @@ export class SessionRouter {
 			const timeout = setTimeout(() => {
 				this.pendingRpcs.delete(requestId);
 				const durationMs = Number(process.hrtime.bigint() - start) / 1_000_000;
-				logger.warn(
-					{ requestId, event, timeoutMs: RPC_TIMEOUT, durationMs },
-					"rpc_timeout",
-				);
+				logger.warn({ requestId, event, timeoutMs, durationMs }, "rpc_timeout");
 				reject(new Error("RPC timeout"));
-			}, RPC_TIMEOUT);
+			}, timeoutMs);
 
 			this.pendingRpcs.set(requestId, {
 				requestId,
@@ -1294,7 +1901,12 @@ export class SessionRouter {
 					const durationMs =
 						Number(process.hrtime.bigint() - start) / 1_000_000;
 					logger.warn(
-						{ requestId, event, durationMs, err: error },
+						{
+							requestId,
+							event,
+							durationMs,
+							...getRpcRejectionLogContext(event, error),
+						},
 						"rpc_response_rejected",
 					);
 					reject(error as Error);

@@ -206,6 +206,32 @@ describe("CliRegistry", () => {
 				"user-1",
 			);
 		});
+
+		it("preserves omitted metadata and applies an explicit null replacement", () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			registry.register(socket, info);
+			registry.updateSessions(socket.id, [
+				createMockSessionSummary({
+					sessionId: "session-1",
+					_meta: { retained: true },
+				}),
+			]);
+
+			registry.updateSessions(socket.id, [
+				createMockSessionSummary({ sessionId: "session-1", title: "Updated" }),
+			]);
+			expect(registry.getCliBySocketId(socket.id)?.sessions[0]?._meta).toEqual({
+				retained: true,
+			});
+
+			registry.updateSessions(socket.id, [
+				createMockSessionSummary({ sessionId: "session-1", _meta: null }),
+			]);
+			expect(
+				registry.getCliBySocketId(socket.id)?.sessions[0]?._meta,
+			).toBeNull();
+		});
 	});
 
 	describe("addDiscoveredSessionsForMachine", () => {
@@ -303,6 +329,54 @@ describe("CliRegistry", () => {
 				undefined,
 			);
 		});
+
+		it("does not overwrite attached metadata or a detached pinned title", () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			registry.register(socket, info);
+			registry.updateSessions("socket-1", [
+				createMockSessionSummary({
+					sessionId: "attached-session",
+					title: "Live title",
+					isAttached: true,
+					_meta: { live: true },
+				}),
+				createMockSessionSummary({
+					sessionId: "pinned-session",
+					title: "Pinned title",
+					isAttached: false,
+					isTitlePinned: true,
+					_meta: { old: true },
+				}),
+			]);
+
+			registry.addDiscoveredSessionsForMachine("machine-1", [
+				createMockSessionSummary({
+					sessionId: "attached-session",
+					title: "Stale title",
+					_meta: { stale: true },
+				}),
+				createMockSessionSummary({
+					sessionId: "pinned-session",
+					title: "Agent title",
+					_meta: { fresh: true },
+				}),
+			]);
+
+			const sessions = registry.getCliBySocketId("socket-1")?.sessions;
+			expect(sessions?.[0]).toEqual(
+				expect.objectContaining({
+					title: "Live title",
+					_meta: { live: true },
+				}),
+			);
+			expect(sessions?.[1]).toEqual(
+				expect.objectContaining({
+					title: "Pinned title",
+					_meta: { fresh: true },
+				}),
+			);
+		});
 	});
 
 	describe("updateSessionsIncremental", () => {
@@ -359,6 +433,34 @@ describe("CliRegistry", () => {
 			const record = registry.getCliBySocketId("socket-1");
 			expect(record?.sessions[0].title).toBe("Updated Title");
 			expect(record?.sessions[0].modelId).toBe("claude-3");
+		});
+
+		it("preserves metadata when an incremental update omits it", () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			registry.register(socket, info);
+			registry.updateSessions(socket.id, [
+				createMockSessionSummary({
+					sessionId: "session-1",
+					_meta: { retained: true },
+				}),
+			]);
+
+			const enhanced = registry.updateSessionsIncremental(socket.id, {
+				added: [],
+				updated: [
+					createMockSessionSummary({
+						sessionId: "session-1",
+						title: "Updated",
+					}),
+				],
+				removed: [],
+			});
+
+			expect(registry.getCliBySocketId(socket.id)?.sessions[0]?._meta).toEqual({
+				retained: true,
+			});
+			expect(enhanced?.updated[0]?._meta).toEqual({ retained: true });
 		});
 
 		it("adds new sessions to record.sessions", () => {
@@ -581,6 +683,68 @@ describe("CliRegistry", () => {
 				removed: [],
 			});
 			expect(listener).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe("backend capabilities", () => {
+		it("sanitizes every capability snapshot before caching and emitting it", () => {
+			const socket = createMockSocket("socket-1");
+			const record = registry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-1" }),
+				{ userId: "user-1", deviceId: "device-1" },
+			);
+			const statusListener = vi.fn();
+			registry.onCliStatus(statusListener);
+
+			registry.updateBackendCapabilities("socket-1", {
+				"backend-1": {
+					list: true,
+					load: false,
+					auth: {
+						methods: [
+							{ id: "browser", name: "Browser" },
+							{ id: " browser", name: "Leading whitespace" },
+							{ id: "trailing ", name: "Trailing whitespace" },
+							{ id: "control\u0000", name: "Control ID" },
+							{ id: "bad-name", name: "Bad\nname" },
+							{
+								id: "bad-description",
+								name: "Bad description",
+								description: "secret\u007fvalue",
+							},
+							{
+								id: "environment",
+								name: "Environment",
+								type: "env_var",
+								vars: [{ name: "TOKEN" }],
+							} as never,
+						],
+						logout: true,
+					} as never,
+				} as never,
+				"unregistered-backend": {
+					list: true,
+					load: true,
+				} as never,
+			});
+
+			expect(record.backendCapabilities).toEqual({
+				"backend-1": {
+					list: true,
+					load: false,
+					auth: {
+						methods: [{ id: "browser", name: "Browser" }],
+						logout: true,
+					},
+				},
+			});
+			expect(statusListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					userId: "user-1",
+					backendCapabilities: record.backendCapabilities,
+				}),
+			);
 		});
 	});
 

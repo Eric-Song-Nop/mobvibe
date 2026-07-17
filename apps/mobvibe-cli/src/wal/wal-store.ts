@@ -2,7 +2,17 @@ import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { SessionEventKind, StopReason } from "@mobvibe/shared";
+import {
+	type AcpMetaValue,
+	REPORTED_TOKEN_USAGE_MAX_SERIALIZED_BYTES,
+	type ReportedTokenUsage,
+	type SendMessageResult,
+	type SessionEventKind,
+	type StopReason,
+	sanitizeAcpMessageMeta,
+	sanitizeAcpMeta,
+	sanitizeReportedTokenUsage,
+} from "@mobvibe/shared";
 import { logger } from "../lib/logger.js";
 import { runMigrations } from "./migrations.js";
 import { SeqGenerator } from "./seq-generator.js";
@@ -13,6 +23,7 @@ export type WalSession = {
 	backendId: string;
 	currentRevision: number;
 	cwd?: string;
+	additionalDirectories: string[];
 	title?: string;
 	isTitlePinned?: boolean;
 	createdAt: string;
@@ -43,7 +54,7 @@ export type SessionRevisionKey = {
 
 export type MessageSendClaim =
 	| { status: "claimed"; claimId: string }
-	| { status: "completed"; result: { stopReason: StopReason } }
+	| { status: "completed"; result: SendMessageResult }
 	| { status: "in_progress" };
 
 export type AppendEventParams = {
@@ -58,6 +69,7 @@ export type WalEventInput = Pick<AppendEventParams, "kind" | "payload">;
 export type CommitReloadRevisionParams = {
 	sessionId: string;
 	expectedRevision: number;
+	additionalDirectories?: readonly string[];
 	events: readonly WalEventInput[];
 	wrappedDek?: string;
 };
@@ -79,6 +91,7 @@ export type EnsureSessionParams = {
 	machineId: string;
 	backendId: string;
 	cwd?: string;
+	additionalDirectories?: readonly string[];
 	title?: string;
 	isTitlePinned?: boolean;
 };
@@ -89,19 +102,63 @@ export type CommitSessionLoadParams = EnsureSessionParams & {
 	wrappedDek?: string;
 };
 
+export type CommitSessionResumeParams = EnsureSessionParams & {
+	expectedRevision: number | null;
+	events: readonly WalEventInput[];
+	wrappedDek?: string;
+};
+
 export type DiscoveredSession = {
 	sessionId: string;
 	backendId: string;
 	cwd?: string;
+	additionalDirectories?: string[];
 	workspaceRootCwd?: string;
-	title?: string;
-	agentUpdatedAt?: string;
+	title?: string | null;
+	agentUpdatedAt?: string | null;
+	_meta?: Record<string, unknown> | null;
 	discoveredAt: string;
 	lastVerifiedAt?: string;
 	isStale: boolean;
 };
 
 const DEFAULT_QUERY_LIMIT = 100;
+
+const parseAdditionalDirectories = (value: string): string[] => {
+	const parsed: unknown = JSON.parse(value);
+	if (
+		!Array.isArray(parsed) ||
+		!parsed.every((directory) => typeof directory === "string")
+	) {
+		throw new Error("Invalid additional directories in WAL");
+	}
+	return parsed;
+};
+
+const parseMetadata = (value: string): AcpMetaValue | undefined => {
+	try {
+		const result = sanitizeAcpMeta(JSON.parse(value));
+		return result.ok ? result.value : undefined;
+	} catch {
+		return undefined;
+	}
+};
+
+const parseReportedTokenUsage = (
+	value: string | null,
+): ReportedTokenUsage | undefined => {
+	if (value === null) return undefined;
+	if (
+		Buffer.byteLength(value, "utf8") > REPORTED_TOKEN_USAGE_MAX_SERIALIZED_BYTES
+	) {
+		return undefined;
+	}
+	try {
+		return sanitizeReportedTokenUsage(JSON.parse(value));
+	} catch {
+		return undefined;
+	}
+};
 
 /**
  * Tables whose rows are tied to a user's local Mobvibe identity. Schema and
@@ -160,6 +217,7 @@ export class WalStore {
 	private db: Database;
 	private readonly initialSchemaVersion: number;
 	private seqGenerator = new SeqGenerator();
+	private metaReplayWarnings = 0;
 
 	// Prepared statements for performance
 	private stmtGetSession: ReturnType<Database["query"]>;
@@ -188,8 +246,10 @@ export class WalStore {
 	private stmtUpsertDiscoveredSession: ReturnType<Database["query"]>;
 	private stmtGetDiscoveredSessions: ReturnType<Database["query"]>;
 	private stmtGetDiscoveredSessionsByBackend: ReturnType<Database["query"]>;
+	private stmtGetDiscoveredSessionBackend: ReturnType<Database["query"]>;
 	private stmtMarkDiscoveredSessionStale: ReturnType<Database["query"]>;
 	private stmtDeleteStaleDiscoveredSessions: ReturnType<Database["query"]>;
+	private stmtDeleteDiscoveredSession: ReturnType<Database["query"]>;
 
 	// Consolidation statements
 	private stmtQueryBySeqRange: ReturnType<Database["query"]>;
@@ -200,8 +260,11 @@ export class WalStore {
 	private stmtDeleteMessageSendResults: ReturnType<Database["query"]>;
 	private stmtDeleteMessageSendClaims: ReturnType<Database["query"]>;
 	private stmtDeleteSessionRevisionKeys: ReturnType<Database["query"]>;
+	private stmtDeleteCompactionLog: ReturnType<Database["query"]>;
+	private stmtClearAgentTeamMemberSession: ReturnType<Database["query"]>;
 	private stmtDeleteSession: ReturnType<Database["query"]>;
 	private stmtInsertArchivedSession: ReturnType<Database["query"]>;
+	private stmtDeleteArchivedSession: ReturnType<Database["query"]>;
 	private stmtIsArchived: ReturnType<Database["query"]>;
 	private stmtGetArchivedSessionIds: ReturnType<Database["query"]>;
 
@@ -217,25 +280,26 @@ export class WalStore {
 
 		// Prepare statements
 		this.stmtGetSession = this.db.query(`
-      SELECT session_id, machine_id, backend_id, current_revision, cwd, title, is_title_pinned, created_at, updated_at
+      SELECT session_id, machine_id, backend_id, current_revision, cwd, additional_directories_json, title, is_title_pinned, created_at, updated_at
       FROM sessions
       WHERE session_id = $sessionId
     `);
 
 		this.stmtGetSessions = this.db.query(`
-			SELECT session_id, machine_id, backend_id, current_revision, cwd, title, is_title_pinned, created_at, updated_at
+			SELECT session_id, machine_id, backend_id, current_revision, cwd, additional_directories_json, title, is_title_pinned, created_at, updated_at
 			FROM sessions
 			ORDER BY updated_at DESC, session_id ASC
 		`);
 
 		this.stmtInsertSession = this.db.query(`
-      INSERT INTO sessions (session_id, machine_id, backend_id, current_revision, cwd, title, is_title_pinned, created_at, updated_at)
-      VALUES ($sessionId, $machineId, $backendId, 1, $cwd, $title, $isTitlePinned, $createdAt, $updatedAt)
+      INSERT INTO sessions (session_id, machine_id, backend_id, current_revision, cwd, additional_directories_json, title, is_title_pinned, created_at, updated_at)
+      VALUES ($sessionId, $machineId, $backendId, 1, $cwd, $additionalDirectoriesJson, $title, $isTitlePinned, $createdAt, $updatedAt)
     `);
 
 		this.stmtUpdateSession = this.db.query(`
       UPDATE sessions
       SET cwd = COALESCE($cwd, cwd),
+          additional_directories_json = COALESCE($additionalDirectoriesJson, additional_directories_json),
           title = COALESCE($title, title),
           is_title_pinned = COALESCE($isTitlePinned, is_title_pinned),
           updated_at = $updatedAt
@@ -297,6 +361,7 @@ export class WalStore {
 		this.stmtCommitReloadRevision = this.db.query(`
 			UPDATE sessions
 			SET current_revision = current_revision + 1,
+				additional_directories_json = COALESCE($additionalDirectoriesJson, additional_directories_json),
 				updated_at = $updatedAt
 			WHERE session_id = $sessionId
 				AND current_revision = $expectedRevision
@@ -310,15 +375,15 @@ export class WalStore {
 		`);
 
 		this.stmtGetMessageSendResult = this.db.query(`
-			SELECT stop_reason
+			SELECT stop_reason, usage_json
 			FROM message_send_results
 			WHERE session_id = $sessionId AND message_id = $messageId
 		`);
 
 		this.stmtInsertMessageSendResult = this.db.query(`
 			INSERT OR IGNORE INTO message_send_results (
-				session_id, message_id, stop_reason, completed_at
-			) VALUES ($sessionId, $messageId, $stopReason, $completedAt)
+				session_id, message_id, stop_reason, usage_json, completed_at
+			) VALUES ($sessionId, $messageId, $stopReason, $usageJson, $completedAt)
 		`);
 
 		this.stmtGetMessageSendClaim = this.db.query(`
@@ -388,24 +453,26 @@ export class WalStore {
 		// Discovered sessions statements
 		this.stmtUpsertDiscoveredSession = this.db.query(`
       INSERT INTO discovered_sessions (
-        session_id, backend_id, cwd, workspace_root_cwd, title, agent_updated_at,
+        session_id, backend_id, cwd, additional_directories_json, workspace_root_cwd, title, agent_updated_at, meta_json,
         discovered_at, last_verified_at, is_stale
       ) VALUES (
-        $sessionId, $backendId, $cwd, $workspaceRootCwd, $title, $agentUpdatedAt,
+        $sessionId, $backendId, $cwd, $additionalDirectoriesJson, $workspaceRootCwd, $title, $agentUpdatedAt, $metaJson,
         $discoveredAt, $lastVerifiedAt, 0
       )
       ON CONFLICT (session_id) DO UPDATE SET
         backend_id = $backendId,
         cwd = COALESCE($cwd, discovered_sessions.cwd),
+        additional_directories_json = $additionalDirectoriesJson,
         workspace_root_cwd = COALESCE($workspaceRootCwd, discovered_sessions.workspace_root_cwd),
-        title = COALESCE($title, discovered_sessions.title),
-        agent_updated_at = COALESCE($agentUpdatedAt, discovered_sessions.agent_updated_at),
+        title = $title,
+        agent_updated_at = $agentUpdatedAt,
+        meta_json = CASE WHEN $hasMeta = 1 THEN $metaJson ELSE discovered_sessions.meta_json END,
         last_verified_at = $lastVerifiedAt,
         is_stale = 0
     `);
 
 		this.stmtGetDiscoveredSessions = this.db.query(`
-      SELECT d.session_id, d.backend_id, d.cwd, d.workspace_root_cwd, d.title, d.agent_updated_at,
+			SELECT d.session_id, d.backend_id, d.cwd, d.additional_directories_json, d.workspace_root_cwd, d.title, d.agent_updated_at, d.meta_json,
              d.discovered_at, d.last_verified_at, d.is_stale
       FROM discovered_sessions d
       LEFT JOIN archived_session_ids a ON d.session_id = a.session_id
@@ -414,13 +481,19 @@ export class WalStore {
     `);
 
 		this.stmtGetDiscoveredSessionsByBackend = this.db.query(`
-      SELECT d.session_id, d.backend_id, d.cwd, d.workspace_root_cwd, d.title, d.agent_updated_at,
+			SELECT d.session_id, d.backend_id, d.cwd, d.additional_directories_json, d.workspace_root_cwd, d.title, d.agent_updated_at, d.meta_json,
              d.discovered_at, d.last_verified_at, d.is_stale
       FROM discovered_sessions d
       LEFT JOIN archived_session_ids a ON d.session_id = a.session_id
       WHERE d.backend_id = $backendId AND d.is_stale = 0 AND a.session_id IS NULL
       ORDER BY d.discovered_at DESC
     `);
+
+		this.stmtGetDiscoveredSessionBackend = this.db.query(`
+			SELECT backend_id
+			FROM discovered_sessions
+			WHERE session_id = $sessionId
+		`);
 
 		this.stmtMarkDiscoveredSessionStale = this.db.query(`
       UPDATE discovered_sessions
@@ -432,6 +505,10 @@ export class WalStore {
       DELETE FROM discovered_sessions
       WHERE is_stale = 1 AND discovered_at < $olderThan
     `);
+
+		this.stmtDeleteDiscoveredSession = this.db.query(`
+			DELETE FROM discovered_sessions WHERE session_id = $sessionId
+		`);
 
 		// Archive statements
 		this.stmtDeleteSessionEvents = this.db.query(`
@@ -450,6 +527,16 @@ export class WalStore {
 			DELETE FROM session_revision_keys WHERE session_id = $sessionId
 		`);
 
+		this.stmtDeleteCompactionLog = this.db.query(`
+			DELETE FROM compaction_log WHERE session_id = $sessionId
+		`);
+
+		this.stmtClearAgentTeamMemberSession = this.db.query(`
+			UPDATE agent_team_members
+			SET session_id = NULL, updated_at = $updatedAt
+			WHERE session_id = $sessionId
+		`);
+
 		this.stmtDeleteSession = this.db.query(`
       DELETE FROM sessions WHERE session_id = $sessionId
     `);
@@ -458,6 +545,10 @@ export class WalStore {
       INSERT OR IGNORE INTO archived_session_ids (session_id, archived_at)
       VALUES ($sessionId, $archivedAt)
     `);
+
+		this.stmtDeleteArchivedSession = this.db.query(`
+			DELETE FROM archived_session_ids WHERE session_id = $sessionId
+		`);
 
 		this.stmtIsArchived = this.db.query(`
       SELECT 1 FROM archived_session_ids WHERE session_id = $sessionId
@@ -551,6 +642,10 @@ export class WalStore {
 			this.stmtUpdateSession.run({
 				$sessionId: params.sessionId,
 				$cwd: params.cwd ?? null,
+				$additionalDirectoriesJson:
+					params.additionalDirectories === undefined
+						? null
+						: JSON.stringify(params.additionalDirectories),
 				$title: params.title ?? null,
 				$isTitlePinned:
 					params.isTitlePinned !== undefined
@@ -590,6 +685,9 @@ export class WalStore {
 			$machineId: params.machineId,
 			$backendId: params.backendId,
 			$cwd: params.cwd ?? null,
+			$additionalDirectoriesJson: JSON.stringify(
+				params.additionalDirectories ?? [],
+			),
 			$title: params.title ?? null,
 			$isTitlePinned: params.isTitlePinned ? 1 : 0,
 			$createdAt: now,
@@ -700,6 +798,9 @@ export class WalStore {
 							$machineId: params.machineId,
 							$backendId: params.backendId,
 							$cwd: params.cwd ?? null,
+							$additionalDirectoriesJson: JSON.stringify(
+								params.additionalDirectories ?? [],
+							),
 							$title: params.title ?? null,
 							$isTitlePinned: params.isTitlePinned ? 1 : 0,
 							$createdAt: now,
@@ -719,6 +820,108 @@ export class WalStore {
 						this.stmtUpdateSession.run({
 							$sessionId: params.sessionId,
 							$cwd: params.cwd ?? null,
+							$additionalDirectoriesJson:
+								params.additionalDirectories === undefined
+									? null
+									: JSON.stringify(params.additionalDirectories),
+							$title: params.title ?? null,
+							$isTitlePinned:
+								params.isTitlePinned === undefined
+									? null
+									: params.isTitlePinned
+										? 1
+										: 0,
+							$updatedAt: now,
+						});
+						revision = params.expectedRevision;
+					}
+					if (params.wrappedDek) {
+						this.stmtInsertSessionRevisionKey.run({
+							$sessionId: params.sessionId,
+							$revision: revision,
+							$wrappedDek: params.wrappedDek,
+							$createdAt: now,
+						});
+					}
+					return {
+						revision,
+						events: this.insertPreparedEvents(
+							params.sessionId,
+							revision,
+							prepared,
+						),
+					};
+				})
+				.immediate();
+		} catch (error) {
+			this.syncSequenceFromDurableState(params.sessionId, targetRevision);
+			throw error;
+		}
+		this.syncSequenceAfterCommit(
+			params.sessionId,
+			committed.revision,
+			committed.events,
+		);
+		this.logAppendedEvents(committed.events);
+		return committed;
+	}
+
+	/**
+	 * Atomically attach durable state to a resumed agent session. Unlike a load,
+	 * a resume keeps the current revision and appends only updates emitted while
+	 * the resume request was in flight.
+	 */
+	commitSessionResume(params: CommitSessionResumeParams): {
+		revision: number;
+		events: WalEvent[];
+	} {
+		const prepared = this.prepareEventInputs(params.events);
+		const targetRevision = params.expectedRevision ?? 1;
+		let committed: { revision: number; events: WalEvent[] };
+		try {
+			committed = this.db
+				.transaction(() => {
+					const existing = this.stmtGetSession.get({
+						$sessionId: params.sessionId,
+					}) as WalSessionRow | null;
+					const now = new Date().toISOString();
+					let revision: number;
+					if (params.expectedRevision === null) {
+						if (existing) {
+							throw new Error(
+								`Session appeared before resume commit: ${params.sessionId}`,
+							);
+						}
+						this.stmtInsertSession.run({
+							$sessionId: params.sessionId,
+							$machineId: params.machineId,
+							$backendId: params.backendId,
+							$cwd: params.cwd ?? null,
+							$additionalDirectoriesJson: JSON.stringify(
+								params.additionalDirectories ?? [],
+							),
+							$title: params.title ?? null,
+							$isTitlePinned: params.isTitlePinned ? 1 : 0,
+							$createdAt: now,
+							$updatedAt: now,
+						});
+						revision = 1;
+					} else {
+						if (
+							!existing ||
+							existing.current_revision !== params.expectedRevision
+						) {
+							throw new Error(
+								`Session changed before resume commit: ${params.sessionId}`,
+							);
+						}
+						this.stmtUpdateSession.run({
+							$sessionId: params.sessionId,
+							$cwd: params.cwd ?? null,
+							$additionalDirectoriesJson:
+								params.additionalDirectories === undefined
+									? null
+									: JSON.stringify(params.additionalDirectories),
 							$title: params.title ?? null,
 							$isTitlePinned:
 								params.isTitlePinned === undefined
@@ -777,6 +980,10 @@ export class WalStore {
 					const revisionRow = this.stmtCommitReloadRevision.get({
 						$sessionId: params.sessionId,
 						$expectedRevision: params.expectedRevision,
+						$additionalDirectoriesJson:
+							params.additionalDirectories === undefined
+								? null
+								: JSON.stringify(params.additionalDirectories),
 						$updatedAt: new Date().toISOString(),
 					}) as { current_revision: number } | null;
 					if (!revisionRow) {
@@ -908,12 +1115,17 @@ export class WalStore {
 	getMessageSendResult(
 		sessionId: string,
 		messageId: string,
-	): { stopReason: StopReason } | undefined {
+	): SendMessageResult | undefined {
 		const row = this.stmtGetMessageSendResult.get({
 			$sessionId: sessionId,
 			$messageId: messageId,
-		}) as { stop_reason: StopReason } | null;
-		return row ? { stopReason: row.stop_reason } : undefined;
+		}) as { stop_reason: StopReason; usage_json: string | null } | null;
+		if (!row) return undefined;
+		const usage = parseReportedTokenUsage(row.usage_json);
+		return {
+			stopReason: row.stop_reason,
+			...(usage ? { usage } : {}),
+		};
 	}
 
 	/**
@@ -957,9 +1169,17 @@ export class WalStore {
 		messageId: string,
 		claimId: string,
 		stopReason: StopReason,
+		usage?: ReportedTokenUsage,
 	): WalEvent {
+		const sanitizedUsage = sanitizeReportedTokenUsage(usage);
 		const prepared = this.prepareEventInputs([
-			{ kind: "turn_end", payload: { stopReason } },
+			{
+				kind: "turn_end",
+				payload: {
+					stopReason,
+					...(sanitizedUsage ? { usage: sanitizedUsage } : {}),
+				},
+			},
 		]);
 		let terminalEvent: WalEvent;
 		let revision = 0;
@@ -978,7 +1198,15 @@ export class WalStore {
 						throw new Error(`Session not found: ${sessionId}`);
 					}
 					revision = session.currentRevision;
-					this.recordMessageSendResult(sessionId, messageId, stopReason);
+					const inserted = this.recordMessageSendResult(
+						sessionId,
+						messageId,
+						stopReason,
+						sanitizedUsage,
+					);
+					if (!inserted) {
+						throw new Error("Completed message result already exists");
+					}
 					this.stmtDeleteMessageSendClaim.run({
 						$sessionId: sessionId,
 						$messageId: messageId,
@@ -1013,13 +1241,17 @@ export class WalStore {
 		sessionId: string,
 		messageId: string,
 		stopReason: StopReason,
-	): void {
-		this.stmtInsertMessageSendResult.run({
+		usage?: ReportedTokenUsage,
+	): boolean {
+		const sanitizedUsage = sanitizeReportedTokenUsage(usage);
+		const result = this.stmtInsertMessageSendResult.run({
 			$sessionId: sessionId,
 			$messageId: messageId,
 			$stopReason: stopReason,
+			$usageJson: sanitizedUsage ? JSON.stringify(sanitizedUsage) : null,
 			$completedAt: new Date().toISOString(),
 		});
+		return result.changes === 1;
 	}
 
 	/**
@@ -1142,13 +1374,24 @@ export class WalStore {
 	saveDiscoveredSessions(sessions: DiscoveredSession[]): void {
 		const now = new Date().toISOString();
 		for (const session of sessions) {
+			const hasMeta = Object.hasOwn(session, "_meta");
+			const sanitizedMeta = hasMeta
+				? sanitizeAcpMeta(session._meta)
+				: undefined;
 			this.stmtUpsertDiscoveredSession.run({
 				$sessionId: session.sessionId,
 				$backendId: session.backendId,
 				$cwd: session.cwd ?? null,
+				$additionalDirectoriesJson: JSON.stringify(
+					session.additionalDirectories ?? [],
+				),
 				$workspaceRootCwd: session.workspaceRootCwd ?? null,
 				$title: session.title ?? null,
 				$agentUpdatedAt: session.agentUpdatedAt ?? null,
+				$hasMeta: hasMeta && sanitizedMeta?.ok ? 1 : 0,
+				$metaJson: sanitizedMeta?.ok
+					? JSON.stringify(sanitizedMeta.value)
+					: null,
 				$discoveredAt: session.discoveredAt,
 				$lastVerifiedAt: now,
 			});
@@ -1168,6 +1411,14 @@ export class WalStore {
 			rows = this.stmtGetDiscoveredSessions.all() as DiscoveredSessionRow[];
 		}
 		return rows.map((row) => this.rowToDiscoveredSession(row));
+	}
+
+	/** Resolve durable backend affinity even for a legacy archived snapshot. */
+	getDiscoveredSessionBackendId(sessionId: string): string | undefined {
+		const row = this.stmtGetDiscoveredSessionBackend.get({
+			$sessionId: sessionId,
+		}) as { backend_id: string } | null;
+		return row?.backend_id;
 	}
 
 	/**
@@ -1201,11 +1452,35 @@ export class WalStore {
 				this.stmtDeleteMessageSendResults.run({ $sessionId: sessionId });
 				this.stmtDeleteMessageSendClaims.run({ $sessionId: sessionId });
 				this.stmtDeleteSessionRevisionKeys.run({ $sessionId: sessionId });
+				this.stmtDeleteCompactionLog.run({ $sessionId: sessionId });
+				this.stmtDeleteDiscoveredSession.run({ $sessionId: sessionId });
 				this.stmtDeleteSession.run({ $sessionId: sessionId });
 				this.stmtInsertArchivedSession.run({
 					$sessionId: sessionId,
 					$archivedAt: new Date().toISOString(),
 				});
+			})
+			.immediate();
+		this.seqGenerator.clearSession(sessionId);
+	}
+
+	/** Permanently remove every local WAL record associated with a session. */
+	deleteSession(sessionId: string): void {
+		const deletedAt = new Date().toISOString();
+		this.db
+			.transaction(() => {
+				this.stmtDeleteSessionEvents.run({ $sessionId: sessionId });
+				this.stmtDeleteMessageSendResults.run({ $sessionId: sessionId });
+				this.stmtDeleteMessageSendClaims.run({ $sessionId: sessionId });
+				this.stmtDeleteSessionRevisionKeys.run({ $sessionId: sessionId });
+				this.stmtDeleteCompactionLog.run({ $sessionId: sessionId });
+				this.stmtDeleteDiscoveredSession.run({ $sessionId: sessionId });
+				this.stmtClearAgentTeamMemberSession.run({
+					$sessionId: sessionId,
+					$updatedAt: deletedAt,
+				});
+				this.stmtDeleteSession.run({ $sessionId: sessionId });
+				this.stmtDeleteArchivedSession.run({ $sessionId: sessionId });
 			})
 			.immediate();
 		this.seqGenerator.clearSession(sessionId);
@@ -1349,6 +1624,9 @@ export class WalStore {
 			backendId: row.backend_id,
 			currentRevision: row.current_revision,
 			cwd: row.cwd ?? undefined,
+			additionalDirectories: parseAdditionalDirectories(
+				row.additional_directories_json,
+			),
 			title: row.title ?? undefined,
 			isTitlePinned: row.is_title_pinned === 1 ? true : undefined,
 			createdAt: row.created_at,
@@ -1357,30 +1635,57 @@ export class WalStore {
 	}
 
 	private rowToEvent(row: WalEventRow): WalEvent {
+		const payload = this.sanitizeWalPayload(JSON.parse(row.payload), "replay");
 		return {
 			id: row.id,
 			sessionId: row.session_id,
 			revision: row.revision,
 			seq: row.seq,
 			kind: row.kind as SessionEventKind,
-			payload: JSON.parse(row.payload),
+			payload,
 			createdAt: row.created_at,
 			ackedAt: row.acked_at ?? undefined,
 		};
 	}
 
 	private rowToDiscoveredSession(row: DiscoveredSessionRow): DiscoveredSession {
+		const metadata =
+			row.meta_json === null ? undefined : parseMetadata(row.meta_json);
 		return {
 			sessionId: row.session_id,
 			backendId: row.backend_id,
 			cwd: row.cwd ?? undefined,
+			additionalDirectories: parseAdditionalDirectories(
+				row.additional_directories_json,
+			),
 			workspaceRootCwd: row.workspace_root_cwd ?? undefined,
-			title: row.title ?? undefined,
-			agentUpdatedAt: row.agent_updated_at ?? undefined,
+			title: row.title,
+			agentUpdatedAt: row.agent_updated_at,
+			...(metadata !== undefined ? { _meta: metadata } : {}),
 			discoveredAt: row.discovered_at,
 			lastVerifiedAt: row.last_verified_at ?? undefined,
 			isStale: row.is_stale === 1,
 		};
+	}
+
+	private sanitizeWalPayload(payload: unknown, operation: string): unknown {
+		const result = sanitizeAcpMessageMeta(payload);
+		if (!result.complete) {
+			throw new Error("WAL event payload must contain plain JSON values");
+		}
+		if (result.rejectedEnvelopes > 0 && this.metaReplayWarnings < 3) {
+			this.metaReplayWarnings += 1;
+			logger.warn(
+				{
+					operation,
+					rejectedEnvelopes: result.rejectedEnvelopes,
+					reasons: result.rejections.map(({ reason }) => reason),
+					rejectionsTruncated: result.rejectionsTruncated,
+				},
+				"wal_acp_metadata_rejected",
+			);
+		}
+		return result.value;
 	}
 }
 
@@ -1391,6 +1696,7 @@ type WalSessionRow = {
 	backend_id: string;
 	current_revision: number;
 	cwd: string | null;
+	additional_directories_json: string;
 	title: string | null;
 	is_title_pinned: number | null;
 	created_at: string;
@@ -1412,9 +1718,11 @@ type DiscoveredSessionRow = {
 	session_id: string;
 	backend_id: string;
 	cwd: string | null;
+	additional_directories_json: string;
 	workspace_root_cwd: string | null;
 	title: string | null;
 	agent_updated_at: string | null;
+	meta_json: string | null;
 	discovered_at: string;
 	last_verified_at: string | null;
 	is_stale: number;

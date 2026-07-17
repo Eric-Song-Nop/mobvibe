@@ -13,11 +13,14 @@ export function MainLayout({ controller }: MainLayoutProps) {
 	const {
 		activeSessionId,
 		handleArchiveSession,
+		handleCloseSession,
+		handleDeleteSession,
 		handleBulkArchiveSessions,
 		handleOpenCreateDialog,
 		handleRenameSubmit,
 		handleSelectSession,
 		isBulkArchiving,
+		deletingSessionId,
 		isCreatingSession,
 		mutationsSnapshot,
 		sessionList,
@@ -39,10 +42,15 @@ export function MainLayout({ controller }: MainLayoutProps) {
 				onArchiveSession={(sessionId) => {
 					void handleArchiveSession(sessionId);
 				}}
+				onCloseSession={(sessionId) => {
+					void handleCloseSession(sessionId);
+				}}
+				onDeleteSession={handleDeleteSession}
 				onArchiveAllSessions={(sessionIds) => {
 					void handleBulkArchiveSessions(sessionIds);
 				}}
 				isBulkArchiving={isBulkArchiving}
+				deletingSessionId={deletingSessionId}
 				isCreating={isCreatingSession}
 				mutations={mutationsSnapshot}
 			/>

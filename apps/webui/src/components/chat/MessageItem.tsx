@@ -14,7 +14,6 @@ import { memo, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { UnifiedDiffView } from "@/components/chat/DiffView";
 import { LazyStreamdown } from "@/components/chat/LazyStreamdown";
-import i18n from "@/i18n";
 import type {
 	AudioContent,
 	ContentBlock,
@@ -32,6 +31,8 @@ import {
 	useChatStore,
 } from "@/lib/chat-store";
 import { getCodeAccentFillClass } from "@/lib/code-highlight";
+import { getContentBlocksText } from "@/lib/content-block-utils";
+import { getToolCallMetaHints } from "@/lib/tool-call-meta";
 import { cn } from "@/lib/utils";
 
 type PermissionDecisionPayload = {
@@ -118,7 +119,12 @@ const isAbsolutePath = (pathValue: string) => pathValue.startsWith("/");
 
 const resolveFilePathFromUri = (uri: string) => {
 	if (uri.startsWith("file://")) {
-		return decodeURIComponent(uri.slice("file://".length));
+		try {
+			const decodedPath = decodeURIComponent(uri.slice("file://".length));
+			return isAbsolutePath(decodedPath) ? decodedPath : null;
+		} catch {
+			return null;
+		}
 	}
 	if (uri.startsWith("/")) {
 		return uri;
@@ -157,8 +163,47 @@ const formatBytes = (value: number) => {
 	return `${(kb / 1024).toFixed(1)} MB`;
 };
 
-const buildDataUri = (mimeType: string, data: string) =>
-	`data:${mimeType};base64,${data}`;
+const MAX_INLINE_MEDIA_BYTES = 2 * 1024 * 1024;
+const MAX_INLINE_MEDIA_BASE64_CHARS = Math.ceil(MAX_INLINE_MEDIA_BYTES / 3) * 4;
+const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
+const SAFE_IMAGE_MIME_TYPES = new Set([
+	"image/avif",
+	"image/gif",
+	"image/jpeg",
+	"image/png",
+	"image/webp",
+]);
+const SAFE_AUDIO_MIME_TYPES = new Set([
+	"audio/aac",
+	"audio/flac",
+	"audio/mp4",
+	"audio/mpeg",
+	"audio/ogg",
+	"audio/wav",
+	"audio/webm",
+	"audio/x-wav",
+]);
+
+const buildSafeDataUri = (
+	mimeType: string,
+	data: string,
+	allowedMimeTypes: ReadonlySet<string>,
+) => {
+	const normalizedMimeType = mimeType.trim().toLowerCase();
+	const paddingLength = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+	const decodedByteLength = (data.length / 4) * 3 - paddingLength;
+	if (
+		!allowedMimeTypes.has(normalizedMimeType) ||
+		data.length === 0 ||
+		data.length % 4 !== 0 ||
+		data.length > MAX_INLINE_MEDIA_BASE64_CHARS ||
+		!BASE64_PATTERN.test(data) ||
+		decodedByteLength > MAX_INLINE_MEDIA_BYTES
+	) {
+		return undefined;
+	}
+	return `data:${normalizedMimeType};base64,${data}`;
+};
 
 const renderResourceLabel = (
 	label: string,
@@ -170,7 +215,7 @@ const renderResourceLabel = (
 		return (
 			<button
 				type="button"
-				className="text-xs text-primary hover:underline"
+				className="break-all text-left text-xs text-primary hover:underline"
 				onClick={(event) => {
 					event.preventDefault();
 					onOpenFilePreview(filePath);
@@ -186,13 +231,13 @@ const renderResourceLabel = (
 				href={uri}
 				target="_blank"
 				rel="noreferrer"
-				className="text-xs text-primary hover:underline"
+				className="break-all text-xs text-primary hover:underline"
 			>
 				{label}
 			</a>
 		);
 	}
-	return <span className="text-xs text-foreground">{label}</span>;
+	return <span className="break-all text-xs text-foreground">{label}</span>;
 };
 
 const renderTextContent = (text: string, key: string) => (
@@ -220,14 +265,12 @@ const renderImageContent = (
 	onOpenFilePreview?: (path: string) => void,
 ) => {
 	const label = resolveResourceLabel(content.uri ?? getLabel("toolCall.image"));
-	const source = content.data
-		? buildDataUri(content.mimeType, content.data)
-		: (content.uri ?? undefined);
-	const canPreviewInline =
-		source !== undefined &&
-		(source.startsWith("data:") ||
-			source.startsWith("http://") ||
-			source.startsWith("https://"));
+	const source = buildSafeDataUri(
+		content.mimeType,
+		content.data,
+		SAFE_IMAGE_MIME_TYPES,
+	);
+	const canPreviewInline = source !== undefined;
 	return (
 		<div
 			key={key}
@@ -265,7 +308,11 @@ const renderAudioContent = (
 	key: string,
 	getLabel: (key: string, options?: Record<string, unknown>) => string,
 ) => {
-	const source = buildDataUri(content.mimeType, content.data);
+	const source = buildSafeDataUri(
+		content.mimeType,
+		content.data,
+		SAFE_AUDIO_MIME_TYPES,
+	);
 	return (
 		<div
 			key={key}
@@ -275,10 +322,16 @@ const renderAudioContent = (
 				<span>{getLabel("toolCall.audio")}</span>
 				<span>{content.mimeType}</span>
 			</div>
-			<audio controls className="mt-2 w-full">
-				<source src={source} type={content.mimeType} />
-				<track kind="captions" />
-			</audio>
+			{source ? (
+				<audio controls className="mt-2 w-full">
+					<source src={source} type={content.mimeType} />
+					<track kind="captions" />
+				</audio>
+			) : (
+				<div className="mt-2 text-[11px] text-muted-foreground">
+					{getLabel("toolCall.imagePreviewUnavailable")}
+				</div>
+			)}
 		</div>
 	);
 };
@@ -359,65 +412,9 @@ const renderResourceLink = (
 const extractUserMessageText = (
 	message: Extract<ChatMessage, { kind: "text" }>,
 ): string => {
-	const blocks = message.contentBlocks;
+	const blocks = message.contentBlocks ?? [];
 	if (blocks.length === 0) return message.content;
-	return blocks
-		.filter(
-			(b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text",
-		)
-		.map((b) => b.text)
-		.join("\n");
-};
-
-const renderUserContent = (
-	message: Extract<ChatMessage, { kind: "text" }>,
-	onOpenFilePreview?: (path: string) => void,
-) => {
-	const contentBlocks = message.contentBlocks ?? [];
-	if (contentBlocks.length === 0) {
-		return <LazyStreamdown>{message.content}</LazyStreamdown>;
-	}
-	const parts = contentBlocks.map((block, index) => {
-		if (block.type === "text") {
-			return (
-				<LazyStreamdown key={`text-${index}`}>{block.text}</LazyStreamdown>
-			);
-		}
-		if (block.type === "image") {
-			return renderImageContent(
-				block,
-				`image-${index}`,
-				(key, options) => i18n.t(key, options),
-				onOpenFilePreview,
-			);
-		}
-		if (block.type === "resource_link") {
-			const label = `@${block.name}`;
-			const filePath = resolveFilePathFromUri(block.uri);
-			if (filePath && onOpenFilePreview) {
-				return (
-					<button
-						key={`resource-${index}`}
-						type="button"
-						className="text-primary hover:underline"
-						onClick={(event) => {
-							event.preventDefault();
-							onOpenFilePreview(filePath);
-						}}
-					>
-						{label}
-					</button>
-				);
-			}
-			return (
-				<span key={`resource-${index}`} className="text-foreground">
-					{label}
-				</span>
-			);
-		}
-		return null;
-	});
-	return <div className="flex flex-col gap-2">{parts}</div>;
+	return getContentBlocksText(blocks);
 };
 
 const renderContentBlock = (
@@ -440,6 +437,38 @@ const renderContentBlock = (
 		default:
 			return renderUnknownContent(content, key);
 	}
+};
+
+const renderMessageContentBlocks = (
+	contentBlocks: readonly ContentBlock[] | undefined,
+	fallbackContent: string,
+	getLabel: (key: string, options?: Record<string, unknown>) => string,
+	onOpenFilePreview?: (path: string) => void,
+) => {
+	const blocks =
+		contentBlocks && contentBlocks.length > 0
+			? contentBlocks
+			: fallbackContent
+				? [{ type: "text" as const, text: fallbackContent }]
+				: [];
+	return (
+		<div className="flex min-w-0 flex-col gap-2">
+			{blocks.map((block, index) =>
+				block.type === "text" ? (
+					<LazyStreamdown key={`message-text-${index}`}>
+						{block.text}
+					</LazyStreamdown>
+				) : (
+					renderContentBlock(
+						block,
+						`message-${block.type}-${index}`,
+						getLabel,
+						onOpenFilePreview,
+					)
+				),
+			)}
+		</div>
+	);
 };
 
 const isDiffPayload = (
@@ -783,10 +812,16 @@ export const ToolCallItemContent = ({
 
 type ThoughtItemContentProps = {
 	message: Extract<ChatMessage, { kind: "thought" }>;
+	onOpenFilePreview?: (path: string) => void;
 };
 
-export const ThoughtItemContent = ({ message }: ThoughtItemContentProps) => {
+export const ThoughtItemContent = ({
+	message,
+	onOpenFilePreview,
+}: ThoughtItemContentProps) => {
 	const { t } = useTranslation();
+	const getLabel = (key: string, options?: Record<string, unknown>) =>
+		t(key, { defaultValue: key, ...options });
 	return (
 		<div className="flex flex-col gap-1 items-start">
 			<details className="w-full max-w-[85%]">
@@ -797,7 +832,12 @@ export const ThoughtItemContent = ({ message }: ThoughtItemContentProps) => {
 					</span>
 				</summary>
 				<div className="mt-1 ml-3.5 pl-2 border-l border-muted text-xs text-muted-foreground">
-					<LazyStreamdown>{message.content}</LazyStreamdown>
+					{renderMessageContentBlocks(
+						message.contentBlocks,
+						message.content,
+						getLabel,
+						onOpenFilePreview,
+					)}
 				</div>
 			</details>
 		</div>
@@ -878,14 +918,12 @@ const MessageItemInner = ({
 		);
 	}
 	if (message.kind === "permission") {
-		const meta = message.toolCall?._meta;
+		const meta = getToolCallMetaHints(message.toolCall?._meta);
 		const toolLabel =
-			message.toolCall?.title ??
-			(meta?.name as string | undefined) ??
-			getLabel("toolCall.toolCall");
+			message.toolCall?.title ?? meta.name ?? getLabel("toolCall.toolCall");
 		const toolId = message.toolCall?.toolCallId ?? message.requestId;
-		const toolCommand = meta?.command as string | undefined;
-		const toolArgs = (meta?.args as string[] | undefined)?.join(" ");
+		const toolCommand = meta.command;
+		const toolArgs = meta.args?.join(" ");
 		const isDisabled =
 			message.outcome !== undefined || message.decisionState === "submitting";
 		return (
@@ -971,7 +1009,12 @@ const MessageItemInner = ({
 	}
 	// Thought messages: collapsible light block
 	if (message.kind === "thought") {
-		return <ThoughtItemContent message={message} />;
+		return (
+			<ThoughtItemContent
+				message={message}
+				onOpenFilePreview={onOpenFilePreview}
+			/>
+		);
 	}
 	// User messages: bubble style with hover-reveal copy button
 	if (isUser && message.kind === "text") {
@@ -1029,7 +1072,12 @@ const MessageItemInner = ({
 							className={message.isStreaming ? "opacity-90" : "opacity-100"}
 						>
 							<BubbleContent>
-								{renderUserContent(message, onOpenFilePreview)}
+								{renderMessageContentBlocks(
+									message.contentBlocks,
+									message.content,
+									getLabel,
+									onOpenFilePreview,
+								)}
 							</BubbleContent>
 						</Bubble>
 					</div>
@@ -1048,7 +1096,12 @@ const MessageItemInner = ({
 					<BubbleContent
 						className={message.isStreaming ? "opacity-90" : "opacity-100"}
 					>
-						<LazyStreamdown>{message.content}</LazyStreamdown>
+						{renderMessageContentBlocks(
+							message.contentBlocks,
+							message.content,
+							getLabel,
+							onOpenFilePreview,
+						)}
 					</BubbleContent>
 				</Bubble>
 			</MessageContent>

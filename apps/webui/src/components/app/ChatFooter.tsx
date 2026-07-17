@@ -41,6 +41,10 @@ import {
 import { useTranslation } from "react-i18next";
 import { CommandCombobox } from "@/components/app/CommandCombobox";
 import { ResourceCombobox } from "@/components/app/ResourceCombobox";
+import {
+	SessionConfigControls,
+	type SessionConfigValue,
+} from "@/components/app/SessionConfigControls";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { AvailableCommand, ContentBlock, ResourceLink } from "@/lib/acp";
 import {
@@ -62,8 +66,10 @@ export type ChatFooterProps = {
 	activeSessionId: string | undefined;
 	isModeSwitching: boolean;
 	isModelSwitching: boolean;
+	pendingConfigId?: string;
 	onModeChange: (modeId: string) => void;
 	onModelChange: (modelId: string) => void;
+	onSessionConfigChange: (configId: string, value: SessionConfigValue) => void;
 	onSend: () => void;
 	onCancel: () => void;
 };
@@ -441,8 +447,10 @@ export function ChatFooter({
 	activeSessionId,
 	isModeSwitching,
 	isModelSwitching,
+	pendingConfigId,
 	onModeChange,
 	onModelChange,
+	onSessionConfigChange,
 	onSend,
 	onCancel,
 }: ChatFooterProps) {
@@ -458,6 +466,13 @@ export function ChatFooter({
 	const availableModels = activeSession?.availableModels ?? [];
 	const availableModes = activeSession?.availableModes ?? [];
 	const availableCommands = activeSession?.availableCommands ?? [];
+	const configOptions = activeSession?.configOptions ?? [];
+	const hasConfigModel = configOptions.some(
+		(option) => option.type === "select" && option.category === "model",
+	);
+	const hasConfigMode = configOptions.some(
+		(option) => option.type === "select" && option.category === "mode",
+	);
 	const modelLabel = activeSession?.modelName ?? activeSession?.modelId;
 	const modeLabel = activeSession?.modeName ?? activeSession?.modeId;
 	const isReady = Boolean(
@@ -1299,7 +1314,13 @@ export function ChatFooter({
 
 					{/* Bottom toolbar */}
 					<div className="flex items-center gap-1 px-2 pb-2">
-						{availableModels.length > 0 ? (
+						<SessionConfigControls
+							options={configOptions}
+							disabled={!canMutateSession}
+							pendingConfigId={pendingConfigId}
+							onChange={onSessionConfigChange}
+						/>
+						{!hasConfigModel && availableModels.length > 0 ? (
 							<Select
 								value={activeSession?.modelId ?? ""}
 								onValueChange={onModelChange}
@@ -1319,13 +1340,13 @@ export function ChatFooter({
 									))}
 								</SelectContent>
 							</Select>
-						) : modelLabel ? (
+						) : !hasConfigModel && modelLabel ? (
 							<span className="max-w-32 truncate px-1 py-0.5 text-xs text-muted-foreground">
 								{modelLabel}
 							</span>
 						) : null}
 
-						{availableModes.length > 0 ? (
+						{!hasConfigMode && availableModes.length > 0 ? (
 							<Select
 								value={activeSession?.modeId ?? ""}
 								onValueChange={onModeChange}
@@ -1345,7 +1366,7 @@ export function ChatFooter({
 									))}
 								</SelectContent>
 							</Select>
-						) : modeLabel ? (
+						) : !hasConfigMode && modeLabel ? (
 							<span className="max-w-32 truncate px-1 py-0.5 text-xs text-muted-foreground">
 								{modeLabel}
 							</span>

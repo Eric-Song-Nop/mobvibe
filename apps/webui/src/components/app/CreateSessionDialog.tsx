@@ -31,6 +31,7 @@ import { Skeleton } from "@mobvibe/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AgentAuthenticationPanel } from "@/components/app/AgentAuthenticationPanel";
 import { WorkingDirectoryDialog } from "@/components/app/WorkingDirectoryDialog";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
@@ -38,7 +39,7 @@ import {
 	fetchFsRoots,
 	fetchGitBranchesForCwd,
 } from "@/lib/api";
-import { useMachinesStore } from "@/lib/machines-store";
+import { getBackendCapability, useMachinesStore } from "@/lib/machines-store";
 import { useUiStore } from "@/lib/ui-store";
 import { getPathBasename } from "@/lib/ui-utils";
 
@@ -65,12 +66,17 @@ export function CreateSessionDialog({
 }: CreateSessionDialogProps) {
 	const { t } = useTranslation();
 	const [directoryDialogOpen, setDirectoryDialogOpen] = useState(false);
+	const [additionalDirectoryDialogOpen, setAdditionalDirectoryDialogOpen] =
+		useState(false);
+	const [additionalDirectoryCandidate, setAdditionalDirectoryCandidate] =
+		useState<string>();
 	const [hasUserEditedWorktreeBranch, setHasUserEditedWorktreeBranch] =
 		useState(false);
 	const {
 		draftTitle,
 		draftBackendId,
 		draftCwd,
+		draftAdditionalDirectories,
 		draftWorktreeEnabled,
 		draftWorktreeBranch,
 		draftWorktreeSuggestedBranch,
@@ -78,12 +84,22 @@ export function CreateSessionDialog({
 		setDraftTitle,
 		setDraftBackendId,
 		setDraftCwd,
+		setDraftAdditionalDirectories,
 		setDraftWorktreeEnabled,
 		setDraftWorktreeBranch,
 		setDraftWorktreeSuggestedBranch,
 		setDraftWorktreeBaseBranch,
 	} = useUiStore();
 	const { selectedMachineId, machines } = useMachinesStore();
+	const selectedMachine = selectedMachineId
+		? machines[selectedMachineId]
+		: undefined;
+	const supportsAdditionalDirectories =
+		getBackendCapability(
+			selectedMachine,
+			draftBackendId,
+			"additionalDirectories",
+		) === true;
 	const machineDisplayName = selectedMachineId
 		? (machines[selectedMachineId]?.hostname ?? selectedMachineId.slice(0, 8))
 		: undefined;
@@ -152,6 +168,8 @@ export function CreateSessionDialog({
 	useEffect(() => {
 		if (!open) {
 			setDirectoryDialogOpen(false);
+			setAdditionalDirectoryDialogOpen(false);
+			setAdditionalDirectoryCandidate(undefined);
 			setHasUserEditedWorktreeBranch(false);
 		}
 	}, [open]);
@@ -177,6 +195,39 @@ export function CreateSessionDialog({
 		selectedMachineId,
 		setDraftCwd,
 	]);
+
+	const handleBackendChange = (backendId: string) => {
+		setDraftBackendId(backendId);
+		if (
+			getBackendCapability(
+				selectedMachine,
+				backendId,
+				"additionalDirectories",
+			) !== true
+		) {
+			setDraftAdditionalDirectories([]);
+		}
+	};
+
+	const handleCwdChange = (cwd: string) => {
+		setDraftCwd(cwd);
+		if (draftAdditionalDirectories.includes(cwd)) {
+			setDraftAdditionalDirectories(
+				draftAdditionalDirectories.filter((directory) => directory !== cwd),
+			);
+		}
+	};
+
+	const handleAddAdditionalDirectory = (directory: string) => {
+		if (
+			directory !== draftCwd &&
+			!draftAdditionalDirectories.includes(directory)
+		) {
+			setDraftAdditionalDirectories([...draftAdditionalDirectories, directory]);
+		}
+		setAdditionalDirectoryCandidate(undefined);
+		setAdditionalDirectoryDialogOpen(false);
+	};
 
 	// Reset worktree when query completes and cwd is not a git repo
 	useEffect(() => {
@@ -228,7 +279,7 @@ export function CreateSessionDialog({
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent
 				size="default"
-				className="w-[100vw] max-w-none sm:w-[92vw] sm:max-w-[92vw] lg:max-w-4xl"
+				className="max-h-[100svh] w-[100vw] max-w-none overflow-y-auto overscroll-contain sm:max-h-[calc(100svh-2rem)] sm:w-[92vw] sm:max-w-[92vw] lg:max-w-4xl"
 			>
 				<div className="grid gap-1.5 text-center sm:text-left">
 					<DialogTitle>{t("session.createTitle")}</DialogTitle>
@@ -264,7 +315,7 @@ export function CreateSessionDialog({
 						<Label htmlFor="session-backend">{t("session.backendLabel")}</Label>
 						<Select
 							value={draftBackendId}
-							onValueChange={setDraftBackendId}
+							onValueChange={handleBackendChange}
 							disabled={availableBackends.length === 0}
 						>
 							<SelectTrigger id="session-backend">
@@ -285,6 +336,11 @@ export function CreateSessionDialog({
 							</SelectContent>
 						</Select>
 					</div>
+					<AgentAuthenticationPanel
+						backendId={draftBackendId || undefined}
+						enabled={open}
+						machineId={selectedMachineId ?? undefined}
+					/>
 					<div className="flex flex-col gap-2">
 						<Label htmlFor="session-cwd">{t("session.cwdLabel")}</Label>
 						<InputGroup>
@@ -293,7 +349,7 @@ export function CreateSessionDialog({
 								name="session-cwd"
 								autoComplete="off"
 								value={draftCwd ?? ""}
-								onChange={(event) => setDraftCwd(event.target.value)}
+								onChange={(event) => handleCwdChange(event.target.value)}
 								placeholder={t("session.cwdPlaceholder")}
 							/>
 							<InputGroupAddon align="inline-end">
@@ -312,6 +368,64 @@ export function CreateSessionDialog({
 							</div>
 						) : null}
 					</div>
+
+					{supportsAdditionalDirectories ? (
+						<div className="flex min-w-0 flex-col gap-2">
+							<div className="flex items-center justify-between gap-3">
+								<div className="min-w-0">
+									<div className="text-sm font-medium">
+										{t("session.additionalDirectories.label")}
+									</div>
+									<p className="text-muted-foreground text-xs text-pretty">
+										{t("session.additionalDirectories.description")}
+									</p>
+								</div>
+								<Button
+									type="button"
+									variant="outline"
+									onClick={() => {
+										setAdditionalDirectoryCandidate(undefined);
+										setAdditionalDirectoryDialogOpen(true);
+									}}
+									disabled={!selectedMachineId}
+								>
+									{t("session.additionalDirectories.browse")}
+								</Button>
+							</div>
+							{draftAdditionalDirectories.length > 0 ? (
+								<ul className="border-border divide-border min-w-0 divide-y rounded-md border">
+									{draftAdditionalDirectories.map((directory) => (
+										<li
+											key={directory}
+											className="flex min-w-0 items-center gap-2 px-3 py-2"
+										>
+											<code
+												className="min-w-0 flex-1 truncate text-xs"
+												title={directory}
+											>
+												{directory}
+											</code>
+											<Button
+												type="button"
+												variant="ghost"
+												size="sm"
+												aria-label={`${t("session.additionalDirectories.remove")} ${directory}`}
+												onClick={() =>
+													setDraftAdditionalDirectories(
+														draftAdditionalDirectories.filter(
+															(value) => value !== directory,
+														),
+													)
+												}
+											>
+												{t("session.additionalDirectories.remove")}
+											</Button>
+										</li>
+									))}
+								</ul>
+							) : null}
+						</div>
+					) : null}
 
 					{/* Loading state while resolving the current cwd */}
 					{isResolvingGitContext ? (
@@ -448,8 +562,19 @@ export function CreateSessionDialog({
 						open={directoryDialogOpen}
 						onOpenChange={setDirectoryDialogOpen}
 						value={draftCwd}
-						onChange={setDraftCwd}
+						onChange={handleCwdChange}
 						machineId={selectedMachineId ?? undefined}
+					/>
+					<WorkingDirectoryDialog
+						open={additionalDirectoryDialogOpen}
+						onOpenChange={setAdditionalDirectoryDialogOpen}
+						value={additionalDirectoryCandidate}
+						onChange={setAdditionalDirectoryCandidate}
+						onConfirm={handleAddAdditionalDirectory}
+						machineId={selectedMachineId ?? undefined}
+						title={t("session.additionalDirectories.dialogTitle")}
+						description={t("session.additionalDirectories.dialogDescription")}
+						confirmLabel={t("session.additionalDirectories.add")}
 					/>
 				</div>
 				<div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">

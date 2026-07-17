@@ -1,5 +1,6 @@
 import {
 	AlertDialog,
+	AlertDialogAction,
 	AlertDialogCancel,
 	AlertDialogContent,
 	AlertDialogDescription,
@@ -16,6 +17,10 @@ export type WorkingDirectoryDialogProps = {
 	value: string | undefined;
 	onChange: (nextPath: string) => void;
 	machineId?: string;
+	title?: string;
+	description?: string;
+	confirmLabel?: string;
+	onConfirm?: (path: string) => void;
 };
 
 export function WorkingDirectoryDialog({
@@ -24,6 +29,10 @@ export function WorkingDirectoryDialog({
 	value,
 	onChange,
 	machineId,
+	title,
+	description,
+	confirmLabel,
+	onConfirm,
 }: WorkingDirectoryDialogProps) {
 	const { t } = useTranslation();
 
@@ -32,10 +41,10 @@ export function WorkingDirectoryDialog({
 			<AlertDialogContent className="flex h-[100svh] w-[100vw] max-w-none min-h-0 min-w-0 flex-col gap-4 overflow-hidden translate-x-0 translate-y-0 rounded-none px-4 pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))] sm:pt-4 sm:pb-4 sm:h-[80vh] sm:max-w-5xl sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-none top-0 left-0 sm:top-1/2 sm:left-1/2">
 				<AlertDialogHeader>
 					<AlertDialogTitle>
-						{t("workingDirectory.dialogTitle")}
+						{title ?? t("workingDirectory.dialogTitle")}
 					</AlertDialogTitle>
 					<AlertDialogDescription>
-						{t("workingDirectory.dialogDescription")}
+						{description ?? t("workingDirectory.dialogDescription")}
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 
@@ -50,6 +59,16 @@ export function WorkingDirectoryDialog({
 				/>
 				<AlertDialogFooter>
 					<AlertDialogCancel>{t("common.close")}</AlertDialogCancel>
+					{onConfirm ? (
+						<AlertDialogAction
+							disabled={!value}
+							onClick={() => {
+								if (value) onConfirm(value);
+							}}
+						>
+							{confirmLabel ?? t("common.add")}
+						</AlertDialogAction>
+					) : null}
 				</AlertDialogFooter>
 			</AlertDialogContent>
 		</AlertDialog>

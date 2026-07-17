@@ -31,6 +31,7 @@ import {
 import { type ChatSession, useChatStore } from "@/lib/chat-store";
 import { bootstrapSessionE2EE, e2ee } from "@/lib/e2ee";
 import { createFallbackError } from "@/lib/error-utils";
+import { sanitizeInboundAcpPayload } from "@/lib/inbound-acp-meta";
 import { useMachinesStore } from "@/lib/machines-store";
 import {
 	notifyPermissionRequest,
@@ -46,6 +47,8 @@ type UseSocketOptions = {
 	setSending?: ChatStoreActions["setSending"];
 	setCanceling?: ChatStoreActions["setCanceling"];
 	finalizeAssistantMessage?: ChatStoreActions["finalizeAssistantMessage"];
+	upsertPlan?: ChatStoreActions["upsertPlan"];
+	removePlan?: ChatStoreActions["removePlan"];
 	/** Called on socket reconnect (not the initial connect) */
 	onReconnect?: () => void;
 } & Pick<
@@ -87,6 +90,10 @@ export function useSocket({
 	appendThoughtChunk,
 	confirmOrAppendUserMessage,
 	updateSessionMeta,
+	upsertPlan = (sessionId, plan) =>
+		useChatStore.getState().upsertPlan(sessionId, plan),
+	removePlan = (sessionId, planId) =>
+		useChatStore.getState().removePlan(sessionId, planId),
 	setStreamError,
 	addPermissionRequest,
 	setPermissionDecisionState,
@@ -166,6 +173,8 @@ export function useSocket({
 			appendThoughtChunk,
 			confirmOrAppendUserMessage,
 			updateSessionMeta,
+			upsertPlan,
+			removePlan,
 			setStreamError,
 			addPermissionRequest,
 			setPermissionDecisionState,
@@ -452,6 +461,9 @@ export function useSocket({
 				.setSessionE2EEStatus(incomingEvent.sessionId, "missing_key");
 			return;
 		}
+		const sanitizedEvent = sanitizeInboundAcpPayload(event);
+		if (!sanitizedEvent) return;
+		event = sanitizedEvent;
 
 		let session = sessionsRef.current[event.sessionId];
 		if (!session) {
@@ -572,10 +584,12 @@ export function useSocket({
 	};
 
 	handlePermissionRequestRef.current = (payload: PermissionRequestPayload) => {
+		const sanitizedPayload = sanitizeInboundAcpPayload(payload);
+		if (!sanitizedPayload) return;
 		applyPermissionRequest({
-			sessionId: payload.sessionId,
-			payload,
-			session: sessionsRef.current[payload.sessionId],
+			sessionId: sanitizedPayload.sessionId,
+			payload: sanitizedPayload,
+			session: sessionsRef.current[sanitizedPayload.sessionId],
 			sessions: sessionsRef.current,
 			actions: { addPermissionRequest },
 			notifications: { notifyPermissionRequest },
@@ -591,6 +605,9 @@ export function useSocket({
 		const addedOrUpdated = [...payload.added, ...payload.updated];
 		for (const reset of getRevisionResetSessions(addedOrUpdated)) {
 			clearRevisionRuntimeState(reset.sessionId, reset.revision);
+		}
+		for (const sessionId of payload.removed) {
+			clearTrackedSession(sessionId);
 		}
 		handleSessionsChanged(payload);
 
@@ -902,6 +919,7 @@ export function useSocket({
 	return {
 		syncSessionSummaries,
 		syncSessionHistory,
+		clearTrackedSession,
 		isBackfilling,
 	};
 }

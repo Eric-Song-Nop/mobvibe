@@ -25,6 +25,7 @@ vi.mock("@hugeicons/core-free-icons", () => ({
 	Image01Icon: {},
 	StopIcon: {},
 	File01Icon: {},
+	Settings02Icon: {},
 }));
 
 vi.mock("react-i18next", async (importOriginal) => {
@@ -135,8 +136,10 @@ const renderFooter = (
 				activeSessionId={session.sessionId}
 				isModeSwitching={false}
 				isModelSwitching={false}
+				pendingConfigId={undefined}
 				onModeChange={vi.fn()}
 				onModelChange={vi.fn()}
+				onSessionConfigChange={vi.fn()}
 				onSend={vi.fn()}
 				onCancel={vi.fn()}
 				{...props}
@@ -717,6 +720,38 @@ describe("ChatFooter", () => {
 			uploadButton.compareDocumentPosition(sendButton) &
 				Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
+	});
+
+	it("keeps legacy selectors when boolean config hints share their categories", () => {
+		renderFooter(
+			buildSession({
+				availableModels: [{ id: "model-1", name: "Model 1" }],
+				availableModes: [{ id: "mode-1", name: "Mode 1" }],
+				configOptions: [
+					{
+						type: "boolean",
+						id: "mode-toggle",
+						name: "Mode toggle",
+						category: "mode",
+						currentValue: false,
+					},
+					{
+						type: "boolean",
+						id: "model-toggle",
+						name: "Model toggle",
+						category: "model",
+						currentValue: true,
+					},
+				],
+			}),
+		);
+
+		expect(
+			screen.getByRole("button", { name: "chat.modelLabel" }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "chat.modeLabel" }),
+		).toBeInTheDocument();
 	});
 
 	it("keeps send disabled until restored session E2EE status is hydrated", () => {

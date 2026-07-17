@@ -1,9 +1,11 @@
 import type {
 	AvailableCommand,
 	PlanEntry,
+	PlanOperationSessionUpdate,
 	SessionNotification,
 	ToolCallUpdate,
 } from "@mobvibe/shared";
+import { sanitizePlanSessionUpdate } from "@mobvibe/shared";
 
 // Core-specific types (UI/extraction helpers)
 export type SessionTextChunk = {
@@ -16,8 +18,8 @@ export type SessionModeUpdate = {
 };
 
 export type SessionInfoPayload = {
-	title?: string;
-	updatedAt?: string;
+	title?: string | null;
+	updatedAt?: string | null;
 	_meta?: Record<string, unknown> | null;
 };
 
@@ -28,7 +30,8 @@ export const extractTextChunk = (
 	const { update } = notification;
 	if (
 		update.sessionUpdate !== "user_message_chunk" &&
-		update.sessionUpdate !== "agent_message_chunk"
+		update.sessionUpdate !== "agent_message_chunk" &&
+		update.sessionUpdate !== "agent_thought_chunk"
 	) {
 		return null;
 	}
@@ -58,17 +61,29 @@ export const extractSessionInfoUpdate = (
 	if (notification.update.sessionUpdate !== "session_info_update") {
 		return null;
 	}
-	const title = notification.update.title ?? undefined;
-	const updatedAt = notification.update.updatedAt ?? undefined;
-	const _meta =
-		"_meta" in notification.update
-			? (notification.update as { _meta?: Record<string, unknown> | null })
-					._meta
-			: undefined;
-	if (!title && !updatedAt && _meta === undefined) {
+	const result: SessionInfoPayload = {};
+	if (
+		"title" in notification.update &&
+		notification.update.title !== undefined
+	) {
+		result.title = notification.update.title;
+	}
+	if (
+		"updatedAt" in notification.update &&
+		notification.update.updatedAt !== undefined
+	) {
+		result.updatedAt = notification.update.updatedAt;
+	}
+	if (
+		"_meta" in notification.update &&
+		notification.update._meta !== undefined
+	) {
+		result._meta = notification.update._meta;
+	}
+	if (Object.keys(result).length === 0) {
 		return null;
 	}
-	return { title, updatedAt, _meta };
+	return result;
 };
 
 export const extractToolCallUpdate = (
@@ -91,12 +106,18 @@ export type PlanUpdatePayload = {
 export const extractPlanUpdate = (
 	notification: SessionNotification,
 ): PlanUpdatePayload | null => {
-	const { update } = notification;
-	if (update.sessionUpdate !== "plan") {
-		return null;
-	}
-	const planUpdate = update as unknown as { entries?: PlanEntry[] };
-	return { entries: planUpdate.entries ?? [] };
+	const update = sanitizePlanSessionUpdate(notification.update);
+	return update?.sessionUpdate === "plan" ? { entries: update.entries } : null;
+};
+
+export const extractPlanOperationUpdate = (
+	notification: SessionNotification,
+): PlanOperationSessionUpdate | null => {
+	const update = sanitizePlanSessionUpdate(notification.update);
+	return update?.sessionUpdate === "plan_update" ||
+		update?.sessionUpdate === "plan_removed"
+		? update
+		: null;
 };
 
 export const extractAvailableCommandsUpdate = (

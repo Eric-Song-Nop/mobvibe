@@ -21,8 +21,10 @@ export type {
 	PlanEntry,
 	PlanEntryPriority,
 	PlanEntryStatus,
+	PlanUpdateContent,
 	ResourceLink,
 	SessionAttachedPayload,
+	SessionConfigOption,
 	SessionDetachedPayload,
 	SessionEvent,
 	// Session types
@@ -41,6 +43,7 @@ export type {
 
 export {
 	extractAvailableCommandsUpdate,
+	extractPlanOperationUpdate,
 	extractPlanUpdate,
 	extractSessionInfoUpdate,
 	extractSessionModeUpdate,

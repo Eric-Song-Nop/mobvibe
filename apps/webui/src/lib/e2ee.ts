@@ -77,6 +77,17 @@ class E2EEManager {
 	}
 
 	/**
+	 * Forget one session's runtime key material without removing paired devices.
+	 * The cached DEK is overwritten before its references are released.
+	 */
+	forgetSession(sessionId: string): void {
+		this.sessionDeks.get(sessionId)?.fill(0);
+		this.sessionDeks.delete(sessionId);
+		this.sessionDekRevisions.delete(sessionId);
+		this.sessionToSecret.delete(sessionId);
+	}
+
+	/**
 	 * Attempt to unwrap DEKs for all provided sessions.
 	 * Skips sessions that already have a DEK or lack a wrappedDek.
 	 */

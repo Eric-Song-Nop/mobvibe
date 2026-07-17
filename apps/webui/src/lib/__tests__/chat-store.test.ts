@@ -1,3 +1,9 @@
+import {
+	ACP_MAX_ACTIVE_PLANS,
+	ACP_PLAN_MARKDOWN_MAX_BYTES,
+	type ContentBlock,
+	type PlanUpdateContent,
+} from "@mobvibe/shared";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useChatStore } from "../chat-store";
 
@@ -18,6 +24,126 @@ const resetStore = () => {
 
 describe("chat-store", () => {
 	beforeEach(resetStore);
+
+	it("initializes session metadata and pinned-title state", () => {
+		useChatStore.getState().createLocalSession("s1", {
+			_meta: { source: "create", keep: null },
+			isTitlePinned: true,
+		});
+
+		expect(useChatStore.getState().sessions.s1).toEqual(
+			expect.objectContaining({
+				_meta: { source: "create", keep: null },
+				isTitlePinned: true,
+			}),
+		);
+	});
+
+	describe("plan operations", () => {
+		const itemsPlan = (planId: string, content: string): PlanUpdateContent => ({
+			type: "items",
+			planId,
+			entries: [{ content, priority: "medium", status: "pending" }],
+		});
+
+		it("replaces a plan in place, preserves ordering, and removes by exact ID", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.upsertPlan("s1", itemsPlan("plan-a", "first"));
+			store.upsertPlan("s1", {
+				type: "markdown",
+				planId: "plan-b",
+				content: "# Second",
+			});
+			store.upsertPlan("s1", {
+				type: "file",
+				planId: "plan-a",
+				uri: "file:///workspace/PLAN.md",
+			});
+
+			expect(useChatStore.getState().sessions.s1.plans).toEqual([
+				{
+					type: "file",
+					planId: "plan-a",
+					uri: "file:///workspace/PLAN.md",
+				},
+				{
+					type: "markdown",
+					planId: "plan-b",
+					content: "# Second",
+				},
+			]);
+
+			store.removePlan("s1", "missing");
+			expect(useChatStore.getState().sessions.s1.plans).toHaveLength(2);
+			store.removePlan("s1", "plan-a");
+			expect(
+				useChatStore.getState().sessions.s1.plans?.map((plan) => plan.planId),
+			).toEqual(["plan-b"]);
+			store.removePlan("s1", "plan-b");
+			expect(useChatStore.getState().sessions.s1.plans).toBeUndefined();
+		});
+
+		it("bounds active plan count while still allowing replacement", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			for (let index = 0; index <= ACP_MAX_ACTIVE_PLANS; index += 1) {
+				store.upsertPlan("s1", itemsPlan(`plan-${index}`, `${index}`));
+			}
+			expect(useChatStore.getState().sessions.s1.plans).toHaveLength(
+				ACP_MAX_ACTIVE_PLANS,
+			);
+
+			store.upsertPlan("s1", itemsPlan("plan-0", "replacement"));
+			expect(useChatStore.getState().sessions.s1.plans?.[0]).toEqual(
+				itemsPlan("plan-0", "replacement"),
+			);
+		});
+
+		it("rejects a projection that would exceed the one MiB store cap", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			const content = "x".repeat(ACP_PLAN_MARKDOWN_MAX_BYTES);
+			for (let index = 0; index < 4; index += 1) {
+				store.upsertPlan("s1", {
+					type: "markdown",
+					planId: `plan-${index}`,
+					content,
+				});
+			}
+
+			expect(
+				useChatStore.getState().sessions.s1.plans?.map((plan) => plan.planId),
+			).toEqual(["plan-0", "plan-1", "plan-2"]);
+		});
+
+		it("clears and restores legacy and operation plans with session history", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			const legacyPlan = [
+				{
+					content: "Legacy",
+					priority: "low" as const,
+					status: "pending" as const,
+				},
+			];
+			const plans = [itemsPlan("plan-a", "Operation")];
+			store.updateSessionMeta("s1", { plan: legacyPlan });
+			store.upsertPlan("s1", plans[0]);
+			store.addUserMessage("s1", "keep me");
+			const messages = [...useChatStore.getState().sessions.s1.messages];
+
+			store.resetSessionForRevision("s1", 2);
+			expect(useChatStore.getState().sessions.s1).toEqual(
+				expect.objectContaining({ plan: undefined, plans: undefined }),
+			);
+
+			store.restoreSessionMessages("s1", messages, { plan: legacyPlan, plans });
+			expect(useChatStore.getState().sessions.s1).toEqual(
+				expect.objectContaining({ plan: legacyPlan, plans }),
+			);
+		});
+	});
 
 	// ---------------------------------------------------------------------------
 	// updateSessionCursor — monotonic guard
@@ -727,6 +853,114 @@ describe("chat-store", () => {
 	});
 
 	describe("syncSessions (attached revision authority)", () => {
+		it("replaces and clears summary metadata by property presence", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1", {
+				title: "Session",
+				backendId: "backend-1",
+				backendLabel: "Backend",
+			});
+			store.updateSessionMeta("s1", { _meta: { stale: true } });
+			const baseSummary = {
+				sessionId: "s1",
+				title: "Session",
+				backendId: "backend-1",
+				backendLabel: "Backend",
+				createdAt: "2026-07-01T00:00:00.000Z",
+				updatedAt: "2026-07-01T00:00:00.000Z",
+			};
+
+			store.handleSessionsChanged({
+				added: [],
+				updated: [{ ...baseSummary, _meta: { fresh: true, keep: null } }],
+				removed: [],
+			});
+			expect(useChatStore.getState().sessions.s1._meta).toEqual({
+				fresh: true,
+				keep: null,
+			});
+
+			store.handleSessionsChanged({
+				added: [],
+				updated: [baseSummary],
+				removed: [],
+			});
+			expect(useChatStore.getState().sessions.s1._meta).toEqual({
+				fresh: true,
+				keep: null,
+			});
+
+			store.handleSessionsChanged({
+				added: [],
+				updated: [{ ...baseSummary, _meta: null }],
+				removed: [],
+			});
+			expect(useChatStore.getState().sessions.s1._meta).toBeNull();
+		});
+
+		it("atomically replaces session config options, including with an empty list", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1", {
+				modelId: "model-old",
+				modelName: "Old model",
+				availableModels: [{ id: "model-old", name: "Old model" }],
+				configOptions: [
+					{
+						type: "boolean",
+						id: "safe-mode",
+						name: "Safe mode",
+						currentValue: true,
+					},
+				],
+			});
+
+			store.syncSessions([
+				{
+					sessionId: "s1",
+					title: "Session",
+					backendId: "backend-1",
+					backendLabel: "Backend",
+					createdAt: "2024-01-01T00:00:00Z",
+					updatedAt: "2024-01-01T00:00:00Z",
+					configOptions: [],
+				},
+			]);
+
+			expect(useChatStore.getState().sessions.s1.configOptions).toEqual([]);
+			expect(useChatStore.getState().sessions.s1.modelId).toBeUndefined();
+			expect(useChatStore.getState().sessions.s1.modelName).toBeUndefined();
+			expect(
+				useChatStore.getState().sessions.s1.availableModels,
+			).toBeUndefined();
+		});
+
+		it("clears legacy model projections when a config mutation removes them", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1", {
+				modelId: "model-old",
+				modelName: "Old model",
+				availableModels: [{ id: "model-old", name: "Old model" }],
+				configOptions: [
+					{
+						type: "select",
+						id: "model",
+						name: "Model",
+						category: "model",
+						currentValue: "model-old",
+						options: [{ value: "model-old", name: "Old model" }],
+					},
+				],
+			});
+
+			store.updateSessionMeta("s1", { configOptions: [] });
+
+			const session = useChatStore.getState().sessions.s1;
+			expect(session.configOptions).toEqual([]);
+			expect(session.modelId).toBeUndefined();
+			expect(session.modelName).toBeUndefined();
+			expect(session.availableModels).toBeUndefined();
+		});
+
 		it("resets attached transcript when the summary revision changes", () => {
 			const store = useChatStore.getState();
 			store.createLocalSession("s1", {
@@ -964,6 +1198,180 @@ describe("chat-store", () => {
 			const session = useChatStore.getState().sessions.s1;
 			expect(session.revision).toBe(1);
 			expect(session.lastAppliedSeq).toBe(5);
+		});
+	});
+
+	// ---------------------------------------------------------------------------
+	// ACP protocol message boundaries
+	// ---------------------------------------------------------------------------
+	describe("ACP protocol message boundaries", () => {
+		it("coalesces user chunks by protocol messageId without crossing boundaries", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.confirmOrAppendUserMessage("s1", "Hello ", undefined, 1, "user-1");
+			store.confirmOrAppendUserMessage("s1", "world", undefined, 2, "user-1");
+			store.confirmOrAppendUserMessage(
+				"s1",
+				"Next message",
+				undefined,
+				3,
+				"user-2",
+			);
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(2);
+			expect(messages[0]).toMatchObject({
+				content: "Hello world",
+				contentBlocks: [{ type: "text", text: "Hello world" }],
+				protocolMessageId: "user-1",
+			});
+			expect(messages[1]).toMatchObject({
+				content: "Next message",
+				protocolMessageId: "user-2",
+			});
+		});
+
+		it("does not reuse a Mobvibe send id across protocol message boundaries", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.confirmOrAppendUserMessage("s1", "First", "send-1", 1, "user-1");
+			store.confirmOrAppendUserMessage("s1", "Second", "send-1", 2, "user-2");
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(2);
+			expect(messages[0]).toMatchObject({
+				id: "send-1",
+				content: "First",
+				protocolMessageId: "user-1",
+			});
+			expect(messages[1]).toMatchObject({
+				content: "Second",
+				protocolMessageId: "user-2",
+			});
+			expect(messages[1]?.id).not.toBe("send-1");
+		});
+
+		it("keeps assistant chunks with the same messageId together", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.appendAssistantChunk("s1", "Hello ", "assistant-1");
+			store.appendAssistantChunk("s1", "world", "assistant-1");
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(1);
+			expect(messages[0]).toMatchObject({
+				kind: "text",
+				content: "Hello world",
+				protocolMessageId: "assistant-1",
+				isStreaming: true,
+			});
+		});
+
+		it("starts a new assistant message when messageId changes", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.appendAssistantChunk("s1", "First", "assistant-1");
+			store.appendAssistantChunk("s1", "Second", "assistant-2");
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(2);
+			expect(messages[0]).toMatchObject({
+				content: "First",
+				protocolMessageId: "assistant-1",
+				isStreaming: false,
+			});
+			expect(messages[1]).toMatchObject({
+				content: "Second",
+				protocolMessageId: "assistant-2",
+				isStreaming: true,
+			});
+		});
+
+		it("retains legacy chunk folding when the agent omits messageId", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.appendAssistantChunk("s1", "legacy ");
+			store.appendAssistantChunk("s1", "agent");
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(1);
+			expect(messages[0]).toMatchObject({
+				content: "legacy agent",
+			});
+		});
+
+		it("starts a new thought message when messageId changes", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.appendThoughtChunk("s1", "First thought", "thought-1");
+			store.appendThoughtChunk("s1", "Second thought", "thought-2");
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(2);
+			expect(messages[0]).toMatchObject({
+				kind: "thought",
+				content: "First thought",
+				protocolMessageId: "thought-1",
+				isStreaming: false,
+			});
+			expect(messages[1]).toMatchObject({
+				kind: "thought",
+				content: "Second thought",
+				protocolMessageId: "thought-2",
+				isStreaming: true,
+			});
+		});
+
+		it("preserves mixed assistant blocks and only merges matching text metadata", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			const first = {
+				type: "text",
+				text: "Hello ",
+				annotations: { audience: ["user"] },
+				_meta: { channel: "answer" },
+			} satisfies ContentBlock;
+			const second = { ...first, text: "world" } satisfies ContentBlock;
+			const distinct = {
+				type: "text",
+				text: "!",
+				_meta: { channel: "emphasis" },
+			} satisfies ContentBlock;
+			const image = {
+				type: "image",
+				data: "aW1hZ2U=",
+				mimeType: "image/png",
+			} satisfies ContentBlock;
+
+			for (const block of [first, second, distinct, image]) {
+				store.appendAssistantChunk("s1", block, "assistant-rich");
+			}
+
+			const message = useChatStore.getState().sessions.s1.messages[0];
+			expect(message).toMatchObject({
+				content: "Hello world!",
+				contentBlocks: [{ ...first, text: "Hello world" }, distinct, image],
+			});
+		});
+
+		it("preserves non-text thought blocks", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			const resource = {
+				type: "resource",
+				resource: {
+					uri: "file:///workspace/reasoning.txt",
+					text: "reasoning context",
+				},
+			} satisfies ContentBlock;
+
+			store.appendThoughtChunk("s1", resource, "thought-rich");
+
+			expect(useChatStore.getState().sessions.s1.messages[0]).toMatchObject({
+				kind: "thought",
+				content: "",
+				contentBlocks: [resource],
+			});
 		});
 	});
 

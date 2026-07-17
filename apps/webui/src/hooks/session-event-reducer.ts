@@ -1,11 +1,11 @@
-import type { ErrorDetail } from "@mobvibe/shared";
+import { type ErrorDetail, sanitizeReportedTokenUsage } from "@mobvibe/shared";
 import type { ChatStoreActions } from "@/hooks/useSessionMutations";
 import {
 	extractAvailableCommandsUpdate,
+	extractPlanOperationUpdate,
 	extractPlanUpdate,
 	extractSessionInfoUpdate,
 	extractSessionModeUpdate,
-	extractTextChunk,
 	extractToolCallUpdate,
 	type PermissionOutcome,
 	type PermissionRequestPayload,
@@ -22,6 +22,8 @@ export type SessionEventReducerActions = Pick<
 	| "appendThoughtChunk"
 	| "confirmOrAppendUserMessage"
 	| "updateSessionMeta"
+	| "upsertPlan"
+	| "removePlan"
 	| "setStreamError"
 	| "addPermissionRequest"
 	| "setPermissionDecisionState"
@@ -56,6 +58,24 @@ type ApplySessionEventOptions = {
 	sessions: Record<string, ChatSession>;
 	actions: SessionEventReducerActions;
 	notifications: SessionEventNotifications;
+};
+
+const getSessionFallbackTitle = (sessionId: string) =>
+	`Session ${sessionId.slice(0, 8)}`;
+
+const selectNewestValidTimestamp = (
+	...values: Array<string | null | undefined>
+): string | undefined => {
+	let selected: string | undefined;
+	let selectedTime = Number.NEGATIVE_INFINITY;
+	for (const value of values) {
+		if (value === undefined || value === null) continue;
+		const parsed = Date.parse(value);
+		if (Number.isNaN(parsed) || parsed <= selectedTime) continue;
+		selected = value;
+		selectedTime = parsed;
+	}
+	return selected;
 };
 
 export function applyPermissionRequest({
@@ -95,43 +115,57 @@ export function applySessionEvent({
 }: ApplySessionEventOptions) {
 	switch (event.kind) {
 		case "user_message": {
+			// This top-level field is Mobvibe's send/idempotency key. ACP's
+			// update.messageId is a content boundary and must not confirm a send.
 			const notification = event.payload as SessionNotification & {
 				messageId?: string;
 			};
 			if (notification.update.sessionUpdate === "user_message_chunk") {
-				const messageId =
-					notification.messageId ?? notification.update.messageId ?? undefined;
-				if (messageId) {
-					actions.confirmOrAppendUserMessage(
-						event.sessionId,
-						notification.update.content,
-						messageId,
-						event.seq,
-					);
-				} else {
-					actions.confirmOrAppendUserMessage(
-						event.sessionId,
-						notification.update.content,
-						undefined,
-						event.seq,
-					);
-				}
+				actions.confirmOrAppendUserMessage(
+					event.sessionId,
+					notification.update.content,
+					notification.messageId,
+					event.seq,
+					resolveProtocolMessageId(event, notification),
+				);
 			}
 			break;
 		}
 		case "agent_message_chunk": {
 			const notification = event.payload as SessionNotification;
-			const textChunk = extractTextChunk(notification);
-			if (textChunk?.role === "assistant") {
-				actions.appendAssistantChunk(event.sessionId, textChunk.text);
+			if (notification.update.sessionUpdate === "agent_message_chunk") {
+				const protocolMessageId = resolveProtocolMessageId(event, notification);
+				if (protocolMessageId !== undefined) {
+					actions.appendAssistantChunk(
+						event.sessionId,
+						notification.update.content,
+						protocolMessageId,
+					);
+				} else {
+					actions.appendAssistantChunk(
+						event.sessionId,
+						notification.update.content,
+					);
+				}
 			}
 			break;
 		}
 		case "agent_thought_chunk": {
 			const notification = event.payload as SessionNotification;
-			const textChunk = extractTextChunk(notification);
-			if (textChunk) {
-				actions.appendThoughtChunk(event.sessionId, textChunk.text);
+			if (notification.update.sessionUpdate === "agent_thought_chunk") {
+				const protocolMessageId = resolveProtocolMessageId(event, notification);
+				if (protocolMessageId !== undefined) {
+					actions.appendThoughtChunk(
+						event.sessionId,
+						notification.update.content,
+						protocolMessageId,
+					);
+				} else {
+					actions.appendThoughtChunk(
+						event.sessionId,
+						notification.update.content,
+					);
+				}
 			}
 			break;
 		}
@@ -163,13 +197,28 @@ export function applySessionEvent({
 
 			const infoUpdate = extractSessionInfoUpdate(notification);
 			if (infoUpdate) {
-				if (session?.isTitlePinned && infoUpdate.title !== undefined) {
-					const { title: _ignored, ...rest } = infoUpdate;
-					if (Object.keys(rest).length > 0) {
-						actions.updateSessionMeta(event.sessionId, rest);
-					}
-				} else {
-					actions.updateSessionMeta(event.sessionId, infoUpdate);
+				const metadata: Parameters<
+					SessionEventReducerActions["updateSessionMeta"]
+				>[1] = {};
+				if ("title" in infoUpdate && !session?.isTitlePinned) {
+					metadata.title =
+						infoUpdate.title === null
+							? getSessionFallbackTitle(event.sessionId)
+							: infoUpdate.title;
+				}
+				const updatedAt = selectNewestValidTimestamp(
+					session?.updatedAt,
+					event.createdAt,
+					infoUpdate.updatedAt,
+				);
+				if (updatedAt !== undefined) {
+					metadata.updatedAt = updatedAt;
+				}
+				if ("_meta" in infoUpdate) {
+					metadata._meta = infoUpdate._meta;
+				}
+				if (Object.keys(metadata).length > 0) {
+					actions.updateSessionMeta(event.sessionId, metadata);
 				}
 			}
 
@@ -183,6 +232,23 @@ export function applySessionEvent({
 				actions.updateSessionMeta(event.sessionId, {
 					plan: planUpdate.entries,
 				});
+			}
+			break;
+		}
+		case "plan_update":
+		case "plan_removed": {
+			const notification = event.payload as SessionNotification;
+			const planUpdate = extractPlanOperationUpdate(notification);
+			if (
+				event.kind === "plan_update" &&
+				planUpdate?.sessionUpdate === "plan_update"
+			) {
+				actions.upsertPlan(event.sessionId, planUpdate.plan);
+			} else if (
+				event.kind === "plan_removed" &&
+				planUpdate?.sessionUpdate === "plan_removed"
+			) {
+				actions.removePlan(event.sessionId, planUpdate.planId);
 			}
 			break;
 		}
@@ -253,6 +319,9 @@ export function applySessionEvent({
 			break;
 		}
 		case "turn_end": {
+			const payload = event.payload as { usage?: unknown };
+			const reportedTokenUsage = sanitizeReportedTokenUsage(payload.usage);
+			actions.updateSessionMeta(event.sessionId, { reportedTokenUsage });
 			notifications.notifyResponseCompleted(
 				{ sessionId: event.sessionId },
 				{ sessions },
@@ -265,4 +334,15 @@ export function applySessionEvent({
 		default:
 			break;
 	}
+}
+
+function resolveProtocolMessageId(
+	event: SessionEvent,
+	notification: SessionNotification,
+): string | undefined {
+	if (event.protocolMessageId !== undefined) {
+		return event.protocolMessageId;
+	}
+	const messageId = (notification.update as { messageId?: unknown }).messageId;
+	return typeof messageId === "string" ? messageId : undefined;
 }

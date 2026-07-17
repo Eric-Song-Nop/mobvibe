@@ -6,6 +6,7 @@ import {
 	createErrorDetail,
 	createInternalError,
 	isEncryptedPayload,
+	sanitizeAcpMeta,
 } from "@mobvibe/shared";
 import type { Router } from "express";
 import { logger } from "../lib/logger.js";
@@ -26,6 +27,25 @@ const getErrorMessage = (error: unknown) => {
 	return String(error);
 };
 
+const selectDiscoveredSessionTimestamp = (
+	existing: string | undefined,
+	provided: string | null | undefined,
+	discoveredAt: string,
+): string => {
+	const validValues = [existing, provided].filter(
+		(value): value is string =>
+			typeof value === "string" && !Number.isNaN(Date.parse(value)),
+	);
+	return (
+		validValues.reduce<string | undefined>((latest, value) => {
+			if (latest === undefined || Date.parse(value) > Date.parse(latest)) {
+				return value;
+			}
+			return latest;
+		}, undefined) ?? discoveredAt
+	);
+};
+
 const buildRequestValidationError = (message = "Invalid request") =>
 	createErrorDetail({
 		code: "REQUEST_VALIDATION_FAILED",
@@ -41,6 +61,144 @@ const buildAuthorizationError = (message = "Not authorized") =>
 		retryable: false,
 		scope: "request",
 	});
+
+const MAX_MACHINE_ID_BYTES = 256;
+const MAX_BACKEND_ID_BYTES = 256;
+const MAX_AUTH_METHOD_ID_BYTES = 128;
+const hasC0OrDel = (value: string): boolean =>
+	Array.from(value).some((character) => {
+		const codePoint = character.codePointAt(0);
+		return codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f);
+	});
+
+const isBoundedIdentifier = (
+	value: unknown,
+	maxBytes: number,
+): value is string =>
+	typeof value === "string" &&
+	value.trim().length > 0 &&
+	value === value.trim() &&
+	!hasC0OrDel(value) &&
+	Buffer.byteLength(value, "utf8") <= maxBytes;
+
+const respondAgentOperationError = (
+	response: Parameters<typeof respondError>[0],
+	error: unknown,
+	message: string,
+) => {
+	if (error instanceof AppError) {
+		// Do not trust an Agent/CLI supplied status, message, scope, retryability,
+		// or detail. Only a small code allowlist selects static Gateway responses.
+		switch (error.detail.code) {
+			case "REQUEST_VALIDATION_FAILED":
+				respondError(
+					response,
+					buildRequestValidationError("Invalid Agent authentication request"),
+					400,
+				);
+				return;
+			case "AUTHORIZATION_FAILED":
+				respondError(
+					response,
+					buildAuthorizationError("Machine or backend not found"),
+					404,
+				);
+				return;
+			case "CAPABILITY_NOT_SUPPORTED":
+				respondError(
+					response,
+					createErrorDetail({
+						code: "CAPABILITY_NOT_SUPPORTED",
+						message: "Agent authentication capability is not supported",
+						retryable: false,
+						scope: "request",
+					}),
+					409,
+				);
+				return;
+			case "AGENT_AUTHENTICATION_REQUIRED":
+				respondError(
+					response,
+					createErrorDetail({
+						code: "AGENT_AUTHENTICATION_REQUIRED",
+						message: "Agent authentication is required",
+						retryable: false,
+						scope: "service",
+					}),
+					409,
+				);
+				return;
+			case "SESSION_BUSY":
+				respondError(
+					response,
+					createErrorDetail({
+						code: "SESSION_BUSY",
+						message: "Agent authentication backend is busy",
+						retryable: true,
+						scope: "service",
+					}),
+					409,
+				);
+				return;
+			case "ACP_PROTOCOL_MISMATCH":
+				respondError(
+					response,
+					createErrorDetail({
+						code: "ACP_PROTOCOL_MISMATCH",
+						message: "Agent returned an invalid authentication response",
+						retryable: false,
+						scope: "service",
+					}),
+					502,
+				);
+				return;
+			case "ACP_CONNECT_FAILED":
+			case "ACP_PROCESS_EXITED":
+			case "ACP_CONNECTION_CLOSED":
+				respondError(
+					response,
+					createErrorDetail({
+						code: error.detail.code,
+						message: "Agent authentication service is unavailable",
+						retryable: true,
+						scope: "service",
+					}),
+					502,
+				);
+				return;
+		}
+		respondError(
+			response,
+			createErrorDetail({
+				code: "AGENT_AUTHENTICATION_FAILED",
+				message,
+				retryable: true,
+				scope: "service",
+			}),
+			502,
+		);
+		return;
+	}
+	respondError(
+		response,
+		createErrorDetail({
+			code: "AGENT_AUTHENTICATION_FAILED",
+			message,
+			retryable: true,
+			scope: "service",
+		}),
+		getErrorMessage(error).includes("timeout") ? 504 : 502,
+	);
+};
+
+const getAgentOperationErrorLog = (error: unknown) =>
+	error instanceof AppError
+		? {
+				errorCode: error.detail.code,
+				errorStatus: error.status,
+				retryable: error.detail.retryable,
+			}
+		: { errorType: error instanceof Error ? error.name : typeof error };
 
 const isPlaintextPrompt = (value: unknown): value is ContentBlock[] =>
 	Array.isArray(value) &&
@@ -83,6 +241,41 @@ const normalizeRelativeCwd = (value: unknown): string | undefined => {
 	return segments.join("/");
 };
 
+const normalizeAdditionalDirectories = (
+	value: unknown,
+): string[] | undefined => {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (!Array.isArray(value)) {
+		throw new AppError(
+			buildRequestValidationError("additionalDirectories must be an array"),
+			400,
+		);
+	}
+	const seen = new Set<string>();
+	const directories: string[] = [];
+	for (const directory of value) {
+		if (
+			typeof directory !== "string" ||
+			directory.length === 0 ||
+			(!path.posix.isAbsolute(directory) && !path.win32.isAbsolute(directory))
+		) {
+			throw new AppError(
+				buildRequestValidationError(
+					"additionalDirectories must contain non-empty absolute paths",
+				),
+				400,
+			);
+		}
+		if (!seen.has(directory)) {
+			seen.add(directory);
+			directories.push(directory);
+		}
+	}
+	return directories;
+};
+
 export function setupSessionRoutes(
 	router: Router,
 	cliRegistry: CliRegistry,
@@ -123,6 +316,147 @@ export function setupSessionRoutes(
 		response.json({ backends });
 	});
 
+	// Probe backend-scoped stable Agent-managed authentication methods.
+	router.get(
+		"/backend/capabilities",
+		async (request: AuthenticatedRequest, response) => {
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			const { machineId, backendId } = request.query;
+			if (
+				!isBoundedIdentifier(machineId, MAX_MACHINE_ID_BYTES) ||
+				!isBoundedIdentifier(backendId, MAX_BACKEND_ID_BYTES)
+			) {
+				respondError(
+					response,
+					buildRequestValidationError(
+						"bounded machineId and backendId are required",
+					),
+					400,
+				);
+				return;
+			}
+			try {
+				const result = await sessionRouter.getAgentCapabilities(
+					{ machineId, backendId },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				logger.warn(
+					{
+						...getAgentOperationErrorLog(error),
+						machineId,
+						backendId,
+						userId,
+					},
+					"agent_capabilities_error",
+				);
+				respondAgentOperationError(
+					response,
+					error,
+					"Unable to query Agent authentication capabilities",
+				);
+			}
+		},
+	);
+
+	// Authentication itself is performed by the Agent; no credentials cross HTTP.
+	router.post(
+		"/backend/authenticate",
+		async (request: AuthenticatedRequest, response) => {
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			const { machineId, backendId, methodId } = request.body ?? {};
+			if (
+				!isBoundedIdentifier(machineId, MAX_MACHINE_ID_BYTES) ||
+				!isBoundedIdentifier(backendId, MAX_BACKEND_ID_BYTES) ||
+				!isBoundedIdentifier(methodId, MAX_AUTH_METHOD_ID_BYTES)
+			) {
+				respondError(
+					response,
+					buildRequestValidationError(
+						"bounded machineId, backendId, and methodId are required",
+					),
+					400,
+				);
+				return;
+			}
+			try {
+				const result = await sessionRouter.authenticateAgent(
+					{ machineId, backendId, methodId },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				logger.warn(
+					{
+						...getAgentOperationErrorLog(error),
+						machineId,
+						backendId,
+						methodId,
+						userId,
+					},
+					"agent_authenticate_error",
+				);
+				respondAgentOperationError(
+					response,
+					error,
+					"Agent authentication failed",
+				);
+			}
+		},
+	);
+
+	router.post(
+		"/backend/logout",
+		async (request: AuthenticatedRequest, response) => {
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			const { machineId, backendId } = request.body ?? {};
+			if (
+				!isBoundedIdentifier(machineId, MAX_MACHINE_ID_BYTES) ||
+				!isBoundedIdentifier(backendId, MAX_BACKEND_ID_BYTES)
+			) {
+				respondError(
+					response,
+					buildRequestValidationError(
+						"bounded machineId and backendId are required",
+					),
+					400,
+				);
+				return;
+			}
+			try {
+				const result = await sessionRouter.logoutAgent(
+					{ machineId, backendId },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				logger.warn(
+					{
+						...getAgentOperationErrorLog(error),
+						machineId,
+						backendId,
+						userId,
+					},
+					"agent_logout_error",
+				);
+				respondAgentOperationError(response, error, "Agent logout failed");
+			}
+		},
+	);
+
 	// Create session - routes to user's machine if authenticated
 	router.post("/session", async (request: AuthenticatedRequest, response) => {
 		const userId = getUserId(request);
@@ -131,7 +465,14 @@ export function setupSessionRoutes(
 			return;
 		}
 		try {
-			const { cwd, title, backendId, machineId, worktree } = request.body ?? {};
+			const {
+				cwd,
+				additionalDirectories,
+				title,
+				backendId,
+				machineId,
+				worktree,
+			} = request.body ?? {};
 
 			if (typeof backendId !== "string" || backendId.trim().length === 0) {
 				respondError(
@@ -183,6 +524,9 @@ export function setupSessionRoutes(
 				{
 					cwd:
 						typeof cwd === "string" && cwd.trim().length > 0 ? cwd : undefined,
+					additionalDirectories: normalizeAdditionalDirectories(
+						additionalDirectories,
+					),
 					title:
 						typeof title === "string" && title.trim().length > 0
 							? title.trim()
@@ -210,6 +554,17 @@ export function setupSessionRoutes(
 				message.includes("Machine not found")
 			) {
 				respondError(response, buildAuthorizationError(message), 403);
+			} else if (message.includes("does not support")) {
+				respondError(
+					response,
+					createErrorDetail({
+						code: "CAPABILITY_NOT_SUPPORTED",
+						message,
+						retryable: false,
+						scope: "session",
+					}),
+					409,
+				);
 			} else {
 				respondError(response, createInternalError("service"));
 			}
@@ -252,6 +607,100 @@ export function setupSessionRoutes(
 			}
 		}
 	});
+
+	// Close an active ACP session while retaining durable local history
+	router.post(
+		"/session/close",
+		async (request: AuthenticatedRequest, response) => {
+			const { sessionId } = request.body ?? {};
+			if (typeof sessionId !== "string" || sessionId.length === 0) {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId required"),
+					400,
+				);
+				return;
+			}
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			try {
+				logger.info({ sessionId, userId }, "session_close_request");
+				const session = await sessionRouter.closeSession({ sessionId }, userId);
+				logger.info({ sessionId, userId }, "session_close_success");
+				response.json(session);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				logger.error({ err: error, sessionId }, "session_close_error");
+				if (respondAppError(response, error)) return;
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
+				} else if (message.includes("does not support")) {
+					respondError(
+						response,
+						createErrorDetail({
+							code: "CAPABILITY_NOT_SUPPORTED",
+							message,
+							retryable: false,
+							scope: "session",
+						}),
+						409,
+					);
+				} else {
+					respondError(response, createInternalError("session"));
+				}
+			}
+		},
+	);
+
+	// Request Agent deletion and purge Mobvibe's local session storage
+	router.post(
+		"/session/delete",
+		async (request: AuthenticatedRequest, response) => {
+			const { sessionId } = request.body ?? {};
+			if (typeof sessionId !== "string" || sessionId.length === 0) {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId required"),
+					400,
+				);
+				return;
+			}
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			try {
+				logger.info({ sessionId, userId }, "session_delete_request");
+				const result = await sessionRouter.deleteSession({ sessionId }, userId);
+				logger.info({ sessionId, userId }, "session_delete_success");
+				response.json(result);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				logger.error({ err: error, sessionId }, "session_delete_error");
+				if (respondAppError(response, error)) return;
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
+				} else if (message.includes("does not support")) {
+					respondError(
+						response,
+						createErrorDetail({
+							code: "CAPABILITY_NOT_SUPPORTED",
+							message,
+							retryable: false,
+							scope: "session",
+						}),
+						409,
+					);
+				} else {
+					respondError(response, createInternalError("session"));
+				}
+			}
+		},
+	);
 
 	// Archive session - with authorization check
 	router.post(
@@ -404,6 +853,90 @@ export function setupSessionRoutes(
 			} catch (error) {
 				const message = getErrorMessage(error);
 				logger.error({ err: error, sessionId, modeId }, "session_mode_error");
+				if (respondAppError(response, error)) return;
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
+				} else {
+					respondError(response, createInternalError("session"));
+				}
+			}
+		},
+	);
+
+	// Set protocol-native session config option - with authorization check
+	router.post(
+		"/session/config-option",
+		async (request: AuthenticatedRequest, response) => {
+			const { sessionId, configId, type, value, _meta } = request.body ?? {};
+			const isBooleanValue = type === "boolean" && typeof value === "boolean";
+			const isSelectValue = type === undefined && typeof value === "string";
+			if (
+				typeof sessionId !== "string" ||
+				typeof configId !== "string" ||
+				(!isBooleanValue && !isSelectValue)
+			) {
+				respondError(
+					response,
+					buildRequestValidationError(
+						"sessionId, configId, and a valid config value are required",
+					),
+					400,
+				);
+				return;
+			}
+
+			const sanitizedMeta =
+				_meta === undefined ? undefined : sanitizeAcpMeta(_meta);
+			if (sanitizedMeta && !sanitizedMeta.ok) {
+				respondError(
+					response,
+					buildRequestValidationError("Invalid session config metadata"),
+					400,
+				);
+				return;
+			}
+
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+
+			const metaParams = sanitizedMeta ? { _meta: sanitizedMeta.value } : {};
+			const params = isBooleanValue
+				? {
+						sessionId,
+						configId,
+						type: "boolean" as const,
+						value,
+						...metaParams,
+					}
+				: {
+						sessionId,
+						configId,
+						value: value as string,
+						...metaParams,
+					};
+			try {
+				logger.info(
+					{ sessionId, configId, type, userId },
+					"session_config_option_request",
+				);
+				const session = await sessionRouter.setSessionConfigOption(
+					params,
+					userId,
+				);
+				logger.info(
+					{ sessionId, configId, userId },
+					"session_config_option_success",
+				);
+				response.json(session);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				logger.error(
+					{ err: error, sessionId, configId },
+					"session_config_option_error",
+				);
 				if (respondAppError(response, error)) return;
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
@@ -709,16 +1242,30 @@ export function setupSessionRoutes(
 							cli.backends.find(
 								(backend) => backend.backendId === requestedBackendId,
 							)?.backendLabel ?? requestedBackendId;
-						const summaries: SessionSummary[] = result.sessions.map((s) => ({
-							sessionId: s.sessionId,
-							title: s.title ?? `Session ${s.sessionId.slice(0, 8)}`,
-							cwd: s.cwd,
-							updatedAt: s.updatedAt ?? new Date().toISOString(),
-							createdAt: s.updatedAt ?? new Date().toISOString(),
-							backendId: requestedBackendId,
-							backendLabel: discoveredBackendLabel,
-							machineId: cli.machineId,
-						}));
+						const existingSessions = new Map(
+							cli.sessions.map((session) => [session.sessionId, session]),
+						);
+						const discoveredAt = new Date().toISOString();
+						const summaries: SessionSummary[] = result.sessions.map((s) => {
+							const existing = existingSessions.get(s.sessionId);
+							const updatedAt = selectDiscoveredSessionTimestamp(
+								existing?.updatedAt,
+								s.updatedAt,
+								discoveredAt,
+							);
+							return {
+								sessionId: s.sessionId,
+								title: s.title ?? `Session ${s.sessionId.slice(0, 8)}`,
+								cwd: s.cwd,
+								additionalDirectories: s.additionalDirectories ?? [],
+								updatedAt,
+								createdAt: existing?.createdAt ?? updatedAt,
+								backendId: requestedBackendId,
+								backendLabel: discoveredBackendLabel,
+								machineId: cli.machineId,
+								...(Object.hasOwn(s, "_meta") ? { _meta: s._meta } : {}),
+							};
+						});
 						cliRegistry.addDiscoveredSessionsForMachine(
 							cli.machineId,
 							summaries,
@@ -755,7 +1302,8 @@ export function setupSessionRoutes(
 	router.post(
 		"/session/load",
 		async (request: AuthenticatedRequest, response) => {
-			const { sessionId, cwd, backendId, machineId } = request.body ?? {};
+			const { sessionId, cwd, additionalDirectories, backendId, machineId } =
+				request.body ?? {};
 			if (typeof sessionId !== "string" || typeof cwd !== "string") {
 				respondError(
 					response,
@@ -779,6 +1327,9 @@ export function setupSessionRoutes(
 				return;
 			}
 			try {
+				const normalizedAdditionalDirectories = normalizeAdditionalDirectories(
+					additionalDirectories,
+				);
 				logger.info(
 					{ sessionId, cwd, backendId, machineId, userId },
 					"session_load_request",
@@ -787,6 +1338,7 @@ export function setupSessionRoutes(
 					{
 						sessionId,
 						cwd,
+						additionalDirectories: normalizedAdditionalDirectories,
 						backendId,
 						machineId: typeof machineId === "string" ? machineId : undefined,
 					},
@@ -821,11 +1373,97 @@ export function setupSessionRoutes(
 		},
 	);
 
+	// Resume a durable session without replaying history from the ACP agent
+	router.post(
+		"/session/resume",
+		async (request: AuthenticatedRequest, response) => {
+			const { sessionId, cwd, additionalDirectories, backendId, machineId } =
+				request.body ?? {};
+			if (
+				typeof sessionId !== "string" ||
+				sessionId.length === 0 ||
+				typeof cwd !== "string" ||
+				cwd.length === 0 ||
+				(!path.posix.isAbsolute(cwd) && !path.win32.isAbsolute(cwd))
+			) {
+				respondError(
+					response,
+					buildRequestValidationError(
+						"sessionId and an absolute cwd are required",
+					),
+					400,
+				);
+				return;
+			}
+			if (typeof backendId !== "string" || backendId.trim().length === 0) {
+				respondError(
+					response,
+					buildRequestValidationError("backendId required"),
+					400,
+				);
+				return;
+			}
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+
+			try {
+				const normalizedAdditionalDirectories = normalizeAdditionalDirectories(
+					additionalDirectories,
+				);
+				logger.info(
+					{ sessionId, cwd, backendId, machineId, userId },
+					"session_resume_request",
+				);
+				const session = await sessionRouter.resumeSession(
+					{
+						sessionId,
+						cwd,
+						additionalDirectories: normalizedAdditionalDirectories,
+						backendId,
+						machineId: typeof machineId === "string" ? machineId : undefined,
+					},
+					userId,
+				);
+				logger.info({ sessionId, userId }, "session_resume_success");
+				response.json(session);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				logger.error({ err: error, sessionId }, "session_resume_error");
+				if (respondAppError(response, error)) return;
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(), 404);
+				} else if (
+					message.includes("Machine not found") ||
+					message.includes("No CLI connected")
+				) {
+					respondError(response, buildAuthorizationError(message), 503);
+				} else if (message.includes("does not support")) {
+					respondError(
+						response,
+						createErrorDetail({
+							code: "CAPABILITY_NOT_SUPPORTED",
+							message,
+							retryable: false,
+							scope: "session",
+						}),
+						409,
+					);
+				} else {
+					respondError(response, createInternalError("session"));
+				}
+			}
+		},
+	);
+
 	// Reload historical session from ACP agent
 	router.post(
 		"/session/reload",
 		async (request: AuthenticatedRequest, response) => {
-			const { sessionId, cwd, backendId, machineId } = request.body ?? {};
+			const { sessionId, cwd, additionalDirectories, backendId, machineId } =
+				request.body ?? {};
 			if (typeof sessionId !== "string" || typeof cwd !== "string") {
 				respondError(
 					response,
@@ -849,6 +1487,9 @@ export function setupSessionRoutes(
 				return;
 			}
 			try {
+				const normalizedAdditionalDirectories = normalizeAdditionalDirectories(
+					additionalDirectories,
+				);
 				logger.info(
 					{ sessionId, cwd, backendId, machineId, userId },
 					"session_reload_request",
@@ -857,6 +1498,7 @@ export function setupSessionRoutes(
 					{
 						sessionId,
 						cwd,
+						additionalDirectories: normalizedAdditionalDirectories,
 						backendId,
 						machineId: typeof machineId === "string" ? machineId : undefined,
 					},
