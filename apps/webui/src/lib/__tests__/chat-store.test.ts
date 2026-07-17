@@ -1034,6 +1034,51 @@ describe("chat-store", () => {
 	// ACP protocol message boundaries
 	// ---------------------------------------------------------------------------
 	describe("ACP protocol message boundaries", () => {
+		it("coalesces user chunks by protocol messageId without crossing boundaries", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.confirmOrAppendUserMessage("s1", "Hello ", undefined, 1, "user-1");
+			store.confirmOrAppendUserMessage("s1", "world", undefined, 2, "user-1");
+			store.confirmOrAppendUserMessage(
+				"s1",
+				"Next message",
+				undefined,
+				3,
+				"user-2",
+			);
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(2);
+			expect(messages[0]).toMatchObject({
+				content: "Hello world",
+				protocolMessageId: "user-1",
+			});
+			expect(messages[1]).toMatchObject({
+				content: "Next message",
+				protocolMessageId: "user-2",
+			});
+		});
+
+		it("does not reuse a Mobvibe send id across protocol message boundaries", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.confirmOrAppendUserMessage("s1", "First", "send-1", 1, "user-1");
+			store.confirmOrAppendUserMessage("s1", "Second", "send-1", 2, "user-2");
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(2);
+			expect(messages[0]).toMatchObject({
+				id: "send-1",
+				content: "First",
+				protocolMessageId: "user-1",
+			});
+			expect(messages[1]).toMatchObject({
+				content: "Second",
+				protocolMessageId: "user-2",
+			});
+			expect(messages[1]?.id).not.toBe("send-1");
+		});
+
 		it("keeps assistant chunks with the same messageId together", () => {
 			const store = useChatStore.getState();
 			store.createLocalSession("s1");

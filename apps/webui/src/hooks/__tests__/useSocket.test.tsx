@@ -2414,6 +2414,7 @@ describe("useSocket (webui)", () => {
 			},
 			undefined,
 			1,
+			undefined,
 		);
 	});
 
@@ -2458,10 +2459,12 @@ describe("useSocket (webui)", () => {
 			revision: 1,
 			seq: 1,
 			kind: "user_message",
+			protocolMessageId: "user-live-1",
 			payload: {
 				sessionId: "session-1",
 				update: {
 					sessionUpdate: "user_message_chunk",
+					messageId: "user-live-1",
 					content: { type: "text", text: "Hello from CLI" },
 				},
 			},
@@ -2477,6 +2480,7 @@ describe("useSocket (webui)", () => {
 			},
 			undefined,
 			1,
+			"user-live-1",
 		);
 	});
 

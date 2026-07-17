@@ -101,22 +101,13 @@ export function applySessionEvent({
 				messageId?: string;
 			};
 			if (notification.update.sessionUpdate === "user_message_chunk") {
-				const messageId = notification.messageId;
-				if (messageId) {
-					actions.confirmOrAppendUserMessage(
-						event.sessionId,
-						notification.update.content,
-						messageId,
-						event.seq,
-					);
-				} else {
-					actions.confirmOrAppendUserMessage(
-						event.sessionId,
-						notification.update.content,
-						undefined,
-						event.seq,
-					);
-				}
+				actions.confirmOrAppendUserMessage(
+					event.sessionId,
+					notification.update.content,
+					notification.messageId,
+					event.seq,
+					resolveProtocolMessageId(event, notification),
+				);
 			}
 			break;
 		}

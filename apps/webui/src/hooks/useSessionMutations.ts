@@ -164,8 +164,9 @@ export interface ChatStoreActions {
 	confirmOrAppendUserMessage: (
 		sessionId: string,
 		chunk: ContentBlock | string,
-		messageId?: string,
+		sendMessageId?: string,
 		eventSeq?: number,
+		protocolMessageId?: string,
 	) => void;
 	markUserMessageFailed: (sessionId: string, messageId: string) => void;
 	addStatusMessage: (sessionId: string, status: StatusPayload) => void;

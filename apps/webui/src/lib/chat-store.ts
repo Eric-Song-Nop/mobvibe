@@ -353,8 +353,9 @@ type ChatState = {
 	confirmOrAppendUserMessage: (
 		sessionId: string,
 		chunk: ContentBlock | string,
-		messageId?: string,
+		sendMessageId?: string,
 		eventSeq?: number,
+		protocolMessageId?: string,
 	) => void;
 	markUserMessageFailed: (sessionId: string, messageId: string) => void;
 	addStatusMessage: (
@@ -1504,7 +1505,13 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
-			confirmOrAppendUserMessage: (sessionId, chunk, messageId, eventSeq) =>
+			confirmOrAppendUserMessage: (
+				sessionId,
+				chunk,
+				sendMessageId,
+				eventSeq,
+				protocolMessageId,
+			) =>
 				set((state: ChatState) => {
 					const session = state.sessions[sessionId];
 					if (!session) return state;
@@ -1519,7 +1526,7 @@ export const useChatStore = create<ChatState>()(
 						}
 					}
 
-					if (!messageId && eventSeq !== undefined) {
+					if (!sendMessageId && eventSeq !== undefined) {
 						let provisionalMatch:
 							| { index: number; echoBlocks: ContentBlock[] }
 							| undefined;
@@ -1532,7 +1539,10 @@ export const useChatStore = create<ChatState>()(
 							if (
 								message.role !== "user" ||
 								message.kind !== "text" ||
-								message.provisional !== true
+								message.provisional !== true ||
+								(message.protocolMessageId !== undefined &&
+									protocolMessageId !== undefined &&
+									message.protocolMessageId !== protocolMessageId)
 							) {
 								continue;
 							}
@@ -1568,6 +1578,9 @@ export const useChatStore = create<ChatState>()(
 							const messages = [...session.messages];
 							messages[provisionalMatch.index] = {
 								...message,
+								...(protocolMessageId !== undefined
+									? { protocolMessageId }
+									: {}),
 								provisional: confirmed ? false : message.provisional,
 								failed: confirmed ? false : message.failed,
 								legacyServerChunked: confirmed ? undefined : true,
@@ -1590,12 +1603,18 @@ export const useChatStore = create<ChatState>()(
 							lastMessage.kind === "text" &&
 							lastMessage.provisional !== true &&
 							lastMessage.legacyServerChunked === true &&
-							lastMessage.lastServerChunkSeq === eventSeq - 1
+							lastMessage.lastServerChunkSeq === eventSeq - 1 &&
+							(lastMessage.protocolMessageId === undefined ||
+								protocolMessageId === undefined ||
+								lastMessage.protocolMessageId === protocolMessageId)
 						) {
 							const content = `${lastMessage.content}${text}`;
 							const messages = [...session.messages];
 							messages[messages.length - 1] = {
 								...lastMessage,
+								...(protocolMessageId !== undefined
+									? { protocolMessageId }
+									: {}),
 								content,
 								contentBlocks: [
 									...(lastMessage.contentBlocks ?? []),
@@ -1613,20 +1632,35 @@ export const useChatStore = create<ChatState>()(
 					}
 
 					let matchIndex = -1;
-					if (messageId) {
+					if (sendMessageId) {
 						matchIndex = session.messages.findIndex(
 							(message) =>
-								message.id === messageId &&
+								message.id === sendMessageId &&
 								message.role === "user" &&
-								message.kind === "text",
+								message.kind === "text" &&
+								(message.protocolMessageId === undefined ||
+									protocolMessageId === undefined ||
+									message.protocolMessageId === protocolMessageId),
 						);
-					} else {
+					} else if (protocolMessageId) {
+						matchIndex = session.messages.findIndex(
+							(message, index) =>
+								index >= boundary &&
+								message.role === "user" &&
+								message.kind === "text" &&
+								message.protocolMessageId === protocolMessageId,
+						);
+					}
+					if (matchIndex < 0 && !sendMessageId) {
 						matchIndex = session.messages.findIndex(
 							(message, index) =>
 								index >= boundary &&
 								message.role === "user" &&
 								message.kind === "text" &&
 								message.provisional === true &&
+								(message.protocolMessageId === undefined ||
+									protocolMessageId === undefined ||
+									message.protocolMessageId === protocolMessageId) &&
 								(contentBlock.type === "text"
 									? message.content === text
 									: (
@@ -1685,6 +1719,7 @@ export const useChatStore = create<ChatState>()(
 						const messages = [...session.messages];
 						messages[matchIndex] = {
 							...matchedMessage,
+							...(protocolMessageId !== undefined ? { protocolMessageId } : {}),
 							provisional: false,
 							failed: false,
 						};
@@ -1697,15 +1732,19 @@ export const useChatStore = create<ChatState>()(
 					}
 
 					// No provisional found → append new message (backfill scenario)
+					const canUseSendMessageId =
+						sendMessageId !== undefined &&
+						!session.messages.some((message) => message.id === sendMessageId);
 					const newMsg: TextMessage = {
-						id: messageId ?? createLocalId(),
+						id: canUseSendMessageId ? sendMessageId : createLocalId(),
 						role: "user",
 						kind: "text",
 						content: text,
 						contentBlocks: [contentBlock],
 						createdAt: new Date().toISOString(),
 						isStreaming: false,
-						...(messageId
+						...(protocolMessageId !== undefined ? { protocolMessageId } : {}),
+						...(sendMessageId || protocolMessageId
 							? {
 									serverChunked: true,
 									...(eventSeq !== undefined

@@ -58,6 +58,7 @@ describe("applySessionEvent user message identity", () => {
 			{ type: "text", text: "Hello" },
 			"message-1",
 			1,
+			undefined,
 		);
 	});
 
@@ -97,6 +98,7 @@ describe("applySessionEvent user message identity", () => {
 			image,
 			"message-image",
 			2,
+			undefined,
 		);
 	});
 
@@ -130,6 +132,7 @@ describe("applySessionEvent user message identity", () => {
 			{ type: "text", text: "legacy" },
 			undefined,
 			7,
+			undefined,
 		);
 	});
 
@@ -165,6 +168,7 @@ describe("applySessionEvent user message identity", () => {
 			{ type: "text", text: "protocol identity" },
 			undefined,
 			8,
+			"acp-user-message-1",
 		);
 	});
 });
