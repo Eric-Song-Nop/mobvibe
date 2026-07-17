@@ -7,6 +7,7 @@ import type {
 	NewSessionResponse,
 	RequestPermissionRequest,
 	RequestPermissionResponse,
+	ResumeSessionResponse,
 	SessionNotification,
 	SetSessionConfigOptionResponse,
 } from "@agentclientprotocol/sdk";
@@ -21,7 +22,7 @@ import {
 import type { CliConfig } from "../../config.js";
 import { CliCryptoService } from "../../e2ee/crypto-service.js";
 import { WalStore } from "../../wal/wal-store.js";
-import type { AcpConnection } from "../acp-connection.js";
+import type { AcpBackendStatus, AcpConnection } from "../acp-connection.js";
 import type { SessionManagerDependencies } from "../session-manager.js";
 
 // Mock the logger
@@ -113,14 +114,16 @@ const createMockConnection = () => ({
 				configOptions: null,
 			}),
 	),
-	getStatus: mock(() => ({
-		backendId: "backend-1",
-		backendLabel: "Claude Code",
-		state: "ready",
-		command: "claude-code",
-		args: [],
-		pid: 12345,
-	})),
+	getStatus: mock(
+		(): AcpBackendStatus => ({
+			backendId: "backend-1",
+			backendLabel: "Claude Code",
+			state: "ready",
+			command: "claude-code",
+			args: [],
+			pid: 12345,
+		}),
+	),
 	getAgentInfo: mock(() => ({
 		name: "claude-code",
 		title: "Claude Code",
@@ -128,9 +131,11 @@ const createMockConnection = () => ({
 	getSessionCapabilities: mock(() => ({
 		list: true,
 		load: true,
+		resume: true,
 	})),
 	supportsSessionList: mock(() => true),
 	supportsSessionLoad: mock(() => true),
+	supportsSessionResume: mock(() => true),
 	listSessions: mock(
 		(): Promise<ListSessionsResponse> =>
 			Promise.resolve({
@@ -152,6 +157,13 @@ const createMockConnection = () => ({
 	),
 	loadSession: mock(
 		(): Promise<LoadSessionResponse> =>
+			Promise.resolve({
+				modes: null,
+				configOptions: null,
+			}),
+	),
+	resumeSession: mock(
+		(): Promise<ResumeSessionResponse> =>
 			Promise.resolve({
 				modes: null,
 				configOptions: null,
@@ -378,6 +390,374 @@ describe("SessionManager", () => {
 					.find((session) => session.sessionId === "discovered-roots")
 					?.additionalDirectories,
 			).toEqual(["/shared", "/shared/nested"]);
+		});
+	});
+
+	describe("resumeSession", () => {
+		const getWalStore = () =>
+			(
+				sessionManager as unknown as {
+					walStore: WalStore;
+				}
+			).walStore;
+
+		it("rejects a relative cwd before acquiring an agent connection", async () => {
+			await expect(
+				sessionManager.resumeSession(
+					"resume-only",
+					"relative/project",
+					"backend-1",
+				),
+			).rejects.toMatchObject({ status: 400 });
+			expect(mockConnection.connect).not.toHaveBeenCalled();
+			expect(getWalStore().getSession("resume-only")).toBeNull();
+		});
+
+		it("preserves durable revision and history while attaching", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			sessionUpdateCallback?.({
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text", text: "durable history" },
+				},
+			} as SessionNotification);
+			const historyBefore = sessionManager.getSessionEvents({
+				sessionId: created.sessionId,
+				revision: 1,
+				afterSeq: 0,
+			});
+			await sessionManager.closeSession(created.sessionId);
+
+			const resumed = await sessionManager.resumeSession(
+				created.sessionId,
+				"/home/user/project",
+				"backend-1",
+				["/shared"],
+			);
+
+			expect(mockConnection.resumeSession).toHaveBeenCalledWith(
+				created.sessionId,
+				"/home/user/project",
+				["/shared"],
+			);
+			expect(resumed.revision).toBe(1);
+			expect(resumed.additionalDirectories).toEqual(["/shared"]);
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: created.sessionId,
+					revision: 1,
+					afterSeq: 0,
+				}),
+			).toEqual(historyBefore);
+		});
+
+		it("rejects a cwd change before calling the agent or mutating WAL", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			await sessionManager.closeSession(created.sessionId);
+			mockConnection.resumeSession.mockClear();
+
+			await expect(
+				sessionManager.resumeSession(
+					created.sessionId,
+					"/home/user/project2",
+					"backend-1",
+				),
+			).rejects.toMatchObject({ status: 400 });
+
+			expect(mockConnection.resumeSession).not.toHaveBeenCalled();
+			expect(getWalStore().getSession(created.sessionId)?.cwd).toBe(
+				"/home/user/project",
+			);
+		});
+
+		it("validates persisted discovery affinity after a daemon restart", async () => {
+			const persistedConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/resume-discovery-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const seedStore = new WalStore(persistedConfig.walDbPath);
+			seedStore.saveDiscoveredSessions([
+				{
+					sessionId: "persisted-discovery",
+					backendId: "backend-1",
+					cwd: "/home/user/project",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+			seedStore.close();
+			const restartedManager = new SessionManager(persistedConfig, undefined, {
+				validateWorkspacePath: async () => true,
+			});
+			const restartedConnection = createMockConnection();
+			restartedManager.createConnection = () =>
+				restartedConnection as unknown as AcpConnection;
+
+			try {
+				await expect(
+					restartedManager.resumeSession(
+						"persisted-discovery",
+						"/home/user/project2",
+						"backend-1",
+					),
+				).rejects.toMatchObject({ status: 400 });
+				await expect(
+					restartedManager.resumeSession(
+						"persisted-discovery",
+						"/home/user/project",
+						"backend-2",
+					),
+				).rejects.toMatchObject({ status: 400 });
+				expect(restartedConnection.resumeSession).not.toHaveBeenCalled();
+			} finally {
+				await restartedManager.shutdown();
+			}
+		});
+
+		it("replaces an attached session when the requested root list changes", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				additionalDirectories: ["/old"],
+				backendId: "backend-1",
+			});
+			mockConnection.getStatus.mockReturnValue({
+				backendId: "backend-1",
+				backendLabel: "Claude Code",
+				state: "ready",
+				command: "claude-code",
+				args: [],
+				pid: 12345,
+				sessionId: created.sessionId,
+			});
+			const replacement = createMockConnection();
+			sessionManager.createConnection = () =>
+				replacement as unknown as AcpConnection;
+
+			const resumed = await sessionManager.resumeSession(
+				created.sessionId,
+				"/home/user/project",
+				"backend-1",
+				["/new"],
+			);
+
+			expect(mockConnection.disconnect).toHaveBeenCalledTimes(1);
+			expect(replacement.resumeSession).toHaveBeenCalledWith(
+				created.sessionId,
+				"/home/user/project",
+				["/new"],
+			);
+			expect(resumed.additionalDirectories).toEqual(["/new"]);
+		});
+
+		it("leaves a failed replacement detached and permits a later resume", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const detachedListener = mock(() => {});
+			sessionManager.onSessionDetached(detachedListener);
+			mockConnection.getStatus.mockReturnValue({
+				backendId: "backend-1",
+				backendLabel: "Claude Code",
+				state: "error",
+				command: "claude-code",
+				args: [],
+				pid: 12345,
+			});
+			const failedConnection = createMockConnection();
+			failedConnection.connect.mockRejectedValueOnce(
+				new Error("replacement failed"),
+			);
+			sessionManager.createConnection = () =>
+				failedConnection as unknown as AcpConnection;
+
+			await expect(
+				sessionManager.resumeSession(
+					created.sessionId,
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toThrow("replacement failed");
+			expect(detachedListener).toHaveBeenCalledWith(
+				expect.objectContaining({ sessionId: created.sessionId }),
+			);
+			expect(
+				sessionManager
+					.listAllSessions()
+					.find((session) => session.sessionId === created.sessionId)
+					?.isAttached,
+			).toBe(false);
+
+			const recoveredConnection = createMockConnection();
+			sessionManager.createConnection = () =>
+				recoveredConnection as unknown as AcpConnection;
+			const resumed = await sessionManager.resumeSession(
+				created.sessionId,
+				"/home/user/project",
+				"backend-1",
+			);
+
+			expect(resumed.isAttached).toBe(true);
+			expect(recoveredConnection.resumeSession).toHaveBeenCalledTimes(1);
+		});
+
+		it("clears stale model and mode projections when resume returns null", async () => {
+			mockConnection.createSession.mockResolvedValueOnce({
+				sessionId: "new-session-1",
+				configOptions: [
+					{
+						id: "model-selector",
+						name: "Model",
+						category: "model",
+						type: "select",
+						currentValue: "fast",
+						options: [{ value: "fast", name: "Fast" }],
+					},
+				],
+				modes: {
+					currentModeId: "architect",
+					availableModes: [{ id: "architect", name: "Architect" }],
+				},
+			});
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			mockConnection.getStatus.mockReturnValue({
+				backendId: "backend-1",
+				backendLabel: "Claude Code",
+				state: "error",
+				command: "claude-code",
+				args: [],
+				pid: 12345,
+			});
+			const resumedConnection = createMockConnection();
+			resumedConnection.resumeSession.mockResolvedValueOnce({
+				configOptions: null,
+				modes: null,
+			});
+			sessionManager.createConnection = () =>
+				resumedConnection as unknown as AcpConnection;
+
+			const resumed = await sessionManager.resumeSession(
+				created.sessionId,
+				"/home/user/project",
+				"backend-1",
+			);
+
+			expect(resumed.configOptions).toEqual([]);
+			expect(resumed.modelId).toBeUndefined();
+			expect(resumed.availableModels).toBeUndefined();
+			expect(resumed.modeId).toBeUndefined();
+			expect(resumed.availableModes).toBeUndefined();
+		});
+
+		it("keeps the wrapped DEK for the existing WAL revision", async () => {
+			await initCrypto();
+			const secureConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/resume-dek-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const secureManager = new SessionManager(
+				secureConfig,
+				new CliCryptoService(generateMasterSecret()),
+				{ validateWorkspacePath: async () => true },
+			);
+			const secureConnection = createMockConnection();
+			secureManager.createConnection = () =>
+				secureConnection as unknown as AcpConnection;
+			try {
+				const created = await secureManager.createSession({
+					cwd: "/home/user/project",
+					backendId: "backend-1",
+				});
+				const secureWal = (secureManager as unknown as { walStore: WalStore })
+					.walStore;
+				const keyBefore = secureWal.getSessionRevisionKey(created.sessionId, 1);
+				expect(created.wrappedDek).toBe(keyBefore);
+				await secureManager.closeSession(created.sessionId);
+
+				const resumed = await secureManager.resumeSession(
+					created.sessionId,
+					"/home/user/project",
+					"backend-1",
+				);
+
+				expect(resumed.revision).toBe(1);
+				expect(resumed.wrappedDek).toBe(created.wrappedDek);
+				expect(secureWal.getSessionRevisionKey(created.sessionId, 1)).toBe(
+					keyBefore,
+				);
+			} finally {
+				await secureManager.shutdown();
+			}
+		});
+
+		it("creates revision one for a resume-only session without local history", async () => {
+			const resumed = await sessionManager.resumeSession(
+				"resume-only",
+				"/home/user/project",
+				"backend-1",
+			);
+
+			expect(resumed.revision).toBe(1);
+			expect(getWalStore().getSession("resume-only")?.currentRevision).toBe(1);
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId: "resume-only",
+					revision: 1,
+					afterSeq: 0,
+				}).events,
+			).toEqual([]);
+		});
+
+		it("rejects archived sessions before calling the agent", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			await sessionManager.archiveSession(created.sessionId);
+			mockConnection.resumeSession.mockClear();
+
+			await expect(
+				sessionManager.resumeSession(
+					created.sessionId,
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toMatchObject({ status: 410 });
+			expect(mockConnection.resumeSession).not.toHaveBeenCalled();
+		});
+
+		it("caches and rejects an explicitly unsupported capability", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValueOnce({
+				list: true,
+				load: true,
+				resume: false,
+			});
+			mockConnection.supportsSessionResume.mockReturnValueOnce(false);
+
+			await expect(
+				sessionManager.resumeSession(
+					"unsupported",
+					"/home/user/project",
+					"backend-1",
+				),
+			).rejects.toMatchObject({ status: 409 });
+			expect(sessionManager.getBackendCapabilities()["backend-1"]?.resume).toBe(
+				false,
+			);
 		});
 	});
 

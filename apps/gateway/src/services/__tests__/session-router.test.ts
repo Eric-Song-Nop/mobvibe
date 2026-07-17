@@ -330,6 +330,88 @@ describe("SessionRouter", () => {
 		});
 	});
 
+	describe("resumeSession", () => {
+		it("routes resume to the owning user machine with the complete request", async () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			cliRegistry.register(socket, info, {
+				userId: "user-1",
+				deviceId: "device-123",
+			});
+			const summary = createMockSessionSummary({
+				sessionId: "session-1",
+				cwd: "/repo",
+			});
+			cliRegistry.updateSessions(socket.id, [summary]);
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:session:resume") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							result: summary,
+						});
+					}, 0);
+				}
+			});
+
+			const result = await sessionRouter.resumeSession(
+				{
+					sessionId: "session-1",
+					cwd: "/repo",
+					additionalDirectories: ["/data"],
+					backendId: "backend-1",
+					machineId: "machine-1",
+				},
+				"user-1",
+			);
+
+			expect(result.sessionId).toBe("session-1");
+			expect(socket.emit).toHaveBeenCalledWith(
+				"rpc:session:resume",
+				expect.objectContaining({
+					params: {
+						sessionId: "session-1",
+						cwd: "/repo",
+						additionalDirectories: ["/data"],
+						backendId: "backend-1",
+						machineId: "machine-1",
+					},
+				}),
+			);
+		});
+
+		it("does not route an owned session to a different machine", async () => {
+			const ownerSocket = createMockSocket("socket-owner");
+			const otherSocket = createMockSocket("socket-other");
+			cliRegistry.register(
+				ownerSocket,
+				createMockRegistrationInfo({ machineId: "machine-owner" }),
+				{ userId: "user-1", deviceId: "device-owner" },
+			);
+			cliRegistry.register(
+				otherSocket,
+				createMockRegistrationInfo({ machineId: "machine-other" }),
+				{ userId: "user-1", deviceId: "device-other" },
+			);
+			cliRegistry.updateSessions(ownerSocket.id, [
+				createMockSessionSummary({ sessionId: "session-owned" }),
+			]);
+
+			await expect(
+				sessionRouter.resumeSession(
+					{
+						sessionId: "session-owned",
+						cwd: "/repo",
+						backendId: "backend-1",
+						machineId: "machine-other",
+					},
+					"user-1",
+				),
+			).rejects.toThrow("Session not found");
+			expect(otherSocket.emit).not.toHaveBeenCalled();
+		});
+	});
+
 	describe("archiveSession", () => {
 		it("sends archive RPC to CLI", async () => {
 			const socket = createMockSocket("socket-1");

@@ -92,6 +92,12 @@ export type CommitSessionLoadParams = EnsureSessionParams & {
 	wrappedDek?: string;
 };
 
+export type CommitSessionResumeParams = EnsureSessionParams & {
+	expectedRevision: number | null;
+	events: readonly WalEventInput[];
+	wrappedDek?: string;
+};
+
 export type DiscoveredSession = {
 	sessionId: string;
 	backendId: string;
@@ -742,6 +748,104 @@ export class WalStore {
 						) {
 							throw new Error(
 								`Session changed before load commit: ${params.sessionId}`,
+							);
+						}
+						this.stmtUpdateSession.run({
+							$sessionId: params.sessionId,
+							$cwd: params.cwd ?? null,
+							$additionalDirectoriesJson:
+								params.additionalDirectories === undefined
+									? null
+									: JSON.stringify(params.additionalDirectories),
+							$title: params.title ?? null,
+							$isTitlePinned:
+								params.isTitlePinned === undefined
+									? null
+									: params.isTitlePinned
+										? 1
+										: 0,
+							$updatedAt: now,
+						});
+						revision = params.expectedRevision;
+					}
+					if (params.wrappedDek) {
+						this.stmtInsertSessionRevisionKey.run({
+							$sessionId: params.sessionId,
+							$revision: revision,
+							$wrappedDek: params.wrappedDek,
+							$createdAt: now,
+						});
+					}
+					return {
+						revision,
+						events: this.insertPreparedEvents(
+							params.sessionId,
+							revision,
+							prepared,
+						),
+					};
+				})
+				.immediate();
+		} catch (error) {
+			this.syncSequenceFromDurableState(params.sessionId, targetRevision);
+			throw error;
+		}
+		this.syncSequenceAfterCommit(
+			params.sessionId,
+			committed.revision,
+			committed.events,
+		);
+		this.logAppendedEvents(committed.events);
+		return committed;
+	}
+
+	/**
+	 * Atomically attach durable state to a resumed agent session. Unlike a load,
+	 * a resume keeps the current revision and appends only updates emitted while
+	 * the resume request was in flight.
+	 */
+	commitSessionResume(params: CommitSessionResumeParams): {
+		revision: number;
+		events: WalEvent[];
+	} {
+		const prepared = this.prepareEventInputs(params.events);
+		const targetRevision = params.expectedRevision ?? 1;
+		let committed: { revision: number; events: WalEvent[] };
+		try {
+			committed = this.db
+				.transaction(() => {
+					const existing = this.stmtGetSession.get({
+						$sessionId: params.sessionId,
+					}) as WalSessionRow | null;
+					const now = new Date().toISOString();
+					let revision: number;
+					if (params.expectedRevision === null) {
+						if (existing) {
+							throw new Error(
+								`Session appeared before resume commit: ${params.sessionId}`,
+							);
+						}
+						this.stmtInsertSession.run({
+							$sessionId: params.sessionId,
+							$machineId: params.machineId,
+							$backendId: params.backendId,
+							$cwd: params.cwd ?? null,
+							$additionalDirectoriesJson: JSON.stringify(
+								params.additionalDirectories ?? [],
+							),
+							$title: params.title ?? null,
+							$isTitlePinned: params.isTitlePinned ? 1 : 0,
+							$createdAt: now,
+							$updatedAt: now,
+						});
+						revision = 1;
+					} else {
+						if (
+							!existing ||
+							existing.current_revision !== params.expectedRevision
+						) {
+							throw new Error(
+								`Session changed before resume commit: ${params.sessionId}`,
 							);
 						}
 						this.stmtUpdateSession.run({

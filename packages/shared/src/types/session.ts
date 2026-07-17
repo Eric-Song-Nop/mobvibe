@@ -141,6 +141,7 @@ export type AgentMcpCapabilities = {
 export type AgentSessionCapabilities = {
 	list: boolean;
 	load: boolean;
+	resume?: boolean;
 	additionalDirectories?: boolean;
 	prompt?: AgentPromptCapabilities;
 	mcp?: AgentMcpCapabilities;

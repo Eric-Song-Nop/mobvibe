@@ -22,7 +22,10 @@ let machinesState: {
 		string,
 		{
 			connected?: boolean;
-			backendCapabilities?: Record<string, { list: boolean; load: boolean }>;
+			backendCapabilities?: Record<
+				string,
+				{ list: boolean; load: boolean; resume?: boolean }
+			>;
 		}
 	>;
 	updateBackendCapabilities: () => void;
@@ -51,6 +54,9 @@ vi.mock("@/lib/socket", () => ({
 const loadSessionMutation = {
 	mutateAsync: vi.fn(),
 };
+const resumeSessionMutation = {
+	mutateAsync: vi.fn(),
+};
 const reloadSessionMutation = {
 	mutateAsync: vi.fn(),
 };
@@ -58,6 +64,7 @@ const reloadSessionMutation = {
 vi.mock("../useSessionMutations", () => ({
 	useSessionMutations: () => ({
 		loadSessionMutation,
+		resumeSessionMutation,
 		reloadSessionMutation,
 	}),
 }));
@@ -123,6 +130,7 @@ describe("useSessionActivation", () => {
 			updateBackendCapabilities: vi.fn(),
 		};
 		loadSessionMutation.mutateAsync.mockReset();
+		resumeSessionMutation.mutateAsync.mockReset();
 		reloadSessionMutation.mutateAsync.mockReset();
 		mockGatewaySocket.subscribeToSession.mockReset();
 		mockGatewaySocket.unsubscribeFromSession.mockReset();
@@ -176,7 +184,7 @@ describe("useSessionActivation", () => {
 		expect(store.setActiveSessionId).not.toHaveBeenCalled();
 	});
 
-	it("sets error when load capability is known false", async () => {
+	it("sets error when load and resume capabilities are known false", async () => {
 		const store = createStore();
 		const session = buildSession({
 			cwd: "/home/user/project",
@@ -190,7 +198,7 @@ describe("useSessionActivation", () => {
 				"machine-1": {
 					connected: true,
 					backendCapabilities: {
-						"backend-1": { list: true, load: false },
+						"backend-1": { list: true, load: false, resume: false },
 					},
 				},
 			},
@@ -206,10 +214,154 @@ describe("useSessionActivation", () => {
 		expect(store.setError).toHaveBeenCalledWith(
 			"session-1",
 			expect.objectContaining({
-				message: "errors.sessionLoadNotSupported",
+				message: "This agent does not support loading or resuming sessions",
 			}),
 		);
 		expect(loadSessionMutation.mutateAsync).not.toHaveBeenCalled();
+	});
+
+	it("resumes a persisted transcript without clearing or syncing history", async () => {
+		const store = createStore();
+		const session = buildSession({
+			cwd: "/home/user/project",
+			additionalDirectories: ["/shared"],
+			machineId: "machine-1",
+			backendId: "backend-1",
+			revision: 3,
+			lastAppliedSeq: 8,
+			messages: [
+				{
+					id: "msg-1",
+					kind: "text",
+					role: "assistant",
+					content: "persisted",
+					contentBlocks: [],
+					createdAt: "",
+					isStreaming: false,
+				},
+			],
+		});
+		mockChatStoreState.sessions[session.sessionId] = session;
+		machinesState = {
+			machines: {
+				"machine-1": {
+					connected: true,
+					backendCapabilities: {
+						"backend-1": { list: true, load: true, resume: true },
+					},
+				},
+			},
+			updateBackendCapabilities: vi.fn(),
+		};
+		resumeSessionMutation.mutateAsync.mockResolvedValue({
+			sessionId: "session-1",
+			revision: 3,
+		});
+
+		const { result } = renderHook(() => useSessionActivation(store));
+		await act(async () => {
+			await result.current.activateSession(session);
+		});
+
+		expect(resumeSessionMutation.mutateAsync).toHaveBeenCalledWith({
+			sessionId: "session-1",
+			cwd: "/home/user/project",
+			additionalDirectories: ["/shared"],
+			backendId: "backend-1",
+			machineId: "machine-1",
+		});
+		expect(loadSessionMutation.mutateAsync).not.toHaveBeenCalled();
+		expect(store.clearSessionMessages).not.toHaveBeenCalled();
+		expect(store.setHistorySyncing).not.toHaveBeenCalled();
+		expect(store.setHistorySyncWarning).not.toHaveBeenCalled();
+		expect(store.restoreSessionMessages).not.toHaveBeenCalled();
+		expect(store.setActiveSessionId).toHaveBeenCalledWith("session-1");
+	});
+
+	it("uses resume for a resume-only agent without local history", async () => {
+		const store = createStore();
+		const session = buildSession({
+			cwd: "/home/user/project",
+			machineId: "machine-1",
+			backendId: "backend-1",
+		});
+		mockChatStoreState.sessions[session.sessionId] = session;
+		machinesState = {
+			machines: {
+				"machine-1": {
+					connected: true,
+					backendCapabilities: {
+						"backend-1": { list: true, load: false, resume: true },
+					},
+				},
+			},
+			updateBackendCapabilities: vi.fn(),
+		};
+		resumeSessionMutation.mutateAsync.mockResolvedValue({
+			sessionId: "session-1",
+			revision: 1,
+		});
+
+		const { result } = renderHook(() => useSessionActivation(store));
+		await act(async () => {
+			await result.current.activateSession(session);
+		});
+
+		expect(resumeSessionMutation.mutateAsync).toHaveBeenCalled();
+		expect(loadSessionMutation.mutateAsync).not.toHaveBeenCalled();
+		expect(store.clearSessionMessages).not.toHaveBeenCalled();
+		expect(store.setHistorySyncing).not.toHaveBeenCalled();
+	});
+
+	it("does not fall back to load or alter history when resume fails", async () => {
+		const store = createStore();
+		const session = buildSession({
+			cwd: "/home/user/project",
+			machineId: "machine-1",
+			backendId: "backend-1",
+			revision: 2,
+			lastAppliedSeq: 1,
+			messages: [
+				{
+					id: "msg-1",
+					kind: "text",
+					role: "user",
+					content: "keep me",
+					contentBlocks: [],
+					createdAt: "",
+					isStreaming: false,
+				},
+			],
+		});
+		mockChatStoreState.sessions[session.sessionId] = session;
+		machinesState = {
+			machines: {
+				"machine-1": {
+					connected: true,
+					backendCapabilities: {
+						"backend-1": { list: true, load: true, resume: true },
+					},
+				},
+			},
+			updateBackendCapabilities: vi.fn(),
+		};
+		resumeSessionMutation.mutateAsync.mockRejectedValue(
+			new Error("resume failed"),
+		);
+
+		const { result } = renderHook(() => useSessionActivation(store));
+		await act(async () => {
+			await result.current.activateSession(session);
+		});
+
+		expect(loadSessionMutation.mutateAsync).not.toHaveBeenCalled();
+		expect(reloadSessionMutation.mutateAsync).not.toHaveBeenCalled();
+		expect(store.clearSessionMessages).not.toHaveBeenCalled();
+		expect(store.restoreSessionMessages).not.toHaveBeenCalled();
+		expect(store.setHistorySyncing).not.toHaveBeenCalled();
+		expect(mockGatewaySocket.unsubscribeFromSession).toHaveBeenCalledWith(
+			"session-1",
+		);
 	});
 
 	it("proceeds optimistically when capabilities unknown", async () => {

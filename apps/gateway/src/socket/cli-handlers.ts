@@ -481,6 +481,7 @@ export function setupCliHandlers(
 					backendId: payload.backendId,
 					backendLabel: payload.backendLabel,
 					machineId: cliRecord.machineId,
+					additionalDirectories: s.additionalDirectories ?? [],
 				}));
 
 				// Add to CLI registry (returns only actually new sessions)

@@ -16,6 +16,7 @@ import {
 	loadSession,
 	reloadSession,
 	renameSession,
+	resumeSession,
 	type SessionSummary,
 	sendMessage,
 	sendPermissionDecision,
@@ -597,6 +598,11 @@ export function useSessionMutations(store: ChatStoreActions) {
 		...createSessionLoadCallbacks("errors.loadSessionFailed"),
 	});
 
+	const resumeSessionMutation = useMutation({
+		mutationFn: resumeSession,
+		...createSessionLoadCallbacks("errors.resumeSessionFailed"),
+	});
+
 	const reloadSessionMutation = useMutation({
 		mutationFn: reloadSession,
 		...createSessionLoadCallbacks("errors.reloadSessionFailed"),
@@ -614,6 +620,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 		sendMessageMutation,
 		permissionDecisionMutation,
 		loadSessionMutation,
+		resumeSessionMutation,
 		reloadSessionMutation,
 	};
 }

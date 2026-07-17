@@ -44,6 +44,7 @@ import type {
 	MachinesResponse,
 	PermissionDecisionPayload,
 	PermissionDecisionResponse,
+	ResumeSessionParams,
 	SendMessageResult,
 	SessionFsFilePreviewResponse,
 	SessionSummary,
@@ -723,6 +724,18 @@ export const loadSession = async (payload: {
 }): Promise<SessionSummary> =>
 	requestJsonWithTimeout<SessionSummary>(
 		"/acp/session/load",
+		SESSION_LOAD_TIMEOUT_MS,
+		{
+			method: "POST",
+			body: JSON.stringify(payload),
+		},
+	);
+
+export const resumeSession = async (
+	payload: ResumeSessionParams,
+): Promise<SessionSummary> =>
+	requestJsonWithTimeout<SessionSummary>(
+		"/acp/session/resume",
 		SESSION_LOAD_TIMEOUT_MS,
 		{
 			method: "POST",

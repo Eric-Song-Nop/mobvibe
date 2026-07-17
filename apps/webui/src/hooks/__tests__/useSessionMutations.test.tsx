@@ -54,6 +54,7 @@ vi.mock("@/lib/api", async () => {
 		sendMessage: vi.fn(),
 		sendPermissionDecision: vi.fn(),
 		loadSession: vi.fn(),
+		resumeSession: vi.fn(),
 		reloadSession: vi.fn(),
 	};
 });
@@ -1194,6 +1195,44 @@ describe("useSessionMutations", () => {
 			});
 
 			expect(mockStore.resetSessionForRevision).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("resumeSessionMutation", () => {
+		it("keeps the current revision content while refreshing session metadata", async () => {
+			mockChatStoreState.sessions = {
+				"session-1": { revision: 5 },
+			};
+			vi.mocked(apiModule.resumeSession).mockResolvedValue({
+				sessionId: "session-1",
+				title: "Resumed Session",
+				backendId: "backend-1",
+				backendLabel: "Backend 1",
+				createdAt: "2025-01-01T00:00:00Z",
+				updatedAt: "2025-01-02T00:00:00Z",
+				revision: 5,
+				wrappedDek: "wrapped-revision-5",
+			});
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+			await result.current.resumeSessionMutation.mutateAsync({
+				sessionId: "session-1",
+				cwd: "/project",
+				backendId: "backend-1",
+			});
+
+			expect(mockStore.resetSessionForRevision).not.toHaveBeenCalled();
+			expect(mockStore.updateSessionMeta).toHaveBeenCalledWith(
+				"session-1",
+				expect.objectContaining({ updatedAt: "2025-01-02T00:00:00Z" }),
+			);
+			expect(mockBootstrapSessionE2EE).toHaveBeenCalledWith(
+				"session-1",
+				"wrapped-revision-5",
+				5,
+			);
 		});
 	});
 

@@ -292,6 +292,19 @@ export type LoadSessionRpcParams = {
 	backendId: string;
 };
 
+/** HTTP/API parameters for resuming a session without replaying its history. */
+export type ResumeSessionParams = {
+	sessionId: string;
+	cwd: string;
+	/** Complete ordered ACP additional directory roots. */
+	additionalDirectories?: string[];
+	backendId: string;
+	machineId?: string;
+};
+
+/** CLI RPC parameters for resuming a session without history replay. */
+export type ResumeSessionRpcParams = ResumeSessionParams;
+
 // Reload session RPC params
 export type ReloadSessionRpcParams = {
 	sessionId: string;
@@ -378,6 +391,7 @@ export interface GatewayToCliEvents {
 		request: RpcRequest<DiscoverSessionsRpcParams>,
 	) => void;
 	"rpc:session:load": (request: RpcRequest<LoadSessionRpcParams>) => void;
+	"rpc:session:resume": (request: RpcRequest<ResumeSessionRpcParams>) => void;
 	"rpc:session:reload": (request: RpcRequest<ReloadSessionRpcParams>) => void;
 	"rpc:agent-team:create": (
 		request: RpcRequest<CreateAgentTeamRpcParams>,

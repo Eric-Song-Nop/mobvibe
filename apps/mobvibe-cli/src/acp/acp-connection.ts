@@ -24,6 +24,7 @@ import {
 	type ReleaseTerminalResponse,
 	type RequestPermissionRequest,
 	type RequestPermissionResponse,
+	type ResumeSessionResponse,
 	type SessionInfo,
 	type SessionNotification,
 	type SetSessionConfigOptionResponse,
@@ -300,6 +301,7 @@ export class AcpConnection {
 		return {
 			list: this.agentCapabilities?.sessionCapabilities?.list != null,
 			load: this.agentCapabilities?.loadSession === true,
+			resume: this.agentCapabilities?.sessionCapabilities?.resume != null,
 			additionalDirectories:
 				this.agentCapabilities?.sessionCapabilities?.additionalDirectories !=
 				null,
@@ -324,6 +326,13 @@ export class AcpConnection {
 	 */
 	supportsSessionLoad(): boolean {
 		return this.agentCapabilities?.loadSession === true;
+	}
+
+	/**
+	 * Check if the agent supports session/resume.
+	 */
+	supportsSessionResume(): boolean {
+		return this.agentCapabilities?.sessionCapabilities?.resume != null;
 	}
 
 	supportsAdditionalDirectories(): boolean {
@@ -387,6 +396,44 @@ export class AcpConnection {
 		const connection = await this.ensureReady();
 		const response = await connection.agent.request(
 			methods.agent.session.load,
+			{
+				sessionId,
+				cwd,
+				mcpServers: [],
+				additionalDirectories:
+					normalizedAdditionalDirectories.length > 0
+						? normalizedAdditionalDirectories
+						: undefined,
+			},
+		);
+		this.sessionId = sessionId;
+		return response;
+	}
+
+	/** Resume a historical session without replaying its message history. */
+	async resumeSession(
+		sessionId: string,
+		cwd: string,
+		additionalDirectories?: readonly string[],
+	): Promise<ResumeSessionResponse> {
+		if (!this.supportsSessionResume()) {
+			throw new Error("Agent does not support session/resume capability");
+		}
+		const normalizedAdditionalDirectories = normalizeAdditionalDirectories(
+			cwd,
+			additionalDirectories,
+		);
+		if (
+			normalizedAdditionalDirectories.length > 0 &&
+			!this.supportsAdditionalDirectories()
+		) {
+			throw new Error(
+				"Agent does not support session additionalDirectories capability",
+			);
+		}
+		const connection = await this.ensureReady();
+		const response = await connection.agent.request(
+			methods.agent.session.resume,
 			{
 				sessionId,
 				cwd,

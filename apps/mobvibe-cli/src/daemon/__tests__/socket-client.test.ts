@@ -141,6 +141,7 @@ describe("SocketClient restore semantics", () => {
 		recordMessageSendResult: ReturnType<typeof mock>;
 		getSession: ReturnType<typeof mock>;
 		loadSession: ReturnType<typeof mock>;
+		resumeSession: ReturnType<typeof mock>;
 		reloadSession: ReturnType<typeof mock>;
 		setSessionConfigOption: ReturnType<typeof mock>;
 		archiveSession: ReturnType<typeof mock>;
@@ -215,6 +216,7 @@ describe("SocketClient restore semantics", () => {
 				cwd: "/tmp/project",
 			})),
 			loadSession: mock(() => Promise.resolve({ sessionId: "session-1" })),
+			resumeSession: mock(() => Promise.resolve({ sessionId: "session-1" })),
 			reloadSession: mock(() => Promise.resolve({ sessionId: "session-1" })),
 			setSessionConfigOption: mock(() =>
 				Promise.resolve({ sessionId: "session-1" }),
@@ -1487,7 +1489,37 @@ describe("SocketClient restore semantics", () => {
 			"session-1",
 			"/tmp/project",
 			"backend-1",
+			undefined,
 		);
+	});
+
+	test("forwards resume RPC parameters through the per-session queue", async () => {
+		const resumeHandler = socketHandlers.get("rpc:session:resume");
+		if (!resumeHandler) {
+			throw new Error("rpc:session:resume handler not registered");
+		}
+
+		await resumeHandler({
+			requestId: "req-resume",
+			params: {
+				sessionId: "session-1",
+				cwd: "/tmp/project",
+				additionalDirectories: ["/tmp/shared"],
+				backendId: "backend-1",
+				machineId: "machine-1",
+			},
+		});
+
+		expect(sessionManager.resumeSession).toHaveBeenCalledWith(
+			"session-1",
+			"/tmp/project",
+			"backend-1",
+			["/tmp/shared"],
+		);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-resume",
+			result: { sessionId: "session-1" },
+		});
 	});
 
 	test("waits for every included session before bulk archiving", async () => {

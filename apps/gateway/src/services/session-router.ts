@@ -43,6 +43,8 @@ import type {
 	PermissionDecisionPayload,
 	ReloadSessionRpcParams,
 	RenameSessionParams,
+	ResumeSessionParams,
+	ResumeSessionRpcParams,
 	RpcRequest,
 	RpcResponse,
 	SendMessageParams,
@@ -911,6 +913,53 @@ export class SessionRouter {
 			"session_load_rpc_complete",
 		);
 
+		return result;
+	}
+
+	/** Resume a durable session without replaying its history. */
+	async resumeSession(
+		params: ResumeSessionParams,
+		userId: string,
+	): Promise<SessionSummary> {
+		const owner = this.cliRegistry.getCliForSessionByUser(
+			params.sessionId,
+			userId,
+		);
+		if (owner && params.machineId && owner.machineId !== params.machineId) {
+			throw new Error("Session not found");
+		}
+		const cli = owner
+			? owner
+			: params.machineId
+				? this.resolveMachineForUser(params.machineId, userId)
+				: this.cliRegistry.getFirstCliForUser(userId);
+		if (!cli) {
+			throw new Error("No CLI connected for this user");
+		}
+
+		logger.info(
+			{
+				sessionId: params.sessionId,
+				machineId: cli.machineId,
+				cwd: params.cwd,
+				backendId: params.backendId,
+				userId,
+			},
+			"session_resume_rpc_start",
+		);
+		const rpcParams: ResumeSessionRpcParams = {
+			...params,
+			machineId: cli.machineId,
+		};
+		const result = await this.sendRpc<ResumeSessionRpcParams, SessionSummary>(
+			cli.socket,
+			"rpc:session:resume",
+			rpcParams,
+		);
+		logger.info(
+			{ sessionId: result.sessionId, userId },
+			"session_resume_rpc_complete",
+		);
 		return result;
 	}
 

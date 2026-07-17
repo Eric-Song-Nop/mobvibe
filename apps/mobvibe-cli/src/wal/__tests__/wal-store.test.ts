@@ -232,6 +232,135 @@ describe("WalStore", () => {
 		});
 	});
 
+	describe("commitSessionResume", () => {
+		it("keeps the revision and atomically appends in-flight updates", () => {
+			walStore.ensureSession({
+				sessionId: "session-resume",
+				machineId: "machine-1",
+				backendId: "backend-1",
+				cwd: "/repo",
+				additionalDirectories: ["/old"],
+			});
+			walStore.appendEvent({
+				sessionId: "session-resume",
+				revision: 1,
+				kind: "user_message",
+				payload: { text: "history" },
+			});
+
+			const committed = walStore.commitSessionResume({
+				sessionId: "session-resume",
+				machineId: "machine-1",
+				backendId: "backend-1",
+				cwd: "/repo",
+				additionalDirectories: ["/new"],
+				expectedRevision: 1,
+				events: [{ kind: "agent_message_chunk", payload: { text: "resumed" } }],
+				wrappedDek: "wrapped-resume",
+			});
+
+			expect(committed.revision).toBe(1);
+			expect(committed.events.map((event) => event.seq)).toEqual([2]);
+			expect(
+				walStore.getSession("session-resume")?.additionalDirectories,
+			).toEqual(["/new"]);
+			expect(walStore.getSessionRevisionKey("session-resume", 1)).toBe(
+				"wrapped-resume",
+			);
+		});
+
+		it("rolls back metadata, key, and every update when append fails", () => {
+			walStore.ensureSession({
+				sessionId: "session-resume-rollback",
+				machineId: "machine-1",
+				backendId: "backend-1",
+				cwd: "/repo",
+				additionalDirectories: ["/old"],
+			});
+			walStore.appendEvent({
+				sessionId: "session-resume-rollback",
+				revision: 1,
+				kind: "user_message",
+				payload: { text: "history" },
+			});
+			const faultDb = new Database(dbPath);
+			faultDb.exec(`
+				CREATE TRIGGER fail_second_resume_update
+				BEFORE INSERT ON session_events
+				WHEN NEW.session_id = 'session-resume-rollback' AND NEW.seq = 3
+				BEGIN
+					SELECT RAISE(ABORT, 'injected resume failure');
+				END;
+			`);
+			faultDb.close();
+
+			expect(() =>
+				walStore.commitSessionResume({
+					sessionId: "session-resume-rollback",
+					machineId: "machine-1",
+					backendId: "backend-1",
+					cwd: "/repo",
+					additionalDirectories: ["/new"],
+					expectedRevision: 1,
+					events: [
+						{ kind: "agent_message_chunk", payload: { text: "first" } },
+						{ kind: "terminal_output", payload: { data: "second" } },
+					],
+					wrappedDek: "wrapped-rollback",
+				}),
+			).toThrow("injected resume failure");
+
+			expect(
+				walStore.getSession("session-resume-rollback")?.additionalDirectories,
+			).toEqual(["/old"]);
+			expect(
+				walStore.getSessionRevisionKey("session-resume-rollback", 1),
+			).toBeUndefined();
+			expect(
+				walStore.queryEvents({
+					sessionId: "session-resume-rollback",
+					revision: 1,
+				}),
+			).toHaveLength(1);
+		});
+
+		it("does not leave a resume-only session when its first append fails", () => {
+			const faultDb = new Database(dbPath);
+			faultDb.exec(`
+				CREATE TRIGGER fail_resume_only_update
+				BEFORE INSERT ON session_events
+				WHEN NEW.session_id = 'resume-only-rollback'
+				BEGIN
+					SELECT RAISE(ABORT, 'injected resume-only failure');
+				END;
+			`);
+			faultDb.close();
+
+			expect(() =>
+				walStore.commitSessionResume({
+					sessionId: "resume-only-rollback",
+					machineId: "machine-1",
+					backendId: "backend-1",
+					cwd: "/repo",
+					expectedRevision: null,
+					events: [{ kind: "agent_message_chunk", payload: { text: "first" } }],
+					wrappedDek: "wrapped-resume-only",
+				}),
+			).toThrow("injected resume-only failure");
+
+			expect(walStore.getSession("resume-only-rollback")).toBeNull();
+			expect(
+				walStore.getSessionRevisionKey("resume-only-rollback", 1),
+			).toBeUndefined();
+			expect(
+				walStore.queryEvents({
+					sessionId: "resume-only-rollback",
+					revision: 1,
+				}),
+			).toEqual([]);
+		});
+	});
+
 	describe("appendEvent", () => {
 		it("should append events with incrementing sequence", () => {
 			walStore.ensureSession({

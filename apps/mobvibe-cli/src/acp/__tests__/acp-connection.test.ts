@@ -12,6 +12,7 @@ mock.module("@agentclientprotocol/sdk", () => ({
 				load: "session/load",
 				new: "session/new",
 				prompt: "session/prompt",
+				resume: "session/resume",
 				setConfigOption: "session/set_config_option",
 				setMode: "session/set_mode",
 			},
@@ -149,6 +150,16 @@ describe("AcpConnection", () => {
 			expect(connection.getSessionCapabilities().additionalDirectories).toBe(
 				true,
 			);
+		});
+
+		it("maps the resume session capability", () => {
+			// @ts-expect-error - accessing private property for testing
+			connection.agentCapabilities = {
+				sessionCapabilities: { resume: {} },
+			};
+
+			expect(connection.getSessionCapabilities().resume).toBe(true);
+			expect(connection.supportsSessionResume()).toBe(true);
 		});
 	});
 
@@ -306,6 +317,49 @@ describe("AcpConnection", () => {
 			await expect(
 				connection.loadSession("session-1", "/home/user/project"),
 			).rejects.toThrow("Agent does not support session/load capability");
+		});
+	});
+
+	describe("resumeSession", () => {
+		it("rejects when the agent does not advertise resume", async () => {
+			await expect(
+				connection.resumeSession("session-1", "/home/user/project"),
+			).rejects.toThrow("Agent does not support session/resume capability");
+		});
+
+		it("forwards cwd, MCP servers, and normalized additional roots", async () => {
+			const request = mock(() =>
+				Promise.resolve({ modes: null, configOptions: null }),
+			);
+			const internal = connection as unknown as {
+				state: "ready";
+				agentCapabilities: {
+					sessionCapabilities: {
+						resume: Record<string, never>;
+						additionalDirectories: Record<string, never>;
+					};
+				};
+				connection: { agent: { request: typeof request } };
+			};
+			internal.state = "ready";
+			internal.agentCapabilities = {
+				sessionCapabilities: { resume: {}, additionalDirectories: {} },
+			};
+			internal.connection = { agent: { request } };
+
+			await connection.resumeSession("session-1", "/repo", [
+				"/repo",
+				"/data",
+				"/data",
+			]);
+
+			expect(request).toHaveBeenCalledWith("session/resume", {
+				sessionId: "session-1",
+				cwd: "/repo",
+				mcpServers: [],
+				additionalDirectories: ["/data"],
+			});
+			expect(connection.getStatus().sessionId).toBe("session-1");
 		});
 	});
 

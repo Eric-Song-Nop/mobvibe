@@ -262,6 +262,8 @@ export type {
 	PermissionRequestPayload,
 	ReloadSessionRpcParams,
 	RenameSessionParams,
+	ResumeSessionParams,
+	ResumeSessionRpcParams,
 	RpcError,
 	RpcRequest,
 	RpcResponse,

@@ -32,6 +32,7 @@ describe("session message routes", () => {
 		createSession: ReturnType<typeof vi.fn>;
 		discoverSessions: ReturnType<typeof vi.fn>;
 		loadSession: ReturnType<typeof vi.fn>;
+		resumeSession: ReturnType<typeof vi.fn>;
 		reloadSession: ReturnType<typeof vi.fn>;
 		sendMessage: ReturnType<typeof vi.fn>;
 		setSessionConfigOption: ReturnType<typeof vi.fn>;
@@ -47,6 +48,7 @@ describe("session message routes", () => {
 			createSession: vi.fn(async () => ({ sessionId: "session-created" })),
 			discoverSessions: vi.fn(async () => ({ sessions: [] })),
 			loadSession: vi.fn(async () => ({ sessionId: "session-loaded" })),
+			resumeSession: vi.fn(async () => ({ sessionId: "session-resumed" })),
 			reloadSession: vi.fn(async () => ({ sessionId: "session-reloaded" })),
 			sendMessage: vi.fn(async () => ({ stopReason: "end_turn" })),
 			setSessionConfigOption: vi.fn(async () => ({ sessionId: "session-1" })),
@@ -292,6 +294,79 @@ describe("session message routes", () => {
 			},
 			"user-1",
 		);
+	});
+
+	it("validates and forwards a resume request with machine affinity", async () => {
+		const response = await fetch(`${baseUrl}/acp/session/resume`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				sessionId: "session-1",
+				cwd: "/repo",
+				backendId: "backend-1",
+				machineId: "machine-1",
+				additionalDirectories: ["/data", "/data", "/shared"],
+			}),
+		});
+
+		expect(response.status).toBe(200);
+		expect(sessionRouter.resumeSession).toHaveBeenCalledWith(
+			{
+				sessionId: "session-1",
+				cwd: "/repo",
+				additionalDirectories: ["/data", "/shared"],
+				backendId: "backend-1",
+				machineId: "machine-1",
+			},
+			"user-1",
+		);
+	});
+
+	it("rejects empty or relative resume paths at the API boundary", async () => {
+		for (const cwd of ["", "relative/project"]) {
+			const response = await fetch(`${baseUrl}/acp/session/resume`, {
+				method: "POST",
+				headers: {
+					authorization: "Bearer user-1",
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({
+					sessionId: "session-1",
+					cwd,
+					backendId: "backend-1",
+				}),
+			});
+
+			expect(response.status).toBe(400);
+		}
+		expect(sessionRouter.resumeSession).not.toHaveBeenCalled();
+	});
+
+	it("maps resume capability failures to 409", async () => {
+		sessionRouter.resumeSession.mockRejectedValueOnce(
+			new Error("Agent does not support session/resume capability"),
+		);
+		const response = await fetch(`${baseUrl}/acp/session/resume`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				sessionId: "session-1",
+				cwd: "/repo",
+				backendId: "backend-1",
+				machineId: "machine-1",
+			}),
+		});
+
+		expect(response.status).toBe(409);
+		expect(await response.json()).toEqual({
+			error: expect.objectContaining({ code: "CAPABILITY_NOT_SUPPORTED" }),
+		});
 	});
 
 	it("forwards messageId unchanged to the CLI RPC", async () => {

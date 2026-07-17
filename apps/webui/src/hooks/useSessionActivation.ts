@@ -11,7 +11,12 @@ import { gatewaySocket } from "@/lib/socket";
 import type { ChatStoreActions } from "./useSessionMutations";
 import { useSessionMutations } from "./useSessionMutations";
 
-export type ActivationPhase = "idle" | "discovering" | "loading" | "reloading";
+export type ActivationPhase =
+	| "idle"
+	| "discovering"
+	| "loading"
+	| "resuming"
+	| "reloading";
 
 export type ActivationState = {
 	phase: ActivationPhase;
@@ -21,7 +26,7 @@ export type ActivationState = {
 
 export function useSessionActivation(store: ChatStoreActions) {
 	const { t } = useTranslation();
-	const { loadSessionMutation, reloadSessionMutation } =
+	const { loadSessionMutation, reloadSessionMutation, resumeSessionMutation } =
 		useSessionMutations(store);
 	const machines = useMachinesStore((state) => state.machines);
 
@@ -56,16 +61,33 @@ export function useSessionActivation(store: ChatStoreActions) {
 				return;
 			}
 
-			// Per-backend capability check: false → known unsupported, undefined → unknown (proceed optimistically)
+			// Unknown capabilities proceed optimistically through load. Resume is used
+			// only when explicitly advertised because it intentionally skips replay.
 			const loadCap = getBackendCapability(machine, fresh.backendId, "load");
-			if (loadCap === false) {
+			const resumeCap = getBackendCapability(
+				machine,
+				fresh.backendId,
+				"resume",
+			);
+			const hasLocalHistory =
+				fresh.revision !== undefined &&
+				((fresh.lastAppliedSeq ?? 0) > 0 || fresh.messages.length > 0);
+			const shouldResume =
+				!force && resumeCap === true && (hasLocalHistory || loadCap === false);
+			if ((force || !shouldResume) && loadCap === false) {
 				store.setError(
 					fresh.sessionId,
-					createFallbackError(t("errors.sessionLoadNotSupported"), "session"),
+					createFallbackError(
+						t(
+							force
+								? "errors.sessionLoadNotSupported"
+								: "errors.sessionActivationNotSupported",
+						),
+						"session",
+					),
 				);
 				return;
 			}
-			// loadCap === true or undefined → proceed, server validates
 
 			if (!fresh.backendId) {
 				store.setError(
@@ -86,6 +108,19 @@ export function useSessionActivation(store: ChatStoreActions) {
 			};
 
 			store.setSessionLoading(fresh.sessionId, true);
+			gatewaySocket.subscribeToSession(fresh.sessionId);
+			if (shouldResume) {
+				try {
+					await resumeSessionMutation.mutateAsync(params);
+					store.setActiveSessionId(fresh.sessionId);
+				} catch {
+					gatewaySocket.unsubscribeFromSession(fresh.sessionId);
+				} finally {
+					store.setSessionLoading(fresh.sessionId, false);
+				}
+				return;
+			}
+
 			store.setHistorySyncing(fresh.sessionId, true);
 			store.setHistorySyncWarning(fresh.sessionId, undefined);
 			const backupMessages: ChatMessage[] = [...fresh.messages];
@@ -98,8 +133,6 @@ export function useSessionActivation(store: ChatStoreActions) {
 				streamingThoughtId: fresh.streamingThoughtId,
 			};
 			store.clearSessionMessages(fresh.sessionId);
-			gatewaySocket.subscribeToSession(fresh.sessionId);
-
 			try {
 				const mutation = force ? reloadSessionMutation : loadSessionMutation;
 				await mutation.mutateAsync(params);
@@ -116,7 +149,14 @@ export function useSessionActivation(store: ChatStoreActions) {
 				store.setSessionLoading(fresh.sessionId, false);
 			}
 		},
-		[loadSessionMutation, reloadSessionMutation, machines, store, t],
+		[
+			loadSessionMutation,
+			reloadSessionMutation,
+			resumeSessionMutation,
+			machines,
+			store,
+			t,
+		],
 	);
 
 	const activationState = useMemo<ActivationState>(() => {
@@ -132,12 +172,20 @@ export function useSessionActivation(store: ChatStoreActions) {
 				sessionId: reloadSessionMutation.variables.sessionId,
 			};
 		}
+		if (resumeSessionMutation.isPending && resumeSessionMutation.variables) {
+			return {
+				phase: "resuming",
+				sessionId: resumeSessionMutation.variables.sessionId,
+			};
+		}
 		return { phase: "idle" };
 	}, [
 		loadSessionMutation.isPending,
 		loadSessionMutation.variables,
 		reloadSessionMutation.isPending,
 		reloadSessionMutation.variables,
+		resumeSessionMutation.isPending,
+		resumeSessionMutation.variables,
 	]);
 
 	return {

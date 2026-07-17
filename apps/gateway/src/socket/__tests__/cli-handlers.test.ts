@@ -267,6 +267,49 @@ describe("setupCliHandlers", () => {
 		);
 	});
 
+	it("preserves additional directories when mapping discovered sessions", () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({ machineId: "machine-1" }),
+			{
+				userId: "user-1",
+				deviceId: "device-123",
+			},
+		);
+
+		socketHandlers["sessions:discovered"]?.({
+			sessions: [
+				{
+					sessionId: "discovered-roots",
+					cwd: "/repo",
+					additionalDirectories: ["/shared", "/data"],
+					title: "Discovered roots",
+				},
+			],
+			capabilities: {
+				list: true,
+				load: true,
+				resume: true,
+				additionalDirectories: true,
+			},
+			backendId: "backend-1",
+			backendLabel: "Claude Code",
+		});
+
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"sessions:changed",
+			expect.objectContaining({
+				added: [
+					expect.objectContaining({
+						sessionId: "discovered-roots",
+						additionalDirectories: ["/shared", "/data"],
+					}),
+				],
+			}),
+			"user-1",
+		);
+	});
+
 	it("preserves the initial session list while CLI registration is pending", async () => {
 		let finishUpsert:
 			| ((value: { machineId: string; userId: string }) => void)

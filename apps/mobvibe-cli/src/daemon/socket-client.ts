@@ -928,6 +928,37 @@ export class SocketClient extends EventEmitter {
 			}
 		});
 
+		// Resume a durable session without replaying historical messages
+		this.socket.on("rpc:session:resume", async (request) => {
+			try {
+				const { sessionId, cwd, backendId, additionalDirectories } =
+					request.params;
+				logger.info(
+					{ requestId: request.requestId, sessionId, cwd, backendId },
+					"rpc_session_resume",
+				);
+				const session = await this.enqueueSessionOperation(sessionId, () =>
+					sessionManager.resumeSession(
+						sessionId,
+						cwd,
+						backendId,
+						additionalDirectories,
+					),
+				);
+				this.sendRpcResponse(request.requestId, session);
+			} catch (error) {
+				logger.error(
+					{
+						err: error,
+						requestId: request.requestId,
+						sessionId: request.params.sessionId,
+					},
+					"rpc_session_resume_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
 		// Reload historical session from ACP agent
 		this.socket.on("rpc:session:reload", async (request) => {
 			try {

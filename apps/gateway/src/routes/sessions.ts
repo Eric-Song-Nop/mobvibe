@@ -947,6 +947,91 @@ export function setupSessionRoutes(
 		},
 	);
 
+	// Resume a durable session without replaying history from the ACP agent
+	router.post(
+		"/session/resume",
+		async (request: AuthenticatedRequest, response) => {
+			const { sessionId, cwd, additionalDirectories, backendId, machineId } =
+				request.body ?? {};
+			if (
+				typeof sessionId !== "string" ||
+				sessionId.length === 0 ||
+				typeof cwd !== "string" ||
+				cwd.length === 0 ||
+				(!path.posix.isAbsolute(cwd) && !path.win32.isAbsolute(cwd))
+			) {
+				respondError(
+					response,
+					buildRequestValidationError(
+						"sessionId and an absolute cwd are required",
+					),
+					400,
+				);
+				return;
+			}
+			if (typeof backendId !== "string" || backendId.trim().length === 0) {
+				respondError(
+					response,
+					buildRequestValidationError("backendId required"),
+					400,
+				);
+				return;
+			}
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+
+			try {
+				const normalizedAdditionalDirectories = normalizeAdditionalDirectories(
+					additionalDirectories,
+				);
+				logger.info(
+					{ sessionId, cwd, backendId, machineId, userId },
+					"session_resume_request",
+				);
+				const session = await sessionRouter.resumeSession(
+					{
+						sessionId,
+						cwd,
+						additionalDirectories: normalizedAdditionalDirectories,
+						backendId,
+						machineId: typeof machineId === "string" ? machineId : undefined,
+					},
+					userId,
+				);
+				logger.info({ sessionId, userId }, "session_resume_success");
+				response.json(session);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				logger.error({ err: error, sessionId }, "session_resume_error");
+				if (respondAppError(response, error)) return;
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(), 404);
+				} else if (
+					message.includes("Machine not found") ||
+					message.includes("No CLI connected")
+				) {
+					respondError(response, buildAuthorizationError(message), 503);
+				} else if (message.includes("does not support")) {
+					respondError(
+						response,
+						createErrorDetail({
+							code: "CAPABILITY_NOT_SUPPORTED",
+							message,
+							retryable: false,
+							scope: "session",
+						}),
+						409,
+					);
+				} else {
+					respondError(response, createInternalError("session"));
+				}
+			}
+		},
+	);
+
 	// Reload historical session from ACP agent
 	router.post(
 		"/session/reload",

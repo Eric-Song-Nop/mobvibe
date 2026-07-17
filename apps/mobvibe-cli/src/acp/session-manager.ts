@@ -1978,6 +1978,286 @@ export class SessionManager {
 	}
 
 	/**
+	 * Resume a durable session without asking the agent to replay history.
+	 * The existing WAL revision, events, and revision key remain authoritative.
+	 */
+	async resumeSession(
+		sessionId: string,
+		cwd: string,
+		backendId: string,
+		additionalDirectories?: string[],
+	): Promise<SessionSummary> {
+		logger.info({ sessionId, cwd, backendId }, "resume_session_start");
+		if (
+			sessionId.length === 0 ||
+			cwd.length === 0 ||
+			(!path.posix.isAbsolute(cwd) && !path.win32.isAbsolute(cwd))
+		) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Session ID and an absolute cwd are required",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		if (this.walStore.isArchived(sessionId)) {
+			throw new AppError(
+				createErrorDetail({
+					code: "SESSION_NOT_FOUND",
+					message: "Archived session cannot be resumed",
+					retryable: false,
+					scope: "session",
+				}),
+				410,
+			);
+		}
+
+		const walSession = this.walStore.getSession(sessionId);
+		const existing = this.sessions.get(sessionId);
+		const discovered = this.discoveredSessions.get(sessionId);
+		const durableDiscovered = this.walStore
+			.getDiscoveredSessions()
+			.find((session) => session.sessionId === sessionId);
+		const knownBackendIds = [
+			walSession?.backendId,
+			existing?.backendId,
+			durableDiscovered?.backendId,
+		].filter((value): value is string => value !== undefined);
+		if (
+			knownBackendIds.some((knownBackendId) => knownBackendId !== backendId)
+		) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Session backend does not match resume request",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		const knownCwds = [
+			walSession?.cwd,
+			existing?.cwd,
+			discovered?.cwd,
+			durableDiscovered?.cwd,
+		].filter((value): value is string => value !== undefined);
+		if (knownCwds.some((knownCwd) => knownCwd !== cwd)) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Session cwd does not match resume request",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		const backend = this.resolveBackend(backendId);
+		const normalizedAdditionalDirectories = normalizeAdditionalDirectories(
+			cwd,
+			additionalDirectories,
+		);
+		const rootsAlreadyActive =
+			existing?.additionalDirectories.length ===
+				normalizedAdditionalDirectories.length &&
+			existing.additionalDirectories.every(
+				(directory, index) =>
+					directory === normalizedAdditionalDirectories[index],
+			);
+
+		if (
+			existing?.connection.getStatus().state === "ready" &&
+			existing.connection.getStatus().sessionId === sessionId &&
+			rootsAlreadyActive
+		) {
+			this.emitSessionAttached(sessionId, true);
+			return this.buildSummary(existing);
+		}
+
+		if (existing) {
+			this.closedSessionRecords.add(existing);
+			existing.unsubscribe?.();
+			existing.unsubscribeTerminal?.();
+			existing.unsubscribeStatus?.();
+			this.cancelPermissionRequests(sessionId);
+			this.emitSessionDetached(sessionId, "unknown");
+			this.sessions.delete(sessionId);
+			await existing.connection.disconnect().catch((error) => {
+				logger.warn(
+					{ err: error, sessionId },
+					"resume_replaced_connection_disconnect_failed",
+				);
+			});
+		}
+
+		const connection = await this.acquireConnection(backend);
+		const resumeBuffer: PendingReloadBuffer = { events: [], bytes: 0 };
+		let recordRef: SessionRecord | undefined;
+		let committedEvents: WalEvent[] = [];
+		const unsubscribe = connection.onSessionUpdate((notification) => {
+			if (recordRef) {
+				this.handleSessionUpdate(recordRef, notification);
+				return;
+			}
+			this.bufferReloadEvent(resumeBuffer, {
+				type: "session_update",
+				notification,
+			});
+		});
+
+		try {
+			this.backendCapabilities.set(
+				backend.id,
+				connection.getSessionCapabilities(),
+			);
+			if (!connection.supportsSessionResume()) {
+				throw createCapabilityNotSupportedError(
+					"Agent does not support session resuming",
+				);
+			}
+			const response = await connection.resumeSession(
+				sessionId,
+				cwd,
+				normalizedAdditionalDirectories,
+			);
+			connection.setPermissionHandler((params, requestId, signal) =>
+				this.handlePermissionRequest(sessionId, params, requestId, signal),
+			);
+			if (resumeBuffer.error) {
+				throw resumeBuffer.error;
+			}
+
+			const projectContext = await this.resolveGitProjectContext(cwd);
+			if (resumeBuffer.error) {
+				throw resumeBuffer.error;
+			}
+
+			const now = new Date();
+			const agentInfo = connection.getAgentInfo();
+			const modelState = resolveModelState(response.configOptions);
+			const modeState = resolveModeState(response.modes);
+			const preserveConfigState = response.configOptions === undefined;
+			const preserveModeState = response.modes === undefined;
+			const configOptions = preserveConfigState
+				? (existing?.configOptions ?? [])
+				: normalizeConfigOptions(response.configOptions);
+			const revision = walSession?.currentRevision ?? 1;
+			const wrappedDek = this.requirePreparedSessionRevisionDek(
+				sessionId,
+				revision,
+			);
+			const record: SessionRecord = {
+				sessionId,
+				title:
+					existing?.title ??
+					walSession?.title ??
+					discovered?.title ??
+					durableDiscovered?.title ??
+					`Session ${sessionId.slice(0, 8)}`,
+				backendId: backend.id,
+				backendLabel: backend.label,
+				connection,
+				createdAt:
+					existing?.createdAt ??
+					(walSession ? new Date(walSession.createdAt) : now),
+				updatedAt: now,
+				cwd,
+				additionalDirectories: normalizedAdditionalDirectories,
+				workspaceRootCwd:
+					existing?.workspaceRootCwd ?? projectContext.repoRoot ?? cwd,
+				worktreeSourceCwd: existing?.worktreeSourceCwd,
+				worktreeBranch: existing?.worktreeBranch,
+				agentName: agentInfo?.title ?? agentInfo?.name ?? existing?.agentName,
+				modelConfigId: preserveConfigState
+					? existing?.modelConfigId
+					: modelState.modelConfigId,
+				modelId: preserveConfigState ? existing?.modelId : modelState.modelId,
+				modelName: preserveConfigState
+					? existing?.modelName
+					: modelState.modelName,
+				availableModels: preserveConfigState
+					? existing?.availableModels
+					: modelState.availableModels,
+				modeId: preserveModeState ? existing?.modeId : modeState.modeId,
+				modeName: preserveModeState ? existing?.modeName : modeState.modeName,
+				availableModes: preserveModeState
+					? existing?.availableModes
+					: modeState.availableModes,
+				configOptions,
+				availableCommands: existing?.availableCommands,
+				revision,
+				_meta: existing?._meta,
+				isTitlePinned: existing?.isTitlePinned ?? walSession?.isTitlePinned,
+				pendingReload: resumeBuffer,
+			};
+			recordRef = record;
+			record.unsubscribe = unsubscribe;
+			this.setupSessionSubscriptions(record, { skipSessionUpdates: true });
+			if (resumeBuffer.error) {
+				throw resumeBuffer.error;
+			}
+			const committed = this.walStore.commitSessionResume({
+				sessionId,
+				machineId: walSession?.machineId ?? this.config.machineId,
+				backendId: walSession?.backendId ?? backend.id,
+				cwd,
+				additionalDirectories: normalizedAdditionalDirectories,
+				title:
+					walSession?.title ?? discovered?.title ?? durableDiscovered?.title,
+				isTitlePinned: walSession?.isTitlePinned,
+				expectedRevision: walSession?.currentRevision ?? null,
+				events: this.toWalEventInputs(resumeBuffer.events),
+				wrappedDek,
+			});
+			committedEvents = committed.events;
+			delete record.pendingReload;
+		} catch (error) {
+			if (recordRef) {
+				this.closedSessionRecords.add(recordRef);
+				delete recordRef.pendingReload;
+			}
+			unsubscribe();
+			recordRef?.unsubscribeTerminal?.();
+			recordRef?.unsubscribeStatus?.();
+			if (this.sessions.get(sessionId) === recordRef) {
+				this.sessions.delete(sessionId);
+			}
+			await connection.disconnect().catch(() => {});
+			throw error;
+		}
+
+		if (!recordRef) {
+			throw new Error("Resumed session record was not initialized");
+		}
+		this.applyReloadEventsToRecord(recordRef, resumeBuffer.events);
+		this.emitCommittedReloadEvents(committedEvents);
+		this.sessions.set(sessionId, recordRef);
+		const summary = this.buildSummary(recordRef);
+		try {
+			this.emitSessionsChanged(
+				walSession
+					? { added: [], updated: [summary], removed: [] }
+					: { added: [summary], updated: [], removed: [] },
+			);
+			this.emitSessionAttached(sessionId);
+		} catch (error) {
+			logger.error(
+				{ err: error, sessionId },
+				"resume_session_notification_failed",
+			);
+		}
+		logger.info(
+			{ sessionId, backendId, revision: recordRef.revision },
+			"resume_session_complete",
+		);
+		return summary;
+	}
+
+	/**
 	 * Load a historical session from the ACP agent.
 	 * This will replay the session's message history.
 	 * @param sessionId The session ID to load

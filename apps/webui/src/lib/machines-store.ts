@@ -118,7 +118,11 @@ export const useMachinesStore = create<MachinesState>((set) => ({
 		}),
 }));
 
-type BooleanBackendCapability = "list" | "load" | "additionalDirectories";
+type BooleanBackendCapability =
+	| "list"
+	| "load"
+	| "resume"
+	| "additionalDirectories";
 
 /** Check boolean capability for a specific backend. Returns undefined if unknown. */
 export const getBackendCapability = (
