@@ -2,7 +2,13 @@ import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { SessionEventKind, StopReason } from "@mobvibe/shared";
+import {
+	type AcpMetaValue,
+	type SessionEventKind,
+	type StopReason,
+	sanitizeAcpMessageMeta,
+	sanitizeAcpMeta,
+} from "@mobvibe/shared";
 import { logger } from "../lib/logger.js";
 import { runMigrations } from "./migrations.js";
 import { SeqGenerator } from "./seq-generator.js";
@@ -125,12 +131,13 @@ const parseAdditionalDirectories = (value: string): string[] => {
 	return parsed;
 };
 
-const parseMetadata = (value: string): Record<string, unknown> => {
-	const parsed: unknown = JSON.parse(value);
-	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-		throw new Error("Invalid discovered session metadata in WAL");
+const parseMetadata = (value: string): AcpMetaValue | undefined => {
+	try {
+		const result = sanitizeAcpMeta(JSON.parse(value));
+		return result.ok ? result.value : undefined;
+	} catch {
+		return undefined;
 	}
-	return parsed as Record<string, unknown>;
 };
 
 /**
@@ -190,6 +197,7 @@ export class WalStore {
 	private db: Database;
 	private readonly initialSchemaVersion: number;
 	private seqGenerator = new SeqGenerator();
+	private metaReplayWarnings = 0;
 
 	// Prepared statements for performance
 	private stmtGetSession: ReturnType<Database["query"]>;
@@ -433,7 +441,7 @@ export class WalStore {
         workspace_root_cwd = COALESCE($workspaceRootCwd, discovered_sessions.workspace_root_cwd),
         title = $title,
         agent_updated_at = $agentUpdatedAt,
-        meta_json = $metaJson,
+        meta_json = CASE WHEN $hasMeta = 1 THEN $metaJson ELSE discovered_sessions.meta_json END,
         last_verified_at = $lastVerifiedAt,
         is_stale = 0
     `);
@@ -1292,6 +1300,10 @@ export class WalStore {
 	saveDiscoveredSessions(sessions: DiscoveredSession[]): void {
 		const now = new Date().toISOString();
 		for (const session of sessions) {
+			const hasMeta = Object.hasOwn(session, "_meta");
+			const sanitizedMeta = hasMeta
+				? sanitizeAcpMeta(session._meta)
+				: undefined;
 			this.stmtUpsertDiscoveredSession.run({
 				$sessionId: session.sessionId,
 				$backendId: session.backendId,
@@ -1302,10 +1314,10 @@ export class WalStore {
 				$workspaceRootCwd: session.workspaceRootCwd ?? null,
 				$title: session.title ?? null,
 				$agentUpdatedAt: session.agentUpdatedAt ?? null,
-				$metaJson:
-					session._meta === undefined || session._meta === null
-						? null
-						: JSON.stringify(session._meta),
+				$hasMeta: hasMeta && sanitizedMeta?.ok ? 1 : 0,
+				$metaJson: sanitizedMeta?.ok
+					? JSON.stringify(sanitizedMeta.value)
+					: null,
 				$discoveredAt: session.discoveredAt,
 				$lastVerifiedAt: now,
 			});
@@ -1517,19 +1529,22 @@ export class WalStore {
 	}
 
 	private rowToEvent(row: WalEventRow): WalEvent {
+		const payload = this.sanitizeWalPayload(JSON.parse(row.payload), "replay");
 		return {
 			id: row.id,
 			sessionId: row.session_id,
 			revision: row.revision,
 			seq: row.seq,
 			kind: row.kind as SessionEventKind,
-			payload: JSON.parse(row.payload),
+			payload,
 			createdAt: row.created_at,
 			ackedAt: row.acked_at ?? undefined,
 		};
 	}
 
 	private rowToDiscoveredSession(row: DiscoveredSessionRow): DiscoveredSession {
+		const metadata =
+			row.meta_json === null ? undefined : parseMetadata(row.meta_json);
 		return {
 			sessionId: row.session_id,
 			backendId: row.backend_id,
@@ -1540,11 +1555,31 @@ export class WalStore {
 			workspaceRootCwd: row.workspace_root_cwd ?? undefined,
 			title: row.title,
 			agentUpdatedAt: row.agent_updated_at,
-			_meta: row.meta_json === null ? null : parseMetadata(row.meta_json),
+			...(metadata !== undefined ? { _meta: metadata } : {}),
 			discoveredAt: row.discovered_at,
 			lastVerifiedAt: row.last_verified_at ?? undefined,
 			isStale: row.is_stale === 1,
 		};
+	}
+
+	private sanitizeWalPayload(payload: unknown, operation: string): unknown {
+		const result = sanitizeAcpMessageMeta(payload);
+		if (!result.complete) {
+			throw new Error("WAL event payload must contain plain JSON values");
+		}
+		if (result.rejectedEnvelopes > 0 && this.metaReplayWarnings < 3) {
+			this.metaReplayWarnings += 1;
+			logger.warn(
+				{
+					operation,
+					rejectedEnvelopes: result.rejectedEnvelopes,
+					reasons: result.rejections.map(({ reason }) => reason),
+					rejectionsTruncated: result.rejectionsTruncated,
+				},
+				"wal_acp_metadata_rejected",
+			);
+		}
+		return result.value;
 	}
 }
 

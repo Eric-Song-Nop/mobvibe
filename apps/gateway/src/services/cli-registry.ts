@@ -50,6 +50,16 @@ const mergeDiscoveredSession = (
 	};
 };
 
+const mergeSessionMetadata = (
+	existing: SessionSummary,
+	incoming: SessionSummary,
+): SessionSummary => {
+	if (Object.hasOwn(incoming, "_meta") || !Object.hasOwn(existing, "_meta")) {
+		return incoming;
+	}
+	return { ...incoming, _meta: existing._meta };
+};
+
 export class CliRegistry extends EventEmitter {
 	private cliByMachineId = new Map<string, CliRecord>();
 	private cliBySocketId = new Map<string, CliRecord>();
@@ -164,7 +174,13 @@ export class CliRegistry extends EventEmitter {
 			record.sessions.map((session) => [session.sessionId, session]),
 		);
 		const nextById = new Map(
-			sessions.map((session) => [session.sessionId, session]),
+			sessions.map((session) => {
+				const previous = previousById.get(session.sessionId);
+				return [
+					session.sessionId,
+					previous ? mergeSessionMetadata(previous, session) : session,
+				] as const;
+			}),
 		);
 		const added: SessionSummary[] = [];
 		const updated: SessionSummary[] = [];
@@ -206,9 +222,18 @@ export class CliRegistry extends EventEmitter {
 		if (!record) {
 			return undefined;
 		}
+		const normalizedPayload: SessionsChangedPayload = {
+			...payload,
+			updated: payload.updated.map((updated) => {
+				const existing = record.sessions.find(
+					(session) => session.sessionId === updated.sessionId,
+				);
+				return existing ? mergeSessionMetadata(existing, updated) : updated;
+			}),
+		};
 
 		// Remove sessions
-		for (const removedId of payload.removed) {
+		for (const removedId of normalizedPayload.removed) {
 			const index = record.sessions.findIndex((s) => s.sessionId === removedId);
 			if (index !== -1) {
 				record.sessions.splice(index, 1);
@@ -216,7 +241,7 @@ export class CliRegistry extends EventEmitter {
 		}
 
 		// Update sessions
-		for (const updated of payload.updated) {
+		for (const updated of normalizedPayload.updated) {
 			const index = record.sessions.findIndex(
 				(s) => s.sessionId === updated.sessionId,
 			);
@@ -226,7 +251,7 @@ export class CliRegistry extends EventEmitter {
 		}
 
 		// Add new sessions
-		for (const added of payload.added) {
+		for (const added of normalizedPayload.added) {
 			const existing = record.sessions.find(
 				(s) => s.sessionId === added.sessionId,
 			);
@@ -237,13 +262,16 @@ export class CliRegistry extends EventEmitter {
 
 		// Emit the enhanced payload with machineId
 		const enhancedPayload: SessionsChangedPayload = {
-			added: payload.added.map((s) => ({ ...s, machineId: record.machineId })),
-			updated: payload.updated.map((s) => ({
+			added: normalizedPayload.added.map((s) => ({
 				...s,
 				machineId: record.machineId,
 			})),
-			removed: payload.removed,
-			backendCapabilities: payload.backendCapabilities,
+			updated: normalizedPayload.updated.map((s) => ({
+				...s,
+				machineId: record.machineId,
+			})),
+			removed: normalizedPayload.removed,
+			backendCapabilities: normalizedPayload.backendCapabilities,
 		};
 
 		this.emit(

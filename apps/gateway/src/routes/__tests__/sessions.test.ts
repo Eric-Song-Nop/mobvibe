@@ -706,6 +706,30 @@ describe("session message routes", () => {
 		);
 	});
 
+	it("rejects oversized session config metadata before routing to the CLI", async () => {
+		const response = await fetch(`${baseUrl}/acp/session/config-option`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				sessionId: "session-1",
+				configId: "thinking-level",
+				value: "high",
+				_meta: { opaque: "x".repeat(66 * 1024) },
+			}),
+		});
+
+		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({
+			error: expect.objectContaining({
+				code: "REQUEST_VALIDATION_FAILED",
+			}),
+		});
+		expect(sessionRouter.setSessionConfigOption).not.toHaveBeenCalled();
+	});
+
 	it("forwards protocol-native boolean config values", async () => {
 		const response = await fetch(`${baseUrl}/acp/session/config-option`, {
 			method: "POST",

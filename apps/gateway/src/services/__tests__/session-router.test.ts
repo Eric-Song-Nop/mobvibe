@@ -115,6 +115,60 @@ describe("SessionRouter", () => {
 			expect(result.capabilities.prompt?.image).toBe(true);
 		});
 
+		it("sanitizes discovered metadata before returning CLI results", async () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			cliRegistry.register(socket, info, {
+				userId: "user-1",
+				deviceId: "device-123",
+			});
+			const validMeta = { source: { retained: true } };
+			const mockResult: DiscoverSessionsRpcResult = {
+				sessions: [
+					{
+						sessionId: "invalid-meta",
+						cwd: "/repo",
+						_meta: { opaque: "x".repeat(66 * 1024) },
+					},
+					{
+						sessionId: "valid-meta",
+						cwd: "/repo",
+						_meta: validMeta,
+					},
+				],
+				capabilities: {
+					list: true,
+					load: true,
+				},
+			};
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:sessions:discover") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							result: mockResult,
+						});
+					}, 0);
+				}
+			});
+
+			const result = await sessionRouter.discoverSessions(
+				"machine-1",
+				undefined,
+				"user-1",
+			);
+			validMeta.source.retained = false;
+
+			const invalid = result.sessions.find(
+				(session) => session.sessionId === "invalid-meta",
+			);
+			expect(Object.hasOwn(invalid ?? {}, "_meta")).toBe(false);
+			expect(
+				result.sessions.find((session) => session.sessionId === "valid-meta")
+					?._meta,
+			).toEqual({ source: { retained: true } });
+		});
+
 		it("throws error when no CLI connected for machine", async () => {
 			await expect(
 				sessionRouter.discoverSessions("unknown-machine", undefined, "user-1"),

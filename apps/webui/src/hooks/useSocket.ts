@@ -31,6 +31,7 @@ import {
 import { type ChatSession, useChatStore } from "@/lib/chat-store";
 import { bootstrapSessionE2EE, e2ee } from "@/lib/e2ee";
 import { createFallbackError } from "@/lib/error-utils";
+import { sanitizeInboundAcpPayload } from "@/lib/inbound-acp-meta";
 import { useMachinesStore } from "@/lib/machines-store";
 import {
 	notifyPermissionRequest,
@@ -452,6 +453,9 @@ export function useSocket({
 				.setSessionE2EEStatus(incomingEvent.sessionId, "missing_key");
 			return;
 		}
+		const sanitizedEvent = sanitizeInboundAcpPayload(event);
+		if (!sanitizedEvent) return;
+		event = sanitizedEvent;
 
 		let session = sessionsRef.current[event.sessionId];
 		if (!session) {
@@ -572,10 +576,12 @@ export function useSocket({
 	};
 
 	handlePermissionRequestRef.current = (payload: PermissionRequestPayload) => {
+		const sanitizedPayload = sanitizeInboundAcpPayload(payload);
+		if (!sanitizedPayload) return;
 		applyPermissionRequest({
-			sessionId: payload.sessionId,
-			payload,
-			session: sessionsRef.current[payload.sessionId],
+			sessionId: sanitizedPayload.sessionId,
+			payload: sanitizedPayload,
+			session: sessionsRef.current[sanitizedPayload.sessionId],
 			sessions: sessionsRef.current,
 			actions: { addPermissionRequest },
 			notifications: { notifyPermissionRequest },

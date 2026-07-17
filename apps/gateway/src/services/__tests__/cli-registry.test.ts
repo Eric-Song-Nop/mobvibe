@@ -206,6 +206,32 @@ describe("CliRegistry", () => {
 				"user-1",
 			);
 		});
+
+		it("preserves omitted metadata and applies an explicit null replacement", () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			registry.register(socket, info);
+			registry.updateSessions(socket.id, [
+				createMockSessionSummary({
+					sessionId: "session-1",
+					_meta: { retained: true },
+				}),
+			]);
+
+			registry.updateSessions(socket.id, [
+				createMockSessionSummary({ sessionId: "session-1", title: "Updated" }),
+			]);
+			expect(registry.getCliBySocketId(socket.id)?.sessions[0]?._meta).toEqual({
+				retained: true,
+			});
+
+			registry.updateSessions(socket.id, [
+				createMockSessionSummary({ sessionId: "session-1", _meta: null }),
+			]);
+			expect(
+				registry.getCliBySocketId(socket.id)?.sessions[0]?._meta,
+			).toBeNull();
+		});
 	});
 
 	describe("addDiscoveredSessionsForMachine", () => {
@@ -407,6 +433,34 @@ describe("CliRegistry", () => {
 			const record = registry.getCliBySocketId("socket-1");
 			expect(record?.sessions[0].title).toBe("Updated Title");
 			expect(record?.sessions[0].modelId).toBe("claude-3");
+		});
+
+		it("preserves metadata when an incremental update omits it", () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			registry.register(socket, info);
+			registry.updateSessions(socket.id, [
+				createMockSessionSummary({
+					sessionId: "session-1",
+					_meta: { retained: true },
+				}),
+			]);
+
+			const enhanced = registry.updateSessionsIncremental(socket.id, {
+				added: [],
+				updated: [
+					createMockSessionSummary({
+						sessionId: "session-1",
+						title: "Updated",
+					}),
+				],
+				removed: [],
+			});
+
+			expect(registry.getCliBySocketId(socket.id)?.sessions[0]?._meta).toEqual({
+				retained: true,
+			});
+			expect(enhanced?.updated[0]?._meta).toEqual({ retained: true });
 		});
 
 		it("adds new sessions to record.sessions", () => {

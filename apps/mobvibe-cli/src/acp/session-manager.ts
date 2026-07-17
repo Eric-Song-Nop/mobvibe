@@ -631,7 +631,7 @@ export class SessionManager {
 					additionalDirectories: s.additionalDirectories,
 					workspaceRootCwd:
 						s.workspaceRootCwd ?? s.cwd ?? existing.workspaceRootCwd,
-					_meta: s._meta ?? null,
+					...(Object.hasOwn(s, "_meta") ? { _meta: s._meta } : {}),
 					updatedAt: selectNewerTimestamp(
 						existing.updatedAt,
 						s.agentUpdatedAt ?? undefined,
@@ -651,7 +651,7 @@ export class SessionManager {
 					cwd: s.cwd as string,
 					additionalDirectories: s.additionalDirectories,
 					workspaceRootCwd: s.workspaceRootCwd ?? s.cwd,
-					_meta: s._meta ?? null,
+					...(Object.hasOwn(s, "_meta") ? { _meta: s._meta } : {}),
 					createdAt: s.discoveredAt,
 					updatedAt: agentUpdatedAt ?? s.discoveredAt,
 				} satisfies SessionSummary);
@@ -2067,6 +2067,12 @@ export class SessionManager {
 						continue;
 					}
 
+					const previous = this.discoveredSessions.get(session.sessionId);
+					const metadata = Object.hasOwn(session, "_meta")
+						? { _meta: session._meta }
+						: previous && Object.hasOwn(previous, "_meta")
+							? { _meta: previous._meta }
+							: {};
 					this.discoveredSessions.set(session.sessionId, {
 						sessionId: session.sessionId,
 						cwd: session.cwd,
@@ -2074,7 +2080,7 @@ export class SessionManager {
 						workspaceRootCwd: projectContext?.repoRoot ?? session.cwd,
 						title: session.title,
 						updatedAt: session.updatedAt,
-						_meta: session._meta,
+						...metadata,
 					});
 					sessions.push({
 						sessionId: session.sessionId,
@@ -2083,7 +2089,7 @@ export class SessionManager {
 						workspaceRootCwd: projectContext?.repoRoot ?? session.cwd,
 						title: session.title,
 						updatedAt: session.updatedAt,
-						_meta: session._meta,
+						...metadata,
 					});
 
 					// Collect for WAL persistence
@@ -2095,7 +2101,7 @@ export class SessionManager {
 						workspaceRootCwd: projectContext?.repoRoot ?? session.cwd,
 						title: session.title ?? null,
 						agentUpdatedAt: session.updatedAt ?? null,
-						_meta: session._meta ?? null,
+						...metadata,
 						discoveredAt: now,
 						isStale: false,
 					});

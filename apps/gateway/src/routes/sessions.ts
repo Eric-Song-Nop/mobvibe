@@ -6,6 +6,7 @@ import {
 	createErrorDetail,
 	createInternalError,
 	isEncryptedPayload,
+	sanitizeAcpMeta,
 } from "@mobvibe/shared";
 import type { Router } from "express";
 import { logger } from "../lib/logger.js";
@@ -546,10 +547,7 @@ export function setupSessionRoutes(
 			if (
 				typeof sessionId !== "string" ||
 				typeof configId !== "string" ||
-				(!isBooleanValue && !isSelectValue) ||
-				(_meta !== undefined &&
-					_meta !== null &&
-					(typeof _meta !== "object" || Array.isArray(_meta)))
+				(!isBooleanValue && !isSelectValue)
 			) {
 				respondError(
 					response,
@@ -561,15 +559,38 @@ export function setupSessionRoutes(
 				return;
 			}
 
+			const sanitizedMeta =
+				_meta === undefined ? undefined : sanitizeAcpMeta(_meta);
+			if (sanitizedMeta && !sanitizedMeta.ok) {
+				respondError(
+					response,
+					buildRequestValidationError("Invalid session config metadata"),
+					400,
+				);
+				return;
+			}
+
 			const userId = getUserId(request);
 			if (!userId) {
 				respondError(response, buildAuthorizationError(), 401);
 				return;
 			}
 
+			const metaParams = sanitizedMeta ? { _meta: sanitizedMeta.value } : {};
 			const params = isBooleanValue
-				? { sessionId, configId, type: "boolean" as const, value, _meta }
-				: { sessionId, configId, value: value as string, _meta };
+				? {
+						sessionId,
+						configId,
+						type: "boolean" as const,
+						value,
+						...metaParams,
+					}
+				: {
+						sessionId,
+						configId,
+						value: value as string,
+						...metaParams,
+					};
 			try {
 				logger.info(
 					{ sessionId, configId, type, userId },
@@ -916,7 +937,7 @@ export function setupSessionRoutes(
 								backendId: requestedBackendId,
 								backendLabel: discoveredBackendLabel,
 								machineId: cli.machineId,
-								_meta: s._meta ?? null,
+								...(Object.hasOwn(s, "_meta") ? { _meta: s._meta } : {}),
 							};
 						});
 						cliRegistry.addDiscoveredSessionsForMachine(

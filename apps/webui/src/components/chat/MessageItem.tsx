@@ -32,6 +32,7 @@ import {
 } from "@/lib/chat-store";
 import { getCodeAccentFillClass } from "@/lib/code-highlight";
 import { getContentBlocksText } from "@/lib/content-block-utils";
+import { getToolCallMetaHints } from "@/lib/tool-call-meta";
 import { cn } from "@/lib/utils";
 
 type PermissionDecisionPayload = {
@@ -917,14 +918,12 @@ const MessageItemInner = ({
 		);
 	}
 	if (message.kind === "permission") {
-		const meta = message.toolCall?._meta;
+		const meta = getToolCallMetaHints(message.toolCall?._meta);
 		const toolLabel =
-			message.toolCall?.title ??
-			(meta?.name as string | undefined) ??
-			getLabel("toolCall.toolCall");
+			message.toolCall?.title ?? meta.name ?? getLabel("toolCall.toolCall");
 		const toolId = message.toolCall?.toolCallId ?? message.requestId;
-		const toolCommand = meta?.command as string | undefined;
-		const toolArgs = (meta?.args as string[] | undefined)?.join(" ");
+		const toolCommand = meta.command;
+		const toolArgs = meta.args?.join(" ");
 		const isDisabled =
 			message.outcome !== undefined || message.decisionState === "submitting";
 		return (

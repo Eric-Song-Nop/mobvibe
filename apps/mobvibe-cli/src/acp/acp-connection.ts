@@ -58,6 +58,8 @@ import {
 	createErrorDetail,
 	type ErrorDetail,
 	isProtocolMismatch,
+	sanitizeAcpMessageMeta,
+	sanitizeAcpMeta,
 	type TerminalOutputEvent,
 } from "@mobvibe/shared";
 import type { AcpBackendConfig } from "../config.js";
@@ -74,6 +76,7 @@ type ClientInfo = {
 };
 
 const MAX_STDERR_LINES = 20;
+const MAX_META_SANITIZATION_WARNINGS = 3;
 export const MAX_ACP_FILE_BYTES = 1024 * 1024;
 export const MAX_ACP_FILE_LINES = 10_000;
 
@@ -399,6 +402,7 @@ export class AcpConnection {
 	private promptControllers = new Map<string, Set<AbortController>>();
 	private terminals = new Map<string, TerminalRecord>();
 	private recentStderr: string[] = [];
+	private metaSanitizationWarnings = 0;
 
 	constructor(
 		private readonly options: {
@@ -491,12 +495,12 @@ export class AcpConnection {
 			return { sessions: [] };
 		}
 		const connection = await this.ensureReady();
-		const response: ListSessionsResponse = await connection.agent.request(
-			methods.agent.session.list,
-			{
+		const response = this.sanitizeAgentPayload<ListSessionsResponse>(
+			await connection.agent.request(methods.agent.session.list, {
 				cursor: params?.cursor ?? undefined,
 				cwd: params?.cwd ?? undefined,
-			},
+			}),
+			"session/list",
 		);
 		return {
 			sessions: response.sessions,
@@ -531,9 +535,8 @@ export class AcpConnection {
 			);
 		}
 		const connection = await this.ensureReady();
-		const response = await connection.agent.request(
-			methods.agent.session.load,
-			{
+		const response = this.sanitizeAgentPayload<LoadSessionResponse>(
+			await connection.agent.request(methods.agent.session.load, {
 				sessionId,
 				cwd,
 				mcpServers: [],
@@ -541,7 +544,8 @@ export class AcpConnection {
 					normalizedAdditionalDirectories.length > 0
 						? normalizedAdditionalDirectories
 						: undefined,
-			},
+			}),
+			"session/load",
 		);
 		this.bindActiveSession(sessionId, cwd, normalizedAdditionalDirectories);
 		return response;
@@ -569,9 +573,8 @@ export class AcpConnection {
 			);
 		}
 		const connection = await this.ensureReady();
-		const response = await connection.agent.request(
-			methods.agent.session.resume,
-			{
+		const response = this.sanitizeAgentPayload<ResumeSessionResponse>(
+			await connection.agent.request(methods.agent.session.resume, {
 				sessionId,
 				cwd,
 				mcpServers: [],
@@ -579,7 +582,8 @@ export class AcpConnection {
 					normalizedAdditionalDirectories.length > 0
 						? normalizedAdditionalDirectories
 						: undefined,
-			},
+			}),
+			"session/resume",
 		);
 		this.bindActiveSession(sessionId, cwd, normalizedAdditionalDirectories);
 		return response;
@@ -591,9 +595,11 @@ export class AcpConnection {
 			throw new Error("Agent does not support session/close capability");
 		}
 		const connection = await this.ensureReady();
-		const response = await connection.agent.request(
-			methods.agent.session.close,
-			{ sessionId },
+		const response = this.sanitizeAgentPayload<CloseSessionResponse>(
+			await connection.agent.request(methods.agent.session.close, {
+				sessionId,
+			}),
+			"session/close",
 		);
 		this.cleanupSessionResources(
 			sessionId,
@@ -870,9 +876,12 @@ export class AcpConnection {
 					},
 				},
 			};
-			const initializeResponse = await connection.agent.request(
-				methods.agent.initialize,
-				initializeRequest,
+			const initializeResponse = this.sanitizeAgentPayload(
+				await connection.agent.request(
+					methods.agent.initialize,
+					initializeRequest,
+				),
+				"initialize",
 			);
 
 			this.agentInfo = initializeResponse.agentInfo ?? undefined;
@@ -884,7 +893,9 @@ export class AcpConnection {
 				{
 					backendId: this.options.backend.id,
 					pid: child.pid,
-					agentInfo: this.agentInfo,
+					agentName: this.agentInfo?.name,
+					agentTitle: this.agentInfo?.title,
+					agentVersion: this.agentInfo?.version,
 					sessionCapabilities: this.getSessionCapabilities(),
 				},
 				"acp_backend_initialize_complete",
@@ -943,15 +954,28 @@ export class AcpConnection {
 		prompt: ContentBlock[],
 	): Promise<PromptResponse> {
 		const connection = await this.ensureReady();
+		const sanitizedPrompt = sanitizeAcpMessageMeta(prompt);
+		if (!sanitizedPrompt.complete || sanitizedPrompt.rejectedEnvelopes > 0) {
+			throw RequestError.invalidParams(
+				{
+					complete: sanitizedPrompt.complete,
+					reasons: sanitizedPrompt.rejections.map(({ reason }) => reason),
+				},
+				"Invalid ACP prompt metadata",
+			);
+		}
 		const controller = new AbortController();
 		const controllers = this.promptControllers.get(sessionId) ?? new Set();
 		controllers.add(controller);
 		this.promptControllers.set(sessionId, controllers);
 		try {
-			return await connection.agent.request(
-				methods.agent.session.prompt,
-				{ sessionId, prompt },
-				{ cancellationSignal: controller.signal },
+			return this.sanitizeAgentPayload<PromptResponse>(
+				await connection.agent.request(
+					methods.agent.session.prompt,
+					{ sessionId, prompt: sanitizedPrompt.value },
+					{ cancellationSignal: controller.signal },
+				),
+				"session/prompt",
 			);
 		} finally {
 			controllers.delete(controller);
@@ -984,12 +1008,23 @@ export class AcpConnection {
 		_meta?: Record<string, unknown> | null,
 	): Promise<SetSessionConfigOptionResponse> {
 		const connection = await this.ensureReady();
-		const metadata = _meta === undefined ? {} : { _meta };
-		return connection.agent.request(
-			methods.agent.session.setConfigOption,
-			typeof value === "boolean"
-				? { sessionId, configId, type: "boolean", value, ...metadata }
-				: { sessionId, configId, value, ...metadata },
+		const sanitizedMeta =
+			_meta === undefined ? undefined : sanitizeAcpMeta(_meta);
+		if (sanitizedMeta && !sanitizedMeta.ok) {
+			throw RequestError.invalidParams(
+				{ reason: sanitizedMeta.reason },
+				"Invalid ACP session configuration metadata",
+			);
+		}
+		const metadata = sanitizedMeta ? { _meta: sanitizedMeta.value } : {};
+		return this.sanitizeAgentPayload<SetSessionConfigOptionResponse>(
+			await connection.agent.request(
+				methods.agent.session.setConfigOption,
+				typeof value === "boolean"
+					? { sessionId, configId, type: "boolean", value, ...metadata }
+					: { sessionId, configId, value, ...metadata },
+			),
+			"session/set_config_option",
 		);
 	}
 
@@ -1440,19 +1475,56 @@ export class AcpConnection {
 		cwd: string,
 		additionalDirectories: readonly string[],
 	): Promise<NewSessionResponse> {
-		const session = await connection.agent.request(methods.agent.session.new, {
-			cwd,
-			mcpServers: [],
-			additionalDirectories:
-				additionalDirectories.length > 0
-					? [...additionalDirectories]
-					: undefined,
-		});
+		const session = this.sanitizeAgentPayload<NewSessionResponse>(
+			await connection.agent.request(methods.agent.session.new, {
+				cwd,
+				mcpServers: [],
+				additionalDirectories:
+					additionalDirectories.length > 0
+						? [...additionalDirectories]
+						: undefined,
+			}),
+			"session/new",
+		);
 		return session;
 	}
 
 	private emitSessionUpdate(notification: SessionNotification) {
-		this.sessionUpdateEmitter.emit("update", notification);
+		let sanitized: SessionNotification;
+		try {
+			sanitized = this.sanitizeAgentPayload(notification, "session/update");
+		} catch {
+			// A malformed non-JSON notification is isolated to this update. The
+			// sanitizer has already emitted a bounded, value-free warning.
+			return;
+		}
+		this.sessionUpdateEmitter.emit("update", sanitized);
+	}
+
+	/** Strip invalid opaque ACP metadata while retaining the protocol payload. */
+	private sanitizeAgentPayload<T>(payload: T, method: string): T {
+		const result = sanitizeAcpMessageMeta(payload);
+		if (
+			(!result.complete || result.rejectedEnvelopes > 0) &&
+			this.metaSanitizationWarnings < MAX_META_SANITIZATION_WARNINGS
+		) {
+			this.metaSanitizationWarnings += 1;
+			logger.warn(
+				{
+					backendId: this.options.backend.id,
+					method,
+					complete: result.complete,
+					rejectedEnvelopes: result.rejectedEnvelopes,
+					reasons: result.rejections.map(({ reason }) => reason),
+					rejectionsTruncated: result.rejectionsTruncated,
+				},
+				"acp_metadata_rejected",
+			);
+		}
+		if (!result.complete) {
+			throw new Error("ACP agent returned a malformed non-JSON payload");
+		}
+		return result.value;
 	}
 
 	private cleanupSessionResources(sessionId: string, reason: Error): void {
@@ -1477,8 +1549,12 @@ export class AcpConnection {
 		requestId: JsonRpcId,
 		signal: AbortSignal,
 	): Promise<RequestPermissionResponse> {
+		const sanitizedParams = this.sanitizeAgentPayload(
+			params,
+			"session/request_permission",
+		);
 		if (this.permissionHandler) {
-			return this.permissionHandler(params, requestId, signal);
+			return this.permissionHandler(sanitizedParams, requestId, signal);
 		}
 		return { outcome: { outcome: "cancelled" } };
 	}

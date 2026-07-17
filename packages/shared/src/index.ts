@@ -1,6 +1,23 @@
 // ACP types - re-exported from SDK
 
 export type {
+	AcpMessageMetaSanitizeOptions,
+	AcpMessageMetaSanitizeResult,
+	AcpMetaLimits,
+	AcpMetaRejection,
+	AcpMetaRejectionReason,
+	AcpMetaSanitizeResult,
+	AcpMetaValue,
+} from "./acp-meta.js";
+export {
+	ACP_META_DEFAULT_LIMITS,
+	ACP_META_MESSAGE_DEFAULT_LIMITS,
+	ACP_META_REJECTION_REASONS,
+	sanitizeAcpMessageMeta,
+	sanitizeAcpMeta,
+} from "./acp-meta.js";
+
+export type {
 	CryptoKeyPair,
 	EncryptedPayload,
 	SignedAuthToken,

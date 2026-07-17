@@ -19,6 +19,7 @@ vi.mock("@pierre/diffs/react", () => ({
 type TextChatMessage = Extract<ChatMessage, { kind: "text" }>;
 type ThoughtChatMessage = Extract<ChatMessage, { kind: "thought" }>;
 type ToolCallChatMessage = Extract<ChatMessage, { kind: "tool_call" }>;
+type PermissionChatMessage = Extract<ChatMessage, { kind: "permission" }>;
 
 const buildMessage = (
 	overrides?: Partial<TextChatMessage>,
@@ -56,6 +57,20 @@ const buildThoughtMessage = (
 	kind: "thought",
 	content: "",
 	contentBlocks: [],
+	createdAt: new Date().toISOString(),
+	isStreaming: false,
+	...overrides,
+});
+
+const buildPermissionMessage = (
+	overrides?: Partial<PermissionChatMessage>,
+): PermissionChatMessage => ({
+	id: "message-permission-1",
+	role: "assistant",
+	kind: "permission",
+	requestId: "request-1",
+	options: [],
+	decisionState: "idle",
 	createdAt: new Date().toISOString(),
 	isStreaming: false,
 	...overrides,
@@ -363,6 +378,23 @@ describe("MessageItem", () => {
 		expect(onOpenFilePreview).toHaveBeenCalledWith("/tmp/alpha.txt");
 		expect(onOpenFilePreview).toHaveBeenCalledWith("/tmp/bravo.txt");
 		expect(onOpenFilePreview).toHaveBeenCalledWith("/tmp/charlie.txt");
+	});
+
+	it("ignores malformed permission tool metadata without crashing", () => {
+		const message = buildPermissionMessage({
+			toolCall: {
+				toolCallId: "tool-dangerous-meta",
+				_meta: {
+					name: { label: "unsafe" },
+					command: ["rm"],
+					args: { join: "not a function" },
+				},
+			},
+		});
+
+		const { getByText } = render(<MessageItem message={message} />);
+
+		expect(getByText(i18n.t("toolCall.toolCall"))).toBeInTheDocument();
 	});
 
 	it("maps tool call statuses to shared gruvbox dot classes", () => {

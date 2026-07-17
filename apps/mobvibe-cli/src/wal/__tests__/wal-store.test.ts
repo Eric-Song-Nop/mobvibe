@@ -313,6 +313,71 @@ describe("WalStore", () => {
 			]);
 			expect(walStore.getDiscoveredSessions()[0]?._meta).toBeNull();
 		});
+
+		it("preserves prior metadata when a snapshot omits the extension", () => {
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: "discovered-metadata",
+					backendId: "backend-1",
+					cwd: "/repo",
+					_meta: { retained: true },
+					discoveredAt: "2026-07-01T00:00:00.000Z",
+					isStale: false,
+				},
+			]);
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: "discovered-metadata",
+					backendId: "backend-1",
+					cwd: "/repo",
+					discoveredAt: "2026-07-02T00:00:00.000Z",
+					isStale: false,
+				},
+			]);
+
+			expect(walStore.getDiscoveredSessions()[0]?._meta).toEqual({
+				retained: true,
+			});
+		});
+
+		it("preserves metadata omission for a newly discovered session", () => {
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: "discovered-without-metadata",
+					backendId: "backend-1",
+					cwd: "/repo",
+					discoveredAt: "2026-07-01T00:00:00.000Z",
+					isStale: false,
+				},
+			]);
+
+			const discovered = walStore.getDiscoveredSessions()[0];
+
+			expect(discovered?.sessionId).toBe("discovered-without-metadata");
+			expect(Object.hasOwn(discovered ?? {}, "_meta")).toBeFalse();
+		});
+
+		it("fails closed on invalid persisted metadata without losing the session", () => {
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: "discovered-corrupt-meta",
+					backendId: "backend-1",
+					cwd: "/repo",
+					discoveredAt: "2026-07-01T00:00:00.000Z",
+					isStale: false,
+				},
+			]);
+			const db = new Database(dbPath);
+			db.query(
+				"UPDATE discovered_sessions SET meta_json = ? WHERE session_id = ?",
+			).run('{"constructor":{"polluted":true}}', "discovered-corrupt-meta");
+			db.close();
+
+			const discovered = walStore.getDiscoveredSessions()[0];
+
+			expect(discovered?.sessionId).toBe("discovered-corrupt-meta");
+			expect(Object.hasOwn(discovered ?? {}, "_meta")).toBeFalse();
+		});
 	});
 
 	describe("commitSessionResume", () => {
@@ -556,6 +621,25 @@ describe("WalStore", () => {
 			expect(events.length).toBe(10);
 			expect(events[0].seq).toBe(1);
 			expect(events[9].seq).toBe(10);
+		});
+
+		it("drops invalid metadata from replay without dropping the event", () => {
+			const db = new Database(dbPath);
+			db.query(
+				"UPDATE session_events SET payload = ? WHERE session_id = ? AND seq = 1",
+			).run(
+				'{"index":1,"_meta":{"constructor":{"polluted":true}}}',
+				"session-1",
+			);
+			db.close();
+
+			const [event] = walStore.queryEvents({
+				sessionId: "session-1",
+				revision: 1,
+				limit: 1,
+			});
+
+			expect(event?.payload).toEqual({ index: 1 });
 		});
 
 		it("should query events after a sequence", () => {

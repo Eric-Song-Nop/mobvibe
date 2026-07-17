@@ -22,6 +22,11 @@ import {
 	upsertMachine,
 } from "../services/db-service.js";
 import type { NotificationService } from "../services/notification-service.js";
+import {
+	sanitizeAcpMetaPayload,
+	sanitizeSessionMetaEnvelopes,
+	warnSessionMetaSanitization,
+} from "../services/session-meta-sanitizer.js";
 import type { SessionRouter } from "../services/session-router.js";
 import type { TeamRouter } from "../services/team-router.js";
 import type { UserAffinityProvider } from "../services/user-affinity.js";
@@ -453,7 +458,9 @@ export function setupCliHandlers(
 		// Sessions list update (initial sync and heartbeat)
 		socket.on("sessions:list", (sessions: SessionSummary[]) => {
 			withRegisteredCli("sessions:list", sessions, () => {
-				cliRegistry.updateSessions(socket.id, sessions);
+				const sanitized = sanitizeSessionMetaEnvelopes(sessions);
+				warnSessionMetaSanitization("sessions:list", socket.id, sanitized);
+				cliRegistry.updateSessions(socket.id, sanitized.values);
 				logger.debug(
 					{ socketId: socket.id, sessionCount: sessions.length },
 					"cli_sessions_list",
@@ -464,6 +471,17 @@ export function setupCliHandlers(
 		// Incremental sessions update
 		socket.on("sessions:changed", (payload: SessionsChangedPayload) => {
 			withRegisteredCli("sessions:changed", payload, () => {
+				const addedCount = payload.added.length;
+				const sanitized = sanitizeSessionMetaEnvelopes([
+					...payload.added,
+					...payload.updated,
+				]);
+				warnSessionMetaSanitization("sessions:changed", socket.id, sanitized);
+				const sanitizedPayload: SessionsChangedPayload = {
+					...payload,
+					added: sanitized.values.slice(0, addedCount),
+					updated: sanitized.values.slice(addedCount),
+				};
 				logger.info(
 					{
 						socketId: socket.id,
@@ -479,14 +497,21 @@ export function setupCliHandlers(
 						payload.backendCapabilities,
 					);
 				}
-				cliRegistry.updateSessionsIncremental(socket.id, payload);
+				cliRegistry.updateSessionsIncremental(socket.id, sanitizedPayload);
 			});
 		});
 
 		// Historical sessions discovered from ACP agent
 		socket.on("sessions:discovered", (payload: SessionsDiscoveredPayload) => {
 			withRegisteredCli("sessions:discovered", payload, (cliRecord) => {
-				const { sessions, capabilities } = payload;
+				const { capabilities } = payload;
+				const sanitized = sanitizeSessionMetaEnvelopes(payload.sessions);
+				warnSessionMetaSanitization(
+					"sessions:discovered",
+					socket.id,
+					sanitized,
+				);
+				const sessions = sanitized.values;
 
 				// Update per-backend capabilities from discovery result
 				if (capabilities && payload.backendId) {
@@ -518,7 +543,7 @@ export function setupCliHandlers(
 						backendLabel: payload.backendLabel,
 						machineId: cliRecord.machineId,
 						additionalDirectories: s.additionalDirectories ?? [],
-						_meta: s._meta ?? null,
+						...(Object.hasOwn(s, "_meta") ? { _meta: s._meta } : {}),
 					};
 				});
 
@@ -624,19 +649,25 @@ export function setupCliHandlers(
 		// Permission request from CLI
 		socket.on("permission:request", (payload: PermissionRequestPayload) => {
 			withRegisteredCli("permission:request", payload, (record) => {
+				const sanitized = sanitizeAcpMetaPayload(payload);
+				warnSessionMetaSanitization("permission:request", socket.id, sanitized);
+				const permission = sanitized.value;
 				logger.info(
-					{ sessionId: payload.sessionId, requestId: payload.requestId },
+					{
+						sessionId: permission.sessionId,
+						requestId: permission.requestId,
+					},
 					"permission_request_received",
 				);
-				emitToWebui("permission:request", payload, record.userId);
+				emitToWebui("permission:request", permission, record.userId);
 				if (
 					record.userId &&
 					notificationService &&
-					isActiveCliSession(record, payload.sessionId)
+					isActiveCliSession(record, permission.sessionId)
 				) {
 					void notificationService.notifyPermissionRequest(
 						record.userId,
-						payload,
+						permission,
 					);
 				}
 			});
@@ -658,16 +689,19 @@ export function setupCliHandlers(
 		// session:event with kind="terminal_output"
 		socket.on("session:event", (event: SessionEvent) => {
 			withRegisteredCli("session:event", event, (record) => {
+				const sanitized = sanitizeAcpMetaPayload(event);
+				warnSessionMetaSanitization("session:event", socket.id, sanitized);
+				const sessionEvent = sanitized.value;
 				const eventWithMachineId: SessionEvent = {
-					...event,
+					...sessionEvent,
 					machineId: record.machineId,
 				};
 				logger.debug(
 					{
-						sessionId: event.sessionId,
-						revision: event.revision,
-						seq: event.seq,
-						kind: event.kind,
+						sessionId: sessionEvent.sessionId,
+						revision: sessionEvent.revision,
+						seq: sessionEvent.seq,
+						kind: sessionEvent.kind,
 						socketId: socket.id,
 					},
 					"session_event_received",
@@ -676,7 +710,7 @@ export function setupCliHandlers(
 				if (
 					record.userId &&
 					notificationService &&
-					isActiveCliSession(record, event.sessionId)
+					isActiveCliSession(record, sessionEvent.sessionId)
 				) {
 					void notificationService.notifySessionEvent(
 						record.userId,
@@ -686,9 +720,9 @@ export function setupCliHandlers(
 
 				// Send acknowledgment back to CLI only after the event has been relayed.
 				socket.emit("events:ack", {
-					sessionId: event.sessionId,
-					revision: event.revision,
-					upToSeq: event.seq,
+					sessionId: sessionEvent.sessionId,
+					revision: sessionEvent.revision,
+					upToSeq: sessionEvent.seq,
 				});
 			});
 		});

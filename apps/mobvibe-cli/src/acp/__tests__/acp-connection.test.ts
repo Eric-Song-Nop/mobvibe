@@ -681,6 +681,135 @@ describe("AcpConnection", () => {
 
 			expect(result).toEqual({ sessions: [] });
 		});
+
+		it("drops invalid metadata without dropping the listed session", async () => {
+			const request = mock(() =>
+				Promise.resolve({
+					sessions: [
+						{
+							sessionId: "session-1",
+							cwd: "/repo",
+							title: "Preserved title",
+							_meta: { value: Number.NaN },
+						},
+					],
+				}),
+			);
+			const internal = connection as unknown as {
+				state: "ready";
+				agentCapabilities: {
+					sessionCapabilities: { list: Record<string, never> };
+				};
+				connection: { agent: { request: typeof request } };
+			};
+			internal.state = "ready";
+			internal.agentCapabilities = { sessionCapabilities: { list: {} } };
+			internal.connection = { agent: { request } };
+
+			const result = await connection.listSessions();
+
+			expect(result.sessions).toEqual([
+				expect.objectContaining({
+					sessionId: "session-1",
+					title: "Preserved title",
+				}),
+			]);
+			expect(Object.hasOwn(result.sessions[0] ?? {}, "_meta")).toBeFalse();
+		});
+	});
+
+	describe("session updates", () => {
+		it("drops invalid metadata while preserving session info fields", () => {
+			let received: unknown;
+			const unsubscribe = connection.onSessionUpdate((notification) => {
+				received = notification;
+			});
+			const internal = connection as unknown as {
+				emitSessionUpdate: (notification: unknown) => void;
+			};
+
+			internal.emitSessionUpdate({
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "session_info_update",
+					title: "Preserved title",
+					_meta: JSON.parse('{"constructor":{"polluted":true}}'),
+				},
+			});
+
+			expect(received).toEqual({
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "session_info_update",
+					title: "Preserved title",
+				},
+			});
+			unsubscribe();
+		});
+
+		it("drops malformed non-JSON updates without invoking deferred getters", () => {
+			let getterCalled = false;
+			const received = mock(() => undefined);
+			const unsubscribe = connection.onSessionUpdate(received);
+			const malformed: Record<string, unknown> = { sessionId: "session-1" };
+			Object.defineProperty(malformed, "update", {
+				enumerable: true,
+				get() {
+					getterCalled = true;
+					return {
+						sessionUpdate: "session_info_update",
+						_meta: { deferred: true },
+					};
+				},
+			});
+			const internal = connection as unknown as {
+				emitSessionUpdate: (notification: unknown) => void;
+			};
+
+			internal.emitSessionUpdate(malformed);
+
+			expect(getterCalled).toBeFalse();
+			expect(received).not.toHaveBeenCalled();
+			unsubscribe();
+		});
+	});
+
+	describe("permission requests", () => {
+		it("sanitizes metadata before forwarding a request to the session manager", async () => {
+			const handler = mock((_params: unknown) =>
+				Promise.resolve({ outcome: { outcome: "cancelled" as const } }),
+			);
+			connection.setPermissionHandler(handler);
+			const internal = connection as unknown as {
+				handlePermissionRequest: (
+					params: unknown,
+					requestId: string,
+					signal: AbortSignal,
+				) => Promise<unknown>;
+			};
+
+			await internal.handlePermissionRequest(
+				{
+					sessionId: "session-1",
+					options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+					toolCall: {
+						toolCallId: "tool-1",
+						title: "Preserved title",
+						_meta: JSON.parse('{"constructor":{"polluted":true}}'),
+					},
+					_meta: { value: Number.NaN },
+				},
+				"request-1",
+				new AbortController().signal,
+			);
+
+			const forwarded = handler.mock.calls[0]?.[0] as Record<string, unknown>;
+			expect(Object.hasOwn(forwarded, "_meta")).toBeFalse();
+			expect(forwarded.toolCall).toEqual({
+				toolCallId: "tool-1",
+				title: "Preserved title",
+			});
+		});
 	});
 
 	describe("loadSession", () => {

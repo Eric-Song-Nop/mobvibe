@@ -71,6 +71,11 @@ import {
 	isMessageIdWithinLimit,
 } from "./message-send-safety.js";
 import { toRpcAppError } from "./rpc-errors.js";
+import {
+	sanitizeAcpMetaPayload,
+	sanitizeSessionMetaEnvelopes,
+	warnSessionMetaSanitization,
+} from "./session-meta-sanitizer.js";
 
 type PendingRpc<T> = {
 	requestId: string;
@@ -97,6 +102,36 @@ export class SessionRouter {
 	private durableMessageSends = new Map<string, MessageSendEntry>();
 
 	constructor(private readonly cliRegistry: CliRegistry) {}
+
+	private sanitizeInboundSessionSummaries<T extends { _meta?: unknown }>(
+		event: string,
+		socketId: string,
+		values: readonly T[],
+	): T[] {
+		const result = sanitizeSessionMetaEnvelopes(values);
+		warnSessionMetaSanitization(event, socketId, result);
+		return result.values;
+	}
+
+	private async sendSessionSummaryRpc<Params>(
+		socket: Socket,
+		event: string,
+		params: Params,
+	): Promise<SessionSummary> {
+		const value = await this.sendRpc<Params, SessionSummary>(
+			socket,
+			event,
+			params,
+		);
+		const sanitized = this.sanitizeInboundSessionSummaries(event, socket.id, [
+			value,
+		]);
+		const first = sanitized[0];
+		if (!first) {
+			throw new Error("Invalid session payload from CLI");
+		}
+		return first;
+	}
 
 	/**
 	 * Resolve the CLI that owns a session, scoped to the given user.
@@ -203,7 +238,7 @@ export class SessionRouter {
 			backendId: params.backendId,
 			worktree: params.worktree,
 		};
-		const result = await this.sendRpc<CreateSessionParams, SessionSummary>(
+		const result = await this.sendSessionSummaryRpc(
 			cli.socket,
 			"rpc:session:create",
 			rpcParams,
@@ -266,7 +301,7 @@ export class SessionRouter {
 			"session_close_rpc_start",
 		);
 		const cli = this.resolveCliForSession(params.sessionId, userId);
-		const result = await this.sendRpc<CloseSessionParams, SessionSummary>(
+		const result = await this.sendSessionSummaryRpc(
 			cli.socket,
 			"rpc:session:close",
 			params,
@@ -369,7 +404,7 @@ export class SessionRouter {
 			"session_rename_rpc_start",
 		);
 
-		const result = await this.sendRpc<RenameSessionParams, SessionSummary>(
+		const result = await this.sendSessionSummaryRpc(
 			cli.socket,
 			"rpc:session:rename",
 			params,
@@ -429,7 +464,7 @@ export class SessionRouter {
 			"session_mode_rpc_start",
 		);
 
-		const result = await this.sendRpc<SetSessionModeParams, SessionSummary>(
+		const result = await this.sendSessionSummaryRpc(
 			cli.socket,
 			"rpc:session:mode",
 			params,
@@ -459,10 +494,11 @@ export class SessionRouter {
 			"session_config_rpc_start",
 		);
 
-		const result = await this.sendRpc<
-			SetSessionConfigOptionParams,
-			SessionSummary
-		>(cli.socket, "rpc:session:config", params);
+		const result = await this.sendSessionSummaryRpc(
+			cli.socket,
+			"rpc:session:config",
+			params,
+		);
 
 		logger.info(
 			{ sessionId: params.sessionId, configId: params.configId, userId },
@@ -488,7 +524,7 @@ export class SessionRouter {
 			"session_model_rpc_start",
 		);
 
-		const result = await this.sendRpc<SetSessionModelParams, SessionSummary>(
+		const result = await this.sendSessionSummaryRpc(
 			cli.socket,
 			"rpc:session:model",
 			params,
@@ -870,6 +906,11 @@ export class SessionRouter {
 			DiscoverSessionsRpcParams,
 			DiscoverSessionsRpcResult
 		>(cli.socket, "rpc:sessions:discover", params);
+		const sessions = this.sanitizeInboundSessionSummaries(
+			"rpc:sessions:discover",
+			cli.socket.id,
+			result.sessions,
+		);
 
 		logger.info(
 			{
@@ -880,7 +921,7 @@ export class SessionRouter {
 			"sessions_discover_rpc_complete",
 		);
 
-		return result;
+		return { ...result, sessions };
 	}
 
 	/**
@@ -925,7 +966,7 @@ export class SessionRouter {
 			additionalDirectories: params.additionalDirectories,
 			backendId: params.backendId,
 		};
-		const result = await this.sendRpc<LoadSessionRpcParams, SessionSummary>(
+		const result = await this.sendSessionSummaryRpc(
 			cli.socket,
 			"rpc:session:load",
 			rpcParams,
@@ -974,7 +1015,7 @@ export class SessionRouter {
 			...params,
 			machineId: cli.machineId,
 		};
-		const result = await this.sendRpc<ResumeSessionRpcParams, SessionSummary>(
+		const result = await this.sendSessionSummaryRpc(
 			cli.socket,
 			"rpc:session:resume",
 			rpcParams,
@@ -1028,7 +1069,7 @@ export class SessionRouter {
 			additionalDirectories: params.additionalDirectories,
 			backendId: params.backendId,
 		};
-		const result = await this.sendRpc<ReloadSessionRpcParams, SessionSummary>(
+		const result = await this.sendSessionSummaryRpc(
 			cli.socket,
 			"rpc:session:reload",
 			rpcParams,
@@ -1353,18 +1394,20 @@ export class SessionRouter {
 			SessionEventsParams,
 			SessionEventsResponse
 		>(cli.socket, "rpc:session:events", params);
+		const sanitized = sanitizeAcpMetaPayload(result);
+		warnSessionMetaSanitization("rpc:session:events", cli.socket.id, sanitized);
 
 		logger.debug(
 			{
 				sessionId: params.sessionId,
 				revision: params.revision,
-				eventCount: result.events.length,
-				hasMore: result.hasMore,
+				eventCount: sanitized.value.events.length,
+				hasMore: sanitized.value.hasMore,
 				userId,
 			},
 			"session_events_rpc_complete",
 		);
-		return result;
+		return sanitized.value;
 	}
 
 	private sendRpc<TParams, TResult>(
