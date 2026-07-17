@@ -1,4 +1,17 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import {
+	chmod,
+	mkdir,
+	mkdtemp,
+	readdir,
+	readFile,
+	rm,
+	stat,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 // Mock the SDK
 mock.module("@agentclientprotocol/sdk", () => ({
@@ -19,6 +32,10 @@ mock.module("@agentclientprotocol/sdk", () => ({
 			},
 		},
 		client: {
+			fs: {
+				readTextFile: "fs/read_text_file",
+				writeTextFile: "fs/write_text_file",
+			},
 			session: {
 				requestPermission: "session/request_permission",
 				update: "session/update",
@@ -59,7 +76,10 @@ mock.module("node:stream", () => ({
 
 import type { AcpBackendConfig } from "../../config.js";
 import {
+	ACP_FILE_SYSTEM_CAPABILITIES,
 	AcpConnection,
+	MAX_ACP_FILE_BYTES,
+	MAX_ACP_FILE_LINES,
 	normalizeAdditionalDirectories,
 } from "../acp-connection.js";
 
@@ -73,14 +93,61 @@ const createMockBackendConfig = (): AcpBackendConfig => ({
 describe("AcpConnection", () => {
 	let connection: AcpConnection;
 	let mockBackend: AcpBackendConfig;
+	let temporaryDirectories: string[];
 
 	beforeEach(() => {
+		temporaryDirectories = [];
 		mockBackend = createMockBackendConfig();
 		connection = new AcpConnection({
 			backend: mockBackend,
 			client: { name: "test-client", version: "1.0.0" },
 		});
 	});
+
+	afterEach(async () => {
+		await Promise.all(
+			temporaryDirectories.map((directory) =>
+				rm(directory, { force: true, recursive: true }),
+			),
+		);
+	});
+
+	const createFileSystemWorkspace = async () => {
+		const container = await mkdtemp(path.join(tmpdir(), "mobvibe-acp-fs-"));
+		temporaryDirectories.push(container);
+		const root = path.join(container, "root");
+		const additionalRoot = path.join(container, "additional");
+		const outside = path.join(container, "outside");
+		await Promise.all([mkdir(root), mkdir(additionalRoot), mkdir(outside)]);
+		return { additionalRoot, outside, root };
+	};
+
+	const bindFileSystemSession = async (
+		root: string,
+		additionalDirectories: string[] = [],
+		sessionId = "session-fs",
+	) => {
+		const request = mock(() => Promise.resolve({ sessionId }));
+		const internal = connection as unknown as {
+			state: "ready";
+			agentCapabilities: {
+				sessionCapabilities?: {
+					additionalDirectories: Record<string, never>;
+				};
+			};
+			connection: { agent: { request: typeof request } };
+		};
+		internal.state = "ready";
+		internal.agentCapabilities =
+			additionalDirectories.length > 0
+				? { sessionCapabilities: { additionalDirectories: {} } }
+				: {};
+		internal.connection = { agent: { request } };
+		await connection.createSession({
+			cwd: root,
+			additionalDirectories,
+		});
+	};
 
 	describe("getSessionCapabilities", () => {
 		it("returns all false when agentCapabilities is undefined", () => {
@@ -244,6 +311,300 @@ describe("AcpConnection", () => {
 				}),
 			).rejects.toThrow("additionalDirectories capability");
 			expect(request).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("file system methods", () => {
+		it("advertises both file system methods as a complete capability", () => {
+			expect(ACP_FILE_SYSTEM_CAPABILITIES).toEqual({
+				readTextFile: true,
+				writeTextFile: true,
+			});
+		});
+
+		it("rejects requests for a session other than the active session", async () => {
+			const { root } = await createFileSystemWorkspace();
+			const filePath = path.join(root, "message.txt");
+			await writeFile(filePath, "hello", "utf8");
+			await bindFileSystemSession(root);
+
+			await expect(
+				connection.readTextFile({
+					sessionId: "different-session",
+					path: filePath,
+				}),
+			).rejects.toThrow("does not match the active session");
+			await expect(
+				connection.writeTextFile({
+					sessionId: "different-session",
+					path: filePath,
+					content: "changed",
+				}),
+			).rejects.toThrow("does not match the active session");
+		});
+
+		it("requires native absolute paths and rejects traversal outside roots", async () => {
+			const { outside, root } = await createFileSystemWorkspace();
+			const outsideFile = path.join(outside, "secret.txt");
+			await writeFile(outsideFile, "secret", "utf8");
+			await bindFileSystemSession(root);
+
+			await expect(
+				connection.readTextFile({
+					sessionId: "session-fs",
+					path: "relative.txt",
+				}),
+			).rejects.toThrow("must be absolute");
+
+			const traversalPath = `${root}${path.sep}..${path.sep}outside${path.sep}secret.txt`;
+			await expect(
+				connection.readTextFile({
+					sessionId: "session-fs",
+					path: traversalPath,
+				}),
+			).rejects.toThrow("outside the active session roots");
+			await expect(
+				connection.writeTextFile({
+					sessionId: "session-fs",
+					path: traversalPath,
+					content: "changed",
+				}),
+			).rejects.toThrow("outside the active session roots");
+			expect(await readFile(outsideFile, "utf8")).toBe("secret");
+		});
+
+		it("prevents read and write escapes through symbolic links", async () => {
+			const { outside, root } = await createFileSystemWorkspace();
+			const outsideFile = path.join(outside, "secret.txt");
+			const linkPath = path.join(root, "linked.txt");
+			const directoryLink = path.join(root, "linked-directory");
+			await writeFile(outsideFile, "secret", "utf8");
+			await symlink(outsideFile, linkPath);
+			await symlink(
+				outside,
+				directoryLink,
+				process.platform === "win32" ? "junction" : "dir",
+			);
+			await bindFileSystemSession(root);
+
+			await expect(
+				connection.readTextFile({
+					sessionId: "session-fs",
+					path: linkPath,
+				}),
+			).rejects.toThrow("outside the active session roots");
+			await expect(
+				connection.writeTextFile({
+					sessionId: "session-fs",
+					path: linkPath,
+					content: "changed",
+				}),
+			).rejects.toThrow("symbolic links");
+			await expect(
+				connection.readTextFile({
+					sessionId: "session-fs",
+					path: path.join(directoryLink, "secret.txt"),
+				}),
+			).rejects.toThrow("outside the active session roots");
+			await expect(
+				connection.writeTextFile({
+					sessionId: "session-fs",
+					path: path.join(directoryLink, "created.txt"),
+					content: "created",
+				}),
+			).rejects.toThrow("outside the active session roots");
+			expect(await readFile(outsideFile, "utf8")).toBe("secret");
+			await expect(
+				readFile(path.join(outside, "created.txt"), "utf8"),
+			).rejects.toThrow();
+		});
+
+		it("does not return or write through an in-flight session switch", async () => {
+			const { additionalRoot, root } = await createFileSystemWorkspace();
+			const readPath = path.join(root, "read.txt");
+			const writePath = path.join(root, "write.txt");
+			await writeFile(readPath, "old session data", "utf8");
+			await writeFile(writePath, "before", "utf8");
+			await bindFileSystemSession(root);
+
+			type FileSystemSessionForTest = {
+				sessionId: string;
+				roots: string[];
+				canonicalRoots?: Promise<string[]>;
+			};
+			const internal = connection as unknown as {
+				resolveCanonicalRoots: (
+					session: FileSystemSessionForTest,
+					signal?: AbortSignal,
+				) => Promise<string[]>;
+			};
+			const originalResolve = internal.resolveCanonicalRoots.bind(connection);
+			let releaseRequests = () => {};
+			const requestGate = new Promise<void>((resolve) => {
+				releaseRequests = resolve;
+			});
+			let markBothWaiting = () => {};
+			const bothWaiting = new Promise<void>((resolve) => {
+				markBothWaiting = resolve;
+			});
+			let waitingCount = 0;
+			internal.resolveCanonicalRoots = async (session, signal) => {
+				const roots = await originalResolve(session, signal);
+				waitingCount += 1;
+				if (waitingCount === 2) {
+					markBothWaiting();
+				}
+				await requestGate;
+				return roots;
+			};
+
+			const outcomesPromise = Promise.allSettled([
+				connection.readTextFile({
+					sessionId: "session-fs",
+					path: readPath,
+				}),
+				connection.writeTextFile({
+					sessionId: "session-fs",
+					path: writePath,
+					content: "after",
+				}),
+			]);
+			await bothWaiting;
+			await bindFileSystemSession(additionalRoot, [], "session-next");
+			releaseRequests();
+
+			const outcomes = await outcomesPromise;
+			expect(outcomes.every((outcome) => outcome.status === "rejected")).toBe(
+				true,
+			);
+			for (const outcome of outcomes) {
+				if (outcome.status === "rejected") {
+					expect(String(outcome.reason)).toContain(
+						"no longer belongs to the active session",
+					);
+				}
+			}
+			expect(await readFile(writePath, "utf8")).toBe("before");
+			expect(
+				(await readdir(root)).some((file) => file.endsWith(".mobvibe-tmp")),
+			).toBe(false);
+		});
+
+		it("applies 1-based line slicing and enforces the line limit", async () => {
+			const { root } = await createFileSystemWorkspace();
+			const filePath = path.join(root, "lines.txt");
+			await writeFile(filePath, "one\n二\nthree\nfour\n", "utf8");
+			await bindFileSystemSession(root);
+
+			await expect(
+				connection.readTextFile({
+					sessionId: "session-fs",
+					path: filePath,
+					line: 2,
+					limit: 2,
+				}),
+			).resolves.toEqual({ content: "二\nthree" });
+			await expect(
+				connection.readTextFile({
+					sessionId: "session-fs",
+					path: filePath,
+					limit: MAX_ACP_FILE_LINES + 1,
+				}),
+			).rejects.toThrow(`${MAX_ACP_FILE_LINES} lines`);
+		});
+
+		it("rejects oversized reads, invalid UTF-8, and oversized writes", async () => {
+			const { root } = await createFileSystemWorkspace();
+			const oversizedPath = path.join(root, "oversized.txt");
+			const invalidUtf8Path = path.join(root, "invalid.txt");
+			const bomPath = path.join(root, "bom.txt");
+			await writeFile(oversizedPath, Buffer.alloc(MAX_ACP_FILE_BYTES + 1, 97));
+			await writeFile(invalidUtf8Path, Buffer.from([0xff]));
+			await writeFile(bomPath, "\ufeffhello", "utf8");
+			await bindFileSystemSession(root);
+
+			await expect(
+				connection.readTextFile({
+					sessionId: "session-fs",
+					path: oversizedPath,
+				}),
+			).rejects.toThrow(`${MAX_ACP_FILE_BYTES} bytes`);
+			await expect(
+				connection.readTextFile({
+					sessionId: "session-fs",
+					path: invalidUtf8Path,
+				}),
+			).rejects.toThrow("valid UTF-8");
+			await expect(
+				connection.readTextFile({
+					sessionId: "session-fs",
+					path: bomPath,
+				}),
+			).resolves.toEqual({ content: "\ufeffhello" });
+			await expect(
+				connection.writeTextFile({
+					sessionId: "session-fs",
+					path: path.join(root, "new.txt"),
+					content: "a".repeat(MAX_ACP_FILE_BYTES + 1),
+				}),
+			).rejects.toThrow(`${MAX_ACP_FILE_BYTES} bytes`);
+			await expect(
+				connection.writeTextFile({
+					sessionId: "session-fs",
+					path: path.join(root, "invalid-write.txt"),
+					content: "\ud800",
+				}),
+			).rejects.toThrow("valid Unicode text");
+		});
+
+		it("writes atomically inside cwd and additional directory roots", async () => {
+			const { additionalRoot, root } = await createFileSystemWorkspace();
+			const existingPath = path.join(root, "existing.txt");
+			const additionalPath = path.join(additionalRoot, "created.txt");
+			await writeFile(existingPath, "before", "utf8");
+			await chmod(existingPath, 0o600);
+			await bindFileSystemSession(root, [additionalRoot]);
+
+			await connection.writeTextFile({
+				sessionId: "session-fs",
+				path: existingPath,
+				content: "after",
+			});
+			await connection.writeTextFile({
+				sessionId: "session-fs",
+				path: additionalPath,
+				content: "\ufeffcreated",
+			});
+
+			expect(await readFile(existingPath, "utf8")).toBe("after");
+			expect((await stat(existingPath)).mode & 0o777).toBe(0o600);
+			expect(await readFile(additionalPath, "utf8")).toBe("\ufeffcreated");
+			expect((await stat(additionalPath)).mode & 0o777).toBe(
+				0o666 & ~process.umask(),
+			);
+			const remainingFiles = [
+				...(await readdir(root)),
+				...(await readdir(additionalRoot)),
+			];
+			expect(remainingFiles.some((file) => file.endsWith(".mobvibe-tmp"))).toBe(
+				false,
+			);
+		});
+
+		it("honors an already cancelled file request", async () => {
+			const { root } = await createFileSystemWorkspace();
+			const filePath = path.join(root, "message.txt");
+			await writeFile(filePath, "hello", "utf8");
+			await bindFileSystemSession(root);
+			const controller = new AbortController();
+			controller.abort();
+
+			await expect(
+				connection.readTextFile(
+					{ sessionId: "session-fs", path: filePath },
+					controller.signal,
+				),
+			).rejects.toThrow("cancelled");
 		});
 	});
 

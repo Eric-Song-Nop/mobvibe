@@ -1,7 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { constants as fsConstants } from "node:fs";
+import {
+	chmod,
+	lstat,
+	open,
+	realpath,
+	rename,
+	unlink,
+	writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
+import { TextDecoder } from "node:util";
 import {
 	type AgentCapabilities,
 	type ClientConnection,
@@ -11,6 +22,7 @@ import {
 	type CreateTerminalResponse,
 	client,
 	type Implementation,
+	type InitializeRequest,
 	type JsonRpcId,
 	type KillTerminalRequest,
 	type KillTerminalResponse,
@@ -21,8 +33,11 @@ import {
 	ndJsonStream,
 	PROTOCOL_VERSION,
 	type PromptResponse,
+	type ReadTextFileRequest,
+	type ReadTextFileResponse,
 	type ReleaseTerminalRequest,
 	type ReleaseTerminalResponse,
+	RequestError,
 	type RequestPermissionRequest,
 	type RequestPermissionResponse,
 	type ResumeSessionResponse,
@@ -34,6 +49,8 @@ import {
 	type TerminalOutputResponse,
 	type WaitForTerminalExitRequest,
 	type WaitForTerminalExitResponse,
+	type WriteTextFileRequest,
+	type WriteTextFileResponse,
 } from "@agentclientprotocol/sdk";
 import {
 	type AcpConnectionState,
@@ -57,6 +74,118 @@ type ClientInfo = {
 };
 
 const MAX_STDERR_LINES = 20;
+export const MAX_ACP_FILE_BYTES = 1024 * 1024;
+export const MAX_ACP_FILE_LINES = 10_000;
+
+export const ACP_FILE_SYSTEM_CAPABILITIES = {
+	readTextFile: true,
+	writeTextFile: true,
+} as const;
+
+const UTF8_DECODER = new TextDecoder("utf-8", {
+	fatal: true,
+	ignoreBOM: true,
+});
+
+type ActiveFileSystemSession = {
+	sessionId: string;
+	roots: string[];
+	canonicalRoots?: Promise<string[]>;
+};
+
+const isErrnoException = (error: unknown): error is NodeJS.ErrnoException =>
+	error instanceof Error && "code" in error;
+
+const isPathWithinRoot = (target: string, root: string) => {
+	const relative = path.relative(root, target);
+	return (
+		relative === "" ||
+		(relative !== ".." &&
+			!relative.startsWith(`..${path.sep}`) &&
+			!path.isAbsolute(relative))
+	);
+};
+
+const throwIfCancelled = (signal?: AbortSignal) => {
+	if (signal?.aborted) {
+		throw RequestError.requestCancelled(
+			undefined,
+			"File system request was cancelled",
+		);
+	}
+};
+
+const validateNativeAbsolutePath = (filePath: string) => {
+	if (!path.isAbsolute(filePath)) {
+		throw RequestError.invalidParams(
+			{ path: filePath },
+			"File system paths must be absolute",
+		);
+	}
+};
+
+const decodeUtf8 = (content: Uint8Array, filePath: string) => {
+	try {
+		return UTF8_DECODER.decode(content);
+	} catch {
+		throw RequestError.invalidParams(
+			{ path: filePath },
+			"File content must be valid UTF-8",
+		);
+	}
+};
+
+const encodeUtf8 = (content: string) => {
+	const encoded = Buffer.from(content, "utf8");
+	if (UTF8_DECODER.decode(encoded) !== content) {
+		throw RequestError.invalidParams(
+			undefined,
+			"File content must be valid Unicode text",
+		);
+	}
+	return encoded;
+};
+
+const sliceTextLines = (
+	content: string,
+	line?: number | null,
+	limit?: number | null,
+) => {
+	if (
+		line !== undefined &&
+		line !== null &&
+		(!Number.isInteger(line) || line < 1)
+	) {
+		throw RequestError.invalidParams(
+			{ line },
+			"Read line must be a 1-based positive integer",
+		);
+	}
+	if (
+		limit !== undefined &&
+		limit !== null &&
+		(!Number.isInteger(limit) || limit < 0 || limit > MAX_ACP_FILE_LINES)
+	) {
+		throw RequestError.invalidParams(
+			{ limit, max: MAX_ACP_FILE_LINES },
+			`Read limit must be between 0 and ${MAX_ACP_FILE_LINES} lines`,
+		);
+	}
+
+	const lines = content.split(/\r\n|\n|\r/);
+	const start = (line ?? 1) - 1;
+	const requestedLineCount = limit ?? Math.max(0, lines.length - start);
+	if (requestedLineCount > MAX_ACP_FILE_LINES) {
+		throw RequestError.invalidParams(
+			{ line: line ?? 1, max: MAX_ACP_FILE_LINES },
+			`Read requests are limited to ${MAX_ACP_FILE_LINES} lines`,
+		);
+	}
+	if (line == null && limit == null) {
+		return content;
+	}
+	return lines.slice(start, start + requestedLineCount).join("\n");
+};
 
 const isAbsolutePathInput = (value: string) =>
 	path.posix.isAbsolute(value) || path.win32.isAbsolute(value);
@@ -256,6 +385,7 @@ export class AcpConnection {
 	private connectedAt?: Date;
 	private error?: ErrorDetail;
 	private sessionId?: string;
+	private activeFileSystemSession?: ActiveFileSystemSession;
 	private agentInfo?: Implementation;
 	private agentCapabilities?: AgentCapabilities;
 	private readonly sessionUpdateEmitter = new EventEmitter();
@@ -413,7 +543,7 @@ export class AcpConnection {
 						: undefined,
 			},
 		);
-		this.sessionId = sessionId;
+		this.bindActiveSession(sessionId, cwd, normalizedAdditionalDirectories);
 		return response;
 	}
 
@@ -451,7 +581,7 @@ export class AcpConnection {
 						: undefined,
 			},
 		);
-		this.sessionId = sessionId;
+		this.bindActiveSession(sessionId, cwd, normalizedAdditionalDirectories);
 		return response;
 	}
 
@@ -469,9 +599,7 @@ export class AcpConnection {
 			sessionId,
 			new Error("ACP session was closed"),
 		);
-		if (this.sessionId === sessionId) {
-			this.sessionId = undefined;
-		}
+		this.clearActiveSession(sessionId);
 		return response;
 	}
 
@@ -562,7 +690,7 @@ export class AcpConnection {
 				},
 			);
 			this.process = child;
-			this.sessionId = undefined;
+			this.clearActiveSession();
 			logger.info(
 				{
 					backendId: this.options.backend.id,
@@ -608,6 +736,12 @@ export class AcpConnection {
 					methods.client.session.requestPermission,
 					({ params, requestId, signal }) =>
 						this.handlePermissionRequest(params, requestId, signal),
+				)
+				.onRequest(methods.client.fs.readTextFile, ({ params, signal }) =>
+					this.readTextFile(params, signal),
+				)
+				.onRequest(methods.client.fs.writeTextFile, ({ params, signal }) =>
+					this.writeTextFile(params, signal),
 				)
 				.onNotification(methods.client.session.update, ({ params }) =>
 					this.emitSessionUpdate(params),
@@ -720,23 +854,25 @@ export class AcpConnection {
 				{ backendId: this.options.backend.id, pid: child.pid },
 				"acp_backend_initialize_start",
 			);
-			const initializeResponse = await connection.agent.request(
-				methods.agent.initialize,
-				{
-					protocolVersion: PROTOCOL_VERSION,
-					clientInfo: {
-						name: this.options.client.name,
-						version: this.options.client.version,
-					},
-					clientCapabilities: {
-						terminal: true,
-						session: {
-							configOptions: {
-								boolean: {},
-							},
+			const initializeRequest: InitializeRequest = {
+				protocolVersion: PROTOCOL_VERSION,
+				clientInfo: {
+					name: this.options.client.name,
+					version: this.options.client.version,
+				},
+				clientCapabilities: {
+					fs: ACP_FILE_SYSTEM_CAPABILITIES,
+					terminal: true,
+					session: {
+						configOptions: {
+							boolean: {},
 						},
 					},
 				},
+			};
+			const initializeResponse = await connection.agent.request(
+				methods.agent.initialize,
+				initializeRequest,
 			);
 
 			this.agentInfo = initializeResponse.agentInfo ?? undefined;
@@ -798,7 +934,7 @@ export class AcpConnection {
 			cwd,
 			additionalDirectories,
 		);
-		this.sessionId = response.sessionId;
+		this.bindActiveSession(response.sessionId, cwd, additionalDirectories);
 		return response;
 	}
 
@@ -864,6 +1000,151 @@ export class AcpConnection {
 		_meta?: Record<string, unknown> | null,
 	): Promise<SetSessionConfigOptionResponse> {
 		return this.setSessionConfigOption(sessionId, configId, modelId, _meta);
+	}
+
+	async readTextFile(
+		params: ReadTextFileRequest,
+		signal?: AbortSignal,
+	): Promise<ReadTextFileResponse> {
+		throwIfCancelled(signal);
+		const session = this.requireActiveFileSystemSession(params.sessionId);
+		validateNativeAbsolutePath(params.path);
+		const roots = await this.resolveCanonicalRoots(session, signal);
+		this.assertActiveFileSystemSession(session);
+		const target = await this.resolveExistingPath(params.path);
+		this.assertActiveFileSystemSession(session);
+		this.assertPathAllowed(target, roots, params.path);
+		throwIfCancelled(signal);
+
+		const noFollow = fsConstants.O_NOFOLLOW ?? 0;
+		const handle = await open(target, fsConstants.O_RDONLY | noFollow);
+		try {
+			this.assertActiveFileSystemSession(session);
+			const fileInfo = await handle.stat();
+			if (!fileInfo.isFile()) {
+				throw RequestError.invalidParams(
+					{ path: params.path },
+					"Read target must be a regular file",
+				);
+			}
+			if (fileInfo.size > MAX_ACP_FILE_BYTES) {
+				throw RequestError.invalidParams(
+					{ path: params.path, maxBytes: MAX_ACP_FILE_BYTES },
+					`Read files are limited to ${MAX_ACP_FILE_BYTES} bytes`,
+				);
+			}
+			this.assertActiveFileSystemSession(session);
+			const content = await handle.readFile({ signal });
+			this.assertActiveFileSystemSession(session);
+			throwIfCancelled(signal);
+			if (content.byteLength > MAX_ACP_FILE_BYTES) {
+				throw RequestError.invalidParams(
+					{ path: params.path, maxBytes: MAX_ACP_FILE_BYTES },
+					`Read files are limited to ${MAX_ACP_FILE_BYTES} bytes`,
+				);
+			}
+			return {
+				content: sliceTextLines(
+					decodeUtf8(content, params.path),
+					params.line,
+					params.limit,
+				),
+			};
+		} finally {
+			await handle.close();
+		}
+	}
+
+	async writeTextFile(
+		params: WriteTextFileRequest,
+		signal?: AbortSignal,
+	): Promise<WriteTextFileResponse> {
+		throwIfCancelled(signal);
+		const session = this.requireActiveFileSystemSession(params.sessionId);
+		validateNativeAbsolutePath(params.path);
+		const encoded = encodeUtf8(params.content);
+		if (encoded.byteLength > MAX_ACP_FILE_BYTES) {
+			throw RequestError.invalidParams(
+				{ path: params.path, maxBytes: MAX_ACP_FILE_BYTES },
+				`Write content is limited to ${MAX_ACP_FILE_BYTES} bytes`,
+			);
+		}
+
+		const roots = await this.resolveCanonicalRoots(session, signal);
+		this.assertActiveFileSystemSession(session);
+		const parent = await this.resolveExistingPath(path.dirname(params.path));
+		this.assertActiveFileSystemSession(session);
+		this.assertPathAllowed(parent, roots, params.path);
+		const parentInfo = await lstat(parent);
+		if (!parentInfo.isDirectory()) {
+			throw RequestError.invalidParams(
+				{ path: params.path },
+				"Write target parent must be a directory",
+			);
+		}
+
+		const target = path.join(parent, path.basename(params.path));
+		let existingMode: number | undefined;
+		try {
+			const targetInfo = await lstat(target);
+			if (targetInfo.isSymbolicLink()) {
+				throw RequestError.invalidParams(
+					{ path: params.path },
+					"Writing through symbolic links is not allowed",
+				);
+			}
+			if (!targetInfo.isFile()) {
+				throw RequestError.invalidParams(
+					{ path: params.path },
+					"Write target must be a regular file",
+				);
+			}
+			existingMode = targetInfo.mode & 0o777;
+		} catch (error) {
+			if (!isErrnoException(error) || error.code !== "ENOENT") {
+				throw error;
+			}
+		}
+
+		this.assertActiveFileSystemSession(session);
+		throwIfCancelled(signal);
+		const temporaryPath = path.join(
+			parent,
+			`.${path.basename(params.path)}.${randomUUID()}.mobvibe-tmp`,
+		);
+		let renamed = false;
+		try {
+			await writeFile(temporaryPath, encoded, {
+				flag: "wx",
+				...(existingMode !== undefined ? { mode: existingMode } : {}),
+				signal,
+			});
+			if (existingMode !== undefined) {
+				await chmod(temporaryPath, existingMode);
+			}
+			const temporaryHandle = await open(temporaryPath, "r");
+			try {
+				await temporaryHandle.sync();
+			} finally {
+				await temporaryHandle.close();
+			}
+			this.assertActiveFileSystemSession(session);
+			throwIfCancelled(signal);
+			await rename(temporaryPath, target);
+			renamed = true;
+			return {};
+		} finally {
+			if (!renamed) {
+				await unlink(temporaryPath).catch((error: unknown) => {
+					if (!isErrnoException(error) || error.code !== "ENOENT") {
+						logger.warn(
+							{ err: error, path: temporaryPath },
+							"acp_file_system_temp_cleanup_failed",
+						);
+					}
+				});
+			}
+		}
 	}
 
 	async createTerminal(
@@ -1021,7 +1302,7 @@ export class AcpConnection {
 		}
 
 		this.updateStatus("stopped");
-		this.sessionId = undefined;
+		this.clearActiveSession();
 		this.agentInfo = undefined;
 		for (const sessionId of new Set([
 			...this.promptControllers.keys(),
@@ -1049,6 +1330,109 @@ export class AcpConnection {
 		}
 
 		return this.connection;
+	}
+
+	private bindActiveSession(
+		sessionId: string,
+		cwd: string,
+		additionalDirectories: readonly string[],
+	): void {
+		this.sessionId = sessionId;
+		this.activeFileSystemSession = {
+			sessionId,
+			roots: [cwd, ...additionalDirectories],
+		};
+	}
+
+	private clearActiveSession(sessionId?: string): void {
+		if (sessionId !== undefined && this.sessionId !== sessionId) {
+			return;
+		}
+		this.sessionId = undefined;
+		this.activeFileSystemSession = undefined;
+	}
+
+	private requireActiveFileSystemSession(
+		sessionId: string,
+	): ActiveFileSystemSession {
+		const session = this.activeFileSystemSession;
+		if (
+			!session ||
+			session.sessionId !== sessionId ||
+			this.sessionId !== sessionId
+		) {
+			throw RequestError.invalidParams(
+				{ sessionId },
+				"File system request does not match the active session",
+			);
+		}
+		return session;
+	}
+
+	private assertActiveFileSystemSession(
+		session: ActiveFileSystemSession,
+	): void {
+		if (
+			this.activeFileSystemSession !== session ||
+			this.sessionId !== session.sessionId
+		) {
+			throw RequestError.invalidParams(
+				{ sessionId: session.sessionId },
+				"File system request no longer belongs to the active session",
+			);
+		}
+	}
+
+	private async resolveCanonicalRoots(
+		session: ActiveFileSystemSession,
+		signal?: AbortSignal,
+	): Promise<string[]> {
+		session.canonicalRoots ??= Promise.all(
+			session.roots.map(async (root) => {
+				throwIfCancelled(signal);
+				const canonicalRoot = await this.resolveExistingPath(root);
+				const rootInfo = await lstat(canonicalRoot);
+				if (!rootInfo.isDirectory()) {
+					throw RequestError.invalidParams(
+						{ root },
+						"Session file system roots must be directories",
+					);
+				}
+				return canonicalRoot;
+			}),
+		).then((roots) => [...new Set(roots)]);
+		try {
+			const roots = await session.canonicalRoots;
+			throwIfCancelled(signal);
+			return roots;
+		} catch (error) {
+			session.canonicalRoots = undefined;
+			throw error;
+		}
+	}
+
+	private async resolveExistingPath(inputPath: string): Promise<string> {
+		try {
+			return await realpath(inputPath);
+		} catch (error) {
+			if (isErrnoException(error) && error.code === "ENOENT") {
+				throw RequestError.resourceNotFound(inputPath);
+			}
+			throw error;
+		}
+	}
+
+	private assertPathAllowed(
+		canonicalPath: string,
+		roots: readonly string[],
+		requestedPath: string,
+	): void {
+		if (!roots.some((root) => isPathWithinRoot(canonicalPath, root))) {
+			throw RequestError.invalidParams(
+				{ path: requestedPath },
+				"File system path is outside the active session roots",
+			);
+		}
 	}
 
 	private async createSessionInternal(
