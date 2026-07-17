@@ -203,7 +203,7 @@ describe("applySessionEvent ACP message boundaries", () => {
 
 		expect(actions.appendAssistantChunk).toHaveBeenCalledWith(
 			"session-1",
-			"Hello",
+			{ type: "text", text: "Hello" },
 			"assistant-1",
 		);
 	});
@@ -236,7 +236,7 @@ describe("applySessionEvent ACP message boundaries", () => {
 
 		expect(actions.appendAssistantChunk).toHaveBeenCalledWith(
 			"session-1",
-			"there",
+			{ type: "text", text: "there" },
 			"assistant-native",
 		);
 	});
@@ -270,8 +270,78 @@ describe("applySessionEvent ACP message boundaries", () => {
 
 		expect(actions.appendThoughtChunk).toHaveBeenCalledWith(
 			"session-1",
-			"Reasoning",
+			{ type: "text", text: "Reasoning" },
 			"thought-1",
+		);
+	});
+
+	it("preserves structured assistant content and block metadata", () => {
+		const actions = createActions();
+		const image = {
+			type: "image",
+			data: "aW1hZ2U=",
+			mimeType: "image/png",
+			annotations: { audience: ["user"], priority: 0.8 },
+			_meta: { source: "agent" },
+		} satisfies ContentBlock;
+		const event = {
+			sessionId: "session-1",
+			machineId: "machine-1",
+			revision: 1,
+			seq: 4,
+			createdAt: "2026-07-16T00:00:00.000Z",
+			kind: "agent_message_chunk",
+			protocolMessageId: "assistant-image",
+			payload: {
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					messageId: "assistant-image",
+					content: image,
+				},
+			},
+		} satisfies SessionEvent;
+
+		applySessionEvent({ event, sessions: {}, actions, notifications });
+
+		expect(actions.appendAssistantChunk).toHaveBeenCalledWith(
+			"session-1",
+			image,
+			"assistant-image",
+		);
+	});
+
+	it("preserves embedded resources in thought chunks", () => {
+		const actions = createActions();
+		const resource = {
+			type: "resource",
+			resource: {
+				uri: "file:///workspace/notes.txt",
+				mimeType: "text/plain",
+				text: "private reasoning context",
+			},
+		} satisfies ContentBlock;
+		const event = {
+			sessionId: "session-1",
+			machineId: "machine-1",
+			revision: 1,
+			seq: 5,
+			createdAt: "2026-07-16T00:00:00.000Z",
+			kind: "agent_thought_chunk",
+			payload: {
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "agent_thought_chunk",
+					content: resource,
+				},
+			},
+		} satisfies SessionEvent;
+
+		applySessionEvent({ event, sessions: {}, actions, notifications });
+
+		expect(actions.appendThoughtChunk).toHaveBeenCalledWith(
+			"session-1",
+			resource,
 		);
 	});
 });

@@ -85,4 +85,34 @@ describe("chat-store session event atomicity", () => {
 		expect(restored.messages).toHaveLength(1);
 		expect(restored.messages[0]).toMatchObject({ content: "only once" });
 	});
+
+	it("rehydrates structured assistant and thought blocks", async () => {
+		const event = { sessionId: "s1", revision: 1, seq: 1 };
+		const image = {
+			type: "image" as const,
+			data: "aW1hZ2U=",
+			mimeType: "image/png",
+			_meta: { source: "agent" },
+		};
+		const resource = {
+			type: "resource" as const,
+			resource: {
+				uri: "file:///workspace/reasoning.txt",
+				text: "reasoning context",
+			},
+		};
+		useChatStore.getState().applySessionEventTransaction(event, (actions) => {
+			actions.appendAssistantChunk("s1", image, "assistant-rich");
+			actions.appendThoughtChunk("s1", resource, "thought-rich");
+		});
+
+		const snapshot = memory.getRaw();
+		resetStore();
+		memory.setRaw(snapshot);
+		await useChatStore.persist.rehydrate();
+
+		const messages = useChatStore.getState().sessions.s1.messages;
+		expect(messages[0]).toMatchObject({ contentBlocks: [image] });
+		expect(messages[1]).toMatchObject({ contentBlocks: [resource] });
+	});
 });

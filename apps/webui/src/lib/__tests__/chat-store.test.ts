@@ -1,3 +1,4 @@
+import type { ContentBlock } from "@mobvibe/shared";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useChatStore } from "../chat-store";
 
@@ -1051,6 +1052,7 @@ describe("chat-store", () => {
 			expect(messages).toHaveLength(2);
 			expect(messages[0]).toMatchObject({
 				content: "Hello world",
+				contentBlocks: [{ type: "text", text: "Hello world" }],
 				protocolMessageId: "user-1",
 			});
 			expect(messages[1]).toMatchObject({
@@ -1147,6 +1149,58 @@ describe("chat-store", () => {
 				content: "Second thought",
 				protocolMessageId: "thought-2",
 				isStreaming: true,
+			});
+		});
+
+		it("preserves mixed assistant blocks and only merges matching text metadata", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			const first = {
+				type: "text",
+				text: "Hello ",
+				annotations: { audience: ["user"] },
+				_meta: { channel: "answer" },
+			} satisfies ContentBlock;
+			const second = { ...first, text: "world" } satisfies ContentBlock;
+			const distinct = {
+				type: "text",
+				text: "!",
+				_meta: { channel: "emphasis" },
+			} satisfies ContentBlock;
+			const image = {
+				type: "image",
+				data: "aW1hZ2U=",
+				mimeType: "image/png",
+			} satisfies ContentBlock;
+
+			for (const block of [first, second, distinct, image]) {
+				store.appendAssistantChunk("s1", block, "assistant-rich");
+			}
+
+			const message = useChatStore.getState().sessions.s1.messages[0];
+			expect(message).toMatchObject({
+				content: "Hello world!",
+				contentBlocks: [{ ...first, text: "Hello world" }, distinct, image],
+			});
+		});
+
+		it("preserves non-text thought blocks", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			const resource = {
+				type: "resource",
+				resource: {
+					uri: "file:///workspace/reasoning.txt",
+					text: "reasoning context",
+				},
+			} satisfies ContentBlock;
+
+			store.appendThoughtChunk("s1", resource, "thought-rich");
+
+			expect(useChatStore.getState().sessions.s1.messages[0]).toMatchObject({
+				kind: "thought",
+				content: "",
+				contentBlocks: [resource],
 			});
 		});
 	});

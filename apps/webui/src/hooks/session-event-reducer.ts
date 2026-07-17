@@ -5,7 +5,6 @@ import {
 	extractPlanUpdate,
 	extractSessionInfoUpdate,
 	extractSessionModeUpdate,
-	extractTextChunk,
 	extractToolCallUpdate,
 	type PermissionOutcome,
 	type PermissionRequestPayload,
@@ -113,34 +112,38 @@ export function applySessionEvent({
 		}
 		case "agent_message_chunk": {
 			const notification = event.payload as SessionNotification;
-			const textChunk = extractTextChunk(notification);
-			if (textChunk?.role === "assistant") {
+			if (notification.update.sessionUpdate === "agent_message_chunk") {
 				const protocolMessageId = resolveProtocolMessageId(event, notification);
 				if (protocolMessageId !== undefined) {
 					actions.appendAssistantChunk(
 						event.sessionId,
-						textChunk.text,
+						notification.update.content,
 						protocolMessageId,
 					);
 				} else {
-					actions.appendAssistantChunk(event.sessionId, textChunk.text);
+					actions.appendAssistantChunk(
+						event.sessionId,
+						notification.update.content,
+					);
 				}
 			}
 			break;
 		}
 		case "agent_thought_chunk": {
 			const notification = event.payload as SessionNotification;
-			const textChunk = extractTextChunk(notification);
-			if (textChunk) {
+			if (notification.update.sessionUpdate === "agent_thought_chunk") {
 				const protocolMessageId = resolveProtocolMessageId(event, notification);
 				if (protocolMessageId !== undefined) {
 					actions.appendThoughtChunk(
 						event.sessionId,
-						textChunk.text,
+						notification.update.content,
 						protocolMessageId,
 					);
 				} else {
-					actions.appendThoughtChunk(event.sessionId, textChunk.text);
+					actions.appendThoughtChunk(
+						event.sessionId,
+						notification.update.content,
+					);
 				}
 			}
 			break;

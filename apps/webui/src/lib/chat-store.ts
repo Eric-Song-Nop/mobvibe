@@ -20,7 +20,12 @@ import type {
 import { create, type StateCreator } from "zustand";
 import { persist } from "zustand/middleware";
 import i18n from "@/i18n";
-import { createDefaultContentBlocks } from "./content-block-utils";
+import {
+	appendContentBlock,
+	createDefaultContentBlocks,
+	hasSameTextBlockMetadata,
+	normalizeContentBlock,
+} from "./content-block-utils";
 import type { E2EEStatus } from "./e2ee";
 import { getStorageAdapter } from "./storage-adapter";
 
@@ -57,6 +62,7 @@ type ThoughtMessage = {
 	role: "assistant";
 	kind: "thought";
 	content: string;
+	contentBlocks: ContentBlock[];
 	createdAt: string;
 	isStreaming: boolean;
 };
@@ -368,12 +374,12 @@ type ChatState = {
 	) => void;
 	appendAssistantChunk: (
 		sessionId: string,
-		content: string,
+		content: ContentBlock | string,
 		protocolMessageId?: string,
 	) => void;
 	appendThoughtChunk: (
 		sessionId: string,
-		content: string,
+		content: ContentBlock | string,
 		protocolMessageId?: string,
 	) => void;
 	addPermissionRequest: (
@@ -473,26 +479,13 @@ const createMessage = (role: ChatRole, content: string): TextMessage => ({
 	isStreaming: true,
 });
 
-const normalizeUserMessageChunk = (
-	chunk: ContentBlock | string,
-): ContentBlock =>
-	typeof chunk === "string" ? { type: "text", text: chunk } : chunk;
-
 const isSameContentBlock = (left: ContentBlock, right: ContentBlock): boolean =>
 	JSON.stringify(left) === JSON.stringify(right);
 
 const coalesceTextBlocks = (blocks: ContentBlock[]): ContentBlock[] => {
-	const result: ContentBlock[] = [];
+	let result: ContentBlock[] = [];
 	for (const block of blocks) {
-		const previous = result.at(-1);
-		if (block.type === "text" && previous?.type === "text") {
-			result[result.length - 1] = {
-				type: "text",
-				text: `${previous.text}${block.text}`,
-			};
-		} else {
-			result.push(block);
-		}
+		result = appendContentBlock(result, block);
 	}
 	return result;
 };
@@ -500,10 +493,7 @@ const coalesceTextBlocks = (blocks: ContentBlock[]): ContentBlock[] => {
 const contentBlockMatches = (
 	left: ContentBlock,
 	right: ContentBlock,
-): boolean =>
-	left.type === "text" && right.type === "text"
-		? left.text === right.text
-		: isSameContentBlock(left, right);
+): boolean => isSameContentBlock(left, right);
 
 const isContentBlockSequencePrefix = (
 	candidateBlocks: ContentBlock[],
@@ -520,7 +510,10 @@ const isContentBlockSequencePrefix = (
 			block.type === "text" &&
 			expectedBlock.type === "text"
 		) {
-			return expectedBlock.text.startsWith(block.text);
+			return (
+				hasSameTextBlockMetadata(block, expectedBlock) &&
+				expectedBlock.text.startsWith(block.text)
+			);
 		}
 		return contentBlockMatches(block, expectedBlock);
 	});
@@ -1515,7 +1508,7 @@ export const useChatStore = create<ChatState>()(
 				set((state: ChatState) => {
 					const session = state.sessions[sessionId];
 					if (!session) return state;
-					const contentBlock = normalizeUserMessageChunk(chunk);
+					const contentBlock = normalizeContentBlock(chunk);
 					const text = contentBlock.type === "text" ? contentBlock.text : "";
 
 					let boundary = 0;
@@ -1616,10 +1609,10 @@ export const useChatStore = create<ChatState>()(
 									? { protocolMessageId }
 									: {}),
 								content,
-								contentBlocks: [
-									...(lastMessage.contentBlocks ?? []),
+								contentBlocks: appendContentBlock(
+									lastMessage.contentBlocks ?? [],
 									contentBlock,
-								],
+								),
 								lastServerChunkSeq: eventSeq,
 							};
 							return {
@@ -1692,6 +1685,7 @@ export const useChatStore = create<ChatState>()(
 							const existingBlocks = matchedMessage.contentBlocks ?? [];
 							if (
 								eventSeq === undefined &&
+								sendMessageId !== undefined &&
 								existingBlocks.some((candidate) =>
 									isSameContentBlock(candidate, contentBlock),
 								)
@@ -1704,7 +1698,7 @@ export const useChatStore = create<ChatState>()(
 							messages[matchIndex] = {
 								...matchedMessage,
 								content,
-								contentBlocks: [...existingBlocks, contentBlock],
+								contentBlocks: appendContentBlock(existingBlocks, contentBlock),
 								...(eventSeq !== undefined
 									? { lastServerChunkSeq: eventSeq }
 									: {}),
@@ -1841,6 +1835,7 @@ export const useChatStore = create<ChatState>()(
 						}
 						const message = {
 							...createMessage("assistant", ""),
+							contentBlocks: [],
 							...(protocolMessageId !== undefined ? { protocolMessageId } : {}),
 						};
 						streamingMessageId = message.id;
@@ -1854,10 +1849,15 @@ export const useChatStore = create<ChatState>()(
 					const msg = messages[idx];
 					if (!isTextMessage(msg)) return state;
 
-					const nextContent = `${msg.content}${content}`;
-					const nextBlocks = msg.contentBlocks.map((b) =>
-						b.type === "text" ? { ...b, text: nextContent } : b,
-					);
+					const contentBlock = normalizeContentBlock(content);
+					const nextContent =
+						contentBlock.type === "text"
+							? `${msg.content}${contentBlock.text}`
+							: msg.content;
+					const existingBlocks =
+						msg.contentBlocks ??
+						(msg.content ? createDefaultContentBlocks(msg.content) : []);
+					const nextBlocks = appendContentBlock(existingBlocks, contentBlock);
 
 					messages = [
 						...messages.slice(0, idx),
@@ -1905,6 +1905,7 @@ export const useChatStore = create<ChatState>()(
 							role: "assistant",
 							kind: "thought",
 							content: "",
+							contentBlocks: [],
 							createdAt: new Date().toISOString(),
 							isStreaming: true,
 						};
@@ -1918,9 +1919,21 @@ export const useChatStore = create<ChatState>()(
 					const msg = messages[idx];
 					if (msg.kind !== "thought") return state;
 
+					const contentBlock = normalizeContentBlock(content);
+					const nextContent =
+						contentBlock.type === "text"
+							? `${msg.content}${contentBlock.text}`
+							: msg.content;
+					const existingBlocks =
+						msg.contentBlocks ??
+						(msg.content ? createDefaultContentBlocks(msg.content) : []);
 					messages = [
 						...messages.slice(0, idx),
-						{ ...msg, content: msg.content + content },
+						{
+							...msg,
+							content: nextContent,
+							contentBlocks: appendContentBlock(existingBlocks, contentBlock),
+						},
 						...messages.slice(idx + 1),
 					];
 

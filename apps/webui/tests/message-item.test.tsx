@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ToolCallContent } from "@/lib/acp";
+import type { ContentBlock, ToolCallContent } from "@/lib/acp";
 import type { ChatMessage, ChatSession } from "@/lib/chat-store";
 import { useChatStore } from "@/lib/chat-store";
 import {
@@ -17,6 +17,7 @@ vi.mock("@pierre/diffs/react", () => ({
 }));
 
 type TextChatMessage = Extract<ChatMessage, { kind: "text" }>;
+type ThoughtChatMessage = Extract<ChatMessage, { kind: "thought" }>;
 type ToolCallChatMessage = Extract<ChatMessage, { kind: "tool_call" }>;
 
 const buildMessage = (
@@ -42,6 +43,19 @@ const buildToolCallMessage = (
 	kind: "tool_call",
 	sessionId: "session-1",
 	toolCallId: "tool-1",
+	createdAt: new Date().toISOString(),
+	isStreaming: false,
+	...overrides,
+});
+
+const buildThoughtMessage = (
+	overrides?: Partial<ThoughtChatMessage>,
+): ThoughtChatMessage => ({
+	id: "message-thought-1",
+	role: "assistant",
+	kind: "thought",
+	content: "",
+	contentBlocks: [],
 	createdAt: new Date().toISOString(),
 	isStreaming: false,
 	...overrides,
@@ -110,6 +124,81 @@ describe("MessageItem", () => {
 		const { container, getByText } = render(<MessageItem message={message} />);
 		expect(getByText("Streaming")).toBeInTheDocument();
 		expect(container.querySelector(".opacity-90")).toBeTruthy();
+	});
+
+	it("renders structured assistant and thought content blocks", () => {
+		const blocks: ContentBlock[] = [
+			{ type: "text", text: "Structured answer" },
+			{ type: "image", data: "dGVzdA==", mimeType: "image/png" },
+			{ type: "audio", data: "dGVzdA==", mimeType: "audio/wav" },
+			{
+				type: "resource",
+				resource: {
+					uri: "file:///tmp/context.txt",
+					text: "embedded context",
+				},
+			},
+			{
+				type: "resource_link",
+				uri: "https://example.com/reference",
+				name: "reference",
+			},
+		];
+		const assistant = render(
+			<MessageItem
+				message={buildMessage({ content: "", contentBlocks: blocks })}
+			/>,
+		);
+		expect(assistant.getByText("Structured answer")).toBeInTheDocument();
+		expect(assistant.getByAltText("Image")).toBeInTheDocument();
+		expect(assistant.container.querySelector("audio")).toBeInTheDocument();
+		expect(assistant.getByText("embedded context")).toBeInTheDocument();
+		expect(assistant.getByRole("link", { name: "reference" })).toHaveAttribute(
+			"href",
+			"https://example.com/reference",
+		);
+		assistant.unmount();
+
+		const thought = render(
+			<MessageItem
+				message={buildThoughtMessage({ contentBlocks: [blocks[3]] })}
+			/>,
+		);
+		expect(thought.getByText("embedded context")).toBeInTheDocument();
+	});
+
+	it("does not inline remote or unsafe image payloads", () => {
+		const oversizedImage = Buffer.alloc(2 * 1024 * 1024 + 1).toString("base64");
+		const message = buildMessage({
+			content: "",
+			contentBlocks: [
+				{
+					type: "image",
+					data: "",
+					mimeType: "image/png",
+					uri: "https://tracker.example/pixel.png",
+				},
+				{
+					type: "image",
+					data: "PHN2Zz48L3N2Zz4=",
+					mimeType: "image/svg+xml",
+				},
+				{ type: "image", data: "A", mimeType: "image/png" },
+				{ type: "image", data: oversizedImage, mimeType: "image/png" },
+			],
+		});
+
+		const { container, getAllByText, getByRole } = render(
+			<MessageItem message={message} />,
+		);
+		expect(container.querySelector("img")).not.toBeInTheDocument();
+		expect(
+			getAllByText(i18n.t("toolCall.imagePreviewUnavailable")),
+		).toHaveLength(4);
+		expect(getByRole("link", { name: "pixel.png" })).toHaveAttribute(
+			"href",
+			"https://tracker.example/pixel.png",
+		);
 	});
 
 	it("renders tool call text output as plain text", () => {

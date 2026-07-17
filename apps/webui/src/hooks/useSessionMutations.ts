@@ -172,12 +172,12 @@ export interface ChatStoreActions {
 	addStatusMessage: (sessionId: string, status: StatusPayload) => void;
 	appendAssistantChunk: (
 		sessionId: string,
-		text: string,
+		content: ContentBlock | string,
 		protocolMessageId?: string,
 	) => void;
 	appendThoughtChunk: (
 		sessionId: string,
-		text: string,
+		content: ContentBlock | string,
 		protocolMessageId?: string,
 	) => void;
 	finalizeAssistantMessage: (sessionId: string) => void;
