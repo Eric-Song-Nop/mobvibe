@@ -26,6 +26,25 @@ const getErrorMessage = (error: unknown) => {
 	return String(error);
 };
 
+const selectDiscoveredSessionTimestamp = (
+	existing: string | undefined,
+	provided: string | null | undefined,
+	discoveredAt: string,
+): string => {
+	const validValues = [existing, provided].filter(
+		(value): value is string =>
+			typeof value === "string" && !Number.isNaN(Date.parse(value)),
+	);
+	return (
+		validValues.reduce<string | undefined>((latest, value) => {
+			if (latest === undefined || Date.parse(value) > Date.parse(latest)) {
+				return value;
+			}
+			return latest;
+		}, undefined) ?? discoveredAt
+	);
+};
+
 const buildRequestValidationError = (message = "Invalid request") =>
 	createErrorDetail({
 		code: "REQUEST_VALIDATION_FAILED",
@@ -876,17 +895,30 @@ export function setupSessionRoutes(
 							cli.backends.find(
 								(backend) => backend.backendId === requestedBackendId,
 							)?.backendLabel ?? requestedBackendId;
-						const summaries: SessionSummary[] = result.sessions.map((s) => ({
-							sessionId: s.sessionId,
-							title: s.title ?? `Session ${s.sessionId.slice(0, 8)}`,
-							cwd: s.cwd,
-							additionalDirectories: s.additionalDirectories ?? [],
-							updatedAt: s.updatedAt ?? new Date().toISOString(),
-							createdAt: s.updatedAt ?? new Date().toISOString(),
-							backendId: requestedBackendId,
-							backendLabel: discoveredBackendLabel,
-							machineId: cli.machineId,
-						}));
+						const existingSessions = new Map(
+							cli.sessions.map((session) => [session.sessionId, session]),
+						);
+						const discoveredAt = new Date().toISOString();
+						const summaries: SessionSummary[] = result.sessions.map((s) => {
+							const existing = existingSessions.get(s.sessionId);
+							const updatedAt = selectDiscoveredSessionTimestamp(
+								existing?.updatedAt,
+								s.updatedAt,
+								discoveredAt,
+							);
+							return {
+								sessionId: s.sessionId,
+								title: s.title ?? `Session ${s.sessionId.slice(0, 8)}`,
+								cwd: s.cwd,
+								additionalDirectories: s.additionalDirectories ?? [],
+								updatedAt,
+								createdAt: existing?.createdAt ?? updatedAt,
+								backendId: requestedBackendId,
+								backendLabel: discoveredBackendLabel,
+								machineId: cli.machineId,
+								_meta: s._meta ?? null,
+							};
+						});
 						cliRegistry.addDiscoveredSessionsForMachine(
 							cli.machineId,
 							summaries,

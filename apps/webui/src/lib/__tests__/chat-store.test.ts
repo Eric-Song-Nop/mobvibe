@@ -20,6 +20,20 @@ const resetStore = () => {
 describe("chat-store", () => {
 	beforeEach(resetStore);
 
+	it("initializes session metadata and pinned-title state", () => {
+		useChatStore.getState().createLocalSession("s1", {
+			_meta: { source: "create", keep: null },
+			isTitlePinned: true,
+		});
+
+		expect(useChatStore.getState().sessions.s1).toEqual(
+			expect.objectContaining({
+				_meta: { source: "create", keep: null },
+				isTitlePinned: true,
+			}),
+		);
+	});
+
 	// ---------------------------------------------------------------------------
 	// updateSessionCursor — monotonic guard
 	// ---------------------------------------------------------------------------
@@ -728,6 +742,51 @@ describe("chat-store", () => {
 	});
 
 	describe("syncSessions (attached revision authority)", () => {
+		it("replaces and clears summary metadata by property presence", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1", {
+				title: "Session",
+				backendId: "backend-1",
+				backendLabel: "Backend",
+			});
+			store.updateSessionMeta("s1", { _meta: { stale: true } });
+			const baseSummary = {
+				sessionId: "s1",
+				title: "Session",
+				backendId: "backend-1",
+				backendLabel: "Backend",
+				createdAt: "2026-07-01T00:00:00.000Z",
+				updatedAt: "2026-07-01T00:00:00.000Z",
+			};
+
+			store.handleSessionsChanged({
+				added: [],
+				updated: [{ ...baseSummary, _meta: { fresh: true, keep: null } }],
+				removed: [],
+			});
+			expect(useChatStore.getState().sessions.s1._meta).toEqual({
+				fresh: true,
+				keep: null,
+			});
+
+			store.handleSessionsChanged({
+				added: [],
+				updated: [baseSummary],
+				removed: [],
+			});
+			expect(useChatStore.getState().sessions.s1._meta).toEqual({
+				fresh: true,
+				keep: null,
+			});
+
+			store.handleSessionsChanged({
+				added: [],
+				updated: [{ ...baseSummary, _meta: null }],
+				removed: [],
+			});
+			expect(useChatStore.getState().sessions.s1._meta).toBeNull();
+		});
+
 		it("atomically replaces session config options, including with an empty list", () => {
 			const store = useChatStore.getState();
 			store.createLocalSession("s1", {

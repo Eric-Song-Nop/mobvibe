@@ -1,10 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	applySessionEvent,
 	type SessionEventNotifications,
 	type SessionEventReducerActions,
 } from "@/hooks/session-event-reducer";
 import type { ContentBlock, SessionEvent } from "@/lib/acp";
+import { useChatStore } from "@/lib/chat-store";
 
 const createActions = (): SessionEventReducerActions => ({
 	appendAssistantChunk: vi.fn(),
@@ -342,6 +343,154 @@ describe("applySessionEvent ACP message boundaries", () => {
 		expect(actions.appendThoughtChunk).toHaveBeenCalledWith(
 			"session-1",
 			resource,
+		);
+	});
+});
+
+describe("applySessionEvent session info semantics", () => {
+	const sessionId = "session-info-1";
+
+	const resetSession = (isTitlePinned = false) => {
+		useChatStore.setState({ sessions: {}, activeSessionId: undefined });
+		const store = useChatStore.getState();
+		store.createLocalSession(sessionId, {
+			title: isTitlePinned ? "Pinned title" : "Initial title",
+			updatedAt: "2026-07-10T00:00:00.000Z",
+		});
+		store.updateSessionMeta(sessionId, {
+			_meta: { initial: true },
+			isTitlePinned,
+		});
+	};
+
+	const createSessionInfoEvent = (
+		seq: number,
+		createdAt: string,
+		update: Record<string, unknown>,
+	): SessionEvent =>
+		({
+			sessionId,
+			machineId: "machine-1",
+			revision: 1,
+			seq,
+			createdAt,
+			kind: "session_info_update",
+			payload: {
+				sessionId,
+				update: { sessionUpdate: "session_info_update", ...update },
+			},
+		}) as SessionEvent;
+
+	const applyToStore = (event: SessionEvent) => {
+		const store = useChatStore.getState();
+		applySessionEvent({
+			event,
+			session: store.sessions[event.sessionId],
+			sessions: store.sessions,
+			actions: store,
+			notifications,
+		});
+	};
+
+	beforeEach(() => resetSession());
+
+	it("replaces opaque metadata and produces identical live and replay state", () => {
+		const events = [
+			createSessionInfoEvent(1, "2026-07-11T00:00:00.000Z", {
+				title: "Agent title",
+				updatedAt: "2026-07-09T00:00:00.000Z",
+				_meta: { stale: true, nested: { old: 1 } },
+			}),
+			createSessionInfoEvent(2, "2026-07-12T00:00:00.000Z", {
+				_meta: {
+					fresh: true,
+					nested: { keep: null },
+					preservedNull: null,
+				},
+			}),
+			createSessionInfoEvent(3, "2026-07-13T00:00:00.000Z", {
+				title: null,
+				updatedAt: null,
+			}),
+			createSessionInfoEvent(4, "2026-07-14T00:00:00.000Z", {
+				updatedAt: "not-a-timestamp",
+				_meta: null,
+			}),
+		];
+
+		for (const event of events.slice(0, 2)) applyToStore(event);
+		expect(useChatStore.getState().sessions[sessionId]._meta).toEqual({
+			fresh: true,
+			nested: { keep: null },
+			preservedNull: null,
+		});
+		for (const event of events.slice(2)) applyToStore(event);
+		const live = useChatStore.getState().sessions[sessionId];
+		expect(live).toEqual(
+			expect.objectContaining({
+				title: `Session ${sessionId.slice(0, 8)}`,
+				updatedAt: "2026-07-14T00:00:00.000Z",
+				_meta: null,
+			}),
+		);
+
+		resetSession();
+		for (const event of events) applyToStore(event);
+		const replayed = useChatStore.getState().sessions[sessionId];
+		expect({
+			title: replayed.title,
+			updatedAt: replayed.updatedAt,
+			_meta: replayed._meta,
+		}).toEqual({
+			title: live.title,
+			updatedAt: live.updatedAt,
+			_meta: live._meta,
+		});
+	});
+
+	it("keeps a pinned title while applying the remaining fields", () => {
+		resetSession(true);
+		applyToStore(
+			createSessionInfoEvent(1, "2026-07-15T00:00:00.000Z", {
+				title: null,
+				updatedAt: null,
+				_meta: { applied: true },
+			}),
+		);
+
+		expect(useChatStore.getState().sessions[sessionId]).toEqual(
+			expect.objectContaining({
+				title: "Pinned title",
+				updatedAt: "2026-07-15T00:00:00.000Z",
+				_meta: { applied: true },
+			}),
+		);
+	});
+
+	it("does not let an older summary regress event activity time", () => {
+		applyToStore(
+			createSessionInfoEvent(1, "2026-07-15T00:00:00.000Z", {
+				_meta: { applied: true },
+			}),
+		);
+
+		useChatStore.getState().handleSessionsChanged({
+			added: [],
+			updated: [
+				{
+					sessionId,
+					title: "Initial title",
+					backendId: "backend-1",
+					backendLabel: "Backend",
+					createdAt: "2026-07-01T00:00:00.000Z",
+					updatedAt: "2026-07-14T00:00:00.000Z",
+				},
+			],
+			removed: [],
+		});
+
+		expect(useChatStore.getState().sessions[sessionId].updatedAt).toBe(
+			"2026-07-15T00:00:00.000Z",
 		);
 	});
 });

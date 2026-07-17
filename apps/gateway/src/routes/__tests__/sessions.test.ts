@@ -1,5 +1,5 @@
 import type { AddressInfo } from "node:net";
-import { AppError } from "@mobvibe/shared";
+import { AppError, type SessionSummary } from "@mobvibe/shared";
 import express from "express";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setupSessionRoutes } from "../sessions.js";
@@ -64,6 +64,7 @@ describe("session message routes", () => {
 			getCliByMachineIdForUser: vi.fn(() => ({
 				machineId: "machine-1",
 				backends: [{ backendId: "backend-1", backendLabel: "Test Backend" }],
+				sessions: [],
 			})),
 		};
 		const app = express();
@@ -246,6 +247,7 @@ describe("session message routes", () => {
 					cwd: "/repo",
 					additionalDirectories: ["/data", "/docs"],
 					updatedAt: "2026-07-17T00:00:00.000Z",
+					_meta: { source: "agent", keep: null },
 				},
 			],
 		});
@@ -266,10 +268,70 @@ describe("session message routes", () => {
 					additionalDirectories: ["/data", "/docs"],
 					backendId: "backend-1",
 					backendLabel: "Test Backend",
+					_meta: { source: "agent", keep: null },
 				}),
 			],
 			"user-1",
 		);
+	});
+
+	it("keeps discovery timestamps stable when the agent clears updatedAt", async () => {
+		cliRegistry.getCliByMachineIdForUser.mockReturnValueOnce({
+			machineId: "machine-1",
+			backends: [{ backendId: "backend-1", backendLabel: "Test Backend" }],
+			sessions: [
+				{
+					sessionId: "historical-session",
+					title: "Historical session",
+					backendId: "backend-1",
+					backendLabel: "Test Backend",
+					createdAt: "2026-06-01T00:00:00.000Z",
+					updatedAt: "2026-07-01T00:00:00.000Z",
+				},
+			],
+		});
+		sessionRouter.discoverSessions.mockResolvedValueOnce({
+			sessions: [
+				{
+					sessionId: "historical-session",
+					title: null,
+					cwd: "/repo",
+					updatedAt: null,
+				},
+				{
+					sessionId: "without-agent-time",
+					cwd: "/repo",
+					updatedAt: null,
+				},
+			],
+		});
+
+		const response = await fetch(
+			`${baseUrl}/acp/sessions/discover?machineId=machine-1&backendId=backend-1`,
+			{ headers: { authorization: "Bearer user-1" } },
+		);
+
+		expect(response.status).toBe(200);
+		expect(cliRegistry.addDiscoveredSessionsForMachine).toHaveBeenCalledWith(
+			"machine-1",
+			[
+				expect.objectContaining({
+					sessionId: "historical-session",
+					createdAt: "2026-06-01T00:00:00.000Z",
+					updatedAt: "2026-07-01T00:00:00.000Z",
+				}),
+				expect.objectContaining({
+					sessionId: "without-agent-time",
+					createdAt: expect.any(String),
+					updatedAt: expect.any(String),
+				}),
+			],
+			"user-1",
+		);
+		const addedSessions = cliRegistry.addDiscoveredSessionsForMachine.mock
+			.calls[0]?.[1] as SessionSummary[] | undefined;
+		expect(addedSessions?.[1]?.updatedAt).not.toBe("1970-01-01T00:00:00.000Z");
+		expect(addedSessions?.[1]?.createdAt).toBe(addedSessions?.[1]?.updatedAt);
 	});
 
 	it("forwards the complete list when loading a session", async () => {

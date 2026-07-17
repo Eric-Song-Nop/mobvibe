@@ -119,8 +119,8 @@ export type AcpSessionInfo = {
 	additionalDirectories?: string[];
 	/** Stable workspace/project root for grouping and navigation */
 	workspaceRootCwd?: string;
-	title?: string;
-	updatedAt?: string;
+	title?: string | null;
+	updatedAt?: string | null;
 	/** Agent-defined metadata from session_info_update RFD */
 	_meta?: Record<string, unknown> | null;
 };

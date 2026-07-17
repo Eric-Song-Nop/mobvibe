@@ -307,6 +307,8 @@ type ChatState = {
 			worktreeSourceCwd?: string;
 			worktreeBranch?: string;
 			workspaceRootCwd?: string;
+			_meta?: Record<string, unknown> | null;
+			isTitlePinned?: boolean;
 		},
 	) => void;
 	syncSessions: (summaries: SessionSummary[]) => void;
@@ -685,6 +687,8 @@ const createSessionState = (
 		worktreeSourceCwd?: string;
 		worktreeBranch?: string;
 		workspaceRootCwd?: string;
+		_meta?: Record<string, unknown> | null;
+		isTitlePinned?: boolean;
 	},
 ): ChatSession => ({
 	sessionId,
@@ -727,6 +731,8 @@ const createSessionState = (
 	worktreeSourceCwd: options?.worktreeSourceCwd,
 	worktreeBranch: options?.worktreeBranch,
 	workspaceRootCwd: options?.workspaceRootCwd,
+	_meta: options?._meta,
+	isTitlePinned: options?.isTitlePinned,
 });
 
 const resetSessionContentForRevision = (
@@ -748,6 +754,21 @@ const resetSessionContentForRevision = (
  * Merge a server session summary into an existing local session state.
  * Shared by handleSessionsChanged (added/updated) and syncSessions.
  */
+const selectNewestValidTimestamp = (
+	...values: Array<string | null | undefined>
+): string | undefined => {
+	let selected: string | undefined;
+	let selectedTime = Number.NEGATIVE_INFINITY;
+	for (const value of values) {
+		if (value === undefined || value === null) continue;
+		const parsed = Date.parse(value);
+		if (Number.isNaN(parsed) || parsed <= selectedTime) continue;
+		selected = value;
+		selectedTime = parsed;
+	}
+	return selected;
+};
+
 const mergeSessionFromSummary = (
 	existing: ChatSession,
 	summary: {
@@ -768,6 +789,7 @@ const mergeSessionFromSummary = (
 		availableModels?: ChatSession["availableModels"];
 		configOptions?: ChatSession["configOptions"];
 		availableCommands?: ChatSession["availableCommands"];
+		_meta?: ChatSession["_meta"];
 		machineId?: string;
 		worktreeSourceCwd?: string | null;
 		worktreeBranch?: string | null;
@@ -803,7 +825,10 @@ const mergeSessionFromSummary = (
 		title: summary.title ?? baseSession.title,
 		error: summary.error,
 		createdAt: summary.createdAt ?? baseSession.createdAt,
-		updatedAt: summary.updatedAt ?? baseSession.updatedAt,
+		updatedAt: selectNewestValidTimestamp(
+			baseSession.updatedAt,
+			summary.updatedAt,
+		),
 		backendId: summary.backendId ?? baseSession.backendId,
 		backendLabel: summary.backendLabel ?? baseSession.backendLabel,
 		cwd: summary.cwd ?? baseSession.cwd,
@@ -826,6 +851,9 @@ const mergeSessionFromSummary = (
 		configOptions: summary.configOptions ?? baseSession.configOptions,
 		availableCommands:
 			summary.availableCommands ?? baseSession.availableCommands,
+		...("_meta" in summary && summary._meta !== undefined
+			? { _meta: summary._meta }
+			: {}),
 		machineId: summary.machineId ?? baseSession.machineId,
 		isCreating: false,
 		isTitlePinned: summary.isTitlePinned ?? baseSession.isTitlePinned,
@@ -1377,7 +1405,10 @@ export const useChatStore = create<ChatState>()(
 						nextSession.title = payload.title;
 					}
 					if (payload.updatedAt !== undefined) {
-						nextSession.updatedAt = payload.updatedAt;
+						nextSession.updatedAt = selectNewestValidTimestamp(
+							session.updatedAt,
+							payload.updatedAt,
+						);
 					}
 					if (payload.cwd !== undefined) {
 						nextSession.cwd = payload.cwd;

@@ -57,6 +57,24 @@ type ApplySessionEventOptions = {
 	notifications: SessionEventNotifications;
 };
 
+const getSessionFallbackTitle = (sessionId: string) =>
+	`Session ${sessionId.slice(0, 8)}`;
+
+const selectNewestValidTimestamp = (
+	...values: Array<string | null | undefined>
+): string | undefined => {
+	let selected: string | undefined;
+	let selectedTime = Number.NEGATIVE_INFINITY;
+	for (const value of values) {
+		if (value === undefined || value === null) continue;
+		const parsed = Date.parse(value);
+		if (Number.isNaN(parsed) || parsed <= selectedTime) continue;
+		selected = value;
+		selectedTime = parsed;
+	}
+	return selected;
+};
+
 export function applyPermissionRequest({
 	sessionId,
 	payload,
@@ -176,13 +194,28 @@ export function applySessionEvent({
 
 			const infoUpdate = extractSessionInfoUpdate(notification);
 			if (infoUpdate) {
-				if (session?.isTitlePinned && infoUpdate.title !== undefined) {
-					const { title: _ignored, ...rest } = infoUpdate;
-					if (Object.keys(rest).length > 0) {
-						actions.updateSessionMeta(event.sessionId, rest);
-					}
-				} else {
-					actions.updateSessionMeta(event.sessionId, infoUpdate);
+				const metadata: Parameters<
+					SessionEventReducerActions["updateSessionMeta"]
+				>[1] = {};
+				if ("title" in infoUpdate && !session?.isTitlePinned) {
+					metadata.title =
+						infoUpdate.title === null
+							? getSessionFallbackTitle(event.sessionId)
+							: infoUpdate.title;
+				}
+				const updatedAt = selectNewestValidTimestamp(
+					session?.updatedAt,
+					event.createdAt,
+					infoUpdate.updatedAt,
+				);
+				if (updatedAt !== undefined) {
+					metadata.updatedAt = updatedAt;
+				}
+				if ("_meta" in infoUpdate) {
+					metadata._meta = infoUpdate._meta;
+				}
+				if (Object.keys(metadata).length > 0) {
+					actions.updateSessionMeta(event.sessionId, metadata);
 				}
 			}
 

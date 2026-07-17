@@ -303,6 +303,54 @@ describe("CliRegistry", () => {
 				undefined,
 			);
 		});
+
+		it("does not overwrite attached metadata or a detached pinned title", () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			registry.register(socket, info);
+			registry.updateSessions("socket-1", [
+				createMockSessionSummary({
+					sessionId: "attached-session",
+					title: "Live title",
+					isAttached: true,
+					_meta: { live: true },
+				}),
+				createMockSessionSummary({
+					sessionId: "pinned-session",
+					title: "Pinned title",
+					isAttached: false,
+					isTitlePinned: true,
+					_meta: { old: true },
+				}),
+			]);
+
+			registry.addDiscoveredSessionsForMachine("machine-1", [
+				createMockSessionSummary({
+					sessionId: "attached-session",
+					title: "Stale title",
+					_meta: { stale: true },
+				}),
+				createMockSessionSummary({
+					sessionId: "pinned-session",
+					title: "Agent title",
+					_meta: { fresh: true },
+				}),
+			]);
+
+			const sessions = registry.getCliBySocketId("socket-1")?.sessions;
+			expect(sessions?.[0]).toEqual(
+				expect.objectContaining({
+					title: "Live title",
+					_meta: { live: true },
+				}),
+			);
+			expect(sessions?.[1]).toEqual(
+				expect.objectContaining({
+					title: "Pinned title",
+					_meta: { fresh: true },
+				}),
+			);
+		});
 	});
 
 	describe("updateSessionsIncremental", () => {

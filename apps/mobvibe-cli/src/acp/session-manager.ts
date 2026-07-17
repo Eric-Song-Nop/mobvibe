@@ -139,6 +139,57 @@ type SessionRecord = {
 	workspaceRootCwd?: string;
 };
 
+const getSessionFallbackTitle = (sessionId: string) =>
+	`Session ${sessionId.slice(0, 8)}`;
+
+const resolveSessionTitle = ({
+	sessionId,
+	isTitlePinned,
+	localTitle,
+	hasDiscoveredSnapshot,
+	discoveredTitle,
+}: {
+	sessionId: string;
+	isTitlePinned?: boolean;
+	localTitle?: string | null;
+	hasDiscoveredSnapshot: boolean;
+	discoveredTitle?: string | null;
+}): string => {
+	if (isTitlePinned || !hasDiscoveredSnapshot) {
+		return localTitle ?? getSessionFallbackTitle(sessionId);
+	}
+	return discoveredTitle ?? getSessionFallbackTitle(sessionId);
+};
+
+const parseAgentUpdatedAt = (value: string): Date | undefined => {
+	const timestamp = new Date(value);
+	return Number.isNaN(timestamp.getTime()) ? undefined : timestamp;
+};
+
+const advanceSessionUpdatedAt = (record: SessionRecord, candidate: Date) => {
+	if (
+		!Number.isNaN(candidate.getTime()) &&
+		candidate.getTime() > record.updatedAt.getTime()
+	) {
+		record.updatedAt = candidate;
+	}
+};
+
+const selectNewerTimestamp = (current: string, candidate?: string): string => {
+	if (candidate === undefined) {
+		return current;
+	}
+	const currentTime = parseAgentUpdatedAt(current)?.getTime();
+	const candidateTime = parseAgentUpdatedAt(candidate)?.getTime();
+	if (candidateTime === undefined) {
+		return current;
+	}
+	if (currentTime === undefined || candidateTime > currentTime) {
+		return candidate;
+	}
+	return current;
+};
+
 type PermissionRequestRecord = {
 	sessionId: string;
 	requestId: string;
@@ -545,7 +596,7 @@ export class SessionManager {
 			const backend = this.backendById.get(session.backendId);
 			merged.set(session.sessionId, {
 				sessionId: session.sessionId,
-				title: session.title ?? `Session ${session.sessionId.slice(0, 8)}`,
+				title: session.title ?? getSessionFallbackTitle(session.sessionId),
 				backendId: session.backendId,
 				backendLabel: backend?.label ?? session.backendId,
 				cwd: session.cwd,
@@ -567,37 +618,42 @@ export class SessionManager {
 			if (s.cwd === undefined) continue;
 			const existing = merged.get(s.sessionId);
 			if (existing) {
-				// Keep the latest updatedAt between active and discovered
-				const discoveredUpdatedAt = s.agentUpdatedAt ?? s.discoveredAt;
-				if (discoveredUpdatedAt > existing.updatedAt) {
-					const isActive = activeSessionIds.has(s.sessionId);
-					merged.set(s.sessionId, {
-						...existing,
-						...(!isActive
-							? {
-									title: existing.isTitlePinned
-										? existing.title
-										: (s.title ?? existing.title),
-									cwd: s.cwd ?? existing.cwd,
-									additionalDirectories: s.additionalDirectories,
-									workspaceRootCwd:
-										s.workspaceRootCwd ?? s.cwd ?? existing.workspaceRootCwd,
-								}
-							: {}),
-						updatedAt: discoveredUpdatedAt,
-					});
-				}
+				// Active connection state is authoritative. A detached discovery result
+				// is a current metadata snapshot, but it must not make local activity
+				// ordering regress or treat discovery time as agent activity.
+				if (activeSessionIds.has(s.sessionId)) continue;
+				merged.set(s.sessionId, {
+					...existing,
+					title: existing.isTitlePinned
+						? existing.title
+						: (s.title ?? getSessionFallbackTitle(s.sessionId)),
+					cwd: s.cwd ?? existing.cwd,
+					additionalDirectories: s.additionalDirectories,
+					workspaceRootCwd:
+						s.workspaceRootCwd ?? s.cwd ?? existing.workspaceRootCwd,
+					_meta: s._meta ?? null,
+					updatedAt: selectNewerTimestamp(
+						existing.updatedAt,
+						s.agentUpdatedAt ?? undefined,
+					),
+				});
 			} else {
+				const agentUpdatedAt =
+					typeof s.agentUpdatedAt !== "string" ||
+					parseAgentUpdatedAt(s.agentUpdatedAt) === undefined
+						? undefined
+						: s.agentUpdatedAt;
 				merged.set(s.sessionId, {
 					sessionId: s.sessionId,
-					title: s.title ?? `Session ${s.sessionId.slice(0, 8)}`,
+					title: s.title ?? getSessionFallbackTitle(s.sessionId),
 					backendId: s.backendId,
 					backendLabel: s.backendId,
 					cwd: s.cwd as string,
 					additionalDirectories: s.additionalDirectories,
 					workspaceRootCwd: s.workspaceRootCwd ?? s.cwd,
+					_meta: s._meta ?? null,
 					createdAt: s.discoveredAt,
-					updatedAt: s.agentUpdatedAt ?? s.discoveredAt,
+					updatedAt: agentUpdatedAt ?? s.discoveredAt,
 				} satisfies SessionSummary);
 			}
 		}
@@ -1986,8 +2042,9 @@ export class SessionManager {
 					cwd?: string;
 					additionalDirectories: string[];
 					workspaceRootCwd?: string;
-					title?: string;
-					agentUpdatedAt?: string;
+					title?: string | null;
+					agentUpdatedAt?: string | null;
+					_meta?: Record<string, unknown> | null;
 					discoveredAt: string;
 					isStale: boolean;
 				}> = [];
@@ -2015,16 +2072,18 @@ export class SessionManager {
 						cwd: session.cwd,
 						additionalDirectories,
 						workspaceRootCwd: projectContext?.repoRoot ?? session.cwd,
-						title: session.title ?? undefined,
-						updatedAt: session.updatedAt ?? undefined,
+						title: session.title,
+						updatedAt: session.updatedAt,
+						_meta: session._meta,
 					});
 					sessions.push({
 						sessionId: session.sessionId,
 						cwd: session.cwd,
 						additionalDirectories,
 						workspaceRootCwd: projectContext?.repoRoot ?? session.cwd,
-						title: session.title ?? undefined,
-						updatedAt: session.updatedAt ?? undefined,
+						title: session.title,
+						updatedAt: session.updatedAt,
+						_meta: session._meta,
 					});
 
 					// Collect for WAL persistence
@@ -2034,8 +2093,9 @@ export class SessionManager {
 						cwd: session.cwd,
 						additionalDirectories,
 						workspaceRootCwd: projectContext?.repoRoot ?? session.cwd,
-						title: session.title ?? undefined,
-						agentUpdatedAt: session.updatedAt ?? undefined,
+						title: session.title ?? null,
+						agentUpdatedAt: session.updatedAt ?? null,
+						_meta: session._meta ?? null,
 						discoveredAt: now,
 						isStale: false,
 					});
@@ -2109,6 +2169,19 @@ export class SessionManager {
 		const durableDiscovered = this.walStore
 			.getDiscoveredSessions()
 			.find((session) => session.sessionId === sessionId);
+		const isTitlePinned = walSession?.isTitlePinned ?? existing?.isTitlePinned;
+		const resolvedTitle = resolveSessionTitle({
+			sessionId,
+			isTitlePinned,
+			localTitle: walSession?.isTitlePinned
+				? walSession.title
+				: (existing?.title ?? walSession?.title),
+			hasDiscoveredSnapshot:
+				existing === undefined &&
+				(discovered !== undefined || durableDiscovered !== undefined),
+			discoveredTitle:
+				discovered !== undefined ? discovered.title : durableDiscovered?.title,
+		});
 		const knownBackendIds = [
 			walSession?.backendId,
 			existing?.backendId,
@@ -2236,12 +2309,7 @@ export class SessionManager {
 			);
 			const record: SessionRecord = {
 				sessionId,
-				title:
-					existing?.title ??
-					walSession?.title ??
-					discovered?.title ??
-					durableDiscovered?.title ??
-					`Session ${sessionId.slice(0, 8)}`,
+				title: resolvedTitle,
 				backendId: backend.id,
 				backendLabel: backend.label,
 				connection,
@@ -2274,8 +2342,13 @@ export class SessionManager {
 				configOptions,
 				availableCommands: existing?.availableCommands,
 				revision,
-				_meta: existing?._meta,
-				isTitlePinned: existing?.isTitlePinned ?? walSession?.isTitlePinned,
+				_meta:
+					existing !== undefined
+						? existing._meta
+						: discovered !== undefined
+							? discovered._meta
+							: durableDiscovered?._meta,
+				isTitlePinned,
 				pendingReload: resumeBuffer,
 			};
 			recordRef = record;
@@ -2290,9 +2363,8 @@ export class SessionManager {
 				backendId: walSession?.backendId ?? backend.id,
 				cwd,
 				additionalDirectories: normalizedAdditionalDirectories,
-				title:
-					walSession?.title ?? discovered?.title ?? durableDiscovered?.title,
-				isTitlePinned: walSession?.isTitlePinned,
+				title: resolvedTitle,
+				isTitlePinned,
 				expectedRevision: walSession?.currentRevision ?? null,
 				events: this.toWalEventInputs(resumeBuffer.events),
 				wrappedDek,
@@ -2470,6 +2542,23 @@ export class SessionManager {
 				response.modes,
 			);
 			const discovered = this.discoveredSessions.get(sessionId);
+			const durableDiscovered = this.walStore
+				.getDiscoveredSessions()
+				.find((session) => session.sessionId === sessionId);
+			const walPinned = existingWalSession?.isTitlePinned;
+			const resolvedTitle = resolveSessionTitle({
+				sessionId,
+				isTitlePinned: walPinned,
+				localTitle: existingWalSession?.title,
+				hasDiscoveredSnapshot:
+					discovered !== undefined || durableDiscovered !== undefined,
+				discoveredTitle:
+					discovered !== undefined
+						? discovered.title
+						: durableDiscovered?.title,
+			});
+			const resolvedMeta =
+				discovered !== undefined ? discovered._meta : durableDiscovered?._meta;
 			const projectContext = await this.resolveGitProjectContext(cwd);
 			if (loadBuffer.error) {
 				throw loadBuffer.error;
@@ -2506,6 +2595,8 @@ export class SessionManager {
 					backendId: backend.id,
 					cwd,
 					additionalDirectories: normalizedAdditionalDirectories,
+					title: resolvedTitle,
+					isTitlePinned: walPinned,
 					expectedRevision,
 					events: walEvents,
 					wrappedDek,
@@ -2516,12 +2607,6 @@ export class SessionManager {
 			if (hasExistingHistory) {
 				logger.debug({ sessionId, revision }, "load_session_bump_revision");
 			}
-
-			// Restore pinned title from WAL if applicable
-			const walPinned = existingWalSession?.isTitlePinned;
-			const walTitle = existingWalSession?.title;
-			const resolvedTitle =
-				walPinned && walTitle ? walTitle : (discovered?.title ?? sessionId);
 
 			const record: SessionRecord = {
 				sessionId,
@@ -2545,6 +2630,7 @@ export class SessionManager {
 				configOptions: normalizeConfigOptions(response.configOptions),
 				availableCommands: undefined,
 				revision,
+				_meta: resolvedMeta,
 				isTitlePinned: walPinned,
 			};
 
@@ -2784,7 +2870,7 @@ export class SessionManager {
 	): void {
 		for (const event of events) {
 			if (event.type === "session_update") {
-				record.updatedAt = new Date();
+				advanceSessionUpdatedAt(record, new Date());
 				this.applySessionUpdateToRecord(record, event.notification);
 			}
 		}
@@ -2822,7 +2908,7 @@ export class SessionManager {
 			});
 			return;
 		}
-		record.updatedAt = new Date();
+		advanceSessionUpdatedAt(record, new Date());
 		this.writeSessionUpdateToWal(record, notification);
 		this.applySessionUpdateToRecord(record, notification);
 		if (notification.update.sessionUpdate === "config_option_update") {
@@ -2880,31 +2966,25 @@ export class SessionManager {
 			return;
 		}
 		if (update.sessionUpdate === "session_info_update") {
-			if (typeof update.title === "string" && !record.isTitlePinned) {
-				record.title = update.title;
+			if ("title" in update && !record.isTitlePinned) {
+				if (update.title === null) {
+					record.title = getSessionFallbackTitle(record.sessionId);
+				} else if (typeof update.title === "string") {
+					record.title = update.title;
+				}
 			}
-			if (typeof update.updatedAt === "string") {
-				record.updatedAt = new Date(update.updatedAt);
+			if ("updatedAt" in update && typeof update.updatedAt === "string") {
+				const agentUpdatedAt = parseAgentUpdatedAt(update.updatedAt);
+				if (agentUpdatedAt) {
+					advanceSessionUpdatedAt(record, agentUpdatedAt);
+				}
 			}
-			// RFD _meta merge semantics
 			if ("_meta" in update) {
-				const meta = (update as { _meta?: Record<string, unknown> | null })
-					._meta;
-				if (meta === null) {
-					// null → clear all metadata
-					record._meta = null;
-				} else if (meta && typeof meta === "object") {
-					// Merge: null values delete keys, others upsert
-					const current = record._meta ?? {};
-					const merged = { ...current };
-					for (const [key, value] of Object.entries(meta)) {
-						if (value === null) {
-							delete merged[key];
-						} else {
-							merged[key] = value;
-						}
-					}
-					record._meta = Object.keys(merged).length > 0 ? merged : null;
+				const meta = update._meta;
+				if (meta !== undefined) {
+					// `_meta` is opaque: a concrete object replaces the previous value
+					// exactly (including null-valued keys), while null clears it.
+					record._meta = meta;
 				}
 			}
 		}

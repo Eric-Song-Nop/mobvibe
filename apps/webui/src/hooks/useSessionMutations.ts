@@ -61,6 +61,8 @@ type SessionMetadata = Partial<
 		| "worktreeBranch"
 		| "isCreating"
 		| "machineId"
+		| "_meta"
+		| "isTitlePinned"
 	>
 >;
 
@@ -149,6 +151,7 @@ export interface ChatStoreActions {
 				| "usage"
 				| "_meta"
 				| "plan"
+				| "isTitlePinned"
 			>
 		>,
 	) => void;
@@ -248,6 +251,8 @@ const applySessionSummary = (
 		availableCommands: summary.availableCommands,
 		worktreeSourceCwd: summary.worktreeSourceCwd,
 		worktreeBranch: summary.worktreeBranch,
+		_meta: summary._meta,
+		isTitlePinned: summary.isTitlePinned,
 	});
 };
 
@@ -310,6 +315,8 @@ export function useSessionMutations(store: ChatStoreActions) {
 				worktreeSourceCwd: data.worktreeSourceCwd,
 				worktreeBranch: data.worktreeBranch,
 				machineId: data.machineId,
+				_meta: data._meta,
+				isTitlePinned: data.isTitlePinned,
 			});
 
 			store.setSessionE2EEStatus(
@@ -606,6 +613,8 @@ export function useSessionMutations(store: ChatStoreActions) {
 				availableCommands: data.availableCommands,
 				worktreeSourceCwd: data.worktreeSourceCwd,
 				worktreeBranch: data.worktreeBranch,
+				_meta: data._meta,
+				isTitlePinned: data.isTitlePinned,
 			});
 			store.setActiveSessionId(data.sessionId);
 			store.setAppError(undefined);

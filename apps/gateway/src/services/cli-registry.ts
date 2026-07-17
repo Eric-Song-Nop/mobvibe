@@ -27,6 +27,29 @@ export type CliRecord = {
 	backendCapabilities?: Record<string, AgentSessionCapabilities>;
 };
 
+const mergeDiscoveredSession = (
+	existing: SessionSummary,
+	discovered: SessionSummary,
+): SessionSummary => {
+	// The attached session is the live authority. Discovery is only allowed to
+	// refresh detached snapshots, otherwise a stale list page could overwrite
+	// active metadata or a locally pinned title.
+	if (existing.isAttached === true) {
+		return existing;
+	}
+	return {
+		...existing,
+		...discovered,
+		title: existing.isTitlePinned ? existing.title : discovered.title,
+		...(existing.isTitlePinned !== undefined
+			? { isTitlePinned: existing.isTitlePinned }
+			: {}),
+		...(existing.isAttached !== undefined
+			? { isAttached: existing.isAttached }
+			: {}),
+	};
+};
+
 export class CliRegistry extends EventEmitter {
 	private cliByMachineId = new Map<string, CliRecord>();
 	private cliBySocketId = new Map<string, CliRecord>();
@@ -250,29 +273,39 @@ export class CliRegistry extends EventEmitter {
 	}
 
 	/**
-	 * Add discovered historical sessions to a CLI record.
-	 * Only adds sessions that don't already exist (to avoid overwriting active sessions).
+	 * Add or refresh discovered historical sessions on a CLI record.
+	 * Attached sessions remain authoritative and pinned titles are preserved.
 	 */
 	addDiscoveredSessions(
 		socketId: string,
 		sessions: SessionSummary[],
-	): SessionSummary[] {
+	): Pick<SessionsChangedPayload, "added" | "updated" | "removed"> {
 		const record = this.cliBySocketId.get(socketId);
 		if (!record) {
-			return [];
+			return { added: [], updated: [], removed: [] };
 		}
 
 		const added: SessionSummary[] = [];
+		const updated: SessionSummary[] = [];
 		for (const session of sessions) {
-			const exists = record.sessions.some(
-				(s) => s.sessionId === session.sessionId,
+			const existingIndex = record.sessions.findIndex(
+				(existing) => existing.sessionId === session.sessionId,
 			);
-			if (!exists) {
+			if (existingIndex === -1) {
 				record.sessions.push(session);
 				added.push(session);
+				continue;
+			}
+			const merged = mergeDiscoveredSession(
+				record.sessions[existingIndex],
+				session,
+			);
+			if (!isDeepStrictEqual(record.sessions[existingIndex], merged)) {
+				record.sessions[existingIndex] = merged;
+				updated.push(merged);
 			}
 		}
-		return added;
+		return { added, updated, removed: [] };
 	}
 
 	/**
@@ -302,11 +335,8 @@ export class CliRegistry extends EventEmitter {
 			}
 
 			const existing = record.sessions[existingIndex];
-			const merged: SessionSummary = { ...existing, ...session };
-			const hasChanges = (
-				Object.keys(session) as Array<keyof SessionSummary>
-			).some((key) => existing[key] !== merged[key]);
-			if (hasChanges) {
+			const merged = mergeDiscoveredSession(existing, session);
+			if (!isDeepStrictEqual(existing, merged)) {
 				record.sessions[existingIndex] = merged;
 				updated.push(merged);
 			}

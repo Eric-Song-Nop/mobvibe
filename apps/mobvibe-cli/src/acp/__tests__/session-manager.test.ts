@@ -320,6 +320,59 @@ describe("SessionManager", () => {
 			expect(result.sessions).toHaveLength(2);
 		});
 
+		it("preserves and clears complete session list metadata snapshots", async () => {
+			mockConnection.listSessions.mockResolvedValueOnce({
+				sessions: [
+					{
+						sessionId: "discovered-meta",
+						cwd: "/home/user/project1",
+						title: "Metadata session",
+						updatedAt: "2026-07-01T00:00:00.000Z",
+						_meta: { source: "agent", nested: { keep: null } },
+					},
+				],
+			});
+			const first = await sessionManager.discoverSessions({
+				backendId: "backend-1",
+			});
+			expect(first.sessions[0]?._meta).toEqual({
+				source: "agent",
+				nested: { keep: null },
+			});
+			expect(
+				sessionManager
+					.listAllSessions()
+					.find((session) => session.sessionId === "discovered-meta")?._meta,
+			).toEqual({ source: "agent", nested: { keep: null } });
+
+			mockConnection.listSessions.mockResolvedValueOnce({
+				sessions: [
+					{
+						sessionId: "discovered-meta",
+						cwd: "/home/user/project1",
+						title: null,
+						updatedAt: null,
+						_meta: null,
+					},
+				],
+			});
+			const cleared = await sessionManager.discoverSessions({
+				backendId: "backend-1",
+			});
+			expect(cleared.sessions[0]).toEqual(
+				expect.objectContaining({
+					title: null,
+					updatedAt: null,
+					_meta: null,
+				}),
+			);
+			expect(
+				sessionManager
+					.listAllSessions()
+					.find((session) => session.sessionId === "discovered-meta")?._meta,
+			).toBeNull();
+		});
+
 		it("throws error for invalid backend", async () => {
 			await expect(
 				sessionManager.discoverSessions({ backendId: "invalid-backend" }),
@@ -526,6 +579,92 @@ describe("SessionManager", () => {
 			}
 		});
 
+		it("uses a durable discovery snapshot after restart and clears a stale unpinned WAL title", async () => {
+			const persistedConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/resume-title-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const sessionId = "persisted-resume-title";
+			const seedStore = new WalStore(persistedConfig.walDbPath);
+			seedStore.ensureSession({
+				sessionId,
+				machineId: persistedConfig.machineId,
+				backendId: "backend-1",
+				cwd: "/home/user/project",
+				title: "Stale WAL title",
+				isTitlePinned: false,
+			});
+			seedStore.saveDiscoveredSessions([
+				{
+					sessionId,
+					backendId: "backend-1",
+					cwd: "/home/user/project",
+					title: null,
+					_meta: { source: "durable discovery" },
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+			seedStore.close();
+
+			const restartedManager = new SessionManager(persistedConfig, undefined, {
+				validateWorkspacePath: async () => true,
+			});
+			const restartedConnection = createMockConnection();
+			restartedManager.createConnection = () =>
+				restartedConnection as unknown as AcpConnection;
+
+			try {
+				const resumed = await restartedManager.resumeSession(
+					sessionId,
+					"/home/user/project",
+					"backend-1",
+				);
+
+				expect(resumed.title).toBe("Session persiste");
+				expect(resumed._meta).toEqual({ source: "durable discovery" });
+				const persisted = (
+					restartedManager as unknown as {
+						walStore: WalStore;
+					}
+				).walStore.getSession(sessionId);
+				expect(persisted?.title).toBe("Session persiste");
+				expect(persisted?.isTitlePinned).not.toBe(true);
+			} finally {
+				await restartedManager.shutdown();
+			}
+		});
+
+		it("preserves a pinned WAL title over a durable discovery snapshot", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+				title: "Pinned local title",
+			});
+			await sessionManager.closeSession(created.sessionId);
+			getWalStore().saveDiscoveredSessions([
+				{
+					sessionId: created.sessionId,
+					backendId: "backend-1",
+					cwd: "/home/user/project",
+					title: "New agent title",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+
+			const resumed = await sessionManager.resumeSession(
+				created.sessionId,
+				"/home/user/project",
+				"backend-1",
+			);
+
+			expect(resumed.title).toBe("Pinned local title");
+			expect(resumed.isTitlePinned).toBe(true);
+		});
+
 		it("replaces an attached session when the requested root list changes", async () => {
 			const created = await sessionManager.createSession({
 				cwd: "/home/user/project",
@@ -544,6 +683,16 @@ describe("SessionManager", () => {
 			const replacement = createMockConnection();
 			sessionManager.createConnection = () =>
 				replacement as unknown as AcpConnection;
+			getWalStore().saveDiscoveredSessions([
+				{
+					sessionId: created.sessionId,
+					backendId: "backend-1",
+					cwd: "/home/user/project",
+					title: "Stale discovered title",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
 
 			const resumed = await sessionManager.resumeSession(
 				created.sessionId,
@@ -559,6 +708,7 @@ describe("SessionManager", () => {
 				["/new"],
 			);
 			expect(resumed.additionalDirectories).toEqual(["/new"]);
+			expect(resumed.title).toBe(created.title);
 		});
 
 		it("leaves a failed replacement detached and permits a later resume", async () => {
@@ -1138,9 +1288,65 @@ describe("SessionManager", () => {
 			);
 
 			expect(result.sessionId).toBe("session-to-load");
-			expect(result.title).toBe("session-to-load");
+			expect(result.title).toBe("Session session-");
 			expect(result.cwd).toBe("/home/user/project");
 			expect(result.sessionId).toBeDefined();
+		});
+
+		it("restores durable discovered title and metadata when loading after restart", async () => {
+			const persistedConfig = {
+				...mockConfig,
+				walDbPath: `/tmp/mobvibe-test/load-discovery-${Date.now()}-${Math.random()
+					.toString(36)
+					.slice(2)}.db`,
+			};
+			const sessionId = "persisted-load-session";
+			const seedStore = new WalStore(persistedConfig.walDbPath);
+			seedStore.saveDiscoveredSessions([
+				{
+					sessionId,
+					backendId: "backend-1",
+					cwd: "/home/user/project",
+					title: "Durable discovered title",
+					_meta: {
+						source: "durable discovery",
+						nested: { keep: null },
+					},
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+			seedStore.close();
+
+			const restartedManager = new SessionManager(persistedConfig, undefined, {
+				validateWorkspacePath: async () => true,
+			});
+			const restartedConnection = createMockConnection();
+			restartedManager.createConnection = () =>
+				restartedConnection as unknown as AcpConnection;
+
+			try {
+				const loaded = await restartedManager.loadSession(
+					sessionId,
+					"/home/user/project",
+					"backend-1",
+				);
+
+				expect(loaded.title).toBe("Durable discovered title");
+				expect(loaded._meta).toEqual({
+					source: "durable discovery",
+					nested: { keep: null },
+				});
+				expect(
+					(
+						restartedManager as unknown as {
+							walStore: WalStore;
+						}
+					).walStore.getSession(sessionId)?.title,
+				).toBe("Durable discovered title");
+			} finally {
+				await restartedManager.shutdown();
+			}
 		});
 
 		it("returns existing session if already loaded", async () => {
@@ -1958,6 +2164,38 @@ describe("SessionManager", () => {
 				}),
 			);
 		});
+
+		it("clears detached agent metadata without reordering local activity", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const detached = await sessionManager.closeSession(created.sessionId);
+			const walStore = (sessionManager as unknown as { walStore: WalStore })
+				.walStore;
+
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: created.sessionId,
+					backendId: "backend-1",
+					cwd: "/home/user/project",
+					title: null,
+					agentUpdatedAt: null,
+					discoveredAt: "2100-01-01T00:00:00.000Z",
+					isStale: false,
+				},
+			]);
+
+			const restored = sessionManager
+				.listAllSessions()
+				.find((session) => session.sessionId === created.sessionId);
+			expect(restored).toEqual(
+				expect.objectContaining({
+					title: `Session ${created.sessionId.slice(0, 8)}`,
+					updatedAt: detached.updatedAt,
+				}),
+			);
+		});
 	});
 
 	describe("E2EE session summaries", () => {
@@ -2169,6 +2407,7 @@ describe("SessionManager", () => {
 			legacyDb.exec(`
 				ALTER TABLE sessions DROP COLUMN additional_directories_json;
 				ALTER TABLE discovered_sessions DROP COLUMN additional_directories_json;
+				ALTER TABLE discovered_sessions DROP COLUMN meta_json;
 				DELETE FROM schema_version WHERE version > 7;
 				DROP TABLE message_send_results;
 				DROP TABLE session_revision_keys;
@@ -3678,6 +3917,132 @@ describe("SessionManager", () => {
 					sessionId,
 					kind: "session_info_update",
 				}),
+			);
+		});
+
+		it("replaces opaque session metadata without interpreting null keys", async () => {
+			const { sessionId } = await setupSessionWithListener();
+
+			sessionUpdateCallback?.({
+				sessionId,
+				update: {
+					sessionUpdate: "session_info_update",
+					_meta: { stale: true, nested: { old: 1 } },
+				},
+			} as SessionNotification);
+			sessionUpdateCallback?.({
+				sessionId,
+				update: {
+					sessionUpdate: "session_info_update",
+					_meta: {
+						fresh: true,
+						nested: { keep: null },
+						preservedNull: null,
+					},
+				},
+			} as SessionNotification);
+
+			expect(sessionManager.listSessions()[0]._meta).toEqual({
+				fresh: true,
+				nested: { keep: null },
+				preservedNull: null,
+			});
+
+			sessionUpdateCallback?.({
+				sessionId,
+				update: {
+					sessionUpdate: "session_info_update",
+					title: "Metadata unchanged",
+				},
+			} as SessionNotification);
+			expect(sessionManager.listSessions()[0]._meta).toEqual({
+				fresh: true,
+				nested: { keep: null },
+				preservedNull: null,
+			});
+
+			sessionUpdateCallback?.({
+				sessionId,
+				update: { sessionUpdate: "session_info_update", _meta: {} },
+			} as SessionNotification);
+			expect(sessionManager.listSessions()[0]._meta).toEqual({});
+
+			sessionUpdateCallback?.({
+				sessionId,
+				update: { sessionUpdate: "session_info_update", _meta: null },
+			} as SessionNotification);
+			expect(sessionManager.listSessions()[0]._meta).toBeNull();
+		});
+
+		it("clears only unpinned agent titles", async () => {
+			const unpinned = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			sessionUpdateCallback?.({
+				sessionId: unpinned.sessionId,
+				update: {
+					sessionUpdate: "session_info_update",
+					title: "Agent title",
+				},
+			} as SessionNotification);
+			sessionUpdateCallback?.({
+				sessionId: unpinned.sessionId,
+				update: { sessionUpdate: "session_info_update", title: null },
+			} as SessionNotification);
+			expect(sessionManager.listSessions()[0].title).toBe(
+				`Session ${unpinned.sessionId.slice(0, 8)}`,
+			);
+
+			await sessionManager.closeSession(unpinned.sessionId);
+			const pinned = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+				title: "Pinned title",
+			});
+			for (const title of ["Ignored agent title", null]) {
+				sessionUpdateCallback?.({
+					sessionId: pinned.sessionId,
+					update: { sessionUpdate: "session_info_update", title },
+				} as SessionNotification);
+			}
+			expect(sessionManager.listSessions()[0]).toEqual(
+				expect.objectContaining({
+					title: "Pinned title",
+					isTitlePinned: true,
+				}),
+			);
+		});
+
+		it("keeps local activity monotonic across invalid and null timestamps", async () => {
+			const { sessionId } = await setupSessionWithListener();
+			const initial = sessionManager.listSessions()[0].updatedAt;
+
+			for (const updatedAt of ["2000-01-01T00:00:00.000Z", "not-a-timestamp"]) {
+				sessionUpdateCallback?.({
+					sessionId,
+					update: { sessionUpdate: "session_info_update", updatedAt },
+				} as SessionNotification);
+			}
+			expect(sessionManager.listSessions()[0].updatedAt >= initial).toBe(true);
+
+			sessionUpdateCallback?.({
+				sessionId,
+				update: {
+					sessionUpdate: "session_info_update",
+					updatedAt: "2100-01-01T00:00:00.000Z",
+				},
+			} as SessionNotification);
+			expect(sessionManager.listSessions()[0].updatedAt).toBe(
+				"2100-01-01T00:00:00.000Z",
+			);
+
+			sessionUpdateCallback?.({
+				sessionId,
+				update: { sessionUpdate: "session_info_update", updatedAt: null },
+			} as SessionNotification);
+			expect(sessionManager.listSessions()[0].updatedAt).toBe(
+				"2100-01-01T00:00:00.000Z",
 			);
 		});
 

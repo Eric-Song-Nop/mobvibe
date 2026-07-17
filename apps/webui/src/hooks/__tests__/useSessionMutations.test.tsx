@@ -145,6 +145,8 @@ describe("useSessionMutations", () => {
 				availableCommands: [],
 				machineId: "machine-1",
 				wrappedDek: "wrapped-dek-1",
+				_meta: { created: true },
+				isTitlePinned: true,
 			};
 			vi.mocked(apiModule.createSession).mockResolvedValue(mockSession);
 
@@ -178,6 +180,8 @@ describe("useSessionMutations", () => {
 				availableModes: mockSession.availableModes,
 				availableModels: mockSession.availableModels,
 				availableCommands: mockSession.availableCommands,
+				_meta: { created: true },
+				isTitlePinned: true,
 			});
 
 			// Optimistic session should be removed
@@ -749,6 +753,8 @@ describe("useSessionMutations", () => {
 				backendLabel: "Backend",
 				createdAt: "2025-01-01T00:00:00Z",
 				updatedAt: "2025-01-01T00:00:00Z",
+				_meta: null,
+				isTitlePinned: true,
 			};
 
 			vi.mocked(apiModule.setSessionMode).mockResolvedValue(mockSummary);
@@ -767,6 +773,8 @@ describe("useSessionMutations", () => {
 				expect.objectContaining({
 					modeId: "mode-1",
 					modeName: "Chat Mode",
+					_meta: null,
+					isTitlePinned: true,
 				}),
 			);
 		});
@@ -1142,6 +1150,32 @@ describe("useSessionMutations", () => {
 			expect(mockStore.setSessionE2EEStatus).toHaveBeenCalledWith(
 				"session-1",
 				"none",
+			);
+		});
+
+		it("applies metadata replacement and pinned-title state from load", async () => {
+			vi.mocked(apiModule.loadSession).mockResolvedValue({
+				...mockLoadResponse,
+				_meta: null,
+				isTitlePinned: true,
+			});
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.loadSessionMutation.mutateAsync({
+				sessionId: "session-1",
+				cwd: "/project",
+				backendId: "backend-1",
+			});
+
+			expect(mockStore.updateSessionMeta).toHaveBeenCalledWith(
+				"session-1",
+				expect.objectContaining({
+					_meta: null,
+					isTitlePinned: true,
+				}),
 			);
 		});
 

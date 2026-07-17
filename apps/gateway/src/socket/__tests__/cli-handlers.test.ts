@@ -284,6 +284,7 @@ describe("setupCliHandlers", () => {
 					cwd: "/repo",
 					additionalDirectories: ["/shared", "/data"],
 					title: "Discovered roots",
+					_meta: { source: "agent", keep: null },
 				},
 			],
 			capabilities: {
@@ -303,11 +304,108 @@ describe("setupCliHandlers", () => {
 					expect.objectContaining({
 						sessionId: "discovered-roots",
 						additionalDirectories: ["/shared", "/data"],
+						_meta: { source: "agent", keep: null },
 					}),
 				],
 			}),
 			"user-1",
 		);
+	});
+
+	it("emits refreshed metadata for a previously discovered session", () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({ machineId: "machine-1" }),
+			{
+				userId: "user-1",
+				deviceId: "device-123",
+			},
+		);
+		const initial = {
+			sessions: [
+				{
+					sessionId: "discovered-refresh",
+					cwd: "/repo",
+					title: "Initial title",
+					updatedAt: "2026-07-01T00:00:00.000Z",
+					_meta: { version: 1 },
+				},
+			],
+			backendId: "backend-1",
+			backendLabel: "Claude Code",
+		};
+		socketHandlers["sessions:discovered"]?.(initial);
+		emitToWebui.mockClear();
+
+		socketHandlers["sessions:discovered"]?.({
+			...initial,
+			sessions: [
+				{
+					...initial.sessions[0],
+					title: "Refreshed title",
+					updatedAt: "2026-07-02T00:00:00.000Z",
+					_meta: { version: 2 },
+				},
+			],
+		});
+
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"sessions:changed",
+			expect.objectContaining({
+				added: [],
+				updated: [
+					expect.objectContaining({
+						sessionId: "discovered-refresh",
+						title: "Refreshed title",
+						updatedAt: "2026-07-02T00:00:00.000Z",
+						_meta: { version: 2 },
+					}),
+				],
+			}),
+			"user-1",
+		);
+	});
+
+	it("uses a stable timestamp when a discovered session has no agent time", () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({ machineId: "machine-1" }),
+			{
+				userId: "user-1",
+				deviceId: "device-123",
+			},
+		);
+
+		socketHandlers["sessions:discovered"]?.({
+			sessions: [
+				{
+					sessionId: "without-agent-time",
+					cwd: "/repo",
+					updatedAt: null,
+				},
+			],
+			backendId: "backend-1",
+			backendLabel: "Claude Code",
+		});
+
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"sessions:changed",
+			expect.objectContaining({
+				added: [
+					expect.objectContaining({
+						sessionId: "without-agent-time",
+						createdAt: expect.any(String),
+						updatedAt: expect.any(String),
+					}),
+				],
+			}),
+			"user-1",
+		);
+		const discovered = registry
+			.getCliBySocketId("socket-1")
+			?.sessions.find((session) => session.sessionId === "without-agent-time");
+		expect(discovered?.updatedAt).not.toBe("1970-01-01T00:00:00.000Z");
+		expect(discovered?.createdAt).toBe(discovered?.updatedAt);
 	});
 
 	it("preserves the initial session list while CLI registration is pending", async () => {

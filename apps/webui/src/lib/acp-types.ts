@@ -16,8 +16,8 @@ export type SessionModeUpdate = {
 };
 
 export type SessionInfoPayload = {
-	title?: string;
-	updatedAt?: string;
+	title?: string | null;
+	updatedAt?: string | null;
 	_meta?: Record<string, unknown> | null;
 };
 
@@ -59,17 +59,29 @@ export const extractSessionInfoUpdate = (
 	if (notification.update.sessionUpdate !== "session_info_update") {
 		return null;
 	}
-	const title = notification.update.title ?? undefined;
-	const updatedAt = notification.update.updatedAt ?? undefined;
-	const _meta =
-		"_meta" in notification.update
-			? (notification.update as { _meta?: Record<string, unknown> | null })
-					._meta
-			: undefined;
-	if (!title && !updatedAt && _meta === undefined) {
+	const result: SessionInfoPayload = {};
+	if (
+		"title" in notification.update &&
+		notification.update.title !== undefined
+	) {
+		result.title = notification.update.title;
+	}
+	if (
+		"updatedAt" in notification.update &&
+		notification.update.updatedAt !== undefined
+	) {
+		result.updatedAt = notification.update.updatedAt;
+	}
+	if (
+		"_meta" in notification.update &&
+		notification.update._meta !== undefined
+	) {
+		result._meta = notification.update._meta;
+	}
+	if (Object.keys(result).length === 0) {
 		return null;
 	}
-	return { title, updatedAt, _meta };
+	return result;
 };
 
 export const extractToolCallUpdate = (

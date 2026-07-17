@@ -291,6 +291,15 @@ const MIGRATIONS = [
 				ADD COLUMN additional_directories_json TEXT NOT NULL DEFAULT '[]';
 		`,
 	},
+	{
+		version: 13,
+		up: `
+			-- session/list metadata is a complete opaque snapshot. Persist it so
+			-- detached sessions keep the same metadata across daemon restarts.
+			ALTER TABLE discovered_sessions
+				ADD COLUMN meta_json TEXT;
+		`,
+	},
 ];
 
 export function runMigrations(db: Database): number {
@@ -313,10 +322,13 @@ export function runMigrations(db: Database): number {
 	// Run pending migrations
 	for (const migration of MIGRATIONS) {
 		if (migration.version > currentVersion) {
-			db.exec(migration.up);
-			db.exec(
-				`INSERT INTO schema_version (version) VALUES (${migration.version})`,
-			);
+			const applyMigration = db.transaction(() => {
+				db.exec(migration.up);
+				db.exec(
+					`INSERT INTO schema_version (version) VALUES (${migration.version})`,
+				);
+			});
+			applyMigration();
 		}
 	}
 	return initialVersion;

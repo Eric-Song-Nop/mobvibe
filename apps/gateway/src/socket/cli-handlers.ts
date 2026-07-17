@@ -37,6 +37,25 @@ interface SocketData {
 const MAX_PRE_REGISTRATION_EVENTS = 1_000;
 const MAX_PRE_REGISTRATION_BYTES = 4 * 1024 * 1024;
 
+const selectDiscoveredSessionTimestamp = (
+	existing: string | undefined,
+	provided: string | null | undefined,
+	discoveredAt: string,
+): string => {
+	const validValues = [existing, provided].filter(
+		(value): value is string =>
+			typeof value === "string" && !Number.isNaN(Date.parse(value)),
+	);
+	return (
+		validValues.reduce<string | undefined>((latest, value) => {
+			if (latest === undefined || Date.parse(value) > Date.parse(latest)) {
+				return value;
+			}
+			return latest;
+		}, undefined) ?? discoveredAt
+	);
+};
+
 const getSerializedPayloadBytes = (payload: unknown): number | undefined => {
 	try {
 		const serialized = JSON.stringify(payload);
@@ -477,33 +496,48 @@ export function setupCliHandlers(
 				}
 
 				// Transform AcpSessionInfo to SessionSummary with historical markers
-				const historicalSessions: SessionSummary[] = sessions.map((s) => ({
-					sessionId: s.sessionId,
-					title: s.title ?? `Session ${s.sessionId.slice(0, 8)}`,
-					cwd: s.cwd,
-					workspaceRootCwd: s.workspaceRootCwd,
-					updatedAt: s.updatedAt ?? new Date().toISOString(),
-					createdAt: s.updatedAt ?? new Date().toISOString(),
-					backendId: payload.backendId,
-					backendLabel: payload.backendLabel,
-					machineId: cliRecord.machineId,
-					additionalDirectories: s.additionalDirectories ?? [],
-				}));
+				const existingSessions = new Map(
+					cliRecord.sessions.map((session) => [session.sessionId, session]),
+				);
+				const discoveredAt = new Date().toISOString();
+				const historicalSessions: SessionSummary[] = sessions.map((s) => {
+					const existing = existingSessions.get(s.sessionId);
+					const updatedAt = selectDiscoveredSessionTimestamp(
+						existing?.updatedAt,
+						s.updatedAt,
+						discoveredAt,
+					);
+					return {
+						sessionId: s.sessionId,
+						title: s.title ?? `Session ${s.sessionId.slice(0, 8)}`,
+						cwd: s.cwd,
+						workspaceRootCwd: s.workspaceRootCwd,
+						updatedAt,
+						createdAt: existing?.createdAt ?? updatedAt,
+						backendId: payload.backendId,
+						backendLabel: payload.backendLabel,
+						machineId: cliRecord.machineId,
+						additionalDirectories: s.additionalDirectories ?? [],
+						_meta: s._meta ?? null,
+					};
+				});
 
-				// Add to CLI registry (returns only actually new sessions)
-				const added = cliRegistry.addDiscoveredSessions(
+				const changes = cliRegistry.addDiscoveredSessions(
 					socket.id,
 					historicalSessions,
 				);
 
-				// Emit sessions:changed to webui (with capabilities even if no new sessions)
-				if (cliRecord.userId && (added.length > 0 || capabilities)) {
+				// Emit sessions:changed to webui (with capabilities even if no metadata changed)
+				if (
+					cliRecord.userId &&
+					(changes.added.length > 0 ||
+						changes.updated.length > 0 ||
+						capabilities)
+				) {
 					emitToWebui(
 						"sessions:changed",
 						{
-							added,
-							updated: [],
-							removed: [],
+							...changes,
 							backendCapabilities: payload.backendId
 								? { [payload.backendId]: capabilities }
 								: undefined,

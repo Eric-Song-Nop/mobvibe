@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { runMigrations } from "../migrations.js";
 import { WalStore } from "../wal-store.js";
 
 describe("WalStore", () => {
@@ -217,7 +218,8 @@ describe("WalStore", () => {
 			db.exec(`
 				ALTER TABLE sessions DROP COLUMN additional_directories_json;
 				ALTER TABLE discovered_sessions DROP COLUMN additional_directories_json;
-				DELETE FROM schema_version WHERE version = 12;
+				ALTER TABLE discovered_sessions DROP COLUMN meta_json;
+				DELETE FROM schema_version WHERE version >= 12;
 			`);
 			db.close();
 
@@ -229,6 +231,87 @@ describe("WalStore", () => {
 			expect(
 				walStore.getDiscoveredSessions()[0]?.additionalDirectories,
 			).toEqual([]);
+		});
+	});
+
+	describe("discovered session snapshots", () => {
+		it("rolls back schema changes when the version record cannot commit", () => {
+			walStore.close();
+			const db = new Database(dbPath);
+			db.exec(`
+				ALTER TABLE discovered_sessions DROP COLUMN meta_json;
+				DELETE FROM schema_version WHERE version = 13;
+				CREATE TRIGGER reject_schema_version_13
+				BEFORE INSERT ON schema_version
+				WHEN NEW.version = 13
+				BEGIN
+					SELECT RAISE(ABORT, 'injected schema version failure');
+				END;
+			`);
+
+			expect(() => runMigrations(db)).toThrow(
+				"injected schema version failure",
+			);
+			const columns = db
+				.query("PRAGMA table_info(discovered_sessions)")
+				.all() as Array<{ name: string }>;
+			expect(columns.some((column) => column.name === "meta_json")).toBeFalse();
+
+			db.exec("DROP TRIGGER reject_schema_version_13");
+			db.close();
+			walStore = new WalStore(dbPath);
+		});
+
+		it("clears nullable agent metadata on a later full snapshot", () => {
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: "discovered-metadata",
+					backendId: "backend-1",
+					cwd: "/repo",
+					title: "Old title",
+					agentUpdatedAt: "2026-07-01T00:00:00.000Z",
+					_meta: { stale: true },
+					discoveredAt: "2026-07-01T00:00:00.000Z",
+					isStale: false,
+				},
+			]);
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: "discovered-metadata",
+					backendId: "backend-1",
+					cwd: "/repo",
+					title: null,
+					agentUpdatedAt: null,
+					_meta: { fresh: true, keep: null },
+					discoveredAt: "2026-07-02T00:00:00.000Z",
+					isStale: false,
+				},
+			]);
+
+			walStore.close();
+			walStore = new WalStore(dbPath);
+
+			expect(walStore.getDiscoveredSessions()[0]).toEqual(
+				expect.objectContaining({
+					title: null,
+					agentUpdatedAt: null,
+					_meta: { fresh: true, keep: null },
+				}),
+			);
+
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: "discovered-metadata",
+					backendId: "backend-1",
+					cwd: "/repo",
+					title: null,
+					agentUpdatedAt: null,
+					_meta: null,
+					discoveredAt: "2026-07-03T00:00:00.000Z",
+					isStale: false,
+				},
+			]);
+			expect(walStore.getDiscoveredSessions()[0]?._meta).toBeNull();
 		});
 	});
 

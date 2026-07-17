@@ -104,8 +104,9 @@ export type DiscoveredSession = {
 	cwd?: string;
 	additionalDirectories?: string[];
 	workspaceRootCwd?: string;
-	title?: string;
-	agentUpdatedAt?: string;
+	title?: string | null;
+	agentUpdatedAt?: string | null;
+	_meta?: Record<string, unknown> | null;
 	discoveredAt: string;
 	lastVerifiedAt?: string;
 	isStale: boolean;
@@ -122,6 +123,14 @@ const parseAdditionalDirectories = (value: string): string[] => {
 		throw new Error("Invalid additional directories in WAL");
 	}
 	return parsed;
+};
+
+const parseMetadata = (value: string): Record<string, unknown> => {
+	const parsed: unknown = JSON.parse(value);
+	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new Error("Invalid discovered session metadata in WAL");
+	}
+	return parsed as Record<string, unknown>;
 };
 
 /**
@@ -411,10 +420,10 @@ export class WalStore {
 		// Discovered sessions statements
 		this.stmtUpsertDiscoveredSession = this.db.query(`
       INSERT INTO discovered_sessions (
-        session_id, backend_id, cwd, additional_directories_json, workspace_root_cwd, title, agent_updated_at,
+        session_id, backend_id, cwd, additional_directories_json, workspace_root_cwd, title, agent_updated_at, meta_json,
         discovered_at, last_verified_at, is_stale
       ) VALUES (
-        $sessionId, $backendId, $cwd, $additionalDirectoriesJson, $workspaceRootCwd, $title, $agentUpdatedAt,
+        $sessionId, $backendId, $cwd, $additionalDirectoriesJson, $workspaceRootCwd, $title, $agentUpdatedAt, $metaJson,
         $discoveredAt, $lastVerifiedAt, 0
       )
       ON CONFLICT (session_id) DO UPDATE SET
@@ -422,14 +431,15 @@ export class WalStore {
         cwd = COALESCE($cwd, discovered_sessions.cwd),
         additional_directories_json = $additionalDirectoriesJson,
         workspace_root_cwd = COALESCE($workspaceRootCwd, discovered_sessions.workspace_root_cwd),
-        title = COALESCE($title, discovered_sessions.title),
-        agent_updated_at = COALESCE($agentUpdatedAt, discovered_sessions.agent_updated_at),
+        title = $title,
+        agent_updated_at = $agentUpdatedAt,
+        meta_json = $metaJson,
         last_verified_at = $lastVerifiedAt,
         is_stale = 0
     `);
 
 		this.stmtGetDiscoveredSessions = this.db.query(`
-      SELECT d.session_id, d.backend_id, d.cwd, d.additional_directories_json, d.workspace_root_cwd, d.title, d.agent_updated_at,
+			SELECT d.session_id, d.backend_id, d.cwd, d.additional_directories_json, d.workspace_root_cwd, d.title, d.agent_updated_at, d.meta_json,
              d.discovered_at, d.last_verified_at, d.is_stale
       FROM discovered_sessions d
       LEFT JOIN archived_session_ids a ON d.session_id = a.session_id
@@ -438,7 +448,7 @@ export class WalStore {
     `);
 
 		this.stmtGetDiscoveredSessionsByBackend = this.db.query(`
-      SELECT d.session_id, d.backend_id, d.cwd, d.additional_directories_json, d.workspace_root_cwd, d.title, d.agent_updated_at,
+			SELECT d.session_id, d.backend_id, d.cwd, d.additional_directories_json, d.workspace_root_cwd, d.title, d.agent_updated_at, d.meta_json,
              d.discovered_at, d.last_verified_at, d.is_stale
       FROM discovered_sessions d
       LEFT JOIN archived_session_ids a ON d.session_id = a.session_id
@@ -1292,6 +1302,10 @@ export class WalStore {
 				$workspaceRootCwd: session.workspaceRootCwd ?? null,
 				$title: session.title ?? null,
 				$agentUpdatedAt: session.agentUpdatedAt ?? null,
+				$metaJson:
+					session._meta === undefined || session._meta === null
+						? null
+						: JSON.stringify(session._meta),
 				$discoveredAt: session.discoveredAt,
 				$lastVerifiedAt: now,
 			});
@@ -1524,8 +1538,9 @@ export class WalStore {
 				row.additional_directories_json,
 			),
 			workspaceRootCwd: row.workspace_root_cwd ?? undefined,
-			title: row.title ?? undefined,
-			agentUpdatedAt: row.agent_updated_at ?? undefined,
+			title: row.title,
+			agentUpdatedAt: row.agent_updated_at,
+			_meta: row.meta_json === null ? null : parseMetadata(row.meta_json),
 			discoveredAt: row.discovered_at,
 			lastVerifiedAt: row.last_verified_at ?? undefined,
 			isStale: row.is_stale === 1,
@@ -1566,6 +1581,7 @@ type DiscoveredSessionRow = {
 	workspace_root_cwd: string | null;
 	title: string | null;
 	agent_updated_at: string | null;
+	meta_json: string | null;
 	discovered_at: string;
 	last_verified_at: string | null;
 	is_stale: number;
