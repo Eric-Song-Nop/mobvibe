@@ -241,6 +241,7 @@ describe("SessionRouter", () => {
 				{
 					sessionId: "loaded-session-1",
 					cwd: "/home/user/project",
+					additionalDirectories: ["/data", "/shared"],
 					machineId: "machine-1",
 					backendId: "backend-1",
 				},
@@ -255,6 +256,7 @@ describe("SessionRouter", () => {
 					params: {
 						sessionId: "loaded-session-1",
 						cwd: "/home/user/project",
+						additionalDirectories: ["/data", "/shared"],
 						backendId: "backend-1",
 					},
 				}),

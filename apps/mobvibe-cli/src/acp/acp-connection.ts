@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import {
 	type AgentCapabilities,
@@ -54,6 +55,41 @@ type ClientInfo = {
 };
 
 const MAX_STDERR_LINES = 20;
+
+const isAbsolutePathInput = (value: string) =>
+	path.posix.isAbsolute(value) || path.win32.isAbsolute(value);
+
+/**
+ * Validate and normalize ACP additional directories without changing their
+ * spelling or order. Exact duplicates and the primary cwd are omitted.
+ */
+export const normalizeAdditionalDirectories = (
+	cwd: string,
+	additionalDirectories?: readonly string[],
+): string[] => {
+	if (additionalDirectories === undefined) {
+		return [];
+	}
+	if (!Array.isArray(additionalDirectories)) {
+		throw new Error("additionalDirectories must be an array");
+	}
+	const seen = new Set<string>();
+	const normalized: string[] = [];
+	for (const directory of additionalDirectories) {
+		if (typeof directory !== "string" || directory.length === 0) {
+			throw new Error("additionalDirectories must contain non-empty strings");
+		}
+		if (!isAbsolutePathInput(directory)) {
+			throw new Error("additionalDirectories must contain absolute paths");
+		}
+		if (directory === cwd || seen.has(directory)) {
+			continue;
+		}
+		seen.add(directory);
+		normalized.push(directory);
+	}
+	return normalized;
+};
 
 export type AcpBackendStatus = {
 	backendId: string;
@@ -264,6 +300,9 @@ export class AcpConnection {
 		return {
 			list: this.agentCapabilities?.sessionCapabilities?.list != null,
 			load: this.agentCapabilities?.loadSession === true,
+			additionalDirectories:
+				this.agentCapabilities?.sessionCapabilities?.additionalDirectories !=
+				null,
 			prompt: {
 				image: this.agentCapabilities?.promptCapabilities?.image === true,
 				audio: this.agentCapabilities?.promptCapabilities?.audio === true,
@@ -285,6 +324,12 @@ export class AcpConnection {
 	 */
 	supportsSessionLoad(): boolean {
 		return this.agentCapabilities?.loadSession === true;
+	}
+
+	supportsAdditionalDirectories(): boolean {
+		return (
+			this.agentCapabilities?.sessionCapabilities?.additionalDirectories != null
+		);
 	}
 
 	/**
@@ -322,9 +367,22 @@ export class AcpConnection {
 	async loadSession(
 		sessionId: string,
 		cwd: string,
+		additionalDirectories?: readonly string[],
 	): Promise<LoadSessionResponse> {
 		if (!this.supportsSessionLoad()) {
 			throw new Error("Agent does not support session/load capability");
+		}
+		const normalizedAdditionalDirectories = normalizeAdditionalDirectories(
+			cwd,
+			additionalDirectories,
+		);
+		if (
+			normalizedAdditionalDirectories.length > 0 &&
+			!this.supportsAdditionalDirectories()
+		) {
+			throw new Error(
+				"Agent does not support session additionalDirectories capability",
+			);
 		}
 		const connection = await this.ensureReady();
 		const response = await connection.agent.request(
@@ -333,6 +391,10 @@ export class AcpConnection {
 				sessionId,
 				cwd,
 				mcpServers: [],
+				additionalDirectories:
+					normalizedAdditionalDirectories.length > 0
+						? normalizedAdditionalDirectories
+						: undefined,
 			},
 		);
 		this.sessionId = sessionId;
@@ -639,11 +701,28 @@ export class AcpConnection {
 		}
 	}
 
-	async createSession(options?: { cwd?: string }): Promise<NewSessionResponse> {
+	async createSession(options?: {
+		cwd?: string;
+		additionalDirectories?: readonly string[];
+	}): Promise<NewSessionResponse> {
 		const connection = await this.ensureReady();
+		const cwd = options?.cwd ?? process.cwd();
+		const additionalDirectories = normalizeAdditionalDirectories(
+			cwd,
+			options?.additionalDirectories,
+		);
+		if (
+			additionalDirectories.length > 0 &&
+			!this.supportsAdditionalDirectories()
+		) {
+			throw new Error(
+				"Agent does not support session additionalDirectories capability",
+			);
+		}
 		const response = await this.createSessionInternal(
 			connection,
-			options?.cwd ?? process.cwd(),
+			cwd,
+			additionalDirectories,
 		);
 		this.sessionId = response.sessionId;
 		return response;
@@ -897,10 +976,15 @@ export class AcpConnection {
 	private async createSessionInternal(
 		connection: ClientConnection,
 		cwd: string,
+		additionalDirectories: readonly string[],
 	): Promise<NewSessionResponse> {
 		const session = await connection.agent.request(methods.agent.session.new, {
 			cwd,
 			mcpServers: [],
+			additionalDirectories:
+				additionalDirectories.length > 0
+					? [...additionalDirectories]
+					: undefined,
 		});
 		return session;
 	}

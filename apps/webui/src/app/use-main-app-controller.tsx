@@ -121,6 +121,7 @@ export function useMainAppController() {
 			setDraftTitle: s.setDraftTitle,
 			setDraftBackendId: s.setDraftBackendId,
 			setDraftCwd: s.setDraftCwd,
+			setDraftAdditionalDirectories: s.setDraftAdditionalDirectories,
 			resetDraftWorktree: s.resetDraftWorktree,
 			setSelectedWorkspace: s.setSelectedWorkspace,
 		})),

@@ -249,6 +249,7 @@ describe("useSessionActivation", () => {
 		const store = createStore();
 		const session = buildSession({
 			cwd: "/home/user/project",
+			additionalDirectories: ["/data", "/shared"],
 			machineId: "machine-1",
 			backendId: "backend-1",
 		});
@@ -285,6 +286,7 @@ describe("useSessionActivation", () => {
 		expect(loadSessionMutation.mutateAsync).toHaveBeenCalledWith({
 			sessionId: "session-1",
 			cwd: "/home/user/project",
+			additionalDirectories: ["/data", "/shared"],
 			backendId: "backend-1",
 			machineId: "machine-1",
 		});
@@ -341,6 +343,7 @@ describe("useSessionActivation", () => {
 		const store = createStore();
 		const session = buildSession({
 			cwd: "/home/user/project",
+			additionalDirectories: ["/reload-root"],
 			machineId: "machine-1",
 			backendId: "backend-1",
 			isAttached: true,
@@ -371,6 +374,7 @@ describe("useSessionActivation", () => {
 		expect(reloadSessionMutation.mutateAsync).toHaveBeenCalledWith({
 			sessionId: "session-1",
 			cwd: "/home/user/project",
+			additionalDirectories: ["/reload-root"],
 			backendId: "backend-1",
 			machineId: "machine-1",
 		});

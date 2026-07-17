@@ -24,6 +24,7 @@ const mockUiStoreState = vi.hoisted(() => ({
 	draftTitle: "",
 	draftBackendId: undefined as string | undefined,
 	draftCwd: undefined as string | undefined,
+	draftAdditionalDirectories: [] as string[],
 	draftWorktreeEnabled: false,
 	draftWorktreeBranch: "",
 	draftWorktreeSuggestedBranch: undefined as string | undefined,
@@ -72,6 +73,7 @@ const createMockUiActions = (): UseSessionHandlersParams["uiActions"] => ({
 	setDraftTitle: vi.fn(),
 	setDraftBackendId: vi.fn(),
 	setDraftCwd: vi.fn(),
+	setDraftAdditionalDirectories: vi.fn(),
 	resetDraftWorktree: vi.fn(),
 	clearEditingSession: vi.fn(),
 });
@@ -174,6 +176,7 @@ describe("useSessionHandlers — handleOpenCreateDialog", () => {
 		mockUiStoreState.draftTitle = "";
 		mockUiStoreState.draftBackendId = undefined;
 		mockUiStoreState.draftCwd = undefined;
+		mockUiStoreState.draftAdditionalDirectories = [];
 		mockUiStoreState.draftWorktreeEnabled = false;
 		mockUiStoreState.draftWorktreeBranch = "";
 		mockUiStoreState.draftWorktreeSuggestedBranch = undefined;
@@ -406,6 +409,7 @@ describe("useSessionHandlers — handleCreateSession", () => {
 		mockUiStoreState.draftTitle = "Feature Session";
 		mockUiStoreState.draftBackendId = "backend-1";
 		mockUiStoreState.draftCwd = "/projects/repo/apps/webui";
+		mockUiStoreState.draftAdditionalDirectories = [];
 		mockUiStoreState.draftWorktreeEnabled = true;
 		mockUiStoreState.draftWorktreeBranch = "feat/live-cwd";
 		mockUiStoreState.draftWorktreeSuggestedBranch = undefined;
@@ -497,6 +501,45 @@ describe("useSessionHandlers — handleCreateSession", () => {
 				sourceCwd: "/projects/repo",
 				relativeCwd: "apps/webui",
 			},
+		});
+	});
+
+	it("submits normalized additional directories only for a capable backend", async () => {
+		mockUiStoreState.draftWorktreeEnabled = false;
+		mockUiStoreState.draftAdditionalDirectories = [
+			"/projects/repo/apps/webui",
+			"/data",
+			"/data",
+			"/shared",
+		];
+		vi.mocked(mutations.createSessionMutation.mutateAsync).mockResolvedValue(
+			{},
+		);
+		const { result } = renderHandlers({
+			machines: {
+				"machine-1": {
+					machineId: "machine-1",
+					connected: true,
+					backendCapabilities: {
+						"backend-1": {
+							list: true,
+							load: true,
+							additionalDirectories: true,
+						},
+					},
+				},
+			},
+		});
+
+		await result.current.handleCreateSession();
+
+		expect(mutations.createSessionMutation.mutateAsync).toHaveBeenCalledWith({
+			backendId: "backend-1",
+			cwd: "/projects/repo/apps/webui",
+			additionalDirectories: ["/data", "/shared"],
+			title: "Feature Session",
+			machineId: "machine-1",
+			worktree: undefined,
 		});
 	});
 });

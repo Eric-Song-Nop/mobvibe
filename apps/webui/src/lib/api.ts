@@ -603,6 +603,7 @@ export const fetchSessionFsResources = async (payload: {
 
 export const createSession = async (payload?: {
 	cwd?: string;
+	additionalDirectories?: string[];
 	title?: string;
 	backendId?: string;
 	machineId?: string;
@@ -716,6 +717,7 @@ export const sendPermissionDecision = async (
 export const loadSession = async (payload: {
 	sessionId: string;
 	cwd: string;
+	additionalDirectories?: string[];
 	backendId: string;
 	machineId?: string;
 }): Promise<SessionSummary> =>
@@ -731,6 +733,7 @@ export const loadSession = async (payload: {
 export const reloadSession = async (payload: {
 	sessionId: string;
 	cwd: string;
+	additionalDirectories?: string[];
 	backendId: string;
 	machineId?: string;
 }): Promise<SessionSummary> =>

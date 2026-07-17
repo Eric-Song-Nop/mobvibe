@@ -280,6 +280,17 @@ const MIGRATIONS = [
 			);
 		`,
 	},
+	{
+		version: 12,
+		up: `
+			-- ACP additionalDirectories is complete ordered session state. Keep it
+			-- with both attached/WAL sessions and agent-discovered sessions.
+			ALTER TABLE sessions
+				ADD COLUMN additional_directories_json TEXT NOT NULL DEFAULT '[]';
+			ALTER TABLE discovered_sessions
+				ADD COLUMN additional_directories_json TEXT NOT NULL DEFAULT '[]';
+		`,
+	},
 ];
 
 export function runMigrations(db: Database): number {

@@ -900,13 +900,19 @@ export class SocketClient extends EventEmitter {
 		// Load historical session from ACP agent
 		this.socket.on("rpc:session:load", async (request) => {
 			try {
-				const { sessionId, cwd, backendId } = request.params;
+				const { sessionId, cwd, backendId, additionalDirectories } =
+					request.params;
 				logger.info(
 					{ requestId: request.requestId, sessionId, cwd, backendId },
 					"rpc_session_load",
 				);
 				const session = await this.enqueueSessionOperation(sessionId, () =>
-					sessionManager.loadSession(sessionId, cwd, backendId),
+					sessionManager.loadSession(
+						sessionId,
+						cwd,
+						backendId,
+						additionalDirectories,
+					),
 				);
 				this.sendRpcResponse(request.requestId, session);
 			} catch (error) {
@@ -925,13 +931,19 @@ export class SocketClient extends EventEmitter {
 		// Reload historical session from ACP agent
 		this.socket.on("rpc:session:reload", async (request) => {
 			try {
-				const { sessionId, cwd, backendId } = request.params;
+				const { sessionId, cwd, backendId, additionalDirectories } =
+					request.params;
 				logger.info(
 					{ requestId: request.requestId, sessionId, cwd, backendId },
 					"rpc_session_reload",
 				);
 				const session = await this.enqueueSessionOperation(sessionId, () =>
-					sessionManager.reloadSession(sessionId, cwd, backendId),
+					sessionManager.reloadSession(
+						sessionId,
+						cwd,
+						backendId,
+						additionalDirectories,
+					),
 				);
 				this.sendRpcResponse(request.requestId, session);
 			} catch (error) {

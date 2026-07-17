@@ -38,6 +38,8 @@ export type SessionSummary = {
 	createdAt: string;
 	updatedAt: string;
 	cwd?: string;
+	/** Complete ordered ACP additional directory roots for this session. */
+	additionalDirectories?: string[];
 	/** Stable workspace/project root for grouping and navigation */
 	workspaceRootCwd?: string;
 	agentName?: string;
@@ -113,6 +115,8 @@ export type SessionFsResourceEntry = {
 export type AcpSessionInfo = {
 	sessionId: string;
 	cwd: string;
+	/** Complete ordered ACP additional directory roots for this session. */
+	additionalDirectories?: string[];
 	/** Stable workspace/project root for grouping and navigation */
 	workspaceRootCwd?: string;
 	title?: string;
@@ -137,6 +141,7 @@ export type AgentMcpCapabilities = {
 export type AgentSessionCapabilities = {
 	list: boolean;
 	load: boolean;
+	additionalDirectories?: boolean;
 	prompt?: AgentPromptCapabilities;
 	mcp?: AgentMcpCapabilities;
 };

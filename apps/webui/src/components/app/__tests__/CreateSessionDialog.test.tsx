@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type {
 	ButtonHTMLAttributes,
 	InputHTMLAttributes,
@@ -12,6 +12,7 @@ const mockUiState = vi.hoisted(() => ({
 	draftTitle: "Session 1",
 	draftBackendId: "backend-1",
 	draftCwd: "/repo/apps/webui",
+	draftAdditionalDirectories: [] as string[],
 	draftWorktreeEnabled: true,
 	draftWorktreeBranch: "feat/live-cwd",
 	draftWorktreeSuggestedBranch: "brisk-comet-x7",
@@ -19,6 +20,7 @@ const mockUiState = vi.hoisted(() => ({
 	setDraftTitle: vi.fn(),
 	setDraftBackendId: vi.fn(),
 	setDraftCwd: vi.fn(),
+	setDraftAdditionalDirectories: vi.fn(),
 	setDraftWorktreeEnabled: vi.fn(),
 	setDraftWorktreeBranch: vi.fn(),
 	setDraftWorktreeSuggestedBranch: vi.fn(),
@@ -32,6 +34,13 @@ const mockMachinesState = vi.hoisted(() => ({
 			machineId: "machine-1",
 			hostname: "dev-box",
 			connected: true,
+			backendCapabilities: {
+				"backend-1": {
+					list: true,
+					load: true,
+					additionalDirectories: false,
+				},
+			},
 		},
 	},
 }));
@@ -79,6 +88,13 @@ vi.mock("react-i18next", () => ({
 				"session.cwdLabel": "Working directory",
 				"session.cwdPlaceholder": "Enter a path",
 				"session.browse": "Browse",
+				"session.additionalDirectories.label": "Additional directories",
+				"session.additionalDirectories.description": "Other roots",
+				"session.additionalDirectories.browse": "Add directory",
+				"session.additionalDirectories.remove": "Remove",
+				"session.additionalDirectories.dialogTitle": "Add directory",
+				"session.additionalDirectories.dialogDescription": "Choose a root",
+				"session.additionalDirectories.add": "Add directory",
 				"session.projectDetection.checking": "Checking project...",
 				"session.projectDetection.repoRoot": "Project root",
 				"session.projectDetection.relativeCwd": "Selected subdirectory",
@@ -137,7 +153,26 @@ vi.mock("@mobvibe/shared", async () => {
 });
 
 vi.mock("@/components/app/WorkingDirectoryDialog", () => ({
-	WorkingDirectoryDialog: () => null,
+	WorkingDirectoryDialog: ({
+		open,
+		onChange,
+		onConfirm,
+	}: {
+		open: boolean;
+		onChange: (path: string) => void;
+		onConfirm?: (path: string) => void;
+	}) =>
+		open && onConfirm ? (
+			<button
+				type="button"
+				onClick={() => {
+					onChange("/shared");
+					onConfirm("/shared");
+				}}
+			>
+				Choose shared
+			</button>
+		) : null,
 }));
 
 vi.mock("@mobvibe/ui/dialog", () => ({
@@ -156,12 +191,19 @@ vi.mock("@mobvibe/ui/button", () => ({
 		children,
 		disabled,
 		onClick,
+		"aria-label": ariaLabel,
 	}: {
 		children: ReactNode;
 		disabled?: boolean;
 		onClick?: () => void;
+		"aria-label"?: string;
 	}) => (
-		<button type="button" disabled={disabled} onClick={onClick}>
+		<button
+			type="button"
+			disabled={disabled}
+			onClick={onClick}
+			aria-label={ariaLabel}
+		>
 			{children}
 		</button>
 	),
@@ -231,6 +273,19 @@ vi.mock("@mobvibe/ui/skeleton", () => ({
 
 vi.mock("@/lib/machines-store", () => ({
 	useMachinesStore: () => mockMachinesState,
+	getBackendCapability: (
+		machine: (typeof mockMachinesState.machines)["machine-1"] | undefined,
+		backendId: string | undefined,
+		capability: "list" | "load" | "additionalDirectories",
+	) => {
+		const capabilities = machine?.backendCapabilities as
+			| Record<
+					string,
+					{ list: boolean; load: boolean; additionalDirectories: boolean }
+			  >
+			| undefined;
+		return backendId ? capabilities?.[backendId]?.[capability] : undefined;
+	},
 }));
 
 vi.mock("@/lib/ui-store", () => ({
@@ -246,6 +301,10 @@ describe("CreateSessionDialog", () => {
 		mockUiState.draftTitle = "Session 1";
 		mockUiState.draftBackendId = "backend-1";
 		mockUiState.draftCwd = "/repo/apps/webui";
+		mockUiState.draftAdditionalDirectories = [];
+		mockMachinesState.machines["machine-1"].backendCapabilities[
+			"backend-1"
+		].additionalDirectories = false;
 		mockUiState.draftWorktreeEnabled = true;
 		mockUiState.draftWorktreeBranch = "feat/live-cwd";
 		mockUiState.draftWorktreeSuggestedBranch = "brisk-comet-x7";
@@ -265,6 +324,57 @@ describe("CreateSessionDialog", () => {
 			isError: false,
 		};
 		vi.clearAllMocks();
+	});
+
+	it("shows additional directory controls only when the backend advertises support", () => {
+		const props = {
+			open: true,
+			onOpenChange: vi.fn(),
+			availableBackends: [
+				{ backendId: "backend-1", backendLabel: "Backend 1" },
+			],
+			isCreating: false,
+			onCreate: vi.fn(),
+		};
+		const { rerender } = render(<CreateSessionDialog {...props} />);
+		expect(
+			screen.queryByText("Additional directories"),
+		).not.toBeInTheDocument();
+
+		mockMachinesState.machines["machine-1"].backendCapabilities[
+			"backend-1"
+		].additionalDirectories = true;
+		rerender(<CreateSessionDialog {...props} />);
+		expect(screen.getByText("Additional directories")).toBeInTheDocument();
+	});
+
+	it("adds and removes ordered additional directory drafts", () => {
+		mockMachinesState.machines["machine-1"].backendCapabilities[
+			"backend-1"
+		].additionalDirectories = true;
+		mockUiState.draftAdditionalDirectories = ["/data"];
+
+		render(
+			<CreateSessionDialog
+				open
+				onOpenChange={vi.fn()}
+				availableBackends={[
+					{ backendId: "backend-1", backendLabel: "Backend 1" },
+				]}
+				isCreating={false}
+				onCreate={vi.fn()}
+			/>,
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Add directory" }));
+		fireEvent.click(screen.getByRole("button", { name: "Choose shared" }));
+		expect(mockUiState.setDraftAdditionalDirectories).toHaveBeenCalledWith([
+			"/data",
+			"/shared",
+		]);
+
+		fireEvent.click(screen.getByRole("button", { name: "Remove /data" }));
+		expect(mockUiState.setDraftAdditionalDirectories).toHaveBeenCalledWith([]);
 	});
 
 	it("disables create for worktree mode while the current git context is stale", () => {

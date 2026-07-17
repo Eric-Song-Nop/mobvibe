@@ -152,6 +152,7 @@ export type ChatSession = {
 	backendId?: string;
 	backendLabel?: string;
 	cwd?: string;
+	additionalDirectories?: string[];
 	agentName?: string;
 	modelId?: string;
 	modelName?: string;
@@ -282,6 +283,7 @@ type ChatState = {
 			backendId?: string;
 			backendLabel?: string;
 			cwd?: string;
+			additionalDirectories?: string[];
 			agentName?: string;
 			modelId?: string;
 			modelName?: string;
@@ -317,6 +319,7 @@ type ChatState = {
 				| "title"
 				| "updatedAt"
 				| "cwd"
+				| "additionalDirectories"
 				| "workspaceRootCwd"
 				| "agentName"
 				| "modelId"
@@ -670,6 +673,7 @@ const createSessionState = (
 		backendId?: string;
 		backendLabel?: string;
 		cwd?: string;
+		additionalDirectories?: string[];
 		agentName?: string;
 		modelId?: string;
 		modelName?: string;
@@ -706,6 +710,7 @@ const createSessionState = (
 	backendId: options?.backendId,
 	backendLabel: options?.backendLabel,
 	cwd: options?.cwd,
+	additionalDirectories: options?.additionalDirectories,
 	agentName: options?.agentName,
 	modelId: options?.modelId,
 	modelName: options?.modelName,
@@ -758,6 +763,7 @@ const mergeSessionFromSummary = (
 		backendId?: string;
 		backendLabel?: string | null;
 		cwd?: string;
+		additionalDirectories?: string[];
 		agentName?: string | null;
 		modelId?: string | null;
 		modelName?: string | null;
@@ -806,6 +812,8 @@ const mergeSessionFromSummary = (
 		backendId: summary.backendId ?? baseSession.backendId,
 		backendLabel: summary.backendLabel ?? baseSession.backendLabel,
 		cwd: summary.cwd ?? baseSession.cwd,
+		additionalDirectories:
+			summary.additionalDirectories ?? baseSession.additionalDirectories,
 		workspaceRootCwd: summary.workspaceRootCwd ?? baseSession.workspaceRootCwd,
 		agentName: summary.agentName ?? baseSession.agentName,
 		modelId: replacesConfigState
@@ -1115,6 +1123,7 @@ export const useChatStore = create<ChatState>()(
 									backendId: added.backendId,
 									backendLabel: added.backendLabel,
 									cwd: added.cwd,
+									additionalDirectories: added.additionalDirectories,
 									agentName: added.agentName,
 									modelId: added.modelId,
 									modelName: added.modelName,
@@ -1234,6 +1243,7 @@ export const useChatStore = create<ChatState>()(
 								backendId: summary.backendId,
 								backendLabel: summary.backendLabel,
 								cwd: summary.cwd,
+								additionalDirectories: summary.additionalDirectories,
 								availableModes: summary.availableModes,
 								availableModels: summary.availableModels,
 								configOptions: summary.configOptions,
@@ -1376,6 +1386,9 @@ export const useChatStore = create<ChatState>()(
 					}
 					if (payload.cwd !== undefined) {
 						nextSession.cwd = payload.cwd;
+					}
+					if (payload.additionalDirectories !== undefined) {
+						nextSession.additionalDirectories = payload.additionalDirectories;
 					}
 					if (payload.workspaceRootCwd !== undefined) {
 						nextSession.workspaceRootCwd = payload.workspaceRootCwd;

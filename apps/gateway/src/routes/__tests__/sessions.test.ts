@@ -29,21 +29,40 @@ describe("session message routes", () => {
 	let server: ReturnType<express.Express["listen"]>;
 	let baseUrl: string;
 	let sessionRouter: {
+		createSession: ReturnType<typeof vi.fn>;
+		discoverSessions: ReturnType<typeof vi.fn>;
+		loadSession: ReturnType<typeof vi.fn>;
+		reloadSession: ReturnType<typeof vi.fn>;
 		sendMessage: ReturnType<typeof vi.fn>;
 		setSessionConfigOption: ReturnType<typeof vi.fn>;
 		setSessionMode: ReturnType<typeof vi.fn>;
 	};
+	let cliRegistry: {
+		addDiscoveredSessionsForMachine: ReturnType<typeof vi.fn>;
+		getCliByMachineIdForUser: ReturnType<typeof vi.fn>;
+	};
 
 	beforeEach(async () => {
 		sessionRouter = {
+			createSession: vi.fn(async () => ({ sessionId: "session-created" })),
+			discoverSessions: vi.fn(async () => ({ sessions: [] })),
+			loadSession: vi.fn(async () => ({ sessionId: "session-loaded" })),
+			reloadSession: vi.fn(async () => ({ sessionId: "session-reloaded" })),
 			sendMessage: vi.fn(async () => ({ stopReason: "end_turn" })),
 			setSessionConfigOption: vi.fn(async () => ({ sessionId: "session-1" })),
 			setSessionMode: vi.fn(async () => ({ sessionId: "session-1" })),
 		};
+		cliRegistry = {
+			addDiscoveredSessionsForMachine: vi.fn(),
+			getCliByMachineIdForUser: vi.fn(() => ({
+				machineId: "machine-1",
+				backends: [{ backendId: "backend-1", backendLabel: "Test Backend" }],
+			})),
+		};
 		const app = express();
 		app.use(express.json());
 		const router = express.Router();
-		setupSessionRoutes(router, {} as never, sessionRouter as never);
+		setupSessionRoutes(router, cliRegistry as never, sessionRouter as never);
 		app.use("/acp", router);
 		server = app.listen(0);
 		await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -133,6 +152,146 @@ describe("session message routes", () => {
 
 		expect(response.status).toBe(204);
 		expect(await response.text()).toBe("");
+	});
+
+	it("validates, deduplicates, and forwards additional directories on create", async () => {
+		const response = await fetch(`${baseUrl}/acp/session`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				cwd: "/repo",
+				backendId: "backend-1",
+				machineId: "machine-1",
+				additionalDirectories: ["/data", "/data", "/data/nested"],
+			}),
+		});
+
+		expect(response.status).toBe(200);
+		expect(sessionRouter.createSession).toHaveBeenCalledWith(
+			{
+				cwd: "/repo",
+				additionalDirectories: ["/data", "/data/nested"],
+				backendId: "backend-1",
+				machineId: "machine-1",
+				title: undefined,
+				worktree: undefined,
+			},
+			"user-1",
+		);
+	});
+
+	it("rejects relative additional directories before routing", async () => {
+		const response = await fetch(`${baseUrl}/acp/session`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				cwd: "/repo",
+				backendId: "backend-1",
+				additionalDirectories: ["relative/path"],
+			}),
+		});
+
+		expect(response.status).toBe(400);
+		expect(sessionRouter.createSession).not.toHaveBeenCalled();
+	});
+
+	it("returns a capability error when create roots are unsupported", async () => {
+		sessionRouter.createSession.mockRejectedValueOnce(
+			new Error(
+				"Agent does not support session additionalDirectories capability",
+			),
+		);
+		const response = await fetch(`${baseUrl}/acp/session`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				cwd: "/repo",
+				backendId: "backend-1",
+				additionalDirectories: ["/data"],
+			}),
+		});
+
+		expect(response.status).toBe(409);
+		expect(await response.json()).toEqual({
+			error: expect.objectContaining({
+				code: "CAPABILITY_NOT_SUPPORTED",
+				retryable: false,
+				scope: "session",
+			}),
+		});
+	});
+
+	it("preserves additional directories when registering discovered sessions", async () => {
+		sessionRouter.discoverSessions.mockResolvedValueOnce({
+			sessions: [
+				{
+					sessionId: "historical-session",
+					title: "Historical session",
+					cwd: "/repo",
+					additionalDirectories: ["/data", "/docs"],
+					updatedAt: "2026-07-17T00:00:00.000Z",
+				},
+			],
+		});
+
+		const response = await fetch(
+			`${baseUrl}/acp/sessions/discover?machineId=machine-1&backendId=backend-1`,
+			{
+				headers: { authorization: "Bearer user-1" },
+			},
+		);
+
+		expect(response.status).toBe(200);
+		expect(cliRegistry.addDiscoveredSessionsForMachine).toHaveBeenCalledWith(
+			"machine-1",
+			[
+				expect.objectContaining({
+					sessionId: "historical-session",
+					additionalDirectories: ["/data", "/docs"],
+					backendId: "backend-1",
+					backendLabel: "Test Backend",
+				}),
+			],
+			"user-1",
+		);
+	});
+
+	it("forwards the complete list when loading a session", async () => {
+		const response = await fetch(`${baseUrl}/acp/session/load`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				sessionId: "session-1",
+				cwd: "/repo",
+				backendId: "backend-1",
+				machineId: "machine-1",
+				additionalDirectories: ["/data"],
+			}),
+		});
+
+		expect(response.status).toBe(200);
+		expect(sessionRouter.loadSession).toHaveBeenCalledWith(
+			{
+				sessionId: "session-1",
+				cwd: "/repo",
+				additionalDirectories: ["/data"],
+				backendId: "backend-1",
+				machineId: "machine-1",
+			},
+			"user-1",
+		);
 	});
 
 	it("forwards messageId unchanged to the CLI RPC", async () => {

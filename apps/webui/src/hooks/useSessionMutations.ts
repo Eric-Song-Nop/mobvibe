@@ -44,6 +44,7 @@ type SessionMetadata = Partial<
 		| "backendId"
 		| "backendLabel"
 		| "cwd"
+		| "additionalDirectories"
 		| "workspaceRootCwd"
 		| "agentName"
 		| "modelId"
@@ -130,6 +131,7 @@ export interface ChatStoreActions {
 				| "title"
 				| "updatedAt"
 				| "cwd"
+				| "additionalDirectories"
 				| "workspaceRootCwd"
 				| "agentName"
 				| "modelId"
@@ -230,6 +232,7 @@ const applySessionSummary = (
 		title: summary.title,
 		updatedAt: summary.updatedAt,
 		cwd: summary.cwd,
+		additionalDirectories: summary.additionalDirectories,
 		workspaceRootCwd: summary.workspaceRootCwd,
 		agentName: summary.agentName,
 		modelId: summary.modelId,
@@ -288,6 +291,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 				backendId: data.backendId,
 				backendLabel: data.backendLabel,
 				cwd: data.cwd,
+				additionalDirectories: data.additionalDirectories,
 				workspaceRootCwd: data.workspaceRootCwd,
 				agentName: data.agentName,
 				modelId: data.modelId,
@@ -561,6 +565,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 			store.updateSessionMeta(data.sessionId, {
 				updatedAt: data.updatedAt,
 				cwd: data.cwd,
+				additionalDirectories: data.additionalDirectories,
 				workspaceRootCwd: data.workspaceRootCwd,
 				agentName: data.agentName,
 				modelId: data.modelId,

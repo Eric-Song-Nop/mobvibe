@@ -195,6 +195,7 @@ export class SessionRouter {
 
 		const rpcParams: CreateSessionParams = {
 			cwd: params.cwd,
+			additionalDirectories: params.additionalDirectories,
 			title: params.title,
 			backendId: params.backendId,
 			worktree: params.worktree,
@@ -868,6 +869,7 @@ export class SessionRouter {
 		params: {
 			sessionId: string;
 			cwd: string;
+			additionalDirectories?: string[];
 			backendId: string;
 			machineId?: string;
 		},
@@ -895,6 +897,7 @@ export class SessionRouter {
 		const rpcParams: LoadSessionRpcParams = {
 			sessionId: params.sessionId,
 			cwd: params.cwd,
+			additionalDirectories: params.additionalDirectories,
 			backendId: params.backendId,
 		};
 		const result = await this.sendRpc<LoadSessionRpcParams, SessionSummary>(
@@ -922,6 +925,7 @@ export class SessionRouter {
 		params: {
 			sessionId: string;
 			cwd: string;
+			additionalDirectories?: string[];
 			backendId: string;
 			machineId?: string;
 		},
@@ -949,6 +953,7 @@ export class SessionRouter {
 		const rpcParams: ReloadSessionRpcParams = {
 			sessionId: params.sessionId,
 			cwd: params.cwd,
+			additionalDirectories: params.additionalDirectories,
 			backendId: params.backendId,
 		};
 		const result = await this.sendRpc<ReloadSessionRpcParams, SessionSummary>(

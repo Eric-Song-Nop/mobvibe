@@ -78,6 +78,9 @@ export function useSessionActivation(store: ChatStoreActions) {
 			const params = {
 				sessionId: fresh.sessionId,
 				cwd: fresh.cwd,
+				...(fresh.additionalDirectories !== undefined
+					? { additionalDirectories: fresh.additionalDirectories }
+					: {}),
 				backendId: fresh.backendId,
 				machineId: fresh.machineId,
 			};

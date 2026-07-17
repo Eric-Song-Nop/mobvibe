@@ -13,6 +13,7 @@ export type WalSession = {
 	backendId: string;
 	currentRevision: number;
 	cwd?: string;
+	additionalDirectories: string[];
 	title?: string;
 	isTitlePinned?: boolean;
 	createdAt: string;
@@ -58,6 +59,7 @@ export type WalEventInput = Pick<AppendEventParams, "kind" | "payload">;
 export type CommitReloadRevisionParams = {
 	sessionId: string;
 	expectedRevision: number;
+	additionalDirectories?: readonly string[];
 	events: readonly WalEventInput[];
 	wrappedDek?: string;
 };
@@ -79,6 +81,7 @@ export type EnsureSessionParams = {
 	machineId: string;
 	backendId: string;
 	cwd?: string;
+	additionalDirectories?: readonly string[];
 	title?: string;
 	isTitlePinned?: boolean;
 };
@@ -93,6 +96,7 @@ export type DiscoveredSession = {
 	sessionId: string;
 	backendId: string;
 	cwd?: string;
+	additionalDirectories?: string[];
 	workspaceRootCwd?: string;
 	title?: string;
 	agentUpdatedAt?: string;
@@ -102,6 +106,17 @@ export type DiscoveredSession = {
 };
 
 const DEFAULT_QUERY_LIMIT = 100;
+
+const parseAdditionalDirectories = (value: string): string[] => {
+	const parsed: unknown = JSON.parse(value);
+	if (
+		!Array.isArray(parsed) ||
+		!parsed.every((directory) => typeof directory === "string")
+	) {
+		throw new Error("Invalid additional directories in WAL");
+	}
+	return parsed;
+};
 
 /**
  * Tables whose rows are tied to a user's local Mobvibe identity. Schema and
@@ -217,25 +232,26 @@ export class WalStore {
 
 		// Prepare statements
 		this.stmtGetSession = this.db.query(`
-      SELECT session_id, machine_id, backend_id, current_revision, cwd, title, is_title_pinned, created_at, updated_at
+      SELECT session_id, machine_id, backend_id, current_revision, cwd, additional_directories_json, title, is_title_pinned, created_at, updated_at
       FROM sessions
       WHERE session_id = $sessionId
     `);
 
 		this.stmtGetSessions = this.db.query(`
-			SELECT session_id, machine_id, backend_id, current_revision, cwd, title, is_title_pinned, created_at, updated_at
+			SELECT session_id, machine_id, backend_id, current_revision, cwd, additional_directories_json, title, is_title_pinned, created_at, updated_at
 			FROM sessions
 			ORDER BY updated_at DESC, session_id ASC
 		`);
 
 		this.stmtInsertSession = this.db.query(`
-      INSERT INTO sessions (session_id, machine_id, backend_id, current_revision, cwd, title, is_title_pinned, created_at, updated_at)
-      VALUES ($sessionId, $machineId, $backendId, 1, $cwd, $title, $isTitlePinned, $createdAt, $updatedAt)
+      INSERT INTO sessions (session_id, machine_id, backend_id, current_revision, cwd, additional_directories_json, title, is_title_pinned, created_at, updated_at)
+      VALUES ($sessionId, $machineId, $backendId, 1, $cwd, $additionalDirectoriesJson, $title, $isTitlePinned, $createdAt, $updatedAt)
     `);
 
 		this.stmtUpdateSession = this.db.query(`
       UPDATE sessions
       SET cwd = COALESCE($cwd, cwd),
+          additional_directories_json = COALESCE($additionalDirectoriesJson, additional_directories_json),
           title = COALESCE($title, title),
           is_title_pinned = COALESCE($isTitlePinned, is_title_pinned),
           updated_at = $updatedAt
@@ -297,6 +313,7 @@ export class WalStore {
 		this.stmtCommitReloadRevision = this.db.query(`
 			UPDATE sessions
 			SET current_revision = current_revision + 1,
+				additional_directories_json = COALESCE($additionalDirectoriesJson, additional_directories_json),
 				updated_at = $updatedAt
 			WHERE session_id = $sessionId
 				AND current_revision = $expectedRevision
@@ -388,15 +405,16 @@ export class WalStore {
 		// Discovered sessions statements
 		this.stmtUpsertDiscoveredSession = this.db.query(`
       INSERT INTO discovered_sessions (
-        session_id, backend_id, cwd, workspace_root_cwd, title, agent_updated_at,
+        session_id, backend_id, cwd, additional_directories_json, workspace_root_cwd, title, agent_updated_at,
         discovered_at, last_verified_at, is_stale
       ) VALUES (
-        $sessionId, $backendId, $cwd, $workspaceRootCwd, $title, $agentUpdatedAt,
+        $sessionId, $backendId, $cwd, $additionalDirectoriesJson, $workspaceRootCwd, $title, $agentUpdatedAt,
         $discoveredAt, $lastVerifiedAt, 0
       )
       ON CONFLICT (session_id) DO UPDATE SET
         backend_id = $backendId,
         cwd = COALESCE($cwd, discovered_sessions.cwd),
+        additional_directories_json = $additionalDirectoriesJson,
         workspace_root_cwd = COALESCE($workspaceRootCwd, discovered_sessions.workspace_root_cwd),
         title = COALESCE($title, discovered_sessions.title),
         agent_updated_at = COALESCE($agentUpdatedAt, discovered_sessions.agent_updated_at),
@@ -405,7 +423,7 @@ export class WalStore {
     `);
 
 		this.stmtGetDiscoveredSessions = this.db.query(`
-      SELECT d.session_id, d.backend_id, d.cwd, d.workspace_root_cwd, d.title, d.agent_updated_at,
+      SELECT d.session_id, d.backend_id, d.cwd, d.additional_directories_json, d.workspace_root_cwd, d.title, d.agent_updated_at,
              d.discovered_at, d.last_verified_at, d.is_stale
       FROM discovered_sessions d
       LEFT JOIN archived_session_ids a ON d.session_id = a.session_id
@@ -414,7 +432,7 @@ export class WalStore {
     `);
 
 		this.stmtGetDiscoveredSessionsByBackend = this.db.query(`
-      SELECT d.session_id, d.backend_id, d.cwd, d.workspace_root_cwd, d.title, d.agent_updated_at,
+      SELECT d.session_id, d.backend_id, d.cwd, d.additional_directories_json, d.workspace_root_cwd, d.title, d.agent_updated_at,
              d.discovered_at, d.last_verified_at, d.is_stale
       FROM discovered_sessions d
       LEFT JOIN archived_session_ids a ON d.session_id = a.session_id
@@ -551,6 +569,10 @@ export class WalStore {
 			this.stmtUpdateSession.run({
 				$sessionId: params.sessionId,
 				$cwd: params.cwd ?? null,
+				$additionalDirectoriesJson:
+					params.additionalDirectories === undefined
+						? null
+						: JSON.stringify(params.additionalDirectories),
 				$title: params.title ?? null,
 				$isTitlePinned:
 					params.isTitlePinned !== undefined
@@ -590,6 +612,9 @@ export class WalStore {
 			$machineId: params.machineId,
 			$backendId: params.backendId,
 			$cwd: params.cwd ?? null,
+			$additionalDirectoriesJson: JSON.stringify(
+				params.additionalDirectories ?? [],
+			),
 			$title: params.title ?? null,
 			$isTitlePinned: params.isTitlePinned ? 1 : 0,
 			$createdAt: now,
@@ -700,6 +725,9 @@ export class WalStore {
 							$machineId: params.machineId,
 							$backendId: params.backendId,
 							$cwd: params.cwd ?? null,
+							$additionalDirectoriesJson: JSON.stringify(
+								params.additionalDirectories ?? [],
+							),
 							$title: params.title ?? null,
 							$isTitlePinned: params.isTitlePinned ? 1 : 0,
 							$createdAt: now,
@@ -719,6 +747,10 @@ export class WalStore {
 						this.stmtUpdateSession.run({
 							$sessionId: params.sessionId,
 							$cwd: params.cwd ?? null,
+							$additionalDirectoriesJson:
+								params.additionalDirectories === undefined
+									? null
+									: JSON.stringify(params.additionalDirectories),
 							$title: params.title ?? null,
 							$isTitlePinned:
 								params.isTitlePinned === undefined
@@ -777,6 +809,10 @@ export class WalStore {
 					const revisionRow = this.stmtCommitReloadRevision.get({
 						$sessionId: params.sessionId,
 						$expectedRevision: params.expectedRevision,
+						$additionalDirectoriesJson:
+							params.additionalDirectories === undefined
+								? null
+								: JSON.stringify(params.additionalDirectories),
 						$updatedAt: new Date().toISOString(),
 					}) as { current_revision: number } | null;
 					if (!revisionRow) {
@@ -1146,6 +1182,9 @@ export class WalStore {
 				$sessionId: session.sessionId,
 				$backendId: session.backendId,
 				$cwd: session.cwd ?? null,
+				$additionalDirectoriesJson: JSON.stringify(
+					session.additionalDirectories ?? [],
+				),
 				$workspaceRootCwd: session.workspaceRootCwd ?? null,
 				$title: session.title ?? null,
 				$agentUpdatedAt: session.agentUpdatedAt ?? null,
@@ -1349,6 +1388,9 @@ export class WalStore {
 			backendId: row.backend_id,
 			currentRevision: row.current_revision,
 			cwd: row.cwd ?? undefined,
+			additionalDirectories: parseAdditionalDirectories(
+				row.additional_directories_json,
+			),
 			title: row.title ?? undefined,
 			isTitlePinned: row.is_title_pinned === 1 ? true : undefined,
 			createdAt: row.created_at,
@@ -1374,6 +1416,9 @@ export class WalStore {
 			sessionId: row.session_id,
 			backendId: row.backend_id,
 			cwd: row.cwd ?? undefined,
+			additionalDirectories: parseAdditionalDirectories(
+				row.additional_directories_json,
+			),
 			workspaceRootCwd: row.workspace_root_cwd ?? undefined,
 			title: row.title ?? undefined,
 			agentUpdatedAt: row.agent_updated_at ?? undefined,
@@ -1391,6 +1436,7 @@ type WalSessionRow = {
 	backend_id: string;
 	current_revision: number;
 	cwd: string | null;
+	additional_directories_json: string;
 	title: string | null;
 	is_title_pinned: number | null;
 	created_at: string;
@@ -1412,6 +1458,7 @@ type DiscoveredSessionRow = {
 	session_id: string;
 	backend_id: string;
 	cwd: string | null;
+	additional_directories_json: string;
 	workspace_root_cwd: string | null;
 	title: string | null;
 	agent_updated_at: string | null;

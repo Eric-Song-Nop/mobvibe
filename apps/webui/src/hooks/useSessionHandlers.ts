@@ -28,6 +28,7 @@ type Mutations = {
 		mutateAsync: (params: {
 			backendId: string;
 			cwd: string;
+			additionalDirectories?: string[];
 			title?: string;
 			machineId: string;
 			worktree?: {
@@ -114,6 +115,7 @@ type UiActions = {
 	setDraftTitle: (title: string) => void;
 	setDraftBackendId: (id: string | undefined) => void;
 	setDraftCwd: (cwd: string | undefined) => void;
+	setDraftAdditionalDirectories: (directories: string[]) => void;
 	resetDraftWorktree: () => void;
 	clearEditingSession: () => void;
 };
@@ -209,6 +211,7 @@ export function useSessionHandlers({
 		}
 
 		uiActions.setDraftCwd(initialCwd);
+		uiActions.setDraftAdditionalDirectories([]);
 		uiActions.resetDraftWorktree();
 		uiActions.setMobileMenuOpen(false);
 		uiActions.setCreateDialogOpen(true);
@@ -219,6 +222,7 @@ export function useSessionHandlers({
 			draftTitle,
 			draftBackendId,
 			draftCwd,
+			draftAdditionalDirectories,
 			draftWorktreeEnabled,
 			draftWorktreeBranch,
 			draftWorktreeSuggestedBranch,
@@ -246,6 +250,18 @@ export function useSessionHandlers({
 		const defaultTitle = buildSessionTitle(sessionList, t);
 		const isUserCustomTitle = title.length > 0 && title !== defaultTitle;
 		chatActions.setAppError(undefined);
+		const additionalDirectories =
+			getBackendCapability(
+				machines[selectedMachineId],
+				draftBackendId,
+				"additionalDirectories",
+			) === true
+				? draftAdditionalDirectories.filter(
+						(directory, index, directories) =>
+							directory !== draftCwd &&
+							directories.indexOf(directory) === index,
+					)
+				: [];
 
 		let worktree:
 			| {
@@ -293,6 +309,7 @@ export function useSessionHandlers({
 			await mutations.createSessionMutation.mutateAsync({
 				backendId: draftBackendId,
 				cwd: draftCwd,
+				...(additionalDirectories.length > 0 ? { additionalDirectories } : {}),
 				title: isUserCustomTitle ? title : undefined,
 				machineId: selectedMachineId,
 				worktree,

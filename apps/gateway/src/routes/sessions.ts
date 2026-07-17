@@ -83,6 +83,41 @@ const normalizeRelativeCwd = (value: unknown): string | undefined => {
 	return segments.join("/");
 };
 
+const normalizeAdditionalDirectories = (
+	value: unknown,
+): string[] | undefined => {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (!Array.isArray(value)) {
+		throw new AppError(
+			buildRequestValidationError("additionalDirectories must be an array"),
+			400,
+		);
+	}
+	const seen = new Set<string>();
+	const directories: string[] = [];
+	for (const directory of value) {
+		if (
+			typeof directory !== "string" ||
+			directory.length === 0 ||
+			(!path.posix.isAbsolute(directory) && !path.win32.isAbsolute(directory))
+		) {
+			throw new AppError(
+				buildRequestValidationError(
+					"additionalDirectories must contain non-empty absolute paths",
+				),
+				400,
+			);
+		}
+		if (!seen.has(directory)) {
+			seen.add(directory);
+			directories.push(directory);
+		}
+	}
+	return directories;
+};
+
 export function setupSessionRoutes(
 	router: Router,
 	cliRegistry: CliRegistry,
@@ -131,7 +166,14 @@ export function setupSessionRoutes(
 			return;
 		}
 		try {
-			const { cwd, title, backendId, machineId, worktree } = request.body ?? {};
+			const {
+				cwd,
+				additionalDirectories,
+				title,
+				backendId,
+				machineId,
+				worktree,
+			} = request.body ?? {};
 
 			if (typeof backendId !== "string" || backendId.trim().length === 0) {
 				respondError(
@@ -183,6 +225,9 @@ export function setupSessionRoutes(
 				{
 					cwd:
 						typeof cwd === "string" && cwd.trim().length > 0 ? cwd : undefined,
+					additionalDirectories: normalizeAdditionalDirectories(
+						additionalDirectories,
+					),
 					title:
 						typeof title === "string" && title.trim().length > 0
 							? title.trim()
@@ -210,6 +255,17 @@ export function setupSessionRoutes(
 				message.includes("Machine not found")
 			) {
 				respondError(response, buildAuthorizationError(message), 403);
+			} else if (message.includes("does not support")) {
+				respondError(
+					response,
+					createErrorDetail({
+						code: "CAPABILITY_NOT_SUPPORTED",
+						message,
+						retryable: false,
+						scope: "session",
+					}),
+					409,
+				);
 			} else {
 				respondError(response, createInternalError("service"));
 			}
@@ -777,6 +833,7 @@ export function setupSessionRoutes(
 							sessionId: s.sessionId,
 							title: s.title ?? `Session ${s.sessionId.slice(0, 8)}`,
 							cwd: s.cwd,
+							additionalDirectories: s.additionalDirectories ?? [],
 							updatedAt: s.updatedAt ?? new Date().toISOString(),
 							createdAt: s.updatedAt ?? new Date().toISOString(),
 							backendId: requestedBackendId,
@@ -819,7 +876,8 @@ export function setupSessionRoutes(
 	router.post(
 		"/session/load",
 		async (request: AuthenticatedRequest, response) => {
-			const { sessionId, cwd, backendId, machineId } = request.body ?? {};
+			const { sessionId, cwd, additionalDirectories, backendId, machineId } =
+				request.body ?? {};
 			if (typeof sessionId !== "string" || typeof cwd !== "string") {
 				respondError(
 					response,
@@ -843,6 +901,9 @@ export function setupSessionRoutes(
 				return;
 			}
 			try {
+				const normalizedAdditionalDirectories = normalizeAdditionalDirectories(
+					additionalDirectories,
+				);
 				logger.info(
 					{ sessionId, cwd, backendId, machineId, userId },
 					"session_load_request",
@@ -851,6 +912,7 @@ export function setupSessionRoutes(
 					{
 						sessionId,
 						cwd,
+						additionalDirectories: normalizedAdditionalDirectories,
 						backendId,
 						machineId: typeof machineId === "string" ? machineId : undefined,
 					},
@@ -889,7 +951,8 @@ export function setupSessionRoutes(
 	router.post(
 		"/session/reload",
 		async (request: AuthenticatedRequest, response) => {
-			const { sessionId, cwd, backendId, machineId } = request.body ?? {};
+			const { sessionId, cwd, additionalDirectories, backendId, machineId } =
+				request.body ?? {};
 			if (typeof sessionId !== "string" || typeof cwd !== "string") {
 				respondError(
 					response,
@@ -913,6 +976,9 @@ export function setupSessionRoutes(
 				return;
 			}
 			try {
+				const normalizedAdditionalDirectories = normalizeAdditionalDirectories(
+					additionalDirectories,
+				);
 				logger.info(
 					{ sessionId, cwd, backendId, machineId, userId },
 					"session_reload_request",
@@ -921,6 +987,7 @@ export function setupSessionRoutes(
 					{
 						sessionId,
 						cwd,
+						additionalDirectories: normalizedAdditionalDirectories,
 						backendId,
 						machineId: typeof machineId === "string" ? machineId : undefined,
 					},

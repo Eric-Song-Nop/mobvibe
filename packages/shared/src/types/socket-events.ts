@@ -172,6 +172,8 @@ export type CreateSessionWorktreeOptions = {
 // Create session RPC params
 export type CreateSessionParams = {
 	cwd?: string;
+	/** Complete ordered ACP additional directory roots. */
+	additionalDirectories?: string[];
 	title?: string;
 	backendId: AcpBackendId;
 	machineId?: string;
@@ -285,6 +287,8 @@ export type DiscoverSessionsRpcResult = {
 export type LoadSessionRpcParams = {
 	sessionId: string;
 	cwd: string;
+	/** Complete ordered ACP additional directory roots. */
+	additionalDirectories?: string[];
 	backendId: string;
 };
 
@@ -292,6 +296,8 @@ export type LoadSessionRpcParams = {
 export type ReloadSessionRpcParams = {
 	sessionId: string;
 	cwd: string;
+	/** Complete ordered ACP additional directory roots. */
+	additionalDirectories?: string[];
 	backendId: string;
 };
 

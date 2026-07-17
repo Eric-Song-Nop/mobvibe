@@ -56,7 +56,10 @@ mock.module("node:stream", () => ({
 }));
 
 import type { AcpBackendConfig } from "../../config.js";
-import { AcpConnection } from "../acp-connection.js";
+import {
+	AcpConnection,
+	normalizeAdditionalDirectories,
+} from "../acp-connection.js";
 
 const createMockBackendConfig = (): AcpBackendConfig => ({
 	id: "test-backend",
@@ -135,6 +138,90 @@ describe("AcpConnection", () => {
 				audio: false,
 				embeddedContext: true,
 			});
+		});
+
+		it("maps the additionalDirectories session capability", () => {
+			// @ts-expect-error - accessing private property for testing
+			connection.agentCapabilities = {
+				sessionCapabilities: { additionalDirectories: {} },
+			};
+
+			expect(connection.getSessionCapabilities().additionalDirectories).toBe(
+				true,
+			);
+		});
+	});
+
+	describe("additionalDirectories", () => {
+		it("preserves order while removing exact duplicates and cwd", () => {
+			expect(
+				normalizeAdditionalDirectories("/repo", [
+					"/repo",
+					"/data",
+					"/data/nested",
+					"/data",
+					"C:\\workspace",
+				]),
+			).toEqual(["/data", "/data/nested", "C:\\workspace"]);
+		});
+
+		it("rejects relative directories", () => {
+			expect(() =>
+				normalizeAdditionalDirectories("/repo", ["relative/path"]),
+			).toThrow("absolute paths");
+		});
+
+		it("gates and forwards the complete list for load", async () => {
+			const request = mock(() => Promise.resolve({}));
+			const internal = connection as unknown as {
+				state: "ready";
+				agentCapabilities: {
+					loadSession: boolean;
+					sessionCapabilities: {
+						additionalDirectories: Record<string, never>;
+					};
+				};
+				connection: { agent: { request: typeof request } };
+			};
+			internal.state = "ready";
+			internal.agentCapabilities = {
+				loadSession: true,
+				sessionCapabilities: { additionalDirectories: {} },
+			};
+			internal.connection = { agent: { request } };
+
+			await connection.loadSession("session-1", "/repo", [
+				"/repo",
+				"/data",
+				"/data",
+			]);
+
+			expect(request).toHaveBeenCalledWith("session/load", {
+				sessionId: "session-1",
+				cwd: "/repo",
+				mcpServers: [],
+				additionalDirectories: ["/data"],
+			});
+		});
+
+		it("rejects non-empty roots when the capability is absent", async () => {
+			const request = mock(() => Promise.resolve({ sessionId: "session-1" }));
+			const internal = connection as unknown as {
+				state: "ready";
+				agentCapabilities: Record<string, never>;
+				connection: { agent: { request: typeof request } };
+			};
+			internal.state = "ready";
+			internal.agentCapabilities = {};
+			internal.connection = { agent: { request } };
+
+			await expect(
+				connection.createSession({
+					cwd: "/repo",
+					additionalDirectories: ["/data"],
+				}),
+			).rejects.toThrow("additionalDirectories capability");
+			expect(request).not.toHaveBeenCalled();
 		});
 	});
 

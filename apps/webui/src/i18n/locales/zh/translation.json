@@ -104,6 +104,15 @@
 		"cwdPlaceholder": "输入或粘贴路径",
 		"browse": "浏览",
 		"targetMachine": "目标机器：{{name}}",
+		"additionalDirectories": {
+			"label": "附加目录",
+			"description": "允许代理在本次对话中访问其他目录根路径。",
+			"browse": "添加目录",
+			"remove": "移除",
+			"dialogTitle": "添加目录",
+			"dialogDescription": "为本次对话选择另一个目录根路径。",
+			"add": "添加目录"
+		},
 		"projectDetection": {
 			"checking": "正在检查项目…",
 			"folder": "已检测为普通目录",

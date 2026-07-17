@@ -48,7 +48,10 @@ import {
 	type WalEventInput,
 	WalStore,
 } from "../wal/index.js";
-import { AcpConnection } from "./acp-connection.js";
+import {
+	AcpConnection,
+	normalizeAdditionalDirectories,
+} from "./acp-connection.js";
 
 type PendingReloadEvent =
 	| { type: "session_update"; notification: SessionNotification }
@@ -101,6 +104,7 @@ type SessionRecord = {
 	createdAt: Date;
 	updatedAt: Date;
 	cwd?: string;
+	additionalDirectories: string[];
 	agentName?: string;
 	modelId?: string;
 	modelName?: string;
@@ -540,6 +544,7 @@ export class SessionManager {
 				backendId: session.backendId,
 				backendLabel: backend?.label ?? session.backendId,
 				cwd: session.cwd,
+				additionalDirectories: session.additionalDirectories,
 				workspaceRootCwd: session.cwd,
 				createdAt: session.createdAt,
 				updatedAt: session.updatedAt,
@@ -569,6 +574,7 @@ export class SessionManager {
 										? existing.title
 										: (s.title ?? existing.title),
 									cwd: s.cwd ?? existing.cwd,
+									additionalDirectories: s.additionalDirectories,
 									workspaceRootCwd:
 										s.workspaceRootCwd ?? s.cwd ?? existing.workspaceRootCwd,
 								}
@@ -583,6 +589,7 @@ export class SessionManager {
 					backendId: s.backendId,
 					backendLabel: s.backendId,
 					cwd: s.cwd as string,
+					additionalDirectories: s.additionalDirectories,
 					workspaceRootCwd: s.workspaceRootCwd ?? s.cwd,
 					createdAt: s.discoveredAt,
 					updatedAt: s.agentUpdatedAt ?? s.discoveredAt,
@@ -1196,6 +1203,7 @@ export class SessionManager {
 
 	async createSession(options: {
 		cwd?: string;
+		additionalDirectories?: string[];
 		title?: string;
 		backendId: string;
 		worktree?: CreateSessionWorktreeOptions;
@@ -1275,6 +1283,10 @@ export class SessionManager {
 			workspaceRootCwd = projectContext.repoRoot ?? options.cwd;
 		}
 
+		const additionalDirectories = normalizeAdditionalDirectories(
+			effectiveCwd ?? process.cwd(),
+			options.additionalDirectories,
+		);
 		const connection = await this.acquireConnection(backend);
 		const bufferedUpdates: SessionNotification[] = [];
 		let recordRef: SessionRecord | undefined;
@@ -1296,7 +1308,10 @@ export class SessionManager {
 			},
 		);
 		try {
-			const session = await connection.createSession({ cwd: effectiveCwd });
+			const session = await connection.createSession({
+				cwd: effectiveCwd,
+				additionalDirectories,
+			});
 			connection.setPermissionHandler((params, requestId, signal) =>
 				this.handlePermissionRequest(
 					session.sessionId,
@@ -1324,6 +1339,7 @@ export class SessionManager {
 				machineId: this.config.machineId,
 				backendId: backend.id,
 				cwd: effectiveCwd,
+				additionalDirectories,
 				title: sessionTitle,
 				isTitlePinned: hasExplicitTitle,
 			});
@@ -1340,6 +1356,7 @@ export class SessionManager {
 				createdAt: now,
 				updatedAt: now,
 				cwd: effectiveCwd,
+				additionalDirectories,
 				workspaceRootCwd,
 				worktreeSourceCwd,
 				worktreeBranch,
@@ -1533,6 +1550,7 @@ export class SessionManager {
 			machineId: this.config.machineId,
 			backendId: record.backendId,
 			cwd: record.cwd,
+			additionalDirectories: record.additionalDirectories,
 			title,
 			isTitlePinned: true,
 		});
@@ -1842,15 +1860,35 @@ export class SessionManager {
 				const archivedIds = new Set(this.walStore.getArchivedSessionIds());
 
 				const validity = await Promise.all(
-					response.sessions.map(async (session) => ({
-						session,
-						isValid: session.cwd
-							? await this.validateWorkspacePath(session.cwd)
-							: false,
-						projectContext: session.cwd
-							? await this.resolveGitProjectContext(session.cwd)
-							: undefined,
-					})),
+					response.sessions.map(async (session) => {
+						try {
+							const additionalDirectories = normalizeAdditionalDirectories(
+								session.cwd,
+								session.additionalDirectories ?? undefined,
+							);
+							return {
+								session,
+								additionalDirectories,
+								isValid: session.cwd
+									? await this.validateWorkspacePath(session.cwd)
+									: false,
+								projectContext: session.cwd
+									? await this.resolveGitProjectContext(session.cwd)
+									: undefined,
+							};
+						} catch (error) {
+							logger.warn(
+								{ err: error, sessionId: session.sessionId },
+								"discovered_session_invalid_additional_directories",
+							);
+							return {
+								session,
+								additionalDirectories: [],
+								isValid: false,
+								projectContext: undefined,
+							};
+						}
+					}),
 				);
 
 				const now = new Date().toISOString();
@@ -1858,6 +1896,7 @@ export class SessionManager {
 					sessionId: string;
 					backendId: string;
 					cwd?: string;
+					additionalDirectories: string[];
 					workspaceRootCwd?: string;
 					title?: string;
 					agentUpdatedAt?: string;
@@ -1865,7 +1904,12 @@ export class SessionManager {
 					isStale: boolean;
 				}> = [];
 
-				for (const { session, isValid, projectContext } of validity) {
+				for (const {
+					session,
+					additionalDirectories,
+					isValid,
+					projectContext,
+				} of validity) {
 					if (!isValid) {
 						this.discoveredSessions.delete(session.sessionId);
 						// Mark as stale in WAL
@@ -1881,6 +1925,7 @@ export class SessionManager {
 					this.discoveredSessions.set(session.sessionId, {
 						sessionId: session.sessionId,
 						cwd: session.cwd,
+						additionalDirectories,
 						workspaceRootCwd: projectContext?.repoRoot ?? session.cwd,
 						title: session.title ?? undefined,
 						updatedAt: session.updatedAt ?? undefined,
@@ -1888,6 +1933,7 @@ export class SessionManager {
 					sessions.push({
 						sessionId: session.sessionId,
 						cwd: session.cwd,
+						additionalDirectories,
 						workspaceRootCwd: projectContext?.repoRoot ?? session.cwd,
 						title: session.title ?? undefined,
 						updatedAt: session.updatedAt ?? undefined,
@@ -1898,6 +1944,7 @@ export class SessionManager {
 						sessionId: session.sessionId,
 						backendId: backend.id,
 						cwd: session.cwd,
+						additionalDirectories,
 						workspaceRootCwd: projectContext?.repoRoot ?? session.cwd,
 						title: session.title ?? undefined,
 						agentUpdatedAt: session.updatedAt ?? undefined,
@@ -1942,6 +1989,7 @@ export class SessionManager {
 		sessionId: string,
 		cwd: string,
 		backendId: string,
+		additionalDirectories?: string[],
 	): Promise<SessionSummary> {
 		logger.info({ sessionId, cwd, backendId }, "load_session_start");
 		if (this.walStore.isArchived(sessionId)) {
@@ -1966,6 +2014,10 @@ export class SessionManager {
 
 		const backend = this.resolveBackend(backendId);
 		const connection = await this.acquireConnection(backend);
+		const normalizedAdditionalDirectories = normalizeAdditionalDirectories(
+			cwd,
+			additionalDirectories,
+		);
 		let unsubscribe: (() => void) | undefined;
 		let recordRef: SessionRecord | undefined;
 
@@ -2017,7 +2069,11 @@ export class SessionManager {
 			);
 
 			logger.debug({ sessionId }, "load_session_calling_acp");
-			const response = await connection.loadSession(sessionId, cwd);
+			const response = await connection.loadSession(
+				sessionId,
+				cwd,
+				normalizedAdditionalDirectories,
+			);
 			logger.debug(
 				{
 					sessionId,
@@ -2060,6 +2116,7 @@ export class SessionManager {
 				const committed = this.walStore.commitReloadRevision({
 					sessionId,
 					expectedRevision: existingWalSession.currentRevision,
+					additionalDirectories: normalizedAdditionalDirectories,
 					events: walEvents,
 					wrappedDek,
 				});
@@ -2077,6 +2134,7 @@ export class SessionManager {
 					machineId: this.config.machineId,
 					backendId: backend.id,
 					cwd,
+					additionalDirectories: normalizedAdditionalDirectories,
 					expectedRevision,
 					events: walEvents,
 					wrappedDek,
@@ -2103,6 +2161,7 @@ export class SessionManager {
 				createdAt: now,
 				updatedAt: now,
 				cwd,
+				additionalDirectories: normalizedAdditionalDirectories,
 				workspaceRootCwd: projectContext.repoRoot ?? cwd,
 				agentName: agentInfo?.title ?? agentInfo?.name,
 				modelConfigId,
@@ -2164,11 +2223,17 @@ export class SessionManager {
 		sessionId: string,
 		cwd: string,
 		backendId: string,
+		additionalDirectories?: string[],
 	): Promise<SessionSummary> {
 		const previous =
 			this.sessionReloadTails.get(sessionId) ?? Promise.resolve();
 		const operation = previous.then(() =>
-			this.executeReloadSession(sessionId, cwd, backendId),
+			this.executeReloadSession(
+				sessionId,
+				cwd,
+				backendId,
+				additionalDirectories,
+			),
 		);
 		const tail = operation.then(
 			() => {},
@@ -2188,10 +2253,20 @@ export class SessionManager {
 		sessionId: string,
 		cwd: string,
 		backendId: string,
+		additionalDirectories?: string[],
 	): Promise<SessionSummary> {
+		const normalizedAdditionalDirectories = normalizeAdditionalDirectories(
+			cwd,
+			additionalDirectories,
+		);
 		const existing = this.sessions.get(sessionId);
 		if (!existing) {
-			return this.loadSession(sessionId, cwd, backendId);
+			return this.loadSession(
+				sessionId,
+				cwd,
+				backendId,
+				normalizedAdditionalDirectories,
+			);
 		}
 
 		if (!existing.connection.supportsSessionLoad()) {
@@ -2206,7 +2281,11 @@ export class SessionManager {
 		let response: Awaited<ReturnType<typeof existing.connection.loadSession>>;
 		let projectContext: Awaited<ReturnType<typeof resolveGitProjectContext>>;
 		try {
-			response = await existing.connection.loadSession(sessionId, cwd);
+			response = await existing.connection.loadSession(
+				sessionId,
+				cwd,
+				normalizedAdditionalDirectories,
+			);
 			if (reloadBuffer.error) {
 				throw reloadBuffer.error;
 			}
@@ -2242,6 +2321,7 @@ export class SessionManager {
 			const committed = this.walStore.commitReloadRevision({
 				sessionId,
 				expectedRevision: existing.revision,
+				additionalDirectories: normalizedAdditionalDirectories,
 				events: this.toWalEventInputs(bufferedEvents),
 				wrappedDek,
 			});
@@ -2281,6 +2361,7 @@ export class SessionManager {
 
 		existing.revision = committed.revision;
 		existing.cwd = cwd;
+		existing.additionalDirectories = normalizedAdditionalDirectories;
 		existing.workspaceRootCwd = projectContext.repoRoot ?? cwd;
 		existing.agentName =
 			agentInfo?.title ?? agentInfo?.name ?? existing.agentName;
@@ -2579,6 +2660,7 @@ export class SessionManager {
 			createdAt: record.createdAt.toISOString(),
 			updatedAt: record.updatedAt.toISOString(),
 			cwd: record.cwd,
+			additionalDirectories: record.additionalDirectories,
 			workspaceRootCwd: record.workspaceRootCwd,
 			agentName: record.agentName,
 			modelId: record.modelId,

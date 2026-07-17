@@ -104,6 +104,15 @@
 		"cwdPlaceholder": "Enter or paste a path",
 		"browse": "Browse",
 		"targetMachine": "Target: {{name}}",
+		"additionalDirectories": {
+			"label": "Additional directories",
+			"description": "Give the agent access to other directory roots for this session.",
+			"browse": "Add directory",
+			"remove": "Remove",
+			"dialogTitle": "Add directory",
+			"dialogDescription": "Choose another directory root for this session.",
+			"add": "Add directory"
+		},
 		"projectDetection": {
 			"checking": "Checking project…",
 			"folder": "Folder detected",

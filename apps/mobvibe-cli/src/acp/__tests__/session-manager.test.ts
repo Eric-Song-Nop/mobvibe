@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type {
 	JsonRpcId,
+	ListSessionsResponse,
 	LoadSessionResponse,
 	NewSessionResponse,
 	RequestPermissionRequest,
@@ -130,23 +131,24 @@ const createMockConnection = () => ({
 	})),
 	supportsSessionList: mock(() => true),
 	supportsSessionLoad: mock(() => true),
-	listSessions: mock(() =>
-		Promise.resolve({
-			sessions: [
-				{
-					sessionId: "discovered-1",
-					cwd: "/home/user/project1",
-					title: "Project 1",
-					updatedAt: new Date().toISOString(),
-				},
-				{
-					sessionId: "discovered-2",
-					cwd: "/home/user/project2",
-					title: "Project 2",
-				},
-			],
-			nextCursor: undefined,
-		}),
+	listSessions: mock(
+		(): Promise<ListSessionsResponse> =>
+			Promise.resolve({
+				sessions: [
+					{
+						sessionId: "discovered-1",
+						cwd: "/home/user/project1",
+						title: "Project 1",
+						updatedAt: new Date().toISOString(),
+					},
+					{
+						sessionId: "discovered-2",
+						cwd: "/home/user/project2",
+						title: "Project 2",
+					},
+				],
+				nextCursor: undefined,
+			}),
 	),
 	loadSession: mock(
 		(): Promise<LoadSessionResponse> =>
@@ -307,6 +309,75 @@ describe("SessionManager", () => {
 			await expect(
 				sessionManager.discoverSessions({ backendId: "invalid-backend" }),
 			).rejects.toThrow("Invalid backend ID");
+		});
+	});
+
+	describe("additional directories", () => {
+		const getWalStore = () =>
+			(
+				sessionManager as unknown as {
+					walStore: WalStore;
+				}
+			).walStore;
+
+		it("normalizes create roots and persists them in summaries and WAL", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				additionalDirectories: [
+					"/home/user/project",
+					"/data",
+					"/data/nested",
+					"/data",
+				],
+				backendId: "backend-1",
+			});
+
+			expect(mockConnection.createSession).toHaveBeenCalledWith({
+				cwd: "/home/user/project",
+				additionalDirectories: ["/data", "/data/nested"],
+			});
+			expect(created.additionalDirectories).toEqual(["/data", "/data/nested"]);
+			expect(
+				getWalStore().getSession(created.sessionId)?.additionalDirectories,
+			).toEqual(["/data", "/data/nested"]);
+			expect(
+				sessionManager
+					.listAllSessions()
+					.find((session) => session.sessionId === created.sessionId)
+					?.additionalDirectories,
+			).toEqual(["/data", "/data/nested"]);
+		});
+
+		it("persists discovered ordered roots into listAllSessions", async () => {
+			mockConnection.listSessions.mockResolvedValueOnce({
+				sessions: [
+					{
+						sessionId: "discovered-roots",
+						cwd: "/home/user/project1",
+						additionalDirectories: ["/shared", "/shared/nested"],
+						title: "Roots",
+					},
+				],
+				nextCursor: undefined,
+			});
+
+			const discovered = await sessionManager.discoverSessions({
+				backendId: "backend-1",
+			});
+
+			expect(discovered.sessions[0]?.additionalDirectories).toEqual([
+				"/shared",
+				"/shared/nested",
+			]);
+			expect(
+				getWalStore().getDiscoveredSessions()[0]?.additionalDirectories,
+			).toEqual(["/shared", "/shared/nested"]);
+			expect(
+				sessionManager
+					.listAllSessions()
+					.find((session) => session.sessionId === "discovered-roots")
+					?.additionalDirectories,
+			).toEqual(["/shared", "/shared/nested"]);
 		});
 	});
 
@@ -1711,6 +1782,8 @@ describe("SessionManager", () => {
 
 			const legacyDb = new Database(legacyConfig.walDbPath);
 			legacyDb.exec(`
+				ALTER TABLE sessions DROP COLUMN additional_directories_json;
+				ALTER TABLE discovered_sessions DROP COLUMN additional_directories_json;
 				DELETE FROM schema_version WHERE version > 7;
 				DROP TABLE message_send_results;
 				DROP TABLE session_revision_keys;

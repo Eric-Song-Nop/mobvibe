@@ -152,6 +152,86 @@ describe("WalStore", () => {
 		});
 	});
 
+	describe("additional directories", () => {
+		it("round-trips the complete ordered list for WAL sessions", () => {
+			walStore.ensureSession({
+				sessionId: "session-roots",
+				machineId: "machine-1",
+				backendId: "backend-1",
+				cwd: "/repo",
+				additionalDirectories: ["/data", "/data/nested"],
+			});
+
+			expect(
+				walStore.getSession("session-roots")?.additionalDirectories,
+			).toEqual(["/data", "/data/nested"]);
+
+			walStore.ensureSession({
+				sessionId: "session-roots",
+				machineId: "machine-1",
+				backendId: "backend-1",
+				additionalDirectories: [],
+			});
+			expect(
+				walStore.getSession("session-roots")?.additionalDirectories,
+			).toEqual([]);
+		});
+
+		it("round-trips discovered session roots across reopen", () => {
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: "discovered-roots",
+					backendId: "backend-1",
+					cwd: "/repo",
+					additionalDirectories: ["/one", "/two"],
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+			walStore.close();
+			walStore = new WalStore(dbPath);
+
+			expect(
+				walStore.getDiscoveredSessions()[0]?.additionalDirectories,
+			).toEqual(["/one", "/two"]);
+		});
+
+		it("migrates schema 11 rows with empty lists", () => {
+			walStore.ensureSession({
+				sessionId: "legacy-session",
+				machineId: "machine-1",
+				backendId: "backend-1",
+			});
+			walStore.saveDiscoveredSessions([
+				{
+					sessionId: "legacy-discovered",
+					backendId: "backend-1",
+					cwd: "/legacy",
+					discoveredAt: new Date().toISOString(),
+					isStale: false,
+				},
+			]);
+			walStore.close();
+
+			const db = new Database(dbPath);
+			db.exec(`
+				ALTER TABLE sessions DROP COLUMN additional_directories_json;
+				ALTER TABLE discovered_sessions DROP COLUMN additional_directories_json;
+				DELETE FROM schema_version WHERE version = 12;
+			`);
+			db.close();
+
+			walStore = new WalStore(dbPath);
+			expect(walStore.getInitialSchemaVersion()).toBe(11);
+			expect(
+				walStore.getSession("legacy-session")?.additionalDirectories,
+			).toEqual([]);
+			expect(
+				walStore.getDiscoveredSessions()[0]?.additionalDirectories,
+			).toEqual([]);
+		});
+	});
+
 	describe("appendEvent", () => {
 		it("should append events with incrementing sequence", () => {
 			walStore.ensureSession({
@@ -941,6 +1021,7 @@ describe("WalStore", () => {
 
 			const db = new Database(dbPath);
 			db.exec(`
+				ALTER TABLE sessions DROP COLUMN additional_directories_json;
 				DROP TABLE IF EXISTS schema_version;
 				CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
 				INSERT INTO schema_version (version) VALUES (5);
