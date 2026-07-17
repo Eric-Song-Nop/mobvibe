@@ -138,6 +138,19 @@ export type AgentMcpCapabilities = {
 	perSessionBridge?: boolean;
 };
 
+/** A stable, Agent-managed ACP authentication method. */
+export type AgentAuthMethod = {
+	id: string;
+	name: string;
+	description?: string | null;
+};
+
+/** Backend-scoped stable ACP authentication capabilities. */
+export type AgentAuthenticationCapabilities = {
+	methods: AgentAuthMethod[];
+	logout: boolean;
+};
+
 export type AgentSessionCapabilities = {
 	list: boolean;
 	load: boolean;
@@ -147,6 +160,7 @@ export type AgentSessionCapabilities = {
 	additionalDirectories?: boolean;
 	prompt?: AgentPromptCapabilities;
 	mcp?: AgentMcpCapabilities;
+	auth?: AgentAuthenticationCapabilities;
 };
 
 /** Result of discovering sessions */

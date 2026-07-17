@@ -142,6 +142,9 @@ describe("SocketClient restore semantics", () => {
 		getMessageSendResult: ReturnType<typeof mock>;
 		recordMessageSendResult: ReturnType<typeof mock>;
 		getSession: ReturnType<typeof mock>;
+		getAgentCapabilities: ReturnType<typeof mock>;
+		authenticateAgent: ReturnType<typeof mock>;
+		logoutAgent: ReturnType<typeof mock>;
 		loadSession: ReturnType<typeof mock>;
 		resumeSession: ReturnType<typeof mock>;
 		reloadSession: ReturnType<typeof mock>;
@@ -227,6 +230,20 @@ describe("SocketClient restore semantics", () => {
 				connection: promptConnection,
 				cwd: "/tmp/project",
 			})),
+			getAgentCapabilities: mock(() =>
+				Promise.resolve({
+					list: false,
+					load: false,
+					auth: {
+						methods: [{ id: "browser", name: "Browser sign-in" }],
+						logout: true,
+					},
+				}),
+			),
+			authenticateAgent: mock(() =>
+				Promise.resolve({ list: false, load: false }),
+			),
+			logoutAgent: mock(() => Promise.resolve({ list: false, load: false })),
 			loadSession: mock(() => Promise.resolve({ sessionId: "session-1" })),
 			resumeSession: mock(() => Promise.resolve({ sessionId: "session-1" })),
 			reloadSession: mock(() => Promise.resolve({ sessionId: "session-1" })),
@@ -310,6 +327,68 @@ describe("SocketClient restore semantics", () => {
 		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
 			requestId: "req-config",
 			result: { sessionId: "session-1" },
+		});
+	});
+
+	test("serves backend authentication capabilities over RPC", async () => {
+		const handler = socketHandlers.get("rpc:agent:capabilities");
+		if (!handler) throw new Error("Agent capabilities handler not registered");
+
+		await handler({
+			requestId: "req-agent-capabilities",
+			params: { backendId: "backend-1" },
+		});
+
+		expect(sessionManager.getAgentCapabilities).toHaveBeenCalledWith(
+			"backend-1",
+		);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-agent-capabilities",
+			result: {
+				capabilities: {
+					list: false,
+					load: false,
+					auth: {
+						methods: [{ id: "browser", name: "Browser sign-in" }],
+						logout: true,
+					},
+				},
+			},
+		});
+	});
+
+	test("forwards Agent authentication without credential payloads", async () => {
+		const handler = socketHandlers.get("rpc:agent:authenticate");
+		if (!handler) throw new Error("Agent authenticate handler not registered");
+
+		await handler({
+			requestId: "req-agent-authenticate",
+			params: { backendId: "backend-1", methodId: "browser" },
+		});
+
+		expect(sessionManager.authenticateAgent).toHaveBeenCalledWith(
+			"backend-1",
+			"browser",
+		);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-agent-authenticate",
+			result: { capabilities: { list: false, load: false } },
+		});
+	});
+
+	test("forwards Agent logout and returns the refreshed snapshot", async () => {
+		const handler = socketHandlers.get("rpc:agent:logout");
+		if (!handler) throw new Error("Agent logout handler not registered");
+
+		await handler({
+			requestId: "req-agent-logout",
+			params: { backendId: "backend-1" },
+		});
+
+		expect(sessionManager.logoutAgent).toHaveBeenCalledWith("backend-1");
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-agent-logout",
+			result: { capabilities: { list: false, load: false } },
 		});
 	});
 

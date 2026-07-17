@@ -11,6 +11,7 @@ import type {
 	SessionModeState,
 	SessionNotification,
 } from "@agentclientprotocol/sdk";
+import { RequestError } from "@agentclientprotocol/sdk";
 import {
 	type AcpSessionInfo,
 	type AgentSessionCapabilities,
@@ -72,6 +73,7 @@ const MAX_RECENT_SESSION_DELETES = 1024;
 const MAX_ACTIVE_AGENT_SESSION_OBSERVATIONS = 128;
 const MAX_DELETES_PER_AGENT_SESSION_OBSERVATION = 1024;
 const MAX_SESSION_ID_BYTES = 1024;
+const AGENT_AUTH_OPERATION_TIMEOUT_MS = 120_000;
 
 type RecentSessionDelete = {
 	generation: number;
@@ -414,6 +416,33 @@ const createCapabilityNotSupportedError = (message: string) =>
 		409,
 	);
 
+const createAgentAuthenticationError = (
+	code: "AGENT_AUTHENTICATION_REQUIRED" | "AGENT_AUTHENTICATION_FAILED",
+	message: string,
+	retryable: boolean,
+	status = 409,
+) =>
+	new AppError(
+		createErrorDetail({
+			code,
+			message,
+			retryable,
+			scope: "service",
+		}),
+		status,
+	);
+
+const translateAgentAuthenticationRequired = (error: unknown): never => {
+	if (error instanceof RequestError && error.code === -32000) {
+		throw createAgentAuthenticationError(
+			"AGENT_AUTHENTICATION_REQUIRED",
+			"Agent authentication is required",
+			false,
+		);
+	}
+	throw error;
+};
+
 const isValidWorkspacePath = async (cwd: string): Promise<boolean> => {
 	try {
 		const stats = await fs.stat(cwd);
@@ -428,6 +457,21 @@ export type SessionManagerDependencies = {
 	createGitWorktree?: typeof createGitWorktree;
 	isGitRepo?: typeof isGitRepo;
 	resolveGitProjectContext?: typeof resolveGitProjectContext;
+	agentAuthOperationTimeoutMs?: number;
+};
+
+type CreateManagedSessionOptions = {
+	cwd?: string;
+	additionalDirectories?: string[];
+	title?: string;
+	backendId: string;
+	worktree?: CreateSessionWorktreeOptions;
+};
+
+type DiscoverManagedSessionsOptions = {
+	cwd?: string;
+	backendId: string;
+	cursor?: string;
 };
 
 export class SessionManager {
@@ -447,6 +491,7 @@ export class SessionManager {
 	private readonly createGitWorktree: typeof createGitWorktree;
 	private readonly isGitRepo: typeof isGitRepo;
 	private readonly resolveGitProjectContext: typeof resolveGitProjectContext;
+	private readonly agentAuthOperationTimeoutMs: number;
 	private readonly activeMessageIdBySession = new Map<string, string>();
 	private readonly sessionReloadTails = new Map<string, Promise<void>>();
 	private readonly closedSessionRecords = new WeakSet<SessionRecord>();
@@ -469,6 +514,9 @@ export class SessionManager {
 	private sessionLifecycleGeneration = 0;
 	/** Per-backend idle connections (initialized but no session bound) */
 	private idleConnections = new Map<string, AcpConnection>();
+	/** Serializes every operation that may acquire or release a backend process. */
+	private readonly backendLifecycleTails = new Map<string, Promise<void>>();
+	private shuttingDown = false;
 
 	/** Per-backend capabilities cache */
 	private backendCapabilities = new Map<string, AgentSessionCapabilities>();
@@ -500,6 +548,9 @@ export class SessionManager {
 		this.isGitRepo = dependencies?.isGitRepo ?? isGitRepo;
 		this.resolveGitProjectContext =
 			dependencies?.resolveGitProjectContext ?? resolveGitProjectContext;
+		this.agentAuthOperationTimeoutMs =
+			dependencies?.agentAuthOperationTimeoutMs ??
+			AGENT_AUTH_OPERATION_TIMEOUT_MS;
 		const keyIdentity = cryptoService?.getKeyIdentity?.();
 		if (keyIdentity && cryptoService) {
 			try {
@@ -617,6 +668,58 @@ export class SessionManager {
 				{ backendId, state: status.state, sessionId: status.sessionId },
 				"connection_discarded_not_reusable",
 			);
+		}
+	}
+
+	private enqueueBackendLifecycle<T>(
+		backendId: string,
+		operation: () => Promise<T>,
+	): Promise<T> {
+		if (this.shuttingDown) {
+			return Promise.reject(
+				new AppError(
+					createErrorDetail({
+						code: "SESSION_NOT_READY",
+						message: "CLI is shutting down",
+						retryable: true,
+						scope: "service",
+					}),
+					503,
+				),
+			);
+		}
+		const previous = this.backendLifecycleTails.get(backendId);
+		const result = (previous ?? Promise.resolve()).then(operation);
+		const tail = result.then(
+			() => {},
+			() => {},
+		);
+		this.backendLifecycleTails.set(backendId, tail);
+		const clearTail = () => {
+			if (this.backendLifecycleTails.get(backendId) === tail) {
+				this.backendLifecycleTails.delete(backendId);
+			}
+		};
+		void result.then(clearTail, clearTail);
+		return result;
+	}
+
+	private async withAgentAuthTimeout<T>(
+		operation: () => Promise<T>,
+	): Promise<T> {
+		let timeout: NodeJS.Timeout | undefined;
+		try {
+			return await Promise.race([
+				operation(),
+				new Promise<never>((_, reject) => {
+					timeout = setTimeout(
+						() => reject(new Error("Agent authentication operation timed out")),
+						this.agentAuthOperationTimeoutMs,
+					);
+				}),
+			]);
+		} finally {
+			if (timeout) clearTimeout(timeout);
 		}
 	}
 
@@ -1685,15 +1788,19 @@ export class SessionManager {
 		return backend;
 	}
 
-	async createSession(options: {
-		cwd?: string;
-		additionalDirectories?: string[];
-		title?: string;
-		backendId: string;
-		worktree?: CreateSessionWorktreeOptions;
-	}): Promise<SessionSummary> {
+	async createSession(
+		options: CreateManagedSessionOptions,
+	): Promise<SessionSummary> {
 		const backend = this.resolveBackend(options.backendId);
+		return this.enqueueBackendLifecycle(backend.id, () =>
+			this.createSessionOnBackend(options, backend),
+		).catch(translateAgentAuthenticationRequired);
+	}
 
+	private async createSessionOnBackend(
+		options: CreateManagedSessionOptions,
+		backend: AcpBackendConfig,
+	): Promise<SessionSummary> {
 		// Handle worktree creation before acquiring connection
 		let effectiveCwd = options.cwd;
 		let worktreeSourceCwd: string | undefined;
@@ -2379,6 +2486,18 @@ export class SessionManager {
 		sessionId: string,
 		target: { backend: AcpBackendConfig; record?: SessionRecord },
 	): Promise<void> {
+		if (!target.record) {
+			return this.enqueueBackendLifecycle(target.backend.id, () =>
+				this.executeSessionDeleteOnBackend(sessionId, target),
+			).catch(translateAgentAuthenticationRequired);
+		}
+		return this.executeSessionDeleteOnBackend(sessionId, target);
+	}
+
+	private async executeSessionDeleteOnBackend(
+		sessionId: string,
+		target: { backend: AcpBackendConfig; record?: SessionRecord },
+	): Promise<void> {
 		const connection =
 			target.record?.connection ??
 			(await this.acquireConnection(target.backend));
@@ -2584,8 +2703,138 @@ export class SessionManager {
 	 * Shutdown the session manager and close resources.
 	 */
 	async shutdown(): Promise<void> {
+		this.shuttingDown = true;
+		await Promise.all(Array.from(this.backendLifecycleTails.values()));
 		await this.closeAll();
 		this.walStore.close();
+	}
+
+	/** Initialize a backend without creating a session and return a safe snapshot. */
+	async getAgentCapabilities(
+		backendId: string,
+	): Promise<AgentSessionCapabilities> {
+		const backend = this.resolveBackend(backendId);
+		return this.enqueueBackendLifecycle(backend.id, async () => {
+			const connection = await this.acquireConnection(backend);
+			try {
+				const capabilities = connection.getSessionCapabilities();
+				this.backendCapabilities.set(backend.id, capabilities);
+				return capabilities;
+			} finally {
+				this.releaseConnection(backend.id, connection);
+			}
+		});
+	}
+
+	/** Run a stable Agent-managed authentication flow on the backend process. */
+	async authenticateAgent(
+		backendId: string,
+		methodId: string,
+	): Promise<AgentSessionCapabilities> {
+		const backend = this.resolveBackend(backendId);
+		return this.enqueueBackendLifecycle(backend.id, async () => {
+			const connection = await this.acquireConnection(backend);
+			const advertisedMethod = connection
+				.getAuthenticationCapabilities()
+				?.methods.some((method) => method.id === methodId);
+			if (!advertisedMethod) {
+				this.releaseConnection(backend.id, connection);
+				throw new AppError(
+					createErrorDetail({
+						code: "REQUEST_VALIDATION_FAILED",
+						message: "Invalid Agent authentication method",
+						retryable: false,
+						scope: "request",
+					}),
+					400,
+				);
+			}
+
+			try {
+				await this.withAgentAuthTimeout(() =>
+					connection.authenticate(methodId),
+				);
+			} catch {
+				await connection.disconnect().catch(() => {});
+				throw createAgentAuthenticationError(
+					"AGENT_AUTHENTICATION_FAILED",
+					"Agent authentication failed",
+					true,
+					502,
+				);
+			}
+
+			const capabilities = connection.getSessionCapabilities();
+			this.backendCapabilities.set(backend.id, capabilities);
+			this.releaseConnection(backend.id, connection);
+			this.emitBackendCapabilitiesChanged(backend.id, capabilities);
+			return capabilities;
+		});
+	}
+
+	/** Logout invalidates the process, so it is never returned to the idle pool. */
+	async logoutAgent(backendId: string): Promise<AgentSessionCapabilities> {
+		const backend = this.resolveBackend(backendId);
+		return this.enqueueBackendLifecycle(backend.id, async () => {
+			if (
+				Array.from(this.sessions.values()).some(
+					(record) => record.backendId === backend.id,
+				)
+			) {
+				throw new AppError(
+					createErrorDetail({
+						code: "SESSION_BUSY",
+						message: "Close active sessions before logging out of this Agent",
+						retryable: false,
+						scope: "service",
+					}),
+					409,
+				);
+			}
+
+			const connection = await this.acquireConnection(backend);
+			if (!connection.supportsLogout()) {
+				this.releaseConnection(backend.id, connection);
+				throw createCapabilityNotSupportedError(
+					"Agent does not support logout",
+				);
+			}
+			const capabilities = connection.getSessionCapabilities();
+			try {
+				await this.withAgentAuthTimeout(() => connection.logout());
+			} catch {
+				throw createAgentAuthenticationError(
+					"AGENT_AUTHENTICATION_FAILED",
+					"Agent logout failed",
+					true,
+					502,
+				);
+			} finally {
+				await connection.disconnect().catch(() => {});
+			}
+			this.backendCapabilities.set(backend.id, capabilities);
+			this.emitBackendCapabilitiesChanged(backend.id, capabilities);
+			return capabilities;
+		});
+	}
+
+	private emitBackendCapabilitiesChanged(
+		backendId: string,
+		capabilities: AgentSessionCapabilities,
+	): void {
+		try {
+			this.emitSessionsChanged({
+				added: [],
+				updated: [],
+				removed: [],
+				backendCapabilities: { [backendId]: capabilities },
+			});
+		} catch (error) {
+			logger.error(
+				{ err: error, backendId },
+				"agent_backend_capabilities_emit_failed",
+			);
+		}
 	}
 
 	/**
@@ -2601,12 +2850,19 @@ export class SessionManager {
 	 * @param options Optional parameters for discovery
 	 * @returns List of discovered sessions and agent capabilities
 	 */
-	async discoverSessions(options: {
-		cwd?: string;
-		backendId: string;
-		cursor?: string;
-	}): Promise<DiscoverSessionsRpcResult> {
+	async discoverSessions(
+		options: DiscoverManagedSessionsOptions,
+	): Promise<DiscoverSessionsRpcResult> {
 		const backend = this.resolveBackend(options.backendId);
+		return this.enqueueBackendLifecycle(backend.id, () =>
+			this.discoverSessionsOnBackend(options, backend),
+		).catch(translateAgentAuthenticationRequired);
+	}
+
+	private async discoverSessionsOnBackend(
+		options: DiscoverManagedSessionsOptions,
+		backend: AcpBackendConfig,
+	): Promise<DiscoverSessionsRpcResult> {
 		const connection = await this.acquireConnection(backend);
 
 		try {
@@ -2797,6 +3053,25 @@ export class SessionManager {
 		backendId: string,
 		additionalDirectories?: string[],
 	): Promise<SessionSummary> {
+		const backend = this.resolveBackend(backendId);
+		return this.enqueueBackendLifecycle(backend.id, () =>
+			this.resumeSessionOnBackend(
+				sessionId,
+				cwd,
+				backendId,
+				additionalDirectories,
+				backend,
+			),
+		).catch(translateAgentAuthenticationRequired);
+	}
+
+	private async resumeSessionOnBackend(
+		sessionId: string,
+		cwd: string,
+		backendId: string,
+		additionalDirectories: string[] | undefined,
+		backend: AcpBackendConfig,
+	): Promise<SessionSummary> {
 		logger.info({ sessionId, cwd, backendId }, "resume_session_start");
 		if (
 			sessionId.length === 0 ||
@@ -2880,7 +3155,6 @@ export class SessionManager {
 				400,
 			);
 		}
-		const backend = this.resolveBackend(backendId);
 		const normalizedAdditionalDirectories = normalizeAdditionalDirectories(
 			cwd,
 			additionalDirectories,
@@ -3099,6 +3373,25 @@ export class SessionManager {
 		backendId: string,
 		additionalDirectories?: string[],
 	): Promise<SessionSummary> {
+		const backend = this.resolveBackend(backendId);
+		return this.enqueueBackendLifecycle(backend.id, () =>
+			this.loadSessionOnBackend(
+				sessionId,
+				cwd,
+				backendId,
+				additionalDirectories,
+				backend,
+			),
+		).catch(translateAgentAuthenticationRequired);
+	}
+
+	private async loadSessionOnBackend(
+		sessionId: string,
+		cwd: string,
+		backendId: string,
+		additionalDirectories: string[] | undefined,
+		backend: AcpBackendConfig,
+	): Promise<SessionSummary> {
 		logger.info({ sessionId, cwd, backendId }, "load_session_start");
 		this.assertSessionMutable(sessionId);
 		if (this.walStore.isArchived(sessionId)) {
@@ -3121,7 +3414,6 @@ export class SessionManager {
 			return this.buildSummary(existing);
 		}
 
-		const backend = this.resolveBackend(backendId);
 		const connection = await this.acquireConnection(backend);
 		const normalizedAdditionalDirectories = normalizeAdditionalDirectories(
 			cwd,

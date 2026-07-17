@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type {
+	AgentBackendRpcParams,
+	AgentCapabilitiesRpcResult,
 	ArchiveSessionParams,
+	AuthenticateAgentRpcParams,
 	BulkArchiveSessionsParams,
 	CancelSessionParams,
 	CloseSessionParams,
@@ -66,6 +69,7 @@ import {
 } from "@mobvibe/shared";
 import type { Socket } from "socket.io";
 import { logger } from "../lib/logger.js";
+import { sanitizeAgentSessionCapabilities } from "./agent-capability-sanitizer.js";
 import type { CliRecord, CliRegistry } from "./cli-registry.js";
 import {
 	createMessageSendKey,
@@ -87,6 +91,9 @@ type PendingRpc<T> = {
 };
 
 const RPC_TIMEOUT = 120000; // 2 minutes for long operations like message sending
+const AGENT_CAPABILITIES_RPC_TIMEOUT = 15_000;
+const AGENT_AUTHENTICATE_RPC_TIMEOUT = 125_000;
+const AGENT_LOGOUT_RPC_TIMEOUT = 30_000;
 const MAX_DURABLE_MESSAGE_SENDS = 10_000;
 const MAX_DURABLE_MESSAGE_SENDS_PER_OWNER = 1_000;
 const RECENT_SESSION_DELETE_TTL_MS = 5 * 60 * 1000;
@@ -109,6 +116,17 @@ type SessionDeleteEntry = {
 
 const createSessionDeleteKey = (ownerId: string, sessionId: string): string =>
 	JSON.stringify([ownerId, sessionId]);
+
+const getRpcRejectionLogContext = (event: string, error: Error) => {
+	if (!event.startsWith("rpc:agent:")) return { err: error };
+	return error instanceof AppError
+		? {
+				errorCode: error.detail.code,
+				errorStatus: error.status,
+				retryable: error.detail.retryable,
+			}
+		: { errorType: error.name };
+};
 
 export class SessionRouter {
 	private pendingRpcs = new Map<string, PendingRpc<unknown>>();
@@ -177,6 +195,58 @@ export class SessionRouter {
 		return cli;
 	}
 
+	/** Resolve one registered backend without leaking another user's topology. */
+	private resolveBackendForUser(
+		machineId: string,
+		backendId: string,
+		userId: string,
+	): CliRecord {
+		const cli = this.cliRegistry.getCliByMachineIdForUser(machineId, userId);
+		if (
+			!cli ||
+			!cli.backends.some((backend) => backend.backendId === backendId)
+		) {
+			throw new AppError(
+				createErrorDetail({
+					code: "AUTHORIZATION_FAILED",
+					message: "Machine or backend not found",
+					retryable: false,
+					scope: "request",
+				}),
+				404,
+			);
+		}
+		return cli;
+	}
+
+	private updateAgentCapabilities(
+		cli: CliRecord,
+		backendId: string,
+		result: AgentCapabilitiesRpcResult,
+	): AgentCapabilitiesRpcResult {
+		if (
+			typeof result !== "object" ||
+			result === null ||
+			typeof result.capabilities !== "object" ||
+			result.capabilities === null
+		) {
+			throw new AppError(
+				createErrorDetail({
+					code: "ACP_PROTOCOL_MISMATCH",
+					message: "CLI returned an invalid Agent capability response",
+					retryable: false,
+					scope: "service",
+				}),
+				502,
+			);
+		}
+		const capabilities = sanitizeAgentSessionCapabilities(result.capabilities);
+		this.cliRegistry.updateBackendCapabilities(cli.socket.id, {
+			[backendId]: capabilities,
+		});
+		return { capabilities };
+	}
+
 	handleRpcResponse(response: RpcResponse<unknown>, sourceSocketId?: string) {
 		const pending = this.pendingRpcs.get(response.requestId);
 		if (!pending) {
@@ -203,7 +273,6 @@ export class SessionRouter {
 					code: response.error.code,
 					scope: response.error.scope,
 					retryable: response.error.retryable,
-					detail: response.error.detail,
 				},
 				"rpc_response_error",
 			);
@@ -266,6 +335,215 @@ export class SessionRouter {
 		);
 
 		return result;
+	}
+
+	/** Probe stable Agent-managed authentication capabilities for one backend. */
+	async getAgentCapabilities(
+		params: AgentBackendRpcParams,
+		userId: string,
+	): Promise<AgentCapabilitiesRpcResult> {
+		if (!params.machineId) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "machineId is required",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		const cli = this.resolveBackendForUser(
+			params.machineId,
+			params.backendId,
+			userId,
+		);
+		logger.info(
+			{
+				machineId: params.machineId,
+				backendId: params.backendId,
+				userId,
+			},
+			"agent_capabilities_rpc_start",
+		);
+		const result = await this.sendRpc<
+			AgentBackendRpcParams,
+			AgentCapabilitiesRpcResult
+		>(
+			cli.socket,
+			"rpc:agent:capabilities",
+			{ backendId: params.backendId },
+			AGENT_CAPABILITIES_RPC_TIMEOUT,
+		);
+		const sanitized = this.updateAgentCapabilities(
+			cli,
+			params.backendId,
+			result,
+		);
+		logger.info(
+			{
+				machineId: params.machineId,
+				backendId: params.backendId,
+				methodCount: sanitized.capabilities.auth?.methods.length ?? 0,
+				logout: sanitized.capabilities.auth?.logout ?? false,
+			},
+			"agent_capabilities_rpc_complete",
+		);
+		return sanitized;
+	}
+
+	/** Run a stable Agent-managed authentication flow. */
+	async authenticateAgent(
+		params: AuthenticateAgentRpcParams,
+		userId: string,
+	): Promise<AgentCapabilitiesRpcResult> {
+		if (!params.machineId) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "machineId is required",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		const cli = this.resolveBackendForUser(
+			params.machineId,
+			params.backendId,
+			userId,
+		);
+		const capabilities =
+			cli.backendCapabilities?.[params.backendId] ??
+			(
+				await this.getAgentCapabilities(
+					{ machineId: params.machineId, backendId: params.backendId },
+					userId,
+				)
+			).capabilities;
+		const methods = capabilities.auth?.methods ?? [];
+		if (methods.length === 0) {
+			throw new AppError(
+				createErrorDetail({
+					code: "CAPABILITY_NOT_SUPPORTED",
+					message: "Agent does not offer a stable authentication method",
+					retryable: false,
+					scope: "request",
+				}),
+				409,
+			);
+		}
+		if (!methods.some((method) => method.id === params.methodId)) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Unknown Agent authentication method",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		logger.info(
+			{
+				machineId: params.machineId,
+				backendId: params.backendId,
+				methodId: params.methodId,
+				userId,
+			},
+			"agent_authenticate_rpc_start",
+		);
+		const result = await this.sendRpc<
+			AuthenticateAgentRpcParams,
+			AgentCapabilitiesRpcResult
+		>(
+			cli.socket,
+			"rpc:agent:authenticate",
+			{
+				backendId: params.backendId,
+				methodId: params.methodId,
+			},
+			AGENT_AUTHENTICATE_RPC_TIMEOUT,
+		);
+		const sanitized = this.updateAgentCapabilities(
+			cli,
+			params.backendId,
+			result,
+		);
+		logger.info(
+			{ machineId: params.machineId, backendId: params.backendId, userId },
+			"agent_authenticate_rpc_complete",
+		);
+		return sanitized;
+	}
+
+	/** End the stable Agent-managed authentication state for one backend. */
+	async logoutAgent(
+		params: AgentBackendRpcParams,
+		userId: string,
+	): Promise<AgentCapabilitiesRpcResult> {
+		if (!params.machineId) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "machineId is required",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+		const cli = this.resolveBackendForUser(
+			params.machineId,
+			params.backendId,
+			userId,
+		);
+		const capabilities =
+			cli.backendCapabilities?.[params.backendId] ??
+			(
+				await this.getAgentCapabilities(
+					{ machineId: params.machineId, backendId: params.backendId },
+					userId,
+				)
+			).capabilities;
+		if (capabilities.auth?.logout !== true) {
+			throw new AppError(
+				createErrorDetail({
+					code: "CAPABILITY_NOT_SUPPORTED",
+					message: "Agent does not support logout",
+					retryable: false,
+					scope: "request",
+				}),
+				409,
+			);
+		}
+		logger.info(
+			{
+				machineId: params.machineId,
+				backendId: params.backendId,
+				userId,
+			},
+			"agent_logout_rpc_start",
+		);
+		const result = await this.sendRpc<
+			AgentBackendRpcParams,
+			AgentCapabilitiesRpcResult
+		>(
+			cli.socket,
+			"rpc:agent:logout",
+			{ backendId: params.backendId },
+			AGENT_LOGOUT_RPC_TIMEOUT,
+		);
+		const sanitized = this.updateAgentCapabilities(
+			cli,
+			params.backendId,
+			result,
+		);
+		logger.info(
+			{ machineId: params.machineId, backendId: params.backendId, userId },
+			"agent_logout_rpc_complete",
+		);
+		return sanitized;
 	}
 
 	/**
@@ -1058,17 +1336,18 @@ export class SessionRouter {
 			cli.socket.id,
 			result.sessions,
 		);
+		const capabilities = sanitizeAgentSessionCapabilities(result.capabilities);
 
 		logger.info(
 			{
 				machineId: cli.machineId,
 				sessionCount: result.sessions.length,
-				capabilities: result.capabilities,
+				capabilities,
 			},
 			"sessions_discover_rpc_complete",
 		);
 
-		return { ...result, sessions };
+		return { ...result, sessions, capabilities };
 	}
 
 	/**
@@ -1561,6 +1840,7 @@ export class SessionRouter {
 		socket: Socket,
 		event: string,
 		params: TParams,
+		timeoutMs = RPC_TIMEOUT,
 	): Promise<TResult> {
 		return new Promise((resolve, reject) => {
 			const requestId = randomUUID();
@@ -1568,12 +1848,9 @@ export class SessionRouter {
 			const timeout = setTimeout(() => {
 				this.pendingRpcs.delete(requestId);
 				const durationMs = Number(process.hrtime.bigint() - start) / 1_000_000;
-				logger.warn(
-					{ requestId, event, timeoutMs: RPC_TIMEOUT, durationMs },
-					"rpc_timeout",
-				);
+				logger.warn({ requestId, event, timeoutMs, durationMs }, "rpc_timeout");
 				reject(new Error("RPC timeout"));
-			}, RPC_TIMEOUT);
+			}, timeoutMs);
 
 			this.pendingRpcs.set(requestId, {
 				requestId,
@@ -1591,7 +1868,12 @@ export class SessionRouter {
 					const durationMs =
 						Number(process.hrtime.bigint() - start) / 1_000_000;
 					logger.warn(
-						{ requestId, event, durationMs, err: error },
+						{
+							requestId,
+							event,
+							durationMs,
+							...getRpcRejectionLogContext(event, error),
+						},
 						"rpc_response_rejected",
 					);
 					reject(error as Error);

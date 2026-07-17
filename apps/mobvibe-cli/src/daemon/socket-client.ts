@@ -395,6 +395,88 @@ export class SocketClient extends EventEmitter {
 		const { sessionManager } = this.options;
 		const { agentTeamStore } = this;
 
+		this.socket.on("rpc:agent:capabilities", async (request) => {
+			try {
+				logger.info(
+					{
+						requestId: request.requestId,
+						backendId: request.params.backendId,
+					},
+					"rpc_agent_capabilities",
+				);
+				const capabilities = await sessionManager.getAgentCapabilities(
+					request.params.backendId,
+				);
+				this.sendRpcResponse(request.requestId, { capabilities });
+			} catch (error) {
+				logger.error(
+					{
+						requestId: request.requestId,
+						backendId: request.params.backendId,
+						errorCode:
+							error instanceof AppError ? error.detail.code : "INTERNAL_ERROR",
+					},
+					"rpc_agent_capabilities_error",
+				);
+				this.sendRpcError(request.requestId, error, { sensitive: true });
+			}
+		});
+
+		this.socket.on("rpc:agent:authenticate", async (request) => {
+			try {
+				logger.info(
+					{
+						requestId: request.requestId,
+						backendId: request.params.backendId,
+					},
+					"rpc_agent_authenticate",
+				);
+				const capabilities = await sessionManager.authenticateAgent(
+					request.params.backendId,
+					request.params.methodId,
+				);
+				this.sendRpcResponse(request.requestId, { capabilities });
+			} catch (error) {
+				logger.error(
+					{
+						requestId: request.requestId,
+						backendId: request.params.backendId,
+						errorCode:
+							error instanceof AppError ? error.detail.code : "INTERNAL_ERROR",
+					},
+					"rpc_agent_authenticate_error",
+				);
+				this.sendRpcError(request.requestId, error, { sensitive: true });
+			}
+		});
+
+		this.socket.on("rpc:agent:logout", async (request) => {
+			try {
+				logger.info(
+					{
+						requestId: request.requestId,
+						backendId: request.params.backendId,
+					},
+					"rpc_agent_logout",
+				);
+				const capabilities = await sessionManager.logoutAgent(
+					request.params.backendId,
+				);
+				this.sendRpcResponse(request.requestId, { capabilities });
+			} catch (error) {
+				logger.error(
+					{
+						requestId: request.requestId,
+						backendId: request.params.backendId,
+						errorCode:
+							error instanceof AppError ? error.detail.code : "INTERNAL_ERROR",
+					},
+					"rpc_agent_logout_error",
+				);
+				this.sendRpcError(request.requestId, error, { sensitive: true });
+			}
+		});
+
 		// Session create
 		this.socket.on("rpc:session:create", async (request) => {
 			try {
@@ -2135,10 +2217,17 @@ export class SocketClient extends EventEmitter {
 		logger.debug({ requestId }, "rpc_response_sent");
 	}
 
-	private sendRpcError(requestId: string, error: unknown) {
-		const message = error instanceof Error ? error.message : "Unknown error";
+	private sendRpcError(
+		requestId: string,
+		error: unknown,
+		options?: { sensitive?: boolean },
+	) {
+		const message =
+			!options?.sensitive && error instanceof Error
+				? error.message
+				: "Request failed";
 		const detail =
-			process.env.NODE_ENV === "development"
+			!options?.sensitive && process.env.NODE_ENV === "development"
 				? error instanceof Error
 					? error.stack
 					: undefined
@@ -2146,7 +2235,7 @@ export class SocketClient extends EventEmitter {
 		logger.error(
 			{
 				requestId,
-				err: error,
+				...(!options?.sensitive ? { err: error } : {}),
 				message,
 				detail,
 			},

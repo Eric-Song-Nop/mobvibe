@@ -404,6 +404,98 @@ describe("setupCliHandlers", () => {
 		);
 	});
 
+	it("rejects discovery for a backend registered only on another machine", () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({
+				machineId: "machine-1",
+				backends: [{ backendId: "backend-1", backendLabel: "Machine One" }],
+			}),
+			{ userId: "user-1", deviceId: "device-1" },
+		);
+		const otherSocket = {
+			id: "socket-2",
+			disconnect: vi.fn(),
+		} as unknown as Socket;
+		registry.register(
+			otherSocket,
+			createMockRegistrationInfo({
+				machineId: "machine-2",
+				backends: [
+					{ backendId: "other-machine-only", backendLabel: "Machine Two" },
+				],
+			}),
+			{ userId: "user-1", deviceId: "device-2" },
+		);
+		emitToWebui.mockClear();
+		vi.mocked(logger.warn).mockClear();
+
+		socketHandlers["sessions:discovered"]?.({
+			sessions: [
+				{
+					sessionId: "cross-machine-session",
+					cwd: "/private/repo",
+					title: "Must not be accepted",
+				},
+			],
+			capabilities: {
+				list: true,
+				load: true,
+			},
+			backendId: "other-machine-only",
+			backendLabel: "Spoofed label",
+		});
+
+		expect(
+			registry
+				.getCliBySocketId(socket.id)
+				?.sessions.some(
+					(session) => session.sessionId === "cross-machine-session",
+				),
+		).toBe(false);
+		expect(
+			registry.getCliBySocketId(socket.id)?.backendCapabilities,
+		).toBeUndefined();
+		expect(emitToWebui).not.toHaveBeenCalled();
+		expect(logger.warn).toHaveBeenCalledWith(
+			{
+				socketId: socket.id,
+				machineId: "machine-1",
+				backendId: "other-machine-only",
+			},
+			"sessions_discovered_unknown_backend",
+		);
+	});
+
+	it("uses the registered backend label for discovered sessions", () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({
+				backends: [{ backendId: "backend-1", backendLabel: "Trusted label" }],
+			}),
+			{ userId: "user-1", deviceId: "device-1" },
+		);
+
+		socketHandlers["sessions:discovered"]?.({
+			sessions: [
+				{
+					sessionId: "trusted-backend-label",
+					cwd: "/repo",
+				},
+			],
+			backendId: "backend-1",
+			backendLabel: "Spoofed label",
+		});
+
+		expect(
+			registry
+				.getCliBySocketId(socket.id)
+				?.sessions.find(
+					(session) => session.sessionId === "trusted-backend-label",
+				)?.backendLabel,
+		).toBe("Trusted label");
+	});
+
 	it("preserves additional directories when mapping discovered sessions", () => {
 		registry.register(
 			socket,

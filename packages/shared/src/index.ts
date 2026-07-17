@@ -194,6 +194,8 @@ export type {
 	AcpBackendSummary,
 	AcpConnectionState,
 	AcpSessionInfo,
+	AgentAuthenticationCapabilities,
+	AgentAuthMethod,
 	AgentMcpCapabilities,
 	AgentPromptCapabilities,
 	AgentSessionCapabilities,
@@ -212,8 +214,11 @@ export type {
 export type {
 	// HTTP API response types
 	AcpBackendsResponse,
+	AgentBackendRpcParams,
+	AgentCapabilitiesRpcResult,
 	AgentTeamRpcResult,
 	ArchiveSessionParams,
+	AuthenticateAgentRpcParams,
 	BulkArchiveSessionsParams,
 	CancelSessionParams,
 	CancelSessionResponse,

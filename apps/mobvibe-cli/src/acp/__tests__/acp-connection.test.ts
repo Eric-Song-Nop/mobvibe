@@ -18,7 +18,9 @@ mock.module("@agentclientprotocol/sdk", () => ({
 	client: mock(() => {}),
 	methods: {
 		agent: {
+			authenticate: "authenticate",
 			initialize: "initialize",
+			logout: "logout",
 			session: {
 				cancel: "session/cancel",
 				close: "session/close",
@@ -52,6 +54,22 @@ mock.module("@agentclientprotocol/sdk", () => ({
 	},
 	ndJsonStream: mock(() => {}),
 	PROTOCOL_VERSION: "0.1.0",
+	RequestError: class RequestError extends Error {
+		code: number;
+
+		constructor(code: number, message: string) {
+			super(message);
+			this.code = code;
+		}
+
+		static invalidParams(_data?: unknown, message?: string) {
+			return new RequestError(-32602, `Invalid params: ${message ?? ""}`);
+		}
+
+		static methodNotFound(method: string) {
+			return new RequestError(-32601, `Method not found: ${method}`);
+		}
+	},
 }));
 
 // Mock child_process wrapper so other tests can safely mock node:child_process
@@ -77,11 +95,13 @@ mock.module("node:stream", () => ({
 
 import type { AcpBackendConfig } from "../../config.js";
 import {
+	ACP_CLIENT_CAPABILITIES,
 	ACP_FILE_SYSTEM_CAPABILITIES,
 	AcpConnection,
 	MAX_ACP_FILE_BYTES,
 	MAX_ACP_FILE_LINES,
 	normalizeAdditionalDirectories,
+	sanitizeStableAuthMethods,
 } from "../acp-connection.js";
 
 const createMockBackendConfig = (): AcpBackendConfig => ({
@@ -249,6 +269,123 @@ describe("AcpConnection", () => {
 
 			expect(connection.getSessionCapabilities().delete).toBe(true);
 			expect(connection.supportsSessionDelete()).toBe(true);
+		});
+	});
+
+	describe("Agent-managed authentication", () => {
+		it("does not advertise unstable client-side auth handling", () => {
+			expect(Object.hasOwn(ACP_CLIENT_CAPABILITIES, "auth")).toBe(false);
+		});
+
+		it("keeps only bounded stable methods and deduplicates by ID", () => {
+			const methods = sanitizeStableAuthMethods([
+				{
+					id: "browser",
+					name: "Sign in with browser",
+					description: "The Agent owns the complete flow",
+					_meta: { ignored: true },
+				},
+				{ id: "browser", name: "Duplicate" },
+				{
+					type: "env_var",
+					id: "api-key",
+					name: "API key",
+					vars: [{ name: "SECRET" }],
+				},
+				{
+					type: "terminal",
+					id: "terminal",
+					name: "Terminal",
+					env: { SECRET: "must-not-cross" },
+				},
+				{ id: "x".repeat(129), name: "Too long" },
+				{ id: " padded", name: "Padded ID" },
+				{ id: "bad\u0000id", name: "Control ID" },
+				{ id: "control-name", name: "Control\nname" },
+				{
+					id: "control-description",
+					name: "Control description",
+					description: "unsafe\u007fdescription",
+				},
+				{ id: "unicode", name: "登录方式", description: "安全认证" },
+				{ id: "missing-name", name: "" },
+			]);
+
+			expect(methods).toEqual([
+				{
+					id: "browser",
+					name: "Sign in with browser",
+					description: "The Agent owns the complete flow",
+				},
+				{ id: "unicode", name: "登录方式", description: "安全认证" },
+			]);
+			expect(JSON.stringify(methods)).not.toContain("SECRET");
+		});
+
+		it("bounds the advertised method count", () => {
+			const methods = sanitizeStableAuthMethods(
+				Array.from({ length: 40 }, (_, index) => ({
+					id: `method-${index}`,
+					name: `Method ${index}`,
+				})),
+			);
+
+			expect(methods).toHaveLength(32);
+		});
+
+		it("exposes sanitized methods and gates logout by capability presence", () => {
+			const internal = connection as unknown as {
+				agentCapabilities: { auth: { logout: Record<string, never> } };
+				authMethods: Array<{ id: string; name: string }>;
+			};
+			internal.agentCapabilities = { auth: { logout: {} } };
+			internal.authMethods = [{ id: "browser", name: "Browser" }];
+
+			expect(connection.getSessionCapabilities().auth).toEqual({
+				methods: [{ id: "browser", name: "Browser" }],
+				logout: true,
+			});
+			expect(connection.supportsLogout()).toBe(true);
+		});
+
+		it("authenticates only an advertised stable method", async () => {
+			const request = mock(() => Promise.resolve({}));
+			const internal = connection as unknown as {
+				state: "ready";
+				authMethods: Array<{ id: string; name: string }>;
+				connection: { agent: { request: typeof request } };
+			};
+			internal.state = "ready";
+			internal.authMethods = [{ id: "browser", name: "Browser" }];
+			internal.connection = { agent: { request } };
+
+			await connection.authenticate("browser");
+			expect(request).toHaveBeenCalledWith("authenticate", {
+				methodId: "browser",
+			});
+			await expect(connection.authenticate("unknown")).rejects.toThrow(
+				"not advertised",
+			);
+			expect(request).toHaveBeenCalledTimes(1);
+		});
+
+		it("sends logout only when the Agent advertises it", async () => {
+			const request = mock(() => Promise.resolve({}));
+			const internal = connection as unknown as {
+				state: "ready";
+				agentCapabilities: { auth?: { logout: Record<string, never> } };
+				connection: { agent: { request: typeof request } };
+			};
+			internal.state = "ready";
+			internal.agentCapabilities = {};
+			internal.connection = { agent: { request } };
+
+			await expect(connection.logout()).rejects.toThrow("Method not found");
+			expect(request).not.toHaveBeenCalled();
+
+			internal.agentCapabilities = { auth: { logout: {} } };
+			await connection.logout();
+			expect(request).toHaveBeenCalledWith("logout", {});
 		});
 	});
 

@@ -11,7 +11,9 @@ import type {
 	SessionNotification,
 	SetSessionConfigOptionResponse,
 } from "@agentclientprotocol/sdk";
+import { RequestError } from "@agentclientprotocol/sdk";
 import {
+	type AgentSessionCapabilities,
 	decryptPayload,
 	deriveContentKeyPair,
 	generateMasterSecret,
@@ -128,13 +130,22 @@ const createMockConnection = () => ({
 		name: "claude-code",
 		title: "Claude Code",
 	})),
-	getSessionCapabilities: mock(() => ({
-		list: true,
-		load: true,
-		resume: true,
-		close: true,
-		delete: true,
+	getSessionCapabilities: mock(
+		(): AgentSessionCapabilities => ({
+			list: true,
+			load: true,
+			resume: true,
+			close: true,
+			delete: true,
+		}),
+	),
+	getAuthenticationCapabilities: mock(() => ({
+		methods: [{ id: "browser", name: "Browser sign-in" }],
+		logout: true,
 	})),
+	supportsLogout: mock(() => true),
+	authenticate: mock((): Promise<void> => Promise.resolve()),
+	logout: mock((): Promise<void> => Promise.resolve()),
 	supportsSessionList: mock(() => true),
 	supportsSessionLoad: mock(() => true),
 	supportsSessionResume: mock(() => true),
@@ -288,6 +299,225 @@ describe("SessionManager", () => {
 		mockResolveGitProjectContext.mockClear();
 		sessionManager.createConnection = () =>
 			mockConnection as unknown as AcpConnection;
+	});
+
+	describe("Agent-managed authentication", () => {
+		it("probes capabilities without creating a session", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValue({
+				list: true,
+				load: false,
+				auth: {
+					methods: [{ id: "browser", name: "Browser sign-in" }],
+					logout: true,
+				},
+			});
+
+			const capabilities =
+				await sessionManager.getAgentCapabilities("backend-1");
+
+			expect(capabilities.auth).toEqual({
+				methods: [{ id: "browser", name: "Browser sign-in" }],
+				logout: true,
+			});
+			expect(mockConnection.connect).toHaveBeenCalledTimes(1);
+			expect(mockConnection.createSession).not.toHaveBeenCalled();
+		});
+
+		it("reuses the authenticated process for the next session", async () => {
+			await sessionManager.authenticateAgent("backend-1", "browser");
+			await sessionManager.createSession({
+				backendId: "backend-1",
+				cwd: "/home/user/project",
+			});
+
+			expect(mockConnection.authenticate).toHaveBeenCalledWith("browser");
+			expect(mockConnection.connect).toHaveBeenCalledTimes(1);
+			expect(mockConnection.createSession).toHaveBeenCalledTimes(1);
+		});
+
+		it("discards a connection when authentication fails", async () => {
+			mockConnection.authenticate.mockRejectedValueOnce(
+				new Error("agent failed"),
+			);
+
+			await expect(
+				sessionManager.authenticateAgent("backend-1", "browser"),
+			).rejects.toMatchObject({
+				detail: { code: "AGENT_AUTHENTICATION_FAILED" },
+			});
+			expect(mockConnection.disconnect).toHaveBeenCalledTimes(1);
+
+			await sessionManager.getAgentCapabilities("backend-1");
+			expect(mockConnection.connect).toHaveBeenCalledTimes(2);
+		});
+
+		it("rejects logout while that backend has an active session", async () => {
+			await sessionManager.createSession({
+				backendId: "backend-1",
+				cwd: "/home/user/project",
+			});
+
+			await expect(
+				sessionManager.logoutAgent("backend-1"),
+			).rejects.toMatchObject({ detail: { code: "SESSION_BUSY" } });
+			expect(mockConnection.logout).not.toHaveBeenCalled();
+		});
+
+		it("disconnects the process after logout success or failure", async () => {
+			await sessionManager.logoutAgent("backend-1");
+			expect(mockConnection.logout).toHaveBeenCalledTimes(1);
+			expect(mockConnection.disconnect).toHaveBeenCalledTimes(1);
+
+			mockConnection.logout.mockRejectedValueOnce(new Error("logout failed"));
+			await expect(
+				sessionManager.logoutAgent("backend-1"),
+			).rejects.toMatchObject({
+				detail: { code: "AGENT_AUTHENTICATION_FAILED" },
+			});
+			expect(mockConnection.disconnect).toHaveBeenCalledTimes(2);
+		});
+
+		it("serializes process lifecycle operations for one backend", async () => {
+			let markConnectStarted = () => {};
+			const connectStarted = new Promise<void>((resolve) => {
+				markConnectStarted = resolve;
+			});
+			let releaseConnect = () => {};
+			const connectGate = new Promise<void>((resolve) => {
+				releaseConnect = resolve;
+			});
+			mockConnection.connect.mockImplementationOnce(async () => {
+				markConnectStarted();
+				await connectGate;
+			});
+
+			const first = sessionManager.getAgentCapabilities("backend-1");
+			await connectStarted;
+			const second = sessionManager.getAgentCapabilities("backend-1");
+			await Promise.resolve();
+			expect(mockConnection.connect).toHaveBeenCalledTimes(1);
+
+			releaseConnect();
+			await Promise.all([first, second]);
+			expect(mockConnection.connect).toHaveBeenCalledTimes(1);
+		});
+
+		it("does not serialize different backend IDs together", async () => {
+			const secondBackendConfig: CliConfig = {
+				...mockConfig,
+				walDbPath: `${mockConfig.walDbPath}-backend-isolation`,
+				acpBackends: [
+					...mockConfig.acpBackends,
+					{
+						id: "backend-2",
+						label: "Second",
+						command: "second",
+						args: [],
+					},
+				],
+			};
+			const manager = new SessionManager(secondBackendConfig);
+			const firstConnection = createMockConnection();
+			const secondConnection = createMockConnection();
+			let markFirstStarted = () => {};
+			const firstStarted = new Promise<void>((resolve) => {
+				markFirstStarted = resolve;
+			});
+			let releaseFirst = () => {};
+			const firstGate = new Promise<void>((resolve) => {
+				releaseFirst = resolve;
+			});
+			firstConnection.connect.mockImplementationOnce(async () => {
+				markFirstStarted();
+				await firstGate;
+			});
+			manager.createConnection = (backend) =>
+				(backend.id === "backend-1"
+					? firstConnection
+					: secondConnection) as unknown as AcpConnection;
+
+			const first = manager.getAgentCapabilities("backend-1");
+			await firstStarted;
+			const second = manager.getAgentCapabilities("backend-2");
+			await Promise.resolve();
+			expect(secondConnection.connect).toHaveBeenCalledTimes(1);
+			releaseFirst();
+			await Promise.all([first, second]);
+			await manager.shutdown();
+		});
+
+		it("waits for backend lifecycle tails during shutdown", async () => {
+			let markConnectStarted = () => {};
+			const connectStarted = new Promise<void>((resolve) => {
+				markConnectStarted = resolve;
+			});
+			let releaseConnect = () => {};
+			const connectGate = new Promise<void>((resolve) => {
+				releaseConnect = resolve;
+			});
+			mockConnection.connect.mockImplementationOnce(async () => {
+				markConnectStarted();
+				await connectGate;
+			});
+
+			const probe = sessionManager.getAgentCapabilities("backend-1");
+			await connectStarted;
+			let shutdownComplete = false;
+			const shutdown = sessionManager.shutdown().then(() => {
+				shutdownComplete = true;
+			});
+			await Promise.resolve();
+			expect(shutdownComplete).toBe(false);
+
+			releaseConnect();
+			await Promise.all([probe, shutdown]);
+			expect(mockConnection.disconnect).toHaveBeenCalled();
+		});
+
+		it("times out an Agent authentication flow and discards the process", async () => {
+			const timeoutManager = new SessionManager(
+				{
+					...mockConfig,
+					walDbPath: `${mockConfig.walDbPath}-auth-timeout`,
+				},
+				undefined,
+				{ agentAuthOperationTimeoutMs: 5 },
+			);
+			const timeoutConnection = createMockConnection();
+			timeoutConnection.authenticate.mockImplementationOnce(
+				() => new Promise<void>(() => {}),
+			);
+			timeoutManager.createConnection = () =>
+				timeoutConnection as unknown as AcpConnection;
+
+			await expect(
+				timeoutManager.authenticateAgent("backend-1", "browser"),
+			).rejects.toMatchObject({
+				detail: { code: "AGENT_AUTHENTICATION_FAILED" },
+			});
+			expect(timeoutConnection.disconnect).toHaveBeenCalledTimes(1);
+			await timeoutManager.shutdown();
+		});
+
+		it("maps ACP auth_required without exposing protocol error data", async () => {
+			mockConnection.createSession.mockRejectedValueOnce(
+				new RequestError(-32000, "private agent detail", {
+					tokenHint: "must-not-cross",
+				}),
+			);
+
+			await expect(
+				sessionManager.createSession({
+					backendId: "backend-1",
+					cwd: "/home/user/project",
+				}),
+			).rejects.toMatchObject({
+				detail: {
+					code: "AGENT_AUTHENTICATION_REQUIRED",
+					message: "Agent authentication is required",
+				},
+			});
+		});
 	});
 
 	describe("discoverSessions", () => {
@@ -3401,7 +3631,7 @@ describe("SessionManager", () => {
 	});
 
 	describe("deleteSession", () => {
-		it("drops a discovery response that was requested before deletion", async () => {
+		it("serializes detached deletion while suppressing in-flight discovery", async () => {
 			await sessionManager.discoverSessions({ backendId: "backend-1" });
 			let resolveList: ((response: ListSessionsResponse) => void) | undefined;
 			let markListStarted: (() => void) | undefined;
@@ -3420,7 +3650,24 @@ describe("SessionManager", () => {
 			});
 			await listStarted;
 
-			await sessionManager.deleteSession("discovered-1");
+			let deletionSettled = false;
+			const deletion = sessionManager.deleteSession("discovered-1").then(() => {
+				deletionSettled = true;
+			});
+			await Promise.resolve();
+			expect(deletionSettled).toBe(false);
+
+			resolveList?.({
+				sessions: [
+					{
+						sessionId: "discovered-1",
+						cwd: "/home/user/project1",
+						title: "Discovery before delete",
+					},
+				],
+			});
+			expect((await staleDiscovery).sessions).toEqual([]);
+			await deletion;
 			const recentDeletes = (
 				sessionManager as unknown as {
 					recentlyDeletedSessions: Map<
@@ -3434,17 +3681,6 @@ describe("SessionManager", () => {
 				throw new Error("recent delete tombstone missing");
 			}
 			recentDelete.expiresAt = 0;
-			resolveList?.({
-				sessions: [
-					{
-						sessionId: "discovered-1",
-						cwd: "/home/user/project1",
-						title: "Stale discovery",
-					},
-				],
-			});
-
-			expect((await staleDiscovery).sessions).toEqual([]);
 			expect(
 				(
 					sessionManager as unknown as { walStore: WalStore }

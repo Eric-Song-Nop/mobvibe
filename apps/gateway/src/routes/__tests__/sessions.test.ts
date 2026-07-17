@@ -29,6 +29,9 @@ describe("session message routes", () => {
 	let server: ReturnType<express.Express["listen"]>;
 	let baseUrl: string;
 	let sessionRouter: {
+		getAgentCapabilities: ReturnType<typeof vi.fn>;
+		authenticateAgent: ReturnType<typeof vi.fn>;
+		logoutAgent: ReturnType<typeof vi.fn>;
 		createSession: ReturnType<typeof vi.fn>;
 		closeSession: ReturnType<typeof vi.fn>;
 		deleteSession: ReturnType<typeof vi.fn>;
@@ -47,6 +50,22 @@ describe("session message routes", () => {
 
 	beforeEach(async () => {
 		sessionRouter = {
+			getAgentCapabilities: vi.fn(async () => ({
+				capabilities: {
+					list: false,
+					load: false,
+					auth: {
+						methods: [{ id: "browser", name: "Browser login" }],
+						logout: true,
+					},
+				},
+			})),
+			authenticateAgent: vi.fn(async () => ({
+				capabilities: { list: true, load: true },
+			})),
+			logoutAgent: vi.fn(async () => ({
+				capabilities: { list: false, load: false },
+			})),
 			createSession: vi.fn(async () => ({ sessionId: "session-created" })),
 			closeSession: vi.fn(async () => ({
 				sessionId: "session-1",
@@ -162,6 +181,281 @@ describe("session message routes", () => {
 
 		expect(response.status).toBe(204);
 		expect(await response.text()).toBe("");
+	});
+
+	it("queries stable Agent authentication capabilities for a machine backend", async () => {
+		const response = await fetch(
+			`${baseUrl}/acp/backend/capabilities?machineId=machine-1&backendId=backend-1`,
+			{ headers: { authorization: "Bearer user-1" } },
+		);
+
+		expect(response.status).toBe(200);
+		expect(sessionRouter.getAgentCapabilities).toHaveBeenCalledWith(
+			{ machineId: "machine-1", backendId: "backend-1" },
+			"user-1",
+		);
+		expect(await response.json()).toMatchObject({
+			capabilities: {
+				auth: {
+					methods: [{ id: "browser", name: "Browser login" }],
+					logout: true,
+				},
+			},
+		});
+	});
+
+	it("rejects overlong Agent auth identifiers before routing", async () => {
+		const response = await fetch(`${baseUrl}/acp/backend/authenticate`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				machineId: "machine-1",
+				backendId: "backend-1",
+				methodId: "界".repeat(43),
+			}),
+		});
+
+		expect(response.status).toBe(400);
+		expect(sessionRouter.authenticateAgent).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		" browser",
+		"browser ",
+		"browser\u0000",
+		"browser\n",
+	])("rejects non-canonical Agent auth method ID %j before routing", async (methodId) => {
+		const response = await fetch(`${baseUrl}/acp/backend/authenticate`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				machineId: "machine-1",
+				backendId: "backend-1",
+				methodId,
+			}),
+		});
+
+		expect(response.status).toBe(400);
+		expect(sessionRouter.authenticateAgent).not.toHaveBeenCalled();
+	});
+
+	it("forwards Agent authentication without accepting credentials", async () => {
+		const response = await fetch(`${baseUrl}/acp/backend/authenticate`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				machineId: "machine-1",
+				backendId: "backend-1",
+				methodId: "browser",
+				credentials: "must-not-be-forwarded",
+			}),
+		});
+
+		expect(response.status).toBe(200);
+		expect(sessionRouter.authenticateAgent).toHaveBeenCalledWith(
+			{
+				machineId: "machine-1",
+				backendId: "backend-1",
+				methodId: "browser",
+			},
+			"user-1",
+		);
+	});
+
+	it("preserves privacy-safe backend lookup errors", async () => {
+		sessionRouter.getAgentCapabilities.mockRejectedValueOnce(
+			new AppError(
+				{
+					code: "AUTHORIZATION_FAILED",
+					message: "Machine or backend not found",
+					retryable: false,
+					scope: "request",
+				},
+				404,
+			),
+		);
+		const response = await fetch(
+			`${baseUrl}/acp/backend/capabilities?machineId=private&backendId=duplicate`,
+			{ headers: { authorization: "Bearer attacker" } },
+		);
+
+		expect(response.status).toBe(404);
+		expect(await response.json()).toEqual({
+			error: {
+				code: "AUTHORIZATION_FAILED",
+				message: "Machine or backend not found",
+				retryable: false,
+				scope: "request",
+			},
+		});
+	});
+
+	it("never maps an Agent authentication challenge to HTTP 401", async () => {
+		sessionRouter.authenticateAgent.mockRejectedValueOnce(
+			new AppError(
+				{
+					code: "AGENT_AUTHENTICATION_REQUIRED",
+					message: "Agent login is required",
+					retryable: false,
+					scope: "service",
+					detail: "https://agent.example/login?token=secret",
+				},
+				401,
+			),
+		);
+		const response = await fetch(`${baseUrl}/acp/backend/authenticate`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				machineId: "machine-1",
+				backendId: "backend-1",
+				methodId: "browser",
+			}),
+		});
+
+		expect(response.status).toBe(409);
+		expect(await response.json()).toEqual({
+			error: {
+				code: "AGENT_AUTHENTICATION_REQUIRED",
+				message: "Agent authentication is required",
+				retryable: false,
+				scope: "service",
+			},
+		});
+	});
+
+	it("replaces secret-bearing non-401 Agent auth errors with static responses", async () => {
+		sessionRouter.authenticateAgent.mockRejectedValueOnce(
+			new AppError(
+				{
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "bad token sk-secret-value",
+					retryable: true,
+					scope: "session",
+					detail: "private Agent diagnostic",
+				},
+				422,
+			),
+		);
+		const response = await fetch(`${baseUrl}/acp/backend/authenticate`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				machineId: "machine-1",
+				backendId: "backend-1",
+				methodId: "browser",
+			}),
+		});
+
+		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({
+			error: {
+				code: "REQUEST_VALIDATION_FAILED",
+				message: "Invalid Agent authentication request",
+				retryable: false,
+				scope: "request",
+			},
+		});
+	});
+
+	it("returns a bounded timeout error for Agent capability probes", async () => {
+		sessionRouter.getAgentCapabilities.mockRejectedValueOnce(
+			new Error("RPC timeout"),
+		);
+		const response = await fetch(
+			`${baseUrl}/acp/backend/capabilities?machineId=machine-1&backendId=backend-1`,
+			{ headers: { authorization: "Bearer user-1" } },
+		);
+
+		expect(response.status).toBe(504);
+		expect(await response.json()).toEqual({
+			error: {
+				code: "AGENT_AUTHENTICATION_FAILED",
+				message: "Unable to query Agent authentication capabilities",
+				retryable: true,
+				scope: "service",
+			},
+		});
+	});
+
+	it("replaces secret-bearing non-401 capability errors with static responses", async () => {
+		sessionRouter.getAgentCapabilities.mockRejectedValueOnce(
+			new AppError(
+				{
+					code: "ACP_CONNECT_FAILED",
+					message: "spawn failed with TOKEN=secret",
+					retryable: false,
+					scope: "request",
+					detail: "/private/path",
+				},
+				418,
+			),
+		);
+		const response = await fetch(
+			`${baseUrl}/acp/backend/capabilities?machineId=machine-1&backendId=backend-1`,
+			{ headers: { authorization: "Bearer user-1" } },
+		);
+
+		expect(response.status).toBe(502);
+		expect(await response.json()).toEqual({
+			error: {
+				code: "ACP_CONNECT_FAILED",
+				message: "Agent authentication service is unavailable",
+				retryable: true,
+				scope: "service",
+			},
+		});
+	});
+
+	it("returns capability errors from Agent logout without using 401", async () => {
+		sessionRouter.logoutAgent.mockRejectedValueOnce(
+			new AppError(
+				{
+					code: "CAPABILITY_NOT_SUPPORTED",
+					message: "Agent leaked secret-value while rejecting logout",
+					retryable: true,
+					scope: "session",
+					detail: "private diagnostic",
+				},
+				418,
+			),
+		);
+		const response = await fetch(`${baseUrl}/acp/backend/logout`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				machineId: "machine-1",
+				backendId: "backend-1",
+			}),
+		});
+
+		expect(response.status).toBe(409);
+		expect(await response.json()).toEqual({
+			error: {
+				code: "CAPABILITY_NOT_SUPPORTED",
+				message: "Agent authentication capability is not supported",
+				retryable: false,
+				scope: "request",
+			},
+		});
 	});
 
 	it("validates, deduplicates, and forwards additional directories on create", async () => {

@@ -9,6 +9,7 @@ import type {
 	SessionsChangedPayload,
 } from "@mobvibe/shared";
 import type { Socket } from "socket.io";
+import { sanitizeAgentSessionCapabilities } from "./agent-capability-sanitizer.js";
 
 export type CliRecord = {
 	machineId: string;
@@ -222,8 +223,24 @@ export class CliRegistry extends EventEmitter {
 		if (!record) {
 			return undefined;
 		}
+		const normalizedBackendCapabilities = payload.backendCapabilities
+			? Object.fromEntries(
+					record.backends.flatMap((backend) => {
+						const snapshot = payload.backendCapabilities?.[backend.backendId];
+						return snapshot
+							? [
+									[
+										backend.backendId,
+										sanitizeAgentSessionCapabilities(snapshot),
+									] as const,
+								]
+							: [];
+					}),
+				)
+			: undefined;
 		const normalizedPayload: SessionsChangedPayload = {
 			...payload,
+			backendCapabilities: normalizedBackendCapabilities,
 			updated: payload.updated.map((updated) => {
 				const existing = record.sessions.find(
 					(session) => session.sessionId === updated.sessionId,
@@ -271,7 +288,7 @@ export class CliRegistry extends EventEmitter {
 				machineId: record.machineId,
 			})),
 			removed: normalizedPayload.removed,
-			backendCapabilities: normalizedPayload.backendCapabilities,
+			backendCapabilities: normalizedBackendCapabilities,
 		};
 
 		this.emit(
@@ -505,10 +522,28 @@ export class CliRegistry extends EventEmitter {
 	): void {
 		const record = this.cliBySocketId.get(socketId);
 		if (!record) return;
+		const registeredBackendIds = new Set(
+			record.backends.map((backend) => backend.backendId),
+		);
+		const sanitizedCapabilities: Record<string, AgentSessionCapabilities> = {};
+		for (const [backendId, snapshot] of Object.entries(capabilities)) {
+			if (!registeredBackendIds.has(backendId)) continue;
+			sanitizedCapabilities[backendId] =
+				sanitizeAgentSessionCapabilities(snapshot);
+		}
+		if (Object.keys(sanitizedCapabilities).length === 0) return;
 		record.backendCapabilities = {
 			...record.backendCapabilities,
-			...capabilities,
+			...sanitizedCapabilities,
 		};
+		this.emitCliStatus({
+			machineId: record.machineId,
+			connected: true,
+			hostname: record.hostname,
+			sessionCount: record.sessions.length,
+			userId: record.userId,
+			backendCapabilities: record.backendCapabilities,
+		});
 	}
 
 	onCliStatus(listener: (payload: CliStatusPayload) => void) {

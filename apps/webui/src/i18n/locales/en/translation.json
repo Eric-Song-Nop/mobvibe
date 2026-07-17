@@ -21,6 +21,7 @@
 		"empty": "No items",
 		"unknown": "Unknown",
 		"back": "Back",
+		"retry": "Try again",
 		"closeMenu": "Close menu"
 	},
 	"status": {
@@ -111,6 +112,23 @@
 		"cwdPlaceholder": "Enter or paste a path",
 		"browse": "Browse",
 		"targetMachine": "Target: {{name}}",
+		"agentAuthentication": {
+			"title": "Agent authentication",
+			"description": "Authentication is handled by the Agent. Mobvibe never receives your credentials and does not track sign-in status.",
+			"checking": "Checking Agent authentication options…",
+			"loadError": "Couldn’t load the Agent’s authentication options. Check the selected machine and try again.",
+			"authenticate": "Authenticate with {{name}}",
+			"authenticating": "Starting Agent authentication…",
+			"authenticateComplete": "The Agent authentication flow completed. Capabilities were refreshed.",
+			"actionError": "The Agent authentication request failed or timed out. Check the selected machine and try again.",
+			"logout": "Sign out from Agent",
+			"logoutImpact": "Signing out asks the Agent to end its authentication state. Mobvibe does not track whether you are signed in.",
+			"logoutTitle": "End the Agent authentication state?",
+			"logoutDescription": "This asks the selected Agent backend to end its authentication state. You may need to authenticate again before creating or using sessions. Mobvibe does not receive credentials or track sign-in status.",
+			"logoutConfirm": "Sign out from Agent",
+			"loggingOut": "Sending sign-out request…",
+			"logoutComplete": "The Agent sign-out request completed. Capabilities were refreshed."
+		},
 		"additionalDirectories": {
 			"label": "Additional directories",
 			"description": "Give the agent access to other directory roots for this session.",

@@ -62,6 +62,144 @@ const buildAuthorizationError = (message = "Not authorized") =>
 		scope: "request",
 	});
 
+const MAX_MACHINE_ID_BYTES = 256;
+const MAX_BACKEND_ID_BYTES = 256;
+const MAX_AUTH_METHOD_ID_BYTES = 128;
+const hasC0OrDel = (value: string): boolean =>
+	Array.from(value).some((character) => {
+		const codePoint = character.codePointAt(0);
+		return codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f);
+	});
+
+const isBoundedIdentifier = (
+	value: unknown,
+	maxBytes: number,
+): value is string =>
+	typeof value === "string" &&
+	value.trim().length > 0 &&
+	value === value.trim() &&
+	!hasC0OrDel(value) &&
+	Buffer.byteLength(value, "utf8") <= maxBytes;
+
+const respondAgentOperationError = (
+	response: Parameters<typeof respondError>[0],
+	error: unknown,
+	message: string,
+) => {
+	if (error instanceof AppError) {
+		// Do not trust an Agent/CLI supplied status, message, scope, retryability,
+		// or detail. Only a small code allowlist selects static Gateway responses.
+		switch (error.detail.code) {
+			case "REQUEST_VALIDATION_FAILED":
+				respondError(
+					response,
+					buildRequestValidationError("Invalid Agent authentication request"),
+					400,
+				);
+				return;
+			case "AUTHORIZATION_FAILED":
+				respondError(
+					response,
+					buildAuthorizationError("Machine or backend not found"),
+					404,
+				);
+				return;
+			case "CAPABILITY_NOT_SUPPORTED":
+				respondError(
+					response,
+					createErrorDetail({
+						code: "CAPABILITY_NOT_SUPPORTED",
+						message: "Agent authentication capability is not supported",
+						retryable: false,
+						scope: "request",
+					}),
+					409,
+				);
+				return;
+			case "AGENT_AUTHENTICATION_REQUIRED":
+				respondError(
+					response,
+					createErrorDetail({
+						code: "AGENT_AUTHENTICATION_REQUIRED",
+						message: "Agent authentication is required",
+						retryable: false,
+						scope: "service",
+					}),
+					409,
+				);
+				return;
+			case "SESSION_BUSY":
+				respondError(
+					response,
+					createErrorDetail({
+						code: "SESSION_BUSY",
+						message: "Agent authentication backend is busy",
+						retryable: true,
+						scope: "service",
+					}),
+					409,
+				);
+				return;
+			case "ACP_PROTOCOL_MISMATCH":
+				respondError(
+					response,
+					createErrorDetail({
+						code: "ACP_PROTOCOL_MISMATCH",
+						message: "Agent returned an invalid authentication response",
+						retryable: false,
+						scope: "service",
+					}),
+					502,
+				);
+				return;
+			case "ACP_CONNECT_FAILED":
+			case "ACP_PROCESS_EXITED":
+			case "ACP_CONNECTION_CLOSED":
+				respondError(
+					response,
+					createErrorDetail({
+						code: error.detail.code,
+						message: "Agent authentication service is unavailable",
+						retryable: true,
+						scope: "service",
+					}),
+					502,
+				);
+				return;
+		}
+		respondError(
+			response,
+			createErrorDetail({
+				code: "AGENT_AUTHENTICATION_FAILED",
+				message,
+				retryable: true,
+				scope: "service",
+			}),
+			502,
+		);
+		return;
+	}
+	respondError(
+		response,
+		createErrorDetail({
+			code: "AGENT_AUTHENTICATION_FAILED",
+			message,
+			retryable: true,
+			scope: "service",
+		}),
+		getErrorMessage(error).includes("timeout") ? 504 : 502,
+	);
+};
+
+const getAgentOperationErrorLog = (error: unknown) =>
+	error instanceof AppError
+		? {
+				errorCode: error.detail.code,
+				errorStatus: error.status,
+				retryable: error.detail.retryable,
+			}
+		: { errorType: error instanceof Error ? error.name : typeof error };
+
 const isPlaintextPrompt = (value: unknown): value is ContentBlock[] =>
 	Array.isArray(value) &&
 	value.every(
@@ -177,6 +315,147 @@ export function setupSessionRoutes(
 		const { backends } = cliRegistry.getBackendsForUser(userId);
 		response.json({ backends });
 	});
+
+	// Probe backend-scoped stable Agent-managed authentication methods.
+	router.get(
+		"/backend/capabilities",
+		async (request: AuthenticatedRequest, response) => {
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			const { machineId, backendId } = request.query;
+			if (
+				!isBoundedIdentifier(machineId, MAX_MACHINE_ID_BYTES) ||
+				!isBoundedIdentifier(backendId, MAX_BACKEND_ID_BYTES)
+			) {
+				respondError(
+					response,
+					buildRequestValidationError(
+						"bounded machineId and backendId are required",
+					),
+					400,
+				);
+				return;
+			}
+			try {
+				const result = await sessionRouter.getAgentCapabilities(
+					{ machineId, backendId },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				logger.warn(
+					{
+						...getAgentOperationErrorLog(error),
+						machineId,
+						backendId,
+						userId,
+					},
+					"agent_capabilities_error",
+				);
+				respondAgentOperationError(
+					response,
+					error,
+					"Unable to query Agent authentication capabilities",
+				);
+			}
+		},
+	);
+
+	// Authentication itself is performed by the Agent; no credentials cross HTTP.
+	router.post(
+		"/backend/authenticate",
+		async (request: AuthenticatedRequest, response) => {
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			const { machineId, backendId, methodId } = request.body ?? {};
+			if (
+				!isBoundedIdentifier(machineId, MAX_MACHINE_ID_BYTES) ||
+				!isBoundedIdentifier(backendId, MAX_BACKEND_ID_BYTES) ||
+				!isBoundedIdentifier(methodId, MAX_AUTH_METHOD_ID_BYTES)
+			) {
+				respondError(
+					response,
+					buildRequestValidationError(
+						"bounded machineId, backendId, and methodId are required",
+					),
+					400,
+				);
+				return;
+			}
+			try {
+				const result = await sessionRouter.authenticateAgent(
+					{ machineId, backendId, methodId },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				logger.warn(
+					{
+						...getAgentOperationErrorLog(error),
+						machineId,
+						backendId,
+						methodId,
+						userId,
+					},
+					"agent_authenticate_error",
+				);
+				respondAgentOperationError(
+					response,
+					error,
+					"Agent authentication failed",
+				);
+			}
+		},
+	);
+
+	router.post(
+		"/backend/logout",
+		async (request: AuthenticatedRequest, response) => {
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			const { machineId, backendId } = request.body ?? {};
+			if (
+				!isBoundedIdentifier(machineId, MAX_MACHINE_ID_BYTES) ||
+				!isBoundedIdentifier(backendId, MAX_BACKEND_ID_BYTES)
+			) {
+				respondError(
+					response,
+					buildRequestValidationError(
+						"bounded machineId and backendId are required",
+					),
+					400,
+				);
+				return;
+			}
+			try {
+				const result = await sessionRouter.logoutAgent(
+					{ machineId, backendId },
+					userId,
+				);
+				response.json(result);
+			} catch (error) {
+				logger.warn(
+					{
+						...getAgentOperationErrorLog(error),
+						machineId,
+						backendId,
+						userId,
+					},
+					"agent_logout_error",
+				);
+				respondAgentOperationError(response, error, "Agent logout failed");
+			}
+		},
+	);
 
 	// Create session - routes to user's machine if authenticated
 	router.post("/session", async (request: AuthenticatedRequest, response) => {

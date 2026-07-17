@@ -686,6 +686,68 @@ describe("CliRegistry", () => {
 		});
 	});
 
+	describe("backend capabilities", () => {
+		it("sanitizes every capability snapshot before caching and emitting it", () => {
+			const socket = createMockSocket("socket-1");
+			const record = registry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-1" }),
+				{ userId: "user-1", deviceId: "device-1" },
+			);
+			const statusListener = vi.fn();
+			registry.onCliStatus(statusListener);
+
+			registry.updateBackendCapabilities("socket-1", {
+				"backend-1": {
+					list: true,
+					load: false,
+					auth: {
+						methods: [
+							{ id: "browser", name: "Browser" },
+							{ id: " browser", name: "Leading whitespace" },
+							{ id: "trailing ", name: "Trailing whitespace" },
+							{ id: "control\u0000", name: "Control ID" },
+							{ id: "bad-name", name: "Bad\nname" },
+							{
+								id: "bad-description",
+								name: "Bad description",
+								description: "secret\u007fvalue",
+							},
+							{
+								id: "environment",
+								name: "Environment",
+								type: "env_var",
+								vars: [{ name: "TOKEN" }],
+							} as never,
+						],
+						logout: true,
+					} as never,
+				} as never,
+				"unregistered-backend": {
+					list: true,
+					load: true,
+				} as never,
+			});
+
+			expect(record.backendCapabilities).toEqual({
+				"backend-1": {
+					list: true,
+					load: false,
+					auth: {
+						methods: [{ id: "browser", name: "Browser" }],
+						logout: true,
+					},
+				},
+			});
+			expect(statusListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					userId: "user-1",
+					backendCapabilities: record.backendCapabilities,
+				}),
+			);
+		});
+	});
+
 	describe("getSessionsForUser", () => {
 		it("returns sessions only for authenticated user's machines", () => {
 			const socket1 = createMockSocket("socket-1");

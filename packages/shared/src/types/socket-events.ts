@@ -315,6 +315,22 @@ export type CloseSessionParams = { sessionId: string };
 /** Request Agent deletion and purge Mobvibe's local session storage. */
 export type DeleteSessionParams = { sessionId: string };
 
+/** Selects an Agent backend on a machine. `machineId` is stripped by Gateway. */
+export type AgentBackendRpcParams = {
+	backendId: string;
+	machineId?: string;
+};
+
+/** Starts one of the stable Agent-managed ACP authentication methods. */
+export type AuthenticateAgentRpcParams = AgentBackendRpcParams & {
+	methodId: string;
+};
+
+/** Sanitized backend capability snapshot returned after an Agent auth action. */
+export type AgentCapabilitiesRpcResult = {
+	capabilities: AgentSessionCapabilities;
+};
+
 // Reload session RPC params
 export type ReloadSessionRpcParams = {
 	sessionId: string;
@@ -409,6 +425,13 @@ export interface GatewayToCliEvents {
 	"rpc:session:resume": (request: RpcRequest<ResumeSessionRpcParams>) => void;
 	"rpc:session:close": (request: RpcRequest<CloseSessionParams>) => void;
 	"rpc:session:delete": (request: RpcRequest<DeleteSessionParams>) => void;
+	"rpc:agent:capabilities": (
+		request: RpcRequest<AgentBackendRpcParams>,
+	) => void;
+	"rpc:agent:authenticate": (
+		request: RpcRequest<AuthenticateAgentRpcParams>,
+	) => void;
+	"rpc:agent:logout": (request: RpcRequest<AgentBackendRpcParams>) => void;
 	"rpc:session:reload": (request: RpcRequest<ReloadSessionRpcParams>) => void;
 	"rpc:agent-team:create": (
 		request: RpcRequest<CreateAgentTeamRpcParams>,

@@ -16,6 +16,7 @@ import { initCrypto, verifySignedToken } from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
 import type { GatewayConfig } from "../config.js";
 import { logger } from "../lib/logger.js";
+import { sanitizeAgentSessionCapabilities } from "../services/agent-capability-sanitizer.js";
 import type { CliRecord, CliRegistry } from "../services/cli-registry.js";
 import {
 	findDeviceByPublicKey,
@@ -470,17 +471,34 @@ export function setupCliHandlers(
 
 		// Incremental sessions update
 		socket.on("sessions:changed", (payload: SessionsChangedPayload) => {
-			withRegisteredCli("sessions:changed", payload, () => {
+			withRegisteredCli("sessions:changed", payload, (cliRecord) => {
 				const addedCount = payload.added.length;
 				const sanitized = sanitizeSessionMetaEnvelopes([
 					...payload.added,
 					...payload.updated,
 				]);
 				warnSessionMetaSanitization("sessions:changed", socket.id, sanitized);
+				const backendCapabilities = payload.backendCapabilities
+					? Object.fromEntries(
+							cliRecord.backends.flatMap((backend) => {
+								const snapshot =
+									payload.backendCapabilities?.[backend.backendId];
+								return snapshot
+									? [
+											[
+												backend.backendId,
+												sanitizeAgentSessionCapabilities(snapshot),
+											] as const,
+										]
+									: [];
+							}),
+						)
+					: undefined;
 				const sanitizedPayload: SessionsChangedPayload = {
 					...payload,
 					added: sanitized.values.slice(0, addedCount),
 					updated: sanitized.values.slice(addedCount),
+					backendCapabilities,
 				};
 				logger.info(
 					{
@@ -491,11 +509,8 @@ export function setupCliHandlers(
 					},
 					"cli_sessions_changed",
 				);
-				if (payload.backendCapabilities) {
-					cliRegistry.updateBackendCapabilities(
-						socket.id,
-						payload.backendCapabilities,
-					);
+				if (backendCapabilities) {
+					cliRegistry.updateBackendCapabilities(socket.id, backendCapabilities);
 				}
 				cliRegistry.updateSessionsIncremental(socket.id, sanitizedPayload);
 			});
@@ -504,7 +519,23 @@ export function setupCliHandlers(
 		// Historical sessions discovered from ACP agent
 		socket.on("sessions:discovered", (payload: SessionsDiscoveredPayload) => {
 			withRegisteredCli("sessions:discovered", payload, (cliRecord) => {
-				const { capabilities } = payload;
+				const registeredBackend = cliRecord.backends.find(
+					(backend) => backend.backendId === payload.backendId,
+				);
+				if (!registeredBackend) {
+					logger.warn(
+						{
+							socketId: socket.id,
+							machineId: cliRecord.machineId,
+							backendId: payload.backendId,
+						},
+						"sessions_discovered_unknown_backend",
+					);
+					return;
+				}
+				const capabilities = sanitizeAgentSessionCapabilities(
+					payload.capabilities,
+				);
 				const sanitized = sanitizeSessionMetaEnvelopes(payload.sessions);
 				warnSessionMetaSanitization(
 					"sessions:discovered",
@@ -539,8 +570,8 @@ export function setupCliHandlers(
 						workspaceRootCwd: s.workspaceRootCwd,
 						updatedAt,
 						createdAt: existing?.createdAt ?? updatedAt,
-						backendId: payload.backendId,
-						backendLabel: payload.backendLabel,
+						backendId: registeredBackend.backendId,
+						backendLabel: registeredBackend.backendLabel,
 						machineId: cliRecord.machineId,
 						additionalDirectories: s.additionalDirectories ?? [],
 						...(Object.hasOwn(s, "_meta") ? { _meta: s._meta } : {}),

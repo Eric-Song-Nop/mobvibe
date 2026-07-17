@@ -31,6 +31,7 @@ import { Skeleton } from "@mobvibe/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AgentAuthenticationPanel } from "@/components/app/AgentAuthenticationPanel";
 import { WorkingDirectoryDialog } from "@/components/app/WorkingDirectoryDialog";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import {
@@ -335,6 +336,11 @@ export function CreateSessionDialog({
 							</SelectContent>
 						</Select>
 					</div>
+					<AgentAuthenticationPanel
+						backendId={draftBackendId || undefined}
+						enabled={open}
+						machineId={selectedMachineId ?? undefined}
+					/>
 					<div className="flex flex-col gap-2">
 						<Label htmlFor="session-cwd">{t("session.cwdLabel")}</Label>
 						<InputGroup>

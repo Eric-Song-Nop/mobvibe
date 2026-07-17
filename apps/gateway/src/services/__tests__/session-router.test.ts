@@ -80,6 +80,311 @@ describe("SessionRouter", () => {
 		sessionRouter = new SessionRouter(cliRegistry);
 	});
 
+	describe("Agent-managed authentication", () => {
+		it("routes capability probes to the selected machine and sanitizes auth methods", async () => {
+			const firstSocket = createMockSocket("socket-1");
+			const secondSocket = createMockSocket("socket-2");
+			cliRegistry.register(
+				firstSocket,
+				createMockRegistrationInfo({ machineId: "machine-1" }),
+				{ userId: "user-1", deviceId: "device-1" },
+			);
+			cliRegistry.register(
+				secondSocket,
+				createMockRegistrationInfo({ machineId: "machine-2" }),
+				{ userId: "user-1", deviceId: "device-2" },
+			);
+			secondSocket.emit.mockImplementation((event, request) => {
+				if (event !== "rpc:agent:capabilities") return;
+				sessionRouter.handleRpcResponse(
+					{
+						requestId: request.requestId,
+						result: {
+							capabilities: {
+								list: true,
+								load: true,
+								auth: {
+									methods: [
+										{
+											id: "browser",
+											name: "Browser login",
+											description: "Open the Agent login flow",
+										},
+										{
+											id: "terminal",
+											name: "Terminal login",
+											type: "terminal",
+											args: ["--secret"],
+										},
+										{ id: "browser", name: "Duplicate" },
+									],
+									logout: true,
+									credentials: "must-not-cross-gateway",
+								},
+								_meta: { secret: true },
+							},
+						},
+					},
+					secondSocket.id,
+				);
+			});
+
+			const result = await sessionRouter.getAgentCapabilities(
+				{ machineId: "machine-2", backendId: "backend-1" },
+				"user-1",
+			);
+
+			expect(firstSocket.emit).not.toHaveBeenCalledWith(
+				"rpc:agent:capabilities",
+				expect.anything(),
+			);
+			expect(secondSocket.emit).toHaveBeenCalledWith(
+				"rpc:agent:capabilities",
+				expect.objectContaining({ params: { backendId: "backend-1" } }),
+			);
+			expect(result.capabilities.auth).toEqual({
+				methods: [
+					{
+						id: "browser",
+						name: "Browser login",
+						description: "Open the Agent login flow",
+					},
+				],
+				logout: true,
+			});
+			expect(result.capabilities).not.toHaveProperty("_meta");
+			expect(result.capabilities.auth?.methods).not.toContainEqual(
+				expect.objectContaining({ id: "terminal" }),
+			);
+		});
+
+		it("rejects cross-user machine probes without emitting an RPC", async () => {
+			const socket = createMockSocket("socket-private");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "private-machine" }),
+				{ userId: "owner", deviceId: "device-private" },
+			);
+
+			await expect(
+				sessionRouter.getAgentCapabilities(
+					{ machineId: "private-machine", backendId: "backend-1" },
+					"attacker",
+				),
+			).rejects.toMatchObject({ status: 404 });
+			expect(socket.emit).not.toHaveBeenCalledWith(
+				"rpc:agent:capabilities",
+				expect.anything(),
+			);
+		});
+
+		it("validates method IDs against the sanitized snapshot before forwarding", async () => {
+			const socket = createMockSocket("socket-auth");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-auth" }),
+				{ userId: "user-1", deviceId: "device-auth" },
+			);
+			cliRegistry.updateBackendCapabilities(socket.id, {
+				"backend-1": {
+					list: false,
+					load: false,
+					auth: {
+						methods: [{ id: "browser", name: "Browser" }],
+						logout: true,
+					},
+				},
+			});
+
+			await expect(
+				sessionRouter.authenticateAgent(
+					{
+						machineId: "machine-auth",
+						backendId: "backend-1",
+						methodId: "forged-method",
+					},
+					"user-1",
+				),
+			).rejects.toMatchObject({
+				status: 400,
+				detail: { code: "REQUEST_VALIDATION_FAILED" },
+			});
+			expect(socket.emit).not.toHaveBeenCalledWith(
+				"rpc:agent:authenticate",
+				expect.anything(),
+			);
+		});
+
+		it("updates cached capabilities and emits status after authentication", async () => {
+			const socket = createMockSocket("socket-auth-success");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-auth" }),
+				{ userId: "user-1", deviceId: "device-auth" },
+			);
+			cliRegistry.updateBackendCapabilities(socket.id, {
+				"backend-1": {
+					list: false,
+					load: false,
+					auth: {
+						methods: [{ id: "browser", name: "Browser" }],
+						logout: false,
+					},
+				},
+			});
+			const statuses: unknown[] = [];
+			cliRegistry.onCliStatus((payload) => statuses.push(payload));
+			socket.emit.mockImplementation((event, request) => {
+				if (event !== "rpc:agent:authenticate") return;
+				sessionRouter.handleRpcResponse(
+					{
+						requestId: request.requestId,
+						result: {
+							capabilities: {
+								list: true,
+								load: true,
+								auth: {
+									methods: [{ id: "browser", name: "Browser" }],
+									logout: true,
+								},
+							},
+						},
+					},
+					socket.id,
+				);
+			});
+
+			const result = await sessionRouter.authenticateAgent(
+				{
+					machineId: "machine-auth",
+					backendId: "backend-1",
+					methodId: "browser",
+				},
+				"user-1",
+			);
+
+			expect(result.capabilities.auth?.logout).toBe(true);
+			expect(
+				cliRegistry.getCliByMachineIdForUser("machine-auth", "user-1")
+					?.backendCapabilities?.["backend-1"]?.auth?.logout,
+			).toBe(true);
+			expect(statuses).toContainEqual(
+				expect.objectContaining({
+					machineId: "machine-auth",
+					backendCapabilities: expect.objectContaining({
+						"backend-1": expect.objectContaining({
+							auth: expect.objectContaining({ logout: true }),
+						}),
+					}),
+				}),
+			);
+		});
+
+		it("rejects unsupported logout without forwarding it", async () => {
+			const socket = createMockSocket("socket-logout");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-logout" }),
+				{ userId: "user-1", deviceId: "device-logout" },
+			);
+			cliRegistry.updateBackendCapabilities(socket.id, {
+				"backend-1": {
+					list: false,
+					load: false,
+					auth: { methods: [], logout: false },
+				},
+			});
+
+			await expect(
+				sessionRouter.logoutAgent(
+					{ machineId: "machine-logout", backendId: "backend-1" },
+					"user-1",
+				),
+			).rejects.toMatchObject({
+				status: 409,
+				detail: { code: "CAPABILITY_NOT_SUPPORTED" },
+			});
+			expect(socket.emit).not.toHaveBeenCalledWith(
+				"rpc:agent:logout",
+				expect.anything(),
+			);
+		});
+
+		it("times out capability probes and ignores late responses", async () => {
+			vi.useFakeTimers();
+			try {
+				const socket = createMockSocket("socket-timeout");
+				cliRegistry.register(
+					socket,
+					createMockRegistrationInfo({ machineId: "machine-timeout" }),
+					{ userId: "user-1", deviceId: "device-timeout" },
+				);
+				const operation = sessionRouter.getAgentCapabilities(
+					{ machineId: "machine-timeout", backendId: "backend-1" },
+					"user-1",
+				);
+				const rejection = expect(operation).rejects.toThrow("RPC timeout");
+				await vi.advanceTimersByTimeAsync(15_001);
+				await rejection;
+				const request = socket.emit.mock.calls.find(
+					([event]) => event === "rpc:agent:capabilities",
+				)?.[1];
+				expect(request).toBeDefined();
+				expect(() =>
+					sessionRouter.handleRpcResponse(
+						{
+							requestId: request.requestId,
+							result: { capabilities: { list: true, load: true } },
+						},
+						socket.id,
+					),
+				).not.toThrow();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("keeps the Gateway authentication timeout outside the CLI flow window", async () => {
+			vi.useFakeTimers();
+			try {
+				const socket = createMockSocket("socket-auth-timeout");
+				cliRegistry.register(
+					socket,
+					createMockRegistrationInfo({ machineId: "machine-auth-timeout" }),
+					{ userId: "user-1", deviceId: "device-auth-timeout" },
+				);
+				cliRegistry.updateBackendCapabilities(socket.id, {
+					"backend-1": {
+						list: false,
+						load: false,
+						auth: {
+							methods: [{ id: "browser", name: "Browser" }],
+							logout: false,
+						},
+					},
+				});
+				const operation = sessionRouter.authenticateAgent(
+					{
+						machineId: "machine-auth-timeout",
+						backendId: "backend-1",
+						methodId: "browser",
+					},
+					"user-1",
+				);
+				const settled = vi.fn();
+				void operation.then(settled, settled);
+				const rejection = expect(operation).rejects.toThrow("RPC timeout");
+
+				await vi.advanceTimersByTimeAsync(120_001);
+				expect(settled).not.toHaveBeenCalled();
+				await vi.advanceTimersByTimeAsync(5_000);
+				await rejection;
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+	});
+
 	describe("discoverSessions", () => {
 		it("routes discover request to CLI and returns result", async () => {
 			const socket = createMockSocket("socket-1");

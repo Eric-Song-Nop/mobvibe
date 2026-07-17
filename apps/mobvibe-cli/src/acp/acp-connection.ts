@@ -55,6 +55,7 @@ import {
 } from "@agentclientprotocol/sdk";
 import {
 	type AcpConnectionState,
+	type AgentAuthMethod,
 	type AgentSessionCapabilities,
 	createErrorDetail,
 	type ErrorDetail,
@@ -78,6 +79,10 @@ type ClientInfo = {
 
 const MAX_STDERR_LINES = 20;
 const MAX_META_SANITIZATION_WARNINGS = 3;
+const MAX_AUTH_METHODS = 32;
+const MAX_AUTH_METHOD_ID_BYTES = 128;
+const MAX_AUTH_METHOD_NAME_BYTES = 256;
+const MAX_AUTH_METHOD_DESCRIPTION_BYTES = 1024;
 export const MAX_ACP_FILE_BYTES = 1024 * 1024;
 export const MAX_ACP_FILE_LINES = 10_000;
 
@@ -86,10 +91,90 @@ export const ACP_FILE_SYSTEM_CAPABILITIES = {
 	writeTextFile: true,
 } as const;
 
+export const ACP_CLIENT_CAPABILITIES = {
+	fs: ACP_FILE_SYSTEM_CAPABILITIES,
+	terminal: true,
+	session: {
+		configOptions: {
+			boolean: {},
+		},
+	},
+} as const;
+
 const UTF8_DECODER = new TextDecoder("utf-8", {
 	fatal: true,
 	ignoreBOM: true,
 });
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isBoundedString = (
+	value: unknown,
+	maxBytes: number,
+	allowEmpty = false,
+): value is string =>
+	typeof value === "string" &&
+	(allowEmpty || value.trim().length > 0) &&
+	value.length <= maxBytes &&
+	Buffer.byteLength(value, "utf8") <= maxBytes;
+
+const containsControlCharacters = (value: string) => {
+	for (let index = 0; index < value.length; index += 1) {
+		const codePoint = value.charCodeAt(index);
+		if (codePoint <= 0x1f || codePoint === 0x7f) return true;
+	}
+	return false;
+};
+
+/**
+ * Keep only stable Agent-managed authentication methods. The stable wire form
+ * intentionally has no `type` discriminator; typed env_var and terminal forms
+ * are still experimental and may contain credential-handling instructions.
+ */
+export const sanitizeStableAuthMethods = (
+	value: unknown,
+): AgentAuthMethod[] => {
+	if (!Array.isArray(value)) return [];
+	const methods: AgentAuthMethod[] = [];
+	const seenMethodIds = new Set<string>();
+	for (const candidate of value) {
+		if (methods.length >= MAX_AUTH_METHODS) break;
+		if (!isRecord(candidate) || Object.hasOwn(candidate, "type")) continue;
+		if (!isBoundedString(candidate.id, MAX_AUTH_METHOD_ID_BYTES)) continue;
+		if (candidate.id !== candidate.id.trim()) continue;
+		if (containsControlCharacters(candidate.id)) continue;
+		if (!isBoundedString(candidate.name, MAX_AUTH_METHOD_NAME_BYTES)) continue;
+		if (containsControlCharacters(candidate.name)) continue;
+		if (
+			candidate.description !== undefined &&
+			candidate.description !== null &&
+			!isBoundedString(
+				candidate.description,
+				MAX_AUTH_METHOD_DESCRIPTION_BYTES,
+				true,
+			)
+		) {
+			continue;
+		}
+		if (
+			typeof candidate.description === "string" &&
+			containsControlCharacters(candidate.description)
+		) {
+			continue;
+		}
+		if (seenMethodIds.has(candidate.id)) continue;
+		seenMethodIds.add(candidate.id);
+		methods.push({
+			id: candidate.id,
+			name: candidate.name,
+			...(candidate.description !== undefined
+				? { description: candidate.description as string | null }
+				: {}),
+		});
+	}
+	return methods;
+};
 
 type ActiveFileSystemSession = {
 	sessionId: string;
@@ -392,6 +477,7 @@ export class AcpConnection {
 	private activeFileSystemSession?: ActiveFileSystemSession;
 	private agentInfo?: Implementation;
 	private agentCapabilities?: AgentCapabilities;
+	private authMethods: AgentAuthMethod[] = [];
 	private readonly sessionUpdateEmitter = new EventEmitter();
 	private readonly statusEmitter = new EventEmitter();
 	private readonly terminalOutputEmitter = new EventEmitter();
@@ -404,6 +490,7 @@ export class AcpConnection {
 	private terminals = new Map<string, TerminalRecord>();
 	private recentStderr: string[] = [];
 	private metaSanitizationWarnings = 0;
+	private sensitiveAuthOperations = 0;
 
 	constructor(
 		private readonly options: {
@@ -434,6 +521,7 @@ export class AcpConnection {
 	 * Get the agent's session capabilities.
 	 */
 	getSessionCapabilities(): AgentSessionCapabilities {
+		const auth = this.getAuthenticationCapabilities();
 		return {
 			list: this.agentCapabilities?.sessionCapabilities?.list != null,
 			load: this.agentCapabilities?.loadSession === true,
@@ -449,7 +537,52 @@ export class AcpConnection {
 				embeddedContext:
 					this.agentCapabilities?.promptCapabilities?.embeddedContext === true,
 			},
+			...(auth ? { auth } : {}),
 		};
+	}
+
+	getAuthenticationCapabilities():
+		| NonNullable<AgentSessionCapabilities["auth"]>
+		| undefined {
+		const logout = this.agentCapabilities?.auth?.logout != null;
+		if (this.authMethods.length === 0 && !logout) return undefined;
+		return {
+			methods: this.authMethods.map((method) => ({ ...method })),
+			logout,
+		};
+	}
+
+	supportsLogout(): boolean {
+		return this.agentCapabilities?.auth?.logout != null;
+	}
+
+	async authenticate(methodId: string): Promise<void> {
+		if (!this.authMethods.some((method) => method.id === methodId)) {
+			throw RequestError.invalidParams(
+				undefined,
+				"Authentication method was not advertised by the Agent",
+			);
+		}
+		const connection = await this.ensureReady();
+		this.sensitiveAuthOperations += 1;
+		try {
+			await connection.agent.request(methods.agent.authenticate, { methodId });
+		} finally {
+			this.sensitiveAuthOperations -= 1;
+		}
+	}
+
+	async logout(): Promise<void> {
+		if (!this.supportsLogout()) {
+			throw RequestError.methodNotFound(methods.agent.logout);
+		}
+		const connection = await this.ensureReady();
+		this.sensitiveAuthOperations += 1;
+		try {
+			await connection.agent.request(methods.agent.logout, {});
+		} finally {
+			this.sensitiveAuthOperations -= 1;
+		}
 	}
 
 	/**
@@ -693,6 +826,8 @@ export class AcpConnection {
 
 		this.updateStatus("connecting");
 		this.agentInfo = undefined;
+		this.agentCapabilities = undefined;
+		this.authMethods = [];
 		this.recentStderr = [];
 		let attemptConnection: ClientConnection | undefined;
 		logger.info(
@@ -729,6 +864,13 @@ export class AcpConnection {
 			);
 			child.stderr.on("data", (chunk: Buffer) => {
 				if (this.process !== child) {
+					return;
+				}
+				if (this.sensitiveAuthOperations > 0) {
+					logger.debug(
+						{ backendId: this.options.backend.id },
+						"acp_backend_sensitive_auth_stderr_suppressed",
+					);
 					return;
 				}
 				const text = chunk.toString("utf8").trimEnd();
@@ -887,15 +1029,7 @@ export class AcpConnection {
 					name: this.options.client.name,
 					version: this.options.client.version,
 				},
-				clientCapabilities: {
-					fs: ACP_FILE_SYSTEM_CAPABILITIES,
-					terminal: true,
-					session: {
-						configOptions: {
-							boolean: {},
-						},
-					},
-				},
+				clientCapabilities: ACP_CLIENT_CAPABILITIES,
 			};
 			const initializeResponse = this.sanitizeAgentPayload(
 				await connection.agent.request(
@@ -908,6 +1042,9 @@ export class AcpConnection {
 			this.agentInfo = initializeResponse.agentInfo ?? undefined;
 			this.agentCapabilities =
 				initializeResponse.agentCapabilities ?? undefined;
+			this.authMethods = sanitizeStableAuthMethods(
+				initializeResponse.authMethods,
+			);
 			this.connectedAt = new Date();
 			this.updateStatus("ready");
 			logger.info(
@@ -1360,6 +1497,8 @@ export class AcpConnection {
 		this.updateStatus("stopped");
 		this.clearActiveSession();
 		this.agentInfo = undefined;
+		this.agentCapabilities = undefined;
+		this.authMethods = [];
 		for (const sessionId of new Set([
 			...this.promptControllers.keys(),
 			...Array.from(this.terminals.values(), (record) => record.sessionId),

@@ -21,6 +21,7 @@
 		"empty": "暂无内容",
 		"unknown": "未知",
 		"back": "返回",
+		"retry": "重试",
 		"closeMenu": "关闭菜单"
 	},
 	"status": {
@@ -111,6 +112,23 @@
 		"cwdPlaceholder": "输入或粘贴路径",
 		"browse": "浏览",
 		"targetMachine": "目标机器：{{name}}",
+		"agentAuthentication": {
+			"title": "Agent 认证",
+			"description": "认证流程由 Agent 处理。Mobvibe 不接收您的凭据，也不追踪登录状态。",
+			"checking": "正在检查 Agent 认证选项…",
+			"loadError": "无法加载 Agent 认证选项。请检查所选机器后重试。",
+			"authenticate": "使用 {{name}} 认证",
+			"authenticating": "正在启动 Agent 认证…",
+			"authenticateComplete": "Agent 认证流程已完成，能力信息已刷新。",
+			"actionError": "Agent 认证请求失败或超时。请检查所选机器后重试。",
+			"logout": "从 Agent 退出认证",
+			"logoutImpact": "退出会请求 Agent 结束其认证状态。Mobvibe 不追踪您是否已登录。",
+			"logoutTitle": "结束 Agent 认证状态？",
+			"logoutDescription": "这会请求所选 Agent 后端结束其认证状态。创建或使用对话前，您可能需要重新认证。Mobvibe 不接收凭据，也不追踪登录状态。",
+			"logoutConfirm": "从 Agent 退出认证",
+			"loggingOut": "正在发送退出请求…",
+			"logoutComplete": "Agent 退出请求已完成，能力信息已刷新。"
+		},
 		"additionalDirectories": {
 			"label": "附加目录",
 			"description": "允许代理在本次对话中访问其他目录根路径。",

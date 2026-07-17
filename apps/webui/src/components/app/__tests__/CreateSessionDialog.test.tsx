@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CreateSessionDialog } from "../CreateSessionDialog";
 
 const mockDebouncedValue = vi.hoisted(() => ({ cwd: "/repo/apps/webui" }));
+const mockAgentAuthenticationPanel = vi.hoisted(() => vi.fn());
 const mockUiState = vi.hoisted(() => ({
 	draftTitle: "Session 1",
 	draftBackendId: "backend-1",
@@ -139,6 +140,17 @@ vi.mock("@tanstack/react-query", async () => {
 
 vi.mock("@/hooks/useDebouncedValue", () => ({
 	useDebouncedValue: () => mockDebouncedValue.cwd,
+}));
+
+vi.mock("@/components/app/AgentAuthenticationPanel", () => ({
+	AgentAuthenticationPanel: (props: {
+		backendId?: string;
+		enabled: boolean;
+		machineId?: string;
+	}) => {
+		mockAgentAuthenticationPanel(props);
+		return null;
+	},
 }));
 
 vi.mock("@mobvibe/shared", async () => {
@@ -346,6 +358,26 @@ describe("CreateSessionDialog", () => {
 		].additionalDirectories = true;
 		rerender(<CreateSessionDialog {...props} />);
 		expect(screen.getByText("Additional directories")).toBeInTheDocument();
+	});
+
+	it("checks Agent authentication for the selected machine and backend", () => {
+		render(
+			<CreateSessionDialog
+				open
+				onOpenChange={vi.fn()}
+				availableBackends={[
+					{ backendId: "backend-1", backendLabel: "Backend 1" },
+				]}
+				isCreating={false}
+				onCreate={vi.fn()}
+			/>,
+		);
+
+		expect(mockAgentAuthenticationPanel).toHaveBeenLastCalledWith({
+			backendId: "backend-1",
+			enabled: true,
+			machineId: "machine-1",
+		});
 	});
 
 	it("adds and removes ordered additional directory drafts", () => {

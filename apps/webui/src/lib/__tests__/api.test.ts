@@ -62,6 +62,85 @@ describe("api (browser environment)", () => {
 			}),
 		);
 	});
+
+	it("uses the stable Agent-managed authentication endpoints", async () => {
+		const result = {
+			capabilities: {
+				auth: {
+					logout: true,
+					methods: [{ id: "browser", name: "Browser login" }],
+				},
+				list: true,
+				load: true,
+			},
+		};
+		mockFetch
+			.mockResolvedValueOnce({
+				headers: new Headers({ "x-mobvibe-instance-id": "owner-machine-1" }),
+			})
+			.mockResolvedValue({
+				ok: true,
+				status: 200,
+				headers: new Headers({
+					"x-mobvibe-instance-id": "owner-machine-1",
+				}),
+				json: () => Promise.resolve(result),
+			});
+
+		const { authenticateAgent, fetchAgentCapabilities, logoutAgent } =
+			await import("../api");
+		await expect(
+			fetchAgentCapabilities({
+				backendId: "codex-acp",
+				machineId: "machine 1",
+			}),
+		).resolves.toEqual(result);
+		await expect(
+			authenticateAgent({
+				backendId: "codex-acp",
+				machineId: "machine 1",
+				methodId: "browser",
+			}),
+		).resolves.toEqual(result);
+		await expect(
+			logoutAgent({ backendId: "codex-acp", machineId: "machine 1" }),
+		).resolves.toEqual(result);
+
+		expect(mockFetch.mock.calls[1][0]).toBe(
+			"http://localhost:3005/acp/backend/capabilities?machineId=machine+1&backendId=codex-acp",
+		);
+		expect(mockFetch.mock.calls[1][1]).toEqual(
+			expect.objectContaining({
+				credentials: "include",
+				signal: expect.any(AbortSignal),
+			}),
+		);
+		expect(mockFetch.mock.calls[2]).toEqual([
+			"http://localhost:3005/acp/backend/authenticate",
+			expect.objectContaining({
+				body: JSON.stringify({
+					backendId: "codex-acp",
+					machineId: "machine 1",
+					methodId: "browser",
+				}),
+				credentials: "include",
+				method: "POST",
+				signal: expect.any(AbortSignal),
+			}),
+		]);
+		expect(mockFetch.mock.calls[3]).toEqual([
+			"http://localhost:3005/acp/backend/logout",
+			expect.objectContaining({
+				body: JSON.stringify({
+					backendId: "codex-acp",
+					machineId: "machine 1",
+				}),
+				credentials: "include",
+				method: "POST",
+				signal: expect.any(AbortSignal),
+			}),
+		]);
+	});
 });
 
 describe("api Fly owner routing", () => {
