@@ -359,6 +359,61 @@ describe("consolidateEventsForRead", () => {
 		expect(result[0]).toBe(e3);
 	});
 
+	it("passes plan operations through in order alongside legacy plans", () => {
+		const legacyPlan = makeEvent("session_info_update", {
+			sessionId: SESSION_ID,
+			update: {
+				sessionUpdate: "plan",
+				entries: [
+					{
+						content: "Legacy step",
+						priority: "medium",
+						status: "pending",
+					},
+				],
+			},
+		});
+		const firstUpdate = makeEvent("plan_update", {
+			sessionId: SESSION_ID,
+			update: {
+				sessionUpdate: "plan_update",
+				plan: {
+					type: "markdown",
+					planId: "design",
+					content: "## First revision",
+				},
+			},
+		});
+		const secondUpdate = makeEvent("plan_update", {
+			sessionId: SESSION_ID,
+			update: {
+				sessionUpdate: "plan_update",
+				plan: {
+					type: "markdown",
+					planId: "design",
+					content: "## Second revision",
+				},
+			},
+		});
+		const removed = makeEvent("plan_removed", {
+			sessionId: SESSION_ID,
+			update: { sessionUpdate: "plan_removed", planId: "design" },
+		});
+
+		const result = consolidateEventsForRead([
+			legacyPlan,
+			firstUpdate,
+			secondUpdate,
+			removed,
+		]);
+
+		expect(result).toEqual([legacyPlan, firstUpdate, secondUpdate, removed]);
+		expect(result.map((event) => event.seq)).toEqual([1, 2, 3, 4]);
+		expect(result[1]).toBe(firstUpdate);
+		expect(result[2]).toBe(secondUpdate);
+		expect(result[3]).toBe(removed);
+	});
+
 	// 12. Stub payloads are filtered
 	it("should filter out legacy {_c:true} stub payloads", () => {
 		const e1 = makeEvent(

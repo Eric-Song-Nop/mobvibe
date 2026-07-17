@@ -115,4 +115,93 @@ describe("chat-store session event atomicity", () => {
 		expect(messages[0]).toMatchObject({ contentBlocks: [image] });
 		expect(messages[1]).toMatchObject({ contentBlocks: [resource] });
 	});
+
+	it("sanitizes tampered current-version plan state on every hydration", async () => {
+		const store = useChatStore.getState();
+		store.addUserMessage("s1", "persisted message");
+		store.updateSessionCursor("s1", 4, 7);
+		const persisted = JSON.parse(memory.getRaw() ?? "{}") as {
+			state: { sessions: Record<string, Record<string, unknown>> };
+			version: number;
+		};
+		persisted.version = 2;
+		persisted.state.sessions.s1.plan = [
+			{ content: "unsafe", priority: "urgent", status: "pending" },
+		];
+		persisted.state.sessions.s1.plans = Array.from(
+			{ length: 17 },
+			(_, index) => ({
+				type: "file",
+				planId: `plan-${index}`,
+				uri: `file:///workspace/${index}.md`,
+				untrusted: "drop-me",
+			}),
+		);
+
+		resetStore();
+		memory.setRaw(JSON.stringify(persisted));
+		await useChatStore.persist.rehydrate();
+
+		const restored = useChatStore.getState();
+		expect(restored.sessions.s1.plan).toBeUndefined();
+		expect(restored.sessions.s1.plans).toHaveLength(16);
+		expect(restored.sessions.s1.plans?.[0]).toEqual({
+			type: "file",
+			planId: "plan-0",
+			uri: "file:///workspace/0.md",
+		});
+		expect(restored.sessions.s1.messages[0]).toMatchObject({
+			content: "persisted message",
+		});
+		expect(restored.sessions.s1).toMatchObject({
+			revision: 4,
+			lastAppliedSeq: 7,
+		});
+		expect(restored.upsertPlan).toBeTypeOf("function");
+		expect(restored.removePlan).toBeTypeOf("function");
+	});
+
+	it("migrates version-one legacy and operation plans through the sanitizer", async () => {
+		const store = useChatStore.getState();
+		store.addUserMessage("s1", "migration keeps history");
+		store.updateSessionCursor("s1", 3, 5);
+		const persisted = JSON.parse(memory.getRaw() ?? "{}") as {
+			state: { sessions: Record<string, Record<string, unknown>> };
+			version: number;
+		};
+		persisted.version = 1;
+		persisted.state.sessions.s1.plan = [
+			{
+				content: "Legacy",
+				priority: "low",
+				status: "pending",
+				untrusted: true,
+			},
+		];
+		persisted.state.sessions.s1.plans = [
+			{
+				type: "markdown",
+				planId: "plan-a",
+				content: "",
+				untrusted: true,
+			},
+			{ type: "unknown", planId: "bad", content: "drop" },
+		];
+
+		resetStore();
+		memory.setRaw(JSON.stringify(persisted));
+		await useChatStore.persist.rehydrate();
+
+		const restored = useChatStore.getState().sessions.s1;
+		expect(restored.plan).toEqual([
+			{ content: "Legacy", priority: "low", status: "pending" },
+		]);
+		expect(restored.plans).toEqual([
+			{ type: "markdown", planId: "plan-a", content: "" },
+		]);
+		expect(restored.messages[0]).toMatchObject({
+			content: "migration keeps history",
+		});
+		expect(restored).toMatchObject({ revision: 3, lastAppliedSeq: 5 });
+	});
 });

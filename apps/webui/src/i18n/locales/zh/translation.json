@@ -522,6 +522,17 @@
 		"completedSection": "{{count}} 已完成",
 		"showMore": "展开",
 		"showLess": "收起",
+		"plansCount_other": "{{count}} 个计划",
+		"openPlans_other": "打开 {{count}} 个计划",
+		"legacyTitle": "当前计划",
+		"planId": "计划 ID",
+		"emptyItems": "此计划暂无任务。",
+		"emptyMarkdown": "此计划内容为空。",
+		"type": {
+			"items": "任务",
+			"markdown": "Markdown",
+			"file": "文件"
+		},
 		"priority": {
 			"high": "高",
 			"medium": "中",

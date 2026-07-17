@@ -24,6 +24,8 @@ export function createSessionSyncBackup(
 			streamingMessageRole: session.streamingMessageRole,
 			streamingThoughtId: session.streamingThoughtId,
 			reportedTokenUsage: session.reportedTokenUsage,
+			plan: session.plan ? [...session.plan] : undefined,
+			plans: session.plans ? [...session.plans] : undefined,
 		},
 	};
 }

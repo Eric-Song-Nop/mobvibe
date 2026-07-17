@@ -1,9 +1,11 @@
 import type {
 	AvailableCommand,
 	PlanEntry,
+	PlanOperationSessionUpdate,
 	SessionNotification,
 	ToolCallUpdate,
 } from "@mobvibe/shared";
+import { sanitizePlanSessionUpdate } from "@mobvibe/shared";
 
 // Core-specific types (UI/extraction helpers)
 export type SessionTextChunk = {
@@ -104,12 +106,18 @@ export type PlanUpdatePayload = {
 export const extractPlanUpdate = (
 	notification: SessionNotification,
 ): PlanUpdatePayload | null => {
-	const { update } = notification;
-	if (update.sessionUpdate !== "plan") {
-		return null;
-	}
-	const planUpdate = update as unknown as { entries?: PlanEntry[] };
-	return { entries: planUpdate.entries ?? [] };
+	const update = sanitizePlanSessionUpdate(notification.update);
+	return update?.sessionUpdate === "plan" ? { entries: update.entries } : null;
+};
+
+export const extractPlanOperationUpdate = (
+	notification: SessionNotification,
+): PlanOperationSessionUpdate | null => {
+	const update = sanitizePlanSessionUpdate(notification.update);
+	return update?.sessionUpdate === "plan_update" ||
+		update?.sessionUpdate === "plan_removed"
+		? update
+		: null;
 };
 
 export const extractAvailableCommandsUpdate = (

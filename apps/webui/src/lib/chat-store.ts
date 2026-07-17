@@ -6,6 +6,7 @@ import type {
 	PermissionOutcome,
 	PermissionToolCall,
 	PlanEntry,
+	PlanUpdateContent,
 	ReportedTokenUsage,
 	SessionConfigOption,
 	SessionEvent,
@@ -18,6 +19,10 @@ import type {
 	ToolCallStatus,
 	ToolCallUpdate,
 } from "@mobvibe/shared";
+import {
+	ACP_MAX_ACTIVE_PLANS,
+	sanitizePlanSessionUpdate,
+} from "@mobvibe/shared";
 import { create, type StateCreator } from "zustand";
 import { persist } from "zustand/middleware";
 import i18n from "@/i18n";
@@ -29,6 +34,70 @@ import {
 } from "./content-block-utils";
 import type { E2EEStatus } from "./e2ee";
 import { getStorageAdapter } from "./storage-adapter";
+
+const UTF8_ENCODER = new TextEncoder();
+
+export const CHAT_ACTIVE_PLANS_MAX_BYTES = 1024 * 1024;
+
+const activePlansFitPersistenceLimit = (plans: PlanUpdateContent[]) => {
+	try {
+		return (
+			UTF8_ENCODER.encode(JSON.stringify(plans)).byteLength <=
+			CHAT_ACTIVE_PLANS_MAX_BYTES
+		);
+	} catch {
+		return false;
+	}
+};
+
+const sanitizeLegacyPlan = (value: unknown): PlanEntry[] | undefined => {
+	if (value === undefined) return undefined;
+	const update = sanitizePlanSessionUpdate({
+		sessionUpdate: "plan",
+		entries: value,
+	});
+	return update?.sessionUpdate === "plan" ? update.entries : undefined;
+};
+
+const sanitizePlanContent = (value: unknown): PlanUpdateContent | undefined => {
+	const update = sanitizePlanSessionUpdate({
+		sessionUpdate: "plan_update",
+		plan: value,
+	});
+	return update?.sessionUpdate === "plan_update" ? update.plan : undefined;
+};
+
+const sanitizePlanId = (value: unknown): string | undefined => {
+	const update = sanitizePlanSessionUpdate({
+		sessionUpdate: "plan_removed",
+		planId: value,
+	});
+	return update?.sessionUpdate === "plan_removed" ? update.planId : undefined;
+};
+
+const sanitizeActivePlans = (
+	value: unknown,
+): PlanUpdateContent[] | undefined => {
+	if (!Array.isArray(value)) return undefined;
+	const plans: PlanUpdateContent[] = [];
+	for (const rawPlan of value) {
+		const plan = sanitizePlanContent(rawPlan);
+		if (!plan) continue;
+		const existingIndex = plans.findIndex(
+			(existing) => existing.planId === plan.planId,
+		);
+		if (existingIndex < 0 && plans.length >= ACP_MAX_ACTIVE_PLANS) continue;
+		const nextPlans = [...plans];
+		if (existingIndex >= 0) {
+			nextPlans[existingIndex] = plan;
+		} else {
+			nextPlans.push(plan);
+		}
+		if (!activePlansFitPersistenceLimit(nextPlans)) continue;
+		plans.splice(0, plans.length, ...nextPlans);
+	}
+	return plans.length > 0 ? plans : undefined;
+};
 
 export type ChatRole = "user" | "assistant";
 
@@ -139,6 +208,8 @@ export type SessionRestoreSnapshot = {
 	streamingMessageRole?: ChatRole;
 	streamingThoughtId?: string;
 	reportedTokenUsage?: ReportedTokenUsage;
+	plan?: PlanEntry[];
+	plans?: PlanUpdateContent[];
 };
 
 export type ChatSession = {
@@ -209,6 +280,8 @@ export type ChatSession = {
 	workspaceRootCwd?: string;
 	/** Agent execution plan entries (replaced in full on each update) */
 	plan?: PlanEntry[];
+	/** Ordered, independently replaceable plans from the Draft Plan Operations RFD. */
+	plans?: PlanUpdateContent[];
 	/** Whether the title was manually set by the user (immune to agent auto-update) */
 	isTitlePinned?: boolean;
 };
@@ -353,6 +426,8 @@ type ChatState = {
 			>
 		>,
 	) => void;
+	upsertPlan: (sessionId: string, plan: PlanUpdateContent) => void;
+	removePlan: (sessionId: string, planId: string) => void;
 	addUserMessage: (
 		sessionId: string,
 		content: string,
@@ -446,6 +521,8 @@ export type SessionEventTransactionActions = Pick<
 	| "appendThoughtChunk"
 	| "confirmOrAppendUserMessage"
 	| "updateSessionMeta"
+	| "upsertPlan"
+	| "removePlan"
 	| "setStreamError"
 	| "addPermissionRequest"
 	| "setPermissionDecisionState"
@@ -751,6 +828,7 @@ const resetSessionContentForRevision = (
 	streamingMessageRole: undefined,
 	streamingThoughtId: undefined,
 	plan: undefined,
+	plans: undefined,
 	reportedTokenUsage: undefined,
 	revision,
 	lastAppliedSeq: 0,
@@ -872,6 +950,9 @@ const mergeSessionFromSummary = (
 
 const STORAGE_KEY = "mobvibe.chat-store";
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
 const sanitizeMessageForPersist = (message: ChatMessage): ChatMessage => {
 	if (isTextMessage(message)) {
 		return {
@@ -907,9 +988,10 @@ const sanitizeSessionForPersist = (session: ChatSession): ChatSession => ({
 	detachedAt: undefined,
 	detachedReason: undefined,
 	e2eeStatus: undefined,
-	plan: undefined,
 	historySyncing: false,
 	historySyncWarning: undefined,
+	plan: sanitizeLegacyPlan(session.plan),
+	plans: sanitizeActivePlans(session.plans),
 	// Preserve messages even when cursor is set so detached sessions keep history.
 	// Backfill applies only new events based on the cursor.
 	messages: session.messages.map(sanitizeMessageForPersist),
@@ -917,6 +999,35 @@ const sanitizeSessionForPersist = (session: ChatSession): ChatSession => ({
 	revision: session.revision,
 	lastAppliedSeq: session.lastAppliedSeq,
 });
+
+const sanitizePersistedChatState = (persisted: unknown): PersistedChatState => {
+	const state = isRecord(persisted) ? persisted : {};
+	const rawSessions = isRecord(state.sessions) ? state.sessions : {};
+	const sessions: Record<string, ChatSession> = {};
+	for (const [sessionId, rawSession] of Object.entries(rawSessions)) {
+		if (!isRecord(rawSession)) continue;
+		sessions[sessionId] = {
+			...(rawSession as ChatSession),
+			plan: sanitizeLegacyPlan(rawSession.plan),
+			plans: sanitizeActivePlans(rawSession.plans),
+		};
+	}
+	const lastCreatedCwd = isRecord(state.lastCreatedCwd)
+		? Object.fromEntries(
+				Object.entries(state.lastCreatedCwd).filter(
+					(entry): entry is [string, string] => typeof entry[1] === "string",
+				),
+			)
+		: {};
+	return {
+		sessions,
+		activeSessionId:
+			typeof state.activeSessionId === "string"
+				? state.activeSessionId
+				: undefined,
+		lastCreatedCwd,
+	};
+};
 
 const partializeChatState = (state: ChatState): PersistedChatState => ({
 	sessions: Object.keys(state.sessions).reduce<Record<string, ChatSession>>(
@@ -1203,6 +1314,8 @@ export const useChatStore = create<ChatState>()(
 								streamingMessageId: undefined,
 								streamingMessageRole: undefined,
 								streamingThoughtId: undefined,
+								plan: undefined,
+								plans: undefined,
 								reportedTokenUsage: undefined,
 								revision: undefined,
 								lastAppliedSeq: 0,
@@ -1244,6 +1357,12 @@ export const useChatStore = create<ChatState>()(
 									: {}),
 								...(snapshot?.reportedTokenUsage !== undefined
 									? { reportedTokenUsage: snapshot.reportedTokenUsage }
+									: {}),
+								...(snapshot && Object.hasOwn(snapshot, "plan")
+									? { plan: sanitizeLegacyPlan(snapshot.plan) }
+									: {}),
+								...(snapshot && Object.hasOwn(snapshot, "plans")
+									? { plans: sanitizeActivePlans(snapshot.plans) }
 									: {}),
 							},
 						},
@@ -1475,7 +1594,8 @@ export const useChatStore = create<ChatState>()(
 						nextSession._meta = payload._meta;
 					}
 					if (payload.plan !== undefined) {
-						nextSession.plan = payload.plan;
+						const plan = sanitizeLegacyPlan(payload.plan);
+						if (plan) nextSession.plan = plan;
 					}
 					if (payload.isTitlePinned !== undefined) {
 						nextSession.isTitlePinned = payload.isTitlePinned;
@@ -1484,6 +1604,51 @@ export const useChatStore = create<ChatState>()(
 						sessions: {
 							...state.sessions,
 							[sessionId]: nextSession,
+						},
+					};
+				}),
+			upsertPlan: (sessionId, rawPlan) =>
+				set((state) => {
+					const session = state.sessions[sessionId];
+					const plan = sanitizePlanContent(rawPlan);
+					if (!session || !plan) return state;
+					const plans = session.plans ?? [];
+					const existingIndex = plans.findIndex(
+						(existing) => existing.planId === plan.planId,
+					);
+					if (existingIndex < 0 && plans.length >= ACP_MAX_ACTIVE_PLANS) {
+						return state;
+					}
+					const nextPlans = [...plans];
+					if (existingIndex >= 0) {
+						nextPlans[existingIndex] = plan;
+					} else {
+						nextPlans.push(plan);
+					}
+					if (!activePlansFitPersistenceLimit(nextPlans)) return state;
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: { ...session, plans: nextPlans },
+						},
+					};
+				}),
+			removePlan: (sessionId, rawPlanId) =>
+				set((state) => {
+					const session = state.sessions[sessionId];
+					const planId = sanitizePlanId(rawPlanId);
+					if (!session || !planId || !session.plans) return state;
+					const nextPlans = session.plans.filter(
+						(plan) => plan.planId !== planId,
+					);
+					if (nextPlans.length === session.plans.length) return state;
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: {
+								...session,
+								plans: nextPlans.length > 0 ? nextPlans : undefined,
+							},
 						},
 					};
 				}),
@@ -2230,6 +2395,7 @@ export const useChatStore = create<ChatState>()(
 								streamingMessageRole: undefined,
 								streamingThoughtId: undefined,
 								plan: undefined,
+								plans: undefined,
 								reportedTokenUsage: undefined,
 								revision: newRevision,
 								lastAppliedSeq: 0,
@@ -2252,15 +2418,19 @@ export const useChatStore = create<ChatState>()(
 		})),
 		{
 			name: STORAGE_KEY,
-			version: 1,
+			version: 2,
 			migrate: (persisted, version) => {
+				const sanitized = sanitizePersistedChatState(persisted);
 				if (version === 0) {
-					const state = persisted as Record<string, unknown>;
 					// v0 had lastCreatedCwd as string | undefined; discard it
-					state.lastCreatedCwd = {};
+					sanitized.lastCreatedCwd = {};
 				}
-				return persisted as PersistedChatState;
+				return sanitized;
 			},
+			merge: (persisted, current) => ({
+				...current,
+				...sanitizePersistedChatState(persisted),
+			}),
 			partialize: partializeChatState,
 			storage: {
 				getItem: (name) => {

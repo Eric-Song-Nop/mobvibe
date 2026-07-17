@@ -116,6 +116,10 @@ const resolveSessionUpdateEventKind = (
 			return "session_info_update";
 		case "usage_update":
 			return "usage_update";
+		case "plan_update":
+			return "plan_update";
+		case "plan_removed":
+			return "plan_removed";
 		default:
 			return "unknown_update";
 	}
@@ -1893,7 +1897,7 @@ export class SessionManager {
 			options.additionalDirectories,
 		);
 		const connection = await this.acquireConnection(backend);
-		const bufferedUpdates: SessionNotification[] = [];
+		const creationBuffer: PendingReloadBuffer = { events: [], bytes: 0 };
 		let recordRef: SessionRecord | undefined;
 		let observation: AgentSessionObservation | undefined;
 		let quarantinedSessionId: string | undefined;
@@ -1911,7 +1915,10 @@ export class SessionManager {
 					this.handleSessionUpdate(recordRef, notification);
 					return;
 				}
-				bufferedUpdates.push(notification);
+				this.bufferReloadEvent(creationBuffer, {
+					type: "session_update",
+					notification,
+				});
 			},
 		);
 		try {
@@ -1930,6 +1937,9 @@ export class SessionManager {
 					}),
 					502,
 				);
+			}
+			if (creationBuffer.error) {
+				throw creationBuffer.error;
 			}
 			if (!this.acceptAgentSessionObservation(session.sessionId, observation)) {
 				quarantinedSessionId = session.sessionId;
@@ -2024,9 +2034,10 @@ export class SessionManager {
 					this.emitSessionDetached(session.sessionId, "agent_exit");
 				}
 			});
-			for (const notification of bufferedUpdates) {
-				this.writeSessionUpdateToWal(record, notification);
-				this.applySessionUpdateToRecord(record, notification);
+			for (const event of creationBuffer.events) {
+				if (event.type !== "session_update") continue;
+				this.writeSessionUpdateToWal(record, event.notification);
+				this.applySessionUpdateToRecord(record, event.notification);
 			}
 			this.sessions.set(session.sessionId, record);
 			const summary = this.buildSummary(record);

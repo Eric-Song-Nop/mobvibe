@@ -2,6 +2,7 @@ import { type ErrorDetail, sanitizeReportedTokenUsage } from "@mobvibe/shared";
 import type { ChatStoreActions } from "@/hooks/useSessionMutations";
 import {
 	extractAvailableCommandsUpdate,
+	extractPlanOperationUpdate,
 	extractPlanUpdate,
 	extractSessionInfoUpdate,
 	extractSessionModeUpdate,
@@ -21,6 +22,8 @@ export type SessionEventReducerActions = Pick<
 	| "appendThoughtChunk"
 	| "confirmOrAppendUserMessage"
 	| "updateSessionMeta"
+	| "upsertPlan"
+	| "removePlan"
 	| "setStreamError"
 	| "addPermissionRequest"
 	| "setPermissionDecisionState"
@@ -229,6 +232,23 @@ export function applySessionEvent({
 				actions.updateSessionMeta(event.sessionId, {
 					plan: planUpdate.entries,
 				});
+			}
+			break;
+		}
+		case "plan_update":
+		case "plan_removed": {
+			const notification = event.payload as SessionNotification;
+			const planUpdate = extractPlanOperationUpdate(notification);
+			if (
+				event.kind === "plan_update" &&
+				planUpdate?.sessionUpdate === "plan_update"
+			) {
+				actions.upsertPlan(event.sessionId, planUpdate.plan);
+			} else if (
+				event.kind === "plan_removed" &&
+				planUpdate?.sessionUpdate === "plan_removed"
+			) {
+				actions.removePlan(event.sessionId, planUpdate.planId);
 			}
 			break;
 		}

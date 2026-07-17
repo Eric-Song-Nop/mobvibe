@@ -159,6 +159,11 @@ export interface ChatStoreActions {
 			>
 		>,
 	) => void;
+	upsertPlan: (
+		sessionId: string,
+		plan: NonNullable<ChatSession["plans"]>[number],
+	) => void;
+	removePlan: (sessionId: string, planId: string) => void;
 	addUserMessage: (
 		sessionId: string,
 		content: string,

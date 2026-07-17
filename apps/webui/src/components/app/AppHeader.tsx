@@ -30,7 +30,7 @@ import { useTranslation } from "react-i18next";
 import { UserMenu } from "@/components/auth/UserMenu";
 import PlanIndicator from "@/components/plan/plan-indicator";
 import { useIsMobile } from "@/hooks/use-mobile";
-import type { PlanEntry } from "@/lib/acp";
+import type { PlanEntry, PlanUpdateContent } from "@/lib/acp";
 import type { ChatSession } from "@/lib/chat-store";
 import {
 	formatReportedTokenCount,
@@ -53,6 +53,7 @@ export type AppHeaderProps = {
 	streamError?: ChatSession["streamError"];
 	loadingMessage?: string;
 	plan?: PlanEntry[];
+	plans?: PlanUpdateContent[];
 	onOpenMobileMenu: () => void;
 	onOpenFileExplorer?: () => void;
 	onOpenCommandPalette?: () => void;
@@ -108,6 +109,7 @@ export const AppHeader = memo(function AppHeader({
 	streamError,
 	loadingMessage,
 	plan,
+	plans,
 	onOpenMobileMenu,
 	onOpenFileExplorer,
 	onOpenCommandPalette,
@@ -381,7 +383,9 @@ export const AppHeader = memo(function AppHeader({
 							{summaryLabel}
 						</Badge>
 					) : null}
-					{plan && plan.length > 0 ? <PlanIndicator plan={plan} /> : null}
+					{(plan && plan.length > 0) || (plans && plans.length > 0) ? (
+						<PlanIndicator plan={plan} plans={plans} />
+					) : null}
 					<div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
 						{showDetailsTrigger ? (
 							isMobile ? (

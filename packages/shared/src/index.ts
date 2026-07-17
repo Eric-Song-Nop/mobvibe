@@ -54,6 +54,22 @@ export {
 	legalDocumentsById,
 } from "./legal/index.js";
 export type {
+	PlanOperationSessionUpdate,
+	PlanSessionUpdate,
+} from "./plan-operations.js";
+export {
+	ACP_MAX_ACTIVE_PLANS,
+	ACP_PLAN_ENTRIES_MAX_BYTES,
+	ACP_PLAN_ENTRY_MAX_BYTES,
+	ACP_PLAN_ID_MAX_BYTES,
+	ACP_PLAN_MARKDOWN_MAX_BYTES,
+	ACP_PLAN_MAX_ENTRIES,
+	ACP_PLAN_UPDATE_MAX_BYTES,
+	ACP_PLAN_URI_MAX_BYTES,
+	sanitizePlanOperationUpdate,
+	sanitizePlanSessionUpdate,
+} from "./plan-operations.js";
+export type {
 	PromptImageMimeType,
 	PromptImageValidationFailure,
 	PromptImageValidationResult,
@@ -94,9 +110,17 @@ export type {
 	PermissionToolCall,
 	// Plan types (SDK exports)
 	Plan,
+	PlanCapabilities,
 	PlanEntry,
 	PlanEntryPriority,
 	PlanEntryStatus,
+	PlanFile,
+	PlanId,
+	PlanItems,
+	PlanMarkdown,
+	PlanRemoved,
+	PlanUpdate,
+	PlanUpdateContent,
 	RequestPermissionOutcome,
 	RequestPermissionRequest,
 	RequestPermissionResponse,

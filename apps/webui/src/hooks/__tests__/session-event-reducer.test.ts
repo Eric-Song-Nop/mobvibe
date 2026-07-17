@@ -12,6 +12,8 @@ const createActions = (): SessionEventReducerActions => ({
 	appendThoughtChunk: vi.fn(),
 	confirmOrAppendUserMessage: vi.fn(),
 	updateSessionMeta: vi.fn(),
+	upsertPlan: vi.fn(),
+	removePlan: vi.fn(),
 	setStreamError: vi.fn(),
 	addPermissionRequest: vi.fn(),
 	setPermissionDecisionState: vi.fn(),
@@ -620,5 +622,186 @@ describe("applySessionEvent reported token usage", () => {
 		expect(
 			useChatStore.getState().sessions[sessionId].reportedTokenUsage,
 		).toBeUndefined();
+	});
+});
+
+describe("applySessionEvent plan operations", () => {
+	const sessionId = "session-plan-1";
+	const makePlanEvent = (
+		kind: "session_info_update" | "plan_update" | "plan_removed",
+		update: unknown,
+		seq = 1,
+	): SessionEvent =>
+		({
+			sessionId,
+			machineId: "machine-1",
+			revision: 1,
+			seq,
+			createdAt: `2026-07-16T00:00:0${seq}.000Z`,
+			kind,
+			payload: { sessionId, update },
+		}) as SessionEvent;
+
+	it("normalizes new operations and requires the WAL kind to match", () => {
+		const actions = createActions();
+		applySessionEvent({
+			event: makePlanEvent("plan_update", {
+				sessionUpdate: "plan_update",
+				plan: {
+					type: "items",
+					planId: "plan-a",
+					entries: [
+						{
+							content: "Ship it",
+							priority: "high",
+							status: "in_progress",
+							untrusted: true,
+						},
+					],
+					untrusted: true,
+				},
+				untrusted: true,
+			}),
+			sessions: {},
+			actions,
+			notifications,
+		});
+		expect(actions.upsertPlan).toHaveBeenCalledWith("session-plan-1", {
+			type: "items",
+			planId: "plan-a",
+			entries: [
+				{
+					content: "Ship it",
+					priority: "high",
+					status: "in_progress",
+				},
+			],
+		});
+
+		applySessionEvent({
+			event: makePlanEvent("plan_removed", {
+				sessionUpdate: "plan_removed",
+				planId: "plan-a",
+			}),
+			sessions: {},
+			actions,
+			notifications,
+		});
+		expect(actions.removePlan).toHaveBeenCalledWith("session-plan-1", "plan-a");
+
+		applySessionEvent({
+			event: makePlanEvent("plan_removed", {
+				sessionUpdate: "plan_update",
+				plan: { type: "markdown", planId: "wrong-kind", content: "" },
+			}),
+			sessions: {},
+			actions,
+			notifications,
+		});
+		expect(actions.upsertPlan).toHaveBeenCalledTimes(1);
+		expect(actions.removePlan).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps legacy plan handling separate and rejects malformed entries", () => {
+		const actions = createActions();
+		for (const update of [
+			{
+				sessionUpdate: "plan",
+				entries: [{ content: "Legacy", priority: "low", status: "pending" }],
+			},
+			{
+				sessionUpdate: "plan",
+				entries: [
+					{ content: "Invalid", priority: "urgent", status: "pending" },
+				],
+			},
+		]) {
+			applySessionEvent({
+				event: makePlanEvent("session_info_update", update),
+				sessions: {},
+				actions,
+				notifications,
+			});
+		}
+
+		expect(actions.updateSessionMeta).toHaveBeenCalledTimes(1);
+		expect(actions.updateSessionMeta).toHaveBeenCalledWith("session-plan-1", {
+			plan: [{ content: "Legacy", priority: "low", status: "pending" }],
+		});
+	});
+
+	it("applies ordered replacements/removals atomically and advances past bad input", () => {
+		useChatStore.setState({ sessions: {}, activeSessionId: undefined });
+		const store = useChatStore.getState();
+		store.createLocalSession(sessionId);
+		store.resetSessionForRevision(sessionId, 1);
+		const events = [
+			makePlanEvent(
+				"plan_update",
+				{
+					sessionUpdate: "plan_update",
+					plan: { type: "markdown", planId: "plan-a", content: "first" },
+				},
+				1,
+			),
+			makePlanEvent(
+				"plan_update",
+				{
+					sessionUpdate: "plan_update",
+					plan: { type: "file", planId: "plan-b", uri: "file:///b.md" },
+				},
+				2,
+			),
+			makePlanEvent(
+				"plan_update",
+				{
+					sessionUpdate: "plan_update",
+					plan: { type: "markdown", planId: "plan-a", content: "replacement" },
+				},
+				3,
+			),
+			makePlanEvent(
+				"plan_removed",
+				{
+					sessionUpdate: "plan_removed",
+					planId: "plan-b",
+				},
+				4,
+			),
+			makePlanEvent(
+				"plan_update",
+				{
+					sessionUpdate: "plan_update",
+					plan: { type: "markdown", planId: " bad ", content: "drop" },
+				},
+				5,
+			),
+		];
+
+		for (const event of events) {
+			useChatStore.getState().applySessionEventTransaction(event, (actions) => {
+				const state = useChatStore.getState();
+				applySessionEvent({
+					event,
+					session: state.sessions[sessionId],
+					sessions: state.sessions,
+					actions,
+					notifications,
+				});
+			});
+		}
+
+		expect(useChatStore.getState().sessions[sessionId]).toEqual(
+			expect.objectContaining({
+				plans: [
+					{
+						type: "markdown",
+						planId: "plan-a",
+						content: "replacement",
+					},
+				],
+				lastAppliedSeq: 5,
+			}),
+		);
 	});
 });

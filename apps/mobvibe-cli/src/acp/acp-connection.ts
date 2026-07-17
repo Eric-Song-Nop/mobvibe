@@ -15,6 +15,7 @@ import { Readable, Writable } from "node:stream";
 import { TextDecoder } from "node:util";
 import {
 	type AgentCapabilities,
+	type AnyMessage,
 	type ClientConnection,
 	type CloseSessionResponse,
 	type ContentBlock,
@@ -45,6 +46,7 @@ import {
 	type SessionInfo,
 	type SessionNotification,
 	type SetSessionConfigOptionResponse,
+	type Stream,
 	type TerminalExitStatus,
 	type TerminalOutputRequest,
 	type TerminalOutputResponse,
@@ -62,6 +64,7 @@ import {
 	isProtocolMismatch,
 	sanitizeAcpMessageMeta,
 	sanitizeAcpMeta,
+	sanitizePlanSessionUpdate,
 	type TerminalOutputEvent,
 } from "@mobvibe/shared";
 import type { AcpBackendConfig } from "../config.js";
@@ -79,6 +82,7 @@ type ClientInfo = {
 
 const MAX_STDERR_LINES = 20;
 const MAX_META_SANITIZATION_WARNINGS = 3;
+const MAX_PLAN_SANITIZATION_WARNINGS = 3;
 const MAX_AUTH_METHODS = 32;
 const MAX_AUTH_METHOD_ID_BYTES = 128;
 const MAX_AUTH_METHOD_NAME_BYTES = 256;
@@ -94,6 +98,9 @@ export const ACP_FILE_SYSTEM_CAPABILITIES = {
 export const ACP_CLIENT_CAPABILITIES = {
 	fs: ACP_FILE_SYSTEM_CAPABILITIES,
 	terminal: true,
+	// Draft Plan Operations use `planId` in SDK 1.2.1 even though the RFD's
+	// prose examples still show the older `id` spelling.
+	plan: {},
 	session: {
 		configOptions: {
 			boolean: {},
@@ -108,6 +115,60 @@ const UTF8_DECODER = new TextDecoder("utf-8", {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
+
+const filterIncomingMessages = (
+	stream: Stream,
+	shouldForward: (message: AnyMessage) => boolean,
+): Stream => ({
+	writable: stream.writable,
+	readable: stream.readable.pipeThrough(
+		new TransformStream<AnyMessage, AnyMessage>({
+			transform(message, controller) {
+				if (shouldForward(message)) {
+					controller.enqueue(message);
+				}
+			},
+		}),
+	),
+});
+
+const isInvalidRawPlanSessionUpdate = (message: AnyMessage): boolean => {
+	if (
+		!isRecord(message) ||
+		!("method" in message) ||
+		"id" in message ||
+		message.method !== methods.client.session.update
+	) {
+		return false;
+	}
+	const params = message.params;
+	if (!isRecord(params) || !isRecord(params.update)) return false;
+	const update = params.update;
+	const updateType = update.sessionUpdate;
+	if (
+		updateType !== "plan" &&
+		updateType !== "plan_update" &&
+		updateType !== "plan_removed"
+	) {
+		return false;
+	}
+	return sanitizePlanSessionUpdate(update) === undefined;
+};
+
+/**
+ * Reject malformed Plan notifications before SDK schema decoding can salvage
+ * invalid entries. All other inbound messages and the outbound stream are
+ * passed through unchanged.
+ */
+export const filterInvalidRawPlanSessionUpdates = (
+	stream: Stream,
+	onRejected: () => void = () => undefined,
+): Stream =>
+	filterIncomingMessages(stream, (message) => {
+		if (!isInvalidRawPlanSessionUpdate(message)) return true;
+		onRejected();
+		return false;
+	});
 
 const isBoundedString = (
 	value: unknown,
@@ -490,6 +551,7 @@ export class AcpConnection {
 	private terminals = new Map<string, TerminalRecord>();
 	private recentStderr: string[] = [];
 	private metaSanitizationWarnings = 0;
+	private planSanitizationWarnings = 0;
 	private sensitiveAuthOperations = 0;
 
 	constructor(
@@ -899,7 +961,10 @@ export class AcpConnection {
 			const output = Readable.toWeb(
 				child.stdout,
 			) as unknown as ReadableStream<Uint8Array>;
-			const stream = ndJsonStream(input, output);
+			const stream = filterInvalidRawPlanSessionUpdates(
+				ndJsonStream(input, output),
+				() => this.warnPlanUpdateRejected(),
+			);
 			const connection = client({ name: this.options.client.name })
 				.onRequest(
 					methods.client.session.requestPermission,
@@ -1658,7 +1723,31 @@ export class AcpConnection {
 			// sanitizer has already emitted a bounded, value-free warning.
 			return;
 		}
+		const updateType = sanitized.update.sessionUpdate;
+		if (
+			updateType === "plan" ||
+			updateType === "plan_update" ||
+			updateType === "plan_removed"
+		) {
+			const boundedUpdate = sanitizePlanSessionUpdate(sanitized.update);
+			if (!boundedUpdate) {
+				this.warnPlanUpdateRejected();
+				return;
+			}
+			sanitized = { ...sanitized, update: boundedUpdate };
+		}
 		this.sessionUpdateEmitter.emit("update", sanitized);
+	}
+
+	private warnPlanUpdateRejected(): void {
+		if (this.planSanitizationWarnings >= MAX_PLAN_SANITIZATION_WARNINGS) {
+			return;
+		}
+		this.planSanitizationWarnings += 1;
+		logger.warn(
+			{ backendId: this.options.backend.id },
+			"acp_plan_update_rejected",
+		);
 	}
 
 	/** Strip invalid opaque ACP metadata while retaining the protocol payload. */

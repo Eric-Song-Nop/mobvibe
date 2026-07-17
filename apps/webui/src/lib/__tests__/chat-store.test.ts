@@ -1,4 +1,9 @@
-import type { ContentBlock } from "@mobvibe/shared";
+import {
+	ACP_MAX_ACTIVE_PLANS,
+	ACP_PLAN_MARKDOWN_MAX_BYTES,
+	type ContentBlock,
+	type PlanUpdateContent,
+} from "@mobvibe/shared";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useChatStore } from "../chat-store";
 
@@ -32,6 +37,112 @@ describe("chat-store", () => {
 				isTitlePinned: true,
 			}),
 		);
+	});
+
+	describe("plan operations", () => {
+		const itemsPlan = (planId: string, content: string): PlanUpdateContent => ({
+			type: "items",
+			planId,
+			entries: [{ content, priority: "medium", status: "pending" }],
+		});
+
+		it("replaces a plan in place, preserves ordering, and removes by exact ID", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.upsertPlan("s1", itemsPlan("plan-a", "first"));
+			store.upsertPlan("s1", {
+				type: "markdown",
+				planId: "plan-b",
+				content: "# Second",
+			});
+			store.upsertPlan("s1", {
+				type: "file",
+				planId: "plan-a",
+				uri: "file:///workspace/PLAN.md",
+			});
+
+			expect(useChatStore.getState().sessions.s1.plans).toEqual([
+				{
+					type: "file",
+					planId: "plan-a",
+					uri: "file:///workspace/PLAN.md",
+				},
+				{
+					type: "markdown",
+					planId: "plan-b",
+					content: "# Second",
+				},
+			]);
+
+			store.removePlan("s1", "missing");
+			expect(useChatStore.getState().sessions.s1.plans).toHaveLength(2);
+			store.removePlan("s1", "plan-a");
+			expect(
+				useChatStore.getState().sessions.s1.plans?.map((plan) => plan.planId),
+			).toEqual(["plan-b"]);
+			store.removePlan("s1", "plan-b");
+			expect(useChatStore.getState().sessions.s1.plans).toBeUndefined();
+		});
+
+		it("bounds active plan count while still allowing replacement", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			for (let index = 0; index <= ACP_MAX_ACTIVE_PLANS; index += 1) {
+				store.upsertPlan("s1", itemsPlan(`plan-${index}`, `${index}`));
+			}
+			expect(useChatStore.getState().sessions.s1.plans).toHaveLength(
+				ACP_MAX_ACTIVE_PLANS,
+			);
+
+			store.upsertPlan("s1", itemsPlan("plan-0", "replacement"));
+			expect(useChatStore.getState().sessions.s1.plans?.[0]).toEqual(
+				itemsPlan("plan-0", "replacement"),
+			);
+		});
+
+		it("rejects a projection that would exceed the one MiB store cap", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			const content = "x".repeat(ACP_PLAN_MARKDOWN_MAX_BYTES);
+			for (let index = 0; index < 4; index += 1) {
+				store.upsertPlan("s1", {
+					type: "markdown",
+					planId: `plan-${index}`,
+					content,
+				});
+			}
+
+			expect(
+				useChatStore.getState().sessions.s1.plans?.map((plan) => plan.planId),
+			).toEqual(["plan-0", "plan-1", "plan-2"]);
+		});
+
+		it("clears and restores legacy and operation plans with session history", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			const legacyPlan = [
+				{
+					content: "Legacy",
+					priority: "low" as const,
+					status: "pending" as const,
+				},
+			];
+			const plans = [itemsPlan("plan-a", "Operation")];
+			store.updateSessionMeta("s1", { plan: legacyPlan });
+			store.upsertPlan("s1", plans[0]);
+			store.addUserMessage("s1", "keep me");
+			const messages = [...useChatStore.getState().sessions.s1.messages];
+
+			store.resetSessionForRevision("s1", 2);
+			expect(useChatStore.getState().sessions.s1).toEqual(
+				expect.objectContaining({ plan: undefined, plans: undefined }),
+			);
+
+			store.restoreSessionMessages("s1", messages, { plan: legacyPlan, plans });
+			expect(useChatStore.getState().sessions.s1).toEqual(
+				expect.objectContaining({ plan: legacyPlan, plans }),
+			);
+		});
 	});
 
 	// ---------------------------------------------------------------------------

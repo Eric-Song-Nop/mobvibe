@@ -389,6 +389,12 @@ describe("AcpConnection", () => {
 		});
 	});
 
+	describe("client capabilities", () => {
+		it("advertises the complete Draft plan-operation update pair", () => {
+			expect(ACP_CLIENT_CAPABILITIES.plan).toEqual({});
+		});
+	});
+
 	describe("deleteSession", () => {
 		it("gates and forwards session/delete", async () => {
 			const request = mock(() =>
@@ -914,6 +920,75 @@ describe("AcpConnection", () => {
 	});
 
 	describe("session updates", () => {
+		it("normalizes SDK planId operations before notifying session buffers", () => {
+			const received = mock(() => undefined);
+			const unsubscribe = connection.onSessionUpdate(received);
+			const internal = connection as unknown as {
+				emitSessionUpdate: (notification: unknown) => void;
+			};
+
+			internal.emitSessionUpdate({
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "plan_update",
+					plan: {
+						type: "items",
+						planId: "implementation",
+						entries: [{ content: "Test", priority: "high", status: "pending" }],
+						extra: "dropped",
+					},
+					extra: "dropped",
+				},
+			});
+
+			expect(received).toHaveBeenCalledWith({
+				sessionId: "session-1",
+				update: {
+					sessionUpdate: "plan_update",
+					plan: {
+						type: "items",
+						planId: "implementation",
+						entries: [{ content: "Test", priority: "high", status: "pending" }],
+					},
+				},
+			});
+			unsubscribe();
+		});
+
+		it("drops obsolete, malformed, and oversized plan updates", () => {
+			const received = mock(() => undefined);
+			const unsubscribe = connection.onSessionUpdate(received);
+			const internal = connection as unknown as {
+				emitSessionUpdate: (notification: unknown) => void;
+			};
+
+			for (const update of [
+				{
+					sessionUpdate: "plan_update",
+					plan: { type: "markdown", id: "obsolete", content: "text" },
+				},
+				{
+					sessionUpdate: "plan_update",
+					plan: { type: "file", planId: "file", uri: "" },
+				},
+				{
+					sessionUpdate: "plan",
+					entries: [
+						{
+							content: "x".repeat(8 * 1024 + 1),
+							priority: "low",
+							status: "pending",
+						},
+					],
+				},
+			]) {
+				internal.emitSessionUpdate({ sessionId: "session-1", update });
+			}
+
+			expect(received).not.toHaveBeenCalled();
+			unsubscribe();
+		});
+
 		it("drops invalid metadata while preserving session info fields", () => {
 			let received: unknown;
 			const unsubscribe = connection.onSessionUpdate((notification) => {

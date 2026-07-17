@@ -44,6 +44,8 @@ export type SessionEventKind =
 	| "permission_result"
 	| "terminal_output"
 	| "session_info_update"
+	| "plan_update"
+	| "plan_removed"
 	| "session_error"
 	| "usage_update"
 	| "unknown_update";

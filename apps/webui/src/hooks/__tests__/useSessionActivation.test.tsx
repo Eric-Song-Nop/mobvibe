@@ -105,6 +105,8 @@ const createStore = (): ChatStoreActions =>
 		setCanceling: vi.fn(),
 		setStreamError: vi.fn(),
 		updateSessionMeta: vi.fn(),
+		upsertPlan: vi.fn(),
+		removePlan: vi.fn(),
 		addUserMessage: vi.fn(),
 		addStatusMessage: vi.fn(),
 		appendAssistantChunk: vi.fn(),

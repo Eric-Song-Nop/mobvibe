@@ -379,6 +379,13 @@ describe("AppHeader", () => {
 			expect(screen.getByTestId("plan-indicator")).toBeInTheDocument();
 		});
 
+		it("shows plan indicator when only a plan operation projection exists", () => {
+			renderAppHeader({
+				plans: [{ type: "markdown", planId: "design", content: "" }],
+			});
+			expect(screen.getByTestId("plan-indicator")).toBeInTheDocument();
+		});
+
 		it("shows sync history button when enabled", () => {
 			renderAppHeader({ showSyncHistory: true });
 			expect(screen.getByLabelText("Sync History")).toBeInTheDocument();

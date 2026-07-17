@@ -13,6 +13,7 @@ import type {
 } from "@agentclientprotocol/sdk";
 import { RequestError } from "@agentclientprotocol/sdk";
 import {
+	ACP_PLAN_MARKDOWN_MAX_BYTES,
 	type AgentSessionCapabilities,
 	decryptPayload,
 	deriveContentKeyPair,
@@ -1747,6 +1748,82 @@ describe("SessionManager", () => {
 					})
 					.events.map((event) => event.kind),
 			).toEqual(["terminal_output", "session_error"]);
+		});
+
+		it("replays plan operations in order alongside legacy plans", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const planUpdate = {
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "plan_update",
+					plan: {
+						type: "markdown",
+						planId: "implementation",
+						content: "## Implementation\n\nShip the WAL mapping.",
+					},
+				},
+			} as SessionNotification;
+			const legacyPlan = {
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "plan",
+					entries: [
+						{
+							content: "Keep legacy clients working",
+							priority: "high",
+							status: "in_progress",
+						},
+					],
+				},
+			} as SessionNotification;
+			const planRemoved = {
+				sessionId: created.sessionId,
+				update: {
+					sessionUpdate: "plan_removed",
+					planId: "implementation",
+				},
+			} as SessionNotification;
+			mockConnection.loadSession.mockImplementationOnce(async () => {
+				sessionUpdateCallback?.(planUpdate);
+				sessionUpdateCallback?.(legacyPlan);
+				sessionUpdateCallback?.(planRemoved);
+				return { modes: null, configOptions: null };
+			});
+
+			await sessionManager.reloadSession(
+				created.sessionId,
+				"/home/user/project",
+				"backend-1",
+			);
+
+			const events = sessionManager.getSessionEvents({
+				sessionId: created.sessionId,
+				revision: 2,
+				afterSeq: 0,
+			}).events;
+			expect(events).toEqual([
+				expect.objectContaining({
+					revision: 2,
+					seq: 1,
+					kind: "plan_update",
+					payload: planUpdate,
+				}),
+				expect.objectContaining({
+					revision: 2,
+					seq: 2,
+					kind: "session_info_update",
+					payload: legacyPlan,
+				}),
+				expect.objectContaining({
+					revision: 2,
+					seq: 3,
+					kind: "plan_removed",
+					payload: planRemoved,
+				}),
+			]);
 		});
 
 		it("serializes concurrent reloads and preserves each replay revision", async () => {
@@ -4636,6 +4713,66 @@ describe("SessionManager", () => {
 			);
 		});
 
+		it("maps plan operations to dedicated WAL events without rewriting them", async () => {
+			const { sessionId, eventListener } = await setupSessionWithListener();
+			const planUpdate = {
+				sessionId,
+				update: {
+					sessionUpdate: "plan_update",
+					plan: {
+						type: "file",
+						planId: "release",
+						uri: "file:///workspace/RELEASE.md",
+					},
+				},
+			} as SessionNotification;
+			const planRemoved = {
+				sessionId,
+				update: {
+					sessionUpdate: "plan_removed",
+					planId: "release",
+				},
+			} as SessionNotification;
+
+			sessionUpdateCallback?.(planUpdate);
+			sessionUpdateCallback?.(planRemoved);
+
+			expect(eventListener).toHaveBeenNthCalledWith(
+				1,
+				expect.objectContaining({
+					sessionId,
+					kind: "plan_update",
+					payload: planUpdate,
+				}),
+			);
+			expect(eventListener).toHaveBeenNthCalledWith(
+				2,
+				expect.objectContaining({
+					sessionId,
+					kind: "plan_removed",
+					payload: planRemoved,
+				}),
+			);
+			expect(
+				sessionManager.getSessionEvents({
+					sessionId,
+					revision: 1,
+					afterSeq: 0,
+				}).events,
+			).toEqual([
+				expect.objectContaining({
+					seq: 1,
+					kind: "plan_update",
+					payload: planUpdate,
+				}),
+				expect.objectContaining({
+					seq: 2,
+					kind: "plan_removed",
+					payload: planRemoved,
+				}),
+			]);
+		});
+
 		it("maps session_info_update → session_info_update WAL event", async () => {
 			const { sessionId, eventListener } = await setupSessionWithListener();
 
@@ -5070,6 +5207,119 @@ describe("SessionManager", () => {
 					}),
 				}),
 			]);
+		});
+
+		it("persists ordered plan operations emitted during session creation", async () => {
+			const planUpdate = {
+				sessionId: "new-session-1",
+				update: {
+					sessionUpdate: "plan_update",
+					plan: {
+						type: "markdown",
+						planId: "implementation",
+						content: "## Implementation\n\nShip the bounded creation buffer.",
+					},
+				},
+			} as SessionNotification;
+			const replacementPlan = {
+				sessionId: "new-session-1",
+				update: {
+					sessionUpdate: "plan_update",
+					plan: {
+						type: "markdown",
+						planId: "implementation",
+						content: "## Implementation\n\nVerify the bounded creation buffer.",
+					},
+				},
+			} as SessionNotification;
+			const planRemoved = {
+				sessionId: "new-session-1",
+				update: {
+					sessionUpdate: "plan_removed",
+					planId: "implementation",
+				},
+			} as SessionNotification;
+			mockConnection.createSession.mockImplementationOnce(async () => {
+				sessionUpdateCallback?.(planUpdate);
+				sessionUpdateCallback?.(replacementPlan);
+				sessionUpdateCallback?.(planRemoved);
+				return {
+					sessionId: "new-session-1",
+					modes: null,
+					configOptions: null,
+				};
+			});
+
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			const events = sessionManager.getSessionEvents({
+				sessionId: created.sessionId,
+				revision: 1,
+				afterSeq: 0,
+			}).events;
+			expect(events).toEqual([
+				expect.objectContaining({
+					seq: 1,
+					kind: "plan_update",
+					payload: planUpdate,
+				}),
+				expect.objectContaining({
+					seq: 2,
+					kind: "plan_update",
+					payload: replacementPlan,
+				}),
+				expect.objectContaining({
+					seq: 3,
+					kind: "plan_removed",
+					payload: planRemoved,
+				}),
+			]);
+		});
+
+		it("rejects an oversized creation replay without exposing partial state", async () => {
+			mockConnection.createSession.mockImplementationOnce(async () => {
+				// Each update is independently valid at the ACP boundary; their
+				// aggregate exceeds the creation replay's 8 MiB local cap.
+				for (let index = 0; index < 33; index += 1) {
+					sessionUpdateCallback?.({
+						sessionId: "new-session-1",
+						update: {
+							sessionUpdate: "plan_update",
+							plan: {
+								type: "markdown",
+								planId: "bounded",
+								content: "x".repeat(ACP_PLAN_MARKDOWN_MAX_BYTES),
+							},
+						},
+					} as SessionNotification);
+				}
+				return {
+					sessionId: "new-session-1",
+					modes: null,
+					configOptions: null,
+				};
+			});
+
+			await expect(
+				sessionManager.createSession({
+					cwd: "/home/user/project",
+					backendId: "backend-1",
+				}),
+			).rejects.toThrow("Reload replay exceeds local buffer limit");
+
+			const walStore = (
+				sessionManager as unknown as {
+					walStore: WalStore;
+				}
+			).walStore;
+			expect(walStore.getSession("new-session-1")).toBeNull();
+			expect(sessionManager.getSession("new-session-1")).toBeUndefined();
+			expect(sessionManager.listSessions()).toEqual([]);
+			expect(sessionUpdateCallback).toBeUndefined();
+			expect(mockConnection.disconnect).toHaveBeenCalledTimes(1);
 		});
 
 		it("subscribes to onSessionUpdate when session is created", async () => {

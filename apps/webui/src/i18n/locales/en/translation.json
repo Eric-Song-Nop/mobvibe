@@ -522,6 +522,19 @@
 		"completedSection": "{{count}} completed",
 		"showMore": "Show more",
 		"showLess": "Show less",
+		"plansCount_one": "{{count}} plan",
+		"plansCount_other": "{{count}} plans",
+		"openPlans_one": "Open {{count}} plan",
+		"openPlans_other": "Open {{count}} plans",
+		"legacyTitle": "Current plan",
+		"planId": "Plan ID",
+		"emptyItems": "This plan has no tasks.",
+		"emptyMarkdown": "This plan is empty.",
+		"type": {
+			"items": "Tasks",
+			"markdown": "Markdown",
+			"file": "File"
+		},
 		"priority": {
 			"high": "HIGH",
 			"medium": "MED",

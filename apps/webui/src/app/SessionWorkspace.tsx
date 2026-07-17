@@ -35,6 +35,7 @@ export function SessionWorkspace({ controller }: SessionWorkspaceProps) {
 		pendingConfigId,
 		loadingMessage,
 		plan,
+		plans,
 		selectedMachineId,
 		statusMessage,
 		streamError,
@@ -64,6 +65,7 @@ export function SessionWorkspace({ controller }: SessionWorkspaceProps) {
 				streamError={streamError}
 				loadingMessage={loadingMessage}
 				plan={plan}
+				plans={plans}
 				onOpenMobileMenu={() => uiActions.setMobileMenuOpen(true)}
 				onOpenFileExplorer={() => uiActions.setFileExplorerOpen(true)}
 				onOpenCommandPalette={() => uiActions.setCommandPaletteOpen(true)}

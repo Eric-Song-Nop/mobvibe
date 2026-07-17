@@ -47,6 +47,8 @@ type UseSocketOptions = {
 	setSending?: ChatStoreActions["setSending"];
 	setCanceling?: ChatStoreActions["setCanceling"];
 	finalizeAssistantMessage?: ChatStoreActions["finalizeAssistantMessage"];
+	upsertPlan?: ChatStoreActions["upsertPlan"];
+	removePlan?: ChatStoreActions["removePlan"];
 	/** Called on socket reconnect (not the initial connect) */
 	onReconnect?: () => void;
 } & Pick<
@@ -88,6 +90,10 @@ export function useSocket({
 	appendThoughtChunk,
 	confirmOrAppendUserMessage,
 	updateSessionMeta,
+	upsertPlan = (sessionId, plan) =>
+		useChatStore.getState().upsertPlan(sessionId, plan),
+	removePlan = (sessionId, planId) =>
+		useChatStore.getState().removePlan(sessionId, planId),
 	setStreamError,
 	addPermissionRequest,
 	setPermissionDecisionState,
@@ -167,6 +173,8 @@ export function useSocket({
 			appendThoughtChunk,
 			confirmOrAppendUserMessage,
 			updateSessionMeta,
+			upsertPlan,
+			removePlan,
 			setStreamError,
 			addPermissionRequest,
 			setPermissionDecisionState,
