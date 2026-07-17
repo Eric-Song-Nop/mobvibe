@@ -854,15 +854,7 @@ export class SessionManager {
 			sessionId: params.sessionId,
 			machineId: this.config.machineId,
 			revision: actualRevision,
-			events: consolidated.map((e) => ({
-				sessionId: e.sessionId,
-				machineId: this.config.machineId,
-				revision: e.revision,
-				seq: e.seq,
-				kind: e.kind,
-				createdAt: e.createdAt,
-				payload: e.payload,
-			})),
+			events: consolidated.map((event) => this.toSessionEvent(event)),
 			nextAfterSeq:
 				rawEvents.length > 0 ? rawEvents[rawEvents.length - 1].seq : undefined,
 			hasMore,
@@ -889,15 +881,7 @@ export class SessionManager {
 			return [];
 		}
 		const events = this.walStore.getUnackedEvents(sessionId, revision);
-		return events.map((e) => ({
-			sessionId: e.sessionId,
-			machineId: this.config.machineId,
-			revision: e.revision,
-			seq: e.seq,
-			kind: e.kind,
-			createdAt: e.createdAt,
-			payload: e.payload,
-		}));
+		return events.map((event) => this.toSessionEvent(event));
 	}
 
 	getUnackedEventsPage(
@@ -1029,15 +1013,29 @@ export class SessionManager {
 	}
 
 	private toSessionEvent(walEvent: WalEvent): SessionEvent {
+		const protocolMessageId = this.extractProtocolMessageId(walEvent.payload);
 		return {
 			sessionId: walEvent.sessionId,
 			machineId: this.config.machineId,
 			revision: walEvent.revision,
 			seq: walEvent.seq,
 			kind: walEvent.kind,
+			...(protocolMessageId !== undefined ? { protocolMessageId } : {}),
 			createdAt: walEvent.createdAt,
 			payload: walEvent.payload,
 		};
+	}
+
+	private extractProtocolMessageId(payload: unknown): string | undefined {
+		if (!payload || typeof payload !== "object") {
+			return undefined;
+		}
+		const update = (payload as { update?: unknown }).update;
+		if (!update || typeof update !== "object") {
+			return undefined;
+		}
+		const messageId = (update as { messageId?: unknown }).messageId;
+		return typeof messageId === "string" ? messageId : undefined;
 	}
 
 	private emitSessionEvent(event: SessionEvent): void {

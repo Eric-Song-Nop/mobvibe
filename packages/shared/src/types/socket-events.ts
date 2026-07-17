@@ -54,6 +54,8 @@ export type SessionEvent = {
 	revision: number;
 	seq: number;
 	kind: SessionEventKind;
+	/** ACP message boundary identifier; distinct from SendMessageParams.messageId. */
+	protocolMessageId?: string;
 	createdAt: string;
 	payload: unknown;
 };

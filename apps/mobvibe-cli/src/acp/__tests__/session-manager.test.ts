@@ -2991,7 +2991,7 @@ describe("SessionManager", () => {
 			);
 		});
 
-		it("persists the active messageId on matching user message events", async () => {
+		it("keeps send idempotency and ACP message IDs distinct", async () => {
 			const { sessionId, eventListener } = await setupSessionWithListener();
 			expect(sessionUpdateCallback).toBeDefined();
 			sessionManager.beginMessageSend(sessionId, "message-123");
@@ -3001,6 +3001,7 @@ describe("SessionManager", () => {
 				update: {
 					sessionUpdate: "user_message_chunk",
 					content: { type: "text", text: "Hello" },
+					messageId: "acp-user-message-1",
 				},
 			} as SessionNotification);
 			sessionManager.endMessageSend(sessionId, "message-123");
@@ -3009,6 +3010,7 @@ describe("SessionManager", () => {
 				expect.objectContaining({
 					sessionId,
 					kind: "user_message",
+					protocolMessageId: "acp-user-message-1",
 					payload: expect.objectContaining({ messageId: "message-123" }),
 				}),
 			);
@@ -3017,8 +3019,16 @@ describe("SessionManager", () => {
 				revision: 1,
 				afterSeq: 0,
 			});
-			expect(events.events[0]?.payload).toEqual(
-				expect.objectContaining({ messageId: "message-123" }),
+			expect(events.events[0]).toEqual(
+				expect.objectContaining({
+					protocolMessageId: "acp-user-message-1",
+					payload: expect.objectContaining({
+						messageId: "message-123",
+						update: expect.objectContaining({
+							messageId: "acp-user-message-1",
+						}),
+					}),
+				}),
 			);
 		});
 
@@ -3030,6 +3040,7 @@ describe("SessionManager", () => {
 				update: {
 					sessionUpdate: "agent_message_chunk",
 					content: { type: "text", text: "Hello from assistant" },
+					messageId: "acp-assistant-message-1",
 				},
 			} as SessionNotification);
 
@@ -3037,6 +3048,7 @@ describe("SessionManager", () => {
 				expect.objectContaining({
 					sessionId,
 					kind: "agent_message_chunk",
+					protocolMessageId: "acp-assistant-message-1",
 				}),
 			);
 		});
@@ -3049,6 +3061,7 @@ describe("SessionManager", () => {
 				update: {
 					sessionUpdate: "agent_thought_chunk",
 					content: { type: "text", text: "Thinking..." },
+					messageId: "acp-thought-message-1",
 				},
 			} as SessionNotification);
 
@@ -3056,6 +3069,7 @@ describe("SessionManager", () => {
 				expect.objectContaining({
 					sessionId,
 					kind: "agent_thought_chunk",
+					protocolMessageId: "acp-thought-message-1",
 				}),
 			);
 		});

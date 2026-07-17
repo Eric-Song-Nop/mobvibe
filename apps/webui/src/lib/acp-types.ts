@@ -28,7 +28,8 @@ export const extractTextChunk = (
 	const { update } = notification;
 	if (
 		update.sessionUpdate !== "user_message_chunk" &&
-		update.sessionUpdate !== "agent_message_chunk"
+		update.sessionUpdate !== "agent_message_chunk" &&
+		update.sessionUpdate !== "agent_thought_chunk"
 	) {
 		return null;
 	}

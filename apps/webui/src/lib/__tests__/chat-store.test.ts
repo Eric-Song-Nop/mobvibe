@@ -1031,6 +1031,82 @@ describe("chat-store", () => {
 	});
 
 	// ---------------------------------------------------------------------------
+	// ACP protocol message boundaries
+	// ---------------------------------------------------------------------------
+	describe("ACP protocol message boundaries", () => {
+		it("keeps assistant chunks with the same messageId together", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.appendAssistantChunk("s1", "Hello ", "assistant-1");
+			store.appendAssistantChunk("s1", "world", "assistant-1");
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(1);
+			expect(messages[0]).toMatchObject({
+				kind: "text",
+				content: "Hello world",
+				protocolMessageId: "assistant-1",
+				isStreaming: true,
+			});
+		});
+
+		it("starts a new assistant message when messageId changes", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.appendAssistantChunk("s1", "First", "assistant-1");
+			store.appendAssistantChunk("s1", "Second", "assistant-2");
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(2);
+			expect(messages[0]).toMatchObject({
+				content: "First",
+				protocolMessageId: "assistant-1",
+				isStreaming: false,
+			});
+			expect(messages[1]).toMatchObject({
+				content: "Second",
+				protocolMessageId: "assistant-2",
+				isStreaming: true,
+			});
+		});
+
+		it("retains legacy chunk folding when the agent omits messageId", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.appendAssistantChunk("s1", "legacy ");
+			store.appendAssistantChunk("s1", "agent");
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(1);
+			expect(messages[0]).toMatchObject({
+				content: "legacy agent",
+			});
+		});
+
+		it("starts a new thought message when messageId changes", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1");
+			store.appendThoughtChunk("s1", "First thought", "thought-1");
+			store.appendThoughtChunk("s1", "Second thought", "thought-2");
+
+			const messages = useChatStore.getState().sessions.s1.messages;
+			expect(messages).toHaveLength(2);
+			expect(messages[0]).toMatchObject({
+				kind: "thought",
+				content: "First thought",
+				protocolMessageId: "thought-1",
+				isStreaming: false,
+			});
+			expect(messages[1]).toMatchObject({
+				kind: "thought",
+				content: "Second thought",
+				protocolMessageId: "thought-2",
+				isStreaming: true,
+			});
+		});
+	});
+
+	// ---------------------------------------------------------------------------
 	// Multi-turn conversation simulation
 	// ---------------------------------------------------------------------------
 	describe("multi-turn conversation simulation", () => {

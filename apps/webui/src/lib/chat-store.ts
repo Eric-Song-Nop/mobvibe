@@ -28,6 +28,8 @@ export type ChatRole = "user" | "assistant";
 
 type TextMessage = {
 	id: string;
+	/** ACP message boundary identifier; unrelated to the local message id. */
+	protocolMessageId?: string;
 	role: ChatRole;
 	kind: "text";
 	content: string;
@@ -50,6 +52,8 @@ type TextMessage = {
 
 type ThoughtMessage = {
 	id: string;
+	/** ACP message boundary identifier; unrelated to the local message id. */
+	protocolMessageId?: string;
 	role: "assistant";
 	kind: "thought";
 	content: string;
@@ -357,8 +361,16 @@ type ChatState = {
 			variant?: StatusVariant;
 		},
 	) => void;
-	appendAssistantChunk: (sessionId: string, content: string) => void;
-	appendThoughtChunk: (sessionId: string, content: string) => void;
+	appendAssistantChunk: (
+		sessionId: string,
+		content: string,
+		protocolMessageId?: string,
+	) => void;
+	appendThoughtChunk: (
+		sessionId: string,
+		content: string,
+		protocolMessageId?: string,
+	) => void;
 	addPermissionRequest: (
 		sessionId: string,
 		payload: {
@@ -1747,15 +1759,37 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
-			appendAssistantChunk: (sessionId, content) =>
+			appendAssistantChunk: (sessionId, content, protocolMessageId) =>
 				set((state: ChatState) => {
 					const session =
 						state.sessions[sessionId] ?? createSessionState(sessionId);
 					let { streamingMessageId, streamingMessageRole } = session;
 					let messages = session.messages;
+					const streamingMessage = streamingMessageId
+						? messages.find((message) => message.id === streamingMessageId)
+						: undefined;
+					const startsNewProtocolMessage =
+						protocolMessageId !== undefined &&
+						(!streamingMessage ||
+							!isTextMessage(streamingMessage) ||
+							streamingMessage.protocolMessageId !== protocolMessageId);
 
-					if (!streamingMessageId || streamingMessageRole !== "assistant") {
-						const message = createMessage("assistant", "");
+					if (
+						!streamingMessageId ||
+						streamingMessageRole !== "assistant" ||
+						startsNewProtocolMessage
+					) {
+						if (streamingMessageId) {
+							messages = messages.map((message) =>
+								message.id === streamingMessageId && isTextMessage(message)
+									? { ...message, isStreaming: false }
+									: message,
+							);
+						}
+						const message = {
+							...createMessage("assistant", ""),
+							...(protocolMessageId !== undefined ? { protocolMessageId } : {}),
+						};
 						streamingMessageId = message.id;
 						streamingMessageRole = "assistant";
 						messages = [...messages, message];
@@ -1790,16 +1824,31 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
-			appendThoughtChunk: (sessionId, content) =>
+			appendThoughtChunk: (sessionId, content, protocolMessageId) =>
 				set((state: ChatState) => {
 					const session =
 						state.sessions[sessionId] ?? createSessionState(sessionId);
 					let { streamingThoughtId } = session;
 					let messages = session.messages;
+					const streamingThought = streamingThoughtId
+						? messages.find((message) => message.id === streamingThoughtId)
+						: undefined;
+					const startsNewProtocolMessage =
+						protocolMessageId !== undefined &&
+						(streamingThought?.kind !== "thought" ||
+							streamingThought.protocolMessageId !== protocolMessageId);
 
-					if (!streamingThoughtId) {
+					if (!streamingThoughtId || startsNewProtocolMessage) {
+						if (streamingThoughtId) {
+							messages = messages.map((message) =>
+								message.id === streamingThoughtId && message.kind === "thought"
+									? { ...message, isStreaming: false }
+									: message,
+							);
+						}
 						const thought: ThoughtMessage = {
 							id: createLocalId(),
+							...(protocolMessageId !== undefined ? { protocolMessageId } : {}),
 							role: "assistant",
 							kind: "thought",
 							content: "",

@@ -95,12 +95,13 @@ export function applySessionEvent({
 }: ApplySessionEventOptions) {
 	switch (event.kind) {
 		case "user_message": {
+			// This top-level field is Mobvibe's send/idempotency key. ACP's
+			// update.messageId is a content boundary and must not confirm a send.
 			const notification = event.payload as SessionNotification & {
 				messageId?: string;
 			};
 			if (notification.update.sessionUpdate === "user_message_chunk") {
-				const messageId =
-					notification.messageId ?? notification.update.messageId ?? undefined;
+				const messageId = notification.messageId;
 				if (messageId) {
 					actions.confirmOrAppendUserMessage(
 						event.sessionId,
@@ -123,7 +124,16 @@ export function applySessionEvent({
 			const notification = event.payload as SessionNotification;
 			const textChunk = extractTextChunk(notification);
 			if (textChunk?.role === "assistant") {
-				actions.appendAssistantChunk(event.sessionId, textChunk.text);
+				const protocolMessageId = resolveProtocolMessageId(event, notification);
+				if (protocolMessageId !== undefined) {
+					actions.appendAssistantChunk(
+						event.sessionId,
+						textChunk.text,
+						protocolMessageId,
+					);
+				} else {
+					actions.appendAssistantChunk(event.sessionId, textChunk.text);
+				}
 			}
 			break;
 		}
@@ -131,7 +141,16 @@ export function applySessionEvent({
 			const notification = event.payload as SessionNotification;
 			const textChunk = extractTextChunk(notification);
 			if (textChunk) {
-				actions.appendThoughtChunk(event.sessionId, textChunk.text);
+				const protocolMessageId = resolveProtocolMessageId(event, notification);
+				if (protocolMessageId !== undefined) {
+					actions.appendThoughtChunk(
+						event.sessionId,
+						textChunk.text,
+						protocolMessageId,
+					);
+				} else {
+					actions.appendThoughtChunk(event.sessionId, textChunk.text);
+				}
 			}
 			break;
 		}
@@ -265,4 +284,15 @@ export function applySessionEvent({
 		default:
 			break;
 	}
+}
+
+function resolveProtocolMessageId(
+	event: SessionEvent,
+	notification: SessionNotification,
+): string | undefined {
+	if (event.protocolMessageId !== undefined) {
+		return event.protocolMessageId;
+	}
+	const messageId = (notification.update as { messageId?: unknown }).messageId;
+	return typeof messageId === "string" ? messageId : undefined;
 }

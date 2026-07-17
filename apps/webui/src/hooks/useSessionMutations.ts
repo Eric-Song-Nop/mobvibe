@@ -165,8 +165,16 @@ export interface ChatStoreActions {
 	) => void;
 	markUserMessageFailed: (sessionId: string, messageId: string) => void;
 	addStatusMessage: (sessionId: string, status: StatusPayload) => void;
-	appendAssistantChunk: (sessionId: string, text: string) => void;
-	appendThoughtChunk: (sessionId: string, text: string) => void;
+	appendAssistantChunk: (
+		sessionId: string,
+		text: string,
+		protocolMessageId?: string,
+	) => void;
+	appendThoughtChunk: (
+		sessionId: string,
+		text: string,
+		protocolMessageId?: string,
+	) => void;
 	finalizeAssistantMessage: (sessionId: string) => void;
 	addPermissionRequest: (
 		sessionId: string,
