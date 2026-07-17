@@ -145,6 +145,8 @@
 			"branchLabel": "Branch",
 			"subdirectoryLabel": "Subdirectory",
 			"contextLeftLabel": "Context Left",
+			"contextTokensLabel": "Context Tokens (Used / Size)",
+			"cumulativeCostLabel": "Cumulative Cost",
 			"local": "Local",
 			"worktree": "Worktree",
 			"subdir": "Subdir: {{path}}"

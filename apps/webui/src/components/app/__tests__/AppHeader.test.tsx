@@ -28,6 +28,8 @@ vi.mock("react-i18next", () => ({
 				"session.context.branchLabel": "Branch",
 				"session.context.subdirectoryLabel": "Subdirectory",
 				"session.context.contextLeftLabel": "Context Left",
+				"session.context.contextTokensLabel": "Context Tokens (Used / Size)",
+				"session.context.cumulativeCostLabel": "Cumulative Cost",
 				"session.context.local": "Local",
 				"session.context.worktree": "Worktree",
 				"session.context.subdir": `Subdir: ${options?.path ?? ""}`,
@@ -38,6 +40,7 @@ vi.mock("react-i18next", () => ({
 		},
 		i18n: {
 			language: "en",
+			resolvedLanguage: "en",
 			changeLanguage: vi.fn(),
 		},
 	}),
@@ -470,6 +473,11 @@ describe("AppHeader", () => {
 				branchLabel: "feat/detection-fix",
 				subdirectoryLabel: "apps/webui",
 				contextLeftPercent: 74,
+				sessionUsage: {
+					used: 260,
+					size: 1_000,
+					cost: { amount: 0.05, currency: "USD" },
+				},
 			});
 
 			await user.click(screen.getByRole("button", { name: "Session Details" }));
@@ -485,6 +493,28 @@ describe("AppHeader", () => {
 			expect(screen.getByText("apps/webui")).toBeInTheDocument();
 			expect(screen.getByText("Context Left")).toBeInTheDocument();
 			expect(screen.getByText("74%")).toBeInTheDocument();
+			expect(
+				screen.getByText("Context Tokens (Used / Size)"),
+			).toBeInTheDocument();
+			expect(screen.getByText("260 / 1,000")).toHaveClass("tabular-nums");
+			expect(screen.getByText("Cumulative Cost")).toBeInTheDocument();
+			expect(screen.getByText(/USD.*0\.05/)).toHaveClass("tabular-nums");
+		});
+
+		it("renders malformed currency codes as text without invoking currency formatting", async () => {
+			const user = userEvent.setup();
+			renderAppHeader({
+				backendLabel: "Claude Agent",
+				sessionUsage: {
+					used: 260,
+					size: 1_000,
+					cost: { amount: 0.05, currency: "not-a-currency" },
+				},
+			});
+
+			await user.click(screen.getByRole("button", { name: "Session Details" }));
+
+			expect(screen.getByText("0.05 not-a-currency")).toBeInTheDocument();
 		});
 
 		it("opens a mobile sheet with session details", async () => {
