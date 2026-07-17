@@ -95,6 +95,16 @@ export function formatSessionTokenUsage(
 	return `${used} / ${size}`;
 }
 
+export function formatReportedTokenCount(
+	value: number | null | undefined,
+	locale?: string,
+): string | undefined {
+	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+		return undefined;
+	}
+	return formatFiniteNumber(value, locale);
+}
+
 export function formatSessionCost(
 	cost: SessionCost,
 	locale?: string,

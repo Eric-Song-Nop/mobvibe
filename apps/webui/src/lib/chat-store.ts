@@ -6,6 +6,7 @@ import type {
 	PermissionOutcome,
 	PermissionToolCall,
 	PlanEntry,
+	ReportedTokenUsage,
 	SessionConfigOption,
 	SessionEvent,
 	SessionModelOption,
@@ -137,6 +138,7 @@ export type SessionRestoreSnapshot = {
 	streamingMessageId?: string;
 	streamingMessageRole?: ChatRole;
 	streamingThoughtId?: string;
+	reportedTokenUsage?: ReportedTokenUsage;
 };
 
 export type ChatSession = {
@@ -190,6 +192,8 @@ export type ChatSession = {
 		size: number;
 		cost?: { amount: number; currency: string };
 	};
+	/** Latest bounded token snapshot reported by an Agent prompt response. */
+	reportedTokenUsage?: ReportedTokenUsage;
 	/** Agent-defined metadata from session_info_update RFD */
 	_meta?: Record<string, unknown> | null;
 	/** WAL cursor tracking for sync */
@@ -342,6 +346,7 @@ type ChatState = {
 				| "worktreeSourceCwd"
 				| "worktreeBranch"
 				| "usage"
+				| "reportedTokenUsage"
 				| "_meta"
 				| "plan"
 				| "isTitlePinned"
@@ -746,6 +751,7 @@ const resetSessionContentForRevision = (
 	streamingMessageRole: undefined,
 	streamingThoughtId: undefined,
 	plan: undefined,
+	reportedTokenUsage: undefined,
 	revision,
 	lastAppliedSeq: 0,
 });
@@ -1197,6 +1203,7 @@ export const useChatStore = create<ChatState>()(
 								streamingMessageId: undefined,
 								streamingMessageRole: undefined,
 								streamingThoughtId: undefined,
+								reportedTokenUsage: undefined,
 								revision: undefined,
 								lastAppliedSeq: 0,
 							},
@@ -1234,6 +1241,9 @@ export const useChatStore = create<ChatState>()(
 									: {}),
 								...(snapshot?.streamingThoughtId !== undefined
 									? { streamingThoughtId: snapshot.streamingThoughtId }
+									: {}),
+								...(snapshot?.reportedTokenUsage !== undefined
+									? { reportedTokenUsage: snapshot.reportedTokenUsage }
 									: {}),
 							},
 						},
@@ -1457,6 +1467,9 @@ export const useChatStore = create<ChatState>()(
 					}
 					if (payload.usage !== undefined) {
 						nextSession.usage = payload.usage;
+					}
+					if ("reportedTokenUsage" in payload) {
+						nextSession.reportedTokenUsage = payload.reportedTokenUsage;
 					}
 					if (payload._meta !== undefined) {
 						nextSession._meta = payload._meta;
@@ -2217,6 +2230,7 @@ export const useChatStore = create<ChatState>()(
 								streamingMessageRole: undefined,
 								streamingThoughtId: undefined,
 								plan: undefined,
+								reportedTokenUsage: undefined,
 								revision: newRevision,
 								lastAppliedSeq: 0,
 							},

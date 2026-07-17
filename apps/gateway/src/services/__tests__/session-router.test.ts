@@ -1492,6 +1492,102 @@ describe("SessionRouter", () => {
 			expect(getDurableMessageSendCache().size).toBe(0);
 		});
 
+		it("reconstructs a bounded message result before returning it", async () => {
+			const socket = registerSession({ messageIdempotency: true });
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:message:send") {
+					sessionRouter.handleRpcResponse({
+						requestId: request.requestId,
+						result: {
+							stopReason: "end_turn",
+							usage: {
+								totalTokens: 120,
+								inputTokens: 80,
+								outputTokens: 40,
+								thoughtTokens: null,
+								cachedReadTokens: 10,
+								_meta: { ignored: true },
+							},
+							extra: "ignored",
+						},
+					});
+				}
+			});
+
+			await expect(
+				sessionRouter.sendMessage(
+					{
+						sessionId: "session-message",
+						messageId: "usage-message",
+						prompt: { t: "encrypted", c: "ciphertext" },
+					},
+					"user-message",
+				),
+			).resolves.toEqual({
+				stopReason: "end_turn",
+				usage: {
+					totalTokens: 120,
+					inputTokens: 80,
+					outputTokens: 40,
+					cachedReadTokens: 10,
+				},
+			});
+		});
+
+		it("rejects an invalid CLI stop reason and omits malformed usage", async () => {
+			const socket = registerSession({ messageIdempotency: true });
+			let requestId: string | undefined;
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:message:send") requestId = request.requestId;
+			});
+
+			const invalidStop = sessionRouter.sendMessage(
+				{
+					sessionId: "session-message",
+					messageId: "invalid-stop",
+					prompt: { t: "encrypted", c: "ciphertext" },
+				},
+				"user-message",
+			);
+			sessionRouter.handleRpcResponse({
+				requestId: requestId ?? "missing",
+				result: { stopReason: "invented" },
+			});
+			await expect(invalidStop).rejects.toMatchObject({
+				status: 502,
+				detail: {
+					code: "ACP_PROTOCOL_MISMATCH",
+					message: "CLI returned an invalid message result",
+				},
+			});
+
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:message:send") {
+					sessionRouter.handleRpcResponse({
+						requestId: request.requestId,
+						result: {
+							stopReason: "end_turn",
+							usage: {
+								totalTokens: "9".repeat(2_000),
+								inputTokens: 0,
+								outputTokens: 0,
+							},
+						},
+					});
+				}
+			});
+			await expect(
+				sessionRouter.sendMessage(
+					{
+						sessionId: "session-message",
+						messageId: "invalid-usage",
+						prompt: { t: "encrypted", c: "ciphertext" },
+					},
+					"user-message",
+				),
+			).resolves.toEqual({ stopReason: "end_turn" });
+		});
+
 		it("rejects a plaintext downgrade for a session that advertises E2EE", async () => {
 			const socket = registerSession(
 				{ messageIdempotency: true },

@@ -215,6 +215,7 @@ describe("WalStore", () => {
 
 			const db = new Database(dbPath);
 			db.exec(`
+				ALTER TABLE message_send_results DROP COLUMN usage_json;
 				ALTER TABLE sessions DROP COLUMN additional_directories_json;
 				ALTER TABLE discovered_sessions DROP COLUMN additional_directories_json;
 				ALTER TABLE discovered_sessions DROP COLUMN meta_json;
@@ -233,13 +234,66 @@ describe("WalStore", () => {
 		});
 	});
 
+	describe("reported token usage migration", () => {
+		it("migrates v13 completed sends with a null usage snapshot", () => {
+			walStore.recordMessageSendResult(
+				"legacy-session",
+				"legacy-message",
+				"end_turn",
+			);
+			walStore.close();
+			const db = new Database(dbPath);
+			db.exec(`
+				ALTER TABLE message_send_results DROP COLUMN usage_json;
+				DELETE FROM schema_version WHERE version = 14;
+			`);
+			db.close();
+
+			walStore = new WalStore(dbPath);
+			expect(walStore.getInitialSchemaVersion()).toBe(13);
+			expect(
+				walStore.getMessageSendResult("legacy-session", "legacy-message"),
+			).toEqual({ stopReason: "end_turn" });
+		});
+
+		it("rolls back the v14 column when its version record fails", () => {
+			walStore.close();
+			const db = new Database(dbPath);
+			db.exec(`
+				ALTER TABLE message_send_results DROP COLUMN usage_json;
+				DELETE FROM schema_version WHERE version = 14;
+				CREATE TRIGGER reject_schema_version_14
+				BEFORE INSERT ON schema_version
+				WHEN NEW.version = 14
+				BEGIN
+					SELECT RAISE(ABORT, 'injected schema version failure');
+				END;
+			`);
+
+			expect(() => runMigrations(db)).toThrow(
+				"injected schema version failure",
+			);
+			const columns = db
+				.query("PRAGMA table_info(message_send_results)")
+				.all() as Array<{ name: string }>;
+			expect(
+				columns.some((column) => column.name === "usage_json"),
+			).toBeFalse();
+
+			db.exec("DROP TRIGGER reject_schema_version_14");
+			db.close();
+			walStore = new WalStore(dbPath);
+		});
+	});
+
 	describe("discovered session snapshots", () => {
 		it("rolls back schema changes when the version record cannot commit", () => {
 			walStore.close();
 			const db = new Database(dbPath);
 			db.exec(`
+				ALTER TABLE message_send_results DROP COLUMN usage_json;
 				ALTER TABLE discovered_sessions DROP COLUMN meta_json;
-				DELETE FROM schema_version WHERE version = 13;
+				DELETE FROM schema_version WHERE version >= 13;
 				CREATE TRIGGER reject_schema_version_13
 				BEFORE INSERT ON schema_version
 				WHEN NEW.version = 13
@@ -788,17 +842,59 @@ describe("WalStore", () => {
 				"message-1",
 				first.claimId,
 				"end_turn",
+				{
+					totalTokens: 120,
+					inputTokens: 80,
+					outputTokens: 40,
+					cachedReadTokens: 10,
+				},
 			);
 
 			expect(walStore.claimMessageSend("session-1", "message-1")).toEqual({
 				status: "completed",
-				result: { stopReason: "end_turn" },
+				result: {
+					stopReason: "end_turn",
+					usage: {
+						totalTokens: 120,
+						inputTokens: 80,
+						outputTokens: 40,
+						cachedReadTokens: 10,
+					},
+				},
 			});
 			expect(
 				walStore
 					.queryEvents({ sessionId: "session-1", revision: 1 })
 					.map((event) => ({ kind: event.kind, payload: event.payload })),
-			).toEqual([{ kind: "turn_end", payload: { stopReason: "end_turn" } }]);
+			).toEqual([
+				{
+					kind: "turn_end",
+					payload: {
+						stopReason: "end_turn",
+						usage: {
+							totalTokens: 120,
+							inputTokens: 80,
+							outputTokens: 40,
+							cachedReadTokens: 10,
+						},
+					},
+				},
+			]);
+
+			walStore.close();
+			walStore = new WalStore(dbPath);
+			expect(walStore.claimMessageSend("session-1", "message-1")).toEqual({
+				status: "completed",
+				result: {
+					stopReason: "end_turn",
+					usage: {
+						totalTokens: 120,
+						inputTokens: 80,
+						outputTokens: 40,
+						cachedReadTokens: 10,
+					},
+				},
+			});
 		});
 
 		it("rolls back the result and claim deletion when turn_end cannot persist", () => {
@@ -831,8 +927,12 @@ describe("WalStore", () => {
 					"message-1",
 					claim.claimId,
 					"end_turn",
+					{ totalTokens: 10, inputTokens: 6, outputTokens: 4 },
 				),
 			).toThrow("injected terminal event failure");
+
+			walStore.close();
+			walStore = new WalStore(dbPath);
 
 			expect(
 				walStore.getMessageSendResult("session-atomic-failure", "message-1"),
@@ -846,6 +946,50 @@ describe("WalStore", () => {
 					revision: 1,
 				}),
 			).toHaveLength(0);
+
+			const recoveryDb = new Database(dbPath);
+			recoveryDb.exec("DROP TRIGGER fail_terminal_event");
+			recoveryDb.close();
+			const usage = { totalTokens: 10, inputTokens: 6, outputTokens: 4 };
+			walStore.completeMessageSend(
+				"session-atomic-failure",
+				"message-1",
+				claim.claimId,
+				"end_turn",
+				usage,
+			);
+			expect(
+				walStore.getMessageSendResult("session-atomic-failure", "message-1"),
+			).toEqual({ stopReason: "end_turn", usage });
+			expect(
+				walStore.queryEvents({
+					sessionId: "session-atomic-failure",
+					revision: 1,
+				})[0]?.payload,
+			).toEqual({ stopReason: "end_turn", usage });
+		});
+
+		it("omits an oversized or malformed durable usage snapshot", () => {
+			walStore.recordMessageSendResult(
+				"session-raw",
+				"message-raw",
+				"end_turn",
+			);
+			const db = new Database(dbPath);
+			db.query(`
+				UPDATE message_send_results
+				SET usage_json = ?
+				WHERE session_id = ? AND message_id = ?
+			`).run(
+				`{"totalTokens":1,"padding":"${"界".repeat(600)}"}`,
+				"session-raw",
+				"message-raw",
+			);
+			db.close();
+
+			expect(
+				walStore.getMessageSendResult("session-raw", "message-raw"),
+			).toEqual({ stopReason: "end_turn" });
 		});
 
 		it("persists the first completed result across store restarts", () => {
@@ -1514,6 +1658,7 @@ describe("WalStore", () => {
 
 			const db = new Database(dbPath);
 			db.exec(`
+				ALTER TABLE message_send_results DROP COLUMN usage_json;
 				ALTER TABLE sessions DROP COLUMN additional_directories_json;
 				DROP TABLE IF EXISTS schema_version;
 				CREATE TABLE schema_version (version INTEGER PRIMARY KEY);

@@ -33,6 +33,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import type { PlanEntry } from "@/lib/acp";
 import type { ChatSession } from "@/lib/chat-store";
 import {
+	formatReportedTokenCount,
 	formatSessionCost,
 	formatSessionTokenUsage,
 } from "@/lib/session-usage";
@@ -46,6 +47,7 @@ export type AppHeaderProps = {
 	subdirectoryLabel?: string;
 	contextLeftPercent?: number;
 	sessionUsage?: ChatSession["usage"];
+	reportedTokenUsage?: ChatSession["reportedTokenUsage"];
 	statusMessage?: string;
 	warningMessage?: string;
 	streamError?: ChatSession["streamError"];
@@ -100,6 +102,7 @@ export const AppHeader = memo(function AppHeader({
 	subdirectoryLabel,
 	contextLeftPercent,
 	sessionUsage,
+	reportedTokenUsage,
 	statusMessage,
 	warningMessage,
 	streamError,
@@ -127,6 +130,25 @@ export const AppHeader = memo(function AppHeader({
 	const locale = i18n.resolvedLanguage ?? i18n.language;
 	const tokenUsage = formatSessionTokenUsage(sessionUsage, locale);
 	const cumulativeCost = formatSessionCost(sessionUsage?.cost, locale);
+	const reportedTokenSummary = reportedTokenUsage
+		? [
+				formatReportedTokenCount(reportedTokenUsage.totalTokens, locale),
+				formatReportedTokenCount(reportedTokenUsage.inputTokens, locale),
+				formatReportedTokenCount(reportedTokenUsage.outputTokens, locale),
+			].join(" / ")
+		: undefined;
+	const reportedThoughtTokens = formatReportedTokenCount(
+		reportedTokenUsage?.thoughtTokens,
+		locale,
+	);
+	const reportedCacheReadTokens = formatReportedTokenCount(
+		reportedTokenUsage?.cachedReadTokens,
+		locale,
+	);
+	const reportedCacheWriteTokens = formatReportedTokenCount(
+		reportedTokenUsage?.cachedWriteTokens,
+		locale,
+	);
 	const detailItems: SessionDetailItem[] = [
 		backendLabel
 			? {
@@ -187,6 +209,38 @@ export const AppHeader = memo(function AppHeader({
 					numeric: true,
 				}
 			: null,
+		reportedTokenSummary
+			? {
+					key: "reportedTokenUsage",
+					label: t("session.context.reportedTokenUsageLabel"),
+					value: reportedTokenSummary,
+					numeric: true,
+				}
+			: null,
+		reportedThoughtTokens
+			? {
+					key: "reportedThoughtTokens",
+					label: t("session.context.reportedThoughtTokensLabel"),
+					value: reportedThoughtTokens,
+					numeric: true,
+				}
+			: null,
+		reportedCacheReadTokens
+			? {
+					key: "reportedCacheReadTokens",
+					label: t("session.context.reportedCacheReadTokensLabel"),
+					value: reportedCacheReadTokens,
+					numeric: true,
+				}
+			: null,
+		reportedCacheWriteTokens
+			? {
+					key: "reportedCacheWriteTokens",
+					label: t("session.context.reportedCacheWriteTokensLabel"),
+					value: reportedCacheWriteTokens,
+					numeric: true,
+				}
+			: null,
 	].filter((item): item is SessionDetailItem => item !== null);
 	const showDetailsTrigger = Boolean(
 		(backendLabel && backendLabel !== summaryLabel) ||
@@ -196,7 +250,8 @@ export const AppHeader = memo(function AppHeader({
 			subdirectoryLabel ||
 			hasContextLeftPercent ||
 			tokenUsage ||
-			cumulativeCost,
+			cumulativeCost ||
+			reportedTokenSummary,
 	);
 	const detailsTitle = t("session.context.details");
 	const detailsTrigger = showDetailsTrigger ? (

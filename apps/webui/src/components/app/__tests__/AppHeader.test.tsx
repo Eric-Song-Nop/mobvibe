@@ -30,6 +30,14 @@ vi.mock("react-i18next", () => ({
 				"session.context.contextLeftLabel": "Context Left",
 				"session.context.contextTokensLabel": "Context Tokens (Used / Size)",
 				"session.context.cumulativeCostLabel": "Cumulative Cost",
+				"session.context.reportedTokenUsageLabel":
+					"Agent-reported Token Usage — semantics may vary (Total / Input / Output)",
+				"session.context.reportedThoughtTokensLabel":
+					"Agent-reported Thought Tokens",
+				"session.context.reportedCacheReadTokensLabel":
+					"Agent-reported Cache Read Tokens",
+				"session.context.reportedCacheWriteTokensLabel":
+					"Agent-reported Cache Write Tokens",
 				"session.context.local": "Local",
 				"session.context.worktree": "Worktree",
 				"session.context.subdir": `Subdir: ${options?.path ?? ""}`,
@@ -461,6 +469,42 @@ describe("AppHeader", () => {
 			expect(
 				screen.getByRole("button", { name: "Session Details" }),
 			).toBeInTheDocument();
+		});
+
+		it("shows a clearly qualified agent-reported usage snapshot", async () => {
+			const user = userEvent.setup();
+			renderAppHeader({
+				backendLabel: "Claude Agent",
+				reportedTokenUsage: {
+					totalTokens: 1_200,
+					inputTokens: 800,
+					outputTokens: 400,
+					thoughtTokens: 75,
+					cachedReadTokens: 125,
+					cachedWriteTokens: 25,
+				},
+			});
+
+			await user.click(screen.getByRole("button", { name: "Session Details" }));
+
+			expect(
+				screen.getByText(
+					"Agent-reported Token Usage — semantics may vary (Total / Input / Output)",
+				),
+			).toBeInTheDocument();
+			expect(screen.getByText("1,200 / 800 / 400")).toHaveClass("tabular-nums");
+			expect(
+				screen.getByText("Agent-reported Thought Tokens"),
+			).toBeInTheDocument();
+			expect(screen.getByText("75")).toBeInTheDocument();
+			expect(
+				screen.getByText("Agent-reported Cache Read Tokens"),
+			).toBeInTheDocument();
+			expect(screen.getByText("125")).toBeInTheDocument();
+			expect(
+				screen.getByText("Agent-reported Cache Write Tokens"),
+			).toBeInTheDocument();
+			expect(screen.getByText("25")).toBeInTheDocument();
 		});
 
 		it("opens a desktop popover with session details", async () => {

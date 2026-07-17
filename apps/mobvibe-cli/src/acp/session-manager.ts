@@ -21,7 +21,9 @@ import {
 	type DiscoverSessionsRpcResult,
 	type PermissionDecisionPayload,
 	type PermissionRequestPayload,
+	type ReportedTokenUsage,
 	resolveWorktreeBranchName,
+	type SendMessageResult,
 	type SessionEvent,
 	type SessionEventKind,
 	type SessionEventsParams,
@@ -1468,7 +1470,7 @@ export class SessionManager {
 	getMessageSendResult(
 		sessionId: string,
 		messageId: string,
-	): { stopReason: StopReason } | undefined {
+	): SendMessageResult | undefined {
 		if (this.isSessionDeletionGuarded(sessionId)) {
 			return undefined;
 		}
@@ -1479,11 +1481,17 @@ export class SessionManager {
 		sessionId: string,
 		messageId: string,
 		stopReason: StopReason,
+		usage?: ReportedTokenUsage,
 	): void {
 		if (this.isSessionDeletionGuarded(sessionId)) {
 			return;
 		}
-		this.walStore.recordMessageSendResult(sessionId, messageId, stopReason);
+		this.walStore.recordMessageSendResult(
+			sessionId,
+			messageId,
+			stopReason,
+			usage,
+		);
 	}
 
 	claimMessageSend(sessionId: string, messageId: string): MessageSendClaim {
@@ -1513,6 +1521,7 @@ export class SessionManager {
 		messageId: string,
 		claimId: string,
 		stopReason: StopReason,
+		usage?: ReportedTokenUsage,
 	): void {
 		if (this.isSessionDeletionGuarded(sessionId)) {
 			return;
@@ -1526,6 +1535,7 @@ export class SessionManager {
 			messageId,
 			claimId,
 			stopReason,
+			usage,
 		);
 		record.updatedAt = new Date();
 		this.emitSessionEvent(this.toSessionEvent(terminalEvent));
@@ -1536,7 +1546,11 @@ export class SessionManager {
 		});
 	}
 
-	recordTurnEnd(sessionId: string, stopReason: StopReason): void {
+	recordTurnEnd(
+		sessionId: string,
+		stopReason: StopReason,
+		usage?: ReportedTokenUsage,
+	): void {
 		if (this.isSessionDeletionGuarded(sessionId)) {
 			return;
 		}
@@ -1545,7 +1559,7 @@ export class SessionManager {
 			return;
 		}
 		record.updatedAt = new Date();
-		const payload = { stopReason };
+		const payload = { stopReason, ...(usage ? { usage } : {}) };
 		this.bufferOrWriteSessionEvent(record, "turn_end", payload);
 		// 将更新后的 updatedAt 推送给 WebUI，确保侧边栏排序正确
 		const summary = this.buildSummary(record);

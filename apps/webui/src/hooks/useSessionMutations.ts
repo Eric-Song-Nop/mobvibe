@@ -152,6 +152,7 @@ export interface ChatStoreActions {
 				| "worktreeSourceCwd"
 				| "worktreeBranch"
 				| "usage"
+				| "reportedTokenUsage"
 				| "_meta"
 				| "plan"
 				| "isTitlePinned"

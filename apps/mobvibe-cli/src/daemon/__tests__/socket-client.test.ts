@@ -1016,6 +1016,16 @@ describe("SocketClient restore semantics", () => {
 	});
 
 	test("forwards plaintext prompts through rpc:message:send", async () => {
+		promptConnection.prompt.mockResolvedValueOnce({
+			stopReason: "end_turn",
+			usage: {
+				totalTokens: 120,
+				inputTokens: 80,
+				outputTokens: 40,
+				thoughtTokens: null,
+				cachedReadTokens: 10,
+			},
+		});
 		const prompt = [{ type: "text", text: "plain prompt" }] as const;
 		const handler = socketHandlers.get("rpc:message:send");
 		if (!handler) {
@@ -1050,10 +1060,53 @@ describe("SocketClient restore semantics", () => {
 			"message-1",
 			"claim-1",
 			"end_turn",
+			{
+				totalTokens: 120,
+				inputTokens: 80,
+				outputTokens: 40,
+				cachedReadTokens: 10,
+			},
 		);
 		expect(sessionManager.recordTurnEnd).not.toHaveBeenCalled();
 		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
 			requestId: "req-1",
+			result: {
+				stopReason: "end_turn",
+				usage: {
+					totalTokens: 120,
+					inputTokens: 80,
+					outputTokens: 40,
+					cachedReadTokens: 10,
+				},
+			},
+		});
+	});
+
+	test("omits an invalid agent usage snapshot without failing the prompt", async () => {
+		promptConnection.prompt.mockResolvedValueOnce({
+			stopReason: "end_turn",
+			usage: { totalTokens: -1, inputTokens: 1, outputTokens: 0 },
+		});
+		const handler = socketHandlers.get("rpc:message:send");
+		if (!handler) throw new Error("rpc:message:send handler not registered");
+
+		await handler({
+			requestId: "req-invalid-usage",
+			params: {
+				sessionId: "session-1",
+				messageId: "message-invalid-usage",
+				prompt: [{ type: "text", text: "prompt" }],
+			},
+		});
+
+		expect(sessionManager.completeMessageSend).toHaveBeenCalledWith(
+			"session-1",
+			"message-invalid-usage",
+			"claim-1",
+			"end_turn",
+		);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-invalid-usage",
 			result: { stopReason: "end_turn" },
 		});
 	});

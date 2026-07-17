@@ -1,4 +1,5 @@
 import type { EncryptedPayload } from "../crypto/types.js";
+import type { ReportedTokenUsage } from "../reported-token-usage.js";
 import type {
 	ContentBlock,
 	PermissionOption,
@@ -199,6 +200,8 @@ export type SendMessageParams = {
 // Send message RPC result
 export type SendMessageResult = {
 	stopReason: StopReason;
+	/** Optional bounded snapshot reported by the Agent for this prompt response. */
+	usage?: ReportedTokenUsage;
 };
 
 // Cancel session RPC params

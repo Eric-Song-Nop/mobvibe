@@ -71,6 +71,11 @@ export {
 	resolvePromptImageMimeTypeFromPath,
 	validatePromptImageBlocks,
 } from "./prompt-images.js";
+export type { ReportedTokenUsage } from "./reported-token-usage.js";
+export {
+	REPORTED_TOKEN_USAGE_MAX_SERIALIZED_BYTES,
+	sanitizeReportedTokenUsage,
+} from "./reported-token-usage.js";
 export type {
 	// SDK types (directly from SDK)
 	AgentCapabilities,

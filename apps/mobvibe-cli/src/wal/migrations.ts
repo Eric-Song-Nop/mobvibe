@@ -300,6 +300,15 @@ const MIGRATIONS = [
 				ADD COLUMN meta_json TEXT;
 		`,
 	},
+	{
+		version: 14,
+		up: `
+			-- Preserve the bounded, agent-reported prompt usage snapshot with the
+			-- durable idempotency result. Legacy completed sends remain NULL.
+			ALTER TABLE message_send_results
+				ADD COLUMN usage_json TEXT;
+		`,
+	},
 ];
 
 export function runMigrations(db: Database): number {

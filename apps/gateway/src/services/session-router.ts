@@ -53,6 +53,7 @@ import type {
 	RpcRequest,
 	RpcResponse,
 	SendMessageParams,
+	SendMessageResult,
 	SessionEventsParams,
 	SessionEventsResponse,
 	SessionFsFilePreview,
@@ -60,12 +61,12 @@ import type {
 	SetSessionConfigOptionParams,
 	SetSessionModelParams,
 	SetSessionModeParams,
-	StopReason,
 } from "@mobvibe/shared";
 import {
 	AppError,
 	createErrorDetail,
 	isEncryptedPayload,
+	sanitizeReportedTokenUsage,
 } from "@mobvibe/shared";
 import type { Socket } from "socket.io";
 import { logger } from "../lib/logger.js";
@@ -99,11 +100,43 @@ const MAX_DURABLE_MESSAGE_SENDS_PER_OWNER = 1_000;
 const RECENT_SESSION_DELETE_TTL_MS = 5 * 60 * 1000;
 const MAX_DURABLE_SESSION_DELETES = 10_000;
 const MAX_DURABLE_SESSION_DELETES_PER_OWNER = 1_000;
+const STOP_REASONS = new Set([
+	"end_turn",
+	"max_tokens",
+	"max_turn_requests",
+	"refusal",
+	"cancelled",
+]);
 
-type MessageSendResult = { stopReason: StopReason };
+const sanitizeMessageSendResult = (value: unknown): SendMessageResult => {
+	if (
+		typeof value !== "object" ||
+		value === null ||
+		!("stopReason" in value) ||
+		typeof value.stopReason !== "string" ||
+		!STOP_REASONS.has(value.stopReason)
+	) {
+		throw new AppError(
+			createErrorDetail({
+				code: "ACP_PROTOCOL_MISMATCH",
+				message: "CLI returned an invalid message result",
+				retryable: false,
+				scope: "service",
+			}),
+			502,
+		);
+	}
+	const usage = sanitizeReportedTokenUsage(
+		"usage" in value ? value.usage : undefined,
+	);
+	return {
+		stopReason: value.stopReason as SendMessageResult["stopReason"],
+		...(usage ? { usage } : {}),
+	};
+};
 
 type MessageSendEntry = {
-	promise: Promise<MessageSendResult>;
+	promise: Promise<SendMessageResult>;
 	ownerId: string;
 };
 
@@ -971,7 +1004,7 @@ export class SessionRouter {
 	async sendMessage(
 		params: SendMessageParams,
 		userId: string,
-	): Promise<{ stopReason: StopReason }> {
+	): Promise<SendMessageResult> {
 		const messageId = params.messageId?.trim() || randomUUID();
 		if (!isMessageIdWithinLimit(messageId)) {
 			throw new AppError(
@@ -1060,11 +1093,11 @@ export class SessionRouter {
 			"message_send_rpc_start",
 		);
 
-		const rpcOperation = this.sendRpc<SendMessageParams, MessageSendResult>(
+		const rpcOperation = this.sendRpc<SendMessageParams, unknown>(
 			cli.socket,
 			"rpc:message:send",
 			normalizedParams,
-		);
+		).then(sanitizeMessageSendResult);
 		const entry: MessageSendEntry = {
 			promise: rpcOperation,
 			ownerId: userId,

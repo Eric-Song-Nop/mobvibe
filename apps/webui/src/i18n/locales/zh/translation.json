@@ -171,6 +171,10 @@
 			"contextLeftLabel": "剩余上下文",
 			"contextTokensLabel": "上下文 Token（已用 / 容量）",
 			"cumulativeCostLabel": "累计费用",
+			"reportedTokenUsageLabel": "Agent 报告的 Token 用量 — 统计口径可能不同（总计 / 输入 / 输出）",
+			"reportedThoughtTokensLabel": "Agent 报告的思考 Token",
+			"reportedCacheReadTokensLabel": "Agent 报告的缓存读取 Token",
+			"reportedCacheWriteTokensLabel": "Agent 报告的缓存写入 Token",
 			"local": "本地",
 			"worktree": "Worktree",
 			"subdir": "子目录：{{path}}"

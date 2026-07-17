@@ -171,6 +171,10 @@
 			"contextLeftLabel": "Context Left",
 			"contextTokensLabel": "Context Tokens (Used / Size)",
 			"cumulativeCostLabel": "Cumulative Cost",
+			"reportedTokenUsageLabel": "Agent-reported Token Usage — semantics may vary (Total / Input / Output)",
+			"reportedThoughtTokensLabel": "Agent-reported Thought Tokens",
+			"reportedCacheReadTokensLabel": "Agent-reported Cache Read Tokens",
+			"reportedCacheWriteTokensLabel": "Agent-reported Cache Write Tokens",
 			"local": "Local",
 			"worktree": "Worktree",
 			"subdir": "Subdir: {{path}}"

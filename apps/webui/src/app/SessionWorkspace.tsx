@@ -58,6 +58,7 @@ export function SessionWorkspace({ controller }: SessionWorkspaceProps) {
 				subdirectoryLabel={subdirectoryLabel}
 				contextLeftPercent={contextLeftPercent}
 				sessionUsage={activeSession?.usage}
+				reportedTokenUsage={activeSession?.reportedTokenUsage}
 				statusMessage={statusMessage}
 				warningMessage={warningMessage}
 				streamError={streamError}

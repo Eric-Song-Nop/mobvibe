@@ -280,6 +280,9 @@ const createStore = (): ChatStoreActions => {
 				...(snapshot?.streamingThoughtId !== undefined
 					? { streamingThoughtId: snapshot.streamingThoughtId }
 					: {}),
+				...(snapshot?.reportedTokenUsage !== undefined
+					? { reportedTokenUsage: snapshot.reportedTokenUsage }
+					: {}),
 			}));
 		},
 	);
@@ -921,6 +924,11 @@ describe("useSocket (webui)", () => {
 				isAttached: true,
 				revision: 1,
 				lastAppliedSeq: 2,
+				reportedTokenUsage: {
+					totalTokens: 100,
+					inputTokens: 70,
+					outputTokens: 30,
+				},
 				messages: [
 					{
 						id: "msg-1",
@@ -986,6 +994,11 @@ describe("useSocket (webui)", () => {
 			expect.objectContaining({
 				revision: 1,
 				lastAppliedSeq: 2,
+				reportedTokenUsage: {
+					totalTokens: 100,
+					inputTokens: 70,
+					outputTokens: 30,
+				},
 			}),
 		);
 		expect(mockStoreState.setHistorySyncing).toHaveBeenCalledWith(

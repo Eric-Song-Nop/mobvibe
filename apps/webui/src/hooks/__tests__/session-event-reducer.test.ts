@@ -494,3 +494,131 @@ describe("applySessionEvent session info semantics", () => {
 		);
 	});
 });
+
+describe("applySessionEvent reported token usage", () => {
+	const sessionId = "session-usage-1";
+	const makeTurnEnd = (seq: number, usage?: unknown): SessionEvent => ({
+		sessionId,
+		machineId: "machine-1",
+		revision: 1,
+		seq,
+		createdAt: `2026-07-16T00:00:0${seq}.000Z`,
+		kind: "turn_end",
+		payload: {
+			stopReason: "end_turn",
+			...(usage !== undefined ? { usage } : {}),
+		},
+	});
+
+	const applyAtomically = (event: SessionEvent) => {
+		useChatStore.getState().applySessionEventTransaction(event, (actions) => {
+			const state = useChatStore.getState();
+			applySessionEvent({
+				event,
+				session: state.sessions[sessionId],
+				sessions: state.sessions,
+				actions,
+				notifications,
+			});
+		});
+	};
+
+	beforeEach(() => {
+		useChatStore.setState({ sessions: {}, activeSessionId: undefined });
+		const store = useChatStore.getState();
+		store.createLocalSession(sessionId);
+		store.resetSessionForRevision(sessionId, 1);
+		store.updateSessionMeta(sessionId, {
+			usage: {
+				used: 250,
+				size: 1_000,
+				cost: { amount: 0.05, currency: "USD" },
+			},
+		});
+	});
+
+	it("overwrites snapshots without aggregating and ignores duplicate sequence replay", () => {
+		applyAtomically(
+			makeTurnEnd(1, {
+				totalTokens: 100,
+				inputTokens: 70,
+				outputTokens: 30,
+			}),
+		);
+		applyAtomically(
+			makeTurnEnd(1, {
+				totalTokens: 999,
+				inputTokens: 999,
+				outputTokens: 0,
+			}),
+		);
+		expect(
+			useChatStore.getState().sessions[sessionId].reportedTokenUsage,
+		).toEqual({
+			totalTokens: 100,
+			inputTokens: 70,
+			outputTokens: 30,
+		});
+
+		applyAtomically(
+			makeTurnEnd(2, {
+				totalTokens: 60,
+				inputTokens: 40,
+				outputTokens: 20,
+				thoughtTokens: 5,
+			}),
+		);
+		expect(useChatStore.getState().sessions[sessionId]).toEqual(
+			expect.objectContaining({
+				reportedTokenUsage: {
+					totalTokens: 60,
+					inputTokens: 40,
+					outputTokens: 20,
+					thoughtTokens: 5,
+				},
+				usage: {
+					used: 250,
+					size: 1_000,
+					cost: { amount: 0.05, currency: "USD" },
+				},
+			}),
+		);
+	});
+
+	it("clears absent or invalid reports and resets the snapshot with a revision", () => {
+		applyAtomically(
+			makeTurnEnd(1, {
+				totalTokens: 100,
+				inputTokens: 70,
+				outputTokens: 30,
+			}),
+		);
+		applyAtomically(makeTurnEnd(2));
+		expect(
+			useChatStore.getState().sessions[sessionId].reportedTokenUsage,
+		).toBeUndefined();
+
+		applyAtomically(
+			makeTurnEnd(3, {
+				totalTokens: 100,
+				inputTokens: -1,
+				outputTokens: 30,
+			}),
+		);
+		expect(
+			useChatStore.getState().sessions[sessionId].reportedTokenUsage,
+		).toBeUndefined();
+
+		useChatStore.getState().updateSessionMeta(sessionId, {
+			reportedTokenUsage: {
+				totalTokens: 10,
+				inputTokens: 6,
+				outputTokens: 4,
+			},
+		});
+		useChatStore.getState().resetSessionForRevision(sessionId, 2);
+		expect(
+			useChatStore.getState().sessions[sessionId].reportedTokenUsage,
+		).toBeUndefined();
+	});
+});

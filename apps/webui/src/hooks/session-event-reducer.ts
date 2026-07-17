@@ -1,4 +1,4 @@
-import type { ErrorDetail } from "@mobvibe/shared";
+import { type ErrorDetail, sanitizeReportedTokenUsage } from "@mobvibe/shared";
 import type { ChatStoreActions } from "@/hooks/useSessionMutations";
 import {
 	extractAvailableCommandsUpdate,
@@ -299,6 +299,9 @@ export function applySessionEvent({
 			break;
 		}
 		case "turn_end": {
+			const payload = event.payload as { usage?: unknown };
+			const reportedTokenUsage = sanitizeReportedTokenUsage(payload.usage);
+			actions.updateSessionMeta(event.sessionId, { reportedTokenUsage });
 			notifications.notifyResponseCompleted(
 				{ sessionId: event.sessionId },
 				{ sessions },

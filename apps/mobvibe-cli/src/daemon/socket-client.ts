@@ -26,6 +26,7 @@ import {
 	createSignedToken,
 	getPromptImageBlocks,
 	isEncryptedPayload,
+	sanitizeReportedTokenUsage,
 	validatePromptImageBlocks,
 } from "@mobvibe/shared";
 import ignore, { type Ignore } from "ignore";
@@ -1974,14 +1975,28 @@ export class SocketClient extends EventEmitter {
 					error instanceof Error ? error.message : undefined,
 				);
 			}
-			const result = { stopReason: promptResult.stopReason as StopReason };
+			const usage = sanitizeReportedTokenUsage(promptResult.usage);
+			const result: SendMessageResult = {
+				stopReason: promptResult.stopReason as StopReason,
+				...(usage ? { usage } : {}),
+			};
 			try {
-				sessionManager.completeMessageSend(
-					params.sessionId,
-					params.messageId,
-					claim.claimId,
-					result.stopReason,
-				);
+				if (result.usage) {
+					sessionManager.completeMessageSend(
+						params.sessionId,
+						params.messageId,
+						claim.claimId,
+						result.stopReason,
+						result.usage,
+					);
+				} else {
+					sessionManager.completeMessageSend(
+						params.sessionId,
+						params.messageId,
+						claim.claimId,
+						result.stopReason,
+					);
+				}
 			} catch (error) {
 				throw createMessageOutcomeUnknownError(
 					error instanceof Error ? error.message : undefined,

@@ -4,10 +4,14 @@ import fs from "node:fs";
 import path from "node:path";
 import {
 	type AcpMetaValue,
+	REPORTED_TOKEN_USAGE_MAX_SERIALIZED_BYTES,
+	type ReportedTokenUsage,
+	type SendMessageResult,
 	type SessionEventKind,
 	type StopReason,
 	sanitizeAcpMessageMeta,
 	sanitizeAcpMeta,
+	sanitizeReportedTokenUsage,
 } from "@mobvibe/shared";
 import { logger } from "../lib/logger.js";
 import { runMigrations } from "./migrations.js";
@@ -50,7 +54,7 @@ export type SessionRevisionKey = {
 
 export type MessageSendClaim =
 	| { status: "claimed"; claimId: string }
-	| { status: "completed"; result: { stopReason: StopReason } }
+	| { status: "completed"; result: SendMessageResult }
 	| { status: "in_progress" };
 
 export type AppendEventParams = {
@@ -135,6 +139,22 @@ const parseMetadata = (value: string): AcpMetaValue | undefined => {
 	try {
 		const result = sanitizeAcpMeta(JSON.parse(value));
 		return result.ok ? result.value : undefined;
+	} catch {
+		return undefined;
+	}
+};
+
+const parseReportedTokenUsage = (
+	value: string | null,
+): ReportedTokenUsage | undefined => {
+	if (value === null) return undefined;
+	if (
+		Buffer.byteLength(value, "utf8") > REPORTED_TOKEN_USAGE_MAX_SERIALIZED_BYTES
+	) {
+		return undefined;
+	}
+	try {
+		return sanitizeReportedTokenUsage(JSON.parse(value));
 	} catch {
 		return undefined;
 	}
@@ -355,15 +375,15 @@ export class WalStore {
 		`);
 
 		this.stmtGetMessageSendResult = this.db.query(`
-			SELECT stop_reason
+			SELECT stop_reason, usage_json
 			FROM message_send_results
 			WHERE session_id = $sessionId AND message_id = $messageId
 		`);
 
 		this.stmtInsertMessageSendResult = this.db.query(`
 			INSERT OR IGNORE INTO message_send_results (
-				session_id, message_id, stop_reason, completed_at
-			) VALUES ($sessionId, $messageId, $stopReason, $completedAt)
+				session_id, message_id, stop_reason, usage_json, completed_at
+			) VALUES ($sessionId, $messageId, $stopReason, $usageJson, $completedAt)
 		`);
 
 		this.stmtGetMessageSendClaim = this.db.query(`
@@ -1095,12 +1115,17 @@ export class WalStore {
 	getMessageSendResult(
 		sessionId: string,
 		messageId: string,
-	): { stopReason: StopReason } | undefined {
+	): SendMessageResult | undefined {
 		const row = this.stmtGetMessageSendResult.get({
 			$sessionId: sessionId,
 			$messageId: messageId,
-		}) as { stop_reason: StopReason } | null;
-		return row ? { stopReason: row.stop_reason } : undefined;
+		}) as { stop_reason: StopReason; usage_json: string | null } | null;
+		if (!row) return undefined;
+		const usage = parseReportedTokenUsage(row.usage_json);
+		return {
+			stopReason: row.stop_reason,
+			...(usage ? { usage } : {}),
+		};
 	}
 
 	/**
@@ -1144,9 +1169,17 @@ export class WalStore {
 		messageId: string,
 		claimId: string,
 		stopReason: StopReason,
+		usage?: ReportedTokenUsage,
 	): WalEvent {
+		const sanitizedUsage = sanitizeReportedTokenUsage(usage);
 		const prepared = this.prepareEventInputs([
-			{ kind: "turn_end", payload: { stopReason } },
+			{
+				kind: "turn_end",
+				payload: {
+					stopReason,
+					...(sanitizedUsage ? { usage: sanitizedUsage } : {}),
+				},
+			},
 		]);
 		let terminalEvent: WalEvent;
 		let revision = 0;
@@ -1165,7 +1198,15 @@ export class WalStore {
 						throw new Error(`Session not found: ${sessionId}`);
 					}
 					revision = session.currentRevision;
-					this.recordMessageSendResult(sessionId, messageId, stopReason);
+					const inserted = this.recordMessageSendResult(
+						sessionId,
+						messageId,
+						stopReason,
+						sanitizedUsage,
+					);
+					if (!inserted) {
+						throw new Error("Completed message result already exists");
+					}
 					this.stmtDeleteMessageSendClaim.run({
 						$sessionId: sessionId,
 						$messageId: messageId,
@@ -1200,13 +1241,17 @@ export class WalStore {
 		sessionId: string,
 		messageId: string,
 		stopReason: StopReason,
-	): void {
-		this.stmtInsertMessageSendResult.run({
+		usage?: ReportedTokenUsage,
+	): boolean {
+		const sanitizedUsage = sanitizeReportedTokenUsage(usage);
+		const result = this.stmtInsertMessageSendResult.run({
 			$sessionId: sessionId,
 			$messageId: messageId,
 			$stopReason: stopReason,
+			$usageJson: sanitizedUsage ? JSON.stringify(sanitizedUsage) : null,
 			$completedAt: new Date().toISOString(),
 		});
+		return result.changes === 1;
 	}
 
 	/**
