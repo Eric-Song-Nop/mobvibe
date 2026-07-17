@@ -454,6 +454,12 @@ export function setupCliHandlers(
 					},
 					"cli_sessions_changed",
 				);
+				if (payload.backendCapabilities) {
+					cliRegistry.updateBackendCapabilities(
+						socket.id,
+						payload.backendCapabilities,
+					);
+				}
 				cliRegistry.updateSessionsIncremental(socket.id, payload);
 			});
 		});

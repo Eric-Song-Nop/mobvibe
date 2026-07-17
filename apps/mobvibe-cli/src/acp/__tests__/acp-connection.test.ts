@@ -8,6 +8,7 @@ mock.module("@agentclientprotocol/sdk", () => ({
 			initialize: "initialize",
 			session: {
 				cancel: "session/cancel",
+				close: "session/close",
 				list: "session/list",
 				load: "session/load",
 				new: "session/new",
@@ -160,6 +161,16 @@ describe("AcpConnection", () => {
 
 			expect(connection.getSessionCapabilities().resume).toBe(true);
 			expect(connection.supportsSessionResume()).toBe(true);
+		});
+
+		it("maps the close session capability", () => {
+			// @ts-expect-error - accessing private property for testing
+			connection.agentCapabilities = {
+				sessionCapabilities: { close: {} },
+			};
+
+			expect(connection.getSessionCapabilities().close).toBe(true);
+			expect(connection.supportsSessionClose()).toBe(true);
 		});
 	});
 
@@ -360,6 +371,37 @@ describe("AcpConnection", () => {
 				additionalDirectories: ["/data"],
 			});
 			expect(connection.getStatus().sessionId).toBe("session-1");
+		});
+	});
+
+	describe("closeSession", () => {
+		it("rejects when the agent does not advertise close", async () => {
+			await expect(connection.closeSession("session-1")).rejects.toThrow(
+				"Agent does not support session/close capability",
+			);
+		});
+
+		it("sends session/close after capability negotiation", async () => {
+			const request = mock(() => Promise.resolve({}));
+			const internal = connection as unknown as {
+				state: "ready";
+				sessionId: string;
+				agentCapabilities: {
+					sessionCapabilities: { close: Record<string, never> };
+				};
+				connection: { agent: { request: typeof request } };
+			};
+			internal.state = "ready";
+			internal.sessionId = "session-1";
+			internal.agentCapabilities = { sessionCapabilities: { close: {} } };
+			internal.connection = { agent: { request } };
+
+			await connection.closeSession("session-1");
+
+			expect(request).toHaveBeenCalledWith("session/close", {
+				sessionId: "session-1",
+			});
+			expect(connection.getStatus().sessionId).toBeUndefined();
 		});
 	});
 

@@ -171,6 +171,7 @@ export type ChatSession = {
 		| "agent_exit"
 		| "cli_disconnect"
 		| "gateway_disconnect"
+		| "session_close"
 		| "unknown";
 	isLoading?: boolean;
 	historySyncing?: boolean;

@@ -78,6 +78,7 @@
 		"newTitle": "Session {{count}}",
 		"defaultTitle": "New session",
 		"empty": "No sessions",
+		"actions": "Actions for {{title}}",
 		"archiveTitle": "Archive session?",
 		"archiveDescription": "Archiving ends the backend process and hides this session from the list.",
 		"archiveConfirm": "Confirm archive",
@@ -306,7 +307,8 @@
 		"system": "System"
 	},
 	"statusMessages": {
-		"cancelled": "Generation cancelled"
+		"cancelled": "Generation cancelled",
+		"sessionClosed": "Session closed; local history was kept"
 	},
 	"notifications": {
 		"withSession": "{{sessionTitle}}: {{title}}",

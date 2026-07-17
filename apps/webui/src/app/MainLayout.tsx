@@ -13,6 +13,7 @@ export function MainLayout({ controller }: MainLayoutProps) {
 	const {
 		activeSessionId,
 		handleArchiveSession,
+		handleCloseSession,
 		handleBulkArchiveSessions,
 		handleOpenCreateDialog,
 		handleRenameSubmit,
@@ -38,6 +39,9 @@ export function MainLayout({ controller }: MainLayoutProps) {
 				onEditSubmit={handleRenameSubmit}
 				onArchiveSession={(sessionId) => {
 					void handleArchiveSession(sessionId);
+				}}
+				onCloseSession={(sessionId) => {
+					void handleCloseSession(sessionId);
 				}}
 				onArchiveAllSessions={(sessionIds) => {
 					void handleBulkArchiveSessions(sessionIds);

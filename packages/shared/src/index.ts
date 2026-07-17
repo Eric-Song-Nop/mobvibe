@@ -204,6 +204,7 @@ export type {
 	CliRegistrationInfo,
 	CliStatusPayload,
 	CliToGatewayEvents,
+	CloseSessionParams,
 	CreateSessionParams,
 	CreateSessionResponse,
 	CreateSessionWorktreeOptions,

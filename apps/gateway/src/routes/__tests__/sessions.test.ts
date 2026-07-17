@@ -30,6 +30,7 @@ describe("session message routes", () => {
 	let baseUrl: string;
 	let sessionRouter: {
 		createSession: ReturnType<typeof vi.fn>;
+		closeSession: ReturnType<typeof vi.fn>;
 		discoverSessions: ReturnType<typeof vi.fn>;
 		loadSession: ReturnType<typeof vi.fn>;
 		resumeSession: ReturnType<typeof vi.fn>;
@@ -46,6 +47,10 @@ describe("session message routes", () => {
 	beforeEach(async () => {
 		sessionRouter = {
 			createSession: vi.fn(async () => ({ sessionId: "session-created" })),
+			closeSession: vi.fn(async () => ({
+				sessionId: "session-1",
+				isAttached: false,
+			})),
 			discoverSessions: vi.fn(async () => ({ sessions: [] })),
 			loadSession: vi.fn(async () => ({ sessionId: "session-loaded" })),
 			resumeSession: vi.fn(async () => ({ sessionId: "session-resumed" })),
@@ -366,6 +371,76 @@ describe("session message routes", () => {
 		expect(response.status).toBe(409);
 		expect(await response.json()).toEqual({
 			error: expect.objectContaining({ code: "CAPABILITY_NOT_SUPPORTED" }),
+		});
+	});
+
+	it("closes an active ACP session and returns its detached summary", async () => {
+		const response = await fetch(`${baseUrl}/acp/session/close`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ sessionId: "session-1" }),
+		});
+
+		expect(response.status).toBe(200);
+		expect(sessionRouter.closeSession).toHaveBeenCalledWith(
+			{ sessionId: "session-1" },
+			"user-1",
+		);
+		expect(await response.json()).toEqual({
+			sessionId: "session-1",
+			isAttached: false,
+		});
+	});
+
+	it("maps close capability failures to 409", async () => {
+		sessionRouter.closeSession.mockRejectedValueOnce(
+			new Error("Agent does not support session/close capability"),
+		);
+		const response = await fetch(`${baseUrl}/acp/session/close`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ sessionId: "session-1" }),
+		});
+
+		expect(response.status).toBe(409);
+		expect(await response.json()).toEqual({
+			error: expect.objectContaining({ code: "CAPABILITY_NOT_SUPPORTED" }),
+		});
+	});
+
+	it("requires authorization for session close", async () => {
+		const response = await fetch(`${baseUrl}/acp/session/close`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ sessionId: "session-1" }),
+		});
+
+		expect(response.status).toBe(401);
+		expect(sessionRouter.closeSession).not.toHaveBeenCalled();
+	});
+
+	it("does not reveal a missing or unauthorized session during close", async () => {
+		sessionRouter.closeSession.mockRejectedValueOnce(
+			new Error("Session not found"),
+		);
+		const response = await fetch(`${baseUrl}/acp/session/close`, {
+			method: "POST",
+			headers: {
+				authorization: "Bearer user-1",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ sessionId: "session-other" }),
+		});
+
+		expect(response.status).toBe(404);
+		expect(await response.json()).toEqual({
+			error: expect.objectContaining({ code: "AUTHORIZATION_FAILED" }),
 		});
 	});
 

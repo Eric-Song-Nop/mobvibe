@@ -12,6 +12,7 @@ import {
 	archiveSession,
 	bulkArchiveSessions,
 	cancelSession,
+	closeSession,
 	createSession,
 	loadSession,
 	reloadSession,
@@ -374,6 +375,31 @@ export function useSessionMutations(store: ChatStoreActions) {
 		},
 	});
 
+	const closeSessionMutation = useMutation({
+		mutationFn: closeSession,
+		onSuccess: (summary) => {
+			applySessionSummary(store, summary);
+			store.markSessionDetached({
+				sessionId: summary.sessionId,
+				machineId: summary.machineId,
+				detachedAt: new Date().toISOString(),
+				reason: "session_close",
+			});
+			store.addStatusMessage(summary.sessionId, {
+				title: t("statusMessages.sessionClosed"),
+			});
+			store.setAppError(undefined);
+		},
+		onError: (mutationError: unknown) => {
+			store.setAppError(
+				normalizeError(
+					mutationError,
+					createFallbackError(t("errors.closeSessionFailed"), "session"),
+				),
+			);
+		},
+	});
+
 	const bulkArchiveSessionsMutation = useMutation({
 		mutationFn: bulkArchiveSessions,
 		onSuccess: (_, variables) => {
@@ -612,6 +638,7 @@ export function useSessionMutations(store: ChatStoreActions) {
 		createSessionMutation,
 		renameSessionMutation,
 		archiveSessionMutation,
+		closeSessionMutation,
 		bulkArchiveSessionsMutation,
 		cancelSessionMutation,
 		setSessionModeMutation,

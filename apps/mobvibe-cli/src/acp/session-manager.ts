@@ -474,6 +474,7 @@ export class SessionManager {
 			this.idleConnections.delete(backend.id);
 			const status = idle.getStatus();
 			if (status.state === "ready") {
+				this.backendCapabilities.set(backend.id, idle.getSessionCapabilities());
 				logger.debug({ backendId: backend.id }, "idle_connection_reused");
 				return idle;
 			}
@@ -487,6 +488,10 @@ export class SessionManager {
 
 		const connection = this.createConnection(backend);
 		await connection.connect();
+		this.backendCapabilities.set(
+			backend.id,
+			connection.getSessionCapabilities(),
+		);
 		return connection;
 	}
 
@@ -779,6 +784,7 @@ export class SessionManager {
 				| "agent_exit"
 				| "cli_disconnect"
 				| "gateway_disconnect"
+				| "session_close"
 				| "unknown";
 		}) => void,
 	) {
@@ -1089,7 +1095,18 @@ export class SessionManager {
 	}
 
 	private emitSessionsChanged(payload: SessionsChangedPayload) {
-		this.sessionsChangedEmitter.emit("changed", payload);
+		const cachedCapabilities =
+			payload.added.length > 0 ? this.getBackendCapabilities() : {};
+		const backendCapabilities = {
+			...cachedCapabilities,
+			...payload.backendCapabilities,
+		};
+		this.sessionsChangedEmitter.emit("changed", {
+			...payload,
+			...(Object.keys(backendCapabilities).length > 0
+				? { backendCapabilities }
+				: {}),
+		} satisfies SessionsChangedPayload);
 	}
 
 	private emitSessionAttached(sessionId: string, force = false) {
@@ -1113,7 +1130,12 @@ export class SessionManager {
 
 	private emitSessionDetached(
 		sessionId: string,
-		reason: "agent_exit" | "cli_disconnect" | "gateway_disconnect" | "unknown",
+		reason:
+			| "agent_exit"
+			| "cli_disconnect"
+			| "gateway_disconnect"
+			| "session_close"
+			| "unknown",
 	) {
 		const record = this.sessions.get(sessionId);
 		if (!record) {
@@ -1727,7 +1749,65 @@ export class SessionManager {
 		return true;
 	}
 
-	async closeSession(sessionId: string): Promise<boolean> {
+	/**
+	 * Close a session through ACP while preserving its durable local history.
+	 * The active record is only detached after the agent confirms success.
+	 */
+	async closeSession(sessionId: string): Promise<SessionSummary> {
+		const record = this.requireClosableSession(sessionId);
+		await record.connection.closeSession(sessionId);
+		const detachedSummary: SessionSummary = {
+			...this.buildSummary(record),
+			error: undefined,
+			pid: undefined,
+			isAttached: false,
+		};
+		await this.disposeAttachedSession(sessionId, {
+			reason: "session_close",
+			detachedSummary,
+		});
+		return detachedSummary;
+	}
+
+	/** Validate close before the daemon cancels any active prompt. */
+	assertSessionCloseSupported(sessionId: string): void {
+		this.requireClosableSession(sessionId);
+	}
+
+	private requireClosableSession(sessionId: string): SessionRecord {
+		const record = this.sessions.get(sessionId);
+		if (!record) {
+			throw new AppError(
+				createErrorDetail({
+					code: "SESSION_NOT_FOUND",
+					message: "Session not found",
+					retryable: false,
+					scope: "session",
+				}),
+				404,
+			);
+		}
+		if (!record.connection.supportsSessionClose()) {
+			throw createCapabilityNotSupportedError(
+				"Agent does not support session/close capability",
+			);
+		}
+		return record;
+	}
+
+	/** Dispose a local ACP connection without invoking protocol session/close. */
+	private async disposeAttachedSession(
+		sessionId: string,
+		options?: {
+			reason?:
+				| "agent_exit"
+				| "cli_disconnect"
+				| "gateway_disconnect"
+				| "session_close"
+				| "unknown";
+			detachedSummary?: SessionSummary;
+		},
+	): Promise<boolean> {
 		const record = this.sessions.get(sessionId);
 		if (!record) {
 			return false;
@@ -1754,17 +1834,25 @@ export class SessionManager {
 			logger.error({ err: error, sessionId }, "session_disconnect_failed");
 		}
 		try {
-			this.emitSessionDetached(sessionId, "unknown");
+			this.emitSessionDetached(sessionId, options?.reason ?? "unknown");
 		} catch (error) {
 			logger.error({ err: error, sessionId }, "session_detach_emit_failed");
 		}
 		this.sessions.delete(sessionId);
 		try {
-			this.emitSessionsChanged({
-				added: [],
-				updated: [],
-				removed: [sessionId],
-			});
+			this.emitSessionsChanged(
+				options?.detachedSummary
+					? {
+							added: [],
+							updated: [options.detachedSummary],
+							removed: [],
+						}
+					: {
+							added: [],
+							updated: [],
+							removed: [sessionId],
+						},
+			);
 		} catch (error) {
 			logger.error(
 				{ err: error, sessionId },
@@ -1777,7 +1865,7 @@ export class SessionManager {
 	async closeAll(): Promise<void> {
 		const sessionIds = Array.from(this.sessions.keys());
 		await Promise.all(
-			sessionIds.map((sessionId) => this.closeSession(sessionId)),
+			sessionIds.map((sessionId) => this.disposeAttachedSession(sessionId)),
 		);
 		// Also disconnect idle connections
 		for (const [, conn] of this.idleConnections) {
@@ -1791,7 +1879,7 @@ export class SessionManager {
 	 */
 	async archiveSession(sessionId: string): Promise<void> {
 		if (this.sessions.has(sessionId)) {
-			await this.closeSession(sessionId);
+			await this.disposeAttachedSession(sessionId);
 		}
 		this.walStore.archiveSession(sessionId);
 		this.discoveredSessions.delete(sessionId);
@@ -1806,7 +1894,7 @@ export class SessionManager {
 		await Promise.allSettled(
 			sessionIds
 				.filter((id) => this.sessions.has(id))
-				.map((id) => this.closeSession(id)),
+				.map((id) => this.disposeAttachedSession(id)),
 		);
 		const archivedCount = this.walStore.bulkArchiveSessions(sessionIds);
 		for (const id of sessionIds) {
@@ -2110,10 +2198,6 @@ export class SessionManager {
 		});
 
 		try {
-			this.backendCapabilities.set(
-				backend.id,
-				connection.getSessionCapabilities(),
-			);
 			if (!connection.supportsSessionResume()) {
 				throw createCapabilityNotSupportedError(
 					"Agent does not support session resuming",
@@ -2240,7 +2324,14 @@ export class SessionManager {
 		try {
 			this.emitSessionsChanged(
 				walSession
-					? { added: [], updated: [summary], removed: [] }
+					? {
+							added: [],
+							updated: [summary],
+							removed: [],
+							backendCapabilities: {
+								[backend.id]: connection.getSessionCapabilities(),
+							},
+						}
 					: { added: [summary], updated: [], removed: [] },
 			);
 			this.emitSessionAttached(sessionId);
@@ -2585,7 +2676,7 @@ export class SessionManager {
 					"reload_failed_events_discarded",
 				);
 			}
-			await this.closeSession(sessionId);
+			await this.disposeAttachedSession(sessionId);
 			throw error;
 		}
 
@@ -2621,7 +2712,7 @@ export class SessionManager {
 				{ err: error, sessionId },
 				"reload_local_commit_failed_session_closing",
 			);
-			await this.closeSession(sessionId);
+			await this.disposeAttachedSession(sessionId);
 			throw error;
 		} finally {
 			delete existing.pendingReload;

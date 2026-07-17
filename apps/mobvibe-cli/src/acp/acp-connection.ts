@@ -5,6 +5,7 @@ import { Readable, Writable } from "node:stream";
 import {
 	type AgentCapabilities,
 	type ClientConnection,
+	type CloseSessionResponse,
 	type ContentBlock,
 	type CreateTerminalRequest,
 	type CreateTerminalResponse,
@@ -302,6 +303,7 @@ export class AcpConnection {
 			list: this.agentCapabilities?.sessionCapabilities?.list != null,
 			load: this.agentCapabilities?.loadSession === true,
 			resume: this.agentCapabilities?.sessionCapabilities?.resume != null,
+			close: this.agentCapabilities?.sessionCapabilities?.close != null,
 			additionalDirectories:
 				this.agentCapabilities?.sessionCapabilities?.additionalDirectories !=
 				null,
@@ -333,6 +335,11 @@ export class AcpConnection {
 	 */
 	supportsSessionResume(): boolean {
 		return this.agentCapabilities?.sessionCapabilities?.resume != null;
+	}
+
+	/** Check if the agent supports session/close. */
+	supportsSessionClose(): boolean {
+		return this.agentCapabilities?.sessionCapabilities?.close != null;
 	}
 
 	supportsAdditionalDirectories(): boolean {
@@ -445,6 +452,26 @@ export class AcpConnection {
 			},
 		);
 		this.sessionId = sessionId;
+		return response;
+	}
+
+	/** Close an active session and release its client-owned resources. */
+	async closeSession(sessionId: string): Promise<CloseSessionResponse> {
+		if (!this.supportsSessionClose()) {
+			throw new Error("Agent does not support session/close capability");
+		}
+		const connection = await this.ensureReady();
+		const response = await connection.agent.request(
+			methods.agent.session.close,
+			{ sessionId },
+		);
+		this.cleanupSessionResources(
+			sessionId,
+			new Error("ACP session was closed"),
+		);
+		if (this.sessionId === sessionId) {
+			this.sessionId = undefined;
+		}
 		return response;
 	}
 
@@ -996,10 +1023,14 @@ export class AcpConnection {
 		this.updateStatus("stopped");
 		this.sessionId = undefined;
 		this.agentInfo = undefined;
-		for (const controllers of this.promptControllers.values()) {
-			for (const controller of controllers) {
-				controller.abort(new Error("ACP connection stopped"));
-			}
+		for (const sessionId of new Set([
+			...this.promptControllers.keys(),
+			...Array.from(this.terminals.values(), (record) => record.sessionId),
+		])) {
+			this.cleanupSessionResources(
+				sessionId,
+				new Error("ACP connection stopped"),
+			);
 		}
 		this.promptControllers.clear();
 		this.connection?.close();
@@ -1038,6 +1069,23 @@ export class AcpConnection {
 
 	private emitSessionUpdate(notification: SessionNotification) {
 		this.sessionUpdateEmitter.emit("update", notification);
+	}
+
+	private cleanupSessionResources(sessionId: string, reason: Error): void {
+		for (const controller of this.promptControllers.get(sessionId) ?? []) {
+			controller.abort(reason);
+		}
+		this.promptControllers.delete(sessionId);
+		for (const [terminalId, record] of this.terminals) {
+			if (record.sessionId !== sessionId) {
+				continue;
+			}
+			if (record.process?.exitCode === null) {
+				record.process.kill("SIGTERM");
+			}
+			record.resolveExit?.({ exitCode: null, signal: null });
+			this.terminals.delete(terminalId);
+		}
 	}
 
 	private async handlePermissionRequest(

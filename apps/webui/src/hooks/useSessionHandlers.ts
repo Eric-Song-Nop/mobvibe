@@ -46,6 +46,9 @@ type Mutations = {
 	archiveSessionMutation: {
 		mutateAsync: (params: { sessionId: string }) => Promise<unknown>;
 	};
+	closeSessionMutation: {
+		mutateAsync: (params: { sessionId: string }) => Promise<unknown>;
+	};
 	bulkArchiveSessionsMutation: {
 		mutateAsync: (params: { sessionIds: string[] }) => Promise<unknown>;
 		isPending: boolean;
@@ -349,6 +352,17 @@ export function useSessionHandlers({
 		[mutations.archiveSessionMutation],
 	);
 
+	const handleCloseSession = useCallback(
+		async (sessionId: string) => {
+			try {
+				await mutations.closeSessionMutation.mutateAsync({ sessionId });
+			} catch {
+				return;
+			}
+		},
+		[mutations.closeSessionMutation],
+	);
+
 	const handleBulkArchiveSessions = useCallback(
 		async (sessionIds: string[]) => {
 			try {
@@ -592,6 +606,7 @@ export function useSessionHandlers({
 		handleCreateSession,
 		handleRenameSubmit,
 		handleArchiveSession,
+		handleCloseSession,
 		handleBulkArchiveSessions,
 		handlePermissionDecision,
 		handleModeChange,

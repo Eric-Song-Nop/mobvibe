@@ -144,6 +144,9 @@ describe("SocketClient restore semantics", () => {
 		resumeSession: ReturnType<typeof mock>;
 		reloadSession: ReturnType<typeof mock>;
 		setSessionConfigOption: ReturnType<typeof mock>;
+		cancelSession: ReturnType<typeof mock>;
+		assertSessionCloseSupported: ReturnType<typeof mock>;
+		closeSession: ReturnType<typeof mock>;
 		archiveSession: ReturnType<typeof mock>;
 		bulkArchiveSessions: ReturnType<typeof mock>;
 		touchSession: ReturnType<typeof mock>;
@@ -220,6 +223,11 @@ describe("SocketClient restore semantics", () => {
 			reloadSession: mock(() => Promise.resolve({ sessionId: "session-1" })),
 			setSessionConfigOption: mock(() =>
 				Promise.resolve({ sessionId: "session-1" }),
+			),
+			cancelSession: mock(() => Promise.resolve(true)),
+			assertSessionCloseSupported: mock(() => {}),
+			closeSession: mock(() =>
+				Promise.resolve({ sessionId: "session-1", isAttached: false }),
 			),
 			archiveSession: mock(() => Promise.resolve()),
 			bulkArchiveSessions: mock(() => Promise.resolve({ archivedCount: 1 })),
@@ -1451,6 +1459,94 @@ describe("SocketClient restore semantics", () => {
 		await Promise.all([message, archive]);
 
 		expect(sessionManager.archiveSession).toHaveBeenCalledWith("session-1");
+	});
+
+	test("pre-cancels work before closing a session through ACP", async () => {
+		const calls: string[] = [];
+		sessionManager.cancelSession.mockImplementationOnce(() => {
+			calls.push("cancel");
+			return Promise.resolve(true);
+		});
+		sessionManager.closeSession.mockImplementationOnce(() => {
+			calls.push("close");
+			return Promise.resolve({ sessionId: "session-1", isAttached: false });
+		});
+		const closeHandler = socketHandlers.get("rpc:session:close");
+		if (!closeHandler) {
+			throw new Error("session close RPC handler not registered");
+		}
+
+		await closeHandler({
+			requestId: "req-close",
+			params: { sessionId: "session-1" },
+		});
+
+		expect(calls).toEqual(["cancel", "close"]);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-close",
+			result: { sessionId: "session-1", isAttached: false },
+		});
+	});
+
+	test("reserves close before awaiting cancellation and rejects a new prompt", async () => {
+		let finishCancel: (() => void) | undefined;
+		sessionManager.cancelSession.mockImplementationOnce(
+			() =>
+				new Promise<boolean>((resolve) => {
+					finishCancel = () => resolve(true);
+				}),
+		);
+		const closeHandler = socketHandlers.get("rpc:session:close");
+		const messageHandler = socketHandlers.get("rpc:message:send");
+		if (!closeHandler || !messageHandler) {
+			throw new Error("session close or message RPC handler not registered");
+		}
+
+		const close = closeHandler({
+			requestId: "req-close-reserved",
+			params: { sessionId: "session-1" },
+		});
+		await Promise.resolve();
+		await messageHandler({
+			requestId: "req-message-during-close",
+			params: {
+				sessionId: "session-1",
+				messageId: "message-during-close",
+				prompt: [{ type: "text", text: "do not start" }],
+			},
+		});
+
+		expect(promptConnection.prompt).not.toHaveBeenCalled();
+		expect(sessionManager.closeSession).not.toHaveBeenCalled();
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "req-message-during-close",
+			error: expect.objectContaining({
+				code: "SESSION_BUSY",
+				status: 409,
+			}),
+		});
+
+		finishCancel?.();
+		await close;
+		expect(sessionManager.closeSession).toHaveBeenCalledWith("session-1");
+	});
+
+	test("does not cancel when close capability validation fails", async () => {
+		sessionManager.assertSessionCloseSupported.mockImplementationOnce(() => {
+			throw new Error("Agent does not support session/close capability");
+		});
+		const closeHandler = socketHandlers.get("rpc:session:close");
+		if (!closeHandler) {
+			throw new Error("session close RPC handler not registered");
+		}
+
+		await closeHandler({
+			requestId: "req-close-unsupported",
+			params: { sessionId: "session-1" },
+		});
+
+		expect(sessionManager.cancelSession).not.toHaveBeenCalled();
+		expect(sessionManager.closeSession).not.toHaveBeenCalled();
 	});
 
 	test("waits for archive completion before loading the same session", async () => {

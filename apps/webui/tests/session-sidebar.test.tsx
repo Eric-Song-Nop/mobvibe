@@ -19,6 +19,18 @@ const defaultMutations: SessionMutationsSnapshot = {
 
 // --- mocks ---
 
+const mockMachinesStoreState = vi.hoisted(() => ({
+	selectedMachineId: "machine-1",
+	machines: {} as Record<
+		string,
+		{
+			backendCapabilities?: Record<string, Record<string, boolean>>;
+		}
+	>,
+	setSelectedMachineId: vi.fn(),
+	updateBackendCapabilities: vi.fn(),
+}));
+
 vi.mock("@mobvibe/ui/dropdown-menu", () => ({
 	DropdownMenu: ({ children }: { children: React.ReactNode }) => (
 		<div>{children}</div>
@@ -59,12 +71,15 @@ vi.mock("@mobvibe/ui/tooltip", () => ({
 }));
 
 vi.mock("../src/lib/machines-store", () => ({
-	useMachinesStore: vi.fn(() => ({
-		selectedMachineId: "machine-1",
-		machines: {},
-		setSelectedMachineId: vi.fn(),
-		updateBackendCapabilities: vi.fn(),
-	})),
+	useMachinesStore: vi.fn(() => mockMachinesStoreState),
+	getBackendCapability: (
+		machine: (typeof mockMachinesStoreState.machines)[string] | undefined,
+		backendId: string | undefined,
+		capability: string,
+	) =>
+		backendId
+			? machine?.backendCapabilities?.[backendId]?.[capability]
+			: undefined,
 }));
 
 vi.mock("../src/components/workspace/WorkspaceList", () => ({
@@ -99,6 +114,7 @@ const renderSidebar = (
 					onCreateSession={options?.onCreateSession ?? (() => {})}
 					onSelectSession={options?.onSelectSession ?? (() => {})}
 					onEditSubmit={options?.onEditSubmit ?? (() => {})}
+					onCloseSessionRequest={options?.onCloseSessionRequest ?? (() => {})}
 					onArchiveSessionRequest={
 						options?.onArchiveSessionRequest ?? (() => {})
 					}
@@ -117,6 +133,7 @@ const renderSidebar = (
 
 describe("SessionSidebar", () => {
 	beforeEach(() => {
+		mockMachinesStoreState.machines = {};
 		useUiStore.setState({
 			mobileMenuOpen: false,
 			createDialogOpen: false,
@@ -564,6 +581,56 @@ describe("SessionSidebar", () => {
 			await user.click(screen.getByText(i18n.t("common.archive")));
 
 			expect(onArchiveSessionRequest).toHaveBeenCalledWith("s1");
+		});
+	});
+
+	describe("Close active session", () => {
+		it("shows the action only for an attached session with advertised support", async () => {
+			mockMachinesStoreState.machines = {
+				"machine-1": {
+					backendCapabilities: {
+						"backend-1": { close: true },
+					},
+				},
+			};
+			const onCloseSessionRequest = vi.fn();
+			const user = userEvent.setup();
+			renderSidebar(
+				[
+					buildSession({
+						sessionId: "session-close",
+						machineId: "machine-1",
+						backendId: "backend-1",
+						isAttached: true,
+					}),
+				],
+				{ onCloseSessionRequest },
+			);
+
+			await user.click(screen.getByText(i18n.t("common.close")));
+
+			expect(onCloseSessionRequest).toHaveBeenCalledWith("session-close");
+		});
+
+		it("hides the action when close support is absent", () => {
+			mockMachinesStoreState.machines = {
+				"machine-1": {
+					backendCapabilities: {
+						"backend-1": { close: false },
+					},
+				},
+			};
+			renderSidebar([
+				buildSession({
+					machineId: "machine-1",
+					backendId: "backend-1",
+					isAttached: true,
+				}),
+			]);
+
+			expect(
+				screen.queryByText(i18n.t("common.close")),
+			).not.toBeInTheDocument();
 		});
 	});
 });

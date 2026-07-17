@@ -16,6 +16,7 @@ import type {
 	SessionEventsResponse,
 	SessionFsFilePreview,
 	SessionFsResourceEntry,
+	SessionSummary,
 	StopReason,
 } from "@mobvibe/shared";
 import {
@@ -222,6 +223,10 @@ export class SocketClient extends EventEmitter {
 		Promise<SendMessageResult>
 	>();
 	private readonly activeMessageIdBySession = new Map<string, string>();
+	private readonly sessionClosesInFlight = new Map<
+		string,
+		Promise<SessionSummary>
+	>();
 	private readonly sessionOperationTails = new Map<string, Promise<void>>();
 
 	constructor(private readonly options: SocketClientOptions) {
@@ -504,6 +509,55 @@ export class SocketClient extends EventEmitter {
 						sessionId: request.params.sessionId,
 					},
 					"rpc_session_cancel_error",
+				);
+				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		// Session close
+		this.socket.on("rpc:session:close", async (request) => {
+			const { sessionId } = request.params;
+			try {
+				logger.info(
+					{ requestId: request.requestId, sessionId },
+					"rpc_session_close",
+				);
+				let closeOperation = this.sessionClosesInFlight.get(sessionId);
+				if (!closeOperation) {
+					sessionManager.assertSessionCloseSupported(sessionId);
+					let finishCancellation: (() => void) | undefined;
+					const cancellationFinished = new Promise<void>((resolve) => {
+						finishCancellation = resolve;
+					});
+					closeOperation = this.enqueueSessionOperation(sessionId, async () => {
+						await cancellationFinished;
+						return sessionManager.closeSession(sessionId);
+					});
+					this.sessionClosesInFlight.set(sessionId, closeOperation);
+					void sessionManager
+						.cancelSession(sessionId)
+						.catch((error: unknown) => {
+							logger.warn(
+								{ err: error, requestId: request.requestId, sessionId },
+								"rpc_session_close_pre_cancel_failed",
+							);
+						})
+						.finally(() => {
+							finishCancellation?.();
+						});
+					const clearClose = () => {
+						if (this.sessionClosesInFlight.get(sessionId) === closeOperation) {
+							this.sessionClosesInFlight.delete(sessionId);
+						}
+					};
+					void closeOperation.then(clearClose, clearClose);
+				}
+				const session = await closeOperation;
+				this.sendRpcResponse(request.requestId, session);
+			} catch (error) {
+				logger.error(
+					{ err: error, requestId: request.requestId, sessionId },
+					"rpc_session_close_error",
 				);
 				this.sendRpcError(request.requestId, error);
 			}
@@ -1540,6 +1594,19 @@ export class SocketClient extends EventEmitter {
 		const inFlight = this.messageSendsInFlight.get(key);
 		if (inFlight) {
 			return inFlight;
+		}
+		if (this.sessionClosesInFlight.has(params.sessionId)) {
+			return Promise.reject(
+				new AppError(
+					createErrorDetail({
+						code: "SESSION_BUSY",
+						message: "Session is closing",
+						retryable: true,
+						scope: "session",
+					}),
+					409,
+				),
+			);
 		}
 		const activeMessageId = this.activeMessageIdBySession.get(params.sessionId);
 		if (activeMessageId && activeMessageId !== messageId) {

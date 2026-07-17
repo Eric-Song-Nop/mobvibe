@@ -78,6 +78,7 @@
 		"newTitle": "对话 {{count}}",
 		"defaultTitle": "新对话",
 		"empty": "暂无对话",
+		"actions": "{{title}} 的操作",
 		"archiveTitle": "归档对话？",
 		"archiveDescription": "归档后将结束后端进程并从列表中隐藏此对话。",
 		"archiveConfirm": "确认归档",
@@ -306,7 +307,8 @@
 		"system": "跟随系统"
 	},
 	"statusMessages": {
-		"cancelled": "已取消本次生成"
+		"cancelled": "已取消本次生成",
+		"sessionClosed": "会话已关闭，本地历史记录已保留"
 	},
 	"notifications": {
 		"withSession": "{{sessionTitle}}：{{title}}",

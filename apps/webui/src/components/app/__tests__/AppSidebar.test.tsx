@@ -23,6 +23,9 @@ vi.mock("react-i18next", () => ({
 				"session.archiveAllTitle": "Archive all sessions",
 				"session.archiveAllDescription": `Archive ${options?.count ?? 0} sessions`,
 				"session.archiveAllConfirm": "Confirm archive all",
+				"session.closeTitle": "Close session",
+				"session.closeDescription": "Close this session and keep history",
+				"session.closeConfirm": "Confirm close",
 			};
 			return translations[key] ?? key;
 		},
@@ -80,16 +83,21 @@ vi.mock("@/components/machines/RegisterMachineDialog", () => ({
 vi.mock("@/components/session/SessionSidebar", () => ({
 	SessionSidebar: ({
 		onCreateSession,
+		onCloseSessionRequest,
 		onArchiveSessionRequest,
 		onArchiveAllSessionsRequest,
 	}: {
 		onCreateSession: (mode: "workspace" | "session") => void;
+		onCloseSessionRequest: (sessionId: string) => void;
 		onArchiveSessionRequest: (sessionId: string) => void;
 		onArchiveAllSessionsRequest: (sessionIds: string[]) => void;
 	}) => (
 		<div>
 			<button type="button" onClick={() => onCreateSession("session")}>
 				New Session
+			</button>
+			<button type="button" onClick={() => onCloseSessionRequest("session-1")}>
+				Close One
 			</button>
 			<button
 				type="button"
@@ -176,6 +184,7 @@ const renderSidebar = (
 				onCreateSession={props?.onCreateSession ?? vi.fn()}
 				onSelectSession={props?.onSelectSession ?? vi.fn()}
 				onEditSubmit={props?.onEditSubmit ?? vi.fn()}
+				onCloseSession={props?.onCloseSession ?? vi.fn()}
 				onArchiveSession={props?.onArchiveSession ?? vi.fn()}
 				onArchiveAllSessions={props?.onArchiveAllSessions ?? vi.fn()}
 				isBulkArchiving={props?.isBulkArchiving ?? false}
@@ -248,5 +257,24 @@ describe("AppSidebar mobile modal flow", () => {
 		await user.click(screen.getByRole("button", { name: "Confirm archive" }));
 
 		expect(onArchiveSession).toHaveBeenCalledWith("session-1");
+	});
+
+	it("keeps close confirmation open and calls the distinct close action", async () => {
+		const onCloseSession = vi.fn();
+		const onArchiveSession = vi.fn();
+		const user = userEvent.setup();
+		renderSidebar({ onCloseSession, onArchiveSession });
+
+		await user.click(screen.getAllByText("Close One")[0]!);
+
+		expect(useUiStore.getState().mobileMenuOpen).toBe(false);
+		expect(
+			screen.getByText("Close this session and keep history"),
+		).toBeVisible();
+
+		await user.click(screen.getByRole("button", { name: "Confirm close" }));
+
+		expect(onCloseSession).toHaveBeenCalledWith("session-1");
+		expect(onArchiveSession).not.toHaveBeenCalled();
 	});
 });

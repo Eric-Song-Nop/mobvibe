@@ -132,10 +132,13 @@ const createMockConnection = () => ({
 		list: true,
 		load: true,
 		resume: true,
+		close: true,
 	})),
 	supportsSessionList: mock(() => true),
 	supportsSessionLoad: mock(() => true),
 	supportsSessionResume: mock(() => true),
+	supportsSessionClose: mock(() => true),
+	closeSession: mock(() => Promise.resolve({})),
 	listSessions: mock(
 		(): Promise<ListSessionsResponse> =>
 			Promise.resolve({
@@ -728,6 +731,7 @@ describe("SessionManager", () => {
 				backendId: "backend-1",
 			});
 			await sessionManager.archiveSession(created.sessionId);
+			expect(mockConnection.closeSession).not.toHaveBeenCalled();
 			mockConnection.resumeSession.mockClear();
 
 			await expect(
@@ -745,6 +749,7 @@ describe("SessionManager", () => {
 				list: true,
 				load: true,
 				resume: false,
+				close: true,
 			});
 			mockConnection.supportsSessionResume.mockReturnValueOnce(false);
 
@@ -2970,7 +2975,28 @@ describe("SessionManager", () => {
 	});
 
 	describe("closeSession", () => {
-		it("closes and removes session", async () => {
+		it("publishes close support when a fresh session initializes the backend", async () => {
+			const changedListener = mock(() => {});
+			sessionManager.onSessionsChanged(changedListener);
+
+			await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+
+			expect(sessionManager.getBackendCapabilities()).toEqual({
+				"backend-1": expect.objectContaining({ close: true }),
+			});
+			expect(changedListener).toHaveBeenCalledWith(
+				expect.objectContaining({
+					backendCapabilities: {
+						"backend-1": expect.objectContaining({ close: true }),
+					},
+				}),
+			);
+		});
+
+		it("closes the agent session and keeps durable history detached", async () => {
 			const created = await sessionManager.createSession({
 				cwd: "/home/user/project",
 				backendId: "backend-1",
@@ -2978,8 +3004,22 @@ describe("SessionManager", () => {
 
 			const result = await sessionManager.closeSession(created.sessionId);
 
-			expect(result).toBe(true);
+			expect(result).toEqual(
+				expect.objectContaining({
+					sessionId: created.sessionId,
+					isAttached: false,
+				}),
+			);
+			expect(mockConnection.closeSession).toHaveBeenCalledWith(
+				created.sessionId,
+			);
 			expect(sessionManager.listSessions()).toHaveLength(0);
+			expect(sessionManager.listAllSessions()).toEqual([
+				expect.objectContaining({
+					sessionId: created.sessionId,
+					isAttached: false,
+				}),
+			]);
 		});
 
 		it("emits sessions:changed event when session closed", async () => {
@@ -2996,15 +3036,69 @@ describe("SessionManager", () => {
 			expect(changedListener).toHaveBeenCalledWith(
 				expect.objectContaining({
 					added: [],
-					updated: [],
-					removed: [created.sessionId],
+					updated: [
+						expect.objectContaining({
+							sessionId: created.sessionId,
+							isAttached: false,
+						}),
+					],
+					removed: [],
 				}),
 			);
 		});
 
-		it("returns false for unknown session", async () => {
-			const result = await sessionManager.closeSession("unknown-session");
-			expect(result).toBe(false);
+		it("returns session metadata emitted while protocol close completes", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			mockConnection.closeSession.mockImplementationOnce(() => {
+				sessionUpdateCallback?.({
+					sessionId: created.sessionId,
+					update: {
+						sessionUpdate: "session_info_update",
+						title: "Final agent title",
+					},
+				} as SessionNotification);
+				return Promise.resolve({});
+			});
+
+			const result = await sessionManager.closeSession(created.sessionId);
+
+			expect(result).toEqual(
+				expect.objectContaining({
+					title: "Final agent title",
+					isAttached: false,
+				}),
+			);
+		});
+
+		it("rejects an unknown session", async () => {
+			await expect(
+				sessionManager.closeSession("unknown-session"),
+			).rejects.toMatchObject({ status: 404 });
+		});
+
+		it("keeps the active session intact when protocol close fails", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			mockConnection.closeSession.mockImplementationOnce(() =>
+				Promise.reject(new Error("agent refused close")),
+			);
+
+			await expect(
+				sessionManager.closeSession(created.sessionId),
+			).rejects.toThrow("agent refused close");
+
+			expect(sessionManager.listSessions()).toEqual([
+				expect.objectContaining({
+					sessionId: created.sessionId,
+					isAttached: true,
+				}),
+			]);
+			expect(mockConnection.disconnect).not.toHaveBeenCalled();
 		});
 	});
 

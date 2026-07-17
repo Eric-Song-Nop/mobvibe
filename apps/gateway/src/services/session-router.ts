@@ -3,6 +3,7 @@ import type {
 	ArchiveSessionParams,
 	BulkArchiveSessionsParams,
 	CancelSessionParams,
+	CloseSessionParams,
 	CreateSessionParams,
 	DiscoverSessionsRpcParams,
 	DiscoverSessionsRpcResult,
@@ -253,6 +254,28 @@ export class SessionRouter {
 		);
 
 		return result;
+	}
+
+	/** Close an active ACP session while retaining its durable local history. */
+	async closeSession(
+		params: CloseSessionParams,
+		userId: string,
+	): Promise<SessionSummary> {
+		logger.info(
+			{ sessionId: params.sessionId, userId },
+			"session_close_rpc_start",
+		);
+		const cli = this.resolveCliForSession(params.sessionId, userId);
+		const result = await this.sendRpc<CloseSessionParams, SessionSummary>(
+			cli.socket,
+			"rpc:session:close",
+			params,
+		);
+		logger.info(
+			{ sessionId: params.sessionId, userId },
+			"session_close_rpc_complete",
+		);
+		return { ...result, machineId: cli.machineId };
 	}
 
 	/**

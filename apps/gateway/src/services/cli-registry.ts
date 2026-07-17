@@ -220,6 +220,7 @@ export class CliRegistry extends EventEmitter {
 				machineId: record.machineId,
 			})),
 			removed: payload.removed,
+			backendCapabilities: payload.backendCapabilities,
 		};
 
 		this.emit(

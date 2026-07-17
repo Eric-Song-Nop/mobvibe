@@ -305,6 +305,9 @@ export type ResumeSessionParams = {
 /** CLI RPC parameters for resuming a session without history replay. */
 export type ResumeSessionRpcParams = ResumeSessionParams;
 
+/** Close an active ACP session while preserving its durable local history. */
+export type CloseSessionParams = { sessionId: string };
+
 // Reload session RPC params
 export type ReloadSessionRpcParams = {
 	sessionId: string;
@@ -335,7 +338,12 @@ export type SessionDetachedPayload = {
 	sessionId: string;
 	machineId: string;
 	detachedAt: string;
-	reason: "agent_exit" | "cli_disconnect" | "gateway_disconnect" | "unknown";
+	reason:
+		| "agent_exit"
+		| "cli_disconnect"
+		| "gateway_disconnect"
+		| "session_close"
+		| "unknown";
 };
 
 // CLI -> Gateway events
@@ -392,6 +400,7 @@ export interface GatewayToCliEvents {
 	) => void;
 	"rpc:session:load": (request: RpcRequest<LoadSessionRpcParams>) => void;
 	"rpc:session:resume": (request: RpcRequest<ResumeSessionRpcParams>) => void;
+	"rpc:session:close": (request: RpcRequest<CloseSessionParams>) => void;
 	"rpc:session:reload": (request: RpcRequest<ReloadSessionRpcParams>) => void;
 	"rpc:agent-team:create": (
 		request: RpcRequest<CreateAgentTeamRpcParams>,

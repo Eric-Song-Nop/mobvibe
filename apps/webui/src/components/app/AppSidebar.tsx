@@ -37,6 +37,7 @@ export type AppSidebarProps = {
 	onCreateSession: (mode: "workspace" | "session") => void;
 	onSelectSession: (sessionId: string) => void;
 	onEditSubmit: () => void;
+	onCloseSession: (sessionId: string) => void;
 	onArchiveSession: (sessionId: string) => void;
 	onArchiveAllSessions: (sessionIds: string[]) => void;
 	isBulkArchiving?: boolean;
@@ -61,6 +62,7 @@ export const AppSidebar = memo(function AppSidebar({
 	onCreateSession,
 	onSelectSession,
 	onEditSubmit,
+	onCloseSession,
 	onArchiveSession,
 	onArchiveAllSessions,
 	isBulkArchiving,
@@ -76,6 +78,7 @@ export const AppSidebar = memo(function AppSidebar({
 	} = useUiStore();
 	const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
 	const [archiveTarget, setArchiveTarget] = useState<ArchiveTarget>(null);
+	const [closeTarget, setCloseTarget] = useState<string | null>(null);
 
 	const handleCreateSessionRequest = useCallback(
 		(mode: "workspace" | "session") => {
@@ -101,6 +104,14 @@ export const AppSidebar = memo(function AppSidebar({
 		[setMobileMenuOpen],
 	);
 
+	const handleCloseSessionRequest = useCallback(
+		(sessionId: string) => {
+			setMobileMenuOpen(false);
+			setCloseTarget(sessionId);
+		},
+		[setMobileMenuOpen],
+	);
+
 	const handleArchiveConfirm = useCallback(() => {
 		if (!archiveTarget) {
 			return;
@@ -113,6 +124,14 @@ export const AppSidebar = memo(function AppSidebar({
 		setArchiveTarget(null);
 	}, [archiveTarget, onArchiveAllSessions, onArchiveSession]);
 
+	const handleCloseConfirm = useCallback(() => {
+		if (!closeTarget) {
+			return;
+		}
+		onCloseSession(closeTarget);
+		setCloseTarget(null);
+	}, [closeTarget, onCloseSession]);
+
 	const handleOpenRegisterMachineDialog = useCallback(() => {
 		setMobileMenuOpen(false);
 		setRegisterDialogOpen(true);
@@ -124,6 +143,29 @@ export const AppSidebar = memo(function AppSidebar({
 				open={registerDialogOpen}
 				onOpenChange={setRegisterDialogOpen}
 			/>
+			<AlertDialog
+				open={closeTarget !== null}
+				onOpenChange={(open) => {
+					if (!open) {
+						setCloseTarget(null);
+					}
+				}}
+			>
+				<AlertDialogContent size="sm">
+					<AlertDialogHeader>
+						<AlertDialogTitle>{t("session.closeTitle")}</AlertDialogTitle>
+						<AlertDialogDescription>
+							{t("session.closeDescription")}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+						<AlertDialogAction onClick={handleCloseConfirm}>
+							{t("session.closeConfirm")}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 			<AlertDialog
 				open={archiveTarget !== null}
 				onOpenChange={(open) => {
@@ -167,6 +209,7 @@ export const AppSidebar = memo(function AppSidebar({
 					onCreateSession={handleCreateSessionRequest}
 					onSelectSession={onSelectSession}
 					onEditSubmit={onEditSubmit}
+					onCloseSessionRequest={handleCloseSessionRequest}
 					onArchiveSessionRequest={handleArchiveSessionRequest}
 					onArchiveAllSessionsRequest={handleArchiveAllSessionsRequest}
 					isBulkArchiving={isBulkArchiving}
@@ -197,6 +240,7 @@ export const AppSidebar = memo(function AppSidebar({
 									setMobileMenuOpen(false);
 								}}
 								onEditSubmit={onEditSubmit}
+								onCloseSessionRequest={handleCloseSessionRequest}
 								onArchiveSessionRequest={handleArchiveSessionRequest}
 								onArchiveAllSessionsRequest={handleArchiveAllSessionsRequest}
 								isBulkArchiving={isBulkArchiving}

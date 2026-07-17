@@ -94,6 +94,7 @@ const createMockMutations = (): UseSessionHandlersParams["mutations"] => ({
 	},
 	renameSessionMutation: { mutate: vi.fn() },
 	archiveSessionMutation: { mutateAsync: vi.fn() },
+	closeSessionMutation: { mutateAsync: vi.fn() },
 	bulkArchiveSessionsMutation: { mutateAsync: vi.fn(), isPending: false },
 	cancelSessionMutation: { mutate: vi.fn(), mutateAsync: vi.fn() },
 	setSessionModeMutation: { mutate: vi.fn(), isPending: false },

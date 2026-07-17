@@ -309,6 +309,53 @@ export function setupSessionRoutes(
 		}
 	});
 
+	// Close an active ACP session while retaining durable local history
+	router.post(
+		"/session/close",
+		async (request: AuthenticatedRequest, response) => {
+			const { sessionId } = request.body ?? {};
+			if (typeof sessionId !== "string" || sessionId.length === 0) {
+				respondError(
+					response,
+					buildRequestValidationError("sessionId required"),
+					400,
+				);
+				return;
+			}
+			const userId = getUserId(request);
+			if (!userId) {
+				respondError(response, buildAuthorizationError(), 401);
+				return;
+			}
+			try {
+				logger.info({ sessionId, userId }, "session_close_request");
+				const session = await sessionRouter.closeSession({ sessionId }, userId);
+				logger.info({ sessionId, userId }, "session_close_success");
+				response.json(session);
+			} catch (error) {
+				const message = getErrorMessage(error);
+				logger.error({ err: error, sessionId }, "session_close_error");
+				if (respondAppError(response, error)) return;
+				if (message.includes("Session not found")) {
+					respondError(response, buildAuthorizationError(message), 404);
+				} else if (message.includes("does not support")) {
+					respondError(
+						response,
+						createErrorDetail({
+							code: "CAPABILITY_NOT_SUPPORTED",
+							message,
+							retryable: false,
+							scope: "session",
+						}),
+						409,
+					);
+				} else {
+					respondError(response, createInternalError("session"));
+				}
+			}
+		},
+	);
+
 	// Archive session - with authorization check
 	router.post(
 		"/session/archive",

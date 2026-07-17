@@ -459,6 +459,73 @@ describe("SessionRouter", () => {
 		});
 	});
 
+	describe("closeSession", () => {
+		it("routes protocol close and keeps the session as detached", async () => {
+			const socket = createMockSocket("socket-close");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-close" }),
+				{ userId: "user-close", deviceId: "device-close" },
+			);
+			cliRegistry.updateSessions(socket.id, [
+				createMockSessionSummary({
+					sessionId: "session-close",
+					isAttached: true,
+				}),
+			]);
+			const detached = createMockSessionSummary({
+				sessionId: "session-close",
+				isAttached: false,
+			});
+			socket.emit.mockImplementation((event, request) => {
+				if (event === "rpc:session:close") {
+					setTimeout(() => {
+						sessionRouter.handleRpcResponse({
+							requestId: request.requestId,
+							result: detached,
+						});
+					}, 0);
+				}
+			});
+
+			const result = await sessionRouter.closeSession(
+				{ sessionId: "session-close" },
+				"user-close",
+			);
+
+			expect(socket.emit).toHaveBeenCalledWith(
+				"rpc:session:close",
+				expect.objectContaining({
+					params: { sessionId: "session-close" },
+				}),
+			);
+			expect(result).toEqual({ ...detached, machineId: "machine-close" });
+		});
+
+		it("rejects a close request from another user without sending RPC", async () => {
+			const socket = createMockSocket("socket-close-private");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-close-private" }),
+				{ userId: "owner", deviceId: "device-owner" },
+			);
+			cliRegistry.updateSessions(socket.id, [
+				createMockSessionSummary({ sessionId: "session-private" }),
+			]);
+
+			await expect(
+				sessionRouter.closeSession(
+					{ sessionId: "session-private" },
+					"other-user",
+				),
+			).rejects.toThrow("Session not found");
+			expect(socket.emit).not.toHaveBeenCalledWith(
+				"rpc:session:close",
+				expect.anything(),
+			);
+		});
+	});
+
 	describe("setSessionConfigOption", () => {
 		it("routes a protocol-native config update to the session owner's CLI", async () => {
 			const socket = createMockSocket("socket-config");

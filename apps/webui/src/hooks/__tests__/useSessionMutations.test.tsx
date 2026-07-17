@@ -47,6 +47,7 @@ vi.mock("@/lib/api", async () => {
 		createSession: vi.fn(),
 		renameSession: vi.fn(),
 		archiveSession: vi.fn(),
+		closeSession: vi.fn(),
 		cancelSession: vi.fn(),
 		setSessionMode: vi.fn(),
 		setSessionModel: vi.fn(),
@@ -649,6 +650,43 @@ describe("useSessionMutations", () => {
 			}
 
 			expect(mockStore.removeSession).toHaveBeenCalledWith("broken-session");
+		});
+	});
+
+	describe("closeSessionMutation", () => {
+		it("keeps history and marks the session detached", async () => {
+			vi.mocked(apiModule.closeSession).mockResolvedValue({
+				sessionId: "session-1",
+				title: "Session",
+				backendId: "backend-1",
+				backendLabel: "Backend",
+				createdAt: "2026-01-01T00:00:00.000Z",
+				updatedAt: "2026-01-01T00:01:00.000Z",
+				machineId: "machine-1",
+				isAttached: false,
+			});
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.closeSessionMutation.mutateAsync({
+				sessionId: "session-1",
+			});
+
+			expect(mockStore.removeSession).not.toHaveBeenCalled();
+			expect(mockStore.markSessionDetached).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId: "session-1",
+					machineId: "machine-1",
+					reason: "session_close",
+				}),
+			);
+			expect(mockStore.addStatusMessage).toHaveBeenCalledWith(
+				"session-1",
+				expect.objectContaining({
+					title: "Session closed; local history was kept",
+				}),
+			);
 		});
 	});
 

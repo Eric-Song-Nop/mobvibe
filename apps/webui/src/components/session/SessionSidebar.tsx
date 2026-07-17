@@ -24,7 +24,7 @@ import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { WorkspaceList } from "@/components/workspace/WorkspaceList";
 import { type SessionListEntry } from "@/lib/chat-store";
-import { useMachinesStore } from "@/lib/machines-store";
+import { getBackendCapability, useMachinesStore } from "@/lib/machines-store";
 import { compareSessionsByRecency } from "@/lib/session-order";
 import {
 	getSessionDisplayStatus,
@@ -71,6 +71,7 @@ type SessionSidebarProps = {
 	onCreateSession: (mode: "workspace" | "session") => void;
 	onSelectSession: (sessionId: string) => void;
 	onEditSubmit: () => void;
+	onCloseSessionRequest: (sessionId: string) => void;
 	onArchiveSessionRequest: (sessionId: string) => void;
 	onArchiveAllSessionsRequest: (sessionIds: string[]) => void;
 	isBulkArchiving?: boolean;
@@ -84,6 +85,7 @@ export const SessionSidebar = ({
 	onCreateSession,
 	onSelectSession,
 	onEditSubmit,
+	onCloseSessionRequest,
 	onArchiveSessionRequest,
 	onArchiveAllSessionsRequest,
 	isBulkArchiving,
@@ -105,7 +107,7 @@ export const SessionSidebar = ({
 		setSidebarTab,
 		selectedWorkspaceByMachine,
 	} = useUiStore();
-	const { selectedMachineId } = useMachinesStore();
+	const { machines, selectedMachineId } = useMachinesStore();
 
 	// Current workspace label for header display
 	const currentWorkspace = useMemo(() => {
@@ -342,6 +344,19 @@ export const SessionSidebar = ({
 															onEditCancel={clearEditingSession}
 															onEditSubmit={onEditSubmit}
 															onEditingTitleChange={setEditingTitle}
+															onClose={
+																session.isAttached === true &&
+																getBackendCapability(
+																	session.machineId
+																		? machines[session.machineId]
+																		: undefined,
+																	session.backendId,
+																	"close",
+																) === true
+																	? () =>
+																			onCloseSessionRequest(session.sessionId)
+																	: undefined
+															}
 															onArchive={() =>
 																onArchiveSessionRequest(session.sessionId)
 															}
@@ -385,6 +400,7 @@ type SessionListItemProps = {
 	onEditCancel: () => void;
 	onEditSubmit: () => void;
 	onEditingTitleChange: (value: string) => void;
+	onClose?: () => void;
 	onArchive: () => void;
 };
 
@@ -399,6 +415,7 @@ const SessionListItem = ({
 	onEditCancel,
 	onEditSubmit,
 	onEditingTitleChange,
+	onClose,
 	onArchive,
 }: SessionListItemProps) => {
 	const { t, i18n } = useTranslation();
@@ -514,6 +531,7 @@ const SessionListItem = ({
 								isActive && "text-foreground",
 							)}
 							onClick={(event) => event.stopPropagation()}
+							aria-label={t("session.actions", { title: session.title })}
 						>
 							<HugeiconsIcon
 								icon={MoreHorizontalIcon}
@@ -526,6 +544,11 @@ const SessionListItem = ({
 						<DropdownMenuItem onClick={onEdit}>
 							{t("common.rename")}
 						</DropdownMenuItem>
+						{onClose ? (
+							<DropdownMenuItem onClick={onClose}>
+								{t("common.close")}
+							</DropdownMenuItem>
+						) : null}
 						<DropdownMenuItem variant="destructive" onClick={onArchive}>
 							{t("common.archive")}
 						</DropdownMenuItem>
