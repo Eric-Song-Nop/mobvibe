@@ -3,16 +3,18 @@ import { EventEmitter } from "node:events";
 import { Readable, Writable } from "node:stream";
 import {
 	type AgentCapabilities,
-	type Client,
-	ClientSideConnection,
+	type ClientConnection,
 	type ContentBlock,
 	type CreateTerminalRequest,
 	type CreateTerminalResponse,
+	client,
 	type Implementation,
+	type JsonRpcId,
 	type KillTerminalRequest,
 	type KillTerminalResponse,
 	type ListSessionsResponse,
 	type LoadSessionResponse,
+	methods,
 	type NewSessionResponse,
 	ndJsonStream,
 	PROTOCOL_VERSION,
@@ -90,70 +92,6 @@ type TerminalRecord = {
 	onExit?: Promise<WaitForTerminalExitResponse>;
 	resolveExit?: (response: WaitForTerminalExitResponse) => void;
 };
-
-type ClientHandlers = {
-	onSessionUpdate: (notification: SessionNotification) => void;
-	onRequestPermission?: (
-		params: RequestPermissionRequest,
-	) => Promise<RequestPermissionResponse>;
-	onCreateTerminal?: (
-		params: CreateTerminalRequest,
-	) => Promise<CreateTerminalResponse>;
-	onTerminalOutput?: (
-		params: TerminalOutputRequest,
-	) => Promise<TerminalOutputResponse>;
-	onWaitForTerminalExit?: (
-		params: WaitForTerminalExitRequest,
-	) => Promise<WaitForTerminalExitResponse>;
-	onKillTerminal?: (
-		params: KillTerminalRequest,
-	) => Promise<KillTerminalResponse>;
-	onReleaseTerminal?: (
-		params: ReleaseTerminalRequest,
-	) => Promise<ReleaseTerminalResponse>;
-};
-
-const buildClient = (handlers: ClientHandlers): Client => ({
-	async requestPermission(params: RequestPermissionRequest) {
-		if (handlers.onRequestPermission) {
-			return handlers.onRequestPermission(params);
-		}
-		return { outcome: { outcome: "cancelled" } };
-	},
-	async sessionUpdate(params: SessionNotification) {
-		handlers.onSessionUpdate(params);
-	},
-	async createTerminal(params: CreateTerminalRequest) {
-		if (!handlers.onCreateTerminal) {
-			throw new Error("Terminal create handler not configured");
-		}
-		return handlers.onCreateTerminal(params);
-	},
-	async terminalOutput(params: TerminalOutputRequest) {
-		if (!handlers.onTerminalOutput) {
-			return { output: "", truncated: false };
-		}
-		return handlers.onTerminalOutput(params);
-	},
-	async waitForTerminalExit(params: WaitForTerminalExitRequest) {
-		if (!handlers.onWaitForTerminalExit) {
-			return { exitCode: null, signal: null };
-		}
-		return handlers.onWaitForTerminalExit(params);
-	},
-	async killTerminal(params: KillTerminalRequest) {
-		if (!handlers.onKillTerminal) {
-			return {};
-		}
-		return handlers.onKillTerminal(params);
-	},
-	async releaseTerminal(params: ReleaseTerminalRequest) {
-		if (!handlers.onReleaseTerminal) {
-			return {};
-		}
-		return handlers.onReleaseTerminal(params);
-	},
-});
 
 const formatExitMessage = (
 	code: number | null,
@@ -240,8 +178,40 @@ const sliceOutputToLimit = (value: string, limit: number) => {
 	return sliced.subarray(start).toString("utf8");
 };
 
+const withCancellationSignal = <T>(
+	promise: Promise<T>,
+	signal?: AbortSignal,
+): Promise<T> => {
+	if (!signal) {
+		return promise;
+	}
+	if (signal.aborted) {
+		return Promise.reject(
+			signal.reason ?? new Error("ACP request was cancelled"),
+		);
+	}
+	return new Promise<T>((resolve, reject) => {
+		const cleanup = () => signal.removeEventListener("abort", onAbort);
+		const onAbort = () => {
+			cleanup();
+			reject(signal.reason ?? new Error("ACP request was cancelled"));
+		};
+		signal.addEventListener("abort", onAbort, { once: true });
+		promise.then(
+			(value) => {
+				cleanup();
+				resolve(value);
+			},
+			(error: unknown) => {
+				cleanup();
+				reject(error);
+			},
+		);
+	});
+};
+
 export class AcpConnection {
-	private connection?: ClientSideConnection;
+	private connection?: ClientConnection;
 	private process?: ChildProcessWithoutNullStreams;
 	private closedPromise?: Promise<void>;
 	private state: AcpConnectionState = "idle";
@@ -255,7 +225,10 @@ export class AcpConnection {
 	private readonly terminalOutputEmitter = new EventEmitter();
 	private permissionHandler?: (
 		params: RequestPermissionRequest,
+		requestId: JsonRpcId,
+		signal: AbortSignal,
 	) => Promise<RequestPermissionResponse>;
+	private promptControllers = new Map<string, Set<AbortController>>();
 	private terminals = new Map<string, TerminalRecord>();
 	private recentStderr: string[] = [];
 
@@ -327,10 +300,13 @@ export class AcpConnection {
 			return { sessions: [] };
 		}
 		const connection = await this.ensureReady();
-		const response: ListSessionsResponse = await connection.listSessions({
-			cursor: params?.cursor ?? undefined,
-			cwd: params?.cwd ?? undefined,
-		});
+		const response: ListSessionsResponse = await connection.agent.request(
+			methods.agent.session.list,
+			{
+				cursor: params?.cursor ?? undefined,
+				cwd: params?.cwd ?? undefined,
+			},
+		);
 		return {
 			sessions: response.sessions,
 			nextCursor: response.nextCursor ?? undefined,
@@ -351,11 +327,14 @@ export class AcpConnection {
 			throw new Error("Agent does not support session/load capability");
 		}
 		const connection = await this.ensureReady();
-		const response = await connection.loadSession({
-			sessionId,
-			cwd,
-			mcpServers: [],
-		});
+		const response = await connection.agent.request(
+			methods.agent.session.load,
+			{
+				sessionId,
+				cwd,
+				mcpServers: [],
+			},
+		);
 		this.sessionId = sessionId;
 		return response;
 	}
@@ -363,6 +342,8 @@ export class AcpConnection {
 	setPermissionHandler(
 		handler?: (
 			params: RequestPermissionRequest,
+			requestId: JsonRpcId,
+			signal: AbortSignal,
 		) => Promise<RequestPermissionResponse>,
 	) {
 		this.permissionHandler = handler;
@@ -422,6 +403,7 @@ export class AcpConnection {
 		this.updateStatus("connecting");
 		this.agentInfo = undefined;
 		this.recentStderr = [];
+		let attemptConnection: ClientConnection | undefined;
 		logger.info(
 			{
 				backendId: this.options.backend.id,
@@ -455,6 +437,9 @@ export class AcpConnection {
 				"acp_backend_spawned",
 			);
 			child.stderr.on("data", (chunk: Buffer) => {
+				if (this.process !== child) {
+					return;
+				}
 				const text = chunk.toString("utf8").trimEnd();
 				if (text) {
 					this.recordStderr(text);
@@ -482,24 +467,42 @@ export class AcpConnection {
 				child.stdout,
 			) as unknown as ReadableStream<Uint8Array>;
 			const stream = ndJsonStream(input, output);
-			const connection = new ClientSideConnection(
-				() =>
-					buildClient({
-						onSessionUpdate: (notification) =>
-							this.emitSessionUpdate(notification),
-						onRequestPermission: (params) =>
-							this.handlePermissionRequest(params),
-						onCreateTerminal: (params) => this.createTerminal(params),
-						onTerminalOutput: (params) => this.getTerminalOutput(params),
-						onWaitForTerminalExit: (params) => this.waitForTerminalExit(params),
-						onKillTerminal: (params) => this.killTerminal(params),
-						onReleaseTerminal: (params) => this.releaseTerminal(params),
-					}),
-				stream,
-			);
+			const connection = client({ name: this.options.client.name })
+				.onRequest(
+					methods.client.session.requestPermission,
+					({ params, requestId, signal }) =>
+						this.handlePermissionRequest(params, requestId, signal),
+				)
+				.onNotification(methods.client.session.update, ({ params }) =>
+					this.emitSessionUpdate(params),
+				)
+				.onRequest(methods.client.terminal.create, ({ params }) =>
+					this.createTerminal(params),
+				)
+				.onRequest(methods.client.terminal.output, ({ params }) =>
+					this.getTerminalOutput(params),
+				)
+				.onRequest(methods.client.terminal.waitForExit, ({ params, signal }) =>
+					this.waitForTerminalExit(params, signal),
+				)
+				.onRequest(methods.client.terminal.kill, ({ params }) =>
+					this.killTerminal(params),
+				)
+				.onRequest(methods.client.terminal.release, ({ params }) =>
+					this.releaseTerminal(params),
+				)
+				.connect(stream);
+			attemptConnection = connection;
 			this.connection = connection;
 
 			child.once("error", (error) => {
+				if (
+					this.process !== child ||
+					this.state === "stopped" ||
+					this.state === "error"
+				) {
+					return;
+				}
 				const stderrTail = this.getStderrTail();
 				logger.error(
 					{
@@ -510,13 +513,17 @@ export class AcpConnection {
 					},
 					"acp_backend_process_error",
 				);
-				if (this.state === "stopped") {
-					return;
-				}
 				this.updateStatus("error", buildConnectError(error, stderrTail));
 			});
 
 			child.once("exit", (code, signal) => {
+				if (
+					this.process !== child ||
+					this.state === "stopped" ||
+					this.state === "error"
+				) {
+					return;
+				}
 				const detail = formatExitMessage(code, signal);
 				const stderrTail = this.getStderrTail();
 				logger.warn(
@@ -529,9 +536,6 @@ export class AcpConnection {
 					},
 					"acp_backend_process_exit",
 				);
-				if (this.state === "stopped") {
-					return;
-				}
 				this.updateStatus("error", buildProcessExitError(detail, stderrTail));
 			});
 			child.once("close", (code, signal) => {
@@ -546,20 +550,33 @@ export class AcpConnection {
 				);
 			});
 
-			this.closedPromise = connection.closed.catch((error) => {
+			this.closedPromise = connection.closed.then(() => {
+				if (
+					this.connection !== connection ||
+					this.state === "stopped" ||
+					this.state === "error"
+				) {
+					return;
+				}
+				const reason = connection.signal.reason;
 				const stderrTail = this.getStderrTail();
 				logger.warn(
 					{
 						backendId: this.options.backend.id,
 						pid: child.pid,
-						err: error,
+						err: reason,
 						stderrTail,
 					},
 					"acp_backend_connection_closed",
 				);
 				this.updateStatus(
 					"error",
-					buildConnectionClosedError(getErrorMessage(error), stderrTail),
+					buildConnectionClosedError(
+						reason === undefined
+							? "ACP transport closed unexpectedly"
+							: getErrorMessage(reason),
+						stderrTail,
+					),
 				);
 			});
 
@@ -567,14 +584,17 @@ export class AcpConnection {
 				{ backendId: this.options.backend.id, pid: child.pid },
 				"acp_backend_initialize_start",
 			);
-			const initializeResponse = await connection.initialize({
-				protocolVersion: PROTOCOL_VERSION,
-				clientInfo: {
-					name: this.options.client.name,
-					version: this.options.client.version,
+			const initializeResponse = await connection.agent.request(
+				methods.agent.initialize,
+				{
+					protocolVersion: PROTOCOL_VERSION,
+					clientInfo: {
+						name: this.options.client.name,
+						version: this.options.client.version,
+					},
+					clientCapabilities: { terminal: true },
 				},
-				clientCapabilities: { terminal: true },
-			});
+			);
 
 			this.agentInfo = initializeResponse.agentInfo ?? undefined;
 			this.agentCapabilities =
@@ -602,8 +622,12 @@ export class AcpConnection {
 				},
 				"acp_backend_connect_failed",
 			);
-			this.updateStatus("error", buildConnectError(error, stderrTail));
+			if (attemptConnection && this.connection === attemptConnection) {
+				this.connection = undefined;
+				attemptConnection.close(error);
+			}
 			await this.stopProcess();
+			this.updateStatus("error", buildConnectError(error, stderrTail));
 			throw error;
 		}
 	}
@@ -623,17 +647,38 @@ export class AcpConnection {
 		prompt: ContentBlock[],
 	): Promise<PromptResponse> {
 		const connection = await this.ensureReady();
-		return connection.prompt({ sessionId, prompt });
+		const controller = new AbortController();
+		const controllers = this.promptControllers.get(sessionId) ?? new Set();
+		controllers.add(controller);
+		this.promptControllers.set(sessionId, controllers);
+		try {
+			return await connection.agent.request(
+				methods.agent.session.prompt,
+				{ sessionId, prompt },
+				{ cancellationSignal: controller.signal },
+			);
+		} finally {
+			controllers.delete(controller);
+			if (controllers.size === 0) {
+				this.promptControllers.delete(sessionId);
+			}
+		}
 	}
 
 	async cancel(sessionId: string): Promise<void> {
 		const connection = await this.ensureReady();
-		await connection.cancel({ sessionId });
+		for (const controller of this.promptControllers.get(sessionId) ?? []) {
+			controller.abort(new Error("Prompt cancelled by Mobvibe client"));
+		}
+		await connection.agent.notify(methods.agent.session.cancel, { sessionId });
 	}
 
 	async setSessionMode(sessionId: string, modeId: string): Promise<void> {
 		const connection = await this.ensureReady();
-		await connection.setSessionMode({ sessionId, modeId });
+		await connection.agent.request(methods.agent.session.setMode, {
+			sessionId,
+			modeId,
+		});
 	}
 
 	async setSessionModel(
@@ -642,7 +687,7 @@ export class AcpConnection {
 		modelId: string,
 	): Promise<SetSessionConfigOptionResponse> {
 		const connection = await this.ensureReady();
-		return connection.setSessionConfigOption({
+		return connection.agent.request(methods.agent.session.setConfigOption, {
 			sessionId,
 			configId,
 			value: modelId,
@@ -764,12 +809,16 @@ export class AcpConnection {
 
 	async waitForTerminalExit(
 		params: WaitForTerminalExitRequest,
+		signal?: AbortSignal,
 	): Promise<WaitForTerminalExitResponse> {
 		const record = this.terminals.get(params.terminalId);
 		if (!record || record.sessionId !== params.sessionId) {
 			return Promise.resolve({ exitCode: null, signal: null });
 		}
-		return record.onExit ?? Promise.resolve({ exitCode: null, signal: null });
+		return withCancellationSignal(
+			record.onExit ?? Promise.resolve({ exitCode: null, signal: null }),
+			signal,
+		);
 	}
 
 	async killTerminal(
@@ -802,12 +851,19 @@ export class AcpConnection {
 		this.updateStatus("stopped");
 		this.sessionId = undefined;
 		this.agentInfo = undefined;
+		for (const controllers of this.promptControllers.values()) {
+			for (const controller of controllers) {
+				controller.abort(new Error("ACP connection stopped"));
+			}
+		}
+		this.promptControllers.clear();
+		this.connection?.close();
 		await this.stopProcess();
 		await this.closedPromise;
 		this.connection = undefined;
 	}
 
-	private async ensureReady(): Promise<ClientSideConnection> {
+	private async ensureReady(): Promise<ClientConnection> {
 		if (this.state !== "ready" || !this.connection) {
 			await this.connect();
 		}
@@ -820,10 +876,10 @@ export class AcpConnection {
 	}
 
 	private async createSessionInternal(
-		connection: ClientSideConnection,
+		connection: ClientConnection,
 		cwd: string,
 	): Promise<NewSessionResponse> {
-		const session = await connection.newSession({
+		const session = await connection.agent.request(methods.agent.session.new, {
 			cwd,
 			mcpServers: [],
 		});
@@ -836,9 +892,11 @@ export class AcpConnection {
 
 	private async handlePermissionRequest(
 		params: RequestPermissionRequest,
+		requestId: JsonRpcId,
+		signal: AbortSignal,
 	): Promise<RequestPermissionResponse> {
 		if (this.permissionHandler) {
-			return this.permissionHandler(params);
+			return this.permissionHandler(params, requestId, signal);
 		}
 		return { outcome: { outcome: "cancelled" } };
 	}

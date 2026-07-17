@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type {
 	AvailableCommand,
+	JsonRpcId,
 	RequestPermissionRequest,
 	RequestPermissionResponse,
 	SessionConfigOption,
@@ -206,6 +207,14 @@ const resolveWorktreeExecutionCwd = (
 
 const buildPermissionKey = (sessionId: string, requestId: string) =>
 	`${sessionId}:${requestId}`;
+
+const encodeProtocolRequestId = (
+	requestId: JsonRpcId,
+	fallbackId: string,
+): string =>
+	requestId === null
+		? `null:${fallbackId}`
+		: `${typeof requestId}:${requestId}`;
 
 const flattenConfigSelectOptions = (
 	options: Extract<SessionConfigOption, { type: "select" }>["options"],
@@ -1250,8 +1259,13 @@ export class SessionManager {
 		);
 		try {
 			const session = await connection.createSession({ cwd: effectiveCwd });
-			connection.setPermissionHandler((params) =>
-				this.handlePermissionRequest(session.sessionId, params),
+			connection.setPermissionHandler((params, requestId, signal) =>
+				this.handlePermissionRequest(
+					session.sessionId,
+					params,
+					requestId,
+					signal,
+				),
 			);
 			const now = new Date();
 			const agentInfo = connection.getAgentInfo();
@@ -1369,8 +1383,13 @@ export class SessionManager {
 	private handlePermissionRequest(
 		sessionId: string,
 		params: RequestPermissionRequest,
+		protocolRequestId: JsonRpcId,
+		signal: AbortSignal,
 	): Promise<RequestPermissionResponse> {
-		const requestId = params.toolCall?.toolCallId ?? randomUUID();
+		const requestId = encodeProtocolRequestId(
+			protocolRequestId,
+			params.toolCall?.toolCallId ?? randomUUID(),
+		);
 		const key = buildPermissionKey(sessionId, requestId);
 		const existing = this.permissionRequests.get(key);
 		if (existing) {
@@ -1380,14 +1399,39 @@ export class SessionManager {
 		const promise = new Promise<RequestPermissionResponse>((resolve) => {
 			resolver = resolve;
 		});
+		let settled = false;
+		let onAbort = () => {};
+		const resolveOnce = (response: RequestPermissionResponse) => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			signal.removeEventListener("abort", onAbort);
+			resolver(response);
+		};
 		const permRecord: PermissionRequestRecord = {
 			sessionId,
 			requestId,
 			params,
 			promise,
-			resolve: resolver,
+			resolve: resolveOnce,
 		};
 		this.permissionRequests.set(key, permRecord);
+		onAbort = () => {
+			if (this.permissionRequests.get(key) !== permRecord) {
+				return;
+			}
+			const outcome: RequestPermissionResponse["outcome"] = {
+				outcome: "cancelled",
+			};
+			this.permissionRequests.delete(key);
+			resolveOnce({ outcome });
+			this.permissionResultEmitter.emit("result", {
+				sessionId,
+				requestId,
+				outcome,
+			});
+		};
 		const payload = this.buildPermissionRequestPayload(permRecord);
 
 		// Write permission request to WAL
@@ -1402,6 +1446,10 @@ export class SessionManager {
 		}
 
 		this.permissionRequestEmitter.emit("request", payload);
+		signal.addEventListener("abort", onAbort, { once: true });
+		if (signal.aborted) {
+			onAbort();
+		}
 		return promise;
 	}
 
@@ -1901,8 +1949,8 @@ export class SessionManager {
 			if (loadBuffer.error) {
 				throw loadBuffer.error;
 			}
-			connection.setPermissionHandler((params) =>
-				this.handlePermissionRequest(sessionId, params),
+			connection.setPermissionHandler((params, requestId, signal) =>
+				this.handlePermissionRequest(sessionId, params, requestId, signal),
 			);
 
 			const now = new Date();

@@ -2,7 +2,34 @@ import { beforeEach, describe, expect, it, mock } from "bun:test";
 
 // Mock the SDK
 mock.module("@agentclientprotocol/sdk", () => ({
-	ClientSideConnection: mock(() => {}),
+	client: mock(() => {}),
+	methods: {
+		agent: {
+			initialize: "initialize",
+			session: {
+				cancel: "session/cancel",
+				list: "session/list",
+				load: "session/load",
+				new: "session/new",
+				prompt: "session/prompt",
+				setConfigOption: "session/set_config_option",
+				setMode: "session/set_mode",
+			},
+		},
+		client: {
+			session: {
+				requestPermission: "session/request_permission",
+				update: "session/update",
+			},
+			terminal: {
+				create: "terminal/create",
+				kill: "terminal/kill",
+				output: "terminal/output",
+				release: "terminal/release",
+				waitForExit: "terminal/wait_for_exit",
+			},
+		},
+	},
 	ndJsonStream: mock(() => {}),
 	PROTOCOL_VERSION: "0.1.0",
 }));
@@ -192,6 +219,103 @@ describe("AcpConnection", () => {
 			await expect(
 				connection.loadSession("session-1", "/home/user/project"),
 			).rejects.toThrow("Agent does not support session/load capability");
+		});
+	});
+
+	describe("cancel", () => {
+		it("cancels the prompt request and sends session/cancel", async () => {
+			let resolvePrompt:
+				| ((value: { stopReason: "cancelled" }) => void)
+				| undefined;
+			const request = mock(
+				(
+					_method: string,
+					_params: unknown,
+					_options?: { cancellationSignal?: AbortSignal },
+				) =>
+					new Promise<{ stopReason: "cancelled" }>((resolve) => {
+						resolvePrompt = resolve;
+					}),
+			);
+			const notify = mock(() => Promise.resolve());
+			const internal = connection as unknown as {
+				state: "ready";
+				connection: {
+					agent: {
+						request: typeof request;
+						notify: typeof notify;
+					};
+				};
+			};
+			internal.state = "ready";
+			internal.connection = { agent: { request, notify } };
+
+			const prompt = connection.prompt("session-1", [
+				{ type: "text", text: "hello" },
+			]);
+			await Promise.resolve();
+
+			const options = request.mock.calls[0]?.[2];
+			expect(options?.cancellationSignal?.aborted).toBe(false);
+
+			await connection.cancel("session-1");
+
+			expect(options?.cancellationSignal?.aborted).toBe(true);
+			expect(notify).toHaveBeenCalledWith("session/cancel", {
+				sessionId: "session-1",
+			});
+
+			resolvePrompt?.({ stopReason: "cancelled" });
+			await expect(prompt).resolves.toEqual({ stopReason: "cancelled" });
+		});
+
+		it("cancels every concurrent prompt for the session", async () => {
+			const pending: Array<{
+				signal?: AbortSignal;
+				resolve: (value: { stopReason: "cancelled" }) => void;
+			}> = [];
+			const request = mock(
+				(
+					_method: string,
+					_params: unknown,
+					options?: { cancellationSignal?: AbortSignal },
+				) =>
+					new Promise<{ stopReason: "cancelled" }>((resolve) => {
+						pending.push({ signal: options?.cancellationSignal, resolve });
+					}),
+			);
+			const notify = mock(() => Promise.resolve());
+			const internal = connection as unknown as {
+				state: "ready";
+				connection: {
+					agent: {
+						request: typeof request;
+						notify: typeof notify;
+					};
+				};
+			};
+			internal.state = "ready";
+			internal.connection = { agent: { request, notify } };
+
+			const first = connection.prompt("session-1", [
+				{ type: "text", text: "first" },
+			]);
+			const second = connection.prompt("session-1", [
+				{ type: "text", text: "second" },
+			]);
+			await Promise.resolve();
+
+			await connection.cancel("session-1");
+
+			expect(pending).toHaveLength(2);
+			expect(pending.every(({ signal }) => signal?.aborted)).toBe(true);
+			for (const item of pending) {
+				item.resolve({ stopReason: "cancelled" });
+			}
+			await expect(Promise.all([first, second])).resolves.toEqual([
+				{ stopReason: "cancelled" },
+				{ stopReason: "cancelled" },
+			]);
 		});
 	});
 

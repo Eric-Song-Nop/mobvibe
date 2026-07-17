@@ -1,6 +1,12 @@
 import { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it, mock } from "bun:test";
-import type { SessionNotification } from "@agentclientprotocol/sdk";
+import type {
+	JsonRpcId,
+	NewSessionResponse,
+	RequestPermissionRequest,
+	RequestPermissionResponse,
+	SessionNotification,
+} from "@agentclientprotocol/sdk";
 import {
 	decryptPayload,
 	deriveContentKeyPair,
@@ -85,16 +91,24 @@ let sessionUpdateCallback:
 	| undefined;
 let statusChangeCallback: ((status: { error?: unknown }) => void) | undefined;
 let terminalOutputCallback: ((event: unknown) => void) | undefined;
+let permissionHandlerCallback:
+	| ((
+			params: RequestPermissionRequest,
+			requestId: JsonRpcId,
+			signal: AbortSignal,
+	  ) => Promise<RequestPermissionResponse>)
+	| undefined;
 
 const createMockConnection = () => ({
 	connect: mock(() => Promise.resolve(undefined)),
 	disconnect: mock(() => Promise.resolve(undefined)),
-	createSession: mock(() =>
-		Promise.resolve({
-			sessionId: "new-session-1",
-			modes: null,
-			configOptions: null,
-		}),
+	createSession: mock(
+		(): Promise<NewSessionResponse> =>
+			Promise.resolve({
+				sessionId: "new-session-1",
+				modes: null,
+				configOptions: null,
+			}),
 	),
 	getStatus: mock(() => ({
 		backendId: "backend-1",
@@ -156,7 +170,17 @@ const createMockConnection = () => ({
 				],
 			}),
 	),
-	setPermissionHandler: mock(() => {}),
+	setPermissionHandler: mock(
+		(
+			handler?: (
+				params: RequestPermissionRequest,
+				requestId: JsonRpcId,
+				signal: AbortSignal,
+			) => Promise<RequestPermissionResponse>,
+		) => {
+			permissionHandlerCallback = handler;
+		},
+	),
 	onSessionUpdate: mock((cb: (n: SessionNotification) => void) => {
 		sessionUpdateCallback = cb;
 		return () => {
@@ -230,6 +254,7 @@ describe("SessionManager", () => {
 		sessionUpdateCallback = undefined;
 		statusChangeCallback = undefined;
 		terminalOutputCallback = undefined;
+		permissionHandlerCallback = undefined;
 		mockIsGitRepo.mockClear();
 		mockCreateGitWorktree.mockClear();
 		mockResolveGitProjectContext.mockClear();
@@ -2141,6 +2166,56 @@ describe("SessionManager", () => {
 			);
 			expect(updated.modelId).toBe("smart");
 			expect(updated.modelName).toBe("Smart");
+		});
+	});
+
+	describe("permission request cancellation", () => {
+		it("keeps numeric and string request IDs distinct and clears both on abort", async () => {
+			const requestIds: string[] = [];
+			const resultIds: string[] = [];
+			sessionManager.onPermissionRequest((payload) => {
+				requestIds.push(payload.requestId);
+			});
+			sessionManager.onPermissionResult((payload) => {
+				resultIds.push(payload.requestId);
+			});
+			await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			if (!permissionHandlerCallback) {
+				throw new Error("Permission handler was not registered");
+			}
+			const params: RequestPermissionRequest = {
+				sessionId: "new-session-1",
+				toolCall: { toolCallId: "tool-1" },
+				options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+			};
+			const numericController = new AbortController();
+			const stringController = new AbortController();
+
+			const numericResult = permissionHandlerCallback(
+				params,
+				1,
+				numericController.signal,
+			);
+			const stringResult = permissionHandlerCallback(
+				params,
+				"1",
+				stringController.signal,
+			);
+
+			expect(requestIds).toEqual(["number:1", "string:1"]);
+			numericController.abort();
+			stringController.abort();
+
+			await expect(numericResult).resolves.toEqual({
+				outcome: { outcome: "cancelled" },
+			});
+			await expect(stringResult).resolves.toEqual({
+				outcome: { outcome: "cancelled" },
+			});
+			expect(resultIds).toEqual(["number:1", "string:1"]);
 		});
 	});
 
