@@ -1,4 +1,4 @@
-import { Add01Icon } from "@hugeicons/core-free-icons";
+import { Add01Icon, ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { BrandLogo } from "@mobvibe/ui/brand-logo";
 import { Button } from "@mobvibe/ui/button";
@@ -7,8 +7,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
 	forwardRef,
 	useCallback,
-	useEffect,
 	useImperativeHandle,
+	useLayoutEffect,
 	useMemo,
 	useRef,
 } from "react";
@@ -19,10 +19,26 @@ import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { ToolCallGroup } from "@/components/chat/tool-call-group";
 import type { PermissionResultNotification } from "@/lib/acp";
 import type { ChatSession } from "@/lib/chat-store";
-import { buildMessageIndexMap, groupMessages } from "@/lib/group-tool-calls";
+import {
+	buildMessageIndexMap,
+	type DisplayItem,
+	groupMessages,
+} from "@/lib/group-tool-calls";
 import { useUiStore } from "@/lib/ui-store";
 
 const SCROLL_THRESHOLD = 64;
+const THINKING_INDICATOR_KEY = "__thinking-indicator__";
+
+function getDisplayItemKey(item: DisplayItem): string {
+	if (item.type === "single") {
+		return item.message.id;
+	}
+	const firstMessage = item.items[0];
+	if (!firstMessage) {
+		throw new Error("Tool call groups must contain at least one message");
+	}
+	return firstMessage.id;
+}
 
 export type ChatMessageListHandle = {
 	scrollToIndex: (index: number) => void;
@@ -54,9 +70,7 @@ export const ChatMessageList = forwardRef<
 	const { setFileExplorerOpen, setFilePreviewPath } = useUiStore();
 	const { t } = useTranslation();
 	const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-	const isPinnedRef = useRef(true);
-	const followFrameRef = useRef<number | null>(null);
-	const lastMeasuredTotalSizeRef = useRef(0);
+	const initialScrollSessionRef = useRef<string | null>(null);
 	const messages = activeSession?.messages ?? [];
 	const showIndicator = !!activeSession?.sending;
 	const isThinking = showIndicator && !activeSession?.streamingMessageId;
@@ -64,26 +78,35 @@ export const ChatMessageList = forwardRef<
 
 	const displayItems = useMemo(() => groupMessages(messages), [messages]);
 	const totalItems = displayItems.length + (showIndicator ? 1 : 0);
+	const sessionKey = activeSession?.sessionId ?? "no-session";
+	const trailingMessageId = messages.at(-1)?.id ?? "empty";
+	const getItemKey = useCallback(
+		(index: number) => {
+			if (showIndicator && index === displayItems.length) {
+				return `${sessionKey}:${THINKING_INDICATOR_KEY}:${trailingMessageId}`;
+			}
+			const displayItem = displayItems[index];
+			if (!displayItem) {
+				throw new RangeError(`Missing display item at virtual index ${index}`);
+			}
+			return `${sessionKey}:${getDisplayItemKey(displayItem)}`;
+		},
+		[displayItems, sessionKey, showIndicator, trailingMessageId],
+	);
 
 	const virtualizer = useVirtualizer({
 		count: totalItems,
 		getScrollElement: () => scrollContainerRef.current,
 		estimateSize: () => 112,
 		overscan: 8,
-		getItemKey: (index) => {
-			if (showIndicator && index === displayItems.length) {
-				return "__thinking-indicator__";
-			}
-			const displayItem = displayItems[index];
-			if (!displayItem) return `display-${index}`;
-			if (displayItem.type === "tool_call_group") {
-				return `group-${displayItem.messageIndex}`;
-			}
-			return displayItem.message.id ?? `message-${displayItem.messageIndex}`;
-		},
+		getItemKey,
+		anchorTo: "end",
+		followOnAppend: true,
+		scrollEndThreshold: SCROLL_THRESHOLD,
+		directDomUpdates: true,
 	});
 	const virtualItems = virtualizer.getVirtualItems();
-	const totalSize = virtualizer.getTotalSize();
+	const isAtLatest = totalItems === 0 || virtualizer.isAtEnd(SCROLL_THRESHOLD);
 
 	// Pre-computed O(1) lookup map for message → display index
 	const msgIndexMap = useMemo(
@@ -91,19 +114,8 @@ export const ChatMessageList = forwardRef<
 		[displayItems],
 	);
 
-	const queueScrollToBottom = useCallback(() => {
-		if (totalItems === 0 || followFrameRef.current !== null) {
-			return;
-		}
-		followFrameRef.current = requestAnimationFrame(() => {
-			followFrameRef.current = null;
-			virtualizer.scrollToIndex(totalItems - 1, { align: "end" });
-		});
-	}, [totalItems, virtualizer]);
-
 	useImperativeHandle(ref, () => ({
 		scrollToIndex: (msgIndex: number) => {
-			isPinnedRef.current = false;
 			const displayIndex =
 				msgIndexMap.get(msgIndex) ?? Math.max(0, displayItems.length - 1);
 			virtualizer.scrollToIndex(displayIndex, { align: "center" });
@@ -121,50 +133,23 @@ export const ChatMessageList = forwardRef<
 		[activeSession?.cwd, setFilePreviewPath, setFileExplorerOpen],
 	);
 
-	// Effect A — scroll listener + session switch reset
-	// biome-ignore lint/correctness/useExhaustiveDependencies: sessionId triggers reset on session switch
-	useEffect(() => {
-		isPinnedRef.current = true;
-		lastMeasuredTotalSizeRef.current = 0;
-		queueScrollToBottom();
-		const el = scrollContainerRef.current;
-		if (!el) return;
-		const onScroll = () => {
-			isPinnedRef.current =
-				el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_THRESHOLD;
-		};
-		el.addEventListener("scroll", onScroll, { passive: true });
-		return () => {
-			el.removeEventListener("scroll", onScroll);
-			if (followFrameRef.current !== null) {
-				cancelAnimationFrame(followFrameRef.current);
-				followFrameRef.current = null;
-			}
-		};
-	}, [activeSession?.sessionId, queueScrollToBottom]);
-
-	// Effect B — scroll to bottom on new items (non-streaming)
-	useEffect(() => {
-		if (totalItems === 0 || !isPinnedRef.current) {
+	useLayoutEffect(() => {
+		const sessionId = activeSession?.sessionId;
+		if (!sessionId || totalItems === 0) {
+			initialScrollSessionRef.current = null;
 			return;
 		}
-		queueScrollToBottom();
-	}, [queueScrollToBottom, totalItems]);
-
-	// Effect C — follow streaming growth when the last item remeasures
-	useEffect(() => {
-		const previousTotalSize = lastMeasuredTotalSizeRef.current;
-		lastMeasuredTotalSizeRef.current = totalSize;
-		if (
-			!showIndicator ||
-			totalItems === 0 ||
-			!isPinnedRef.current ||
-			totalSize === previousTotalSize
-		) {
+		if (initialScrollSessionRef.current === sessionId) {
 			return;
 		}
-		queueScrollToBottom();
-	}, [queueScrollToBottom, showIndicator, totalItems, totalSize]);
+		initialScrollSessionRef.current = sessionId;
+		virtualizer.scrollToEnd();
+	}, [activeSession?.sessionId, totalItems, virtualizer]);
+
+	const handleJumpToLatest = useCallback(() => {
+		virtualizer.scrollToEnd();
+		scrollContainerRef.current?.focus({ preventScroll: true });
+	}, [virtualizer]);
 
 	return (
 		<main className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -231,59 +216,76 @@ export const ChatMessageList = forwardRef<
 							/>
 						</div>
 					) : null}
-					<div
-						ref={scrollContainerRef}
-						className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-4"
-					>
-						<div
-							className="relative w-full"
-							style={{ height: `${totalSize}px` }}
+					<div className="relative min-h-0 flex-1">
+						<section
+							ref={scrollContainerRef}
+							aria-label={t("chat.messageHistory")}
+							// biome-ignore lint/a11y/noNoninteractiveTabindex: The overflowed chat transcript must be focusable for keyboard scrolling and focus handoff.
+							tabIndex={0}
+							className="h-full overflow-y-auto overscroll-contain pb-4 [overflow-anchor:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
 						>
-							{virtualItems.map((item) => {
-								if (showIndicator && item.index === displayItems.length) {
+							<div ref={virtualizer.containerRef} className="relative w-full">
+								{virtualItems.map((item) => {
+									if (showIndicator && item.index === displayItems.length) {
+										return (
+											<div
+												key={item.key}
+												data-index={item.index}
+												ref={virtualizer.measureElement}
+												className="absolute left-0 top-0 w-full pb-3"
+											>
+												<ThinkingIndicator isThinking={isThinking} />
+											</div>
+										);
+									}
+									const displayItem = displayItems[item.index];
+									if (!displayItem) {
+										return null;
+									}
 									return (
 										<div
 											key={item.key}
 											data-index={item.index}
 											ref={virtualizer.measureElement}
 											className="absolute left-0 top-0 w-full pb-3"
-											style={{
-												transform: `translateY(${item.start}px)`,
-											}}
 										>
-											<ThinkingIndicator isThinking={isThinking} />
+											{displayItem.type === "tool_call_group" ? (
+												<ToolCallGroup
+													group={displayItem}
+													onOpenFilePreview={handleOpenFilePreview}
+												/>
+											) : (
+												<MessageItem
+													message={displayItem.message}
+													onPermissionDecision={onPermissionDecision}
+													onOpenFilePreview={handleOpenFilePreview}
+												/>
+											)}
 										</div>
 									);
-								}
-								const displayItem = displayItems[item.index];
-								if (!displayItem) {
-									return null;
-								}
-								return (
-									<div
-										key={item.key}
-										data-index={item.index}
-										ref={virtualizer.measureElement}
-										className="absolute left-0 top-0 w-full pb-3"
-										style={{
-											transform: `translateY(${item.start}px)`,
-										}}
-									>
-										{displayItem.type === "tool_call_group" ? (
-											<ToolCallGroup
-												group={displayItem}
-												onOpenFilePreview={handleOpenFilePreview}
-											/>
-										) : (
-											<MessageItem
-												message={displayItem.message}
-												onPermissionDecision={onPermissionDecision}
-												onOpenFilePreview={handleOpenFilePreview}
-											/>
-										)}
-									</div>
-								);
-							})}
+								})}
+							</div>
+						</section>
+						<div
+							className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center"
+							aria-live="polite"
+						>
+							{isAtLatest ? null : (
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									className="pointer-events-auto bg-background/95 shadow-sm backdrop-blur-sm"
+									onClick={handleJumpToLatest}
+								>
+									<HugeiconsIcon
+										icon={ArrowDown01Icon}
+										className="h-4 w-4"
+										aria-hidden="true"
+									/>
+									{t("chat.jumpToLatest")}
+								</Button>
+							)}
 						</div>
 					</div>
 				</div>

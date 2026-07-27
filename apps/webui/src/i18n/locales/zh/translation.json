@@ -65,7 +65,9 @@
 		"messagePending": "发送中…",
 		"messageFailed": "发送失败",
 		"messageFailedHint": "草稿已恢复到下方输入框。",
-		"uploadImage": "上传图片"
+		"uploadImage": "上传图片",
+		"jumpToLatest": "跳至最新消息",
+		"messageHistory": "会话消息"
 	},
 	"time": {
 		"justNow": "刚刚"

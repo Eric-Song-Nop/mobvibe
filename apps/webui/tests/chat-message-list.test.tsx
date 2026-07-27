@@ -243,7 +243,7 @@ describe("ChatMessageList", () => {
 		expect(screen.getByTestId("message-msg-3")).toBeInTheDocument();
 	});
 
-	it("positions virtual items absolutely with translateY", async () => {
+	it("positions virtual items with direct DOM transforms", async () => {
 		const messages = [
 			buildMessage({ id: "msg-1", content: "first" }),
 			buildMessage({ id: "msg-2", content: "second" }),
@@ -253,7 +253,7 @@ describe("ChatMessageList", () => {
 			<ChatMessageList activeSession={session} onPermissionDecision={noop} />,
 		);
 		await screen.findByTestId("message-msg-1");
-		const positioned = container.querySelectorAll("[style*='translateY']");
+		const positioned = container.querySelectorAll("[style*='translate3d']");
 		expect(positioned.length).toBeGreaterThanOrEqual(2);
 	});
 
