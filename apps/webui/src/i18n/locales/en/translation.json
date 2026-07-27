@@ -65,7 +65,9 @@
 		"messagePending": "Sending…",
 		"messageFailed": "Send failed",
 		"messageFailedHint": "Draft restored below.",
-		"uploadImage": "Upload image"
+		"uploadImage": "Upload image",
+		"jumpToLatest": "Jump to Latest",
+		"messageHistory": "Conversation messages"
 	},
 	"time": {
 		"justNow": "just now"
