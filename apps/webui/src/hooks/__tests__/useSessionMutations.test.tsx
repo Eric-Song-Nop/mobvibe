@@ -575,6 +575,7 @@ describe("useSessionMutations", () => {
 				cwd: "/repo",
 				machineId: "machine-1",
 				wrappedDek: "wrapped-leader-dek",
+				revision: 1,
 			};
 			vi.mocked(apiModule.createAgentTeam).mockResolvedValue({
 				team: { agentTeamId: "team-1" } as apiModule.AgentTeamSummary,
@@ -610,10 +611,14 @@ describe("useSessionMutations", () => {
 			expect(mockBootstrapSessionE2EE).toHaveBeenCalledWith(
 				"leader-session-1",
 				"wrapped-leader-dek",
+				1,
 			);
 			expect(apiModule.sendMessage).toHaveBeenCalledWith({
 				sessionId: "leader-session-1",
+				messageId: expect.any(String),
 				prompt: [{ type: "text", text: "Ship the team run" }],
+				revision: 1,
+				encryptionRequired: true,
 			});
 			expect(mockStore.createLocalSession).toHaveBeenCalledWith(
 				"leader-session-1",
@@ -639,6 +644,7 @@ describe("useSessionMutations", () => {
 					createdAt: "2025-01-01T00:00:00Z",
 					updatedAt: "2025-01-01T00:00:00Z",
 					wrappedDek: "wrapped-leader-dek",
+					revision: 1,
 				},
 			});
 
@@ -656,6 +662,44 @@ describe("useSessionMutations", () => {
 			).rejects.toThrow("E2EE key missing");
 			expect(apiModule.sendMessage).not.toHaveBeenCalled();
 			expect(mockStore.setAppError).toHaveBeenCalled();
+		});
+
+		it("sends the target without encryption when the leader session is plaintext", async () => {
+			mockBootstrapSessionE2EE.mockReturnValueOnce("none");
+			vi.mocked(apiModule.createAgentTeam).mockResolvedValue({
+				team: { agentTeamId: "team-1" } as apiModule.AgentTeamSummary,
+				leaderSession: {
+					sessionId: "leader-session-1",
+					title: "Team Leader",
+					backendId: "backend-1",
+					backendLabel: "Backend 1",
+					createdAt: "2025-01-01T00:00:00Z",
+					updatedAt: "2025-01-01T00:00:00Z",
+					revision: 3,
+				},
+			});
+			vi.mocked(apiModule.sendMessage).mockResolvedValue({
+				stopReason: "end_turn",
+			});
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.createAgentTeamRunMutation.mutateAsync({
+				machineId: "machine-1",
+				leaderBackendId: "backend-1",
+				workspaceRootCwd: "/repo",
+				target: "Plaintext target",
+			});
+
+			expect(apiModule.sendMessage).toHaveBeenCalledWith({
+				sessionId: "leader-session-1",
+				messageId: expect.any(String),
+				prompt: [{ type: "text", text: "Plaintext target" }],
+				revision: 3,
+				encryptionRequired: false,
+			});
 		});
 	});
 

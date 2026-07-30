@@ -143,6 +143,8 @@ type UiActions = {
 	setDraftBackendId: (id: string | undefined) => void;
 	setDraftCwd: (cwd: string | undefined) => void;
 	setDraftAdditionalDirectories: (directories: string[]) => void;
+	setCreateDialogMode: (mode: "session" | "agent-team") => void;
+	setDraftTeamTarget: (target: string) => void;
 	resetDraftWorktree: () => void;
 	clearEditingSession: () => void;
 };
@@ -295,6 +297,7 @@ export function useSessionHandlers({
 			draftBackendId,
 			draftCwd,
 			draftAdditionalDirectories,
+			draftTeamTarget,
 			draftWorktreeEnabled,
 			draftWorktreeBranch,
 			draftWorktreeSuggestedBranch,
@@ -335,18 +338,14 @@ export function useSessionHandlers({
 					)
 				: [];
 
-		let worktree:
-			| {
-					branch?: string;
-					baseBranch?: string;
-					sourceCwd: string;
-					relativeCwd?: string;
-			  }
-			| undefined;
-
-		if (draftWorktreeEnabled) {
-			const branch = resolveWorktreeBranchName(
-				draftWorktreeBranch.trim() || draftWorktreeSuggestedBranch,
+		const isAgentTeamMode = createDialogMode === "agent-team";
+		const target = draftTeamTarget.trim();
+		if (isAgentTeamMode && target.length === 0) {
+			chatActions.setAppError(
+				createFallbackError(
+					t("errors.createAgentTeamTargetRequired"),
+					"request",
+				),
 			);
 			return;
 		}

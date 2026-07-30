@@ -24,6 +24,8 @@ import {
 } from "@mobvibe/shared";
 import type { CliConfig } from "../../config.js";
 import { CliCryptoService } from "../../e2ee/crypto-service.js";
+import type { AgentTeamStore } from "../../team/agent-team-store.js";
+import type { TeamRuntime } from "../../team/team-runtime.js";
 import { WalStore } from "../../wal/wal-store.js";
 import type { AcpBackendStatus, AcpConnection } from "../acp-connection.js";
 import type { SessionManagerDependencies } from "../session-manager.js";
@@ -122,6 +124,7 @@ const createMockConnection = () => ({
 				configOptions: null,
 			}),
 	),
+	prompt: mock(() => Promise.resolve({ stopReason: "end_turn" as const })),
 	getStatus: mock(
 		(): AcpBackendStatus => ({
 			backendId: "backend-1",
@@ -4208,7 +4211,7 @@ describe("SessionManager", () => {
 				async (...args: unknown[]) => {
 					createdCount += 1;
 					const params = args[0] as {
-						teamMcpDeclaration?: { id?: string };
+						teamMcpDeclaration?: { serverId?: string };
 						teamMcpHandlers?: {
 							handleConnect(input: { serverId: string }): unknown;
 							handleListTools(input: {
@@ -4217,7 +4220,7 @@ describe("SessionManager", () => {
 							}): void;
 						};
 					};
-					const serverId = params.teamMcpDeclaration?.id;
+					const serverId = params.teamMcpDeclaration?.serverId;
 					if (params.teamMcpHandlers && serverId) {
 						params.teamMcpHandlers.handleConnect({ serverId });
 						params.teamMcpHandlers.handleListTools({
@@ -4229,7 +4232,7 @@ describe("SessionManager", () => {
 						sessionId:
 							createdCount === 1 ? "leader-session-1" : "member-session-1",
 						modes: null,
-						models: null,
+						configOptions: null,
 					};
 				},
 			);
@@ -4346,14 +4349,19 @@ describe("SessionManager", () => {
 							};
 						}
 					).teamMcpHandlers;
-					const serverId = (params as { teamMcpDeclaration?: { id?: string } })
-						.teamMcpDeclaration?.id;
+					const serverId = (
+						params as { teamMcpDeclaration?: { serverId?: string } }
+					).teamMcpDeclaration?.serverId;
 					if (!handlers || !serverId) {
 						throw new Error("Expected team MCP handlers");
 					}
 					handlers.handleConnect({ serverId });
 					handlers.handleListTools({ serverId, toolNames: expectedTeamTools });
-					return { sessionId: "leader-session-1", modes: null, models: null };
+					return {
+						sessionId: "leader-session-1",
+						modes: null,
+						configOptions: null,
+					};
 				},
 			);
 
@@ -4418,7 +4426,7 @@ describe("SessionManager", () => {
 			mockConnection.getSessionCapabilities.mockReturnValueOnce({
 				list: true,
 				load: true,
-				mcp: { acp: false, stdio: false, perSessionBridge: false },
+				mcp: { acp: false, http: false, sse: false },
 			});
 
 			await expect(
@@ -4449,7 +4457,7 @@ describe("SessionManager", () => {
 					createdCount += 1;
 					const params = args[0] as {
 						cwd?: string;
-						teamMcpDeclaration?: { id?: string };
+						teamMcpDeclaration?: { serverId?: string };
 						teamMcpHandlers?: {
 							handleConnect(input: { serverId: string }): unknown;
 							handleListTools(input: {
@@ -4458,7 +4466,7 @@ describe("SessionManager", () => {
 							}): void;
 						};
 					};
-					const serverId = params.teamMcpDeclaration?.id;
+					const serverId = params.teamMcpDeclaration?.serverId;
 					if (params.teamMcpHandlers && serverId) {
 						params.teamMcpHandlers.handleConnect({ serverId });
 						params.teamMcpHandlers.handleListTools({
@@ -4470,7 +4478,7 @@ describe("SessionManager", () => {
 						sessionId:
 							createdCount === 1 ? "leader-session-1" : "member-session-1",
 						modes: null,
-						models: null,
+						configOptions: null,
 					};
 				},
 			);
@@ -4533,7 +4541,7 @@ describe("SessionManager", () => {
 			mockConnection.createSession
 				.mockImplementationOnce(async (...args: unknown[]) => {
 					const params = args[0] as {
-						teamMcpDeclaration?: { id?: string };
+						teamMcpDeclaration?: { serverId?: string };
 						teamMcpHandlers?: {
 							handleConnect(input: { serverId: string }): unknown;
 							handleListTools(input: {
@@ -4542,7 +4550,7 @@ describe("SessionManager", () => {
 							}): void;
 						};
 					};
-					const serverId = params.teamMcpDeclaration?.id;
+					const serverId = params.teamMcpDeclaration?.serverId;
 					if (params.teamMcpHandlers && serverId) {
 						params.teamMcpHandlers.handleConnect({ serverId });
 						params.teamMcpHandlers.handleListTools({
@@ -4550,7 +4558,11 @@ describe("SessionManager", () => {
 							toolNames: expectedTeamTools,
 						});
 					}
-					return { sessionId: "leader-session-1", modes: null, models: null };
+					return {
+						sessionId: "leader-session-1",
+						modes: null,
+						configOptions: null,
+					};
 				})
 				.mockRejectedValueOnce(new Error("member backend refused"));
 

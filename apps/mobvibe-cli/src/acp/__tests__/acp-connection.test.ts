@@ -94,6 +94,7 @@ mock.module("node:stream", () => ({
 }));
 
 import type { AcpBackendConfig } from "../../config.js";
+import { buildTeamMcpDeclaration } from "../../team/team-capability.js";
 import {
 	ACP_CLIENT_CAPABILITIES,
 	ACP_FILE_SYSTEM_CAPABILITIES,
@@ -109,6 +110,13 @@ const createMockBackendConfig = (): AcpBackendConfig => ({
 	label: "Test Backend",
 	command: "test-command",
 	args: ["--arg1"],
+});
+
+const createTeamMcpHandlers = () => ({
+	handleConnect: mock(() => {}),
+	handleListTools: mock(() => {}),
+	handleToolCall: mock(() => Promise.resolve({ ok: true })),
+	handleDisconnect: mock(() => {}),
 });
 
 describe("AcpConnection", () => {
@@ -1091,19 +1099,19 @@ describe("AcpConnection", () => {
 		});
 
 		it("passes an empty mcpServers array for ordinary non-team session/load", async () => {
-			const loadSession = mock(() =>
-				Promise.resolve({ modes: null, models: null }),
+			const request = mock(() =>
+				Promise.resolve({ modes: null, configOptions: null }),
 			);
 			// @ts-expect-error - accessing private properties to test ordinary ACP payload isolation
 			connection.state = "ready";
 			// @ts-expect-error - accessing private properties to test ordinary ACP payload isolation
-			connection.connection = { loadSession };
+			connection.connection = { agent: { request } };
 			// @ts-expect-error - accessing private property for testing
 			connection.agentCapabilities = { loadSession: true };
 
 			await connection.loadSession("session-1", "/home/user/project");
 
-			expect(loadSession).toHaveBeenCalledWith({
+			expect(request).toHaveBeenCalledWith("session/load", {
 				sessionId: "session-1",
 				cwd: "/home/user/project",
 				mcpServers: [],
@@ -1111,13 +1119,13 @@ describe("AcpConnection", () => {
 		});
 
 		it("passes a single team MCP declaration for team session/load", async () => {
-			const loadSession = mock(() =>
-				Promise.resolve({ modes: null, models: null }),
+			const request = mock(() =>
+				Promise.resolve({ modes: null, configOptions: null }),
 			);
 			// @ts-expect-error - accessing private properties to test team ACP payload isolation
 			connection.state = "ready";
 			// @ts-expect-error - accessing private properties to test team ACP payload isolation
-			connection.connection = { loadSession };
+			connection.connection = { agent: { request } };
 			// @ts-expect-error - accessing private property for testing
 			connection.agentCapabilities = { loadSession: true };
 			const declaration = buildTeamMcpDeclaration({
@@ -1125,11 +1133,17 @@ describe("AcpConnection", () => {
 				memberId: "member-1",
 			});
 
-			await connection.loadSession("session-1", "/home/user/project", {
-				teamMcpDeclaration: declaration,
-			});
+			await connection.loadSession(
+				"session-1",
+				"/home/user/project",
+				undefined,
+				{
+					teamMcpDeclaration: declaration,
+					teamMcpHandlers: createTeamMcpHandlers(),
+				},
+			);
 
-			expect(loadSession).toHaveBeenCalledWith({
+			expect(request).toHaveBeenCalledWith("session/load", {
 				sessionId: "session-1",
 				cwd: "/home/user/project",
 				mcpServers: [declaration],
@@ -1139,30 +1153,38 @@ describe("AcpConnection", () => {
 
 	describe("createSession", () => {
 		it("passes an empty mcpServers array for ordinary non-team session/new", async () => {
-			const newSession = mock(() =>
-				Promise.resolve({ sessionId: "session-1", modes: null, models: null }),
+			const request = mock(() =>
+				Promise.resolve({
+					sessionId: "session-1",
+					modes: null,
+					configOptions: null,
+				}),
 			);
 			// @ts-expect-error - accessing private properties to test ordinary ACP payload isolation
 			connection.state = "ready";
 			// @ts-expect-error - accessing private properties to test ordinary ACP payload isolation
-			connection.connection = { newSession };
+			connection.connection = { agent: { request } };
 
 			await connection.createSession({ cwd: "/home/user/project" });
 
-			expect(newSession).toHaveBeenCalledWith({
+			expect(request).toHaveBeenCalledWith("session/new", {
 				cwd: "/home/user/project",
 				mcpServers: [],
 			});
 		});
 
 		it("passes a single team MCP declaration for team session/new", async () => {
-			const newSession = mock(() =>
-				Promise.resolve({ sessionId: "session-1", modes: null, models: null }),
+			const request = mock(() =>
+				Promise.resolve({
+					sessionId: "session-1",
+					modes: null,
+					configOptions: null,
+				}),
 			);
 			// @ts-expect-error - accessing private properties to test team ACP payload isolation
 			connection.state = "ready";
 			// @ts-expect-error - accessing private properties to test team ACP payload isolation
-			connection.connection = { newSession };
+			connection.connection = { agent: { request } };
 			const declaration = buildTeamMcpDeclaration({
 				agentTeamId: "team-1",
 				memberId: "member-1",
@@ -1171,147 +1193,13 @@ describe("AcpConnection", () => {
 			await connection.createSession({
 				cwd: "/home/user/project",
 				teamMcpDeclaration: declaration,
+				teamMcpHandlers: createTeamMcpHandlers(),
 			});
 
-			expect(newSession).toHaveBeenCalledWith({
+			expect(request).toHaveBeenCalledWith("session/new", {
 				cwd: "/home/user/project",
 				mcpServers: [declaration],
 			});
-		});
-	});
-
-	describe("team MCP callback adapter", () => {
-		it("routes MCP callbacks to durable mailbox and task handlers", async () => {
-			const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "acp-team-mcp-"));
-			const store = new AgentTeamStore(path.join(tempDir, "events.db"));
-			try {
-				const runtime = new TeamRuntime({ store });
-				const created = store.createAgentTeam({
-					machineId: "machine-1",
-					workspaceRootCwd: "/workspace",
-					backendId: "backend-1",
-					title: "Callback Team",
-					leaderName: "Leader",
-				});
-				const agentTeamId = created.team.agentTeamId;
-				const leaderMemberId = created.team.leaderMemberId;
-				const memberId = store.addTeamMember({
-					agentTeamId,
-					backendId: "backend-1",
-					name: "Worker",
-					role: "member",
-				}).memberId;
-				const serverId = `mobvibe-team:${agentTeamId}:${leaderMemberId}`;
-				const declaration = buildTeamMcpDeclaration({
-					agentTeamId,
-					memberId: leaderMemberId,
-				});
-				const newSession = mock(() =>
-					Promise.resolve({
-						sessionId: "session-1",
-						modes: null,
-						models: null,
-					}),
-				);
-				// @ts-expect-error - configuring private connection state for adapter-level test
-				connection.state = "ready";
-				// @ts-expect-error - configuring private connection state for adapter-level test
-				connection.connection = { newSession };
-
-				await connection.createSession({
-					cwd: "/workspace",
-					teamMcpDeclaration: declaration,
-					teamMcpTransport: "acp",
-					teamMcpHandlers: runtime.mcpRouter,
-				});
-				// @ts-expect-error - exercise the private ACP extension adapter directly
-				await connection.handleTeamMcpExtensionMethod("mcp/connect", {
-					serverId,
-				});
-				// @ts-expect-error - exercise the private ACP extension adapter directly
-				await connection.handleTeamMcpExtensionMethod("mcp/message", {
-					serverId,
-					type: "list-tools",
-					tools: EXPECTED_TEAM_TOOL_NAMES.map((name) => ({ name })),
-				});
-
-				const afterListTools = store.getAgentTeam({ agentTeamId }).team;
-				expect(afterListTools?.members[0].mcp?.phase).toBe("tools_ready");
-
-				// @ts-expect-error - exercise the private ACP extension adapter directly
-				const mailboxResult = await connection.handleTeamMcpExtensionMethod(
-					"mcp/message",
-					{
-						serverId,
-						type: "tool-call",
-						toolName: "mobvibe_team_send_message",
-						args: {
-							to: "Worker",
-							message: "plaintext stays local",
-							fromMemberId: memberId,
-						},
-					},
-				);
-				expect(mailboxResult.caller).toEqual(
-					expect.objectContaining({ memberId: leaderMemberId }),
-				);
-
-				// @ts-expect-error - exercise the private ACP extension adapter directly
-				const createdTask = await connection.handleTeamMcpExtensionMethod(
-					"mcp/message",
-					{
-						serverId,
-						type: "tool-call",
-						toolName: "mobvibe_team_task_create",
-						args: {
-							title: "Callback task",
-							description: "task detail stays local",
-							owner: "Worker",
-						},
-					},
-				);
-				const taskId = readCreatedTaskId(createdTask);
-				// @ts-expect-error - exercise the private ACP extension adapter directly
-				const listedTasks = await connection.handleTeamMcpExtensionMethod(
-					"mcp/message",
-					{
-						serverId,
-						type: "tool-call",
-						toolName: "mobvibe_team_task_list",
-						args: {},
-					},
-				);
-				expect(readListedTaskIds(listedTasks)).toContain(taskId);
-				// @ts-expect-error - exercise the private ACP extension adapter directly
-				await connection.handleTeamMcpExtensionMethod("mcp/message", {
-					serverId,
-					type: "tool-call",
-					toolName: "mobvibe_team_task_update",
-					args: { taskId, status: "completed" },
-				});
-
-				const summary = store.getAgentTeam({ agentTeamId }).team;
-				expect(summary?.mailboxCounts.unread).toBe(1);
-				expect(summary?.taskCounts.completed).toBe(1);
-				expect(summary?.sourceRefs).toContainEqual(
-					expect.objectContaining({
-						type: "mailbox_message",
-						fromMemberId: leaderMemberId,
-						toMemberId: memberId,
-					}),
-				);
-				expect(JSON.stringify(summary)).not.toContain("plaintext stays local");
-				expect(JSON.stringify(summary)).not.toContain(
-					"task detail stays local",
-				);
-				// @ts-expect-error - exercise the private ACP extension adapter directly
-				await connection.handleTeamMcpExtensionMethod("mcp/disconnect", {
-					serverId,
-				});
-			} finally {
-				store.close();
-				fs.rmSync(tempDir, { recursive: true, force: true });
-			}
 		});
 	});
 
@@ -1549,23 +1437,3 @@ describe("AcpConnection", () => {
 		});
 	});
 });
-
-function readCreatedTaskId(value: unknown): string {
-	const response = value as {
-		data?: { task?: { taskId?: unknown } };
-	};
-	const taskId = response.data?.task?.taskId;
-	if (typeof taskId !== "string") {
-		throw new Error("Expected created task id");
-	}
-	return taskId;
-}
-
-function readListedTaskIds(value: unknown): string[] {
-	const response = value as {
-		data?: { tasks?: Array<{ taskId?: unknown }> };
-	};
-	return (response.data?.tasks ?? []).flatMap((task) =>
-		typeof task.taskId === "string" ? [task.taskId] : [],
-	);
-}

@@ -88,6 +88,7 @@ export function CreateSessionDialog({
 		setDraftBackendId,
 		setDraftCwd,
 		setDraftAdditionalDirectories,
+		setDraftTeamTarget,
 		setDraftWorktreeEnabled,
 		setDraftWorktreeBranch,
 		setDraftWorktreeSuggestedBranch,

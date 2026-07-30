@@ -245,7 +245,7 @@ describe("WalStore", () => {
 			const db = new Database(dbPath);
 			db.exec(`
 				ALTER TABLE message_send_results DROP COLUMN usage_json;
-				DELETE FROM schema_version WHERE version = 14;
+				DELETE FROM schema_version WHERE version >= 14;
 			`);
 			db.close();
 
@@ -261,7 +261,7 @@ describe("WalStore", () => {
 			const db = new Database(dbPath);
 			db.exec(`
 				ALTER TABLE message_send_results DROP COLUMN usage_json;
-				DELETE FROM schema_version WHERE version = 14;
+				DELETE FROM schema_version WHERE version >= 14;
 				CREATE TRIGGER reject_schema_version_14
 				BEFORE INSERT ON schema_version
 				WHEN NEW.version = 14

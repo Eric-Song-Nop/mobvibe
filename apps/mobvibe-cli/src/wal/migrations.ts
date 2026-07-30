@@ -1,6 +1,82 @@
 import type { Database } from "bun:sqlite";
 
-const MIGRATIONS = [
+type Migration = {
+	version: number;
+	up: string | ((db: Database) => void);
+};
+
+const MESSAGE_SEND_RESULTS_SCHEMA = `
+	-- Completed message sends are durable idempotency records. The prompt
+	-- itself remains in the session event WAL; only the terminal result is
+	-- stored here so a gateway retry cannot execute the agent twice.
+	CREATE TABLE IF NOT EXISTS message_send_results (
+		session_id TEXT NOT NULL,
+		message_id TEXT NOT NULL,
+		stop_reason TEXT NOT NULL,
+		completed_at TEXT NOT NULL,
+		PRIMARY KEY (session_id, message_id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_message_send_results_completed_at
+		ON message_send_results (completed_at);
+`;
+
+const SESSION_REVISION_KEYS_SCHEMA = `
+	-- DEKs are never stored in plaintext. wrapped_dek is a sealed box
+	-- encrypted to the content keypair derived from the CLI master secret.
+	CREATE TABLE IF NOT EXISTS session_revision_keys (
+		session_id TEXT NOT NULL,
+		revision INTEGER NOT NULL,
+		wrapped_dek TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		PRIMARY KEY (session_id, revision)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_session_revision_keys_session
+		ON session_revision_keys (session_id, revision);
+`;
+
+function tableExists(db: Database, tableName: string): boolean {
+	return (
+		db
+			.query(
+				"SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+			)
+			.get(tableName) !== null
+	);
+}
+
+function columnExists(
+	db: Database,
+	tableName: string,
+	columnName: string,
+): boolean {
+	return (
+		db
+			.query("SELECT 1 FROM pragma_table_info(?) WHERE name = ? LIMIT 1")
+			.get(tableName, columnName) !== null
+	);
+}
+
+function reconcileDivergentMigrationHistory(
+	db: Database,
+	currentVersion: number,
+): void {
+	if (currentVersion >= 8 && !tableExists(db, "message_send_results")) {
+		db.exec(MESSAGE_SEND_RESULTS_SCHEMA);
+	}
+	if (
+		currentVersion >= 14 &&
+		!columnExists(db, "message_send_results", "usage_json")
+	) {
+		db.exec("ALTER TABLE message_send_results ADD COLUMN usage_json TEXT");
+	}
+	if (currentVersion >= 9 && !tableExists(db, "session_revision_keys")) {
+		db.exec(SESSION_REVISION_KEYS_SCHEMA);
+	}
+}
+
+const MIGRATIONS: readonly Migration[] = [
 	{
 		version: 1,
 		up: `
@@ -215,38 +291,11 @@ const MIGRATIONS = [
 	},
 	{
 		version: 8,
-		up: `
-			-- Completed message sends are durable idempotency records. The prompt
-			-- itself remains in the session event WAL; only the terminal result is
-			-- stored here so a gateway retry cannot execute the agent twice.
-			CREATE TABLE IF NOT EXISTS message_send_results (
-				session_id TEXT NOT NULL,
-				message_id TEXT NOT NULL,
-				stop_reason TEXT NOT NULL,
-				completed_at TEXT NOT NULL,
-				PRIMARY KEY (session_id, message_id)
-			);
-
-			CREATE INDEX IF NOT EXISTS idx_message_send_results_completed_at
-				ON message_send_results (completed_at);
-		`,
+		up: MESSAGE_SEND_RESULTS_SCHEMA,
 	},
 	{
 		version: 9,
-		up: `
-			-- DEKs are never stored in plaintext. wrapped_dek is a sealed box
-			-- encrypted to the content keypair derived from the CLI master secret.
-			CREATE TABLE IF NOT EXISTS session_revision_keys (
-				session_id TEXT NOT NULL,
-				revision INTEGER NOT NULL,
-				wrapped_dek TEXT NOT NULL,
-				created_at TEXT NOT NULL,
-				PRIMARY KEY (session_id, revision)
-			);
-
-			CREATE INDEX IF NOT EXISTS idx_session_revision_keys_session
-				ON session_revision_keys (session_id, revision);
-		`,
+		up: SESSION_REVISION_KEYS_SCHEMA,
 	},
 	{
 		version: 10,
@@ -309,6 +358,53 @@ const MIGRATIONS = [
 				ADD COLUMN usage_json TEXT;
 		`,
 	},
+	{
+		version: 15,
+		up: `
+			-- Team tool calls are leader-local durable facts. This migration used
+			-- to occupy v8 on the Agent Team branch; keep it forward-only now that
+			-- the mainline message-delivery migrations own v8-v14.
+			CREATE TABLE IF NOT EXISTS agent_team_tool_intents (
+				intent_id TEXT PRIMARY KEY,
+				agent_team_id TEXT NOT NULL,
+				requested_by_member_id TEXT NOT NULL,
+				kind TEXT NOT NULL,
+				payload_local_json TEXT NOT NULL,
+				status TEXT NOT NULL,
+				source_refs_json TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL,
+				FOREIGN KEY (agent_team_id) REFERENCES agent_teams(agent_team_id),
+				FOREIGN KEY (requested_by_member_id)
+					REFERENCES agent_team_members(member_id)
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_agent_team_tool_intents_team
+				ON agent_team_tool_intents (agent_team_id, created_at);
+		`,
+	},
+	{
+		version: 16,
+		up: (db) => {
+			// The former Agent Team branch used this column as its v9 migration.
+			// Keep the renumbered migration safe when that history already exists.
+			if (!columnExists(db, "agent_team_mailbox_messages", "wake_error_json")) {
+				db.exec(`
+					ALTER TABLE agent_team_mailbox_messages
+						ADD COLUMN wake_error_json TEXT;
+				`);
+			}
+			db.exec(`
+				CREATE INDEX IF NOT EXISTS idx_agent_team_mailbox_unread
+					ON agent_team_mailbox_messages (
+						agent_team_id,
+						to_member_id,
+						read_at,
+						created_at
+					);
+			`);
+		},
+	},
 ];
 
 export function runMigrations(db: Database): number {
@@ -328,11 +424,20 @@ export function runMigrations(db: Database): number {
 	}
 	const initialVersion = currentVersion;
 
+	const reconcileHistory = db.transaction(() => {
+		reconcileDivergentMigrationHistory(db, currentVersion);
+	});
+	reconcileHistory();
+
 	// Run pending migrations
 	for (const migration of MIGRATIONS) {
 		if (migration.version > currentVersion) {
 			const applyMigration = db.transaction(() => {
-				db.exec(migration.up);
+				if (typeof migration.up === "string") {
+					db.exec(migration.up);
+				} else {
+					migration.up(db);
+				}
 				db.exec(
 					`INSERT INTO schema_version (version) VALUES (${migration.version})`,
 				);

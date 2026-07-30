@@ -1,10 +1,10 @@
+import type { McpServer } from "@agentclientprotocol/sdk";
 import {
 	type AgentSessionCapabilities,
 	AppError,
 	createErrorDetail,
 	type TeamMcpTransport,
 } from "@mobvibe/shared";
-import type { PerSessionTeamStdioBridgeDeclaration } from "./team-bridge-stdio.js";
 
 const TEAM_MCP_SERVER_NAME = "mobvibe-team";
 const TEAM_MCP_SERVER_ID_PREFIX = "mobvibe-team";
@@ -15,19 +15,11 @@ export type TeamMcpIdentityInput = {
 	memberId: string;
 };
 
-export type TeamAcpMcpDeclaration = {
-	type: "acp";
-	name: "mobvibe-team";
-	id: string;
-};
-
-export type TeamMcpSessionDeclaration =
-	| TeamAcpMcpDeclaration
-	| PerSessionTeamStdioBridgeDeclaration;
+export type TeamAcpMcpDeclaration = Extract<McpServer, { type: "acp" }>;
 
 export type TeamMcpSessionSelection = {
-	transport: TeamMcpTransport;
-	declaration: TeamMcpSessionDeclaration;
+	transport: "acp";
+	declaration: TeamAcpMcpDeclaration;
 };
 
 const createCapabilityNotSupportedError = () =>
@@ -73,7 +65,7 @@ export const buildTeamMcpDeclaration = (
 ): TeamAcpMcpDeclaration => ({
 	type: "acp",
 	name: TEAM_MCP_SERVER_NAME,
-	id: buildTeamMcpServerId(input),
+	serverId: buildTeamMcpServerId(input),
 });
 
 export const resolveTeamMcpTransport = (

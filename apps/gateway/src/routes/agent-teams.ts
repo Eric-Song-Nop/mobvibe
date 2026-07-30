@@ -1,4 +1,9 @@
-import { createErrorDetail, createInternalError } from "@mobvibe/shared";
+import path from "node:path";
+import {
+	AppError,
+	createErrorDetail,
+	createInternalError,
+} from "@mobvibe/shared";
 import type { Router } from "express";
 import { logger } from "../lib/logger.js";
 import {
@@ -81,15 +86,89 @@ const optionalString = (value: unknown): string | undefined => {
 	return trimmed.length > 0 ? trimmed : undefined;
 };
 
+const requiredString = (value: unknown, field: string): string => {
+	const parsed = optionalString(value);
+	if (!parsed) {
+		throw new AppError(
+			buildRequestValidationError(`${field} must be a non-empty string`),
+			400,
+		);
+	}
+	return parsed;
+};
+
+const parseWorkspaceMode = (value: unknown, provided: boolean) => {
+	if (!provided) return undefined;
+	if (value === "per_member_worktree" || value === "shared_workspace") {
+		return value;
+	}
+	throw new AppError(
+		buildRequestValidationError(
+			"workspaceMode must be per_member_worktree or shared_workspace",
+		),
+		400,
+	);
+};
+
+const normalizeRelativeCwd = (value: unknown): string | undefined => {
+	const trimmed = optionalString(value);
+	if (!trimmed) return undefined;
+	if (path.posix.isAbsolute(trimmed) || path.win32.isAbsolute(trimmed)) {
+		throw new AppError(
+			buildRequestValidationError(
+				"worktree.relativeCwd must be a relative subdirectory",
+			),
+			400,
+		);
+	}
+	const segments = trimmed.split(/[/\\]+/).filter(Boolean);
+	if (
+		segments.length === 0 ||
+		segments.some((segment) => segment === "." || segment === "..")
+	) {
+		throw new AppError(
+			buildRequestValidationError(
+				"worktree.relativeCwd must be a normalized subdirectory path",
+			),
+			400,
+		);
+	}
+	return segments.join("/");
+};
+
+const parseWorktreeOptions = (value: unknown, provided: boolean) => {
+	if (!provided) {
+		return undefined;
+	}
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		throw new AppError(
+			buildRequestValidationError("worktree must be an object"),
+			400,
+		);
+	}
+	const worktree = value as Record<string, unknown>;
+	const sourceCwd = requiredString(worktree.sourceCwd, "worktree.sourceCwd");
+	const branch = optionalString(worktree.branch);
+	const baseBranch = optionalString(worktree.baseBranch);
+	if (branch?.startsWith("-") || baseBranch?.startsWith("-")) {
+		throw new AppError(
+			buildRequestValidationError("Branch name cannot start with '-'"),
+			400,
+		);
+	}
+	return {
+		branch,
+		baseBranch,
+		sourceCwd,
+		relativeCwd: normalizeRelativeCwd(worktree.relativeCwd),
+	};
+};
+
 const mapRouteError = (response: ErrorResponse, error: unknown) => {
 	if (respondAppError(response, error)) {
 		return;
 	}
 	const message = getErrorMessage(error);
-	if (error instanceof AppError) {
-		respondError(response, error.detail, error.status);
-		return;
-	}
 	if (message.includes("Machine not found")) {
 		respondError(response, buildAuthorizationError(message), 403);
 		return;
@@ -132,6 +211,7 @@ export function setupAgentTeamRoutes(
 				return;
 			}
 
+			const body = request.body ?? {};
 			const {
 				machineId,
 				title,
@@ -139,36 +219,37 @@ export function setupAgentTeamRoutes(
 				leaderBackendId,
 				workspaceMode,
 				worktree,
-			} = request.body ?? {};
-			if (
-				typeof machineId !== "string" ||
-				typeof workspaceRootCwd !== "string" ||
-				typeof leaderBackendId !== "string"
-			) {
-				respondError(
-					response,
-					buildRequestValidationError(
-						"machineId, workspaceRootCwd, and leaderBackendId required",
-					),
-					400,
-				);
-				return;
-			}
+			} = body;
 
 			try {
-				const worktreeOptions = parseWorktreeOptions(worktree);
-				logger.info({ userId, machineId }, "agent_team_create_request");
+				const parsedMachineId = requiredString(machineId, "machineId");
+				const parsedWorkspaceRootCwd = requiredString(
+					workspaceRootCwd,
+					"workspaceRootCwd",
+				);
+				const parsedLeaderBackendId = requiredString(
+					leaderBackendId,
+					"leaderBackendId",
+				);
+				const worktreeOptions = parseWorktreeOptions(
+					worktree,
+					Object.hasOwn(body, "worktree"),
+				);
+				const parsedWorkspaceMode = parseWorkspaceMode(
+					workspaceMode,
+					Object.hasOwn(body, "workspaceMode"),
+				);
+				logger.info(
+					{ userId, machineId: parsedMachineId },
+					"agent_team_create_request",
+				);
 				const result = await teamRouter.createAgentTeam(
 					{
-						machineId: machineId.trim(),
-						backendId: leaderBackendId.trim(),
-						workspaceRootCwd: workspaceRootCwd.trim(),
+						machineId: parsedMachineId,
+						backendId: parsedLeaderBackendId,
+						workspaceRootCwd: parsedWorkspaceRootCwd,
 						title: optionalString(title),
-						workspaceMode:
-							workspaceMode === "per_member_worktree" ||
-							workspaceMode === "shared_workspace"
-								? workspaceMode
-								: undefined,
+						workspaceMode: parsedWorkspaceMode,
 						worktree: worktreeOptions,
 					},
 					userId,

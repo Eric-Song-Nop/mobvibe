@@ -53,7 +53,6 @@ import {
 	searchGitLog,
 } from "../lib/git-utils.js";
 import { logger } from "../lib/logger.js";
-import { AgentTeamStore } from "../team/agent-team-store.js";
 import { buildHostFsEntries, buildHostFsRoots } from "./host-fs.js";
 import { resolveWithinCwd } from "./path-utils.js";
 
@@ -62,7 +61,6 @@ type SocketClientOptions = {
 	sessionManager: SessionManager;
 	/** Crypto service for E2EE */
 	cryptoService: CliCryptoService;
-	agentTeamStore?: AgentTeamStore;
 };
 
 type NormalizedSendMessageParams = Omit<SendMessageParams, "messageId"> & {
@@ -220,7 +218,6 @@ export class SocketClient extends EventEmitter {
 	private pendingLiveEvents: SessionEvent[] = [];
 	private pendingLiveEventIncarnations: number[] = [];
 	private pendingLiveEventBytes = 0;
-	private readonly agentTeamStore: AgentTeamStore;
 	private readonly messageSendsInFlight = new Map<
 		string,
 		Promise<SendMessageResult>
@@ -239,8 +236,6 @@ export class SocketClient extends EventEmitter {
 	constructor(private readonly options: SocketClientOptions) {
 		super();
 		const { cryptoService } = options;
-		this.agentTeamStore =
-			options.agentTeamStore ?? new AgentTeamStore(options.config.walDbPath);
 		this.socket = io(`${options.config.gatewayUrl}/cli`, {
 			path: "/socket.io",
 			reconnection: true,
@@ -395,7 +390,6 @@ export class SocketClient extends EventEmitter {
 
 	private setupRpcHandlers() {
 		const { sessionManager } = this.options;
-		const { agentTeamStore } = this;
 
 		this.socket.on("rpc:agent:capabilities", async (request) => {
 			try {
@@ -533,7 +527,7 @@ export class SocketClient extends EventEmitter {
 					},
 					"rpc_agent_teams_list",
 				);
-				const result = agentTeamStore.listAgentTeams(request.params);
+				const result = sessionManager.listAgentTeams(request.params);
 				logger.info(
 					{
 						requestId: request.requestId,
@@ -566,7 +560,7 @@ export class SocketClient extends EventEmitter {
 					},
 					"rpc_agent_team_get",
 				);
-				const result = agentTeamStore.getAgentTeam(request.params);
+				const result = sessionManager.getAgentTeam(request.params);
 				this.sendRpcResponse(request.requestId, result);
 			} catch (error) {
 				logger.error(
@@ -2508,7 +2502,6 @@ export class SocketClient extends EventEmitter {
 		this.stopHeartbeat();
 		this.connected = false;
 		this.invalidateWalReplayBarrier();
-		this.agentTeamStore.close();
 		this.socket.disconnect();
 	}
 

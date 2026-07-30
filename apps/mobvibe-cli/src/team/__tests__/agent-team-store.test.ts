@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { runMigrations } from "../../wal/migrations.js";
+import { WalStore } from "../../wal/wal-store.js";
 import { AgentTeamStore } from "../agent-team-store.js";
 import { assertGatewayFacingAgentTeamPayload } from "../content-boundary.js";
 
@@ -455,8 +456,211 @@ describe("Agent Team migrations", () => {
 			expect(names).toContain("agent_team_mailbox_messages");
 			expect(names).toContain("agent_team_tasks");
 			expect(names).toContain("agent_team_summary_refs");
+			expect(names).toContain("agent_team_tool_intents");
+
+			const mailboxColumns = db
+				.query("PRAGMA table_info(agent_team_mailbox_messages)")
+				.all() as Array<{ name: string }>;
+			expect(mailboxColumns.map((column) => column.name)).toContain(
+				"wake_error_json",
+			);
+
+			const schemaVersion = db
+				.query("SELECT MAX(version) AS version FROM schema_version")
+				.get() as { version: number };
+			expect(schemaVersion.version).toBe(16);
 		} finally {
 			db.close();
+			fs.rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("upgrades a v14 database without replacing leader-local Team facts", () => {
+		const tempDir = fs.mkdtempSync(
+			path.join(os.tmpdir(), "agent-team-migrate-v14-"),
+		);
+		const dbPath = path.join(tempDir, "events.db");
+		const db = new Database(dbPath);
+
+		try {
+			db.exec(`
+				CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+				INSERT INTO schema_version (version) VALUES (14);
+
+				CREATE TABLE agent_teams (
+					agent_team_id TEXT PRIMARY KEY
+				);
+				CREATE TABLE agent_team_members (
+					member_id TEXT PRIMARY KEY,
+					agent_team_id TEXT NOT NULL
+				);
+				CREATE TABLE agent_team_mailbox_messages (
+					message_id TEXT PRIMARY KEY,
+					agent_team_id TEXT NOT NULL,
+					from_member_id TEXT NOT NULL,
+					to_member_id TEXT,
+					body_local_json TEXT NOT NULL,
+					source_refs_json TEXT,
+					read_at TEXT,
+					wake_status TEXT NOT NULL,
+					created_at TEXT NOT NULL
+				);
+
+				INSERT INTO agent_teams (agent_team_id) VALUES ('team-local');
+				INSERT INTO agent_team_members (member_id, agent_team_id)
+				VALUES ('member-local', 'team-local');
+				INSERT INTO agent_team_mailbox_messages (
+					message_id, agent_team_id, from_member_id, to_member_id,
+					body_local_json, wake_status, created_at
+				) VALUES (
+					'message-local', 'team-local', 'member-local', 'member-local',
+					'{"text":"leader-only"}', 'pending', '2026-01-01T00:00:00.000Z'
+				);
+			`);
+
+			expect(runMigrations(db)).toBe(14);
+
+			const message = db
+				.query(`
+					SELECT body_local_json, wake_error_json
+					FROM agent_team_mailbox_messages
+					WHERE message_id = 'message-local'
+				`)
+				.get() as {
+				body_local_json: string;
+				wake_error_json: string | null;
+			};
+			expect(message).toEqual({
+				body_local_json: '{"text":"leader-only"}',
+				wake_error_json: null,
+			});
+
+			const table = db
+				.query(`
+					SELECT name
+					FROM sqlite_master
+					WHERE type = 'table' AND name = 'agent_team_tool_intents'
+				`)
+				.get();
+			expect(table).not.toBeNull();
+		} finally {
+			db.close();
+			fs.rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("reconciles the former Agent Team v9 schema with mainline migrations", () => {
+		const tempDir = fs.mkdtempSync(
+			path.join(os.tmpdir(), "agent-team-migrate-divergent-v9-"),
+		);
+		const dbPath = path.join(tempDir, "events.db");
+		const db = new Database(dbPath);
+
+		try {
+			runMigrations(db);
+			db.exec(`
+				INSERT INTO agent_teams (
+					agent_team_id, machine_id, workspace_root_cwd, title, lifecycle,
+					leader_member_id, workspace_mode, created_at, updated_at
+				) VALUES (
+					'team-local', 'leader-machine', '/workspace', 'Local Team', 'running',
+					'member-local', 'shared', '2026-01-01T00:00:00.000Z',
+					'2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO agent_team_members (
+					member_id, agent_team_id, role, name, backend_id, lifecycle, health,
+					created_at, updated_at
+				) VALUES (
+					'member-local', 'team-local', 'leader', 'Leader', 'backend-local',
+					'running', 'healthy', '2026-01-01T00:00:00.000Z',
+					'2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO agent_team_mailbox_messages (
+					message_id, agent_team_id, from_member_id, to_member_id,
+					body_local_json, wake_status, created_at
+				) VALUES (
+					'message-local', 'team-local', 'member-local', 'member-local',
+					'{"text":"leader-only"}', 'pending', '2026-01-01T00:00:00.000Z'
+				);
+
+				ALTER TABLE sessions DROP COLUMN additional_directories_json;
+				ALTER TABLE discovered_sessions DROP COLUMN additional_directories_json;
+				ALTER TABLE discovered_sessions DROP COLUMN meta_json;
+				DROP TABLE message_send_results;
+				DROP TABLE session_revision_keys;
+				DROP TABLE message_send_claims;
+				DROP TABLE wal_encryption_identity;
+				DELETE FROM schema_version WHERE version > 9;
+			`);
+
+			expect(runMigrations(db)).toBe(9);
+
+			const tables = db
+				.query("SELECT name FROM sqlite_master WHERE type = 'table'")
+				.all() as Array<{ name: string }>;
+			const tableNames = tables.map(({ name }) => name);
+			expect(tableNames).toContain("message_send_results");
+			expect(tableNames).toContain("session_revision_keys");
+			expect(tableNames).toContain("message_send_claims");
+			expect(tableNames).toContain("wal_encryption_identity");
+			expect(tableNames).toContain("agent_team_tool_intents");
+
+			const resultColumns = db
+				.query("PRAGMA table_info(message_send_results)")
+				.all() as Array<{ name: string }>;
+			expect(resultColumns.map(({ name }) => name)).toContain("usage_json");
+
+			const message = db
+				.query(`
+					SELECT body_local_json, wake_error_json
+					FROM agent_team_mailbox_messages
+					WHERE message_id = 'message-local'
+				`)
+				.get() as {
+				body_local_json: string;
+				wake_error_json: string | null;
+			};
+			expect(message).toEqual({
+				body_local_json: '{"text":"leader-only"}',
+				wake_error_json: null,
+			});
+
+			const schemaVersion = db
+				.query("SELECT MAX(version) AS version FROM schema_version")
+				.get() as { version: number };
+			expect(schemaVersion.version).toBe(16);
+		} finally {
+			db.close();
+			fs.rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("restores the complete message result schema for a divergent v14 database", () => {
+		const tempDir = fs.mkdtempSync(
+			path.join(os.tmpdir(), "agent-team-migrate-divergent-v14-"),
+		);
+		const dbPath = path.join(tempDir, "events.db");
+		let db: Database | undefined = new Database(dbPath);
+
+		try {
+			runMigrations(db);
+			db.exec(`
+				DROP TABLE message_send_results;
+				DELETE FROM schema_version WHERE version > 14;
+			`);
+
+			expect(runMigrations(db)).toBe(14);
+			const columns = db
+				.query("PRAGMA table_info(message_send_results)")
+				.all() as Array<{ name: string }>;
+			expect(columns.map(({ name }) => name)).toContain("usage_json");
+			db.close();
+			db = undefined;
+
+			const walStore = new WalStore(dbPath);
+			walStore.close();
+		} finally {
+			db?.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });
 		}
 	});

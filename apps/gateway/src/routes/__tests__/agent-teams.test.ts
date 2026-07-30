@@ -185,6 +185,80 @@ describe("agent team routes", () => {
 		);
 	});
 
+	it("rejects explicitly malformed worktree options before forwarding", async () => {
+		for (const worktree of [{}, "invalid", [], { sourceCwd: "   " }]) {
+			const { response, payload } = await requestJson(
+				baseUrl,
+				"/acp/agent-teams",
+				{
+					method: "POST",
+					headers: { authorization: "Bearer user-1" },
+					body: JSON.stringify({
+						machineId: "machine-1",
+						workspaceRootCwd: "/repo",
+						leaderBackendId: "backend-1",
+						worktree,
+					}),
+				},
+			);
+
+			expect(response.status).toBe(400);
+			expect(payload.error?.code).toBe("REQUEST_VALIDATION_FAILED");
+		}
+		expect(teamRouter.createAgentTeam).not.toHaveBeenCalled();
+	});
+
+	it("rejects an explicitly invalid workspace mode before forwarding", async () => {
+		for (const workspaceMode of ["unknown", "   ", null]) {
+			const { response, payload } = await requestJson(
+				baseUrl,
+				"/acp/agent-teams",
+				{
+					method: "POST",
+					headers: { authorization: "Bearer user-1" },
+					body: JSON.stringify({
+						machineId: "machine-1",
+						workspaceRootCwd: "/repo",
+						leaderBackendId: "backend-1",
+						workspaceMode,
+					}),
+				},
+			);
+
+			expect(response.status).toBe(400);
+			expect(payload.error?.code).toBe("REQUEST_VALIDATION_FAILED");
+		}
+		expect(teamRouter.createAgentTeam).not.toHaveBeenCalled();
+	});
+
+	it("rejects blank required create fields before forwarding", async () => {
+		for (const blankField of [
+			"machineId",
+			"workspaceRootCwd",
+			"leaderBackendId",
+		] as const) {
+			const body = {
+				machineId: "machine-1",
+				workspaceRootCwd: "/repo",
+				leaderBackendId: "backend-1",
+				[blankField]: "   ",
+			};
+			const { response, payload } = await requestJson(
+				baseUrl,
+				"/acp/agent-teams",
+				{
+					method: "POST",
+					headers: { authorization: "Bearer user-1" },
+					body: JSON.stringify(body),
+				},
+			);
+
+			expect(response.status).toBe(400);
+			expect(payload.error?.code).toBe("REQUEST_VALIDATION_FAILED");
+		}
+		expect(teamRouter.createAgentTeam).not.toHaveBeenCalled();
+	});
+
 	it("rejects unsafe worktree relative paths before forwarding", async () => {
 		for (const relativeCwd of ["/absolute", "../escape", "apps/../escape"]) {
 			const { response, payload } = await requestJson(

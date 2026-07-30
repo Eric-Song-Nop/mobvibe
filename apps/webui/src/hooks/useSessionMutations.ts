@@ -13,6 +13,7 @@ import {
 	bulkArchiveSessions,
 	cancelSession,
 	closeSession,
+	createAgentTeam,
 	createSession,
 	deleteSession,
 	loadSession,
@@ -425,13 +426,20 @@ export function useSessionMutations(
 			const e2eeStatus = bootstrapSessionE2EE(
 				leaderSession.sessionId,
 				leaderSession.wrappedDek,
+				leaderSession.revision,
 			);
-			if (e2eeStatus !== "ok") {
+			if (e2eeStatus === "missing_key") {
 				throw new Error(t("errors.sessionE2EEKeyMissing"));
+			}
+			if (leaderSession.revision === undefined) {
+				throw new Error(t("errors.sessionNotReady"));
 			}
 			await sendMessage({
 				sessionId: leaderSession.sessionId,
+				messageId: crypto.randomUUID(),
 				prompt: [{ type: "text", text: variables.target }],
+				revision: leaderSession.revision,
+				encryptionRequired: e2eeStatus === "ok",
 			});
 			return { leaderSession, e2eeStatus };
 		},

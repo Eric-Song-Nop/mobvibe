@@ -134,8 +134,8 @@ export type AgentPromptCapabilities = {
 
 export type AgentMcpCapabilities = {
 	acp?: boolean;
-	stdio?: boolean;
-	perSessionBridge?: boolean;
+	http?: boolean;
+	sse?: boolean;
 };
 
 /** A stable, Agent-managed ACP authentication method. */

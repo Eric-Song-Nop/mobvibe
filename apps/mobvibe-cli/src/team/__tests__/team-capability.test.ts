@@ -18,7 +18,7 @@ describe("team MCP capability resolution", () => {
 		expect(declaration).toEqual({
 			type: "acp",
 			name: "mobvibe-team",
-			id: "mobvibe-team:team-123:member-456",
+			serverId: "mobvibe-team:team-123:member-456",
 		});
 	});
 
@@ -27,17 +27,17 @@ describe("team MCP capability resolution", () => {
 			resolveTeamMcpTransport({
 				list: true,
 				load: true,
-				mcp: { acp: true, stdio: true, perSessionBridge: true },
+				mcp: { acp: true, http: true, sse: true },
 			}),
 		).toBe("acp");
 	});
 
-	test("rejects stdio bridge fallback until an executable bridge server exists", () => {
+	test("rejects non-ACP MCP transports until a bridge server exists", () => {
 		expect(() =>
 			resolveTeamMcpTransport({
 				list: true,
 				load: true,
-				mcp: { stdio: true, perSessionBridge: true },
+				mcp: { http: true, sse: true },
 			}),
 		).toThrow(AppError);
 
@@ -46,7 +46,7 @@ describe("team MCP capability resolution", () => {
 				capabilities: {
 					list: true,
 					load: true,
-					mcp: { stdio: true, perSessionBridge: true },
+					mcp: { http: true, sse: true },
 				},
 				agentTeamId: "team-1",
 				memberId: "member-1",
@@ -72,7 +72,7 @@ describe("team MCP capability resolution", () => {
 			resolveTeamMcpTransport({
 				list: true,
 				load: true,
-				mcp: { stdio: true },
+				mcp: { http: true },
 			}),
 		).toThrow(AppError);
 

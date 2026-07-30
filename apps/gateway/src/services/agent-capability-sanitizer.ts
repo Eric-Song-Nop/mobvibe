@@ -107,7 +107,7 @@ export const sanitizeAgentSessionCapabilities = (
 	}
 	if (isRecord(source.mcp)) {
 		const mcp: Record<string, unknown> = {};
-		for (const key of ["acp", "stdio", "perSessionBridge"]) {
+		for (const key of ["acp", "http", "sse"]) {
 			copyOptionalBoolean(mcp, source.mcp, key);
 		}
 		result.mcp = mcp;

@@ -1,5 +1,23 @@
 import { describe, expect, it } from "bun:test";
-import { agent, client, methods, ndJsonStream } from "@agentclientprotocol/sdk";
+import {
+	agent,
+	type ConnectMcpRequest,
+	type ConnectMcpResponse,
+	client,
+	type DisconnectMcpRequest,
+	type DisconnectMcpResponse,
+	type MessageMcpNotification,
+	type MessageMcpRequest,
+	type MessageMcpResponse,
+	methods,
+	ndJsonStream,
+} from "@agentclientprotocol/sdk";
+import {
+	registerTeamMcpProtocolHandlers,
+	TeamMcpProtocolAdapter,
+	type TeamMcpProtocolHandlers,
+} from "../../team/team-mcp-protocol.js";
+import { EXPECTED_TEAM_TOOL_NAMES } from "../../team/team-tool-handlers.js";
 import {
 	ACP_CLIENT_CAPABILITIES,
 	filterInvalidRawPlanSessionUpdates,
@@ -74,6 +92,154 @@ describe("ACP SDK app conformance", () => {
 		]);
 		connection.close();
 		await connection.closed;
+	});
+
+	it("round-trips the Team MCP lifecycle through real SDK app handlers", async () => {
+		const serverId = "mobvibe-team:team-1:member-1";
+		const lifecycle: string[] = [];
+		const handlers: TeamMcpProtocolHandlers = {
+			handleConnect: (input) => {
+				lifecycle.push(`connect:${input.serverId}`);
+			},
+			handleListTools: (input) => {
+				lifecycle.push(`list:${input.serverId}`);
+			},
+			handleToolCall: (input) => {
+				lifecycle.push(`call:${input.toolName}`);
+				return {
+					caller: {
+						agentTeamId: "team-1",
+						memberId: "member-1",
+						role: "leader",
+					},
+					toolName: input.toolName,
+					data: { ok: true, args: input.args },
+				};
+			},
+			handleDisconnect: (input) => {
+				lifecycle.push(`disconnect:${input.serverId}`);
+			},
+		};
+		const adapter = new TeamMcpProtocolAdapter();
+		adapter.configure({
+			declaration: {
+				type: "acp",
+				name: "mobvibe-team",
+				serverId,
+			},
+			handlers,
+		});
+		const clientApp = registerTeamMcpProtocolHandlers(
+			client({ name: "mobvibe-team-test-client" }),
+			adapter,
+		);
+		const connection = agent({ name: "mobvibe-team-test-agent" }).connect(
+			clientApp,
+		);
+
+		try {
+			const connected = await connection.client.request<
+				ConnectMcpResponse,
+				ConnectMcpRequest
+			>("mcp/connect", { serverId });
+			expect(connected.connectionId).toBeString();
+			expect(connected.connectionId).not.toBe(serverId);
+
+			const initialized = await connection.client.request<
+				MessageMcpResponse,
+				MessageMcpRequest
+			>("mcp/message", {
+				connectionId: connected.connectionId,
+				method: "initialize",
+				params: {
+					protocolVersion: "2025-06-18",
+					capabilities: {},
+					clientInfo: { name: "test-agent", version: "1.0.0" },
+				},
+			});
+			expect(initialized).toEqual(
+				expect.objectContaining({
+					protocolVersion: "2025-06-18",
+					capabilities: { tools: {} },
+					serverInfo: expect.objectContaining({ name: "mobvibe-team" }),
+				}),
+			);
+
+			await connection.client.notify<MessageMcpNotification>("mcp/message", {
+				connectionId: connected.connectionId,
+				method: "notifications/initialized",
+			});
+
+			const listed = await connection.client.request<
+				MessageMcpResponse,
+				MessageMcpRequest
+			>("mcp/message", {
+				connectionId: connected.connectionId,
+				method: "tools/list",
+			});
+			expect(listed).toEqual({
+				tools: expect.arrayContaining(
+					EXPECTED_TEAM_TOOL_NAMES.map((name) =>
+						expect.objectContaining({ name }),
+					),
+				),
+			});
+
+			const called = await connection.client.request<
+				MessageMcpResponse,
+				MessageMcpRequest
+			>("mcp/message", {
+				connectionId: connected.connectionId,
+				method: "tools/call",
+				params: {
+					name: "mobvibe_team_members",
+					arguments: { attemptedMemberId: "member-other" },
+				},
+			});
+			expect(called).toEqual(
+				expect.objectContaining({
+					content: [
+						expect.objectContaining({
+							type: "text",
+							text: expect.stringContaining('"ok":true'),
+						}),
+					],
+					structuredContent: expect.objectContaining({
+						toolName: "mobvibe_team_members",
+						data: {
+							ok: true,
+							args: { attemptedMemberId: "member-other" },
+						},
+					}),
+				}),
+			);
+
+			const disconnected = await connection.client.request<
+				DisconnectMcpResponse,
+				DisconnectMcpRequest
+			>("mcp/disconnect", {
+				connectionId: connected.connectionId,
+			});
+			expect(disconnected).toEqual({});
+			await expect(
+				connection.client.request<MessageMcpResponse, MessageMcpRequest>(
+					"mcp/message",
+					{
+						connectionId: connected.connectionId,
+						method: "tools/list",
+					},
+				),
+			).rejects.toThrow("connection is not active");
+			expect(lifecycle).toEqual([
+				`connect:${serverId}`,
+				`list:${serverId}`,
+				"call:mobvibe_team_members",
+				`disconnect:${serverId}`,
+			]);
+		} finally {
+			connection.close();
+			await connection.closed;
+		}
 	});
 
 	it("rejects malformed Plan notifications from the raw NDJSON wire", async () => {

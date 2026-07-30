@@ -40,13 +40,6 @@ const createdTeam: AgentTeamSummary = {
 	updatedAt: "2026-05-13T00:00:00.000Z",
 };
 
-const agentTeamStoreMock = {
-	createAgentTeam: mock(() => ({ team: createdTeam })),
-	listAgentTeams: mock(() => ({ teams: [createdTeam] })),
-	getAgentTeam: mock(() => ({ team: createdTeam })),
-	close: mock(() => {}),
-};
-
 mock.module("socket.io-client", () => ({
 	io: mock((_url: string, _options: unknown) => socketMock),
 }));
@@ -170,6 +163,8 @@ describe("SocketClient restore semantics", () => {
 		touchSession: ReturnType<typeof mock>;
 		recordTurnEnd: ReturnType<typeof mock>;
 		createAgentTeamRun: ReturnType<typeof mock>;
+		listAgentTeams: ReturnType<typeof mock>;
+		getAgentTeam: ReturnType<typeof mock>;
 		onSessionsChanged: ReturnType<typeof mock>;
 		onSessionAttached: ReturnType<typeof mock>;
 		onSessionDetached: ReturnType<typeof mock>;
@@ -192,10 +187,6 @@ describe("SocketClient restore semantics", () => {
 		socketMock.emit.mockClear();
 		socketMock.connect.mockClear();
 		socketMock.disconnect.mockClear();
-		agentTeamStoreMock.createAgentTeam.mockClear();
-		agentTeamStoreMock.listAgentTeams.mockClear();
-		agentTeamStoreMock.getAgentTeam.mockClear();
-		agentTeamStoreMock.close.mockClear();
 		socketMock.io.opts.extraHeaders = {};
 		sessionEventListener = undefined;
 		agentTeamChangedListener = undefined;
@@ -281,6 +272,8 @@ describe("SocketClient restore semantics", () => {
 					leaderSession: { sessionId: "leader-session-1" },
 				}),
 			),
+			listAgentTeams: mock(() => ({ teams: [createdTeam] })),
+			getAgentTeam: mock(() => ({ team: createdTeam })),
 			onSessionsChanged: mock(() => () => {}),
 			onSessionAttached: mock(() => () => {}),
 			onSessionDetached: mock(() => () => {}),
@@ -318,7 +311,6 @@ describe("SocketClient restore semantics", () => {
 			config: createConfig(),
 			sessionManager: sessionManager as never,
 			cryptoService: cryptoService as never,
-			agentTeamStore: agentTeamStoreMock as never,
 		});
 	});
 
@@ -2439,7 +2431,7 @@ describe("SocketClient restore semantics", () => {
 			params: { machineId: "machine-1" },
 		});
 
-		expect(agentTeamStoreMock.listAgentTeams).toHaveBeenCalledWith({
+		expect(sessionManager.listAgentTeams).toHaveBeenCalledWith({
 			machineId: "machine-1",
 		});
 		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
@@ -2449,7 +2441,7 @@ describe("SocketClient restore semantics", () => {
 	});
 
 	test("handles rpc:agent-team:get not found as typed empty result", async () => {
-		agentTeamStoreMock.getAgentTeam.mockReturnValueOnce({} as never);
+		sessionManager.getAgentTeam.mockReturnValueOnce({} as never);
 		const handler = socketHandlers.get("rpc:agent-team:get");
 		if (!handler) {
 			throw new Error("rpc:agent-team:get handler not registered");
@@ -2460,7 +2452,7 @@ describe("SocketClient restore semantics", () => {
 			params: { agentTeamId: "missing-team", machineId: "machine-1" },
 		});
 
-		expect(agentTeamStoreMock.getAgentTeam).toHaveBeenCalledWith({
+		expect(sessionManager.getAgentTeam).toHaveBeenCalledWith({
 			agentTeamId: "missing-team",
 			machineId: "machine-1",
 		});

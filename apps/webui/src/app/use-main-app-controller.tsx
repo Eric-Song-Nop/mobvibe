@@ -145,6 +145,8 @@ export function useMainAppController() {
 			setDraftBackendId: s.setDraftBackendId,
 			setDraftCwd: s.setDraftCwd,
 			setDraftAdditionalDirectories: s.setDraftAdditionalDirectories,
+			setCreateDialogMode: s.setCreateDialogMode,
+			setDraftTeamTarget: s.setDraftTeamTarget,
 			resetDraftWorktree: s.resetDraftWorktree,
 			setSelectedWorkspace: s.setSelectedWorkspace,
 		})),

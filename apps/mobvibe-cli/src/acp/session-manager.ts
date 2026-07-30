@@ -22,6 +22,10 @@ import {
 	type CreateSessionWorktreeOptions,
 	createErrorDetail,
 	type DiscoverSessionsRpcResult,
+	type GetAgentTeamRpcParams,
+	type GetAgentTeamRpcResult,
+	type ListAgentTeamsRpcParams,
+	type ListAgentTeamsRpcResult,
 	type PermissionDecisionPayload,
 	type PermissionRequestPayload,
 	type ReportedTokenUsage,
@@ -175,6 +179,18 @@ type SessionRecord = {
 	worktreeBranch?: string;
 	/** Stable workspace/project root for grouping and navigation */
 	workspaceRootCwd?: string;
+};
+
+type SessionExecutionContext = {
+	cwd?: string;
+	workspaceRootCwd?: string;
+	worktreeSourceCwd?: string;
+	worktreeBranch?: string;
+};
+
+type TeamSessionBinding = {
+	agentTeamId: string;
+	memberId: string;
 };
 
 const getSessionFallbackTitle = (sessionId: string) =>
@@ -466,6 +482,19 @@ const isValidWorkspacePath = async (cwd: string): Promise<boolean> => {
 	}
 };
 
+const toTeamCreateErrorDetail = (error: unknown) => {
+	if (error instanceof AppError) {
+		return error.detail;
+	}
+	return createErrorDetail({
+		code: "INTERNAL_ERROR",
+		message:
+			error instanceof Error ? error.message : "Agent Team create failed",
+		retryable: true,
+		scope: "session",
+	});
+};
+
 export type SessionManagerDependencies = {
 	validateWorkspacePath?: (cwd: string) => Promise<boolean>;
 	createGitWorktree?: typeof createGitWorktree;
@@ -480,6 +509,8 @@ type CreateManagedSessionOptions = {
 	title?: string;
 	backendId: string;
 	worktree?: CreateSessionWorktreeOptions;
+	executionContext?: SessionExecutionContext;
+	team?: TeamSessionBinding;
 };
 
 type DiscoverManagedSessionsOptions = {
@@ -618,6 +649,24 @@ export class SessionManager {
 				this.walStore.close();
 				throw error;
 			}
+		}
+		try {
+			this.agentTeamStore = new AgentTeamStore(config.walDbPath);
+			this.teamRuntime = new TeamRuntime({
+				store: this.agentTeamStore,
+				sessionManager: this,
+				onAgentTeamChanged: (team) => {
+					this.emitAgentTeamChanged({
+						added: [],
+						updated: [team],
+						removed: [],
+						machineId: team.machineId,
+					});
+				},
+			});
+		} catch (error) {
+			this.walStore.close();
+			throw error;
 		}
 	}
 
@@ -1632,6 +1681,17 @@ export class SessionManager {
 				text: input.text,
 			},
 		);
+		if (!event) {
+			throw new AppError(
+				createErrorDetail({
+					code: "SESSION_NOT_FOUND",
+					message: "Team member session was deleted during mailbox delivery",
+					retryable: false,
+					scope: "session",
+				}),
+				404,
+			);
+		}
 		this.emitSessionsChanged({
 			added: [],
 			updated: [this.buildSummary(record)],
@@ -1897,12 +1957,14 @@ export class SessionManager {
 		backend: AcpBackendConfig,
 	): Promise<SessionSummary> {
 		// Handle worktree creation before acquiring connection
-		let effectiveCwd = options.cwd;
-		let worktreeSourceCwd: string | undefined;
-		let worktreeBranch: string | undefined;
-		let workspaceRootCwd: string | undefined;
+		let effectiveCwd = options.executionContext?.cwd ?? options.cwd;
+		let worktreeSourceCwd = options.executionContext?.worktreeSourceCwd;
+		let worktreeBranch = options.executionContext?.worktreeBranch;
+		let workspaceRootCwd = options.executionContext?.workspaceRootCwd;
 
-		if (options.worktree) {
+		// Internal Team member sessions reuse the leader's already-resolved
+		// checkout metadata without creating a second worktree.
+		if (!options.executionContext && options.worktree) {
 			const repoDir = options.worktree.sourceCwd;
 			if (!(await this.isGitRepo(repoDir))) {
 				throw new AppError(
@@ -1964,7 +2026,7 @@ export class SessionManager {
 			worktreeSourceCwd = repoDir;
 			worktreeBranch = branch;
 			workspaceRootCwd = repoDir;
-		} else if (options.cwd) {
+		} else if (!options.executionContext && options.cwd) {
 			const projectContext = await this.resolveGitProjectContext(options.cwd);
 			workspaceRootCwd = projectContext.repoRoot ?? options.cwd;
 		}
@@ -2000,9 +2062,24 @@ export class SessionManager {
 		);
 		try {
 			observation = this.beginAgentSessionObservation();
+			const teamMcp = options.team
+				? buildTeamMcpSessionSelection({
+						capabilities:
+							this.backendCapabilities.get(backend.id) ??
+							connection.getSessionCapabilities(),
+						agentTeamId: options.team.agentTeamId,
+						memberId: options.team.memberId,
+					})
+				: undefined;
 			const session = await connection.createSession({
 				cwd: effectiveCwd,
 				additionalDirectories,
+				...(teamMcp
+					? {
+							teamMcpDeclaration: teamMcp.declaration,
+							teamMcpHandlers: this.teamRuntime.mcpRouter,
+						}
+					: {}),
 			});
 			if (!isValidSessionId(session.sessionId)) {
 				throw new AppError(
@@ -2116,6 +2193,16 @@ export class SessionManager {
 				this.writeSessionUpdateToWal(record, event.notification);
 				this.applySessionUpdateToRecord(record, event.notification);
 			}
+			if (options.team) {
+				this.agentTeamStore.updateTeamMemberRuntime({
+					agentTeamId: options.team.agentTeamId,
+					memberId: options.team.memberId,
+					sessionId: session.sessionId,
+					lifecycle: "running",
+					worktreeSourceCwd,
+					worktreeBranch,
+				});
+			}
 			this.sessions.set(session.sessionId, record);
 			const summary = this.buildSummary(record);
 			this.emitSessionsChanged({
@@ -2172,120 +2259,22 @@ export class SessionManager {
 		executionContext?: SessionExecutionContext;
 	}): Promise<SessionSummary> {
 		const backend = this.resolveBackend(options.backendId);
-		const executionContext = await this.resolveSessionExecutionContext(options);
-		const effectiveCwd = executionContext.cwd;
-		const workspaceRootCwd = executionContext.workspaceRootCwd;
-		const worktreeSourceCwd = executionContext.worktreeSourceCwd;
-		const worktreeBranch = executionContext.worktreeBranch;
-		const connection = await this.acquireConnection(backend);
-
-		try {
-			const selection = buildTeamMcpSessionSelection({
-				capabilities: connection.getSessionCapabilities(),
-				agentTeamId: options.agentTeamId,
-				memberId: options.memberId,
-			});
-			const session = await connection.createSession({
-				cwd: effectiveCwd,
-				teamMcpDeclaration: selection.declaration,
-				teamMcpTransport: selection.transport,
-				teamMcpHandlers: this.teamRuntime.mcpRouter,
-			});
-			connection.setPermissionHandler((params) =>
-				this.handlePermissionRequest(session.sessionId, params),
-			);
-
-			const now = new Date();
-			const agentInfo = connection.getAgentInfo();
-			const { modelId, modelName, availableModels } = resolveModelState(
-				session.models,
-			);
-			const { modeId, modeName, availableModes } = resolveModeState(
-				session.modes,
-			);
-			const hasExplicitTitle = !!options.title;
-			const sessionTitle = options.title ?? `Session ${this.sessions.size + 1}`;
-			const { revision } = this.walStore.ensureSession({
-				sessionId: session.sessionId,
-				machineId: this.config.machineId,
-				backendId: backend.id,
-				cwd: effectiveCwd,
-				title: sessionTitle,
-				isTitlePinned: hasExplicitTitle,
-			});
-
-			if (this.cryptoService) {
-				this.cryptoService.initSessionDek(session.sessionId);
-			}
-
-			const record: SessionRecord = {
-				sessionId: session.sessionId,
-				title: sessionTitle,
-				backendId: backend.id,
-				backendLabel: backend.label,
-				connection,
-				createdAt: now,
-				updatedAt: now,
-				cwd: effectiveCwd,
-				workspaceRootCwd,
-				worktreeSourceCwd,
-				worktreeBranch,
-				agentName: agentInfo?.title ?? agentInfo?.name,
-				modelId,
-				modelName,
-				modeId,
-				modeName,
-				availableModes,
-				availableModels,
-				availableCommands: undefined,
-				revision,
-				isTitlePinned: hasExplicitTitle,
-			};
-			record.unsubscribe = connection.onSessionUpdate(
-				(notification: SessionNotification) => {
-					record.updatedAt = new Date();
-					this.writeSessionUpdateToWal(record, notification);
-					this.applySessionUpdateToRecord(record, notification);
+		return this.enqueueBackendLifecycle(backend.id, () =>
+			this.createSessionOnBackend(
+				{
+					cwd: options.cwd,
+					title: options.title,
+					backendId: options.backendId,
+					worktree: options.worktree,
+					executionContext: options.executionContext,
+					team: {
+						agentTeamId: options.agentTeamId,
+						memberId: options.memberId,
+					},
 				},
-			);
-			record.unsubscribeTerminal = connection.onTerminalOutput((event) => {
-				this.writeAndEmitEvent(
-					record.sessionId,
-					record.revision,
-					"terminal_output",
-					event,
-				);
-			});
-			connection.onStatusChange((status) => {
-				if (status.error) {
-					this.writeAndEmitEvent(
-						record.sessionId,
-						record.revision,
-						"session_error",
-						{
-							error: status.error,
-						},
-					);
-					this.emitSessionDetached(session.sessionId, "agent_exit");
-				}
-			});
-			this.agentTeamStore.updateTeamMemberRuntime({
-				agentTeamId: options.agentTeamId,
-				memberId: options.memberId,
-				sessionId: session.sessionId,
-				lifecycle: "running",
-				worktreeSourceCwd,
-				worktreeBranch,
-			});
-			this.sessions.set(session.sessionId, record);
-			const summary = this.buildSummary(record);
-			this.emitSessionsChanged({ added: [summary], updated: [], removed: [] });
-			this.emitSessionAttached(session.sessionId);
-			return summary;
-		} catch (error) {
-			await connection.disconnect();
-			throw error;
-		}
+				backend,
+			),
+		).catch(translateAgentAuthenticationRequired);
 	}
 
 	async createAgentTeamRun(
@@ -2353,6 +2342,16 @@ export class SessionManager {
 			this.emitCurrentAgentTeam(agentTeamId, "updated");
 			throw error;
 		}
+	}
+
+	listAgentTeams(
+		params: ListAgentTeamsRpcParams = {},
+	): ListAgentTeamsRpcResult {
+		return this.agentTeamStore.listAgentTeams(params);
+	}
+
+	getAgentTeam(params: GetAgentTeamRpcParams): GetAgentTeamRpcResult {
+		return this.agentTeamStore.getAgentTeam(params);
 	}
 
 	async spawnAgentTeamMember(input: {
