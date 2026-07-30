@@ -588,6 +588,30 @@ export class TeamRelayStore {
 		return this.requireRuntimeOutboxEntry(params.id);
 	}
 
+	deleteDeliveredRuntimeOutbox(params: {
+		deliveredBefore: string;
+		limit: number;
+	}): number {
+		const deliveredBefore = parseIsoTimestamp(
+			params.deliveredBefore,
+			"Runtime outbox delivery retention cutoff",
+		);
+		const limit = parseRuntimeOutboxLimit(params.limit, "cleanup");
+		return this.db
+			.query(`
+				DELETE FROM team_runtime_outbox
+				WHERE id IN (
+					SELECT id
+					FROM team_runtime_outbox
+					WHERE status = 'delivered' AND delivered_at < ?
+					ORDER BY delivered_at, id
+					LIMIT ?
+				)
+				AND status = 'delivered'
+			`)
+			.run(deliveredBefore, limit).changes;
+	}
+
 	close(): void {
 		this.db.close();
 	}
@@ -795,9 +819,17 @@ function parseIsoTimestamp(value: string, label: string): string {
 }
 
 function parseClaimLimit(value: number | undefined): number {
-	const limit = value ?? 100;
+	return parseRuntimeOutboxLimit(value ?? 100, "claim");
+}
+
+function parseRuntimeOutboxLimit(
+	limit: number,
+	operation: "claim" | "cleanup",
+): number {
 	if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
-		throw new Error("Runtime outbox claim limit must be between 1 and 100");
+		throw new Error(
+			`Runtime outbox ${operation} limit must be between 1 and 100`,
+		);
 	}
 	return limit;
 }

@@ -108,6 +108,12 @@ const TEAM_RUNTIME_OUTBOX_SCHEMA = `
 		);
 `;
 
+const TEAM_RUNTIME_OUTBOX_DELIVERED_INDEX_SCHEMA = `
+	CREATE INDEX IF NOT EXISTS idx_team_runtime_outbox_delivered
+		ON team_runtime_outbox (status, delivered_at, id)
+		WHERE status = 'delivered';
+`;
+
 const TEAM_RUNTIME_OUTBOX_BACKFILL_SCHEMA = `
 	-- Reconcile terminal events committed before this migration. A canonical
 	-- replay is safe because the leader relay journal is exactly-once by
@@ -244,6 +250,9 @@ function reconcileDivergentMigrationHistory(
 		);
 		db.exec(TEAM_RUNTIME_OUTBOX_SCHEMA);
 		installTeamRuntimeOutboxCapture(db, outboxMissing || captureTriggerMissing);
+	}
+	if (currentVersion >= 21 && tableExists(db, "team_runtime_outbox")) {
+		db.exec(TEAM_RUNTIME_OUTBOX_DELIVERED_INDEX_SCHEMA);
 	}
 }
 
@@ -721,6 +730,10 @@ const MIGRATIONS: readonly Migration[] = [
 			db.exec(TEAM_RUNTIME_OUTBOX_SCHEMA);
 			installTeamRuntimeOutboxCapture(db, true);
 		},
+	},
+	{
+		version: 21,
+		up: TEAM_RUNTIME_OUTBOX_DELIVERED_INDEX_SCHEMA,
 	},
 ];
 

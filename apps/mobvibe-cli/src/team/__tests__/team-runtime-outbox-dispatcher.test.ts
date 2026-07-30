@@ -74,7 +74,14 @@ describe("TeamRuntimeOutboxDispatcher", () => {
 			payload: { stopReason: "end_turn" },
 		});
 
-	const createDispatcher = () => {
+	const createDispatcher = (
+		overrides: {
+			cleanupBatchLimit?: number;
+			cleanupIntervalMs?: number;
+			deliveredRetentionMs?: number;
+			idleSweepIntervalMs?: number;
+		} = {},
+	) => {
 		dispatcher = new TeamRuntimeOutboxDispatcher({
 			store,
 			relay: {
@@ -92,6 +99,7 @@ describe("TeamRuntimeOutboxDispatcher", () => {
 			clearTimer: (handle) => {
 				(handle as TestTimer).cleared = true;
 			},
+			...overrides,
 		});
 		return dispatcher;
 	};
@@ -130,7 +138,9 @@ describe("TeamRuntimeOutboxDispatcher", () => {
 			},
 		});
 		expect(entry?.sourceSeq).toBe(terminalEvent.seq);
-		expect(activeTimers()).toHaveLength(0);
+		expect(activeTimers()).toEqual([
+			expect.objectContaining({ delayMs: 60_000, cleared: false }),
+		]);
 	});
 
 	test("parks a malformed ACK as a permanent protocol failure", async () => {
@@ -151,7 +161,9 @@ describe("TeamRuntimeOutboxDispatcher", () => {
 			}),
 		);
 		expect(calls).toHaveLength(1);
-		expect(activeTimers()).toHaveLength(0);
+		expect(activeTimers()).toEqual([
+			expect.objectContaining({ delayMs: 60_000, cleared: false }),
+		]);
 	});
 
 	test("retries an ambiguous transport failure with the exact operation", async () => {
@@ -267,7 +279,9 @@ describe("TeamRuntimeOutboxDispatcher", () => {
 				lastErrorCode: "AUTHORIZATION_FAILED",
 			}),
 		);
-		expect(activeTimers()).toHaveLength(0);
+		expect(activeTimers()).toEqual([
+			expect.objectContaining({ delayMs: 60_000, cleared: false }),
+		]);
 	});
 
 	test("coalesces overlapping wakeups into one relay call", async () => {
@@ -336,5 +350,77 @@ describe("TeamRuntimeOutboxDispatcher", () => {
 		expect(activeTimers()).toEqual([
 			expect.objectContaining({ delayMs: 30_000, cleared: false }),
 		]);
+	});
+
+	test("sweeps for durable work when a producer wakeup was missed", async () => {
+		await createDispatcher({ idleSweepIntervalMs: 60_000 }).start();
+		expect(activeTimers()).toEqual([
+			expect.objectContaining({ delayMs: 60_000, cleared: false }),
+		]);
+
+		appendTurnEnd();
+		now += 60_000;
+		fireTimer(activeTimers()[0] as TestTimer);
+		await dispatcher?.wake();
+
+		expect(calls).toHaveLength(1);
+		expect(store.listRuntimeOutbox()[0]).toEqual(
+			expect.objectContaining({ status: "delivered", attemptCount: 1 }),
+		);
+		expect(activeTimers()).toEqual([
+			expect.objectContaining({ delayMs: 60_000, cleared: false }),
+		]);
+	});
+
+	test("schedules maintenance at the configured cleanup deadline", async () => {
+		await createDispatcher({
+			cleanupIntervalMs: 10_000,
+			idleSweepIntervalMs: 60_000,
+		}).start();
+
+		expect(activeTimers()).toEqual([
+			expect.objectContaining({ delayMs: 10_000, cleared: false }),
+		]);
+	});
+
+	test("cleans one bounded batch of expired delivered entries per sweep", async () => {
+		appendTurnEnd();
+		appendTurnEnd();
+		for (const deliveredAt of [
+			"2098-12-20T00:00:00.000Z",
+			"2098-12-21T00:00:00.000Z",
+		]) {
+			const [claimed] = store.claimDueRuntimeOutbox({
+				now: "2098-12-01T00:00:00.000Z",
+				leaseExpiresAt: "2098-12-01T00:01:00.000Z",
+			});
+			if (!claimed) {
+				throw new Error("Expected a runtime completion claim");
+			}
+			store.markRuntimeOutboxDelivered({
+				id: claimed.id,
+				leaseId: claimed.leaseId,
+				deliveredAt,
+			});
+		}
+
+		await createDispatcher({
+			cleanupBatchLimit: 1,
+			deliveredRetentionMs: 24 * 60 * 60 * 1_000,
+			idleSweepIntervalMs: 60_000,
+		}).start();
+
+		expect(store.listRuntimeOutbox()).toHaveLength(1);
+		expect(store.listRuntimeOutbox()[0]).toEqual(
+			expect.objectContaining({
+				status: "delivered",
+				deliveredAt: "2098-12-21T00:00:00.000Z",
+			}),
+		);
+
+		now += 60_000;
+		fireTimer(activeTimers()[0] as TestTimer);
+		await dispatcher?.wake();
+		expect(store.listRuntimeOutbox()).toEqual([]);
 	});
 });

@@ -683,7 +683,7 @@ describe("Agent Team migrations", () => {
 			const schemaVersion = db
 				.query("SELECT MAX(version) AS version FROM schema_version")
 				.get() as { version: number };
-			expect(schemaVersion.version).toBe(20);
+			expect(schemaVersion.version).toBe(21);
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });
@@ -797,11 +797,22 @@ describe("Agent Team migrations", () => {
 						AND name = 'enqueue_team_runtime_after_turn_end'
 				`)
 				.get();
+			const runtimeDeliveredIndex = db
+				.query(`
+					SELECT name
+					FROM sqlite_master
+					WHERE type = 'index'
+						AND name = 'idx_team_runtime_outbox_delivered'
+				`)
+				.get();
 			expect(relayForeignKeys).toEqual([]);
 			expect(bindingForeignKeys).toEqual([]);
 			expect(runtimeOutboxForeignKeys).toEqual([]);
 			expect(runtimeCaptureTrigger).toEqual({
 				name: "enqueue_team_runtime_after_turn_end",
+			});
+			expect(runtimeDeliveredIndex).toEqual({
+				name: "idx_team_runtime_outbox_delivered",
 			});
 		} finally {
 			db.close();
@@ -1056,14 +1067,14 @@ describe("Agent Team migrations", () => {
 			const schemaVersion = db
 				.query("SELECT MAX(version) AS version FROM schema_version")
 				.get();
-			expect(schemaVersion).toEqual({ version: 20 });
+			expect(schemaVersion).toEqual({ version: 21 });
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
 
-	test("upgrades v18 through v20 without replacing leader facts or worker relay rows", () => {
+	test("upgrades v18 through v21 without replacing leader facts or worker relay rows", () => {
 		const tempDir = fs.mkdtempSync(
 			path.join(os.tmpdir(), "agent-team-migrate-v18-"),
 		);
@@ -1147,7 +1158,7 @@ describe("Agent Team migrations", () => {
 			).toEqual({ server_id: "server-worker", lifecycle: "creating" });
 			expect(
 				db.query("SELECT MAX(version) AS version FROM schema_version").get(),
-			).toEqual({ version: 20 });
+			).toEqual({ version: 21 });
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });
@@ -1166,7 +1177,7 @@ describe("Agent Team migrations", () => {
 			db.exec(`
 				DROP TRIGGER enqueue_team_runtime_after_turn_end;
 				DROP TABLE team_runtime_outbox;
-				DELETE FROM schema_version WHERE version = 20;
+				DELETE FROM schema_version WHERE version > 19;
 
 				INSERT INTO sessions (
 					session_id, machine_id, backend_id, current_revision,
@@ -1225,7 +1236,7 @@ describe("Agent Team migrations", () => {
 		}
 	});
 
-	test("does not resurrect cleared runtime work when reopening v20", () => {
+	test("adds the v21 cleanup index without resurrecting cleared runtime work", () => {
 		const tempDir = fs.mkdtempSync(
 			path.join(os.tmpdir(), "agent-team-reopen-v20-outbox-"),
 		);
@@ -1257,10 +1268,25 @@ describe("Agent Team migrations", () => {
 					'{"stopReason":"end_turn"}', '2026-01-01T00:00:01.000Z'
 				);
 				DELETE FROM team_runtime_outbox;
+				DROP INDEX idx_team_runtime_outbox_delivered;
+				DELETE FROM schema_version WHERE version = 21;
 			`);
 
 			expect(runMigrations(db)).toBe(20);
 			expect(db.query("SELECT id FROM team_runtime_outbox").all()).toEqual([]);
+			expect(
+				db
+					.query(`
+						SELECT name
+						FROM sqlite_master
+						WHERE type = 'index'
+							AND name = 'idx_team_runtime_outbox_delivered'
+					`)
+					.get(),
+			).toEqual({ name: "idx_team_runtime_outbox_delivered" });
+			expect(
+				db.query("SELECT MAX(version) AS version FROM schema_version").get(),
+			).toEqual({ version: 21 });
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });
@@ -1278,6 +1304,7 @@ describe("Agent Team migrations", () => {
 			runMigrations(db);
 			db.exec(`
 				DROP TRIGGER enqueue_team_runtime_after_turn_end;
+				DELETE FROM schema_version WHERE version = 21;
 				INSERT INTO sessions (
 					session_id, machine_id, backend_id, current_revision,
 					created_at, updated_at
@@ -1479,7 +1506,7 @@ describe("Agent Team migrations", () => {
 			const schemaVersion = db
 				.query("SELECT MAX(version) AS version FROM schema_version")
 				.get() as { version: number };
-			expect(schemaVersion.version).toBe(20);
+			expect(schemaVersion.version).toBe(21);
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });

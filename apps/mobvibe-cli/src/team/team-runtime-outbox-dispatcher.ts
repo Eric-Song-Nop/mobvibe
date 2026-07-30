@@ -14,11 +14,17 @@ const DEFAULT_LEASE_DURATION_MS = 120_000;
 const DEFAULT_RETRY_BASE_DELAY_MS = 1_000;
 const DEFAULT_UNKNOWN_OUTCOME_RETRY_BASE_DELAY_MS = 30_000;
 const DEFAULT_RETRY_MAX_DELAY_MS = 300_000;
+const DEFAULT_IDLE_SWEEP_INTERVAL_MS = 60_000;
+const DEFAULT_DELIVERED_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
+const DEFAULT_CLEANUP_INTERVAL_MS = 15 * 60 * 1_000;
+const DEFAULT_CLEANUP_BATCH_LIMIT = 100;
+const MIN_TIMER_DELAY_MS = 100;
 const STORE_RETRY_DELAY_MS = 1_000;
 
 type RuntimeOutboxStore = Pick<
 	TeamRelayStore,
 	| "claimDueRuntimeOutbox"
+	| "deleteDeliveredRuntimeOutbox"
 	| "failRuntimeOutbox"
 	| "getNextRuntimeOutboxDueAt"
 	| "markRuntimeOutboxDelivered"
@@ -51,6 +57,10 @@ export type TeamRuntimeOutboxDispatcherOptions = {
 	retryBaseDelayMs?: number;
 	unknownOutcomeRetryBaseDelayMs?: number;
 	retryMaxDelayMs?: number;
+	idleSweepIntervalMs?: number;
+	deliveredRetentionMs?: number;
+	cleanupIntervalMs?: number;
+	cleanupBatchLimit?: number;
 };
 
 export class TeamRuntimeOutboxDispatcher {
@@ -66,11 +76,16 @@ export class TeamRuntimeOutboxDispatcher {
 	private readonly retryBaseDelayMs: number;
 	private readonly unknownOutcomeRetryBaseDelayMs: number;
 	private readonly retryMaxDelayMs: number;
+	private readonly idleSweepIntervalMs: number;
+	private readonly deliveredRetentionMs: number;
+	private readonly cleanupIntervalMs: number;
+	private readonly cleanupBatchLimit: number;
 	private started = false;
 	private stopped = false;
 	private drainRequested = false;
 	private drainPromise?: Promise<void>;
 	private timerHandle?: unknown;
+	private nextCleanupAt?: number;
 
 	constructor(options: TeamRuntimeOutboxDispatcherOptions) {
 		this.store = options.store;
@@ -103,6 +118,21 @@ export class TeamRuntimeOutboxDispatcher {
 		this.retryMaxDelayMs = parsePositiveInteger(
 			options.retryMaxDelayMs ?? DEFAULT_RETRY_MAX_DELAY_MS,
 			"Runtime outbox maximum retry delay",
+		);
+		this.idleSweepIntervalMs = parsePositiveInteger(
+			options.idleSweepIntervalMs ?? DEFAULT_IDLE_SWEEP_INTERVAL_MS,
+			"Runtime outbox idle sweep interval",
+		);
+		this.deliveredRetentionMs = parsePositiveInteger(
+			options.deliveredRetentionMs ?? DEFAULT_DELIVERED_RETENTION_MS,
+			"Runtime outbox delivered retention",
+		);
+		this.cleanupIntervalMs = parsePositiveInteger(
+			options.cleanupIntervalMs ?? DEFAULT_CLEANUP_INTERVAL_MS,
+			"Runtime outbox cleanup interval",
+		);
+		this.cleanupBatchLimit = parseBoundedBatchLimit(
+			options.cleanupBatchLimit ?? DEFAULT_CLEANUP_BATCH_LIMIT,
 		);
 	}
 
@@ -147,6 +177,7 @@ export class TeamRuntimeOutboxDispatcher {
 	}
 
 	private async drain(): Promise<void> {
+		this.cleanupDelivered();
 		while (this.isActive()) {
 			this.drainRequested = false;
 			let entries: ClaimedTeamRuntimeOutboxEntry[];
@@ -169,7 +200,7 @@ export class TeamRuntimeOutboxDispatcher {
 				if (this.drainRequested) {
 					continue;
 				}
-				this.scheduleNextDue();
+				this.scheduleNextDueOrSweep();
 				return;
 			}
 
@@ -318,16 +349,50 @@ export class TeamRuntimeOutboxDispatcher {
 		});
 	}
 
-	private scheduleNextDue(): void {
+	private cleanupDelivered(): void {
 		if (!this.isActive()) {
 			return;
 		}
 		try {
-			const dueAt = this.store.getNextRuntimeOutboxDueAt();
-			if (dueAt === undefined) {
+			const now = this.currentTime().milliseconds;
+			if (this.nextCleanupAt !== undefined && now < this.nextCleanupAt) {
 				return;
 			}
-			this.scheduleAt(Date.parse(dueAt));
+			const deleted = this.store.deleteDeliveredRuntimeOutbox({
+				deliveredBefore: new Date(
+					now - this.deliveredRetentionMs,
+				).toISOString(),
+				limit: this.cleanupBatchLimit,
+			});
+			this.nextCleanupAt =
+				now +
+				(deleted === this.cleanupBatchLimit
+					? this.idleSweepIntervalMs
+					: this.cleanupIntervalMs);
+		} catch (error) {
+			this.reportInternalError(error);
+			try {
+				this.nextCleanupAt =
+					this.currentTime().milliseconds + this.idleSweepIntervalMs;
+			} catch {
+				this.nextCleanupAt = undefined;
+			}
+		}
+	}
+
+	private scheduleNextDueOrSweep(): void {
+		if (!this.isActive()) {
+			return;
+		}
+		try {
+			const sweepAt =
+				this.currentTime().milliseconds + this.idleSweepIntervalMs;
+			let nextWakeAt = Math.min(sweepAt, this.nextCleanupAt ?? sweepAt);
+			const dueAt = this.store.getNextRuntimeOutboxDueAt();
+			if (dueAt !== undefined) {
+				nextWakeAt = Math.min(nextWakeAt, Date.parse(dueAt));
+			}
+			this.scheduleAt(nextWakeAt);
 		} catch (error) {
 			this.reportInternalError(error);
 			this.scheduleAfter(STORE_RETRY_DELAY_MS);
@@ -343,7 +408,10 @@ export class TeamRuntimeOutboxDispatcher {
 			return;
 		}
 		this.clearScheduledTimer();
-		const delayMs = Math.max(0, timestamp - this.currentTime().milliseconds);
+		const delayMs = Math.max(
+			MIN_TIMER_DELAY_MS,
+			timestamp - this.currentTime().milliseconds,
+		);
 		let handle: unknown;
 		handle = this.setTimer(() => {
 			if (this.timerHandle !== handle) {
@@ -408,6 +476,13 @@ const calculateBackoff = (
 const parsePositiveInteger = (value: number, label: string): number => {
 	if (!Number.isSafeInteger(value) || value <= 0) {
 		throw new Error(`${label} must be a positive integer`);
+	}
+	return value;
+};
+
+const parseBoundedBatchLimit = (value: number): number => {
+	if (!Number.isSafeInteger(value) || value < 1 || value > 100) {
+		throw new Error("Runtime outbox cleanup limit must be between 1 and 100");
 	}
 	return value;
 };

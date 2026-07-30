@@ -595,6 +595,100 @@ describe("TeamRelayStore remote runtime outbox", () => {
 		).toThrow("claim is no longer active");
 	});
 
+	test("deletes only the oldest delivered runtime entries within a bounded batch", () => {
+		activateRemoteSession();
+		appendTurnEnd();
+		appendTurnEnd();
+		appendTurnEnd();
+		appendTurnEnd();
+
+		const claimNext = () => {
+			const [claimed] = store.claimDueRuntimeOutbox({
+				now: "2099-01-01T00:00:00.000Z",
+				leaseExpiresAt: "2099-01-01T00:01:00.000Z",
+			});
+			if (!claimed) {
+				throw new Error("Expected a runtime completion claim");
+			}
+			return claimed;
+		};
+
+		const first = claimNext();
+		store.markRuntimeOutboxDelivered({
+			id: first.id,
+			leaseId: first.leaseId,
+			deliveredAt: "2099-01-01T00:00:01.000Z",
+		});
+		const second = claimNext();
+		store.markRuntimeOutboxDelivered({
+			id: second.id,
+			leaseId: second.leaseId,
+			deliveredAt: "2099-01-01T00:00:02.000Z",
+		});
+		const failed = claimNext();
+		store.failRuntimeOutbox({
+			id: failed.id,
+			leaseId: failed.leaseId,
+			errorCode: "REMOTE_MEMBER_REJECTED",
+			failedAt: "2099-01-01T00:00:03.000Z",
+		});
+
+		expect(
+			store.deleteDeliveredRuntimeOutbox({
+				deliveredBefore: "2099-01-01T00:00:03.000Z",
+				limit: 1,
+			}),
+		).toBe(1);
+		expect(store.listRuntimeOutbox()).toEqual([
+			expect.objectContaining({ id: second.id, status: "delivered" }),
+			expect.objectContaining({ id: failed.id, status: "failed" }),
+			expect.objectContaining({ status: "pending" }),
+		]);
+
+		expect(
+			store.deleteDeliveredRuntimeOutbox({
+				deliveredBefore: "2099-01-01T00:00:03.000Z",
+				limit: 10,
+			}),
+		).toBe(1);
+		expect(store.listRuntimeOutbox()).toEqual([
+			expect.objectContaining({ id: failed.id, status: "failed" }),
+			expect.objectContaining({ status: "pending" }),
+		]);
+	});
+
+	test("validates cleanup bounds and keeps a delivery exactly at the cutoff", () => {
+		activateRemoteSession();
+		appendTurnEnd();
+		const [claimed] = store.claimDueRuntimeOutbox({
+			now: "2099-01-01T00:00:00.000Z",
+			leaseExpiresAt: "2099-01-01T00:01:00.000Z",
+		});
+		if (!claimed) {
+			throw new Error("Expected a runtime completion claim");
+		}
+		store.markRuntimeOutboxDelivered({
+			id: claimed.id,
+			leaseId: claimed.leaseId,
+			deliveredAt: "2099-01-01T00:00:01.000Z",
+		});
+
+		expect(
+			store.deleteDeliveredRuntimeOutbox({
+				deliveredBefore: "2099-01-01T00:00:01.000Z",
+				limit: 1,
+			}),
+		).toBe(0);
+		for (const limit of [0, 101, 1.5]) {
+			expect(() =>
+				store.deleteDeliveredRuntimeOutbox({
+					deliveredBefore: "2099-01-01T00:00:02.000Z",
+					limit,
+				}),
+			).toThrow("cleanup limit must be between 1 and 100");
+		}
+	});
+
 	test("preserves member FIFO when its worker session is replaced", () => {
 		activateRemoteSession("remote-session-old");
 		appendTurnEnd("remote-session-old");
