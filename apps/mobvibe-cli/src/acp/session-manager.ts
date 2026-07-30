@@ -39,6 +39,7 @@ import {
 	type SessionsChangedPayload,
 	type StopReason,
 	sanitizeWorktreeBranchForPath,
+	type TeamRelayExecuteRpcResult,
 	type TeamSourceRef,
 } from "@mobvibe/shared";
 import type { AcpBackendConfig, CliConfig } from "../config.js";
@@ -50,7 +51,20 @@ import {
 } from "../lib/git-utils.js";
 import { logger } from "../lib/logger.js";
 import { AgentTeamStore } from "../team/agent-team-store.js";
+import {
+	parseRemoteTeamBootstrapRequest,
+	type RemoteTeamBootstrapInput,
+} from "../team/remote-team-bootstrap.js";
+import { RemoteTeamMcpPort } from "../team/remote-team-mcp-port.js";
 import { buildTeamMcpSessionSelection } from "../team/team-capability.js";
+import { TeamMcpRouter } from "../team/team-mcp-router.js";
+import {
+	TeamRelayClient,
+	type TeamRelayWireTransport,
+} from "../team/team-relay-client.js";
+import { TeamRelayEndpoint } from "../team/team-relay-endpoint.js";
+import { TeamRelayProtocol } from "../team/team-relay-protocol.js";
+import { TeamRelayStore } from "../team/team-relay-store.js";
 import { TeamRuntime } from "../team/team-runtime.js";
 import type { SpawnMemberResult } from "../team/team-tool-handlers.js";
 import {
@@ -189,10 +203,37 @@ type SessionExecutionContext = {
 	worktreeBranch?: string;
 };
 
-type TeamSessionBinding = {
-	agentTeamId: string;
-	memberId: string;
-};
+type TeamSessionBinding =
+	| {
+			kind: "leader_local";
+			agentTeamId: string;
+			memberId: string;
+	  }
+	| {
+			kind: "remote_worker";
+			agentTeamId: string;
+			memberId: string;
+			serverId: string;
+			leaderMachineId: string;
+	  };
+
+type ResolvedTeamSessionBinding =
+	| {
+			kind: "leader_local";
+			agentTeamId: string;
+			memberId: string;
+			role: "leader" | "member";
+			backendId: string;
+	  }
+	| {
+			kind: "remote_worker";
+			agentTeamId: string;
+			memberId: string;
+			role: "member";
+			serverId: string;
+			leaderMachineId: string;
+			backendId: string;
+	  };
 
 const getSessionFallbackTitle = (sessionId: string) =>
 	`Session ${sessionId.slice(0, 8)}`;
@@ -539,7 +580,12 @@ export class SessionManager {
 	private readonly agentTeamChangedEmitter = new EventEmitter();
 	private readonly walStore: WalStore;
 	private readonly agentTeamStore: AgentTeamStore;
+	private readonly teamRelayStore: TeamRelayStore;
 	private readonly teamRuntime: TeamRuntime;
+	private readonly teamRelayClient?: TeamRelayClient;
+	private readonly remoteTeamMcpPort?: RemoteTeamMcpPort;
+	private readonly remoteTeamMcpRouter?: TeamMcpRouter;
+	private readonly teamRelayEndpoint?: TeamRelayEndpoint;
 	private readonly cryptoService?: CliCryptoService;
 	private readonly validateWorkspacePath: (cwd: string) => Promise<boolean>;
 	private readonly createGitWorktree: typeof createGitWorktree;
@@ -656,8 +702,13 @@ export class SessionManager {
 				throw error;
 			}
 		}
+		let agentTeamStore: AgentTeamStore | undefined;
+		let teamRelayStore: TeamRelayStore | undefined;
 		try {
-			this.agentTeamStore = new AgentTeamStore(config.walDbPath);
+			agentTeamStore = new AgentTeamStore(config.walDbPath);
+			teamRelayStore = new TeamRelayStore(config.walDbPath);
+			this.agentTeamStore = agentTeamStore;
+			this.teamRelayStore = teamRelayStore;
 			this.teamRuntime = new TeamRuntime({
 				store: this.agentTeamStore,
 				sessionManager: this,
@@ -670,9 +721,125 @@ export class SessionManager {
 					});
 				},
 			});
+			if (cryptoService) {
+				const protocol = new TeamRelayProtocol({
+					machineId: config.machineId,
+					cryptoService,
+				});
+				const client = new TeamRelayClient({ protocol });
+				const remoteMcpPort = new RemoteTeamMcpPort({
+					store: this.teamRelayStore,
+					relay: client,
+				});
+				this.teamRelayClient = client;
+				this.remoteTeamMcpPort = remoteMcpPort;
+				this.remoteTeamMcpRouter = new TeamMcpRouter({
+					port: remoteMcpPort,
+				});
+				this.teamRelayEndpoint = new TeamRelayEndpoint({
+					protocol,
+					store: this.teamRelayStore,
+					handlers: {
+						"member.bootstrap": (request) =>
+							this.bootstrapRemoteTeamSession(
+								parseRemoteTeamBootstrapRequest(request),
+							),
+					},
+				});
+			}
 		} catch (error) {
+			teamRelayStore?.close();
+			agentTeamStore?.close();
 			this.walStore.close();
 			throw error;
+		}
+	}
+
+	attachTeamRelayTransport(transport: TeamRelayWireTransport): void {
+		const client = this.teamRelayClient;
+		if (!client) {
+			throw createCapabilityNotSupportedError(
+				"Encrypted Team relay is not available",
+			);
+		}
+		client.attachTransport(transport);
+	}
+
+	async handleTeamRelayRequest(
+		params: unknown,
+	): Promise<TeamRelayExecuteRpcResult> {
+		const endpoint = this.teamRelayEndpoint;
+		if (!endpoint) {
+			throw createCapabilityNotSupportedError(
+				"Encrypted Team relay is not available",
+			);
+		}
+		return endpoint.handle(params);
+	}
+
+	private async bootstrapRemoteTeamSession(
+		input: RemoteTeamBootstrapInput,
+	): Promise<{
+		operationId: string;
+		serverId: string;
+		sessionId: string;
+	}> {
+		const backend = this.resolveBackend(input.backendId);
+		this.teamRelayStore.createRemoteSessionBinding({
+			serverId: input.serverId,
+			agentTeamId: input.agentTeamId,
+			memberId: input.memberId,
+			leaderMachineId: input.leaderMachineId,
+			backendId: backend.id,
+		});
+
+		let session: SessionSummary | undefined;
+		try {
+			session = await this.enqueueBackendLifecycle(backend.id, () =>
+				this.createSessionOnBackend(
+					{
+						cwd: input.cwd,
+						additionalDirectories: input.additionalDirectories,
+						backendId: backend.id,
+						team: {
+							kind: "remote_worker",
+							agentTeamId: input.agentTeamId,
+							memberId: input.memberId,
+							serverId: input.serverId,
+							leaderMachineId: input.leaderMachineId,
+						},
+					},
+					backend,
+				),
+			);
+			await this.waitForRemoteTeamToolsReady(input.serverId);
+			return {
+				operationId: input.operationId,
+				serverId: input.serverId,
+				sessionId: session.sessionId,
+			};
+		} catch (error) {
+			if (session) {
+				await this.cleanupFailedTeamSession({
+					agentTeamId: input.agentTeamId,
+					memberId: input.memberId,
+					sessionId: session.sessionId,
+				});
+			}
+			this.remoteTeamMcpPort?.forgetReadiness(input.serverId);
+			try {
+				this.teamRelayStore.failRemoteSessionBinding(input.serverId);
+			} catch (bindingError) {
+				logger.warn(
+					{
+						err: bindingError,
+						serverId: input.serverId,
+						operationId: input.operationId,
+					},
+					"remote_team_binding_failure_persist_failed",
+				);
+			}
+			return translateAgentAuthenticationRequired(error);
 		}
 	}
 
@@ -1645,7 +1812,7 @@ export class SessionManager {
 			updated: [summary],
 			removed: [],
 		});
-		const teamMember = this.findTeamMemberBySessionId(sessionId);
+		const teamMember = this.findLeaderLocalTeamMemberBySessionId(sessionId);
 		if (teamMember && teamMember.role !== "leader") {
 			void this.teamRuntime.onMemberTurnCompleted(
 				teamMember.agentTeamId,
@@ -2063,6 +2230,8 @@ export class SessionManager {
 		let recordRef: SessionRecord | undefined;
 		let observation: AgentSessionObservation | undefined;
 		let quarantinedSessionId: string | undefined;
+		let remoteSessionIdForCleanup: string | undefined;
+		let newRemoteWalSessionId: string | undefined;
 		const unsubscribe = connection.onSessionUpdate(
 			(notification: SessionNotification) => {
 				logger.debug(
@@ -2094,13 +2263,30 @@ export class SessionManager {
 						memberId: options.team.memberId,
 					})
 				: undefined;
+			if (
+				options.team?.kind === "remote_worker" &&
+				teamMcp?.declaration.serverId !== options.team.serverId
+			) {
+				throw new AppError(
+					createErrorDetail({
+						code: "REQUEST_VALIDATION_FAILED",
+						message: "Remote Team MCP server binding is invalid",
+						retryable: false,
+						scope: "session",
+					}),
+					409,
+				);
+			}
 			const session = await connection.createSession({
 				cwd: effectiveCwd,
 				additionalDirectories,
 				...(teamMcp
 					? {
 							teamMcpDeclaration: teamMcp.declaration,
-							teamMcpHandlers: this.teamRuntime.mcpRouter,
+							teamMcpHandlers:
+								options.team?.kind === "remote_worker"
+									? this.requireRemoteTeamMcpRouter()
+									: this.teamRuntime.mcpRouter,
 						}
 					: {}),
 			});
@@ -2114,6 +2300,9 @@ export class SessionManager {
 					}),
 					502,
 				);
+			}
+			if (options.team?.kind === "remote_worker") {
+				remoteSessionIdForCleanup = session.sessionId;
 			}
 			if (creationBuffer.error) {
 				throw creationBuffer.error;
@@ -2129,6 +2318,12 @@ export class SessionManager {
 					}),
 					409,
 				);
+			}
+			if (options.team?.kind === "remote_worker") {
+				this.teamRelayStore.activateRemoteSessionBinding({
+					serverId: options.team.serverId,
+					sessionId: session.sessionId,
+				});
 			}
 			connection.setPermissionHandler((params, requestId, signal) =>
 				this.handlePermissionRequest(
@@ -2152,6 +2347,9 @@ export class SessionManager {
 				options?.title ?? `Session ${this.sessions.size + 1}`;
 
 			// Initialize WAL session
+			const sessionIdWasKnown = this.currentSessionIncarnationIds.has(
+				session.sessionId,
+			);
 			const { revision } = this.walStore.ensureSession({
 				sessionId: session.sessionId,
 				machineId: this.config.machineId,
@@ -2161,6 +2359,9 @@ export class SessionManager {
 				title: sessionTitle,
 				isTitlePinned: hasExplicitTitle,
 			});
+			if (options.team?.kind === "remote_worker" && !sessionIdWasKnown) {
+				newRemoteWalSessionId = session.sessionId;
+			}
 			this.registerCurrentSessionIncarnation(session.sessionId);
 
 			// Initialize DEK for E2EE
@@ -2216,7 +2417,7 @@ export class SessionManager {
 				this.writeSessionUpdateToWal(record, event.notification);
 				this.applySessionUpdateToRecord(record, event.notification);
 			}
-			if (options.team) {
+			if (options.team?.kind === "leader_local") {
 				this.agentTeamStore.updateTeamMemberRuntime({
 					agentTeamId: options.team.agentTeamId,
 					memberId: options.team.memberId,
@@ -2234,6 +2435,7 @@ export class SessionManager {
 				removed: [],
 			});
 			this.emitSessionAttached(session.sessionId);
+			remoteSessionIdForCleanup = undefined;
 			return summary;
 		} catch (error) {
 			unsubscribe();
@@ -2245,17 +2447,33 @@ export class SessionManager {
 					"session_creation_failed_after_worktree_created",
 				);
 			}
-			if (quarantinedSessionId) {
+			const sessionIdToClean =
+				quarantinedSessionId ?? remoteSessionIdForCleanup;
+			if (sessionIdToClean) {
 				try {
 					if (connection.supportsSessionDelete()) {
-						await connection.deleteSession(quarantinedSessionId);
+						await connection.deleteSession(sessionIdToClean);
 					} else if (connection.supportsSessionClose()) {
-						await connection.closeSession(quarantinedSessionId);
+						await connection.closeSession(sessionIdToClean);
 					}
 				} catch (cleanupError) {
 					logger.warn(
-						{ err: cleanupError, sessionId: quarantinedSessionId },
+						{ err: cleanupError, sessionId: sessionIdToClean },
 						"quarantined_session_cleanup_failed",
+					);
+				}
+			}
+			if (newRemoteWalSessionId) {
+				try {
+					this.walStore.deleteSession(newRemoteWalSessionId);
+					this.cryptoService?.forgetSession(newRemoteWalSessionId);
+					this.discoveredSessions.delete(newRemoteWalSessionId);
+					this.currentSessionIncarnationIds.delete(newRemoteWalSessionId);
+					this.sessions.delete(newRemoteWalSessionId);
+				} catch (cleanupError) {
+					logger.warn(
+						{ err: cleanupError, sessionId: newRemoteWalSessionId },
+						"remote_team_wal_cleanup_failed",
 					);
 				}
 			}
@@ -2291,6 +2509,7 @@ export class SessionManager {
 					worktree: options.worktree,
 					executionContext: options.executionContext,
 					team: {
+						kind: "leader_local",
 						agentTeamId: options.agentTeamId,
 						memberId: options.memberId,
 					},
@@ -2599,6 +2818,58 @@ export class SessionManager {
 		);
 	}
 
+	private async waitForRemoteTeamToolsReady(serverId: string): Promise<void> {
+		const port = this.remoteTeamMcpPort;
+		if (!port) {
+			throw createCapabilityNotSupportedError(
+				"Encrypted Team relay is not available",
+			);
+		}
+		let timeout: NodeJS.Timeout | undefined;
+		try {
+			await Promise.race([
+				port.waitForReadiness(serverId),
+				new Promise<never>((_, reject) => {
+					timeout = setTimeout(
+						() =>
+							reject(
+								new AppError(
+									createErrorDetail({
+										code: "SESSION_NOT_READY",
+										message:
+											"Timed out waiting for remote Team MCP tools readiness",
+										retryable: true,
+										scope: "session",
+									}),
+									504,
+								),
+							),
+						5_000,
+					);
+				}),
+			]);
+		} catch (error) {
+			const readiness = port.getReadiness(serverId);
+			if (readiness?.phase === "degraded") {
+				throw new AppError(
+					readiness.lastError ??
+						createErrorDetail({
+							code: "CAPABILITY_NOT_SUPPORTED",
+							message: "Remote Team MCP tools are degraded",
+							retryable: true,
+							scope: "session",
+						}),
+					409,
+				);
+			}
+			throw error;
+		} finally {
+			if (timeout) {
+				clearTimeout(timeout);
+			}
+		}
+	}
+
 	private requireAgentTeam(agentTeamId: string) {
 		const team = this.agentTeamStore.getAgentTeam({ agentTeamId }).team;
 		if (!team) {
@@ -2620,11 +2891,12 @@ export class SessionManager {
 		});
 	}
 
-	private findTeamMemberBySessionId(sessionId: string):
+	private findLeaderLocalTeamMemberBySessionId(sessionId: string):
 		| {
 				agentTeamId: string;
 				memberId: string;
 				role: "leader" | "member";
+				backendId: string;
 		  }
 		| undefined {
 		for (const team of this.agentTeamStore.listAgentTeams().teams) {
@@ -2636,16 +2908,74 @@ export class SessionManager {
 				agentTeamId: team.agentTeamId,
 				memberId: member.memberId,
 				role: member.role,
+				backendId: member.backendId,
 			};
 		}
 		return undefined;
 	}
 
+	private findTeamSessionBinding(
+		sessionId: string,
+		backendId?: string,
+	): ResolvedTeamSessionBinding | undefined {
+		const local = this.findLeaderLocalTeamMemberBySessionId(sessionId);
+		if (local) {
+			if (backendId !== undefined && local.backendId !== backendId) {
+				return undefined;
+			}
+			return { kind: "leader_local", ...local };
+		}
+		const remote =
+			this.teamRelayStore.getRemoteSessionBindingBySessionId(sessionId);
+		if (
+			!remote ||
+			remote.lifecycle !== "active" ||
+			(backendId !== undefined && remote.backendId !== backendId)
+		) {
+			return undefined;
+		}
+		return {
+			kind: "remote_worker",
+			agentTeamId: remote.agentTeamId,
+			memberId: remote.memberId,
+			role: "member",
+			serverId: remote.serverId,
+			leaderMachineId: remote.leaderMachineId,
+			backendId: remote.backendId,
+		};
+	}
+
+	private requireRemoteTeamMcpRouter(): TeamMcpRouter {
+		if (!this.remoteTeamMcpRouter) {
+			throw createCapabilityNotSupportedError(
+				"Encrypted Team relay is not available",
+			);
+		}
+		return this.remoteTeamMcpRouter;
+	}
+
 	private buildTeamMcpOptionsForSession(
 		sessionId: string,
+		backendId: string,
 		capabilities: AgentSessionCapabilities,
 	): TeamMcpSessionOptions | undefined {
-		const member = this.findTeamMemberBySessionId(sessionId);
+		const local = this.findLeaderLocalTeamMemberBySessionId(sessionId);
+		const remote =
+			local === undefined
+				? this.teamRelayStore.getRemoteSessionBindingBySessionId(sessionId)
+				: undefined;
+		if (remote?.lifecycle === "active" && remote.backendId !== backendId) {
+			throw new AppError(
+				createErrorDetail({
+					code: "INSTANCE_AFFINITY_CHANGED",
+					message: "Remote Team session backend affinity changed",
+					retryable: false,
+					scope: "session",
+				}),
+				409,
+			);
+		}
+		const member = this.findTeamSessionBinding(sessionId, backendId);
 		if (!member) {
 			return undefined;
 		}
@@ -2654,9 +2984,26 @@ export class SessionManager {
 			agentTeamId: member.agentTeamId,
 			memberId: member.memberId,
 		});
+		if (
+			member.kind === "remote_worker" &&
+			selection.declaration.serverId !== member.serverId
+		) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Persisted remote Team MCP binding is invalid",
+					retryable: false,
+					scope: "session",
+				}),
+				409,
+			);
+		}
 		return {
 			teamMcpDeclaration: selection.declaration,
-			teamMcpHandlers: this.teamRuntime.mcpRouter,
+			teamMcpHandlers:
+				member.kind === "remote_worker"
+					? this.requireRemoteTeamMcpRouter()
+					: this.teamRuntime.mcpRouter,
 		};
 	}
 
@@ -2674,9 +3021,10 @@ export class SessionManager {
 
 	private selectTeamPermissionAllowOption(
 		sessionId: string,
+		backendId: string,
 		params: RequestPermissionRequest,
 	): RequestPermissionRequest["options"][number] | undefined {
-		if (!this.findTeamMemberBySessionId(sessionId)) {
+		if (!this.findTeamSessionBinding(sessionId, backendId)) {
 			return undefined;
 		}
 		return (
@@ -2733,10 +3081,13 @@ export class SessionManager {
 			return existing.promise;
 		}
 		const sessionRecord = this.sessions.get(sessionId);
-		const automaticAllowOption = this.selectTeamPermissionAllowOption(
-			sessionId,
-			params,
-		);
+		const automaticAllowOption = sessionRecord
+			? this.selectTeamPermissionAllowOption(
+					sessionId,
+					sessionRecord.backendId,
+					params,
+				)
+			: undefined;
 		if (sessionRecord && automaticAllowOption) {
 			return this.autoApproveTeamPermission(
 				sessionId,
@@ -3405,6 +3756,7 @@ export class SessionManager {
 		await Promise.all(Array.from(this.backendLifecycleTails.values()));
 		await this.closeAll();
 		this.agentTeamStore.close();
+		this.teamRelayStore.close();
 		this.walStore.close();
 	}
 
@@ -3914,6 +4266,7 @@ export class SessionManager {
 			}
 			const teamMcp = this.buildTeamMcpOptionsForSession(
 				sessionId,
+				backend.id,
 				this.backendCapabilities.get(backend.id) ??
 					connection.getSessionCapabilities(),
 			);
@@ -4183,6 +4536,7 @@ export class SessionManager {
 			logger.debug({ sessionId }, "load_session_calling_acp");
 			const teamMcp = this.buildTeamMcpOptionsForSession(
 				sessionId,
+				backend.id,
 				this.backendCapabilities.get(backend.id) ??
 					connection.getSessionCapabilities(),
 			);
@@ -4424,6 +4778,7 @@ export class SessionManager {
 		try {
 			const teamMcp = this.buildTeamMcpOptionsForSession(
 				sessionId,
+				existing.backendId,
 				this.backendCapabilities.get(existing.backendId) ??
 					existing.connection.getSessionCapabilities(),
 			);

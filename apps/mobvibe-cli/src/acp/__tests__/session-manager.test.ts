@@ -24,11 +24,20 @@ import {
 	isEncryptedPayload,
 	type PermissionDecisionPayload,
 	type PermissionRequestPayload,
+	type TeamRelayExecuteRpcParams,
+	type TeamRelayExecuteRpcResult,
 	unwrapDEK,
 } from "@mobvibe/shared";
 import type { CliConfig } from "../../config.js";
 import { CliCryptoService } from "../../e2ee/crypto-service.js";
 import type { AgentTeamStore } from "../../team/agent-team-store.js";
+import { buildTeamMcpServerId } from "../../team/team-capability.js";
+import type { TeamRelayWireTransport } from "../../team/team-relay-client.js";
+import {
+	TeamRelayProtocol,
+	TeamRelayRemoteError,
+} from "../../team/team-relay-protocol.js";
+import type { TeamRelayStore } from "../../team/team-relay-store.js";
 import type { TeamRuntime } from "../../team/team-runtime.js";
 import { WalStore } from "../../wal/wal-store.js";
 import type { AcpBackendStatus, AcpConnection } from "../acp-connection.js";
@@ -100,8 +109,15 @@ class SessionManager extends BaseSessionManager {
 type SessionManagerTeamInternals = {
 	agentTeamStore: AgentTeamStore;
 	permissionRequests: Map<string, unknown>;
+	teamRelayStore: TeamRelayStore;
 	teamRuntime: TeamRuntime;
+	walStore: WalStore;
 	waitForTeamToolsReady(agentTeamId: string, memberId: string): Promise<void>;
+};
+
+type SessionManagerTeamRelayApi = {
+	attachTeamRelayTransport(transport: TeamRelayWireTransport): void;
+	handleTeamRelayRequest(params: unknown): Promise<TeamRelayExecuteRpcResult>;
 };
 
 /**
@@ -389,6 +405,109 @@ describe("SessionManager", () => {
 		sessionManager.createConnection = () =>
 			mockConnection as unknown as AcpConnection;
 	});
+
+	const expectedRemoteTeamTools = [
+		"mobvibe_team_send_message",
+		"mobvibe_team_members",
+		"mobvibe_team_spawn_member",
+		"mobvibe_team_task_create",
+		"mobvibe_team_task_list",
+		"mobvibe_team_task_update",
+	];
+
+	const prepareEncryptedRemoteWorker = async () => {
+		await initCrypto();
+		await sessionManager.shutdown();
+
+		const workerCrypto = new CliCryptoService(new Uint8Array(32).fill(42));
+		const leaderCrypto = new CliCryptoService(new Uint8Array(32).fill(41));
+		sessionManager = new SessionManager(mockConfig, workerCrypto, {
+			validateWorkspacePath: async () => true,
+		});
+		mockConnection = createMockConnection();
+		sessionManager.createConnection = () =>
+			mockConnection as unknown as AcpConnection;
+
+		const workerProtocol = new TeamRelayProtocol({
+			machineId: mockConfig.machineId,
+			cryptoService: workerCrypto,
+		});
+		const leaderProtocol = new TeamRelayProtocol({
+			machineId: "leader-machine",
+			cryptoService: leaderCrypto,
+		});
+		const transport: TeamRelayWireTransport = {
+			placeTeamRelayPeer: () =>
+				Promise.resolve({
+					targetMachineId: leaderProtocol.machineId,
+					relayKey: leaderProtocol.relayKey,
+				}),
+			resolveTeamRelayPeer: ({ targetMachineId }) =>
+				Promise.resolve({
+					targetMachineId,
+					relayKey: leaderProtocol.relayKey,
+				}),
+			sendTeamRelay: () =>
+				Promise.reject(new Error("Unexpected outgoing Team relay")),
+		};
+		const relayApi = sessionManager as unknown as SessionManagerTeamRelayApi;
+		relayApi.attachTeamRelayTransport(transport);
+		return {
+			internals: sessionManager as unknown as SessionManagerTeamInternals,
+			leaderProtocol,
+			relayApi,
+			workerProtocol,
+		};
+	};
+
+	const createRemoteBootstrapFixture = (
+		operationId: string,
+		suffix: string,
+	) => {
+		const agentTeamId = `remote-team-${suffix}`;
+		const memberId = `remote-member-${suffix}`;
+		return {
+			operationId,
+			agentTeamId,
+			memberId,
+			serverId: buildTeamMcpServerId({ agentTeamId, memberId }),
+			backendId: "backend-1",
+			cwd: "/home/user/project",
+			additionalDirectories: ["/home/user/shared"],
+		};
+	};
+
+	const sealRemoteBootstrap = (
+		harness: Awaited<ReturnType<typeof prepareEncryptedRemoteWorker>>,
+		fixture: ReturnType<typeof createRemoteBootstrapFixture>,
+	): TeamRelayExecuteRpcParams => {
+		const sealed = harness.leaderProtocol.sealRequest({
+			operationId: fixture.operationId,
+			operation: "member.bootstrap",
+			targetMachineId: harness.workerProtocol.machineId,
+			targetRelayKey: harness.workerProtocol.relayKey,
+			payload: fixture,
+		});
+		return {
+			operationId: fixture.operationId,
+			sourceMachineId: harness.leaderProtocol.machineId,
+			sourceRelayKey: harness.leaderProtocol.relayKey,
+			ciphertext: sealed.ciphertext,
+		};
+	};
+
+	const openRemoteBootstrapResponse = (
+		harness: Awaited<ReturnType<typeof prepareEncryptedRemoteWorker>>,
+		operationId: string,
+		response: TeamRelayExecuteRpcResult,
+	): unknown =>
+		harness.leaderProtocol.openResponse({
+			operationId,
+			operation: "member.bootstrap",
+			targetMachineId: harness.workerProtocol.machineId,
+			targetRelayKey: harness.workerProtocol.relayKey,
+			ciphertext: response.ciphertext,
+		});
 
 	describe("Agent-managed authentication", () => {
 		it("probes capabilities without creating a session", async () => {
@@ -5430,6 +5549,455 @@ describe("SessionManager", () => {
 					health: "error",
 					error: expect.objectContaining({ code: "INTERNAL_ERROR" }),
 				}),
+			);
+		});
+	});
+
+	describe("remote Team worker bootstrap", () => {
+		it("persists a creating binding before ACP session/new and activates it without local Team facts", async () => {
+			const harness = await prepareEncryptedRemoteWorker();
+			const fixture = createRemoteBootstrapFixture(
+				"bootstrap-before-session-new",
+				"ordering",
+			);
+			mockConnection.getSessionCapabilities.mockReturnValue({
+				list: true,
+				load: true,
+				resume: true,
+				close: true,
+				mcp: { acp: true },
+			});
+			let bindingDuringCreate:
+				| ReturnType<TeamRelayStore["getRemoteSessionBindingByServerId"]>
+				| undefined;
+			let bindingDuringPermissionRegistration:
+				| ReturnType<TeamRelayStore["getRemoteSessionBindingByServerId"]>
+				| undefined;
+			let createParams: unknown;
+			mockConnection.createSession.mockImplementationOnce(
+				async (...args: unknown[]) => {
+					createParams = args[0];
+					bindingDuringCreate =
+						harness.internals.teamRelayStore.getRemoteSessionBindingByServerId(
+							fixture.serverId,
+						);
+					bindTeamMcpForTest(args[0], expectedRemoteTeamTools);
+					return {
+						sessionId: "remote-worker-session-ordering",
+						modes: null,
+						configOptions: null,
+					};
+				},
+			);
+			mockConnection.setPermissionHandler.mockImplementationOnce((handler) => {
+				permissionHandlerCallback = handler;
+				bindingDuringPermissionRegistration =
+					harness.internals.teamRelayStore.getRemoteSessionBindingByServerId(
+						fixture.serverId,
+					);
+			});
+			const request = sealRemoteBootstrap(harness, fixture);
+
+			const response = await harness.relayApi.handleTeamRelayRequest(request);
+
+			expect(
+				openRemoteBootstrapResponse(harness, fixture.operationId, response),
+			).toEqual(
+				expect.objectContaining({
+					sessionId: "remote-worker-session-ordering",
+				}),
+			);
+			expect(bindingDuringCreate).toEqual(
+				expect.objectContaining({
+					serverId: fixture.serverId,
+					agentTeamId: fixture.agentTeamId,
+					memberId: fixture.memberId,
+					leaderMachineId: harness.leaderProtocol.machineId,
+					backendId: fixture.backendId,
+					lifecycle: "creating",
+					sessionId: undefined,
+				}),
+			);
+			expect(createParams).toEqual(
+				expect.objectContaining({
+					cwd: fixture.cwd,
+					additionalDirectories: fixture.additionalDirectories,
+					teamMcpDeclaration: expect.objectContaining({
+						type: "acp",
+						serverId: fixture.serverId,
+					}),
+					teamMcpHandlers: expect.any(Object),
+				}),
+			);
+			expect(
+				(
+					createParams as {
+						teamMcpHandlers?: unknown;
+					}
+				).teamMcpHandlers,
+			).not.toBe(harness.internals.teamRuntime.mcpRouter);
+			expect(
+				harness.internals.teamRelayStore.getRemoteSessionBindingByServerId(
+					fixture.serverId,
+				),
+			).toEqual(
+				expect.objectContaining({
+					sessionId: "remote-worker-session-ordering",
+					lifecycle: "active",
+				}),
+			);
+			expect(bindingDuringPermissionRegistration?.lifecycle).toBe("active");
+			const replay = await harness.relayApi.handleTeamRelayRequest(request);
+			expect(
+				openRemoteBootstrapResponse(harness, fixture.operationId, replay),
+			).toEqual(
+				openRemoteBootstrapResponse(harness, fixture.operationId, response),
+			);
+			expect(mockConnection.createSession).toHaveBeenCalledTimes(1);
+			expect(harness.internals.agentTeamStore.listAgentTeams().teams).toEqual(
+				[],
+			);
+		});
+
+		it("auto-approves permissions for an active remote member binding", async () => {
+			const harness = await prepareEncryptedRemoteWorker();
+			const fixture = createRemoteBootstrapFixture(
+				"bootstrap-remote-permission",
+				"permission",
+			);
+			prepareTeamSessionConnection(
+				mockConnection,
+				"remote-worker-session-permission",
+				expectedRemoteTeamTools,
+			);
+			const response = await harness.relayApi.handleTeamRelayRequest(
+				sealRemoteBootstrap(harness, fixture),
+			);
+			openRemoteBootstrapResponse(harness, fixture.operationId, response);
+			const permissionRequests: PermissionRequestPayload[] = [];
+			sessionManager.onPermissionRequest((payload) => {
+				permissionRequests.push(payload);
+			});
+
+			const decision = await requirePermissionHandler()(
+				{
+					sessionId: "remote-worker-session-permission",
+					toolCall: {
+						toolCallId: "remote-member-tool",
+						title: "Remote member tool",
+					},
+					options: [
+						{
+							optionId: "remote-reject",
+							name: "Reject",
+							kind: "reject_once",
+						},
+						{
+							optionId: "remote-allow-always",
+							name: "Always allow",
+							kind: "allow_always",
+						},
+					],
+				},
+				"remote-member-permission",
+				new AbortController().signal,
+			);
+
+			expect(decision).toEqual({
+				outcome: {
+					outcome: "selected",
+					optionId: "remote-allow-always",
+				},
+			});
+			expect(permissionRequests).toEqual([]);
+			expect(harness.internals.permissionRequests.size).toBe(0);
+			expect(
+				harness.internals.teamRelayStore.getRemoteSessionBindingBySessionId(
+					"remote-worker-session-permission",
+				),
+			).toEqual(
+				expect.objectContaining({
+					agentTeamId: fixture.agentTeamId,
+					memberId: fixture.memberId,
+					lifecycle: "active",
+				}),
+			);
+			expect(harness.internals.agentTeamStore.listAgentTeams().teams).toEqual(
+				[],
+			);
+		});
+
+		it("marks the remote binding failed when ACP session creation fails without leaking leader Team projections", async () => {
+			const harness = await prepareEncryptedRemoteWorker();
+			const fixture = createRemoteBootstrapFixture(
+				"bootstrap-session-failure",
+				"failure",
+			);
+			mockConnection.getSessionCapabilities.mockReturnValue({
+				list: true,
+				load: true,
+				close: true,
+				mcp: { acp: true },
+			});
+			mockConnection.createSession.mockRejectedValueOnce(
+				new Error("worker provider refused session"),
+			);
+
+			const response = await harness.relayApi.handleTeamRelayRequest(
+				sealRemoteBootstrap(harness, fixture),
+			);
+			let remoteError: unknown;
+			try {
+				openRemoteBootstrapResponse(harness, fixture.operationId, response);
+			} catch (error) {
+				remoteError = error;
+			}
+
+			expect(remoteError).toBeInstanceOf(TeamRelayRemoteError);
+			expect((remoteError as TeamRelayRemoteError).detail.code).toBe(
+				"INTERNAL_ERROR",
+			);
+			expect(
+				harness.internals.teamRelayStore.getRemoteSessionBindingByServerId(
+					fixture.serverId,
+				),
+			).toEqual(
+				expect.objectContaining({
+					lifecycle: "failed",
+					sessionId: undefined,
+				}),
+			);
+			expect(harness.internals.agentTeamStore.listAgentTeams().teams).toEqual(
+				[],
+			);
+			expect(sessionManager.listSessions()).toEqual([]);
+			expect(mockConnection.disconnect).toHaveBeenCalledTimes(1);
+		});
+
+		it("rolls back a newly created worker WAL session when post-session setup fails", async () => {
+			const harness = await prepareEncryptedRemoteWorker();
+			const fixture = createRemoteBootstrapFixture(
+				"bootstrap-post-session-failure",
+				"post-session-failure",
+			);
+			const sessionId = "remote-worker-session-post-failure";
+			mockConnection.getSessionCapabilities.mockReturnValue({
+				list: true,
+				load: true,
+				close: true,
+				delete: true,
+				mcp: { acp: true },
+			});
+			mockConnection.createSession.mockImplementationOnce(
+				async (...args: unknown[]) => {
+					bindTeamMcpForTest(args[0], expectedRemoteTeamTools);
+					return {
+						sessionId,
+						modes: null,
+						configOptions: null,
+					};
+				},
+			);
+			mockConnection.onTerminalOutput.mockImplementationOnce(() => {
+				throw new Error("terminal subscription failed");
+			});
+
+			const response = await harness.relayApi.handleTeamRelayRequest(
+				sealRemoteBootstrap(harness, fixture),
+			);
+			expect(() =>
+				openRemoteBootstrapResponse(harness, fixture.operationId, response),
+			).toThrow(TeamRelayRemoteError);
+
+			expect(mockConnection.deleteSession).toHaveBeenCalledWith(sessionId);
+			expect(mockConnection.disconnect).toHaveBeenCalledTimes(1);
+			expect(harness.internals.walStore.getSession(sessionId)).toBeNull();
+			expect(
+				harness.internals.teamRelayStore.getRemoteSessionBindingByServerId(
+					fixture.serverId,
+				)?.lifecycle,
+			).toBe("failed");
+			expect(sessionManager.listSessions()).toEqual([]);
+		});
+
+		it("fails the binding before ACP session/new when native MCP-over-ACP is unavailable", async () => {
+			const harness = await prepareEncryptedRemoteWorker();
+			const fixture = createRemoteBootstrapFixture(
+				"bootstrap-mcp-unsupported",
+				"unsupported",
+			);
+			mockConnection.getSessionCapabilities.mockReturnValue({
+				list: true,
+				load: true,
+				close: true,
+				mcp: { acp: false, http: false, sse: false },
+			});
+
+			const response = await harness.relayApi.handleTeamRelayRequest(
+				sealRemoteBootstrap(harness, fixture),
+			);
+			let remoteError: unknown;
+			try {
+				openRemoteBootstrapResponse(harness, fixture.operationId, response);
+			} catch (error) {
+				remoteError = error;
+			}
+
+			expect(remoteError).toBeInstanceOf(TeamRelayRemoteError);
+			expect((remoteError as TeamRelayRemoteError).detail.code).toBe(
+				"CAPABILITY_NOT_SUPPORTED",
+			);
+			expect(mockConnection.createSession).not.toHaveBeenCalled();
+			expect(
+				harness.internals.teamRelayStore.getRemoteSessionBindingByServerId(
+					fixture.serverId,
+				),
+			).toEqual(
+				expect.objectContaining({
+					lifecycle: "failed",
+					sessionId: undefined,
+				}),
+			);
+			expect(harness.internals.agentTeamStore.listAgentTeams().teams).toEqual(
+				[],
+			);
+		});
+
+		it("rejects remote MCP restore through a different backend affinity", async () => {
+			mockConfig.acpBackends.push({
+				id: "backend-2",
+				label: "Other Agent",
+				command: "other-agent",
+				args: [],
+			});
+			const harness = await prepareEncryptedRemoteWorker();
+			const fixture = createRemoteBootstrapFixture(
+				"bootstrap-backend-affinity",
+				"backend-affinity",
+			);
+			prepareTeamSessionConnection(
+				mockConnection,
+				"remote-worker-session-backend-affinity",
+				expectedRemoteTeamTools,
+			);
+			const response = await harness.relayApi.handleTeamRelayRequest(
+				sealRemoteBootstrap(harness, fixture),
+			);
+			openRemoteBootstrapResponse(harness, fixture.operationId, response);
+			await sessionManager.closeSession(
+				"remote-worker-session-backend-affinity",
+			);
+			mockConnection.loadSession.mockClear();
+
+			try {
+				await sessionManager.loadSession(
+					"remote-worker-session-backend-affinity",
+					fixture.cwd,
+					"backend-2",
+					fixture.additionalDirectories,
+				);
+				throw new Error("Expected remote backend affinity mismatch");
+			} catch (error) {
+				expect(error).toBeInstanceOf(AppError);
+				expect((error as AppError).detail.code).toBe(
+					"INSTANCE_AFFINITY_CHANGED",
+				);
+			}
+			expect(mockConnection.loadSession).not.toHaveBeenCalled();
+			expect(
+				harness.internals.teamRelayStore.getRemoteSessionBindingBySessionId(
+					"remote-worker-session-backend-affinity",
+				)?.lifecycle,
+			).toBe("active");
+		});
+
+		it("restores the remote MCP router for reload, resume, and load", async () => {
+			const harness = await prepareEncryptedRemoteWorker();
+			const fixture = createRemoteBootstrapFixture(
+				"bootstrap-remote-restore",
+				"restore",
+			);
+			mockConnection.getSessionCapabilities.mockReturnValue({
+				list: true,
+				load: true,
+				resume: true,
+				close: true,
+				mcp: { acp: true },
+			});
+			mockConnection.createSession.mockImplementationOnce(
+				async (...args: unknown[]) => {
+					bindTeamMcpForTest(args[0], expectedRemoteTeamTools);
+					return {
+						sessionId: "remote-worker-session-restore",
+						modes: null,
+						configOptions: null,
+					};
+				},
+			);
+			const response = await harness.relayApi.handleTeamRelayRequest(
+				sealRemoteBootstrap(harness, fixture),
+			);
+			openRemoteBootstrapResponse(harness, fixture.operationId, response);
+
+			const expectRemoteMcpOptions = (options: unknown) => {
+				expect(options).toEqual(
+					expect.objectContaining({
+						teamMcpDeclaration: expect.objectContaining({
+							type: "acp",
+							serverId: fixture.serverId,
+						}),
+						teamMcpHandlers: expect.any(Object),
+					}),
+				);
+				expect(
+					(options as { teamMcpHandlers?: unknown }).teamMcpHandlers,
+				).not.toBe(harness.internals.teamRuntime.mcpRouter);
+			};
+
+			await sessionManager.reloadSession(
+				"remote-worker-session-restore",
+				fixture.cwd,
+				fixture.backendId,
+				fixture.additionalDirectories,
+			);
+			expectRemoteMcpOptions(
+				(mockConnection.loadSession.mock.calls as unknown as unknown[][]).at(
+					-1,
+				)?.[3],
+			);
+
+			await sessionManager.closeSession("remote-worker-session-restore");
+			await sessionManager.resumeSession(
+				"remote-worker-session-restore",
+				fixture.cwd,
+				fixture.backendId,
+				fixture.additionalDirectories,
+			);
+			expectRemoteMcpOptions(
+				(mockConnection.resumeSession.mock.calls as unknown as unknown[][]).at(
+					-1,
+				)?.[3],
+			);
+
+			await sessionManager.closeSession("remote-worker-session-restore");
+			await sessionManager.loadSession(
+				"remote-worker-session-restore",
+				fixture.cwd,
+				fixture.backendId,
+				fixture.additionalDirectories,
+			);
+			expectRemoteMcpOptions(
+				(mockConnection.loadSession.mock.calls as unknown as unknown[][]).at(
+					-1,
+				)?.[3],
+			);
+			expect(
+				harness.internals.teamRelayStore.getRemoteSessionBindingBySessionId(
+					"remote-worker-session-restore",
+				)?.lifecycle,
+			).toBe("active");
+			expect(harness.internals.agentTeamStore.listAgentTeams().teams).toEqual(
+				[],
 			);
 		});
 	});
