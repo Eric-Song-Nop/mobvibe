@@ -38,6 +38,7 @@ import type { CliConfig } from "../../config.js";
 import { CliCryptoService } from "../../e2ee/crypto-service.js";
 import type { AgentTeamStore } from "../../team/agent-team-store.js";
 import { buildTeamMcpServerId } from "../../team/team-capability.js";
+import { TEAM_COMMAND_ENVELOPE_VERSION } from "../../team/team-command-bus.js";
 import type { TeamRelayWireTransport } from "../../team/team-relay-client.js";
 import {
 	TeamRelayProtocol,
@@ -5575,6 +5576,86 @@ describe("SessionManager", () => {
 					serverId,
 				),
 			).toBeUndefined();
+		});
+
+		it("executes a remote member command only against the leader Team store", async () => {
+			const harness = await prepareEncryptedLeaderForRemoteSpawn();
+			const spawned = await sessionManager.spawnAgentTeamMember({
+				agentTeamId: harness.created.team.agentTeamId,
+				requestedByMemberId: harness.created.team.leaderMemberId,
+				name: "Remote Command Worker",
+				backendId: "backend-remote",
+			});
+			if (!spawned.ok) {
+				throw new Error("Expected remote member spawn to succeed");
+			}
+
+			const operationId = "remote-command-create-task";
+			const command = {
+				version: TEAM_COMMAND_ENVELOPE_VERSION,
+				operationId,
+				agentTeamId: harness.created.team.agentTeamId,
+				callerMemberId: spawned.memberId,
+				toolName: "mobvibe_team_task_create",
+				args: {
+					title: "Leader-owned remote task",
+					description: "Persist this only on the leader machine",
+				},
+			};
+			const sealed = harness.workerProtocol.sealRequest({
+				operationId,
+				operation: "team.command",
+				targetMachineId: harness.leaderProtocol.machineId,
+				targetRelayKey: harness.leaderProtocol.relayKey,
+				payload: command,
+			});
+			const response = await (
+				sessionManager as unknown as SessionManagerTeamRelayApi
+			).handleTeamRelayRequest({
+				operationId,
+				sourceMachineId: harness.workerProtocol.machineId,
+				sourceRelayKey: harness.workerProtocol.relayKey,
+				ciphertext: sealed.ciphertext,
+			});
+			const execution = harness.workerProtocol.openResponse({
+				operationId,
+				operation: "team.command",
+				targetMachineId: harness.leaderProtocol.machineId,
+				targetRelayKey: harness.leaderProtocol.relayKey,
+				ciphertext: response.ciphertext,
+			});
+
+			expect(execution).toEqual(
+				expect.objectContaining({
+					operationId,
+					result: expect.objectContaining({
+						caller: {
+							agentTeamId: harness.created.team.agentTeamId,
+							memberId: spawned.memberId,
+							role: "member",
+						},
+						toolName: "mobvibe_team_task_create",
+					}),
+				}),
+			);
+			const [storedTask] = harness.internals.agentTeamStore.listLocalTasks(
+				harness.created.team.agentTeamId,
+			);
+			expect(storedTask).toEqual(
+				expect.objectContaining({
+					agent_team_id: harness.created.team.agentTeamId,
+					owner_member_id: spawned.memberId,
+					status: "todo",
+				}),
+			);
+			if (!storedTask) {
+				throw new Error("Expected the leader to persist the remote task");
+			}
+			const storedBody: unknown = JSON.parse(storedTask.body_local_json);
+			expect(storedBody).toEqual({
+				title: "Leader-owned remote task",
+				description: "Persist this only on the leader machine",
+			});
 		});
 
 		it("treats remote bootstrap results containing leader-owned facts as outcome unknown", async () => {

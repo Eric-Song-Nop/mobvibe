@@ -51,6 +51,7 @@ import {
 } from "../lib/git-utils.js";
 import { logger } from "../lib/logger.js";
 import { AgentTeamStore } from "../team/agent-team-store.js";
+import { createLeaderTeamRelayHandlers } from "../team/leader-team-relay-handlers.js";
 import {
 	parseRemoteTeamBootstrapRequest,
 	parseRemoteTeamBootstrapResult,
@@ -756,6 +757,10 @@ export class SessionManager {
 					protocol,
 					store: this.teamRelayStore,
 					handlers: {
+						...createLeaderTeamRelayHandlers({
+							store: this.agentTeamStore,
+							dispatcher: this.teamRuntime.commandBus,
+						}),
 						"member.bootstrap": (request) =>
 							this.bootstrapRemoteTeamSession(
 								parseRemoteTeamBootstrapRequest(request),
