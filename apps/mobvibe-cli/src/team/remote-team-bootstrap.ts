@@ -12,6 +12,7 @@ import type { VerifiedTeamRelayRequest } from "./team-relay-protocol.js";
 export const REMOTE_TEAM_BOOTSTRAP_IDENTIFIER_MAX_BYTES = 256;
 export const REMOTE_TEAM_BOOTSTRAP_PATH_MAX_BYTES = 4096;
 export const REMOTE_TEAM_BOOTSTRAP_MAX_ADDITIONAL_DIRECTORIES = 64;
+export const REMOTE_TEAM_BOOTSTRAP_SESSION_ID_MAX_BYTES = 1024;
 
 const REMOTE_TEAM_BOOTSTRAP_SERVER_ID_MAX_BYTES =
 	"mobvibe-team::".length + REMOTE_TEAM_BOOTSTRAP_IDENTIFIER_MAX_BYTES * 2;
@@ -24,6 +25,7 @@ const BOOTSTRAP_PAYLOAD_KEYS = [
 	"cwd",
 	"additionalDirectories",
 ] as const;
+const BOOTSTRAP_RESULT_KEYS = ["operationId", "serverId", "sessionId"] as const;
 const INVALID_TEXT_PATTERN = /[\p{Cc}\p{Cs}]/u;
 const UTF8_ENCODER = new TextEncoder();
 
@@ -39,6 +41,12 @@ type RemoteTeamBootstrapPayload = {
 
 export type RemoteTeamBootstrapInput = RemoteTeamBootstrapPayload & {
 	leaderMachineId: string;
+};
+
+export type RemoteTeamBootstrapResult = {
+	operationId: string;
+	serverId: string;
+	sessionId: string;
 };
 
 export const parseRemoteTeamBootstrapRequest = (
@@ -79,6 +87,48 @@ export const parseRemoteTeamBootstrapRequest = (
 		...payload,
 		additionalDirectories: [...payload.additionalDirectories],
 		leaderMachineId: request.sourceMachineId,
+	};
+};
+
+export const parseRemoteTeamBootstrapResult = (
+	value: unknown,
+	expected: Pick<RemoteTeamBootstrapResult, "operationId" | "serverId">,
+): RemoteTeamBootstrapResult => {
+	if (!isRecord(value) || !hasExactKeys(value, BOOTSTRAP_RESULT_KEYS)) {
+		throw invalidBootstrapRequest("Invalid remote Team bootstrap result shape");
+	}
+	assertBoundedIdentifier(
+		value.operationId,
+		TEAM_RELAY_OPERATION_ID_MAX_BYTES,
+		"operationId",
+	);
+	assertBoundedIdentifier(
+		value.serverId,
+		REMOTE_TEAM_BOOTSTRAP_SERVER_ID_MAX_BYTES,
+		"serverId",
+	);
+	assertBoundedIdentifier(
+		value.sessionId,
+		REMOTE_TEAM_BOOTSTRAP_SESSION_ID_MAX_BYTES,
+		"sessionId",
+	);
+	if (value.sessionId.trim().length === 0) {
+		throw invalidBootstrapRequest("sessionId must not be blank");
+	}
+	if (value.operationId !== expected.operationId) {
+		throw invalidBootstrapRequest(
+			"Bootstrap result operationId binding is invalid",
+		);
+	}
+	if (value.serverId !== expected.serverId) {
+		throw invalidBootstrapRequest(
+			"Bootstrap result Team MCP server binding is invalid",
+		);
+	}
+	return {
+		operationId: value.operationId,
+		serverId: value.serverId,
+		sessionId: value.sessionId,
 	};
 };
 

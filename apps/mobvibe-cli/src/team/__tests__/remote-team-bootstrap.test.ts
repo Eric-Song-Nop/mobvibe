@@ -7,9 +7,11 @@ import {
 } from "@mobvibe/shared";
 import {
 	parseRemoteTeamBootstrapRequest,
+	parseRemoteTeamBootstrapResult,
 	REMOTE_TEAM_BOOTSTRAP_IDENTIFIER_MAX_BYTES,
 	REMOTE_TEAM_BOOTSTRAP_MAX_ADDITIONAL_DIRECTORIES,
 	REMOTE_TEAM_BOOTSTRAP_PATH_MAX_BYTES,
+	REMOTE_TEAM_BOOTSTRAP_SESSION_ID_MAX_BYTES,
 } from "../remote-team-bootstrap.js";
 import { buildTeamMcpServerId } from "../team-capability.js";
 import type { VerifiedTeamRelayRequest } from "../team-relay-protocol.js";
@@ -52,6 +54,29 @@ const expectInvalid = (request: VerifiedTeamRelayRequest): void => {
 	try {
 		parseRemoteTeamBootstrapRequest(request);
 		throw new Error("Expected bootstrap request validation to fail");
+	} catch (error) {
+		expect(error).toBeInstanceOf(AppError);
+		expect((error as AppError).detail).toEqual(
+			expect.objectContaining({
+				code: "REQUEST_VALIDATION_FAILED",
+				retryable: false,
+				scope: "request",
+			}),
+		);
+	}
+};
+
+const expectInvalidResult = (
+	result: unknown,
+	expected = {
+		operationId: "bootstrap-operation-1",
+		serverId:
+			"mobvibe-team:11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222",
+	},
+): void => {
+	try {
+		parseRemoteTeamBootstrapResult(result, expected);
+		throw new Error("Expected bootstrap result validation to fail");
 	} catch (error) {
 		expect(error).toBeInstanceOf(AppError);
 		expect((error as AppError).detail).toEqual(
@@ -337,5 +362,71 @@ describe("parseRemoteTeamBootstrapRequest", () => {
 		]) {
 			expectInvalid(createRequest({ payload }));
 		}
+	});
+});
+
+describe("parseRemoteTeamBootstrapResult", () => {
+	const expected = {
+		operationId: "bootstrap-operation-1",
+		serverId:
+			"mobvibe-team:11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222",
+	};
+	const result = {
+		...expected,
+		sessionId: "remote-acp-session-1",
+	};
+
+	test("returns the exact minimal result when operation and server bindings match", () => {
+		expect(parseRemoteTeamBootstrapResult(result, expected)).toEqual(result);
+	});
+
+	test.each([
+		["null", null],
+		["array", []],
+		["string", "result"],
+		["number", 1],
+	])("rejects a non-object result: %s", (_label, candidate) => {
+		expectInvalidResult(candidate);
+	});
+
+	test("requires exactly operationId, serverId, and sessionId", () => {
+		for (const field of ["operationId", "serverId", "sessionId"]) {
+			const candidate: Record<string, unknown> = { ...result };
+			delete candidate[field];
+			expectInvalidResult(candidate);
+		}
+		expectInvalidResult({ ...result, backendId: "backend-1" });
+		expectInvalidResult({ ...result, agentTeamId: "team-1" });
+		expectInvalidResult({ ...result, machineId: "worker-machine" });
+	});
+
+	test("rejects mismatched operation and MCP server bindings", () => {
+		expectInvalidResult({ ...result, operationId: "other-operation" });
+		expectInvalidResult({ ...result, serverId: "mobvibe-team:forged" });
+	});
+
+	test("rejects empty, control-bearing, and oversized session IDs", () => {
+		for (const sessionId of [
+			"",
+			"   ",
+			"remote\nsession",
+			"🚀".repeat(
+				Math.floor(REMOTE_TEAM_BOOTSTRAP_SESSION_ID_MAX_BYTES / 4) + 1,
+			),
+		]) {
+			expectInvalidResult({ ...result, sessionId });
+		}
+	});
+
+	test("measures the session ID limit in UTF-8 bytes", () => {
+		const sessionId = "🚀".repeat(
+			REMOTE_TEAM_BOOTSTRAP_SESSION_ID_MAX_BYTES / 4,
+		);
+		expect(
+			parseRemoteTeamBootstrapResult({ ...result, sessionId }, expected),
+		).toEqual({
+			...result,
+			sessionId,
+		});
 	});
 });
