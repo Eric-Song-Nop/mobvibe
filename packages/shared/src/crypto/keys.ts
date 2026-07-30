@@ -57,6 +57,17 @@ export function deriveContentKeyPair(masterSecret: Uint8Array): CryptoKeyPair {
 	return { publicKey: pk, secretKey: sk };
 }
 
+export function deriveTeamRelayKeyPair(
+	masterSecret: Uint8Array,
+): CryptoKeyPair {
+	ensureCryptoReady();
+	const seed = kdfDeriveFromKey(32, 3, "mobvteam", masterSecret);
+	const hash = sha512(seed);
+	const sk = hash.slice(0, 32);
+	const pk = nacl.scalarMult.base(sk);
+	return { publicKey: pk, secretKey: sk };
+}
+
 export function generateDEK(): Uint8Array {
 	ensureCryptoReady();
 	return nacl.randomBytes(32);

@@ -29,6 +29,7 @@ export {
 	decryptPayload,
 	deriveAuthKeyPair,
 	deriveContentKeyPair,
+	deriveTeamRelayKeyPair,
 	encryptPayload,
 	generateDEK,
 	generateMasterSecret,
@@ -337,6 +338,11 @@ export type {
 	StreamErrorPayload,
 	WebuiToGatewayEvents,
 } from "./types/socket-events.js";
+export type {
+	TeamRelayCiphertext,
+	TeamRelayPublicKey,
+} from "./types/team-relay.js";
+export { TEAM_RELAY_ENVELOPE_VERSION } from "./types/team-relay.js";
 // Validation utilities (Zod schemas from SDK)
 export { parseSessionNotification } from "./validation/acp-schemas.js";
 export {

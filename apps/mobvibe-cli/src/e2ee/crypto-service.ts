@@ -2,14 +2,19 @@ import type {
 	CryptoKeyPair,
 	EncryptedPayload,
 	SessionEvent,
+	TeamRelayCiphertext,
+	TeamRelayPublicKey,
 } from "@mobvibe/shared";
 import {
+	base64ToUint8,
 	decryptPayload,
 	deriveAuthKeyPair,
 	deriveContentKeyPair,
+	deriveTeamRelayKeyPair,
 	encryptPayload,
 	generateDEK,
 	isEncryptedPayload,
+	TEAM_RELAY_ENVELOPE_VERSION,
 	uint8ToBase64,
 	unwrapDEK,
 	wrapDEK,
@@ -23,6 +28,7 @@ export class CliCryptoService {
 	readonly authKeyPair: CryptoKeyPair;
 	readonly contentEncryptionEnabled: boolean;
 	private contentKeyPair: CryptoKeyPair;
+	private teamRelayKeyPair: CryptoKeyPair;
 	private sessionDeks = new Map<string, Uint8Array>();
 	private wrappedDekCache = new Map<string, string>();
 	private revisionDeks = new Map<string, Uint8Array>();
@@ -32,6 +38,7 @@ export class CliCryptoService {
 		this.authKeyPair = deriveAuthKeyPair(masterSecret);
 		this.contentEncryptionEnabled = options?.contentEncryptionEnabled !== false;
 		this.contentKeyPair = deriveContentKeyPair(masterSecret);
+		this.teamRelayKeyPair = deriveTeamRelayKeyPair(masterSecret);
 	}
 
 	/**
@@ -149,6 +156,63 @@ export class CliCryptoService {
 	/** A stable public identity for binding local durable state to this key. */
 	getKeyIdentity(): string {
 		return `ed25519:${this.getAuthPublicKeyBase64()}`;
+	}
+
+	getTeamRelayPublicKey(): TeamRelayPublicKey {
+		const publicKey = uint8ToBase64(this.teamRelayKeyPair.publicKey);
+		return {
+			version: TEAM_RELAY_ENVELOPE_VERSION,
+			keyId: `x25519:${publicKey}`,
+			publicKey,
+		};
+	}
+
+	encryptTeamRelay(
+		payload: unknown,
+		recipient: TeamRelayPublicKey,
+	): TeamRelayCiphertext {
+		if (
+			recipient.version !== TEAM_RELAY_ENVELOPE_VERSION ||
+			recipient.keyId !== `x25519:${recipient.publicKey}`
+		) {
+			throw new Error("Invalid Team relay recipient key");
+		}
+		const publicKey = base64ToUint8(recipient.publicKey);
+		if (publicKey.length !== 32) {
+			throw new Error("Invalid Team relay recipient key");
+		}
+		const dek = generateDEK();
+		try {
+			return {
+				version: TEAM_RELAY_ENVELOPE_VERSION,
+				recipientKeyId: recipient.keyId,
+				wrappedDek: wrapDEK(dek, publicKey),
+				payload: encryptPayload(payload, dek),
+			};
+		} finally {
+			dek.fill(0);
+		}
+	}
+
+	decryptTeamRelay<T>(ciphertext: TeamRelayCiphertext): T {
+		const ownKey = this.getTeamRelayPublicKey();
+		if (
+			ciphertext.version !== TEAM_RELAY_ENVELOPE_VERSION ||
+			ciphertext.recipientKeyId !== ownKey.keyId ||
+			!isEncryptedPayload(ciphertext.payload)
+		) {
+			throw new Error("Invalid Team relay ciphertext");
+		}
+		const dek = unwrapDEK(
+			ciphertext.wrappedDek,
+			this.teamRelayKeyPair.publicKey,
+			this.teamRelayKeyPair.secretKey,
+		);
+		try {
+			return decryptPayload(ciphertext.payload, dek) as T;
+		} finally {
+			dek.fill(0);
+		}
 	}
 
 	/** Validate a legacy sealed key without caching or exposing its plaintext. */

@@ -9,6 +9,7 @@ export {
 	base64ToUint8,
 	deriveAuthKeyPair,
 	deriveContentKeyPair,
+	deriveTeamRelayKeyPair,
 	generateDEK,
 	generateMasterSecret,
 	uint8ToBase64,
