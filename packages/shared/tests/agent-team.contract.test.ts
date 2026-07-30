@@ -4,11 +4,14 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 
 import type {
 	AgentTeamLifecycle,
+	AgentTeamListResult,
 	AgentTeamSummary,
 	AgentTeamsChangedPayload,
+	AgentTeamsRefreshRequiredPayload,
 	CreateAgentTeamRpcParams,
 	CreateAgentTeamRpcResult,
 	CreateSessionWorktreeOptions,
+	GatewayToWebuiEvents,
 	GetAgentTeamRpcParams,
 	GetAgentTeamRpcResult,
 	ListAgentTeamsRpcResult,
@@ -89,6 +92,10 @@ describe("Agent Team shared contract", () => {
 		expectTypeOf<ListAgentTeamsRpcResult>().toMatchTypeOf<{
 			teams: AgentTeamSummary[];
 		}>();
+		expectTypeOf<AgentTeamListResult>().toEqualTypeOf<{
+			teams: AgentTeamSummary[];
+			coveredLeaderMachineIds: string[];
+		}>();
 		expectTypeOf<GetAgentTeamRpcParams>().toMatchTypeOf<{
 			agentTeamId: string;
 		}>();
@@ -101,6 +108,12 @@ describe("Agent Team shared contract", () => {
 			removed: string[];
 			machineId?: string;
 		}>();
+		expectTypeOf<AgentTeamsRefreshRequiredPayload>().toEqualTypeOf<{
+			reason: "cli_registered";
+		}>();
+		expectTypeOf<
+			Parameters<GatewayToWebuiEvents["agent-teams:refresh-required"]>[0]
+		>().toEqualTypeOf<AgentTeamsRefreshRequiredPayload>();
 	});
 
 	it("keeps forbidden plaintext and secret field names out of gateway-facing team source", () => {
@@ -125,6 +138,21 @@ describe("Agent Team shared contract", () => {
 
 		expect(source).toMatch(/worktree\?: CreateSessionWorktreeOptions/);
 		expect(source).toMatch(/leaderSession\?: SessionSummary/);
+		expect(source).toMatch(/coveredLeaderMachineIds: string\[\]/);
 		expect(source).not.toMatch(/target\?:/);
+	});
+
+	it("declares the CLI registration refresh as a Gateway-to-WebUI event", () => {
+		const source = readFileSync(
+			resolve(import.meta.dirname, "../src/types/socket-events.ts"),
+			"utf8",
+		);
+
+		expect(source).toContain(
+			"export type AgentTeamsRefreshRequiredPayload = {",
+		);
+		expect(source).toContain(
+			'"agent-teams:refresh-required": (\n\t\tpayload: AgentTeamsRefreshRequiredPayload,',
+		);
 	});
 });

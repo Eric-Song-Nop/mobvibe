@@ -188,6 +188,11 @@ export type ListAgentTeamsRpcResult = {
 	teams: AgentTeamSummary[];
 };
 
+export type AgentTeamListResult = {
+	teams: AgentTeamSummary[];
+	coveredLeaderMachineIds: string[];
+};
+
 export type GetAgentTeamRpcParams = {
 	agentTeamId: AgentTeamId;
 	machineId?: string;

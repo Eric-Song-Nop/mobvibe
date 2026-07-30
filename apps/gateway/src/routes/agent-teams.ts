@@ -174,7 +174,7 @@ const mapRouteError = (response: ErrorResponse, error: unknown) => {
 		return;
 	}
 	if (message.includes("No CLI connected")) {
-		respondError(response, buildAuthorizationError(message), 503);
+		respondError(response, createInternalError("service"), 503);
 		return;
 	}
 	if (message.includes("RPC timeout")) {

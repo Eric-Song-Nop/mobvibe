@@ -132,6 +132,18 @@ Phase 1 中对应防线：
 - WebUI `createAgentTeam` 显式构造 metadata-only request body。
 - WebUI `team-store` persist partial state 移除正文和密钥类字段。
 
+## 当前跨机器不变量
+
+Phase 1 之后的跨机器实现继续遵守以下运行时契约：
+
+- **Leader 本地事实源**：leader machine 的 CLI SQLite 是 Team coordination facts 的唯一 canonical truth。远端 worker 通过 Gateway relay 执行，但不复制或改写 Team durable truth。
+- **Gateway 只做中继和部分覆盖**：Team list fan-out 只把仍在线且 RPC 成功的 leader machine 写入 `coveredLeaderMachineIds`；失败、掉线或被替换的机器不构成“空结果”。Gateway 不持久化 Team facts。
+- **WebUI local-first、机器无感**：Team UI 不按机器分组，机器只作为内部 source/routing 信息。浏览器持久化 last-good projection；快照只替换 coverage 内的机器切片，未覆盖切片继续保留，socket delta 也只能修改其声明的 leader-machine 切片。Team-owned session 通过 `agentTeamOwned` 折叠到 Team，而不是重复显示为普通 session。
+- **Session readiness 与覆盖**：CLI registration 在收到第一份完整 `sessions:list` 前保持 `sessionSnapshotReady=false`。`GET /acp/sessions` 只汇总 ready machine，并返回 `coveredMachineIds`；WebUI 只删除或替换这些已覆盖机器的 session，离线或尚未 ready 的机器继续使用本地 last-good。
+- **权限策略**：只有已绑定到 Agent Team 的 session 才自动选择 ACP 提供的 allow option，优先 `allow_always`、其次 `allow_once`；ACP 没有提供 allow option 时走原权限流程，普通 session 的权限行为完全不变。
+- **当前 session identity 兼容契约**：同一用户下，Mobvibe 可见的 `sessionId` 必须跨机器全局唯一。跨 source 冲突或缺少可信 source 时按 fail-closed 处理并保留/隔离 last-good，不能静默覆盖。要支持任意 ACP agent，后续必须引入版本化复合身份 `(machineId, rawSessionId)`，并完成协议、持久化和订阅键迁移。
+- **内容边界不变**：Gateway 只接触路由和 metadata projection；prompt、agent output、mailbox/task/summary 正文、token、密钥及其他 secret 都不得进入 Gateway。
+
 ## 验证命令
 
 Phase 1 已使用以下命令验证关键边界：
@@ -145,6 +157,19 @@ pnpm format
 pnpm lint
 pnpm build
 PLAYWRIGHT_WEB_PORT=45173 PLAYWRIGHT_GATEWAY_PORT=45005 timeout 300 pnpm test:run
+```
+
+当前跨机器增量的聚焦回归可使用：
+
+```bash
+pnpm -C packages/shared test:run -- tests/agent-team.contract.test.ts tests/session.contract.test.ts
+pnpm -C apps/gateway test:run -- src/routes/__tests__/agent-teams.test.ts src/routes/__tests__/sessions.test.ts src/services/__tests__/team-router.test.ts src/services/__tests__/cli-registry.test.ts src/socket/__tests__/cli-handlers.test.ts
+pnpm -C apps/mobvibe-cli test -- src/acp/__tests__/session-manager.test.ts
+pnpm -C apps/webui test:run -- src/lib/__tests__/team-store.test.ts src/lib/__tests__/chat-store.test.ts src/hooks/__tests__/useSessionQueries.test.tsx src/hooks/__tests__/useSocket.test.tsx
+pnpm format
+pnpm lint
+pnpm build
+pnpm test:run
 ```
 
 ## 后续阶段使用方式

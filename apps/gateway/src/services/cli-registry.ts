@@ -6,6 +6,7 @@ import type {
 	AgentSessionCapabilities,
 	CliRegistrationInfo,
 	CliStatusPayload,
+	GatewaySessionsChangedPayload,
 	SessionSummary,
 	SessionsChangedPayload,
 	TeamRelayPublicKey,
@@ -21,6 +22,8 @@ export type CliRecord = {
 	socket: Socket;
 	connectedAt: Date;
 	sessions: SessionSummary[];
+	/** True only after this registration supplied its first complete session list. */
+	sessionSnapshotReady: boolean;
 	backends: AcpBackendSummary[];
 	protocolCapabilities?: CliRegistrationInfo["protocolCapabilities"];
 	teamRelayKey?: TeamRelayPublicKey;
@@ -115,6 +118,7 @@ export class CliRegistry extends EventEmitter {
 			socket,
 			connectedAt: new Date(),
 			sessions: [],
+			sessionSnapshotReady: false,
 			backends: info.backends ?? [],
 			protocolCapabilities: info.protocolCapabilities,
 			...(teamRelayKey
@@ -209,21 +213,35 @@ export class CliRegistry extends EventEmitter {
 		return record;
 	}
 
-	updateSessions(socketId: string, sessions: SessionSummary[]) {
+	updateSessions(
+		socketId: string,
+		sessions: SessionSummary[],
+		options: { onFirstSnapshotReady?: () => void } = {},
+	) {
 		const record = this.cliBySocketId.get(socketId);
 		if (!record) {
 			return;
 		}
+		const becameReady = !record.sessionSnapshotReady;
+		const canonicalSessions = sessions.map((session) => ({
+			...session,
+			machineId: record.machineId,
+		}));
 
 		const previousById = new Map(
 			record.sessions.map((session) => [session.sessionId, session]),
 		);
 		const nextById = new Map(
-			sessions.map((session) => {
+			canonicalSessions.map((session) => {
 				const previous = previousById.get(session.sessionId);
 				return [
 					session.sessionId,
-					previous ? mergeSessionMetadata(previous, session) : session,
+					previous
+						? {
+								...mergeSessionMetadata(previous, session),
+								machineId: record.machineId,
+							}
+						: session,
 				] as const;
 			}),
 		);
@@ -244,12 +262,26 @@ export class CliRegistry extends EventEmitter {
 		// Replace the entire list — the CLI now sends the complete set
 		// (active + discovered), so stale entries are cleaned up naturally.
 		record.sessions = Array.from(nextById.values());
+		record.sessionSnapshotReady = true;
+		if (becameReady) {
+			options.onFirstSnapshotReady?.();
+		}
 		this.emit("sessions:updated", record.machineId, record.sessions);
-		if (added.length > 0 || updated.length > 0 || removed.length > 0) {
+		if (
+			becameReady ||
+			added.length > 0 ||
+			updated.length > 0 ||
+			removed.length > 0
+		) {
 			this.emit(
 				"sessions:changed",
 				record.machineId,
-				{ added, updated, removed } satisfies SessionsChangedPayload,
+				{
+					machineId: record.machineId,
+					added,
+					updated,
+					removed,
+				} satisfies GatewaySessionsChangedPayload,
 				record.userId,
 			);
 		}
@@ -262,7 +294,7 @@ export class CliRegistry extends EventEmitter {
 	updateSessionsIncremental(
 		socketId: string,
 		payload: SessionsChangedPayload,
-	): SessionsChangedPayload | undefined {
+	): GatewaySessionsChangedPayload | undefined {
 		const record = this.cliBySocketId.get(socketId);
 		if (!record) {
 			return undefined;
@@ -282,14 +314,25 @@ export class CliRegistry extends EventEmitter {
 					}),
 				)
 			: undefined;
-		const normalizedPayload: SessionsChangedPayload = {
-			...payload,
+		const normalizedPayload: GatewaySessionsChangedPayload = {
+			machineId: record.machineId,
+			added: payload.added.map((added) => ({
+				...added,
+				machineId: record.machineId,
+			})),
 			backendCapabilities: normalizedBackendCapabilities,
+			removed: payload.removed,
 			updated: payload.updated.map((updated) => {
 				const existing = record.sessions.find(
 					(session) => session.sessionId === updated.sessionId,
 				);
-				return existing ? mergeSessionMetadata(existing, updated) : updated;
+				const canonical = { ...updated, machineId: record.machineId };
+				return existing
+					? {
+							...mergeSessionMetadata(existing, canonical),
+							machineId: record.machineId,
+						}
+					: canonical;
 			}),
 		};
 
@@ -322,25 +365,22 @@ export class CliRegistry extends EventEmitter {
 		}
 
 		// Emit the enhanced payload with machineId
-		const enhancedPayload: SessionsChangedPayload = {
-			added: normalizedPayload.added.map((s) => ({
-				...s,
-				machineId: record.machineId,
-			})),
-			updated: normalizedPayload.updated.map((s) => ({
-				...s,
-				machineId: record.machineId,
-			})),
+		const enhancedPayload: GatewaySessionsChangedPayload = {
+			machineId: record.machineId,
+			added: normalizedPayload.added,
+			updated: normalizedPayload.updated,
 			removed: normalizedPayload.removed,
 			backendCapabilities: normalizedBackendCapabilities,
 		};
 
-		this.emit(
-			"sessions:changed",
-			record.machineId,
-			enhancedPayload,
-			record.userId,
-		);
+		if (record.sessionSnapshotReady) {
+			this.emit(
+				"sessions:changed",
+				record.machineId,
+				enhancedPayload,
+				record.userId,
+			);
+		}
 
 		return enhancedPayload;
 	}
@@ -351,7 +391,7 @@ export class CliRegistry extends EventEmitter {
 	onSessionsChanged(
 		listener: (
 			machineId: string,
-			payload: SessionsChangedPayload,
+			payload: GatewaySessionsChangedPayload,
 			userId?: string,
 		) => void,
 	) {
@@ -376,7 +416,8 @@ export class CliRegistry extends EventEmitter {
 
 		const added: SessionSummary[] = [];
 		const updated: SessionSummary[] = [];
-		for (const session of sessions) {
+		for (const incoming of sessions) {
+			const session = { ...incoming, machineId: record.machineId };
 			const existingIndex = record.sessions.findIndex(
 				(existing) => existing.sessionId === session.sessionId,
 			);
@@ -413,7 +454,8 @@ export class CliRegistry extends EventEmitter {
 
 		const added: SessionSummary[] = [];
 		const updated: SessionSummary[] = [];
-		for (const session of sessions) {
+		for (const incoming of sessions) {
+			const session = { ...incoming, machineId: record.machineId };
 			const existingIndex = record.sessions.findIndex(
 				(existing) => existing.sessionId === session.sessionId,
 			);
@@ -431,15 +473,19 @@ export class CliRegistry extends EventEmitter {
 			}
 		}
 
-		if (added.length > 0 || updated.length > 0) {
+		if (
+			record.sessionSnapshotReady &&
+			(added.length > 0 || updated.length > 0)
+		) {
 			this.emit(
 				"sessions:changed",
 				record.machineId,
 				{
+					machineId: record.machineId,
 					added,
 					updated,
 					removed: [],
-				} as SessionsChangedPayload,
+				} satisfies GatewaySessionsChangedPayload,
 				userId ?? record.userId,
 			);
 		}
@@ -479,13 +525,19 @@ export class CliRegistry extends EventEmitter {
 		if (!machineIds) {
 			return undefined;
 		}
+		let owner: CliRecord | undefined;
 		for (const machineId of machineIds) {
 			const record = this.cliByMachineId.get(machineId);
-			if (record?.sessions.some((s) => s.sessionId === sessionId)) {
-				return record;
+			if (
+				!record?.sessionSnapshotReady ||
+				!record.sessions.some((session) => session.sessionId === sessionId)
+			) {
+				continue;
 			}
+			if (owner) return undefined;
+			owner = record;
 		}
-		return undefined;
+		return owner;
 	}
 
 	/**
@@ -526,6 +578,46 @@ export class CliRegistry extends EventEmitter {
 			}
 		}
 		return sessions;
+	}
+
+	/**
+	 * Get sessions from registrations that have supplied a complete snapshot.
+	 * An unready registration may already contain incremental or discovered
+	 * entries, but those are not safe to expose as an HTTP snapshot.
+	 */
+	getReadySessionsForUser(userId: string): SessionSummary[] {
+		const sessionsById = this.getReadySessionsByIdForUser(userId);
+		return Array.from(sessionsById.values()).flatMap((sessions) =>
+			sessions.length === 1 ? sessions : [],
+		);
+	}
+
+	/**
+	 * Return session ids that violate the cross-machine global identity contract.
+	 */
+	getReadySessionIdCollisionsForUser(userId: string): string[] {
+		return Array.from(this.getReadySessionsByIdForUser(userId).entries())
+			.filter(([, sessions]) => sessions.length > 1)
+			.map(([sessionId]) => sessionId)
+			.sort();
+	}
+
+	private getReadySessionsByIdForUser(
+		userId: string,
+	): Map<string, SessionSummary[]> {
+		const sessionsById = new Map<string, SessionSummary[]>();
+		const clis = this.getClisForUser(userId);
+		for (const cli of clis) {
+			if (!cli.sessionSnapshotReady) {
+				continue;
+			}
+			for (const session of cli.sessions) {
+				const candidates = sessionsById.get(session.sessionId) ?? [];
+				candidates.push({ ...session, machineId: cli.machineId });
+				sessionsById.set(session.sessionId, candidates);
+			}
+		}
+		return sessionsById;
 	}
 
 	/**

@@ -62,6 +62,14 @@ const buildAuthorizationError = (message = "Not authorized") =>
 		scope: "request",
 	});
 
+const buildSessionIdCollisionError = () =>
+	createErrorDetail({
+		code: "SESSION_ID_COLLISION",
+		message: "Session identity collision detected",
+		retryable: false,
+		scope: "service",
+	});
+
 const MAX_MACHINE_ID_BYTES = 256;
 const MAX_BACKEND_ID_BYTES = 256;
 const MAX_AUTH_METHOD_ID_BYTES = 128;
@@ -292,8 +300,9 @@ export function setupSessionRoutes(
 
 	/**
 	 * Returns sessions currently held in the in-memory `cliRegistry`.
-	 * Includes active sessions from connected CLIs and previously discovered
-	 * sessions. Does not query the database.
+	 * Each ready registration contributes one authoritative machine slice.
+	 * Unready registrations are omitted instead of blocking ready machines;
+	 * an empty coverage list is therefore a valid no-op snapshot.
 	 */
 	router.get("/sessions", (request: AuthenticatedRequest, response) => {
 		const userId = getUserId(request);
@@ -301,8 +310,17 @@ export function setupSessionRoutes(
 			respondError(response, buildAuthorizationError(), 401);
 			return;
 		}
-		const sessions = cliRegistry.getSessionsForUser(userId);
-		response.json({ sessions });
+		const clis = cliRegistry.getClisForUser(userId);
+		const coveredMachineIds = clis
+			.filter((cli) => cli.sessionSnapshotReady)
+			.map((cli) => cli.machineId)
+			.sort();
+		if (cliRegistry.getReadySessionIdCollisionsForUser(userId).length > 0) {
+			respondError(response, buildSessionIdCollisionError(), 409);
+			return;
+		}
+		const sessions = cliRegistry.getReadySessionsForUser(userId);
+		response.json({ sessions, coveredMachineIds });
 	});
 
 	// List available backends - returns only user's backends

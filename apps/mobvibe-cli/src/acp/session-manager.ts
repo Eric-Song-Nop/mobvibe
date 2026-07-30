@@ -1322,9 +1322,10 @@ export class SessionManager {
 	}
 
 	listSessions(): SessionSummary[] {
+		const agentTeamOwnedSessionIds = this.collectAgentTeamOwnedSessionIds();
 		return Array.from(this.sessions.values())
 			.filter((record) => !this.isSessionTemporarilyHidden(record.sessionId))
-			.map((record) => this.buildSummary(record));
+			.map((record) => this.buildSummary(record, agentTeamOwnedSessionIds));
 	}
 
 	/**
@@ -1410,7 +1411,13 @@ export class SessionManager {
 			}
 		}
 
-		return Array.from(merged.values());
+		const agentTeamOwnedSessionIds = this.collectAgentTeamOwnedSessionIds();
+		return Array.from(merged.values()).map((session) =>
+			this.withAgentTeamOwnershipClassification(
+				session,
+				agentTeamOwnedSessionIds,
+			),
+		);
 	}
 
 	private prepareSessionRevisionDek(
@@ -3206,6 +3213,33 @@ export class SessionManager {
 			};
 		}
 		return undefined;
+	}
+
+	private collectAgentTeamOwnedSessionIds(): ReadonlySet<string> {
+		const sessionIds = new Set<string>();
+		for (const team of this.agentTeamStore.listAgentTeams().teams) {
+			for (const member of team.members) {
+				if (member.sessionId) {
+					sessionIds.add(member.sessionId);
+				}
+			}
+		}
+		for (const binding of this.teamRelayStore.listRemoteSessionBindings()) {
+			if (binding.sessionId) {
+				sessionIds.add(binding.sessionId);
+			}
+		}
+		return sessionIds;
+	}
+
+	private withAgentTeamOwnershipClassification(
+		session: SessionSummary,
+		agentTeamOwnedSessionIds: ReadonlySet<string> = this.collectAgentTeamOwnedSessionIds(),
+	): SessionSummary {
+		if (!agentTeamOwnedSessionIds.has(session.sessionId)) {
+			return session;
+		}
+		return { ...session, agentTeamOwned: true };
 	}
 
 	private handleTeamTurnCompleted(
@@ -5530,38 +5564,46 @@ export class SessionManager {
 		});
 	}
 
-	private buildSummary(record: SessionRecord): SessionSummary {
+	private buildSummary(
+		record: SessionRecord,
+		agentTeamOwnedSessionIds?: ReadonlySet<string>,
+	): SessionSummary {
 		const status = record.connection.getStatus();
-		return {
-			sessionId: record.sessionId,
-			title: record.title,
-			backendId: record.backendId,
-			backendLabel: record.backendLabel,
-			error: status.error,
-			pid: status.pid,
-			createdAt: record.createdAt.toISOString(),
-			updatedAt: record.updatedAt.toISOString(),
-			cwd: record.cwd,
-			additionalDirectories: record.additionalDirectories,
-			workspaceRootCwd: record.workspaceRootCwd,
-			agentName: record.agentName,
-			modelId: record.modelId,
-			modelName: record.modelName,
-			modeId: record.modeId,
-			modeName: record.modeName,
-			availableModes: record.availableModes,
-			availableModels: record.availableModels,
-			configOptions: record.configOptions,
-			availableCommands: record.availableCommands,
-			revision: record.revision,
-			wrappedDek:
-				this.cryptoService?.getWrappedDek(record.sessionId, record.revision) ??
-				undefined,
-			_meta: record._meta,
-			isTitlePinned: record.isTitlePinned,
-			worktreeSourceCwd: record.worktreeSourceCwd,
-			worktreeBranch: record.worktreeBranch,
-			isAttached: true,
-		};
+		return this.withAgentTeamOwnershipClassification(
+			{
+				sessionId: record.sessionId,
+				title: record.title,
+				backendId: record.backendId,
+				backendLabel: record.backendLabel,
+				error: status.error,
+				pid: status.pid,
+				createdAt: record.createdAt.toISOString(),
+				updatedAt: record.updatedAt.toISOString(),
+				cwd: record.cwd,
+				additionalDirectories: record.additionalDirectories,
+				workspaceRootCwd: record.workspaceRootCwd,
+				agentName: record.agentName,
+				modelId: record.modelId,
+				modelName: record.modelName,
+				modeId: record.modeId,
+				modeName: record.modeName,
+				availableModes: record.availableModes,
+				availableModels: record.availableModels,
+				configOptions: record.configOptions,
+				availableCommands: record.availableCommands,
+				revision: record.revision,
+				wrappedDek:
+					this.cryptoService?.getWrappedDek(
+						record.sessionId,
+						record.revision,
+					) ?? undefined,
+				_meta: record._meta,
+				isTitlePinned: record.isTitlePinned,
+				worktreeSourceCwd: record.worktreeSourceCwd,
+				worktreeBranch: record.worktreeBranch,
+				isAttached: true,
+			},
+			agentTeamOwnedSessionIds,
+		);
 	}
 }

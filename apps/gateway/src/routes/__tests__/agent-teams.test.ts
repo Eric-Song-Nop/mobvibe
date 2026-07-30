@@ -1,5 +1,9 @@
 import type { AddressInfo } from "node:net";
-import { type AgentTeamSummary, AppError } from "@mobvibe/shared";
+import {
+	type AgentTeamSummary,
+	AppError,
+	type ErrorDetail,
+} from "@mobvibe/shared";
 import express from "express";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setupAgentTeamRoutes } from "../agent-teams.js";
@@ -69,9 +73,10 @@ const requestJson = async (
 		},
 	});
 	const payload = (await response.json()) as {
-		error?: { code: string };
+		error?: ErrorDetail;
 		team?: AgentTeamSummary;
 		teams?: AgentTeamSummary[];
+		coveredLeaderMachineIds?: string[];
 	};
 	return { response, payload };
 };
@@ -88,7 +93,10 @@ describe("agent team routes", () => {
 	beforeEach(async () => {
 		teamRouter = {
 			createAgentTeam: vi.fn(async () => ({ team: createTeam() })),
-			listAgentTeams: vi.fn(async () => ({ teams: [createTeam()] })),
+			listAgentTeams: vi.fn(async () => ({
+				teams: [createTeam()],
+				coveredLeaderMachineIds: ["machine-1"],
+			})),
 			getAgentTeam: vi.fn(async () => ({ team: createTeam() })),
 		};
 		const app = express();
@@ -326,6 +334,7 @@ describe("agent team routes", () => {
 
 		expect(list.response.status).toBe(200);
 		expect(list.payload.teams).toHaveLength(1);
+		expect(list.payload.coveredLeaderMachineIds).toEqual(["machine-1"]);
 		expect(get.response.status).toBe(200);
 		expect(get.payload.team?.agentTeamId).toBe("team-1");
 		expect(teamRouter.listAgentTeams).toHaveBeenCalledWith(
@@ -349,6 +358,23 @@ describe("agent team routes", () => {
 
 		expect(response.status).toBe(404);
 		expect(payload.error?.code).toBe("SESSION_NOT_FOUND");
+	});
+
+	it("reports a missing CLI as a retryable service outage", async () => {
+		teamRouter.listAgentTeams.mockRejectedValueOnce(
+			new Error("No CLI connected for this user"),
+		);
+
+		const { response, payload } = await requestJson(
+			baseUrl,
+			"/acp/agent-teams",
+			{ headers: { authorization: "Bearer user-1" } },
+		);
+
+		expect(response.status).toBe(503);
+		expect(payload.error?.code).toBe("INTERNAL_ERROR");
+		expect(payload.error?.retryable).toBe(true);
+		expect(payload.error?.scope).toBe("service");
 	});
 
 	it("maps ownership and timeout failures without leaking another machine", async () => {

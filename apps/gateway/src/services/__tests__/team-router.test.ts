@@ -2,6 +2,7 @@ import {
 	type AgentTeamSummary,
 	AppError,
 	type CliRegistrationInfo,
+	type SessionSummary,
 	type TeamRelayCiphertext,
 	type TeamRelayPublicKey,
 } from "@mobvibe/shared";
@@ -17,6 +18,7 @@ const createMockSocket = (id: string) =>
 		on: vi.fn(),
 		join: vi.fn(),
 		leave: vi.fn(),
+		disconnect: vi.fn(),
 	}) as unknown as Socket & { emit: ReturnType<typeof vi.fn> };
 
 const createRegistration = (
@@ -116,6 +118,18 @@ const createTeam = (
 	...overrides,
 });
 
+const createSession = (
+	overrides: Partial<SessionSummary> = {},
+): SessionSummary => ({
+	sessionId: "leader-session",
+	title: "Leader",
+	backendId: "backend-1",
+	backendLabel: "Claude Code",
+	createdAt: "2026-05-13T00:00:00.000Z",
+	updatedAt: "2026-05-13T00:00:00.000Z",
+	...overrides,
+});
+
 describe("TeamRouter", () => {
 	let cliRegistry: CliRegistry;
 	let teamRouter: TeamRouter;
@@ -132,13 +146,14 @@ describe("TeamRouter", () => {
 	});
 
 	it("forwards create requests to the user's machine CLI", async () => {
-		const team = createTeam();
+		const team = createTeam({ machineId: "untrusted-cli-machine" });
+		const leaderSession = createSession();
 		socket.emit.mockImplementation((event, request) => {
 			if (event === "rpc:agent-team:create") {
 				setTimeout(() => {
 					teamRouter.handleRpcResponse({
 						requestId: request.requestId,
-						result: { team },
+						result: { team, leaderSession },
 					});
 				}, 0);
 			}
@@ -154,7 +169,11 @@ describe("TeamRouter", () => {
 			"user-1",
 		);
 
-		expect(result.team).toEqual(team);
+		expect(result.team).toEqual({ ...team, machineId: "machine-1" });
+		expect(result.leaderSession).toEqual({
+			...leaderSession,
+			machineId: "machine-1",
+		});
 		expect(socket.emit).toHaveBeenCalledWith(
 			"rpc:agent-team:create",
 			expect.objectContaining({
@@ -179,7 +198,161 @@ describe("TeamRouter", () => {
 				setTimeout(() => {
 					teamRouter.handleRpcResponse({
 						requestId: request.requestId,
+						result: {
+							teams: [createTeam({ machineId: "untrusted-machine" })],
+						},
+					});
+				}, 0);
+			}
+		});
+		socket2.emit.mockImplementation((event, request) => {
+			if (event === "rpc:agent-teams:list") {
+				setTimeout(() => {
+					teamRouter.handleRpcResponse({
+						requestId: request.requestId,
+						result: {
+							teams: [
+								createTeam({
+									agentTeamId: "team-2",
+									machineId: "untrusted-machine",
+								}),
+							],
+						},
+					});
+				}, 0);
+			}
+		});
+
+		const result = await teamRouter.listAgentTeams({}, "user-1");
+
+		expect(result.teams.map((team) => team.agentTeamId)).toEqual([
+			"team-1",
+			"team-2",
+		]);
+		expect(result.teams.map((team) => team.machineId)).toEqual([
+			"machine-1",
+			"machine-2",
+		]);
+		expect(result.coveredLeaderMachineIds).toEqual(["machine-1", "machine-2"]);
+		expect(socket.emit).toHaveBeenCalledWith(
+			"rpc:agent-teams:list",
+			expect.objectContaining({ params: { machineId: "machine-1" } }),
+		);
+		expect(socket2.emit).toHaveBeenCalledWith(
+			"rpc:agent-teams:list",
+			expect.objectContaining({ params: { machineId: "machine-2" } }),
+		);
+	});
+
+	it("covers only the online leader when another leader is offline", async () => {
+		const socket2 = createMockSocket("socket-2");
+		cliRegistry.register(socket2, createRegistration("machine-2"), {
+			userId: "user-1",
+			deviceId: "device-2",
+		});
+		cliRegistry.unregister(socket.id);
+		socket2.emit.mockImplementation((event, request) => {
+			if (event === "rpc:agent-teams:list") {
+				setTimeout(() => {
+					teamRouter.handleRpcResponse({
+						requestId: request.requestId,
+						result: {
+							teams: [
+								createTeam({ agentTeamId: "team-2", machineId: "machine-2" }),
+							],
+						},
+					});
+				}, 0);
+			}
+		});
+
+		const result = await teamRouter.listAgentTeams({}, "user-1");
+
+		expect(result.teams.map((team) => team.agentTeamId)).toEqual(["team-2"]);
+		expect(result.coveredLeaderMachineIds).toEqual(["machine-2"]);
+		expect(socket.emit).not.toHaveBeenCalledWith(
+			"rpc:agent-teams:list",
+			expect.anything(),
+		);
+	});
+
+	it("reports directed leader coverage only after its query succeeds", async () => {
+		socket.emit.mockImplementation((event, request) => {
+			if (event === "rpc:agent-teams:list") {
+				setTimeout(() => {
+					teamRouter.handleRpcResponse({
+						requestId: request.requestId,
 						result: { teams: [createTeam()] },
+					});
+				}, 0);
+			}
+		});
+
+		const result = await teamRouter.listAgentTeams(
+			{ machineId: "machine-1" },
+			"user-1",
+		);
+
+		expect(result.teams).toEqual([createTeam()]);
+		expect(result.coveredLeaderMachineIds).toEqual(["machine-1"]);
+	});
+
+	it("drops a directed result when its machine socket is replaced in flight", async () => {
+		const replacementSocket = createMockSocket("socket-replacement");
+		socket.emit.mockImplementation((event, request) => {
+			if (event === "rpc:agent-teams:list") {
+				setTimeout(() => {
+					cliRegistry.register(
+						replacementSocket,
+						createRegistration("machine-1"),
+						{
+							userId: "user-1",
+							deviceId: "device-replacement",
+						},
+					);
+					teamRouter.handleRpcResponse(
+						{
+							requestId: request.requestId,
+							result: { teams: [createTeam()] },
+						},
+						socket.id,
+					);
+				}, 0);
+			}
+		});
+
+		const result = await teamRouter.listAgentTeams(
+			{ machineId: "machine-1" },
+			"user-1",
+		);
+
+		expect(result).toEqual({
+			teams: [],
+			coveredLeaderMachineIds: [],
+		});
+		expect(
+			cliRegistry.getCliByMachineIdForUser("machine-1", "user-1")?.socket,
+		).toBe(replacementSocket);
+	});
+
+	it("omits a connected leader from coverage when its query fails", async () => {
+		const socket2 = createMockSocket("socket-2");
+		cliRegistry.register(socket2, createRegistration("machine-2"), {
+			userId: "user-1",
+			deviceId: "device-2",
+		});
+		socket.emit.mockImplementation((event, request) => {
+			if (event === "rpc:agent-teams:list") {
+				setTimeout(() => {
+					teamRouter.handleRpcResponse({
+						requestId: request.requestId,
+						error: {
+							code: "INTERNAL_ERROR",
+							message: "machine-1 unavailable",
+							retryable: true,
+							scope: "service",
+							status: 503,
+						},
 					});
 				}, 0);
 			}
@@ -201,17 +374,15 @@ describe("TeamRouter", () => {
 
 		const result = await teamRouter.listAgentTeams({}, "user-1");
 
-		expect(result.teams.map((team) => team.agentTeamId)).toEqual([
-			"team-1",
-			"team-2",
-		]);
-		expect(socket.emit).toHaveBeenCalledWith(
-			"rpc:agent-teams:list",
-			expect.objectContaining({ params: { machineId: "machine-1" } }),
-		);
-		expect(socket2.emit).toHaveBeenCalledWith(
-			"rpc:agent-teams:list",
-			expect.objectContaining({ params: { machineId: "machine-2" } }),
+		expect(result.teams.map((team) => team.agentTeamId)).toEqual(["team-2"]);
+		expect(result.coveredLeaderMachineIds).toEqual(["machine-2"]);
+	});
+
+	it("rejects a global list when no CLI is connected", async () => {
+		cliRegistry.unregister(socket.id);
+
+		await expect(teamRouter.listAgentTeams({}, "user-1")).rejects.toThrow(
+			"No CLI connected for this user",
 		);
 	});
 
@@ -239,6 +410,123 @@ describe("TeamRouter", () => {
 				params: { agentTeamId: "missing", machineId: "machine-1" },
 			}),
 		);
+	});
+
+	it("finds a machine-neutral Team detail on its actual leader machine", async () => {
+		const socket2 = createMockSocket("socket-2");
+		cliRegistry.register(socket2, createRegistration("machine-2"), {
+			userId: "user-1",
+			deviceId: "device-2",
+		});
+		socket.emit.mockImplementation((event, request) => {
+			if (event !== "rpc:agent-team:get") return;
+			teamRouter.handleRpcResponse(
+				{ requestId: request.requestId, result: {} },
+				socket.id,
+			);
+		});
+		socket2.emit.mockImplementation((event, request) => {
+			if (event !== "rpc:agent-team:get") return;
+			teamRouter.handleRpcResponse(
+				{
+					requestId: request.requestId,
+					result: {
+						team: createTeam({
+							agentTeamId: "team-on-machine-2",
+							machineId: "forged-machine",
+						}),
+					},
+				},
+				socket2.id,
+			);
+		});
+
+		const result = await teamRouter.getAgentTeam(
+			{ agentTeamId: "team-on-machine-2" },
+			"user-1",
+		);
+
+		expect(result.team).toMatchObject({
+			agentTeamId: "team-on-machine-2",
+			machineId: "machine-2",
+		});
+		expect(socket.emit).toHaveBeenCalledWith(
+			"rpc:agent-team:get",
+			expect.objectContaining({
+				params: {
+					agentTeamId: "team-on-machine-2",
+					machineId: "machine-1",
+				},
+			}),
+		);
+		expect(socket2.emit).toHaveBeenCalledWith(
+			"rpc:agent-team:get",
+			expect.objectContaining({
+				params: {
+					agentTeamId: "team-on-machine-2",
+					machineId: "machine-2",
+				},
+			}),
+		);
+	});
+
+	it("fails closed when two leader machines claim the same Team ID", async () => {
+		const socket2 = createMockSocket("socket-2");
+		cliRegistry.register(socket2, createRegistration("machine-2"), {
+			userId: "user-1",
+			deviceId: "device-2",
+		});
+		for (const [candidateSocket, machineId] of [
+			[socket, "machine-1"],
+			[socket2, "machine-2"],
+		] as const) {
+			candidateSocket.emit.mockImplementation((event, request) => {
+				if (event !== "rpc:agent-team:get") return;
+				teamRouter.handleRpcResponse(
+					{
+						requestId: request.requestId,
+						result: {
+							team: createTeam({
+								agentTeamId: "colliding-team",
+								machineId,
+							}),
+						},
+					},
+					candidateSocket.id,
+				);
+			});
+		}
+
+		await expect(
+			teamRouter.getAgentTeam({ agentTeamId: "colliding-team" }, "user-1"),
+		).rejects.toMatchObject({ status: 409 });
+	});
+
+	it("canonicalizes a directed Team detail and drops a replaced registration response", async () => {
+		const replacementSocket = createMockSocket("socket-replacement");
+		socket.emit.mockImplementation((event, request) => {
+			if (event !== "rpc:agent-team:get") return;
+			cliRegistry.register(replacementSocket, createRegistration("machine-1"), {
+				userId: "user-1",
+				deviceId: "device-replacement",
+			});
+			teamRouter.handleRpcResponse(
+				{
+					requestId: request.requestId,
+					result: {
+						team: createTeam({ machineId: "forged-machine" }),
+					},
+				},
+				socket.id,
+			);
+		});
+
+		const result = await teamRouter.getAgentTeam(
+			{ agentTeamId: "team-1", machineId: "machine-1" },
+			"user-1",
+		);
+
+		expect(result).toEqual({});
 	});
 
 	it("rejects machine ownership mismatch before RPC forwarding", async () => {

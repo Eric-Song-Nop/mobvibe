@@ -1,6 +1,8 @@
 import type {
 	AgentTeamsChangedPayload,
+	AgentTeamsRefreshRequiredPayload,
 	CliRegistrationInfo,
+	GatewayToWebuiEvents,
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
 	PlaceTeamRelayPeerParams,
@@ -168,7 +170,11 @@ export type CliHandlersDeps = {
 	cliRegistry: CliRegistry;
 	sessionRouter: SessionRouter;
 	teamRouter: TeamRouter;
-	emitToWebui: (event: string, payload: unknown, userId?: string) => void;
+	emitToWebui: (
+		event: keyof GatewayToWebuiEvents,
+		payload: unknown,
+		userId?: string,
+	) => void;
 	getUserAffinity: UserAffinityProvider;
 	config: GatewayConfig;
 	notificationService?: NotificationService;
@@ -179,12 +185,23 @@ export function setupCliHandlers(
 	cliRegistry: CliRegistry,
 	sessionRouter: SessionRouter,
 	teamRouter: TeamRouter,
-	emitToWebui: (event: string, payload: unknown, userId?: string) => void,
+	emitToWebui: (
+		event: keyof GatewayToWebuiEvents,
+		payload: unknown,
+		userId?: string,
+	) => void,
 	getUserAffinity: UserAffinityProvider = () => null,
 	config?: GatewayConfig,
 	notificationService?: NotificationService,
 ) {
 	const cliNamespace = io.of("/cli");
+
+	const isUniqueReadySessionOwner = (
+		record: ReturnType<CliRegistry["getCliBySocketId"]>,
+		sessionId: string,
+	): boolean =>
+		record?.userId !== undefined &&
+		cliRegistry.getCliForSessionByUser(sessionId, record.userId) === record;
 
 	const isActiveCliSession = (
 		record: ReturnType<CliRegistry["getCliBySocketId"]>,
@@ -668,10 +685,20 @@ export function setupCliHandlers(
 
 		// Sessions list update (initial sync and heartbeat)
 		socket.on("sessions:list", (sessions: SessionSummary[]) => {
-			withRegisteredCli("sessions:list", sessions, () => {
+			withRegisteredCli("sessions:list", sessions, (record) => {
 				const sanitized = sanitizeSessionMetaEnvelopes(sessions);
 				warnSessionMetaSanitization("sessions:list", socket.id, sanitized);
-				cliRegistry.updateSessions(socket.id, sanitized.values);
+				cliRegistry.updateSessions(socket.id, sanitized.values, {
+					onFirstSnapshotReady: () => {
+						emitToWebui(
+							"agent-teams:refresh-required",
+							{
+								reason: "cli_registered",
+							} satisfies AgentTeamsRefreshRequiredPayload,
+							record.userId,
+						);
+					},
+				});
 				logger.debug(
 					{ socketId: socket.id, sessionCount: sessions.length },
 					"cli_sessions_list",
@@ -796,6 +823,7 @@ export function setupCliHandlers(
 				// Emit sessions:changed to webui (with capabilities even if no metadata changed)
 				if (
 					cliRecord.userId &&
+					cliRecord.sessionSnapshotReady &&
 					(changes.added.length > 0 ||
 						changes.updated.length > 0 ||
 						capabilities)
@@ -804,6 +832,15 @@ export function setupCliHandlers(
 						"sessions:changed",
 						{
 							...changes,
+							machineId: cliRecord.machineId,
+							added: changes.added.map((session) => ({
+								...session,
+								machineId: cliRecord.machineId,
+							})),
+							updated: changes.updated.map((session) => ({
+								...session,
+								machineId: cliRecord.machineId,
+							})),
 							backendCapabilities: payload.backendId
 								? { [payload.backendId]: capabilities }
 								: undefined,
@@ -860,6 +897,9 @@ export function setupCliHandlers(
 					{ sessionId: payload.sessionId, machineId: record.machineId },
 					"session_attached_received",
 				);
+				if (!record.sessionSnapshotReady) {
+					return;
+				}
 				emitToWebui(
 					"session:attached",
 					{ ...payload, machineId: record.machineId },
@@ -879,6 +919,9 @@ export function setupCliHandlers(
 					},
 					"session_detached_received",
 				);
+				if (!record.sessionSnapshotReady) {
+					return;
+				}
 				emitToWebui(
 					"session:detached",
 					{ ...payload, machineId: record.machineId },
@@ -893,22 +936,29 @@ export function setupCliHandlers(
 				const sanitized = sanitizeAcpMetaPayload(payload);
 				warnSessionMetaSanitization("permission:request", socket.id, sanitized);
 				const permission = sanitized.value;
+				if (!isUniqueReadySessionOwner(record, permission.sessionId)) {
+					return;
+				}
+				const canonicalPermission = {
+					...permission,
+					machineId: record.machineId,
+				};
 				logger.info(
 					{
-						sessionId: permission.sessionId,
-						requestId: permission.requestId,
+						sessionId: canonicalPermission.sessionId,
+						requestId: canonicalPermission.requestId,
 					},
 					"permission_request_received",
 				);
-				emitToWebui("permission:request", permission, record.userId);
+				emitToWebui("permission:request", canonicalPermission, record.userId);
 				if (
 					record.userId &&
 					notificationService &&
-					isActiveCliSession(record, permission.sessionId)
+					isActiveCliSession(record, canonicalPermission.sessionId)
 				) {
 					void notificationService.notifyPermissionRequest(
 						record.userId,
-						permission,
+						canonicalPermission,
 					);
 				}
 			});
@@ -917,11 +967,21 @@ export function setupCliHandlers(
 		// Permission result from CLI
 		socket.on("permission:result", (payload: PermissionDecisionPayload) => {
 			withRegisteredCli("permission:result", payload, (record) => {
+				if (!isUniqueReadySessionOwner(record, payload.sessionId)) {
+					return;
+				}
+				const canonicalPayload = {
+					...payload,
+					machineId: record.machineId,
+				};
 				logger.info(
-					{ sessionId: payload.sessionId, requestId: payload.requestId },
+					{
+						sessionId: canonicalPayload.sessionId,
+						requestId: canonicalPayload.requestId,
+					},
 					"permission_result_received",
 				);
-				emitToWebui("permission:result", payload, record.userId);
+				emitToWebui("permission:result", canonicalPayload, record.userId);
 			});
 		});
 
@@ -1004,20 +1064,22 @@ export function setupCliHandlers(
 					{ machineId: record.machineId, reason, socketId: socket.id },
 					"cli_disconnected",
 				);
-				for (const session of record.sessions) {
-					// Only emit detached for sessions that were actually attached
-					// (skip discovered sessions that were never attached)
-					if (!session.isAttached) continue;
-					emitToWebui(
-						"session:detached",
-						{
-							sessionId: session.sessionId,
-							machineId: record.machineId,
-							detachedAt: new Date().toISOString(),
-							reason: "cli_disconnect",
-						},
-						cachedUserId,
-					);
+				if (record.sessionSnapshotReady) {
+					for (const session of record.sessions) {
+						// Only emit detached for sessions that were actually attached
+						// (skip discovered sessions that were never attached)
+						if (!session.isAttached) continue;
+						emitToWebui(
+							"session:detached",
+							{
+								sessionId: session.sessionId,
+								machineId: record.machineId,
+								detachedAt: new Date().toISOString(),
+								reason: "cli_disconnect",
+							},
+							cachedUserId,
+						);
+					}
 				}
 
 				// Do not eagerly release affinity here. A reconnect can claim/refresh

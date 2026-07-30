@@ -234,6 +234,17 @@ setupCliHandlers(
 	(event, payload, userId) => {
 		// Route events to the appropriate user's webui connections
 		switch (event) {
+			case "agent-teams:refresh-required":
+				if (userId) {
+					webuiEmitter.emitToUser(
+						userId,
+						"agent-teams:refresh-required",
+						payload,
+					);
+				} else {
+					logger.warn({ event }, "emitToWebui_missing_userId");
+				}
+				break;
 			case "agent-teams:changed":
 				if (userId) {
 					webuiEmitter.emitToUser(userId, "agent-teams:changed", payload);

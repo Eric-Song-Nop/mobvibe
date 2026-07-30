@@ -25,6 +25,7 @@ import type {
 	AgentSessionCapabilities,
 	FsEntry,
 	FsRoot,
+	GatewaySessionsChangedPayload,
 	SessionFsResourceEntry,
 	SessionSummary,
 	SessionsChangedPayload,
@@ -117,6 +118,14 @@ export type PermissionDecisionPayload = {
 	outcome: PermissionOutcome;
 };
 
+export type GatewayPermissionRequestPayload = PermissionRequestPayload & {
+	machineId: string;
+};
+
+export type GatewayPermissionDecisionPayload = PermissionDecisionPayload & {
+	machineId: string;
+};
+
 // CLI registration info
 export type CliRegistrationInfo = {
 	machineId: string;
@@ -177,6 +186,11 @@ export type CliStatusPayload = {
 	userId?: string;
 	/** Per-backend capabilities (sent when available) */
 	backendCapabilities?: Record<string, AgentSessionCapabilities>;
+};
+
+/** Signals that a newly registered CLI may expose a newer Team projection. */
+export type AgentTeamsRefreshRequiredPayload = {
+	reason: "cli_registered";
 };
 
 // Stream error event
@@ -545,11 +559,14 @@ export interface GatewayToWebuiEvents {
 	"session:event": (event: SessionEvent) => void;
 	"session:attached": (payload: SessionAttachedPayload) => void;
 	"session:detached": (payload: SessionDetachedPayload) => void;
-	"permission:request": (payload: PermissionRequestPayload) => void;
-	"permission:result": (payload: PermissionDecisionPayload) => void;
+	"permission:request": (payload: GatewayPermissionRequestPayload) => void;
+	"permission:result": (payload: GatewayPermissionDecisionPayload) => void;
 	"cli:status": (payload: CliStatusPayload) => void;
-	"sessions:changed": (payload: SessionsChangedPayload) => void;
+	"sessions:changed": (payload: GatewaySessionsChangedPayload) => void;
 	"agent-teams:changed": (payload: AgentTeamsChangedPayload) => void;
+	"agent-teams:refresh-required": (
+		payload: AgentTeamsRefreshRequiredPayload,
+	) => void;
 }
 
 export type AgentTeamRpcResult =
@@ -739,6 +756,8 @@ export type AcpBackendsResponse = {
 
 export type SessionsResponse = {
 	sessions: SessionSummary[];
+	/** Current machine registrations authoritatively represented by this snapshot. */
+	coveredMachineIds: string[];
 };
 
 export type CreateSessionResponse = SessionSummary;

@@ -208,6 +208,194 @@ describe("setupCliHandlers", () => {
 		connectionHandler?.(socket);
 	});
 
+	it("does not request a Team refresh until the first full session list", async () => {
+		socketHandlers["cli:register"]?.(
+			createMockRegistrationInfo({ machineId: "raw-machine-1" }),
+		);
+
+		await vi.waitFor(() => {
+			expect(socket.emit).toHaveBeenCalledWith("cli:registered", {
+				machineId: "machine-1",
+				userId: "user-1",
+			});
+		});
+		expect(registry.getCliBySocketId(socket.id)?.sessionSnapshotReady).toBe(
+			false,
+		);
+		expect(emitToWebui).not.toHaveBeenCalled();
+	});
+
+	it("opens the Team refresh fence before emitting the first full session list", async () => {
+		const emittedEvents: string[] = [];
+		let snapshotAtRefresh: { ready: boolean; sessionIds: string[] } | undefined;
+		emitToWebui.mockImplementation((event: string) => {
+			emittedEvents.push(event);
+			if (event === "agent-teams:refresh-required") {
+				const record = registry.getCliBySocketId(socket.id);
+				snapshotAtRefresh = {
+					ready: record?.sessionSnapshotReady ?? false,
+					sessionIds:
+						record?.sessions.map((session) => session.sessionId) ?? [],
+				};
+			}
+		});
+		registry.onSessionsChanged((_machineId, payload, registeredUserId) => {
+			emitToWebui("sessions:changed", payload, registeredUserId);
+		});
+
+		socketHandlers["cli:register"]?.(
+			createMockRegistrationInfo({ machineId: "raw-machine-1" }),
+		);
+		await vi.waitFor(() => {
+			expect(registry.getCliBySocketId(socket.id)).toBeDefined();
+		});
+		emittedEvents.length = 0;
+
+		socketHandlers["sessions:list"]?.([
+			createMockSessionSummary({ sessionId: "first-full-session" }),
+		]);
+
+		expect(emittedEvents).toEqual([
+			"agent-teams:refresh-required",
+			"sessions:changed",
+		]);
+		expect(snapshotAtRefresh).toEqual({
+			ready: true,
+			sessionIds: ["first-full-session"],
+		});
+		expect(registry.getCliBySocketId(socket.id)?.sessionSnapshotReady).toBe(
+			true,
+		);
+	});
+
+	it("resets the session barrier when replacing the same machine", async () => {
+		const previousSocket = {
+			id: "previous-socket",
+			disconnect: vi.fn(),
+		} as unknown as Socket;
+		registry.register(
+			previousSocket,
+			createMockRegistrationInfo({ machineId: "machine-1" }),
+			{ userId: "user-1", deviceId: "previous-device" },
+		);
+		emitToWebui.mockClear();
+
+		socketHandlers["cli:register"]?.(
+			createMockRegistrationInfo({ machineId: "raw-machine-1" }),
+		);
+
+		await vi.waitFor(() => {
+			expect(previousSocket.disconnect).toHaveBeenCalledWith(true);
+			expect(socket.emit).toHaveBeenCalledWith("cli:registered", {
+				machineId: "machine-1",
+				userId: "user-1",
+			});
+		});
+		expect(registry.getCliBySocketId(socket.id)?.sessionSnapshotReady).toBe(
+			false,
+		);
+		expect(emitToWebui).not.toHaveBeenCalled();
+
+		socketHandlers["sessions:list"]?.([]);
+
+		expect(emitToWebui).toHaveBeenCalledOnce();
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"agent-teams:refresh-required",
+			{ reason: "cli_registered" },
+			"user-1",
+		);
+	});
+
+	it("does not request a Team refresh for backend capability updates", async () => {
+		socketHandlers["cli:register"]?.(
+			createMockRegistrationInfo({ machineId: "raw-machine-1" }),
+		);
+		await vi.waitFor(() => {
+			expect(registry.getCliBySocketId(socket.id)).toBeDefined();
+		});
+		expect(emitToWebui).not.toHaveBeenCalled();
+
+		registry.updateBackendCapabilities(socket.id, {
+			"backend-1": {
+				list: true,
+				load: true,
+			},
+		});
+
+		expect(emitToWebui).not.toHaveBeenCalled();
+	});
+
+	it("updates pre-barrier session state without exposing partial deltas", async () => {
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		const record = registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+		registry.onSessionsChanged((_machineId, payload, registeredUserId) => {
+			emitToWebui("sessions:changed", payload, registeredUserId);
+		});
+
+		socketHandlers["sessions:changed"]?.({
+			added: [
+				createMockSessionSummary({
+					sessionId: "incremental-before-ready",
+					isAttached: true,
+				}),
+			],
+			updated: [],
+			removed: [],
+		});
+		socketHandlers["sessions:discovered"]?.({
+			sessions: [
+				{
+					sessionId: "discovered-before-ready",
+					cwd: "/repo",
+					title: "Discovered",
+				},
+			],
+			backendId: "backend-1",
+			backendLabel: "Claude Code",
+		});
+		socketHandlers["session:attached"]?.({
+			sessionId: "incremental-before-ready",
+			attachedAt: "2026-07-31T00:00:00.000Z",
+		});
+		socketHandlers["session:detached"]?.({
+			sessionId: "incremental-before-ready",
+			detachedAt: "2026-07-31T00:01:00.000Z",
+			reason: "agent_exit",
+		});
+
+		expect(record.sessions.map((session) => session.sessionId)).toEqual([
+			"incremental-before-ready",
+			"discovered-before-ready",
+		]);
+		expect(record.sessionSnapshotReady).toBe(false);
+		expect(emitToWebui).not.toHaveBeenCalledWith(
+			"sessions:changed",
+			expect.anything(),
+			expect.anything(),
+		);
+		expect(emitToWebui).not.toHaveBeenCalledWith(
+			"session:attached",
+			expect.anything(),
+			expect.anything(),
+		);
+		expect(emitToWebui).not.toHaveBeenCalledWith(
+			"session:detached",
+			expect.anything(),
+			expect.anything(),
+		);
+
+		await socketHandlers.disconnect?.("transport close");
+
+		expect(emitToWebui).not.toHaveBeenCalledWith(
+			"session:detached",
+			expect.objectContaining({ reason: "cli_disconnect" }),
+			expect.anything(),
+		);
+	});
+
 	it("relays agent team changed events only to the owning user", () => {
 		const info = createMockRegistrationInfo({ machineId: "machine-1" });
 		registry.register(socket, info, {
@@ -696,6 +884,7 @@ describe("setupCliHandlers", () => {
 			userId: "user-1",
 			deviceId: "device-123",
 		});
+		registry.updateSessions(socket.id, []);
 		vi.mocked(logger.warn).mockClear();
 
 		socketHandlers["sessions:discovered"]?.({
@@ -832,6 +1021,7 @@ describe("setupCliHandlers", () => {
 				deviceId: "device-123",
 			},
 		);
+		registry.updateSessions(socket.id, []);
 
 		socketHandlers["sessions:discovered"]?.({
 			sessions: [
@@ -856,13 +1046,54 @@ describe("setupCliHandlers", () => {
 		expect(emitToWebui).toHaveBeenCalledWith(
 			"sessions:changed",
 			expect.objectContaining({
+				machineId: "machine-1",
 				added: [
 					expect.objectContaining({
 						sessionId: "discovered-roots",
+						machineId: "machine-1",
 						additionalDirectories: ["/shared", "/data"],
 						_meta: { source: "agent", keep: null },
 					}),
 				],
+			}),
+			"user-1",
+		);
+	});
+
+	it("attributes capability-only discovery deltas to the registered machine", () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({ machineId: "machine-1" }),
+			{
+				userId: "user-1",
+				deviceId: "device-123",
+			},
+		);
+		registry.updateSessions(socket.id, []);
+
+		socketHandlers["sessions:discovered"]?.({
+			sessions: [],
+			capabilities: {
+				list: true,
+				load: true,
+			},
+			backendId: "backend-1",
+			backendLabel: "Spoofed label",
+		});
+
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"sessions:changed",
+			expect.objectContaining({
+				machineId: "machine-1",
+				added: [],
+				updated: [],
+				removed: [],
+				backendCapabilities: {
+					"backend-1": expect.objectContaining({
+						list: true,
+						load: true,
+					}),
+				},
 			}),
 			"user-1",
 		);
@@ -877,6 +1108,7 @@ describe("setupCliHandlers", () => {
 				deviceId: "device-123",
 			},
 		);
+		registry.updateSessions(socket.id, []);
 		const initial = {
 			sessions: [
 				{
@@ -931,6 +1163,7 @@ describe("setupCliHandlers", () => {
 				deviceId: "device-123",
 			},
 		);
+		registry.updateSessions(socket.id, []);
 
 		socketHandlers["sessions:discovered"]?.({
 			sessions: [
@@ -985,7 +1218,9 @@ describe("setupCliHandlers", () => {
 		finishUpsert?.({ machineId: "machine-1", userId: "user-1" });
 
 		await vi.waitFor(() => {
-			expect(registry.getCliBySocketId(socket.id)?.sessions).toEqual([session]);
+			expect(registry.getCliBySocketId(socket.id)?.sessions).toEqual([
+				{ ...session, machineId: "machine-1" },
+			]);
 		});
 	});
 
@@ -1198,10 +1433,11 @@ describe("setupCliHandlers", () => {
 			userId: "user-1",
 			deviceId: "device-123",
 		});
+		registry.updateSessions(socket.id, []);
 
 		socketHandlers["session:attached"]?.({
 			sessionId: "session-1",
-			machineId: "machine-1",
+			machineId: "spoofed-machine",
 			attachedAt: "2024-01-01T00:00:00Z",
 		});
 
@@ -1223,10 +1459,11 @@ describe("setupCliHandlers", () => {
 			userId: "user-1",
 			deviceId: "device-123",
 		});
+		registry.updateSessions(socket.id, []);
 
 		socketHandlers["session:detached"]?.({
 			sessionId: "session-1",
-			machineId: "machine-1",
+			machineId: "spoofed-machine",
 			detachedAt: "2024-01-01T00:00:00Z",
 			reason: "agent_exit",
 		});
@@ -1249,6 +1486,12 @@ describe("setupCliHandlers", () => {
 			userId: "user-1",
 			deviceId: "device-123",
 		});
+		registry.updateSessions(socket.id, [
+			createMockSessionSummary({
+				sessionId: "session-1",
+				isAttached: true,
+			}),
+		]);
 
 		socketHandlers["permission:request"]?.({
 			sessionId: "session-1",
@@ -1271,6 +1514,12 @@ describe("setupCliHandlers", () => {
 			userId: "user-1",
 			deviceId: "device-123",
 		});
+		registry.updateSessions(socket.id, [
+			createMockSessionSummary({
+				sessionId: "session-1",
+				isAttached: true,
+			}),
+		]);
 
 		socketHandlers["permission:request"]?.({
 			sessionId: "session-1",
@@ -1296,6 +1545,106 @@ describe("setupCliHandlers", () => {
 			"user-1",
 			expected,
 		);
+	});
+
+	it("binds permission request and result payloads to the unique ready owner", () => {
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+		registry.updateSessions(socket.id, [
+			createMockSessionSummary({
+				sessionId: "session-1",
+				isAttached: true,
+			}),
+		]);
+
+		socketHandlers["permission:request"]?.({
+			sessionId: "session-1",
+			requestId: "request-1",
+			options: [],
+			machineId: "forged-machine",
+		});
+		socketHandlers["permission:result"]?.({
+			sessionId: "session-1",
+			requestId: "request-1",
+			outcome: { outcome: "cancelled" },
+			machineId: "forged-machine",
+		});
+
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"permission:request",
+			expect.objectContaining({
+				sessionId: "session-1",
+				requestId: "request-1",
+				machineId: "machine-1",
+			}),
+			"user-1",
+		);
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"permission:result",
+			expect.objectContaining({
+				sessionId: "session-1",
+				requestId: "request-1",
+				machineId: "machine-1",
+			}),
+			"user-1",
+		);
+	});
+
+	it("suppresses permission traffic when a raw session ID has multiple ready owners", () => {
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+		registry.updateSessions(socket.id, [
+			createMockSessionSummary({
+				sessionId: "collision",
+				isAttached: true,
+			}),
+		]);
+		const secondSocket = {
+			id: "socket-2",
+			disconnect: vi.fn(),
+		} as unknown as Socket;
+		registry.register(
+			secondSocket,
+			createMockRegistrationInfo({ machineId: "machine-2" }),
+			{ userId: "user-1", deviceId: "device-2" },
+		);
+		registry.updateSessions(secondSocket.id, [
+			createMockSessionSummary({
+				sessionId: "collision",
+				isAttached: true,
+			}),
+		]);
+		emitToWebui.mockClear();
+		notificationService.notifyPermissionRequest.mockClear();
+
+		socketHandlers["permission:request"]?.({
+			sessionId: "collision",
+			requestId: "request-collision",
+			options: [],
+		});
+		socketHandlers["permission:result"]?.({
+			sessionId: "collision",
+			requestId: "request-collision",
+			outcome: { outcome: "cancelled" },
+		});
+
+		expect(emitToWebui).not.toHaveBeenCalledWith(
+			"permission:request",
+			expect.anything(),
+			expect.anything(),
+		);
+		expect(emitToWebui).not.toHaveBeenCalledWith(
+			"permission:result",
+			expect.anything(),
+			expect.anything(),
+		);
+		expect(notificationService.notifyPermissionRequest).not.toHaveBeenCalled();
 	});
 
 	it("does not dispatch permission notifications for inactive sessions", () => {

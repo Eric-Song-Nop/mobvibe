@@ -4,6 +4,7 @@ import type {
 	DiscoverSessionsRpcResult,
 	GitFileDiffResponse,
 	GitStatusResponse,
+	SessionEventsResponse,
 	SessionSummary,
 } from "@mobvibe/shared";
 import type { Socket } from "socket.io";
@@ -21,6 +22,7 @@ const createMockSocket = (
 		on: vi.fn(),
 		join: vi.fn(),
 		leave: vi.fn(),
+		disconnect: vi.fn(),
 	} as unknown as Socket & { emit: ReturnType<typeof vi.fn> };
 };
 
@@ -78,6 +80,82 @@ describe("SessionRouter", () => {
 	beforeEach(() => {
 		cliRegistry = new CliRegistry();
 		sessionRouter = new SessionRouter(cliRegistry);
+	});
+
+	describe("SessionSummary source binding", () => {
+		it("canonicalizes a created session to the selected machine", async () => {
+			const socket = createMockSocket("socket-create");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-create" }),
+				{ userId: "user-1", deviceId: "device-create" },
+			);
+			socket.emit.mockImplementation((event, request) => {
+				if (event !== "rpc:session:create") return;
+				sessionRouter.handleRpcResponse(
+					{
+						requestId: request.requestId,
+						result: createMockSessionSummary({
+							sessionId: "created-session",
+							machineId: "forged-machine",
+						}),
+					},
+					socket.id,
+				);
+			});
+
+			const result = await sessionRouter.createSession(
+				{
+					machineId: "machine-create",
+					backendId: "backend-1",
+					cwd: "/repo",
+				},
+				"user-1",
+			);
+
+			expect(result).toMatchObject({
+				sessionId: "created-session",
+				machineId: "machine-create",
+			});
+		});
+
+		it("rejects a summary returned by a replaced registration", async () => {
+			const socket = createMockSocket("socket-create-stale");
+			const replacementSocket = createMockSocket("socket-create-replacement");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-create" }),
+				{ userId: "user-1", deviceId: "device-create" },
+			);
+			socket.emit.mockImplementation((event, request) => {
+				if (event !== "rpc:session:create") return;
+				cliRegistry.register(
+					replacementSocket,
+					createMockRegistrationInfo({ machineId: "machine-create" }),
+					{ userId: "user-1", deviceId: "device-replacement" },
+				);
+				sessionRouter.handleRpcResponse(
+					{
+						requestId: request.requestId,
+						result: createMockSessionSummary({
+							sessionId: "stale-created-session",
+						}),
+					},
+					socket.id,
+				);
+			});
+
+			await expect(
+				sessionRouter.createSession(
+					{
+						machineId: "machine-create",
+						backendId: "backend-1",
+						cwd: "/repo",
+					},
+					"user-1",
+				),
+			).rejects.toThrow("CLI registration changed");
+		});
 	});
 
 	describe("Agent-managed authentication", () => {
@@ -583,6 +661,7 @@ describe("SessionRouter", () => {
 				sessionId: "loaded-session-1",
 				title: "Session Title",
 				cwd: "/home/user/project",
+				machineId: "forged-machine",
 			});
 
 			socket.emit.mockImplementation((event, request) => {
@@ -609,6 +688,7 @@ describe("SessionRouter", () => {
 
 			expect(result.sessionId).toBe("loaded-session-1");
 			expect(result.title).toBe("Session Title");
+			expect(result.machineId).toBe("machine-1");
 			expect(socket.emit).toHaveBeenCalledWith(
 				"rpc:session:load",
 				expect.objectContaining({
@@ -700,6 +780,7 @@ describe("SessionRouter", () => {
 			const summary = createMockSessionSummary({
 				sessionId: "session-1",
 				cwd: "/repo",
+				machineId: "forged-machine",
 			});
 			cliRegistry.updateSessions(socket.id, [summary]);
 			socket.emit.mockImplementation((event, request) => {
@@ -725,6 +806,7 @@ describe("SessionRouter", () => {
 			);
 
 			expect(result.sessionId).toBe("session-1");
+			expect(result.machineId).toBe("machine-1");
 			expect(socket.emit).toHaveBeenCalledWith(
 				"rpc:session:resume",
 				expect.objectContaining({
@@ -1226,7 +1308,10 @@ describe("SessionRouter", () => {
 					},
 					"user-config",
 				),
-			).resolves.toEqual(updatedSession);
+			).resolves.toEqual({
+				...updatedSession,
+				machineId: "machine-config",
+			});
 			expect(socket.emit).toHaveBeenCalledWith(
 				"rpc:session:config",
 				expect.objectContaining({
@@ -2107,6 +2192,73 @@ describe("SessionRouter", () => {
 					expect.objectContaining({ sessionId: "discovered-session-1" }),
 				]),
 			});
+		});
+	});
+
+	describe("getSessionEvents", () => {
+		it("canonicalizes the owner machine and rejects events for another session", async () => {
+			const socket = createMockSocket("socket-events");
+			cliRegistry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-owner" }),
+				{ userId: "user-1", deviceId: "device-events" },
+			);
+			cliRegistry.updateSessions(socket.id, [
+				createMockSessionSummary({ sessionId: "session-1" }),
+			]);
+
+			socket.emit.mockImplementation((event, request) => {
+				if (event !== "rpc:session:events") return;
+				const result: SessionEventsResponse = {
+					sessionId: "forged-envelope-session",
+					machineId: "forged-machine",
+					revision: 1,
+					events: [
+						{
+							sessionId: "other-session",
+							machineId: "forged-machine",
+							revision: 1,
+							seq: 1,
+							kind: "agent_message_chunk",
+							createdAt: "2026-07-31T00:00:00.000Z",
+							payload: { text: "must be dropped" },
+						},
+						{
+							sessionId: "session-1",
+							machineId: "forged-machine",
+							revision: 1,
+							seq: 2,
+							kind: "agent_message_chunk",
+							createdAt: "2026-07-31T00:00:01.000Z",
+							payload: { text: "accepted" },
+						},
+					],
+					hasMore: false,
+				};
+				sessionRouter.handleRpcResponse(
+					{ requestId: request.requestId, result },
+					socket.id,
+				);
+			});
+
+			const result = await sessionRouter.getSessionEvents(
+				{ sessionId: "session-1", revision: 1, afterSeq: 0 },
+				"user-1",
+			);
+
+			expect(result).toMatchObject({
+				sessionId: "session-1",
+				machineId: "machine-owner",
+				revision: 1,
+				hasMore: false,
+			});
+			expect(result.events).toEqual([
+				expect.objectContaining({
+					sessionId: "session-1",
+					machineId: "machine-owner",
+					seq: 2,
+				}),
+			]);
 		});
 	});
 

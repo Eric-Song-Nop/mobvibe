@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
+	type AgentTeamListResult,
+	type AgentTeamSummary,
 	AppError,
 	type CreateAgentTeamRpcParams,
 	type CreateAgentTeamRpcResult,
@@ -19,6 +21,7 @@ import {
 	type RpcRequest,
 	type RpcResponse,
 	type SendTeamRelayResult,
+	type SessionSummary,
 	TEAM_RELAY_GATEWAY_RPC_TIMEOUT_MS,
 	type TeamRelayExecuteRpcParams,
 	type TeamRelayExecuteRpcResult,
@@ -35,6 +38,16 @@ type PendingRpc<T> = {
 	timeout: NodeJS.Timeout;
 };
 
+const canonicalizeTeamMachine = (
+	team: AgentTeamSummary,
+	machineId: string,
+): AgentTeamSummary => ({ ...team, machineId });
+
+const canonicalizeSessionMachine = (
+	session: SessionSummary,
+	machineId: string,
+): SessionSummary => ({ ...session, machineId });
+
 export class TeamRouter {
 	private pendingRpcs = new Map<string, PendingRpc<unknown>>();
 
@@ -49,24 +62,48 @@ export class TeamRouter {
 			{ userId, machineId: params.machineId },
 			"agent_team_create_rpc_start",
 		);
-		return this.sendRpc<CreateAgentTeamRpcParams, CreateAgentTeamRpcResult>(
-			cli.socket,
-			"rpc:agent-team:create",
-			params,
-		);
+		const result = await this.sendRpc<
+			CreateAgentTeamRpcParams,
+			CreateAgentTeamRpcResult
+		>(cli.socket, "rpc:agent-team:create", params);
+		return {
+			...result,
+			team: canonicalizeTeamMachine(result.team, cli.machineId),
+			...(result.leaderSession
+				? {
+						leaderSession: canonicalizeSessionMachine(
+							result.leaderSession,
+							cli.machineId,
+						),
+					}
+				: {}),
+		};
 	}
 
 	async listAgentTeams(
 		params: ListAgentTeamsRpcParams,
 		userId: string,
-	): Promise<ListAgentTeamsRpcResult> {
+	): Promise<AgentTeamListResult> {
 		if (params.machineId) {
 			const cli = this.resolveMachineForUser(params.machineId, userId);
-			return this.sendRpc<ListAgentTeamsRpcParams, ListAgentTeamsRpcResult>(
-				cli.socket,
-				"rpc:agent-teams:list",
-				params,
-			);
+			const result = await this.sendRpc<
+				ListAgentTeamsRpcParams,
+				ListAgentTeamsRpcResult
+			>(cli.socket, "rpc:agent-teams:list", params);
+			if (
+				this.cliRegistry.getCliByMachineIdForUser(cli.machineId, userId) !== cli
+			) {
+				return {
+					teams: [],
+					coveredLeaderMachineIds: [],
+				};
+			}
+			return {
+				teams: result.teams.map((team) =>
+					canonicalizeTeamMachine(team, cli.machineId),
+				),
+				coveredLeaderMachineIds: [cli.machineId],
+			};
 		}
 
 		const clis = this.cliRegistry.getClisForUser(userId);
@@ -74,33 +111,131 @@ export class TeamRouter {
 			throw new Error("No CLI connected for this user");
 		}
 
-		const results = await Promise.all(
-			clis.map((cli) =>
-				this.sendRpc<ListAgentTeamsRpcParams, ListAgentTeamsRpcResult>(
-					cli.socket,
-					"rpc:agent-teams:list",
-					{ ...params, machineId: cli.machineId },
+		const results = await Promise.allSettled(
+			clis.map(async (cli) => ({
+				cli,
+				result: await this.sendRpc<
+					ListAgentTeamsRpcParams,
+					ListAgentTeamsRpcResult
+				>(cli.socket, "rpc:agent-teams:list", {
+					...params,
+					machineId: cli.machineId,
+				}),
+			})),
+		);
+		const successful = results.flatMap((result) => {
+			if (result.status !== "fulfilled") {
+				return [];
+			}
+			const { cli } = result.value;
+			const currentCli = this.cliRegistry.getCliByMachineIdForUser(
+				cli.machineId,
+				userId,
+			);
+			return currentCli === cli ? [result.value] : [];
+		});
+		if (successful.length === 0) {
+			const firstFailure = results.find(
+				(result): result is PromiseRejectedResult =>
+					result.status === "rejected",
+			);
+			if (firstFailure) {
+				throw firstFailure.reason;
+			}
+		}
+		return {
+			teams: successful.flatMap(({ cli, result }) =>
+				result.teams.map((team) =>
+					canonicalizeTeamMachine(team, cli.machineId),
 				),
 			),
-		);
-		return { teams: results.flatMap((result) => result.teams) };
+			coveredLeaderMachineIds: successful.map(({ cli }) => cli.machineId),
+		};
 	}
 
 	async getAgentTeam(
 		params: GetAgentTeamRpcParams,
 		userId: string,
 	): Promise<GetAgentTeamRpcResult> {
-		const cli = params.machineId
-			? this.resolveMachineForUser(params.machineId, userId)
-			: this.cliRegistry.getFirstCliForUser(userId);
-		if (!cli) {
+		if (params.machineId) {
+			const cli = this.resolveMachineForUser(params.machineId, userId);
+			const result = await this.sendRpc<
+				GetAgentTeamRpcParams,
+				GetAgentTeamRpcResult
+			>(cli.socket, "rpc:agent-team:get", {
+				...params,
+				machineId: cli.machineId,
+			});
+			if (
+				this.cliRegistry.getCliByMachineIdForUser(cli.machineId, userId) !== cli
+			) {
+				return {};
+			}
+			return result.team
+				? { team: canonicalizeTeamMachine(result.team, cli.machineId) }
+				: {};
+		}
+
+		const clis = this.cliRegistry.getClisForUser(userId);
+		if (clis.length === 0) {
 			throw new Error("No CLI connected for this user");
 		}
-		return this.sendRpc<GetAgentTeamRpcParams, GetAgentTeamRpcResult>(
-			cli.socket,
-			"rpc:agent-team:get",
-			{ ...params, machineId: cli.machineId },
+
+		const results = await Promise.allSettled(
+			clis.map(async (cli) => ({
+				cli,
+				result: await this.sendRpc<
+					GetAgentTeamRpcParams,
+					GetAgentTeamRpcResult
+				>(cli.socket, "rpc:agent-team:get", {
+					...params,
+					machineId: cli.machineId,
+				}),
+			})),
 		);
+		const successful = results.flatMap((result) => {
+			if (result.status !== "fulfilled") {
+				return [];
+			}
+			const { cli } = result.value;
+			return this.cliRegistry.getCliByMachineIdForUser(
+				cli.machineId,
+				userId,
+			) === cli
+				? [result.value]
+				: [];
+		});
+		const matches = successful.flatMap(({ cli, result }) =>
+			result.team ? [{ cli, team: result.team }] : [],
+		);
+		if (matches.length > 1) {
+			throw new AppError(
+				createErrorDetail({
+					code: "AGENT_TEAM_ID_COLLISION",
+					message: "Agent Team identity collision detected",
+					retryable: false,
+					scope: "service",
+				}),
+				409,
+			);
+		}
+		const match = matches[0];
+		if (match) {
+			return {
+				team: canonicalizeTeamMachine(match.team, match.cli.machineId),
+			};
+		}
+
+		const firstFailure = results.find(
+			(result): result is PromiseRejectedResult => result.status === "rejected",
+		);
+		if (firstFailure) {
+			throw firstFailure.reason;
+		}
+		if (successful.length !== clis.length) {
+			throw new Error("CLI registration changed during Agent Team lookup");
+		}
+		return {};
 	}
 
 	async resolveRelayPeer(

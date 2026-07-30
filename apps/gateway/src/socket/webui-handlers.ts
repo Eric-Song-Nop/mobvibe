@@ -1,9 +1,9 @@
 import type {
 	CliStatusPayload,
+	GatewaySessionsChangedPayload,
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
 	SessionEvent,
-	SessionsChangedPayload,
 } from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
 import { auth } from "../lib/auth.js";
@@ -93,9 +93,24 @@ export function setupWebuiHandlers(
 
 	// Forward sessions:changed events to webui clients
 	cliRegistry.onSessionsChanged(
-		(_machineId: string, payload: SessionsChangedPayload, userId?: string) => {
+		(
+			machineId: string,
+			payload: GatewaySessionsChangedPayload,
+			userId?: string,
+		) => {
 			if (userId) {
-				emitToUser(userId, "sessions:changed", payload);
+				emitToUser(userId, "sessions:changed", {
+					...payload,
+					machineId,
+					added: payload.added.map((session) => ({
+						...session,
+						machineId,
+					})),
+					updated: payload.updated.map((session) => ({
+						...session,
+						machineId,
+					})),
+				} satisfies GatewaySessionsChangedPayload);
 			}
 			// No userId → silently discard
 		},

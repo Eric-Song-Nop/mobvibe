@@ -2736,7 +2736,7 @@ describe("SessionManager", () => {
 		});
 
 		it("returns sessions after creating one", async () => {
-			await sessionManager.createSession({
+			const created = await sessionManager.createSession({
 				cwd: "/home/user/project",
 				backendId: "backend-1",
 			});
@@ -2744,6 +2744,56 @@ describe("SessionManager", () => {
 			const sessions = sessionManager.listSessions();
 			expect(sessions).toHaveLength(1);
 			expect(sessions[0].sessionId).toBeDefined();
+			expect(created).not.toHaveProperty("agentTeamOwned");
+			expect(sessions[0]).not.toHaveProperty("agentTeamOwned");
+			expect(sessionManager.listAllSessions()[0]).not.toHaveProperty(
+				"agentTeamOwned",
+			);
+		});
+
+		it("restores detached remote Team ownership from the durable binding after restart", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const internals =
+				sessionManager as unknown as SessionManagerTeamInternals;
+			const serverId = buildTeamMcpServerId({
+				agentTeamId: "remote-team-persisted-classification",
+				memberId: "remote-member-persisted-classification",
+			});
+			internals.teamRelayStore.createRemoteSessionBinding({
+				serverId,
+				agentTeamId: "remote-team-persisted-classification",
+				memberId: "remote-member-persisted-classification",
+				leaderMachineId: "leader-machine",
+				backendId: "backend-1",
+			});
+			internals.teamRelayStore.activateRemoteSessionBinding({
+				serverId,
+				sessionId: created.sessionId,
+			});
+			await sessionManager.closeSession(created.sessionId);
+			await sessionManager.shutdown();
+
+			const restartedManager = new SessionManager(mockConfig, undefined, {
+				validateWorkspacePath: async () => true,
+			});
+			try {
+				expect(restartedManager.listSessions()).toEqual([]);
+				expect(
+					restartedManager
+						.listAllSessions()
+						.find((session) => session.sessionId === created.sessionId),
+				).toEqual(
+					expect.objectContaining({
+						agentTeamOwned: true,
+						isAttached: false,
+					}),
+				);
+			} finally {
+				await restartedManager.shutdown();
+			}
 		});
 
 		it("sets workspaceRootCwd for subdirectory sessions", async () => {
@@ -4666,6 +4716,12 @@ describe("SessionManager", () => {
 				requestedByMemberId: created.team.leaderMemberId,
 				name: "Worker",
 			});
+			expect(
+				sessionManager
+					.listSessions()
+					.find((session) => session.sessionId === "member-session-1")
+					?.agentTeamOwned,
+			).toBe(true);
 			const teamChanged = mock(() => {});
 			sessionManager.onAgentTeamChanged(teamChanged);
 
@@ -4794,6 +4850,20 @@ describe("SessionManager", () => {
 			});
 
 			expect(result.leaderSession?.sessionId).toBe("leader-session-1");
+			expect(result.leaderSession?.agentTeamOwned).toBe(true);
+			expect(
+				sessionManager
+					.listSessions()
+					.find((session) => session.sessionId === "leader-session-1")
+					?.agentTeamOwned,
+			).toBe(true);
+			await sessionManager.closeSession("leader-session-1");
+			expect(
+				sessionManager
+					.listAllSessions()
+					.find((session) => session.sessionId === "leader-session-1")
+					?.agentTeamOwned,
+			).toBe(true);
 			expect(result.team.lifecycle).toBe("running");
 			expect(result.team.members[0]).toEqual(
 				expect.objectContaining({
@@ -6533,6 +6603,21 @@ describe("SessionManager", () => {
 				}),
 			);
 			expect(bindingDuringPermissionRegistration?.lifecycle).toBe("active");
+			expect(
+				sessionManager
+					.listSessions()
+					.find(
+						(session) => session.sessionId === "remote-worker-session-ordering",
+					)?.agentTeamOwned,
+			).toBe(true);
+			await sessionManager.closeSession("remote-worker-session-ordering");
+			expect(
+				sessionManager
+					.listAllSessions()
+					.find(
+						(session) => session.sessionId === "remote-worker-session-ordering",
+					)?.agentTeamOwned,
+			).toBe(true);
 			const replay = await harness.relayApi.handleTeamRelayRequest(request);
 			expect(
 				openRemoteBootstrapResponse(harness, fixture.operationId, replay),

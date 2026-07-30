@@ -46,6 +46,9 @@ describe("session message routes", () => {
 	let cliRegistry: {
 		addDiscoveredSessionsForMachine: ReturnType<typeof vi.fn>;
 		getCliByMachineIdForUser: ReturnType<typeof vi.fn>;
+		getClisForUser: ReturnType<typeof vi.fn>;
+		getReadySessionIdCollisionsForUser: ReturnType<typeof vi.fn>;
+		getReadySessionsForUser: ReturnType<typeof vi.fn>;
 	};
 
 	beforeEach(async () => {
@@ -87,6 +90,11 @@ describe("session message routes", () => {
 				backends: [{ backendId: "backend-1", backendLabel: "Test Backend" }],
 				sessions: [],
 			})),
+			getClisForUser: vi.fn(() => [
+				{ machineId: "machine-1", sessionSnapshotReady: true },
+			]),
+			getReadySessionIdCollisionsForUser: vi.fn(() => []),
+			getReadySessionsForUser: vi.fn(() => []),
 		};
 		const app = express();
 		app.use(express.json());
@@ -181,6 +189,105 @@ describe("session message routes", () => {
 
 		expect(response.status).toBe(204);
 		expect(await response.text()).toBe("");
+	});
+
+	it("returns sessions with explicit coverage for every ready current registration", async () => {
+		const session = {
+			sessionId: "session-1",
+			title: "Ready session",
+			backendId: "backend-1",
+			backendLabel: "Test Backend",
+			createdAt: "2026-07-31T00:00:00.000Z",
+			updatedAt: "2026-07-31T00:00:00.000Z",
+			machineId: "machine-2",
+		};
+		cliRegistry.getClisForUser.mockReturnValue([
+			{ machineId: "machine-2", sessionSnapshotReady: true },
+			{ machineId: "machine-1", sessionSnapshotReady: true },
+		]);
+		cliRegistry.getReadySessionsForUser.mockReturnValue([session]);
+
+		const response = await fetch(`${baseUrl}/acp/sessions`, {
+			headers: { authorization: "Bearer user-1" },
+		});
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({
+			sessions: [session],
+			coveredMachineIds: ["machine-1", "machine-2"],
+		});
+	});
+
+	it("returns a partial snapshot without letting an unready registration block ready machines", async () => {
+		const readySession = {
+			sessionId: "ready-session",
+			title: "Ready session",
+			machineId: "machine-ready",
+		};
+		cliRegistry.getClisForUser.mockReturnValue([
+			{ machineId: "machine-unready", sessionSnapshotReady: false },
+			{ machineId: "machine-ready", sessionSnapshotReady: true },
+		]);
+		cliRegistry.getReadySessionsForUser.mockReturnValue([readySession]);
+
+		const response = await fetch(`${baseUrl}/acp/sessions`, {
+			headers: { authorization: "Bearer user-1" },
+		});
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({
+			sessions: [readySession],
+			coveredMachineIds: ["machine-ready"],
+		});
+	});
+
+	it("rejects an ambiguous cross-machine session identity snapshot", async () => {
+		cliRegistry.getClisForUser.mockReturnValue([
+			{ machineId: "machine-1", sessionSnapshotReady: true },
+			{ machineId: "machine-2", sessionSnapshotReady: true },
+		]);
+		cliRegistry.getReadySessionIdCollisionsForUser.mockReturnValue([
+			"duplicate-session",
+		]);
+
+		const response = await fetch(`${baseUrl}/acp/sessions`, {
+			headers: { authorization: "Bearer user-1" },
+		});
+
+		expect(response.status).toBe(409);
+		expect(await response.json()).toEqual({
+			error: {
+				code: "SESSION_ID_COLLISION",
+				message: "Session identity collision detected",
+				retryable: false,
+				scope: "service",
+			},
+		});
+		expect(cliRegistry.getReadySessionsForUser).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		["no current CLI", []],
+		[
+			"only unready registrations",
+			[
+				{ machineId: "machine-unready", sessionSnapshotReady: false },
+				{ machineId: "machine-replacement", sessionSnapshotReady: false },
+			],
+		],
+	])("returns an empty no-op snapshot for %s", async (_label, clis) => {
+		cliRegistry.getClisForUser.mockReturnValue(clis);
+		cliRegistry.getReadySessionsForUser.mockReturnValue([]);
+
+		const response = await fetch(`${baseUrl}/acp/sessions`, {
+			headers: { authorization: "Bearer user-1" },
+		});
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({
+			sessions: [],
+			coveredMachineIds: [],
+		});
 	});
 
 	it("queries stable Agent authentication capabilities for a machine backend", async () => {
