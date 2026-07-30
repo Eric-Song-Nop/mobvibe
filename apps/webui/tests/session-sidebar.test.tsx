@@ -113,8 +113,10 @@ const renderSidebar = (
 					sessions={sessions}
 					sidebarEntries={options?.sidebarEntries as SidebarSessionListEntry[]}
 					activeSessionId={options?.activeSessionId}
+					activeAgentTeamId={options?.activeAgentTeamId}
 					onCreateSession={options?.onCreateSession ?? (() => {})}
 					onSelectSession={options?.onSelectSession ?? (() => {})}
+					onSelectAgentTeam={options?.onSelectAgentTeam ?? (() => {})}
 					onEditSubmit={options?.onEditSubmit ?? (() => {})}
 					onCloseSessionRequest={options?.onCloseSessionRequest ?? (() => {})}
 					onDeleteSessionRequest={options?.onDeleteSessionRequest ?? (() => {})}
@@ -158,6 +160,18 @@ describe("SessionSidebar", () => {
 	it("shows empty state when no sessions", () => {
 		renderSidebar([]);
 		expect(screen.getByText(i18n.t("session.empty"))).toBeInTheDocument();
+	});
+
+	it("offers Agent Team creation without asking for a machine", async () => {
+		const onCreateSession = vi.fn();
+		const user = userEvent.setup();
+		renderSidebar([], { onCreateSession });
+
+		await user.click(
+			screen.getByRole("button", { name: i18n.t("agentTeam.new") }),
+		);
+
+		expect(onCreateSession).toHaveBeenCalledWith("agent-team");
 	});
 
 	it("selects a session when clicked", async () => {
@@ -285,6 +299,7 @@ describe("SessionSidebar", () => {
 		const user = userEvent.setup();
 		renderSidebar([], {
 			onSelectSession,
+			activeAgentTeamId: "team-1",
 			sidebarEntries: [
 				{
 					kind: "agent-team",
@@ -339,14 +354,85 @@ describe("SessionSidebar", () => {
 							worktreeBranch: "team/ui",
 							createdAt: "2026-05-14T00:00:00.000Z",
 							updatedAt: "2026-05-14T00:02:00.000Z",
+							session: buildSession({
+								sessionId: "leader-session",
+								title: "Leader",
+								machineId: "machine-1",
+							}),
+						},
+						{
+							memberId: "offline-member",
+							agentTeamId: "team-1",
+							role: "member",
+							name: "Offline worker",
+							backendId: "opencode",
+							sessionId: "offline-session",
+							lifecycle: "running",
+							health: "degraded",
+							mailboxCounts: {
+								unread: 0,
+								wakePending: 0,
+								wakeFailed: 0,
+							},
+							taskCounts: {
+								todo: 1,
+								inProgress: 0,
+								blocked: 0,
+								completed: 0,
+								failed: 0,
+								cancelled: 0,
+							},
+							pendingPermissionCount: 0,
+							createdAt: "2026-05-14T00:00:00.000Z",
+							updatedAt: "2026-05-14T00:02:00.000Z",
 						},
 					],
+				},
+				{
+					kind: "agent-team",
+					workspaceCwd: "/background",
+					updatedAt: "2026-05-14T00:02:00.000Z",
+					team: {
+						agentTeamId: "team-2",
+						machineId: "machine-2",
+						title: "Background Team",
+						workspaceRootCwd: "/background",
+						workspaceMode: "shared_workspace",
+						leaderMemberId: "background-leader",
+						lifecycle: "pending",
+						mailboxCounts: { unread: 0, wakePending: 0, wakeFailed: 0 },
+						taskCounts: {
+							todo: 0,
+							inProgress: 0,
+							blocked: 0,
+							completed: 0,
+							failed: 0,
+							cancelled: 0,
+						},
+						members: [],
+						createdAt: "2026-05-14T00:00:00.000Z",
+						updatedAt: "2026-05-14T00:02:00.000Z",
+					},
+					members: [],
 				},
 			],
 		});
 
+		expect(screen.getByText("Agent Team UI").closest("button")).toHaveAttribute(
+			"aria-current",
+			"page",
+		);
 		expect(
 			screen.getByRole("button", { name: /Agent Team UI members/ }),
+		).toHaveAttribute("aria-expanded", "true");
+		expect(
+			screen.getByRole("button", { name: /Background Team members/ }),
+		).toHaveAttribute("aria-expanded", "false");
+		await user.click(
+			screen.getByRole("button", { name: /Background Team members/ }),
+		);
+		expect(
+			screen.getByRole("button", { name: /Background Team members/ }),
 		).toHaveAttribute("aria-expanded", "true");
 		expect(screen.getByText("running")).toBeInTheDocument();
 		expect(screen.getByText("tools_ready")).toBeInTheDocument();
@@ -355,6 +441,13 @@ describe("SessionSidebar", () => {
 		expect(screen.getByText("Leader")).toBeInTheDocument();
 		expect(screen.getByText(/leader · claude · running/)).toBeInTheDocument();
 		expect(screen.getByText(/team\/ui/)).toBeInTheDocument();
+
+		const offlineMember = screen.getByRole("button", {
+			name: /Offline worker/,
+		});
+		expect(offlineMember).toBeDisabled();
+		await user.click(offlineMember);
+		expect(onSelectSession).not.toHaveBeenCalled();
 
 		await user.click(screen.getByRole("button", { name: /Leader/ }));
 
@@ -548,6 +641,42 @@ describe("SessionSidebar", () => {
 	});
 
 	describe("Tab switching", () => {
+		it("links tabs to panels and supports arrow-key navigation", async () => {
+			const user = userEvent.setup();
+			renderSidebar([buildSession({ title: "My Session" })]);
+
+			const sessionsTab = screen.getByRole("tab", {
+				name: i18n.t("session.title"),
+			});
+			const workspacesTab = screen.getByRole("tab", {
+				name: i18n.t("workspace.title"),
+			});
+			const workspacesPanel = document.getElementById(
+				workspacesTab.getAttribute("aria-controls")!,
+			);
+			const sessionsPanel = document.getElementById(
+				sessionsTab.getAttribute("aria-controls")!,
+			);
+
+			expect(sessionsTab).toHaveAttribute("aria-selected", "true");
+			expect(workspacesPanel).toHaveAttribute("role", "tabpanel");
+			expect(workspacesPanel).toHaveAttribute("hidden");
+			expect(workspacesPanel).toBeEmptyDOMElement();
+			expect(sessionsPanel).toHaveAttribute("role", "tabpanel");
+			expect(sessionsPanel).not.toHaveAttribute("hidden");
+			expect(sessionsPanel).toContainElement(screen.getByText("My Session"));
+
+			sessionsTab.focus();
+			await user.keyboard("{ArrowLeft}");
+
+			expect(workspacesTab).toHaveFocus();
+			expect(workspacesTab).toHaveAttribute("aria-selected", "true");
+			expect(workspacesPanel).not.toHaveAttribute("hidden");
+			expect(sessionsPanel).toHaveAttribute("hidden");
+			expect(sessionsPanel).toBeEmptyDOMElement();
+			expect(screen.getByTestId("workspace-list")).toBeInTheDocument();
+		});
+
 		it("shows sessions tab by default", () => {
 			renderSidebar([buildSession({ title: "My Session" })]);
 			expect(screen.getByText("My Session")).toBeInTheDocument();

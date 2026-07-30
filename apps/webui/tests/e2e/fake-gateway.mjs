@@ -944,8 +944,16 @@ const server = http.createServer(async (req, res) => {
 		return;
 	}
 
+	if (req.method === "GET" && url.pathname === "/acp/agent-teams") {
+		json(req, res, 200, { teams: [], coveredLeaderMachineIds: [] });
+		return;
+	}
+
 	if (req.method === "GET" && url.pathname === "/acp/sessions") {
-		json(req, res, 200, { sessions: state.sessions });
+		json(req, res, 200, {
+			sessions: state.sessions,
+			coveredMachineIds: [MACHINE_ID],
+		});
 		return;
 	}
 

@@ -1,14 +1,15 @@
 import { io, type Socket } from "socket.io-client";
 import type {
 	AgentTeamsChangedPayload,
+	AgentTeamsRefreshRequiredPayload,
 	CliStatusPayload,
+	GatewayPermissionDecisionPayload,
+	GatewayPermissionRequestPayload,
+	GatewaySessionsChangedPayload,
 	GatewayToWebuiEvents,
-	PermissionDecisionPayload,
-	PermissionRequestPayload,
 	SessionAttachedPayload,
 	SessionDetachedPayload,
 	SessionEvent,
-	SessionsChangedPayload,
 	WebuiToGatewayEvents,
 } from "./acp";
 import { isInTauri } from "./auth";
@@ -138,11 +139,15 @@ class GatewaySocket {
 		return this.registerHandler("session:detached", handler);
 	}
 
-	onPermissionRequest(handler: (payload: PermissionRequestPayload) => void) {
+	onPermissionRequest(
+		handler: (payload: GatewayPermissionRequestPayload) => void,
+	) {
 		return this.registerHandler("permission:request", handler);
 	}
 
-	onPermissionResult(handler: (payload: PermissionDecisionPayload) => void) {
+	onPermissionResult(
+		handler: (payload: GatewayPermissionDecisionPayload) => void,
+	) {
 		return this.registerHandler("permission:result", handler);
 	}
 
@@ -150,12 +155,18 @@ class GatewaySocket {
 		return this.registerHandler("cli:status", handler);
 	}
 
-	onSessionsChanged(handler: (payload: SessionsChangedPayload) => void) {
+	onSessionsChanged(handler: (payload: GatewaySessionsChangedPayload) => void) {
 		return this.registerHandler("sessions:changed", handler);
 	}
 
 	onAgentTeamsChanged(handler: (payload: AgentTeamsChangedPayload) => void) {
 		return this.registerHandler("agent-teams:changed", handler);
+	}
+
+	onAgentTeamsRefreshRequired(
+		handler: (payload: AgentTeamsRefreshRequiredPayload) => void,
+	) {
+		return this.registerHandler("agent-teams:refresh-required", handler);
 	}
 
 	onSessionEvent(handler: (event: SessionEvent) => void) {

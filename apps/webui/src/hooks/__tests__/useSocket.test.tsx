@@ -109,6 +109,7 @@ const mockGatewaySocket = vi.hoisted(() => ({
 	onPermissionResult: vi.fn(),
 	onSessionsChanged: vi.fn(),
 	onAgentTeamsChanged: vi.fn(),
+	onAgentTeamsRefreshRequired: vi.fn(),
 	onSessionAttached: vi.fn(),
 	onSessionDetached: vi.fn(),
 	onCliStatus: vi.fn(),
@@ -121,12 +122,67 @@ vi.mock("@/lib/socket", () => ({
 }));
 
 const mockHandleAgentTeamsChanged = vi.hoisted(() => vi.fn());
+const mockTeamStoreState = vi.hoisted(() => {
+	type RecoverySnapshot = {
+		isSessionProjectionRecoveryPending: boolean;
+		sessionProjectionRecoveryGeneration: number;
+	};
+	const state: RecoverySnapshot = {
+		isSessionProjectionRecoveryPending: false,
+		sessionProjectionRecoveryGeneration: 0,
+	};
+	const listeners = new Set<
+		(state: RecoverySnapshot, previousState: RecoverySnapshot) => void
+	>();
+	return {
+		state,
+		reset: () => {
+			state.isSessionProjectionRecoveryPending = false;
+			state.sessionProjectionRecoveryGeneration = 0;
+			listeners.clear();
+		},
+		setRecoveryPending: (pending: boolean) => {
+			const previousState = { ...state };
+			if (pending && !state.isSessionProjectionRecoveryPending) {
+				state.sessionProjectionRecoveryGeneration += 1;
+			}
+			state.isSessionProjectionRecoveryPending = pending;
+			const currentState = { ...state };
+			for (const listener of listeners) {
+				listener(currentState, previousState);
+			}
+		},
+		beginRecovery: () => {
+			const previousState = { ...state };
+			state.isSessionProjectionRecoveryPending = true;
+			state.sessionProjectionRecoveryGeneration += 1;
+			const currentState = { ...state };
+			for (const listener of listeners) {
+				listener(currentState, previousState);
+			}
+		},
+		subscribe: (
+			listener: (
+				state: RecoverySnapshot,
+				previousState: RecoverySnapshot,
+			) => void,
+		) => {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
+	};
+});
 
 vi.mock("@/lib/team-store", () => ({
 	useTeamStore: {
 		getState: () => ({
 			handleAgentTeamsChanged: mockHandleAgentTeamsChanged,
+			isSessionProjectionRecoveryPending:
+				mockTeamStoreState.state.isSessionProjectionRecoveryPending,
+			sessionProjectionRecoveryGeneration:
+				mockTeamStoreState.state.sessionProjectionRecoveryGeneration,
 		}),
+		subscribe: mockTeamStoreState.subscribe,
 	},
 }));
 
@@ -186,6 +242,8 @@ const notificationMocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/notifications", () => notificationMocks);
 
+const mockUpdateBackendCapabilities = vi.hoisted(() => vi.fn());
+
 vi.mock("@/lib/machines-store", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/lib/machines-store")>();
 	return {
@@ -193,7 +251,7 @@ vi.mock("@/lib/machines-store", async (importOriginal) => {
 		useMachinesStore: {
 			getState: () => ({
 				updateMachine: vi.fn(),
-				updateBackendCapabilities: vi.fn(),
+				updateBackendCapabilities: mockUpdateBackendCapabilities,
 			}),
 		},
 	};
@@ -424,6 +482,33 @@ const buildSession = (overrides: Partial<ChatSession> = {}): ChatSession => ({
 	...overrides,
 });
 
+const renderSocket = (
+	store: ChatStoreActions,
+	overrides: Partial<Parameters<typeof useSocket>[0]> = {},
+) =>
+	renderHook(() =>
+		useSocket({
+			appendAssistantChunk: store.appendAssistantChunk,
+			appendThoughtChunk: store.appendThoughtChunk,
+			confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+			updateSessionMeta: store.updateSessionMeta,
+			setStreamError: store.setStreamError,
+			addPermissionRequest: store.addPermissionRequest,
+			setPermissionDecisionState: store.setPermissionDecisionState,
+			setPermissionOutcome: store.setPermissionOutcome,
+			addToolCall: store.addToolCall,
+			updateToolCall: store.updateToolCall,
+			appendTerminalOutput: store.appendTerminalOutput,
+			handleSessionsChanged: store.handleSessionsChanged,
+			markSessionAttached: store.markSessionAttached,
+			markSessionDetached: store.markSessionDetached,
+			createLocalSession: store.createLocalSession,
+			updateSessionCursor: store.updateSessionCursor,
+			resetSessionForRevision: store.resetSessionForRevision,
+			...overrides,
+		}),
+	);
+
 const buildAssistantBackfillEvent = ({
 	sessionId = "session-1",
 	revision = 1,
@@ -512,6 +597,8 @@ describe("useSocket (webui)", () => {
 		notificationMocks.notifyPermissionRequest.mockReset();
 		notificationMocks.notifyResponseCompleted.mockReset();
 		notificationMocks.notifySessionError.mockReset();
+		mockUpdateBackendCapabilities.mockReset();
+		mockTeamStoreState.reset();
 
 		mockGatewaySocket.onPermissionRequest.mockImplementation(
 			(handler: () => void) => {
@@ -545,9 +632,21 @@ describe("useSocket (webui)", () => {
 				};
 			},
 		);
+		mockGatewaySocket.onAgentTeamsRefreshRequired.mockImplementation(
+			(handler: (payload: unknown) => void) => {
+				handlers.agentTeamsRefreshRequired = handler;
+				return () => {
+					handlers.agentTeamsRefreshRequired = undefined;
+				};
+			},
+		);
 		mockGatewaySocket.onSessionEvent.mockImplementation(
 			(handler: (event: unknown) => void) => {
-				handlers.sessionEvent = handler;
+				handlers.sessionEvent = (event) =>
+					handler({
+						machineId: "machine-1",
+						...(event as Record<string, unknown>),
+					});
 				return () => {
 					handlers.sessionEvent = undefined;
 				};
@@ -627,6 +726,680 @@ describe("useSocket (webui)", () => {
 		expect(mockHandleAgentTeamsChanged).toHaveBeenCalledWith(payload);
 	});
 
+	it("buffers and replays projection socket events in order after recovery", () => {
+		const store = createStore();
+		renderHook(() =>
+			useSocket({
+				sessions: {},
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+		const addedPayload = {
+			machineId: "machine-1",
+			added: [
+				{
+					sessionId: "team-member-session",
+					title: "Team member",
+					machineId: "machine-1",
+				},
+			],
+			updated: [],
+			removed: [],
+		};
+		const attachedPayload = {
+			sessionId: "team-member-session",
+			machineId: "machine-1",
+			attachedAt: "2026-07-31T00:00:00.000Z",
+			revision: 3,
+		};
+		const updatedPayload = {
+			machineId: "machine-1",
+			added: [],
+			updated: [
+				{
+					sessionId: "team-member-session",
+					title: "Updated Team member",
+					revision: 3,
+					machineId: "machine-1",
+				},
+			],
+			removed: [],
+		};
+		const detachedPayload = {
+			sessionId: "team-member-session",
+			machineId: "machine-1",
+			detachedAt: "2026-07-31T00:01:00.000Z",
+			reason: "session_close" as const,
+		};
+
+		mockTeamStoreState.setRecoveryPending(true);
+		handlers.sessionsChanged?.(addedPayload);
+		handlers.sessionAttached?.(attachedPayload);
+		handlers.sessionsChanged?.(updatedPayload);
+		handlers.sessionDetached?.(detachedPayload);
+		expect(store.handleSessionsChanged).not.toHaveBeenCalled();
+		expect(store.markSessionAttached).not.toHaveBeenCalled();
+		expect(store.markSessionDetached).not.toHaveBeenCalled();
+		expect(mockStoreState.setSessionE2EEStatus).not.toHaveBeenCalled();
+		expect(mockGatewaySocket.unsubscribeFromSession).not.toHaveBeenCalledWith(
+			"team-member-session",
+		);
+
+		mockTeamStoreState.setRecoveryPending(false);
+
+		expect(store.handleSessionsChanged).toHaveBeenNthCalledWith(
+			1,
+			addedPayload,
+		);
+		expect(store.markSessionAttached).toHaveBeenCalledWith(attachedPayload);
+		expect(store.handleSessionsChanged).toHaveBeenNthCalledWith(
+			2,
+			updatedPayload,
+		);
+		expect(store.markSessionDetached).toHaveBeenCalledWith(detachedPayload);
+		const replayCallOrder = [
+			vi.mocked(store.handleSessionsChanged).mock.invocationCallOrder[0],
+			vi.mocked(store.markSessionAttached).mock.invocationCallOrder[0],
+			vi.mocked(store.handleSessionsChanged).mock.invocationCallOrder[1],
+			vi.mocked(store.markSessionDetached).mock.invocationCallOrder[0],
+		];
+		expect(replayCallOrder).toEqual([...replayCallOrder].sort((a, b) => a - b));
+		expect(mockStoreState.setSessionE2EEStatus).toHaveBeenCalledTimes(2);
+		expect(mockGatewaySocket.unsubscribeFromSession).toHaveBeenCalledWith(
+			"team-member-session",
+		);
+	});
+
+	it("isolates sessions:changed mutations and runtime cleanup by canonical source", () => {
+		const store = createStore();
+		setMockSessions({
+			collision: buildSession({
+				sessionId: "collision",
+				machineId: "machine-a",
+				revision: 1,
+			}),
+			placeholder: buildSession({
+				sessionId: "placeholder",
+				machineId: undefined,
+			}),
+		});
+		renderSocket(store);
+		mockGatewaySocket.unsubscribeFromSession.mockClear();
+		mockBackfill.startBackfill.mockClear();
+		mockBackfill.cancelBackfill.mockClear();
+
+		handlers.sessionsChanged?.({
+			machineId: "machine-b",
+			added: [
+				{
+					sessionId: "placeholder",
+					title: "Claimed placeholder",
+					machineId: "machine-b",
+					revision: 2,
+				},
+			],
+			updated: [
+				{
+					sessionId: "collision",
+					title: "Wrong machine",
+					machineId: "machine-b",
+					revision: 9,
+					isAttached: true,
+				},
+			],
+			removed: ["collision"],
+		});
+
+		expect(store.handleSessionsChanged).toHaveBeenCalledOnce();
+		expect(store.handleSessionsChanged).toHaveBeenCalledWith({
+			machineId: "machine-b",
+			added: [
+				{
+					sessionId: "placeholder",
+					title: "Claimed placeholder",
+					machineId: "machine-b",
+					revision: 2,
+				},
+			],
+			updated: [],
+			removed: [],
+		});
+		expect(store.resetSessionForRevision).not.toHaveBeenCalledWith(
+			"collision",
+			9,
+		);
+		expect(mockGatewaySocket.unsubscribeFromSession).not.toHaveBeenCalledWith(
+			"collision",
+		);
+		expect(mockBackfill.cancelBackfill).not.toHaveBeenCalledWith("collision");
+	});
+
+	it("fails closed for missing or mismatched sessions:changed sources and attributes capability-only events", () => {
+		const store = createStore();
+		setMockSessions({
+			"session-a": buildSession({
+				sessionId: "session-a",
+				machineId: "machine-a",
+			}),
+		});
+		renderSocket(store);
+		mockGatewaySocket.unsubscribeFromSession.mockClear();
+
+		handlers.sessionsChanged?.({
+			added: [],
+			updated: [],
+			removed: ["session-a"],
+		});
+		handlers.sessionsChanged?.({
+			machineId: "machine-b",
+			added: [
+				{
+					sessionId: "malformed",
+					title: "Mismatched",
+					machineId: "machine-a",
+				},
+			],
+			updated: [],
+			removed: [],
+		});
+
+		expect(store.handleSessionsChanged).not.toHaveBeenCalled();
+		expect(mockGatewaySocket.unsubscribeFromSession).not.toHaveBeenCalledWith(
+			"session-a",
+		);
+
+		const backendCapabilities = {
+			"backend-1": {
+				loadSession: true,
+			},
+		};
+		handlers.sessionsChanged?.({
+			machineId: "machine-b",
+			added: [],
+			updated: [],
+			removed: [],
+			backendCapabilities,
+		});
+
+		expect(mockUpdateBackendCapabilities).toHaveBeenCalledWith(
+			"machine-b",
+			backendCapabilities,
+		);
+
+		vi.mocked(store.handleSessionsChanged).mockClear();
+		handlers.sessionsChanged?.({
+			added: [],
+			updated: [
+				{
+					sessionId: "fresh-update",
+					title: "Recovered legacy update",
+					machineId: "machine-c",
+				},
+			],
+			removed: [],
+		});
+
+		expect(store.handleSessionsChanged).toHaveBeenCalledWith({
+			machineId: "machine-c",
+			added: [],
+			updated: [
+				{
+					sessionId: "fresh-update",
+					title: "Recovered legacy update",
+					machineId: "machine-c",
+				},
+			],
+			removed: [],
+		});
+	});
+
+	it("guards attach and detach side effects against cross-machine session collisions", () => {
+		const store = createStore();
+		setMockSessions({
+			collision: buildSession({
+				sessionId: "collision",
+				machineId: "machine-a",
+				revision: 1,
+				isAttached: true,
+			}),
+		});
+		renderSocket(store);
+		mockGatewaySocket.unsubscribeFromSession.mockClear();
+		mockBackfill.startBackfill.mockClear();
+		mockBackfill.cancelBackfill.mockClear();
+
+		handlers.sessionAttached?.({
+			sessionId: "collision",
+			machineId: "machine-b",
+			attachedAt: "2026-07-31T00:00:00.000Z",
+			revision: 2,
+		});
+		handlers.sessionDetached?.({
+			sessionId: "collision",
+			machineId: "machine-b",
+			detachedAt: "2026-07-31T00:01:00.000Z",
+			reason: "session_close",
+		});
+
+		expect(store.markSessionAttached).not.toHaveBeenCalled();
+		expect(store.markSessionDetached).not.toHaveBeenCalled();
+		expect(store.resetSessionForRevision).not.toHaveBeenCalled();
+		expect(mockBackfill.startBackfill).not.toHaveBeenCalled();
+		expect(mockBackfill.cancelBackfill).not.toHaveBeenCalledWith("collision");
+		expect(mockGatewaySocket.unsubscribeFromSession).not.toHaveBeenCalledWith(
+			"collision",
+		);
+
+		handlers.sessionAttached?.({
+			sessionId: "collision",
+			machineId: "machine-a",
+			attachedAt: "2026-07-31T00:02:00.000Z",
+			revision: 1,
+		});
+		handlers.sessionDetached?.({
+			sessionId: "collision",
+			machineId: "machine-a",
+			detachedAt: "2026-07-31T00:03:00.000Z",
+			reason: "session_close",
+		});
+
+		expect(store.markSessionAttached).toHaveBeenCalledOnce();
+		expect(store.markSessionDetached).toHaveBeenCalledOnce();
+		expect(mockGatewaySocket.unsubscribeFromSession).toHaveBeenCalledWith(
+			"collision",
+		);
+	});
+
+	it("guards live session events against cross-machine session collisions", () => {
+		const store = createStore();
+		setMockSessions({
+			collision: buildSession({
+				sessionId: "collision",
+				machineId: "machine-a",
+				revision: 1,
+				lastAppliedSeq: 0,
+			}),
+		});
+		renderSocket(store);
+		const buildEvent = (machineId: string, text: string) => ({
+			sessionId: "collision",
+			machineId,
+			revision: 1,
+			seq: 1,
+			kind: "agent_message_chunk" as const,
+			createdAt: "2026-07-31T00:00:00.000Z",
+			payload: {
+				sessionId: "collision",
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text" as const, text },
+				},
+			},
+		});
+
+		handlers.sessionEvent?.(buildEvent("machine-b", "wrong source"));
+		expect(store.appendAssistantChunk).not.toHaveBeenCalled();
+		expect(store.updateSessionCursor).not.toHaveBeenCalled();
+
+		handlers.sessionEvent?.(buildEvent("machine-a", "accepted source"));
+		expect(store.appendAssistantChunk).toHaveBeenCalledWith("collision", {
+			type: "text",
+			text: "accepted source",
+		});
+		expect(store.updateSessionCursor).toHaveBeenCalledWith("collision", 1, 1);
+	});
+
+	it("guards permission side effects against cross-machine session collisions", () => {
+		const store = createStore();
+		setMockSessions({
+			collision: buildSession({
+				sessionId: "collision",
+				machineId: "machine-a",
+			}),
+		});
+		renderSocket(store);
+		const request = {
+			sessionId: "collision",
+			requestId: "request-1",
+			options: [],
+		};
+		const result = {
+			sessionId: "collision",
+			requestId: "request-1",
+			outcome: { outcome: "cancelled" as const },
+		};
+
+		handlers.permissionRequest?.({ ...request, machineId: "machine-b" });
+		handlers.permissionResult?.({ ...result, machineId: "machine-b" });
+		expect(store.addPermissionRequest).not.toHaveBeenCalled();
+		expect(store.setPermissionOutcome).not.toHaveBeenCalled();
+		expect(store.setPermissionDecisionState).not.toHaveBeenCalled();
+		expect(notificationMocks.notifyPermissionRequest).not.toHaveBeenCalled();
+
+		handlers.permissionRequest?.({ ...request, machineId: "machine-a" });
+		handlers.permissionResult?.({ ...result, machineId: "machine-a" });
+		expect(store.addPermissionRequest).toHaveBeenCalledWith("collision", {
+			requestId: "request-1",
+			toolCall: undefined,
+			options: [],
+		});
+		expect(store.setPermissionOutcome).toHaveBeenCalledWith(
+			"collision",
+			"request-1",
+			{ outcome: "cancelled" },
+		);
+		expect(store.setPermissionDecisionState).toHaveBeenCalledWith(
+			"collision",
+			"request-1",
+			"idle",
+		);
+	});
+
+	it("guards backfill session events against cross-machine session collisions", () => {
+		const store = createStore();
+		setMockSessions({
+			collision: buildSession({
+				sessionId: "collision",
+				machineId: "machine-a",
+				revision: 1,
+				lastAppliedSeq: 0,
+			}),
+		});
+		renderSocket(store);
+		const buildEvent = (machineId: string, text: string) => ({
+			sessionId: "collision",
+			machineId,
+			revision: 1,
+			seq: 1,
+			kind: "agent_message_chunk" as const,
+			createdAt: "2026-07-31T00:00:00.000Z",
+			payload: {
+				sessionId: "collision",
+				update: {
+					sessionUpdate: "agent_message_chunk",
+					content: { type: "text" as const, text },
+				},
+			},
+		});
+
+		backfillOptionsRef.current?.onEvents("collision", [
+			buildEvent("machine-b", "wrong source"),
+		]);
+		expect(store.appendAssistantChunk).not.toHaveBeenCalled();
+		expect(store.updateSessionCursor).not.toHaveBeenCalled();
+
+		backfillOptionsRef.current?.onEvents("collision", [
+			buildEvent("machine-a", "accepted source"),
+		]);
+		expect(store.appendAssistantChunk).toHaveBeenCalledWith("collision", {
+			type: "text",
+			text: "accepted source",
+		});
+		expect(store.updateSessionCursor).toHaveBeenCalledWith("collision", 1, 1);
+	});
+
+	it("allows attach and detach events to claim a machine-less placeholder", () => {
+		const store = createStore();
+		setMockSessions({
+			placeholder: buildSession({
+				sessionId: "placeholder",
+				machineId: undefined,
+			}),
+		});
+		renderSocket(store);
+
+		const attached = {
+			sessionId: "placeholder",
+			machineId: "machine-b",
+			attachedAt: "2026-07-31T00:00:00.000Z",
+		};
+		const detached = {
+			sessionId: "placeholder",
+			machineId: "machine-b",
+			detachedAt: "2026-07-31T00:01:00.000Z",
+			reason: "session_close" as const,
+		};
+		handlers.sessionAttached?.(attached);
+		handlers.sessionDetached?.(detached);
+
+		expect(store.markSessionAttached).toHaveBeenCalledWith(attached);
+		expect(store.markSessionDetached).toHaveBeenCalledWith(detached);
+	});
+
+	it("filters HTTP source collisions before revision side effects and protects last-good IDs", () => {
+		const store = createStore();
+		setMockSessions({
+			collision: buildSession({
+				sessionId: "collision",
+				machineId: "machine-a",
+				revision: 1,
+			}),
+			placeholder: buildSession({
+				sessionId: "placeholder",
+				machineId: undefined,
+				revision: 1,
+			}),
+		});
+		const syncSessions = vi.fn();
+		const { result } = renderSocket(store, { syncSessions });
+
+		let accepted: unknown;
+		act(() => {
+			accepted = result.current.syncSessionSummaries(
+				[
+					{
+						sessionId: "collision",
+						title: "Wrong source",
+						backendId: "backend-1",
+						backendLabel: "Claude",
+						createdAt: "2026-07-31T00:00:00.000Z",
+						updatedAt: "2026-07-31T00:00:00.000Z",
+						machineId: "machine-b",
+						revision: 9,
+						isAttached: true,
+					},
+					{
+						sessionId: "placeholder",
+						title: "Claimed",
+						backendId: "backend-1",
+						backendLabel: "Claude",
+						createdAt: "2026-07-31T00:00:00.000Z",
+						updatedAt: "2026-07-31T00:00:00.000Z",
+						machineId: "machine-a",
+						revision: 2,
+					},
+					{
+						sessionId: "ambiguous-new",
+						title: "Machine A",
+						backendId: "backend-1",
+						backendLabel: "Claude",
+						createdAt: "2026-07-31T00:00:00.000Z",
+						updatedAt: "2026-07-31T00:00:00.000Z",
+						machineId: "machine-a",
+					},
+					{
+						sessionId: "ambiguous-new",
+						title: "Machine B",
+						backendId: "backend-1",
+						backendLabel: "Claude",
+						createdAt: "2026-07-31T00:00:00.000Z",
+						updatedAt: "2026-07-31T00:00:00.000Z",
+						machineId: "machine-b",
+					},
+				],
+				["machine-a", "machine-b"],
+			);
+		});
+
+		const claimed = expect.objectContaining({
+			sessionId: "placeholder",
+			machineId: "machine-a",
+		});
+		expect(accepted).toEqual([claimed]);
+		expect(syncSessions).toHaveBeenCalledWith(
+			[claimed],
+			["machine-a", "machine-b"],
+			["ambiguous-new", "collision"],
+		);
+		expect(store.resetSessionForRevision).not.toHaveBeenCalledWith(
+			"collision",
+			9,
+		);
+	});
+
+	it("flushes the previous recovery generation before buffering the next", () => {
+		const store = createStore();
+		setMockSessions({
+			"session-a": buildSession({
+				sessionId: "session-a",
+				title: "A attached",
+				machineId: "machine-a",
+				isAttached: true,
+			}),
+			"session-b": buildSession({
+				sessionId: "session-b",
+				title: "B old",
+				machineId: "machine-b",
+			}),
+		});
+		store.markSessionDetached = vi.fn((payload) => {
+			const current = mockStoreState.sessions[payload.sessionId];
+			setMockSessions({
+				...mockStoreState.sessions,
+				[payload.sessionId]: {
+					...current,
+					isAttached: false,
+				},
+			});
+		});
+		store.handleSessionsChanged = vi.fn((payload) => {
+			const updated = payload.updated[0];
+			if (!updated) return;
+			const current = mockStoreState.sessions[updated.sessionId];
+			setMockSessions({
+				...mockStoreState.sessions,
+				[updated.sessionId]: {
+					...current,
+					title: updated.title,
+				},
+			});
+		});
+		const syncSessions = vi.fn((summaries: Array<Partial<ChatSession>>) => {
+			const summary = summaries[0];
+			if (!summary?.sessionId) return;
+			const current = mockStoreState.sessions[summary.sessionId];
+			setMockSessions({
+				...mockStoreState.sessions,
+				[summary.sessionId]: {
+					...current,
+					...summary,
+				} as ChatSession,
+			});
+		});
+		const { result } = renderSocket(store, {
+			syncSessions: syncSessions as Parameters<
+				typeof useSocket
+			>[0]["syncSessions"],
+		});
+
+		mockTeamStoreState.beginRecovery();
+		handlers.sessionDetached?.({
+			sessionId: "session-a",
+			machineId: "machine-a",
+			detachedAt: "2026-07-31T00:00:00.000Z",
+			reason: "session_close",
+		});
+		handlers.sessionsChanged?.({
+			machineId: "machine-b",
+			added: [],
+			updated: [
+				{
+					sessionId: "session-b",
+					title: "B delta",
+					machineId: "machine-b",
+				},
+			],
+			removed: [],
+		});
+
+		mockTeamStoreState.beginRecovery();
+		expect(mockStoreState.sessions["session-a"]?.isAttached).toBe(false);
+		expect(mockStoreState.sessions["session-b"]?.title).toBe("B delta");
+
+		act(() => {
+			result.current.syncSessionSummaries(
+				[
+					{
+						sessionId: "session-a",
+						title: "A recreated",
+						backendId: "backend-1",
+						backendLabel: "Claude",
+						createdAt: "2026-07-31T00:00:00.000Z",
+						updatedAt: "2026-07-31T00:00:00.000Z",
+						machineId: "machine-a",
+						isAttached: true,
+					},
+				],
+				["machine-a"],
+			);
+		});
+		mockTeamStoreState.setRecoveryPending(false);
+
+		expect(mockStoreState.sessions["session-a"]?.isAttached).toBe(true);
+		expect(mockStoreState.sessions["session-a"]?.title).toBe("A recreated");
+		expect(mockStoreState.sessions["session-b"]?.title).toBe("B delta");
+		expect(store.markSessionDetached).toHaveBeenCalledOnce();
+		expect(store.handleSessionsChanged).toHaveBeenCalledOnce();
+	});
+
+	it("requests an authoritative Team refresh after a CLI registers", () => {
+		const store = createStore();
+		const onAgentTeamsRefreshRequired = vi.fn();
+		renderHook(() =>
+			useSocket({
+				sessions: {},
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+				onAgentTeamsRefreshRequired,
+			}),
+		);
+
+		handlers.agentTeamsRefreshRequired?.({ reason: "cli_registered" });
+
+		expect(onAgentTeamsRefreshRequired).toHaveBeenCalledTimes(1);
+	});
+
 	it("subscribes to sessions that are attached or loading", async () => {
 		const store = createStore();
 		const sessions: Record<string, ChatSession> = {
@@ -682,11 +1455,119 @@ describe("useSocket (webui)", () => {
 		});
 	});
 
+	it("clears subscription runtime when an HTTP summary authoritatively detaches a session", async () => {
+		const store = createStore();
+		const messages: ChatSession["messages"] = [
+			{
+				id: "message-1",
+				role: "assistant",
+				kind: "text",
+				content: "preserve me",
+				contentBlocks: [{ type: "text", text: "preserve me" }],
+				createdAt: "2024-01-01T00:00:00Z",
+				isStreaming: false,
+			},
+		];
+		setMockSessions({
+			"session-1": buildSession({
+				sessionId: "session-1",
+				machineId: "machine-1",
+				isAttached: true,
+				detachedReason: "gateway_disconnect",
+				revision: 3,
+				lastAppliedSeq: 8,
+				messages,
+			}),
+		});
+		const syncSessions = vi.fn<ChatStoreActions["syncSessions"]>(
+			(summaries, coveredMachineIds) => {
+				expect(coveredMachineIds).toEqual(["machine-1"]);
+				const summary = summaries[0];
+				const current = mockStoreState.sessions["session-1"];
+				setMockSessions({
+					...mockStoreState.sessions,
+					"session-1": {
+						...current,
+						isAttached: summary?.isAttached,
+						detachedReason: "unknown",
+					},
+				});
+			},
+		);
+		const { result } = renderHook(() =>
+			useSocket({
+				syncSessions,
+				appendAssistantChunk: store.appendAssistantChunk,
+				appendThoughtChunk: store.appendThoughtChunk,
+				confirmOrAppendUserMessage: store.confirmOrAppendUserMessage,
+				updateSessionMeta: store.updateSessionMeta,
+				setStreamError: store.setStreamError,
+				addPermissionRequest: store.addPermissionRequest,
+				setPermissionDecisionState: store.setPermissionDecisionState,
+				setPermissionOutcome: store.setPermissionOutcome,
+				addToolCall: store.addToolCall,
+				updateToolCall: store.updateToolCall,
+				appendTerminalOutput: store.appendTerminalOutput,
+				handleSessionsChanged: store.handleSessionsChanged,
+				markSessionAttached: store.markSessionAttached,
+				markSessionDetached: store.markSessionDetached,
+				createLocalSession: store.createLocalSession,
+				updateSessionCursor: store.updateSessionCursor,
+				resetSessionForRevision: store.resetSessionForRevision,
+			}),
+		);
+
+		await waitFor(() => {
+			expect(mockGatewaySocket.subscribeToSession).toHaveBeenCalledWith(
+				"session-1",
+			);
+		});
+		mockGatewaySocket.unsubscribeFromSession.mockClear();
+		mockBackfill.cancelBackfill.mockClear();
+
+		act(() => {
+			result.current.syncSessionSummaries(
+				[
+					{
+						sessionId: "session-1",
+						title: "Session 1",
+						backendId: "backend-1",
+						backendLabel: "Claude",
+						createdAt: "2024-01-01T00:00:00Z",
+						updatedAt: "2024-01-02T00:00:00Z",
+						machineId: "machine-1",
+						revision: 4,
+						isAttached: false,
+					},
+				],
+				["machine-1"],
+			);
+		});
+
+		expect(syncSessions).toHaveBeenCalledTimes(1);
+		expect(mockGatewaySocket.unsubscribeFromSession).toHaveBeenCalledWith(
+			"session-1",
+		);
+		expect(mockBackfill.cancelBackfill).toHaveBeenCalledWith("session-1");
+		expect(mockStoreState.sessions["session-1"]).toMatchObject({
+			isAttached: false,
+			detachedReason: "unknown",
+			revision: 3,
+			lastAppliedSeq: 8,
+			messages,
+		});
+	});
+
 	it("explicitly clears detached backfill runtime after permanent deletion", () => {
 		const store = createStore();
 		setMockSessions({
 			"session-deleted": buildSession({
 				sessionId: "session-deleted",
+				isAttached: false,
+			}),
+			"session-removed": buildSession({
+				sessionId: "session-removed",
+				machineId: "machine-1",
 				isAttached: false,
 			}),
 		});
@@ -723,6 +1604,7 @@ describe("useSocket (webui)", () => {
 		mockGatewaySocket.unsubscribeFromSession.mockClear();
 		act(() => {
 			handlers.sessionsChanged?.({
+				machineId: "machine-1",
 				added: [],
 				updated: [],
 				removed: ["session-removed"],
@@ -2142,6 +3024,7 @@ describe("useSocket (webui)", () => {
 
 		act(() => {
 			handlers.sessionsChanged?.({
+				machineId: "machine-1",
 				added: [],
 				updated: [
 					{
@@ -2149,6 +3032,7 @@ describe("useSocket (webui)", () => {
 						title: "Session 1",
 						createdAt: "2024-01-01T00:00:00Z",
 						updatedAt: "2024-01-01T00:00:00Z",
+						machineId: "machine-1",
 						isAttached: true,
 						revision: 2,
 						wrappedDek: "wrapped-revision-2",
@@ -2275,7 +3159,7 @@ describe("useSocket (webui)", () => {
 		mockBackfill.startBackfill.mockClear();
 
 		handlers.connect?.();
-		expect(onReconnect).not.toHaveBeenCalled();
+		expect(onReconnect).toHaveBeenCalledTimes(1);
 
 		mockGatewaySocket.subscribeToSession.mockClear();
 		mockBackfill.startBackfill.mockClear();
@@ -2289,7 +3173,7 @@ describe("useSocket (webui)", () => {
 		);
 		expect(mockBackfill.startBackfill).toHaveBeenCalledTimes(1);
 		expect(mockBackfill.startBackfill).toHaveBeenCalledWith("session-1", 2, 4);
-		expect(onReconnect).toHaveBeenCalledTimes(1);
+		expect(onReconnect).toHaveBeenCalledTimes(2);
 	});
 
 	it("does not advance a local cursor from another tab without the matching transcript", () => {
@@ -3105,7 +3989,7 @@ describe("useSocket (webui)", () => {
 			);
 		});
 
-		it("does NOT call onReconnect on first connect", async () => {
+		it("calls onReconnect on first connect", async () => {
 			const store = createStore();
 			const onReconnect = vi.fn();
 
@@ -3136,7 +4020,7 @@ describe("useSocket (webui)", () => {
 			// Simulate first connect
 			handlers.connect?.();
 
-			expect(onReconnect).not.toHaveBeenCalled();
+			expect(onReconnect).toHaveBeenCalledTimes(1);
 		});
 
 		it("calls onReconnect on subsequent connects (reconnect)", async () => {
@@ -3167,17 +4051,17 @@ describe("useSocket (webui)", () => {
 				}),
 			);
 
-			// First connect — should NOT trigger onReconnect
-			handlers.connect?.();
-			expect(onReconnect).not.toHaveBeenCalled();
-
-			// Second connect (reconnect) — should trigger onReconnect
+			// First connect triggers the authoritative recovery fence.
 			handlers.connect?.();
 			expect(onReconnect).toHaveBeenCalledTimes(1);
 
-			// Third connect — should trigger again
+			// Second connect (reconnect) triggers recovery again.
 			handlers.connect?.();
 			expect(onReconnect).toHaveBeenCalledTimes(2);
+
+			// Third connect triggers again.
+			handlers.connect?.();
+			expect(onReconnect).toHaveBeenCalledTimes(3);
 		});
 	});
 });

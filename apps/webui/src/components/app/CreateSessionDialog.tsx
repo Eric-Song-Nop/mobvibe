@@ -298,12 +298,13 @@ export function CreateSessionDialog({
 							: t("session.createDescription")}
 					</DialogDescription>
 				</div>
-				{machineDisplayName ? (
+				{!isAgentTeamMode && machineDisplayName ? (
 					<div className="text-muted-foreground flex items-center gap-1.5 text-sm">
 						<HugeiconsIcon
 							icon={ComputerIcon}
 							strokeWidth={2}
 							className="size-4"
+							aria-hidden="true"
 						/>
 						<span>
 							{t("session.targetMachine", { name: machineDisplayName })}
@@ -371,6 +372,7 @@ export function CreateSessionDialog({
 						backendId={draftBackendId || undefined}
 						enabled={open}
 						machineId={selectedMachineId ?? undefined}
+						placementNeutral={isAgentTeamMode}
 					/>
 					<div className="flex flex-col gap-2">
 						<Label htmlFor="session-cwd">{t("session.cwdLabel")}</Label>
@@ -395,7 +397,11 @@ export function CreateSessionDialog({
 						</InputGroup>
 						{!selectedMachineId ? (
 							<div className="text-destructive text-xs">
-								{t("errors.selectMachine")}
+								{t(
+									isAgentTeamMode
+										? "errors.agentTeamWorkspaceContextRequired"
+										: "errors.selectMachine",
+								)}
 							</div>
 						) : null}
 					</div>

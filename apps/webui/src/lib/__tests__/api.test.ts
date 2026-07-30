@@ -1020,13 +1020,20 @@ describe("Agent Team API", () => {
 	it("fetches Agent Teams with an optional machineId query", async () => {
 		mockFetch.mockResolvedValue({
 			ok: true,
-			json: () => Promise.resolve({ teams: [] }),
+			json: () =>
+				Promise.resolve({
+					teams: [],
+					coveredLeaderMachineIds: ["machine-1"],
+				}),
 		});
 
 		const { fetchAgentTeams } = await import("../api");
 		const result = await fetchAgentTeams("machine-1");
 
-		expect(result).toEqual({ teams: [] });
+		expect(result).toEqual({
+			teams: [],
+			coveredLeaderMachineIds: ["machine-1"],
+		});
 		expect(mockFetch).toHaveBeenCalledWith(
 			"http://localhost:3005/acp/agent-teams?machineId=machine-1",
 			expect.objectContaining({ credentials: "include" }),

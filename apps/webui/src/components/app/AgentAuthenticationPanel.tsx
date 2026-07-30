@@ -17,6 +17,7 @@ export type AgentAuthenticationPanelProps = {
 	backendId?: string;
 	enabled: boolean;
 	machineId?: string;
+	placementNeutral?: boolean;
 };
 
 type LogoutTarget = {
@@ -37,6 +38,7 @@ export function AgentAuthenticationPanel({
 	backendId,
 	enabled,
 	machineId,
+	placementNeutral = false,
 }: AgentAuthenticationPanelProps) {
 	const { t } = useTranslation();
 	const [logoutTarget, setLogoutTarget] = useState<LogoutTarget | null>(null);
@@ -86,7 +88,11 @@ export function AgentAuthenticationPanel({
 					className="text-destructive block text-xs text-pretty"
 					aria-live="polite"
 				>
-					{t("session.agentAuthentication.loadError")}
+					{t(
+						placementNeutral
+							? "session.agentAuthentication.teamLoadError"
+							: "session.agentAuthentication.loadError",
+					)}
 				</output>
 				<div>
 					<Button
@@ -107,7 +113,11 @@ export function AgentAuthenticationPanel({
 	}
 
 	const actionStatus = actionError
-		? t("session.agentAuthentication.actionError")
+		? t(
+				placementNeutral
+					? "session.agentAuthentication.teamActionError"
+					: "session.agentAuthentication.actionError",
+			)
 		: actionSucceeded
 			? actionKind === "logout"
 				? t("session.agentAuthentication.logoutComplete")

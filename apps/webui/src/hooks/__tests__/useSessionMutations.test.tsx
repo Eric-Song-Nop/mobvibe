@@ -4,14 +4,17 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import * as apiModule from "@/lib/api";
+import { useTeamStore } from "@/lib/team-store";
 import { useSessionMutations } from "../useSessionMutations";
 
 // Mutable store state for useChatStore.getState()
 const mockChatStoreState = vi.hoisted(
 	() =>
 		({
-			sessions: {} as Record<string, { revision?: number }>,
-		}) as { sessions: Record<string, { revision?: number }> },
+			sessions: {} as Record<string, { machineId?: string; revision?: number }>,
+		}) as {
+			sessions: Record<string, { machineId?: string; revision?: number }>;
+		},
 );
 
 vi.mock("@/lib/chat-store", async (importOriginal) => {
@@ -70,6 +73,35 @@ vi.mock("@/lib/api", async () => {
 		resumeSession: vi.fn(),
 		reloadSession: vi.fn(),
 	};
+});
+
+const createAgentTeamSummary = (
+	overrides: Partial<apiModule.AgentTeamSummary> = {},
+): apiModule.AgentTeamSummary => ({
+	agentTeamId: "team-1",
+	machineId: "machine-1",
+	title: "Team One",
+	workspaceRootCwd: "/repo",
+	workspaceMode: "shared_workspace",
+	leaderMemberId: "leader-member",
+	lifecycle: "running",
+	members: [],
+	mailboxCounts: {
+		unread: 0,
+		wakePending: 0,
+		wakeFailed: 0,
+	},
+	taskCounts: {
+		todo: 0,
+		inProgress: 0,
+		blocked: 0,
+		completed: 0,
+		failed: 0,
+		cancelled: 0,
+	},
+	createdAt: "2025-01-01T00:00:00Z",
+	updatedAt: "2025-01-01T00:01:00Z",
+	...overrides,
 });
 
 describe("useSessionMutations", () => {
@@ -135,6 +167,7 @@ describe("useSessionMutations", () => {
 		});
 		mockStore = createMockStore();
 		mockChatStoreState.sessions = {};
+		useTeamStore.setState({ teams: {}, activeAgentTeamId: undefined });
 		mockUiStoreState.setChatDraft.mockReset();
 		mockUiStoreState.clearChatDraft.mockReset();
 		vi.clearAllMocks();
@@ -564,6 +597,489 @@ describe("useSessionMutations", () => {
 	});
 
 	describe("createAgentTeamRunMutation", () => {
+		it("installs the create response before the initial run and never rolls back a newer socket projection", async () => {
+			const team = createAgentTeamSummary({
+				agentTeamId: "team-create-race",
+				title: "Create response",
+				updatedAt: "2025-01-01T00:01:00Z",
+			});
+			const newerTeam = createAgentTeamSummary({
+				agentTeamId: team.agentTeamId,
+				title: "Newer socket projection",
+				updatedAt: "2025-01-01T00:02:00Z",
+			});
+			const leaderSession: apiModule.SessionSummary = {
+				sessionId: "leader-create-race",
+				title: "Team Leader",
+				backendId: "backend-1",
+				backendLabel: "Backend 1",
+				createdAt: "2025-01-01T00:00:00Z",
+				updatedAt: "2025-01-01T00:01:00Z",
+				cwd: "/repo",
+				agentTeamOwned: true,
+				wrappedDek: "wrapped-leader-dek",
+				revision: 1,
+			};
+			vi.mocked(apiModule.createAgentTeam).mockResolvedValue({
+				team,
+				leaderSession,
+			});
+			let resolveInitialRun:
+				| ((value: Awaited<ReturnType<typeof apiModule.sendMessage>>) => void)
+				| undefined;
+			vi.mocked(apiModule.sendMessage).mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						resolveInitialRun = resolve;
+					}),
+			);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+			let mutation!: Promise<unknown>;
+			await act(async () => {
+				mutation = result.current.createAgentTeamRunMutation.mutateAsync({
+					machineId: team.machineId,
+					leaderBackendId: "backend-1",
+					workspaceRootCwd: "/repo",
+					target: "Start the run",
+				});
+				await vi.waitFor(() => {
+					expect(apiModule.sendMessage).toHaveBeenCalledOnce();
+				});
+			});
+
+			expect(useTeamStore.getState().teams[team.agentTeamId]).toEqual(team);
+			expect(mockStore.createLocalSession).toHaveBeenCalledWith(
+				leaderSession.sessionId,
+				expect.objectContaining({
+					agentTeamOwned: true,
+					machineId: team.machineId,
+				}),
+			);
+			expect(mockStore.handleSessionsChanged).toHaveBeenCalledWith({
+				added: [],
+				updated: [
+					expect.objectContaining({
+						sessionId: leaderSession.sessionId,
+						agentTeamOwned: true,
+						machineId: team.machineId,
+					}),
+				],
+				removed: [],
+			});
+			expect(mockStore.setSessionE2EEStatus).toHaveBeenCalledWith(
+				leaderSession.sessionId,
+				"ok",
+			);
+
+			act(() => {
+				useTeamStore.getState().handleAgentTeamsChanged({
+					machineId: newerTeam.machineId,
+					added: [],
+					updated: [newerTeam],
+					removed: [],
+				});
+			});
+			await act(async () => {
+				resolveInitialRun?.({ stopReason: "end_turn" });
+				await mutation;
+			});
+
+			expect(useTeamStore.getState().teams[team.agentTeamId]).toEqual(
+				newerTeam,
+			);
+		});
+
+		it("fails closed before leader side effects when the returned session id belongs to another machine", async () => {
+			const team = createAgentTeamSummary({
+				agentTeamId: "team-session-collision",
+				machineId: "leader-machine",
+			});
+			const leaderSession: apiModule.SessionSummary = {
+				sessionId: "colliding-leader-session",
+				title: "Team Leader",
+				backendId: "backend-1",
+				backendLabel: "Backend 1",
+				createdAt: "2025-01-01T00:00:00Z",
+				updatedAt: "2025-01-01T00:01:00Z",
+				cwd: "/repo",
+				machineId: team.machineId,
+				wrappedDek: "wrapped-leader-dek",
+				revision: 1,
+			};
+			mockChatStoreState.sessions[leaderSession.sessionId] = {
+				machineId: "other-machine",
+				revision: 7,
+			};
+			vi.mocked(apiModule.createAgentTeam).mockResolvedValue({
+				team,
+				leaderSession,
+			});
+			vi.mocked(apiModule.sendMessage).mockResolvedValue({
+				stopReason: "end_turn",
+			});
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await act(async () => {
+				await expect(
+					result.current.createAgentTeamRunMutation.mutateAsync({
+						machineId: team.machineId,
+						leaderBackendId: "backend-1",
+						workspaceRootCwd: "/repo",
+						target: "Start the run",
+					}),
+				).rejects.toThrow("session source collision");
+			});
+
+			expect(useTeamStore.getState().teams[team.agentTeamId]).toEqual(team);
+			expect(mockStore.createLocalSession).not.toHaveBeenCalled();
+			expect(mockStore.handleSessionsChanged).not.toHaveBeenCalled();
+			expect(mockStore.setActiveSessionId).not.toHaveBeenCalled();
+			expect(mockStore.setLastCreatedCwd).not.toHaveBeenCalled();
+			expect(mockBootstrapSessionE2EE).not.toHaveBeenCalled();
+			expect(mockStore.setSessionE2EEStatus).not.toHaveBeenCalled();
+			expect(apiModule.sendMessage).not.toHaveBeenCalled();
+		});
+
+		it("fails closed before leader side effects when the returned Team id belongs to another machine", async () => {
+			const existingTeam = createAgentTeamSummary({
+				agentTeamId: "team-source-collision",
+				machineId: "existing-machine",
+			});
+			const returnedTeam = createAgentTeamSummary({
+				agentTeamId: existingTeam.agentTeamId,
+				machineId: "returned-machine",
+			});
+			const leaderSession: apiModule.SessionSummary = {
+				sessionId: "orphaned-leader-session",
+				title: "Team Leader",
+				backendId: "backend-1",
+				backendLabel: "Backend 1",
+				createdAt: "2025-01-01T00:00:00Z",
+				updatedAt: "2025-01-01T00:01:00Z",
+				cwd: "/repo",
+				machineId: returnedTeam.machineId,
+				wrappedDek: "wrapped-leader-dek",
+				revision: 1,
+			};
+			useTeamStore.setState({
+				teams: { [existingTeam.agentTeamId]: existingTeam },
+			});
+			vi.mocked(apiModule.createAgentTeam).mockResolvedValue({
+				team: returnedTeam,
+				leaderSession,
+			});
+			vi.mocked(apiModule.sendMessage).mockResolvedValue({
+				stopReason: "end_turn",
+			});
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await act(async () => {
+				await expect(
+					result.current.createAgentTeamRunMutation.mutateAsync({
+						machineId: returnedTeam.machineId,
+						leaderBackendId: "backend-1",
+						workspaceRootCwd: "/repo",
+						target: "Start the run",
+					}),
+				).rejects.toThrow("Team source collision");
+			});
+
+			expect(useTeamStore.getState().teams[existingTeam.agentTeamId]).toEqual(
+				existingTeam,
+			);
+			expect(mockStore.createLocalSession).not.toHaveBeenCalled();
+			expect(mockStore.handleSessionsChanged).not.toHaveBeenCalled();
+			expect(mockStore.setActiveSessionId).not.toHaveBeenCalled();
+			expect(mockStore.setLastCreatedCwd).not.toHaveBeenCalled();
+			expect(mockBootstrapSessionE2EE).not.toHaveBeenCalled();
+			expect(mockStore.setSessionE2EEStatus).not.toHaveBeenCalled();
+			expect(apiModule.sendMessage).not.toHaveBeenCalled();
+		});
+
+		it("installs the HTTP Team parent before creating its marked leader without a socket delta", async () => {
+			const createdAt = "2025-01-01T00:00:00Z";
+			const updatedAt = "2025-01-01T00:01:00Z";
+			const team: apiModule.AgentTeamSummary = {
+				agentTeamId: "team-http",
+				machineId: "canonical-machine",
+				title: "HTTP Team",
+				workspaceRootCwd: "/repo",
+				workspaceMode: "shared_workspace",
+				leaderMemberId: "leader-member",
+				lifecycle: "running",
+				members: [
+					{
+						memberId: "leader-member",
+						agentTeamId: "team-http",
+						role: "leader",
+						name: "Leader",
+						backendId: "backend-1",
+						sessionId: "leader-session-http",
+						lifecycle: "running",
+						health: "healthy",
+						mailboxCounts: {
+							unread: 0,
+							wakePending: 0,
+							wakeFailed: 0,
+						},
+						taskCounts: {
+							todo: 0,
+							inProgress: 0,
+							blocked: 0,
+							completed: 0,
+							failed: 0,
+							cancelled: 0,
+						},
+						pendingPermissionCount: 0,
+						createdAt,
+						updatedAt,
+					},
+				],
+				mailboxCounts: {
+					unread: 0,
+					wakePending: 0,
+					wakeFailed: 0,
+				},
+				taskCounts: {
+					todo: 0,
+					inProgress: 0,
+					blocked: 0,
+					completed: 0,
+					failed: 0,
+					cancelled: 0,
+				},
+				createdAt,
+				updatedAt,
+			};
+			const leaderSession: apiModule.SessionSummary = {
+				sessionId: "leader-session-http",
+				title: "HTTP Team Leader",
+				backendId: "backend-1",
+				backendLabel: "Backend 1",
+				createdAt,
+				updatedAt,
+				cwd: "/repo",
+				agentTeamOwned: true,
+				wrappedDek: "wrapped-leader-dek",
+				revision: 1,
+			};
+			vi.mocked(apiModule.createAgentTeam).mockResolvedValue({
+				team,
+				leaderSession,
+			});
+			vi.mocked(apiModule.sendMessage).mockResolvedValue({
+				stopReason: "end_turn",
+			});
+
+			let teamWasPresentWhenLeaderCreated = false;
+			mockStore.createLocalSession.mockImplementation((sessionId) => {
+				if (sessionId === leaderSession.sessionId) {
+					teamWasPresentWhenLeaderCreated =
+						useTeamStore.getState().teams[team.agentTeamId]?.agentTeamId ===
+						team.agentTeamId;
+				}
+			});
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			const mutationResult =
+				await result.current.createAgentTeamRunMutation.mutateAsync({
+					machineId: "requested-machine",
+					leaderBackendId: "backend-1",
+					workspaceRootCwd: "/repo",
+					target: "Ship without waiting for a socket delta",
+				});
+
+			expect(mutationResult).toMatchObject({ team, leaderSession });
+			expect(useTeamStore.getState().teams[team.agentTeamId]).toEqual(team);
+			expect(teamWasPresentWhenLeaderCreated).toBe(true);
+			expect(mockStore.createLocalSession).toHaveBeenCalledWith(
+				leaderSession.sessionId,
+				expect.objectContaining({
+					agentTeamOwned: true,
+					machineId: team.machineId,
+				}),
+			);
+			expect(mockStore.setLastCreatedCwd).toHaveBeenCalledWith(
+				team.machineId,
+				"/repo",
+			);
+		});
+
+		it("keeps the created Team and leader when the initial send fails", async () => {
+			const team = createAgentTeamSummary({
+				agentTeamId: "team-send-failure",
+				machineId: "canonical-machine",
+			});
+			const leaderSession: apiModule.SessionSummary = {
+				sessionId: "leader-send-failure",
+				title: "Team Leader",
+				backendId: "backend-1",
+				backendLabel: "Backend 1",
+				createdAt: "2025-01-01T00:00:00Z",
+				updatedAt: "2025-01-01T00:01:00Z",
+				cwd: "/repo",
+				agentTeamOwned: true,
+				wrappedDek: "wrapped-leader-dek",
+				revision: 1,
+			};
+			const initialRunError = new Error("Initial Team prompt failed");
+			vi.mocked(apiModule.createAgentTeam).mockResolvedValue({
+				team,
+				leaderSession,
+			});
+			vi.mocked(apiModule.sendMessage).mockRejectedValue(initialRunError);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			const mutationResult =
+				await result.current.createAgentTeamRunMutation.mutateAsync({
+					machineId: "requested-machine",
+					leaderBackendId: "backend-1",
+					workspaceRootCwd: "/repo",
+					target: "Start the run",
+				});
+
+			expect(mutationResult).toMatchObject({
+				team,
+				leaderSession,
+				initialRunError,
+			});
+			expect(useTeamStore.getState().teams[team.agentTeamId]).toEqual(team);
+			expect(mockStore.createLocalSession).toHaveBeenCalledWith(
+				leaderSession.sessionId,
+				expect.objectContaining({
+					agentTeamOwned: true,
+					machineId: team.machineId,
+				}),
+			);
+			expect(mockStore.setActiveSessionId).toHaveBeenCalledWith(
+				leaderSession.sessionId,
+			);
+			expect(mockStore.setAppError).toHaveBeenLastCalledWith(
+				expect.objectContaining({ message: initialRunError.message }),
+			);
+		});
+
+		it("keeps the created Team and reports an error when no leader session is returned", async () => {
+			const team = createAgentTeamSummary({
+				agentTeamId: "team-missing-leader",
+			});
+			vi.mocked(apiModule.createAgentTeam).mockResolvedValue({ team });
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			const mutationResult =
+				await result.current.createAgentTeamRunMutation.mutateAsync({
+					machineId: team.machineId,
+					leaderBackendId: "backend-1",
+					workspaceRootCwd: "/repo",
+					target: "Start the run",
+				});
+
+			expect(mutationResult).toMatchObject({
+				team,
+				initialRunError: expect.any(Error),
+			});
+			expect(useTeamStore.getState().teams[team.agentTeamId]).toEqual(team);
+			expect(mockStore.createLocalSession).not.toHaveBeenCalled();
+			expect(mockStore.setActiveSessionId).not.toHaveBeenCalled();
+			expect(mockStore.setAppError).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					message: "Agent Team leader session was not returned",
+				}),
+			);
+		});
+
+		it("keeps the Team and leader when the leader revision is not ready", async () => {
+			const team = createAgentTeamSummary({
+				agentTeamId: "team-missing-revision",
+			});
+			const leaderSession: apiModule.SessionSummary = {
+				sessionId: "leader-missing-revision",
+				title: "Team Leader",
+				backendId: "backend-1",
+				backendLabel: "Backend 1",
+				createdAt: "2025-01-01T00:00:00Z",
+				updatedAt: "2025-01-01T00:01:00Z",
+				agentTeamOwned: true,
+			};
+			vi.mocked(apiModule.createAgentTeam).mockResolvedValue({
+				team,
+				leaderSession,
+			});
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			const mutationResult =
+				await result.current.createAgentTeamRunMutation.mutateAsync({
+					machineId: team.machineId,
+					leaderBackendId: "backend-1",
+					workspaceRootCwd: "/repo",
+					target: "Start the run",
+				});
+
+			expect(mutationResult).toMatchObject({
+				team,
+				leaderSession,
+				initialRunError: expect.any(Error),
+			});
+			expect(apiModule.sendMessage).not.toHaveBeenCalled();
+			expect(useTeamStore.getState().teams[team.agentTeamId]).toEqual(team);
+			expect(mockStore.createLocalSession).toHaveBeenCalledWith(
+				leaderSession.sessionId,
+				expect.objectContaining({
+					agentTeamOwned: true,
+					machineId: team.machineId,
+				}),
+			);
+			expect(mockStore.setAppError).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					message: expect.stringContaining("Session not ready"),
+				}),
+			);
+		});
+
+		it("rejects without creating local state when the Team create RPC fails", async () => {
+			const createError = new Error("Team create RPC failed");
+			vi.mocked(apiModule.createAgentTeam).mockRejectedValue(createError);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await expect(
+				result.current.createAgentTeamRunMutation.mutateAsync({
+					machineId: "machine-1",
+					leaderBackendId: "backend-1",
+					workspaceRootCwd: "/repo",
+					target: "Start the run",
+				}),
+			).rejects.toBe(createError);
+			expect(useTeamStore.getState().teams).toEqual({});
+			expect(mockStore.createLocalSession).not.toHaveBeenCalled();
+			expect(mockStore.setAppError).toHaveBeenLastCalledWith(
+				expect.objectContaining({ message: createError.message }),
+			);
+		});
+
 		it("creates metadata-only team, bootstraps leader E2EE, and sends target", async () => {
 			const leaderSession: apiModule.SessionSummary = {
 				sessionId: "leader-session-1",
@@ -578,7 +1094,7 @@ describe("useSessionMutations", () => {
 				revision: 1,
 			};
 			vi.mocked(apiModule.createAgentTeam).mockResolvedValue({
-				team: { agentTeamId: "team-1" } as apiModule.AgentTeamSummary,
+				team: createAgentTeamSummary(),
 				leaderSession,
 			});
 			vi.mocked(apiModule.sendMessage).mockResolvedValue({
@@ -632,42 +1148,63 @@ describe("useSessionMutations", () => {
 			);
 		});
 
-		it("fails before sending when leader E2EE bootstrap is not ok", async () => {
+		it("keeps the Team and leader when leader E2EE bootstrap is not ok", async () => {
 			mockBootstrapSessionE2EE.mockReturnValueOnce("missing_key");
+			const team = createAgentTeamSummary();
+			const leaderSession: apiModule.SessionSummary = {
+				sessionId: "leader-session-1",
+				title: "Team Leader",
+				backendId: "backend-1",
+				backendLabel: "Backend 1",
+				createdAt: "2025-01-01T00:00:00Z",
+				updatedAt: "2025-01-01T00:00:00Z",
+				agentTeamOwned: true,
+				wrappedDek: "wrapped-leader-dek",
+				revision: 1,
+			};
 			vi.mocked(apiModule.createAgentTeam).mockResolvedValue({
-				team: { agentTeamId: "team-1" } as apiModule.AgentTeamSummary,
-				leaderSession: {
-					sessionId: "leader-session-1",
-					title: "Team Leader",
-					backendId: "backend-1",
-					backendLabel: "Backend 1",
-					createdAt: "2025-01-01T00:00:00Z",
-					updatedAt: "2025-01-01T00:00:00Z",
-					wrappedDek: "wrapped-leader-dek",
-					revision: 1,
-				},
+				team,
+				leaderSession,
 			});
 
 			const { result } = renderHook(() => useSessionMutations(mockStore), {
 				wrapper,
 			});
 
-			await expect(
-				result.current.createAgentTeamRunMutation.mutateAsync({
+			const mutationResult =
+				await result.current.createAgentTeamRunMutation.mutateAsync({
 					machineId: "machine-1",
 					leaderBackendId: "backend-1",
 					workspaceRootCwd: "/repo",
 					target: "Secret target",
-				}),
-			).rejects.toThrow("E2EE key missing");
+				});
+
+			expect(mutationResult).toMatchObject({
+				team,
+				leaderSession,
+				e2eeStatus: "missing_key",
+				initialRunError: expect.any(Error),
+			});
 			expect(apiModule.sendMessage).not.toHaveBeenCalled();
-			expect(mockStore.setAppError).toHaveBeenCalled();
+			expect(useTeamStore.getState().teams[team.agentTeamId]).toEqual(team);
+			expect(mockStore.createLocalSession).toHaveBeenCalledWith(
+				leaderSession.sessionId,
+				expect.objectContaining({
+					agentTeamOwned: true,
+					machineId: team.machineId,
+				}),
+			);
+			expect(mockStore.setAppError).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					message: expect.stringContaining("E2EE key missing"),
+				}),
+			);
 		});
 
 		it("sends the target without encryption when the leader session is plaintext", async () => {
 			mockBootstrapSessionE2EE.mockReturnValueOnce("none");
 			vi.mocked(apiModule.createAgentTeam).mockResolvedValue({
-				team: { agentTeamId: "team-1" } as apiModule.AgentTeamSummary,
+				team: createAgentTeamSummary(),
 				leaderSession: {
 					sessionId: "leader-session-1",
 					title: "Team Leader",
@@ -892,6 +1429,7 @@ describe("useSessionMutations", () => {
 					{ sessionId: "session-1", title: "Delete me" },
 					{ sessionId: "session-2", title: "Keep me" },
 				],
+				coveredMachineIds: ["machine-1", "machine-2"],
 			});
 			const { result } = renderHook(
 				() => useSessionMutations(mockStore, { onSessionDeleted }),
@@ -908,6 +1446,7 @@ describe("useSessionMutations", () => {
 			expect(mockForgetSession).toHaveBeenCalledWith("session-1");
 			expect(queryClient.getQueryData(["sessions"])).toEqual({
 				sessions: [{ sessionId: "session-2", title: "Keep me" }],
+				coveredMachineIds: ["machine-1", "machine-2"],
 			});
 		});
 
@@ -917,6 +1456,7 @@ describe("useSessionMutations", () => {
 			);
 			const cached = {
 				sessions: [{ sessionId: "session-1", title: "Keep me" }],
+				coveredMachineIds: ["machine-1"],
 			};
 			queryClient.setQueryData(["sessions"], cached);
 			const onSessionDeleted = vi.fn();

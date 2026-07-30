@@ -67,16 +67,16 @@ const parseJson = <T>(value: string): T => JSON.parse(value) as T;
 const getTeamGroupCwd = (team: AgentTeamSummary): string | undefined =>
 	team.workspaceRootCwd || team.members[0]?.worktreeSourceCwd;
 
-const getTeamOwnedSessionIds = (teams: AgentTeamSummary[]) => {
-	const owned = new Set<string>();
+const countTeamMemberRawSessionIds = (teams: AgentTeamSummary[]) => {
+	const counts = new Map<string, number>();
 	for (const team of teams) {
 		for (const member of team.members) {
 			if (member.sessionId) {
-				owned.add(member.sessionId);
+				counts.set(member.sessionId, (counts.get(member.sessionId) ?? 0) + 1);
 			}
 		}
 	}
-	return owned;
+	return counts;
 };
 
 const getEntryUpdatedAt = (entry: SidebarSessionListEntry) =>
@@ -101,32 +101,59 @@ export function useSessionList({
 	selectedMachineId,
 	selectedWorkspaceByMachine,
 }: UseSessionListParams): UseSessionListReturn {
+	const { isProjectionReady, isProjectionUnavailable } = useTeamStore(
+		useShallow((state) => ({
+			isProjectionReady: state.isProjectionReady,
+			isProjectionUnavailable: state.isProjectionUnavailable,
+		})),
+	);
+	const canRenderOrdinaryProjection =
+		isProjectionReady || isProjectionUnavailable;
 	const teamSignatures = useTeamStore(
-		useShallow((state) => {
-			if (!selectedMachineId) {
-				return [];
-			}
-			return Object.values(state.teams)
-				.filter((team) => team.machineId === selectedMachineId)
-				.sort((left, right) =>
-					(right.updatedAt ?? right.createdAt).localeCompare(
-						left.updatedAt ?? left.createdAt,
-					),
-				)
-				.map(serializeTeamSummary);
-		}),
+		useShallow((state) =>
+			state.isProjectionReady || state.isProjectionUnavailable
+				? Object.values(state.teams)
+						.sort((left, right) =>
+							(right.updatedAt ?? right.createdAt).localeCompare(
+								left.updatedAt ?? left.createdAt,
+							),
+						)
+						.map(serializeTeamSummary)
+				: [],
+		),
 	);
 	const teamList = useMemo(
 		() => teamSignatures.map((value) => parseJson<AgentTeamSummary>(value)),
 		[teamSignatures],
 	);
+	const teamMemberRawSessionIdCounts = useMemo(
+		() => countTeamMemberRawSessionIds(teamList),
+		[teamList],
+	);
+	const teamOwnedSessionIds = useMemo(
+		() => new Set(teamMemberRawSessionIdCounts.keys()),
+		[teamMemberRawSessionIdCounts],
+	);
+	const workspaceTeamList = useMemo(
+		() =>
+			selectedMachineId
+				? teamList.filter((team) => team.machineId === selectedMachineId)
+				: [],
+		[selectedMachineId, teamList],
+	);
 
 	const workspaceSignatures = useChatStore(
-		useShallow((state) =>
-			collectWorkspaces(state.sessions, selectedMachineId, teamList).map(
-				serializeWorkspaceSummary,
-			),
-		),
+		useShallow((state) => {
+			if (!canRenderOrdinaryProjection) {
+				return [];
+			}
+			return collectWorkspaces(
+				state.sessions,
+				selectedMachineId,
+				workspaceTeamList,
+				teamOwnedSessionIds,
+			).map(serializeWorkspaceSummary);
+		}),
 	);
 	const workspaceList = useMemo(
 		() =>
@@ -138,23 +165,52 @@ export function useSessionList({
 		activeSessionId ? state.sessions[activeSessionId] : undefined,
 	);
 
-	const selectedWorkspaceCwd = selectedMachineId
+	const persistedWorkspaceCwd = selectedMachineId
 		? selectedWorkspaceByMachine[selectedMachineId]
 		: undefined;
+	const selectedWorkspaceCwd =
+		persistedWorkspaceCwd &&
+		workspaceList.some((workspace) => workspace.cwd === persistedWorkspaceCwd)
+			? persistedWorkspaceCwd
+			: undefined;
 
 	const effectiveWorkspaceCwd = selectedWorkspaceCwd ?? workspaceList[0]?.cwd;
-	const teamOwnedSessionIds = useMemo(
-		() => getTeamOwnedSessionIds(teamList),
-		[teamList],
+	const teamMemberSessionIds = useMemo(
+		() =>
+			Array.from(teamMemberRawSessionIdCounts)
+				.flatMap(([sessionId, count]) => (count === 1 ? [sessionId] : []))
+				.sort(),
+		[teamMemberRawSessionIdCounts],
 	);
+	const teamMemberSessionSignatures = useChatStore(
+		useShallow((state) =>
+			teamMemberSessionIds.flatMap((sessionId) => {
+				const session = state.sessions[sessionId];
+				return session?.agentTeamOwned === true
+					? [serializeSessionEntry(toSessionListEntry(session))]
+					: [];
+			}),
+		),
+	);
+	const teamMemberSessionsById = useMemo(() => {
+		const sessionsById = new Map<string, SessionListEntry>();
+		for (const signature of teamMemberSessionSignatures) {
+			const session = parseJson<SessionListEntry>(signature);
+			sessionsById.set(session.sessionId, session);
+		}
+		return sessionsById;
+	}, [teamMemberSessionSignatures]);
 
 	const sessionSignatures = useChatStore(
 		useShallow((state) => {
-			if (!selectedMachineId) {
+			if (!canRenderOrdinaryProjection || !selectedMachineId) {
 				return [];
 			}
 			const filtered = Object.values(state.sessions).filter((session) => {
-				if (teamOwnedSessionIds.has(session.sessionId)) {
+				if (
+					session.agentTeamOwned ||
+					teamOwnedSessionIds.has(session.sessionId)
+				) {
 					return false;
 				}
 				if (session.machineId !== selectedMachineId) {
@@ -183,38 +239,27 @@ export function useSessionList({
 			}),
 		);
 
-		const teamEntries: TeamSessionListEntry[] = teamList
-			.filter((team) => {
-				const workspaceCwd = getTeamGroupCwd(team);
-				if (!workspaceCwd) {
-					return false;
-				}
-				return effectiveWorkspaceCwd
-					? workspaceCwd === effectiveWorkspaceCwd
-					: true;
-			})
-			.map((team) => {
-				const workspaceCwd = getTeamGroupCwd(team) ?? team.workspaceRootCwd;
-				const members = team.members.map((member) => {
-					const session = member.sessionId
-						? useChatStore.getState().sessions[member.sessionId]
-						: undefined;
-					return {
-						...member,
-						session: session ? toSessionListEntry(session) : undefined,
-					};
-				});
+		const teamEntries: TeamSessionListEntry[] = teamList.map((team) => {
+			const workspaceCwd = getTeamGroupCwd(team) ?? team.workspaceRootCwd;
+			const members = team.members.map((member) => {
 				return {
-					kind: "agent-team" as const,
-					team,
-					members,
-					workspaceCwd,
-					updatedAt: team.updatedAt ?? team.createdAt,
+					...member,
+					session: member.sessionId
+						? teamMemberSessionsById.get(member.sessionId)
+						: undefined,
 				};
 			});
+			return {
+				kind: "agent-team" as const,
+				team,
+				members,
+				workspaceCwd,
+				updatedAt: team.updatedAt ?? team.createdAt,
+			};
+		});
 
 		return [...teamEntries, ...ordinaryEntries].sort(compareEntriesByRecency);
-	}, [effectiveWorkspaceCwd, sessionList, teamList]);
+	}, [sessionList, teamList, teamMemberSessionsById]);
 
 	return {
 		workspaceList,

@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "@/App";
 import { useChatStore } from "@/lib/chat-store";
 import { useMachinesStore } from "@/lib/machines-store";
+import { useTeamStore } from "@/lib/team-store";
 import { useUiStore } from "@/lib/ui-store";
 
 const mockFetch = vi.fn();
@@ -13,7 +14,10 @@ global.fetch = mockFetch;
 
 const sessionsState = vi.hoisted(() => ({
 	sessionsQuery: {
-		data: { sessions: [] as Array<Record<string, unknown>> },
+		data: { sessions: [] } as {
+			sessions: Array<Record<string, unknown>>;
+			coveredMachineIds?: string[];
+		},
 		isError: false,
 	},
 	backendsQuery: {
@@ -21,6 +25,9 @@ const sessionsState = vi.hoisted(() => ({
 		isError: false,
 	},
 }));
+const mockRefreshSessionQueriesAfterReconnect = vi.hoisted(() =>
+	vi.fn(async () => {}),
+);
 
 const handlers = vi.hoisted(
 	() => ({}) as Record<string, ((payload?: unknown) => void) | undefined>,
@@ -63,6 +70,7 @@ const createStoredSession = (overrides: Record<string, unknown> = {}) => ({
 });
 
 vi.mock("@/hooks/useSessionQueries", () => ({
+	refreshSessionQueriesAfterReconnect: mockRefreshSessionQueriesAfterReconnect,
 	useSessionQueries: () => ({
 		sessionsQuery: sessionsState.sessionsQuery,
 		backendsQuery: sessionsState.backendsQuery,
@@ -179,6 +187,10 @@ vi.mock("@/components/app/CreateSessionDialog", () => ({
 	CreateSessionDialog: () => null,
 }));
 
+vi.mock("@/components/app/CommandPalette", () => ({
+	CommandPalette: () => null,
+}));
+
 vi.mock("@/components/app/FileExplorerDialog", () => ({
 	FileExplorerDialog: () => null,
 }));
@@ -250,6 +262,12 @@ const mockGatewaySocket = vi.hoisted(() => ({
 		handlers.agentTeamsChanged = handler;
 		return () => {
 			handlers.agentTeamsChanged = undefined;
+		};
+	}),
+	onAgentTeamsRefreshRequired: vi.fn((handler: (payload: unknown) => void) => {
+		handlers.agentTeamsRefreshRequired = handler;
+		return () => {
+			handlers.agentTeamsRefreshRequired = undefined;
 		};
 	}),
 	onSessionAttached: vi.fn((handler: (payload: unknown) => void) => {
@@ -343,14 +361,20 @@ const renderApp = () => {
 			},
 		},
 	});
-
-	return render(
+	const createApp = () => (
 		<MemoryRouter initialEntries={["/"]}>
 			<QueryClientProvider client={queryClient}>
 				<App />
 			</QueryClientProvider>
-		</MemoryRouter>,
+		</MemoryRouter>
 	);
+	const renderResult = render(createApp());
+
+	return {
+		...renderResult,
+		queryClient,
+		rerenderApp: () => renderResult.rerender(createApp()),
+	};
 };
 
 describe("App session restore integration", () => {
@@ -396,6 +420,7 @@ describe("App session restore integration", () => {
 		mockE2EE.getSessionE2EEStatus.mockReset();
 		mockE2EE.getSessionE2EEStatus.mockReturnValue("ready");
 		mockE2EE.setPairedSecret.mockClear();
+		mockRefreshSessionQueriesAfterReconnect.mockClear();
 
 		useChatStore.setState({
 			sessions: {},
@@ -415,6 +440,18 @@ describe("App session restore integration", () => {
 			},
 			selectedMachineId: "machine-1",
 		});
+		useTeamStore.setState({
+			teams: {},
+			activeAgentTeamId: undefined,
+			appError: undefined,
+			isProjectionReady: true,
+			isProjectionRefreshing: false,
+			isProjectionUnavailable: false,
+			isSessionProjectionRecoveryPending: false,
+			isSessionProjectionSnapshotReady: false,
+			sessionProjectionRecoveryGeneration: 0,
+			lastAbortedSessionProjectionRecoveryGeneration: undefined,
+		});
 		useUiStore.setState({
 			selectedWorkspaceByMachine: {},
 			createDialogOpen: false,
@@ -423,6 +460,577 @@ describe("App session restore integration", () => {
 			commandPaletteOpen: false,
 			chatSearchOpen: false,
 		});
+	});
+
+	it("refreshes the authoritative Team snapshot when a CLI registers", async () => {
+		renderApp();
+
+		await act(async () => {
+			handlers.agentTeamsRefreshRequired?.({ reason: "cli_registered" });
+		});
+
+		expect(mockRefreshSessionQueriesAfterReconnect).toHaveBeenCalledTimes(1);
+		expect(mockRefreshSessionQueriesAfterReconnect).toHaveBeenCalledWith(
+			expect.any(QueryClient),
+		);
+	});
+
+	it("surfaces an authoritative recovery failure without an unhandled rejection", async () => {
+		mockRefreshSessionQueriesAfterReconnect.mockRejectedValueOnce(
+			new Error("Team recovery unavailable"),
+		);
+		renderApp();
+
+		await act(async () => {
+			handlers.agentTeamsRefreshRequired?.({ reason: "cli_registered" });
+			await Promise.resolve();
+		});
+
+		await waitFor(() => {
+			expect(useTeamStore.getState().appError).toEqual(
+				expect.objectContaining({
+					code: "INTERNAL_ERROR",
+					retryable: true,
+					scope: "service",
+				}),
+			);
+		});
+	});
+
+	it("commits the snapshot before releasing and replaying buffered deltas", async () => {
+		sessionsState.sessionsQuery = {
+			data: {
+				sessions: [
+					{
+						sessionId: "recovered-session",
+						title: "HTTP Snapshot",
+						backendId: "backend-1",
+						backendLabel: "Claude",
+						createdAt: "2024-01-01T00:00:00Z",
+						updatedAt: "2024-01-01T00:00:00Z",
+						machineId: "machine-1",
+						cwd: "/repo",
+						revision: 1,
+						isAttached: true,
+					},
+				],
+			},
+			isError: false,
+		};
+		const generation = useTeamStore.getState().beginSessionProjectionRecovery();
+
+		renderApp();
+		await act(async () => {
+			await Promise.resolve();
+		});
+		const recoveryReleased = vi.fn();
+		const unsubscribe = useTeamStore.subscribe((state, previousState) => {
+			if (
+				previousState.isSessionProjectionRecoveryPending &&
+				!state.isSessionProjectionRecoveryPending
+			) {
+				recoveryReleased();
+			}
+		});
+
+		expect(
+			useChatStore.getState().sessions["recovered-session"],
+		).toBeUndefined();
+		act(() => {
+			handlers.sessionsChanged?.({
+				machineId: "machine-1",
+				added: [],
+				updated: [
+					{
+						...sessionsState.sessionsQuery.data.sessions[0],
+						title: "Socket Delta",
+					},
+				],
+				removed: [],
+			});
+		});
+		expect(
+			useChatStore.getState().sessions["recovered-session"],
+		).toBeUndefined();
+
+		act(() => {
+			useTeamStore.getState().markSessionProjectionSnapshotReady(generation);
+		});
+		await waitFor(() => {
+			expect(useChatStore.getState().sessions["recovered-session"]?.title).toBe(
+				"Socket Delta",
+			);
+		});
+		expect(useTeamStore.getState().isSessionProjectionRecoveryPending).toBe(
+			false,
+		);
+		expect(recoveryReleased).toHaveBeenCalledOnce();
+		expect(mockE2EE.getSessionE2EEStatus).toHaveBeenCalled();
+		expect(
+			mockE2EE.getSessionE2EEStatus.mock.invocationCallOrder[0],
+		).toBeLessThan(
+			recoveryReleased.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+		);
+		unsubscribe();
+	});
+
+	it("commits the QueryClient recovery snapshot before the observer catches up", async () => {
+		const observerSnapshot = {
+			sessionId: "observer-stale",
+			title: "Observer stale",
+			backendId: "backend-1",
+			backendLabel: "Claude",
+			createdAt: "2024-01-01T00:00:00Z",
+			updatedAt: "2024-01-01T00:00:00Z",
+			machineId: "machine-1",
+			cwd: "/repo",
+			revision: 1,
+			isAttached: true,
+		};
+		const cachedSnapshot = {
+			...observerSnapshot,
+			sessionId: "cache-current",
+			title: "Cache current",
+		};
+		sessionsState.sessionsQuery = {
+			data: {
+				sessions: [observerSnapshot],
+				coveredMachineIds: ["machine-1"],
+			},
+			isError: false,
+		};
+		const generation = useTeamStore.getState().beginSessionProjectionRecovery();
+		const { queryClient } = renderApp();
+		await act(async () => {
+			await Promise.resolve();
+		});
+
+		queryClient.setQueryData(["sessions"], {
+			sessions: [cachedSnapshot],
+			coveredMachineIds: ["machine-1"],
+		});
+		act(() => {
+			handlers.sessionsChanged?.({
+				machineId: "machine-1",
+				added: [{ ...cachedSnapshot, title: "Socket after cache" }],
+				updated: [],
+				removed: [],
+			});
+			useTeamStore.getState().markSessionProjectionSnapshotReady(generation);
+		});
+
+		await waitFor(() => {
+			expect(useChatStore.getState().sessions["cache-current"]?.title).toBe(
+				"Socket after cache",
+			);
+		});
+		expect(useChatStore.getState().sessions["observer-stale"]).toBeUndefined();
+		expect(useTeamStore.getState().isSessionProjectionRecoveryPending).toBe(
+			false,
+		);
+	});
+
+	it("replaces only covered machine session slices from HTTP", async () => {
+		useChatStore.setState({
+			sessions: {
+				"covered-stale": createStoredSession({
+					sessionId: "covered-stale",
+					title: "Covered stale",
+					machineId: "machine-1",
+				}),
+				"offline-session": createStoredSession({
+					sessionId: "offline-session",
+					title: "Offline retained",
+					machineId: "machine-offline",
+				}),
+			},
+		});
+		sessionsState.sessionsQuery = {
+			data: {
+				sessions: [
+					{
+						sessionId: "covered-current",
+						title: "Covered current",
+						backendId: "backend-1",
+						backendLabel: "Claude",
+						createdAt: "2024-01-01T00:00:00Z",
+						updatedAt: "2024-01-01T00:00:00Z",
+						machineId: "machine-1",
+						cwd: "/repo",
+						revision: 1,
+						isAttached: false,
+					},
+				],
+				coveredMachineIds: ["machine-1"],
+			},
+			isError: false,
+		};
+
+		renderApp();
+
+		await waitFor(() => {
+			expect(useChatStore.getState().sessions["covered-current"]?.title).toBe(
+				"Covered current",
+			);
+		});
+		expect(useChatStore.getState().sessions["covered-stale"]).toBeUndefined();
+		expect(useChatStore.getState().sessions["offline-session"]?.title).toBe(
+			"Offline retained",
+		);
+	});
+
+	it("preserves last-good state and skips E2EE bootstrap for cross-source HTTP collisions", async () => {
+		useChatStore.setState({
+			sessions: {
+				collision: createStoredSession({
+					sessionId: "collision",
+					title: "Last good collision",
+					machineId: "machine-1",
+					revision: 1,
+					isAttached: false,
+				}),
+			},
+		});
+		const baseSummary = {
+			sessionId: "collision",
+			title: "Conflicting snapshot",
+			backendId: "backend-1",
+			backendLabel: "Claude",
+			createdAt: "2024-01-01T00:00:00Z",
+			updatedAt: "2024-01-02T00:00:00Z",
+			revision: 2,
+			isAttached: true,
+		};
+		sessionsState.sessionsQuery = {
+			data: {
+				sessions: [
+					{
+						...baseSummary,
+						machineId: "machine-1",
+						wrappedDek: "wrapped-machine-1",
+					},
+					{
+						...baseSummary,
+						machineId: "machine-2",
+						wrappedDek: "wrapped-machine-2",
+					},
+					{
+						...baseSummary,
+						sessionId: "ordinary",
+						title: "Ordinary accepted",
+						machineId: "machine-1",
+						wrappedDek: "wrapped-ordinary",
+					},
+				],
+				coveredMachineIds: ["machine-1", "machine-2"],
+			},
+			isError: false,
+		};
+
+		renderApp();
+
+		await waitFor(() => {
+			expect(useChatStore.getState().sessions.ordinary?.title).toBe(
+				"Ordinary accepted",
+			);
+		});
+		expect(useChatStore.getState().sessions.collision?.title).toBe(
+			"Last good collision",
+		);
+		expect(mockE2EE.unwrapSessionDek).toHaveBeenCalledWith(
+			"ordinary",
+			"wrapped-ordinary",
+		);
+		expect(mockE2EE.unwrapSessionDek).not.toHaveBeenCalledWith(
+			"collision",
+			expect.any(String),
+		);
+	});
+
+	it("derives coverage when the HTTP coverage field is not an array", async () => {
+		useChatStore.setState({
+			sessions: {
+				"machine-1-stale": createStoredSession({
+					sessionId: "machine-1-stale",
+					machineId: "machine-1",
+					isAttached: false,
+				}),
+				"offline-session": createStoredSession({
+					sessionId: "offline-session",
+					machineId: "machine-offline",
+					isAttached: false,
+				}),
+			},
+		});
+		sessionsState.sessionsQuery = {
+			data: {
+				sessions: [
+					{
+						sessionId: "machine-1-current",
+						title: "Machine 1 current",
+						backendId: "backend-1",
+						backendLabel: "Claude",
+						createdAt: "2024-01-01T00:00:00Z",
+						updatedAt: "2024-01-01T00:00:00Z",
+						machineId: "machine-1",
+					},
+				],
+				coveredMachineIds: {
+					malformed: true,
+				} as unknown as string[],
+			},
+			isError: false,
+		};
+
+		renderApp();
+
+		await waitFor(() => {
+			expect(
+				useChatStore.getState().sessions["machine-1-current"],
+			).toBeDefined();
+		});
+		expect(useChatStore.getState().sessions["machine-1-stale"]).toBeUndefined();
+		expect(useChatStore.getState().sessions["offline-session"]).toBeDefined();
+	});
+
+	it("derives missing coverage from all represented machine slices", async () => {
+		useChatStore.setState({
+			sessions: {
+				"machine-1-stale": createStoredSession({
+					sessionId: "machine-1-stale",
+					machineId: "machine-1",
+					isAttached: false,
+				}),
+				"machine-2-stale": createStoredSession({
+					sessionId: "machine-2-stale",
+					machineId: "machine-2",
+					isAttached: false,
+				}),
+				"offline-session": createStoredSession({
+					sessionId: "offline-session",
+					machineId: "machine-offline",
+					isAttached: false,
+				}),
+			},
+		});
+		sessionsState.sessionsQuery = {
+			data: {
+				sessions: [
+					{
+						sessionId: "machine-1-current",
+						title: "Machine 1 current",
+						backendId: "backend-1",
+						backendLabel: "Claude",
+						createdAt: "2024-01-01T00:00:00Z",
+						updatedAt: "2024-01-01T00:00:00Z",
+						machineId: "machine-1",
+					},
+					{
+						sessionId: "machine-2-current",
+						title: "Machine 2 current",
+						backendId: "backend-1",
+						backendLabel: "Claude",
+						createdAt: "2024-01-01T00:00:00Z",
+						updatedAt: "2024-01-01T00:00:00Z",
+						machineId: "machine-2",
+					},
+				],
+			},
+			isError: false,
+		};
+
+		renderApp();
+
+		await waitFor(() => {
+			expect(
+				useChatStore.getState().sessions["machine-1-current"],
+			).toBeDefined();
+			expect(
+				useChatStore.getState().sessions["machine-2-current"],
+			).toBeDefined();
+		});
+		expect(useChatStore.getState().sessions["machine-1-stale"]).toBeUndefined();
+		expect(useChatStore.getState().sessions["machine-2-stale"]).toBeUndefined();
+		expect(useChatStore.getState().sessions["offline-session"]).toBeDefined();
+	});
+
+	it("treats missing coverage with an empty snapshot as a no-op", async () => {
+		useChatStore.setState({
+			sessions: {
+				"persisted-session": createStoredSession({
+					sessionId: "persisted-session",
+					machineId: "machine-offline",
+					isAttached: false,
+				}),
+			},
+		});
+		sessionsState.sessionsQuery = {
+			data: { sessions: [] },
+			isError: false,
+		};
+
+		renderApp();
+		await act(async () => {
+			await Promise.resolve();
+		});
+
+		expect(useChatStore.getState().sessions["persisted-session"]).toBeDefined();
+	});
+
+	it("applies coverage changes when React Query reuses an empty sessions array", async () => {
+		const sharedEmptySnapshot: Array<Record<string, unknown>> = [];
+		useChatStore.setState({
+			sessions: {
+				"machine-2-stale": createStoredSession({
+					sessionId: "machine-2-stale",
+					title: "Machine 2 stale",
+					machineId: "machine-2",
+					isAttached: false,
+				}),
+			},
+		});
+		sessionsState.sessionsQuery = {
+			data: {
+				sessions: sharedEmptySnapshot,
+				coveredMachineIds: ["machine-1"],
+			},
+			isError: false,
+		};
+		const { rerenderApp } = renderApp();
+
+		await waitFor(() => {
+			expect(useChatStore.getState().sessions["machine-2-stale"]).toBeDefined();
+		});
+
+		sessionsState.sessionsQuery = {
+			data: {
+				sessions: sharedEmptySnapshot,
+				coveredMachineIds: ["machine-2"],
+			},
+			isError: false,
+		};
+		rerenderApp();
+
+		await waitFor(() => {
+			expect(
+				useChatStore.getState().sessions["machine-2-stale"],
+			).toBeUndefined();
+		});
+	});
+
+	it("does not overwrite replayed deltas with an old snapshot after abort", async () => {
+		const lastGoodSessions = [
+			{
+				sessionId: "session-1",
+				title: "Last good snapshot",
+				backendId: "backend-1",
+				backendLabel: "Claude",
+				createdAt: "2024-01-01T00:00:00Z",
+				updatedAt: "2024-01-01T00:00:00Z",
+				machineId: "machine-1",
+				cwd: "/repo",
+				revision: 1,
+				isAttached: true,
+			},
+		];
+		sessionsState.sessionsQuery = {
+			data: { sessions: lastGoodSessions },
+			isError: false,
+		};
+		const { rerenderApp } = renderApp();
+		await waitFor(() => {
+			expect(useChatStore.getState().sessions["session-1"]?.title).toBe(
+				"Last good snapshot",
+			);
+		});
+
+		let generation = 0;
+		act(() => {
+			generation = useTeamStore.getState().beginSessionProjectionRecovery();
+		});
+		act(() => {
+			handlers.sessionsChanged?.({
+				machineId: "machine-1",
+				added: [],
+				updated: [{ ...lastGoodSessions[0], title: "Buffered after failure" }],
+				removed: [],
+			});
+		});
+		expect(useChatStore.getState().sessions["session-1"]?.title).toBe(
+			"Last good snapshot",
+		);
+
+		act(() => {
+			useTeamStore.getState().abortSessionProjectionRecovery(generation);
+		});
+		await waitFor(() => {
+			expect(useChatStore.getState().sessions["session-1"]?.title).toBe(
+				"Buffered after failure",
+			);
+		});
+
+		sessionsState.sessionsQuery = {
+			data: {
+				sessions: [
+					{
+						...lastGoodSessions[0],
+						title: "Late stale query after failure",
+					},
+				],
+			},
+			isError: false,
+		};
+		rerenderApp();
+		await act(async () => {
+			await Promise.resolve();
+		});
+		expect(useChatStore.getState().sessions["session-1"]?.title).toBe(
+			"Buffered after failure",
+		);
+	});
+
+	it("rejects a new stale query snapshot from an aborted recovery generation", async () => {
+		const generation = useTeamStore.getState().beginSessionProjectionRecovery();
+		const { rerenderApp } = renderApp();
+		const staleSnapshot = {
+			sessionId: "session-1",
+			title: "Stale query after failure",
+			backendId: "backend-1",
+			backendLabel: "Claude",
+			createdAt: "2024-01-01T00:00:00Z",
+			updatedAt: "2024-01-01T00:00:00Z",
+			machineId: "machine-1",
+			cwd: "/repo",
+			revision: 1,
+			isAttached: true,
+		};
+		sessionsState.sessionsQuery = {
+			data: { sessions: [staleSnapshot] },
+			isError: false,
+		};
+		rerenderApp();
+
+		act(() => {
+			handlers.sessionsChanged?.({
+				machineId: "machine-1",
+				added: [{ ...staleSnapshot, title: "Buffered after failure" }],
+				updated: [],
+				removed: [],
+			});
+		});
+		expect(useChatStore.getState().sessions["session-1"]).toBeUndefined();
+
+		act(() => {
+			useTeamStore.getState().abortSessionProjectionRecovery(generation);
+		});
+		await waitFor(() => {
+			expect(useChatStore.getState().sessions["session-1"]?.title).toBe(
+				"Buffered after failure",
+			);
+		});
+		expect(useChatStore.getState().sessions["session-1"]?.title).not.toBe(
+			"Stale query after failure",
+		);
 	});
 
 	it("restores the active session and replays backfill after refresh", async () => {
@@ -464,6 +1072,7 @@ describe("App session restore integration", () => {
 					events: [
 						{
 							sessionId: "session-1",
+							machineId: "machine-1",
 							revision: 2,
 							seq: 1,
 							kind: "agent_message_chunk",
@@ -605,6 +1214,7 @@ describe("App session restore integration", () => {
 		await act(async () => {
 			handlers.sessionEvent?.({
 				sessionId: "session-1",
+				machineId: "machine-1",
 				revision: 1,
 				seq: 1,
 				kind: "agent_message_chunk",

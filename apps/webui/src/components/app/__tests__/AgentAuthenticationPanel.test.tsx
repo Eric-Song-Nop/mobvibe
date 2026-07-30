@@ -28,6 +28,8 @@ vi.mock("react-i18next", () => ({
 					"Authentication is handled by the Agent. Mobvibe never receives your credentials and does not track sign-in status.",
 				"session.agentAuthentication.loadError":
 					"Couldn’t load the Agent’s authentication options.",
+				"session.agentAuthentication.teamLoadError":
+					"Couldn’t load authentication options for this workspace.",
 				"session.agentAuthentication.loggingOut": "Sending sign-out request…",
 				"session.agentAuthentication.logout": "Sign out from Agent",
 				"session.agentAuthentication.logoutComplete":
@@ -202,6 +204,34 @@ describe("AgentAuthenticationPanel", () => {
 		expect(screen.getByRole("status")).toHaveTextContent(
 			"Checking Agent authentication options…",
 		);
+	});
+
+	it("uses placement-neutral copy for an Agent Team authentication error", () => {
+		mockUseAgentAuthentication.mockReturnValue(
+			createHookResult({
+				capabilitiesQuery: {
+					isError: true,
+					isFetching: false,
+					isPending: false,
+					refetch: vi.fn(),
+				},
+			}),
+		);
+
+		render(
+			<AgentAuthenticationPanel
+				backendId="backend-1"
+				enabled
+				machineId="machine-1"
+				placementNeutral
+			/>,
+		);
+
+		expect(
+			screen.getByText(
+				"Couldn’t load authentication options for this workspace.",
+			),
+		).toBeInTheDocument();
 	});
 
 	it("explains and confirms that logout ends the Agent authentication state", () => {

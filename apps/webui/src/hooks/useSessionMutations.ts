@@ -9,6 +9,7 @@ import type {
 	ToolCallUpdate,
 } from "@/lib/acp";
 import {
+	type AgentTeamSummary,
 	archiveSession,
 	bulkArchiveSessions,
 	cancelSession,
@@ -39,6 +40,7 @@ import { useChatStore } from "@/lib/chat-store";
 import { bootstrapSessionE2EE, e2ee } from "@/lib/e2ee";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { useNotificationStore } from "@/lib/notification-store";
+import { useTeamStore } from "@/lib/team-store";
 import { useUiStore } from "@/lib/ui-store";
 
 type SessionMetadata = Partial<
@@ -65,6 +67,7 @@ type SessionMetadata = Partial<
 		| "worktreeBranch"
 		| "isCreating"
 		| "machineId"
+		| "agentTeamOwned"
 		| "_meta"
 		| "isTitlePinned"
 	>
@@ -116,8 +119,10 @@ type CreateAgentTeamRunVariables = {
 };
 
 type CreateAgentTeamRunResult = {
-	leaderSession: SessionSummary;
-	e2eeStatus: ChatSession["e2eeStatus"];
+	team: AgentTeamSummary;
+	leaderSession?: SessionSummary;
+	e2eeStatus?: ChatSession["e2eeStatus"];
+	initialRunError?: unknown;
 };
 
 export interface ChatStoreActions {
@@ -142,7 +147,11 @@ export interface ChatStoreActions {
 		reason: ChatSession["detachedReason"];
 	}) => void;
 	createLocalSession: (sessionId: string, metadata?: SessionMetadata) => void;
-	syncSessions: (sessions: SessionSummary[]) => void;
+	syncSessions: (
+		sessions: SessionSummary[],
+		coveredMachineIds: string[],
+		protectedSessionIds?: string[],
+	) => void;
 	removeSession: (sessionId: string) => void;
 	renameSession: (sessionId: string, title: string) => void;
 	setError: (sessionId: string, error?: SessionError) => void;
@@ -287,6 +296,7 @@ const applySessionSummary = (
 
 const createLeaderSessionMetadata = (
 	summary: SessionSummary,
+	machineId: string,
 ): SessionMetadata => ({
 	title: summary.title,
 	backendId: summary.backendId,
@@ -305,7 +315,8 @@ const createLeaderSessionMetadata = (
 	updatedAt: summary.updatedAt,
 	worktreeSourceCwd: summary.worktreeSourceCwd,
 	worktreeBranch: summary.worktreeBranch,
-	machineId: summary.machineId,
+	machineId,
+	agentTeamOwned: summary.agentTeamOwned,
 });
 
 /**
@@ -419,45 +430,124 @@ export function useSessionMutations(
 				title: variables.title,
 				worktree: variables.worktree,
 			});
+			const existingTeam =
+				useTeamStore.getState().teams[result.team.agentTeamId];
+			if (
+				existingTeam !== undefined &&
+				existingTeam.machineId !== result.team.machineId
+			) {
+				throw new Error(
+					`Agent Team source collision for ${result.team.agentTeamId}`,
+				);
+			}
+			useTeamStore.getState().handleAgentTeamsChanged({
+				machineId: result.team.machineId,
+				added: [result.team],
+				updated: [],
+				removed: [],
+			});
+			if (
+				useTeamStore.getState().teams[result.team.agentTeamId]?.machineId !==
+				result.team.machineId
+			) {
+				throw new Error(
+					`Agent Team source collision for ${result.team.agentTeamId}`,
+				);
+			}
 			const leaderSession = result.leaderSession;
 			if (!leaderSession) {
-				throw new Error("Agent Team leader session was not returned");
+				return {
+					team: result.team,
+					initialRunError: new Error(
+						"Agent Team leader session was not returned",
+					),
+				};
 			}
-			const e2eeStatus = bootstrapSessionE2EE(
-				leaderSession.sessionId,
-				leaderSession.wrappedDek,
-				leaderSession.revision,
-			);
-			if (e2eeStatus === "missing_key") {
-				throw new Error(t("errors.sessionE2EEKeyMissing"));
+			const leaderMachineId = leaderSession.machineId ?? result.team.machineId;
+			if (leaderMachineId !== result.team.machineId) {
+				throw new Error(
+					`Agent Team leader source mismatch for ${leaderSession.sessionId}`,
+				);
 			}
-			if (leaderSession.revision === undefined) {
-				throw new Error(t("errors.sessionNotReady"));
+			const existingLeaderSession =
+				useChatStore.getState().sessions[leaderSession.sessionId];
+			if (
+				existingLeaderSession?.machineId !== undefined &&
+				existingLeaderSession.machineId !== leaderMachineId
+			) {
+				throw new Error(
+					`Agent Team session source collision for ${leaderSession.sessionId}`,
+				);
 			}
-			await sendMessage({
-				sessionId: leaderSession.sessionId,
-				messageId: crypto.randomUUID(),
-				prompt: [{ type: "text", text: variables.target }],
-				revision: leaderSession.revision,
-				encryptionRequired: e2eeStatus === "ok",
-			});
-			return { leaderSession, e2eeStatus };
-		},
-		onSuccess: ({ leaderSession, e2eeStatus }, variables) => {
+			const canonicalLeaderSession: SessionSummary = {
+				...leaderSession,
+				machineId: leaderMachineId,
+				agentTeamOwned: true,
+			};
 			store.createLocalSession(
-				leaderSession.sessionId,
-				createLeaderSessionMetadata(leaderSession),
+				canonicalLeaderSession.sessionId,
+				createLeaderSessionMetadata(canonicalLeaderSession, leaderMachineId),
 			);
-			store.setSessionE2EEStatus(leaderSession.sessionId, e2eeStatus);
-			store.setActiveSessionId(leaderSession.sessionId);
+			store.handleSessionsChanged({
+				added: [],
+				updated: [canonicalLeaderSession],
+				removed: [],
+			});
+			store.setActiveSessionId(canonicalLeaderSession.sessionId);
 			const lastCwd =
 				variables.workspaceRootCwd ??
-				leaderSession.worktreeSourceCwd ??
-				leaderSession.cwd;
-			if (leaderSession.machineId && lastCwd) {
-				store.setLastCreatedCwd(leaderSession.machineId, lastCwd);
+				canonicalLeaderSession.worktreeSourceCwd ??
+				canonicalLeaderSession.cwd;
+			if (lastCwd) {
+				store.setLastCreatedCwd(leaderMachineId, lastCwd);
 			}
-			store.setAppError(undefined);
+			let e2eeStatus: ChatSession["e2eeStatus"];
+			try {
+				e2eeStatus = bootstrapSessionE2EE(
+					canonicalLeaderSession.sessionId,
+					canonicalLeaderSession.wrappedDek,
+					canonicalLeaderSession.revision,
+				);
+				store.setSessionE2EEStatus(
+					canonicalLeaderSession.sessionId,
+					e2eeStatus,
+				);
+				if (e2eeStatus === "missing_key") {
+					throw new Error(t("errors.sessionE2EEKeyMissing"));
+				}
+				if (canonicalLeaderSession.revision === undefined) {
+					throw new Error(t("errors.sessionNotReady"));
+				}
+				await sendMessage({
+					sessionId: canonicalLeaderSession.sessionId,
+					messageId: crypto.randomUUID(),
+					prompt: [{ type: "text", text: variables.target }],
+					revision: canonicalLeaderSession.revision,
+					encryptionRequired: e2eeStatus === "ok",
+				});
+				return {
+					team: result.team,
+					leaderSession: canonicalLeaderSession,
+					e2eeStatus,
+				};
+			} catch (initialRunError) {
+				return {
+					team: result.team,
+					leaderSession: canonicalLeaderSession,
+					e2eeStatus,
+					initialRunError,
+				};
+			}
+		},
+		onSuccess: ({ initialRunError }) => {
+			store.setAppError(
+				initialRunError === undefined
+					? undefined
+					: normalizeError(
+							initialRunError,
+							createFallbackError(t("errors.createSessionFailed"), "service"),
+						),
+			);
 		},
 		onError: (mutationError: unknown) => {
 			store.setAppError(
@@ -544,6 +634,7 @@ export function useSessionMutations(
 							sessions: current.sessions.filter(
 								(session) => session.sessionId !== variables.sessionId,
 							),
+							coveredMachineIds: current.coveredMachineIds,
 						}
 					: current,
 			);

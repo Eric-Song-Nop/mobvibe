@@ -37,7 +37,7 @@ export type AppSidebarProps = {
 	sidebarEntries?: SidebarSessionListEntry[];
 	activeSessionId: string | undefined;
 	activeAgentTeamId?: string;
-	onCreateSession: (mode: "workspace" | "session") => void;
+	onCreateSession: (mode: "workspace" | "session" | "agent-team") => void;
 	onSelectSession: (sessionId: string) => void;
 	onSelectAgentTeam?: (agentTeamId: string) => void;
 	onEditSubmit: () => void;
@@ -94,7 +94,7 @@ export const AppSidebar = memo(function AppSidebar({
 	const [isDeleteSubmitting, setIsDeleteSubmitting] = useState(false);
 
 	const handleCreateSessionRequest = useCallback(
-		(mode: "workspace" | "session") => {
+		(mode: "workspace" | "session" | "agent-team") => {
 			setMobileMenuOpen(false);
 			onCreateSession(mode);
 		},

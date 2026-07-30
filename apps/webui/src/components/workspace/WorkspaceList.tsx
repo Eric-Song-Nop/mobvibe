@@ -1,38 +1,115 @@
+import type { AgentTeamSummary } from "@mobvibe/shared";
 import { useQueries } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { useDiscoverSessionsMutation } from "@/hooks/useSessionQueries";
 import { fetchFsEntries } from "@/lib/api";
 import { useChatStore } from "@/lib/chat-store";
 import { useMachinesStore } from "@/lib/machines-store";
+import { useTeamStore } from "@/lib/team-store";
 import { useUiStore } from "@/lib/ui-store";
 import { cn } from "@/lib/utils";
-import { collectWorkspaces } from "@/lib/workspace-utils";
+import {
+	collectWorkspaces,
+	type WorkspaceSummary,
+	type WorkspaceTeamSummary,
+} from "@/lib/workspace-utils";
 
 type WorkspaceListProps = {
 	machineId: string;
 	onEmptyCreateSession: () => void;
 };
 
+const serializeLeaderWorkspaceProjection = (team: AgentTeamSummary) =>
+	JSON.stringify({
+		machineId: team.machineId,
+		workspaceRootCwd: team.workspaceRootCwd,
+		createdAt: team.createdAt,
+		updatedAt: team.updatedAt,
+	} satisfies WorkspaceTeamSummary);
+
+const serializeWorkspaceSummary = (workspace: WorkspaceSummary) =>
+	JSON.stringify(workspace);
+
+const parseProjection = <T,>(value: string): T => JSON.parse(value) as T;
+
 export function WorkspaceList({
 	machineId,
 	onEmptyCreateSession,
 }: WorkspaceListProps) {
 	const { t } = useTranslation();
-	const { sessions } = useChatStore();
+	const { isProjectionReady, isProjectionUnavailable } = useTeamStore(
+		useShallow((state) => ({
+			isProjectionReady: state.isProjectionReady,
+			isProjectionUnavailable: state.isProjectionUnavailable,
+		})),
+	);
+	const canRenderOrdinaryProjection =
+		isProjectionReady || isProjectionUnavailable;
+	const teamOwnedSessionIdList = useTeamStore(
+		useShallow((state) =>
+			state.isProjectionReady || state.isProjectionUnavailable
+				? Object.values(state.teams)
+						.flatMap((team) =>
+							team.members.flatMap((member) =>
+								member.sessionId ? [member.sessionId] : [],
+							),
+						)
+						.sort()
+				: [],
+		),
+	);
+	const leaderWorkspaceSignatures = useTeamStore(
+		useShallow((state) =>
+			state.isProjectionReady || state.isProjectionUnavailable
+				? Object.values(state.teams)
+						.filter((team) => team.machineId === machineId)
+						.map(serializeLeaderWorkspaceProjection)
+						.sort()
+				: [],
+		),
+	);
+	const teamOwnedSessionIds = useMemo(
+		() => new Set(teamOwnedSessionIdList),
+		[teamOwnedSessionIdList],
+	);
+	const leaderTeams = useMemo(
+		() =>
+			leaderWorkspaceSignatures.map((signature) =>
+				parseProjection<WorkspaceTeamSummary>(signature),
+			),
+		[leaderWorkspaceSignatures],
+	);
+	const workspaceSignatures = useChatStore(
+		useShallow((state) => {
+			if (!canRenderOrdinaryProjection) {
+				return [];
+			}
+			return collectWorkspaces(
+				state.sessions,
+				machineId,
+				leaderTeams,
+				teamOwnedSessionIds,
+			).map(serializeWorkspaceSummary);
+		}),
+	);
+	const workspaceList = useMemo(
+		() =>
+			workspaceSignatures.map((value) =>
+				parseProjection<WorkspaceSummary>(value),
+			),
+		[workspaceSignatures],
+	);
 	const { machines, setSelectedMachineId, updateBackendCapabilities } =
 		useMachinesStore();
 	const { selectedWorkspaceByMachine, setSelectedWorkspace, setSidebarTab } =
 		useUiStore();
 	const discoverSessionsMutation = useDiscoverSessionsMutation();
 
-	const workspaceList = useMemo(
-		() => collectWorkspaces(sessions, machineId),
-		[sessions, machineId],
-	);
-
 	const machine = machines[machineId];
-	const canValidate = Boolean(machine?.connected);
+	const canValidate =
+		canRenderOrdinaryProjection && Boolean(machine?.connected);
 
 	const workspaceValidityQueries = useQueries({
 		queries: canValidate
@@ -116,7 +193,10 @@ export function WorkspaceList({
 		onEmptyCreateSession();
 	};
 
-	if (isValidating && validWorkspaces.length === 0) {
+	if (
+		!canRenderOrdinaryProjection ||
+		(isValidating && validWorkspaces.length === 0)
+	) {
 		return (
 			<div className="text-muted-foreground text-xs p-2">
 				{t("common.loading")}

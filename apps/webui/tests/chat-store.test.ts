@@ -30,6 +30,7 @@ const createMockSessionSummary = (
 	backendLabel: "Claude Code",
 	createdAt: new Date().toISOString(),
 	updatedAt: new Date().toISOString(),
+	machineId: "machine-1",
 	...overrides,
 });
 
@@ -163,9 +164,10 @@ describe("useChatStore", () => {
 	it("removes missing sessions during sync", () => {
 		useChatStore.getState().createLocalSession("session-1", {
 			title: "Old conversation",
+			machineId: "machine-1",
 		});
 
-		useChatStore.getState().syncSessions([]);
+		useChatStore.getState().syncSessions([], ["machine-1"]);
 
 		expect(useChatStore.getState().sessions["session-1"]).toBeUndefined();
 	});
@@ -261,7 +263,7 @@ describe("useChatStore", () => {
 			expect(session.cwd).toBe("/updated/path");
 		});
 
-		it("ignores update for non-existent session", () => {
+		it("upserts an update when the add event was missed", () => {
 			const initialSessionCount = Object.keys(
 				useChatStore.getState().sessions,
 			).length;
@@ -280,10 +282,10 @@ describe("useChatStore", () => {
 			const finalSessionCount = Object.keys(
 				useChatStore.getState().sessions,
 			).length;
-			expect(finalSessionCount).toBe(initialSessionCount);
+			expect(finalSessionCount).toBe(initialSessionCount + 1);
 			expect(
-				useChatStore.getState().sessions["non-existent-session"],
-			).toBeUndefined();
+				useChatStore.getState().sessions["non-existent-session"]?.title,
+			).toBe("Should Not Appear");
 		});
 
 		it("removes sessions listed in removed payload", () => {
@@ -481,7 +483,7 @@ describe("useChatStore", () => {
 				isAttached: true,
 			});
 
-			useChatStore.getState().syncSessions([serverSession]);
+			useChatStore.getState().syncSessions([serverSession], ["machine-1"]);
 
 			const session = useChatStore.getState().sessions["session-1"];
 			expect(session.isAttached).toBe(true);
@@ -501,7 +503,7 @@ describe("useChatStore", () => {
 				// isAttached not set (undefined)
 			});
 
-			useChatStore.getState().syncSessions([serverSession]);
+			useChatStore.getState().syncSessions([serverSession], ["machine-1"]);
 
 			const session = useChatStore.getState().sessions["session-1"];
 			expect(session.isAttached).toBe(false);
@@ -522,7 +524,7 @@ describe("useChatStore", () => {
 				isAttached: true,
 			});
 
-			useChatStore.getState().syncSessions([serverSession]);
+			useChatStore.getState().syncSessions([serverSession], ["machine-1"]);
 
 			const session = useChatStore.getState().sessions["session-1"];
 			expect(session.isAttached).toBe(true);
@@ -537,7 +539,7 @@ describe("useChatStore", () => {
 				machineId: "machine-1",
 			});
 
-			useChatStore.getState().syncSessions([serverSession]);
+			useChatStore.getState().syncSessions([serverSession], ["machine-1"]);
 
 			const session = useChatStore.getState().sessions["new-session"];
 			expect(session).toBeTruthy();
@@ -690,7 +692,7 @@ describe("useChatStore", () => {
 				machineId: "machine-1",
 			});
 
-			useChatStore.getState().syncSessions([serverSession]);
+			useChatStore.getState().syncSessions([serverSession], ["machine-1"]);
 
 			const session = useChatStore.getState().sessions["session-1"];
 			expect(session.title).toBe("Server Title");
@@ -716,7 +718,7 @@ describe("useChatStore", () => {
 				title: "Server Session",
 			});
 
-			useChatStore.getState().syncSessions([serverSession]);
+			useChatStore.getState().syncSessions([serverSession], ["machine-1"]);
 
 			const session = useChatStore.getState().sessions["session-1"];
 			expect(session.isLoading).toBe(true);
@@ -738,7 +740,9 @@ describe("useChatStore", () => {
 				}),
 			];
 
-			useChatStore.getState().syncSessions(serverSessions);
+			useChatStore
+				.getState()
+				.syncSessions(serverSessions, ["machine-1", "machine-2"]);
 
 			const sessions = useChatStore.getState().sessions;
 			expect(sessions["server-session-1"]).toBeTruthy();
@@ -764,7 +768,7 @@ describe("useChatStore", () => {
 				title: "Updated from Server",
 			});
 
-			useChatStore.getState().syncSessions([serverSession]);
+			useChatStore.getState().syncSessions([serverSession], ["machine-1"]);
 
 			const session = useChatStore.getState().sessions["session-1"];
 			expect(session.title).toBe("Updated from Server");

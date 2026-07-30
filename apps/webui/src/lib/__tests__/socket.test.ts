@@ -74,6 +74,24 @@ describe("gatewaySocket", () => {
 		unsubscribe();
 		expect(socketMock.off).toHaveBeenCalledWith("agent-teams:changed", handler);
 	});
+
+	it("registers and unregisters Agent Team refresh-required handler", () => {
+		gatewaySocket.destroy();
+		gatewaySocket.connect();
+		const handler = vi.fn();
+		const unsubscribe = gatewaySocket.onAgentTeamsRefreshRequired(handler);
+
+		expect(socketMock.on).toHaveBeenCalledWith(
+			"agent-teams:refresh-required",
+			handler,
+		);
+
+		unsubscribe();
+		expect(socketMock.off).toHaveBeenCalledWith(
+			"agent-teams:refresh-required",
+			handler,
+		);
+	});
 });
 
 describe("gatewaySocket connect() auth branches", () => {

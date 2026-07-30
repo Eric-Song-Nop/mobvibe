@@ -10,6 +10,11 @@ export type WorkspaceSummary = {
 	updatedAt?: string;
 };
 
+export type WorkspaceTeamSummary = Pick<
+	AgentTeamSummary,
+	"machineId" | "workspaceRootCwd" | "createdAt" | "updatedAt"
+>;
+
 /**
  * Collect unique workspaces from sessions.
  * Groups sessions by `workspaceRootCwd || worktreeSourceCwd || cwd` so that
@@ -19,12 +24,18 @@ export type WorkspaceSummary = {
 export const collectWorkspaces = (
 	sessions: Record<string, ChatSession>,
 	machineId?: string | null,
-	teams: AgentTeamSummary[] = [],
+	teams: readonly WorkspaceTeamSummary[] = [],
+	excludedSessionIds: ReadonlySet<string> = new Set(),
 ): WorkspaceSummary[] => {
 	const byCwd = new Map<string, WorkspaceSummary>();
 
 	for (const session of Object.values(sessions)) {
-		if (!session.machineId || !session.cwd) {
+		if (
+			session.agentTeamOwned ||
+			excludedSessionIds.has(session.sessionId) ||
+			!session.machineId ||
+			!session.cwd
+		) {
 			continue;
 		}
 		if (machineId && session.machineId !== machineId) {

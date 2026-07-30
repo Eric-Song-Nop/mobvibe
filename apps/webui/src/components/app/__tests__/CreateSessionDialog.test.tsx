@@ -33,7 +33,7 @@ const mockUiState = vi.hoisted(() => ({
 }));
 
 const mockMachinesState = vi.hoisted(() => ({
-	selectedMachineId: "machine-1",
+	selectedMachineId: "machine-1" as string | null,
 	machines: {
 		"machine-1": {
 			machineId: "machine-1",
@@ -87,12 +87,14 @@ vi.mock("react-i18next", () => ({
 				"session.createTeamTitle": "Create Agent Team",
 				"session.createDescription": "Choose a backend and set the title.",
 				"session.createTeamDescription":
-					"Set the team target and leader backend.",
+					"Set a goal and workspace. Mobvibe coordinates teammates automatically.",
 				"session.teamTargetLabel": "Target",
 				"session.teamTargetPlaceholder":
 					"Describe what the Agent Team should do",
 				"session.teamTitleLabel": "Team title",
 				"session.targetMachine": `Target: ${options?.name ?? ""}`,
+				"errors.agentTeamWorkspaceContextRequired":
+					"Choose a workspace to create an Agent Team.",
 				"session.titleLabel": "Title",
 				"session.titlePlaceholder": "Optional title",
 				"session.backendLabel": "Backend",
@@ -158,6 +160,7 @@ vi.mock("@/components/app/AgentAuthenticationPanel", () => ({
 		backendId?: string;
 		enabled: boolean;
 		machineId?: string;
+		placementNeutral?: boolean;
 	}) => {
 		mockAgentAuthenticationPanel(props);
 		return null;
@@ -327,6 +330,7 @@ vi.mock("@hugeicons/react", () => ({
 
 describe("CreateSessionDialog", () => {
 	beforeEach(() => {
+		mockMachinesState.selectedMachineId = "machine-1";
 		mockUiState.draftTitle = "Session 1";
 		mockUiState.draftBackendId = "backend-1";
 		mockUiState.draftCwd = "/repo/apps/webui";
@@ -396,7 +400,63 @@ describe("CreateSessionDialog", () => {
 			backendId: "backend-1",
 			enabled: true,
 			machineId: "machine-1",
+			placementNeutral: false,
 		});
+		expect(screen.getByText("Target: dev-box")).toBeInTheDocument();
+		expect(screen.getByTestId("machine-icon")).toBeInTheDocument();
+	});
+
+	it("keeps machine placement internal when creating an Agent Team", () => {
+		mockUiState.createDialogMode = "agent-team";
+
+		render(
+			<CreateSessionDialog
+				open
+				onOpenChange={vi.fn()}
+				availableBackends={[
+					{ backendId: "backend-1", backendLabel: "Backend 1" },
+				]}
+				isCreating={false}
+				onCreate={vi.fn()}
+			/>,
+		);
+
+		expect(screen.getByText("Create Agent Team")).toBeInTheDocument();
+		expect(
+			screen.getByText(
+				"Set a goal and workspace. Mobvibe coordinates teammates automatically.",
+			),
+		).toBeInTheDocument();
+		expect(screen.queryByText("Target: dev-box")).not.toBeInTheDocument();
+		expect(screen.queryByTestId("machine-icon")).not.toBeInTheDocument();
+		expect(mockAgentAuthenticationPanel).toHaveBeenLastCalledWith({
+			backendId: "backend-1",
+			enabled: true,
+			machineId: "machine-1",
+			placementNeutral: true,
+		});
+	});
+
+	it("uses placement-neutral guidance when no leader context is selected", () => {
+		mockUiState.createDialogMode = "agent-team";
+		mockMachinesState.selectedMachineId = null;
+
+		render(
+			<CreateSessionDialog
+				open
+				onOpenChange={vi.fn()}
+				availableBackends={[
+					{ backendId: "backend-1", backendLabel: "Backend 1" },
+				]}
+				isCreating={false}
+				onCreate={vi.fn()}
+			/>,
+		);
+
+		expect(
+			screen.getByText("Choose a workspace to create an Agent Team."),
+		).toBeInTheDocument();
+		expect(screen.queryByText("errors.selectMachine")).not.toBeInTheDocument();
 	});
 
 	it("adds and removes ordered additional directory drafts", () => {

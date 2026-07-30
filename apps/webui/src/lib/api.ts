@@ -6,6 +6,7 @@ export type {
 	AgentAuthMethod,
 	AgentBackendRpcParams,
 	AgentCapabilitiesRpcResult,
+	AgentTeamListResult,
 	AgentTeamSummary,
 	AuthenticateAgentRpcParams,
 	CreateAgentTeamRpcResult,
@@ -19,7 +20,6 @@ export type {
 	GetAgentTeamRpcResult,
 	GitFileStatus,
 	HostFsRootsResponse,
-	ListAgentTeamsRpcResult,
 	MachinesResponse,
 	PermissionDecisionResponse,
 	SessionFsFilePreviewResponse,
@@ -37,6 +37,7 @@ import type {
 	AcpBackendsResponse,
 	AgentBackendRpcParams,
 	AgentCapabilitiesRpcResult,
+	AgentTeamListResult,
 	AuthenticateAgentRpcParams,
 	CancelSessionResponse,
 	ContentBlock,
@@ -52,7 +53,6 @@ import type {
 	GetAgentTeamRpcResult,
 	GitBranchesForCwdResponse,
 	HostFsRootsResponse,
-	ListAgentTeamsRpcResult,
 	MachinesResponse,
 	PermissionDecisionPayload,
 	PermissionDecisionResponse,
@@ -519,8 +519,8 @@ export type CreateAgentTeamPayload = {
 
 export const fetchAgentTeams = async (
 	machineId?: string,
-): Promise<ListAgentTeamsRpcResult> =>
-	requestJson<ListAgentTeamsRpcResult>(buildAgentTeamsPath(machineId));
+): Promise<AgentTeamListResult> =>
+	requestJson<AgentTeamListResult>(buildAgentTeamsPath(machineId));
 
 export const fetchAgentTeam = async (
 	agentTeamId: string,

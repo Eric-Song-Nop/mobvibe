@@ -853,6 +853,136 @@ describe("chat-store", () => {
 	});
 
 	describe("syncSessions (attached revision authority)", () => {
+		it("preserves source-collision IDs while replacing the rest of covered slices", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("collision", {
+				title: "Last good",
+				machineId: "machine-a",
+			});
+			store.createLocalSession("ordinary-stale", {
+				title: "Ordinary stale",
+				machineId: "machine-a",
+			});
+
+			store.syncSessions([], ["machine-a", "machine-b"], ["collision"]);
+
+			expect(useChatStore.getState().sessions.collision?.title).toBe(
+				"Last good",
+			);
+			expect(
+				useChatStore.getState().sessions["ordinary-stale"],
+			).toBeUndefined();
+		});
+
+		it("replaces only covered machine slices", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("covered-stale", {
+				title: "Covered stale",
+				machineId: "machine-1",
+			});
+			store.createLocalSession("offline-session", {
+				title: "Offline retained",
+				machineId: "machine-offline",
+			});
+			store.createLocalSession("shared-id", {
+				title: "Offline collision retained",
+				machineId: "machine-offline",
+			});
+
+			store.syncSessions(
+				[
+					{
+						sessionId: "covered-current",
+						title: "Covered current",
+						backendId: "backend-1",
+						backendLabel: "Backend",
+						createdAt: "2026-07-01T00:00:00.000Z",
+						updatedAt: "2026-07-01T00:00:00.000Z",
+						machineId: "machine-1",
+					},
+					{
+						sessionId: "foreign-payload",
+						title: "Foreign payload ignored",
+						backendId: "backend-1",
+						backendLabel: "Backend",
+						createdAt: "2026-07-01T00:00:00.000Z",
+						updatedAt: "2026-07-01T00:00:00.000Z",
+						machineId: "machine-offline",
+					},
+					{
+						sessionId: "shared-id",
+						title: "Covered collision rejected",
+						backendId: "backend-1",
+						backendLabel: "Backend",
+						createdAt: "2026-07-01T00:00:00.000Z",
+						updatedAt: "2026-07-01T00:00:00.000Z",
+						machineId: "machine-1",
+					},
+				],
+				["machine-1"],
+			);
+
+			const sessions = useChatStore.getState().sessions;
+			expect(sessions["covered-stale"]).toBeUndefined();
+			expect(sessions["covered-current"]?.title).toBe("Covered current");
+			expect(sessions["offline-session"]?.title).toBe("Offline retained");
+			expect(sessions["foreign-payload"]).toBeUndefined();
+			expect(sessions["shared-id"]?.title).toBe("Offline collision retained");
+		});
+
+		it("adopts a machine-less placeholder from its covered authoritative slice", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("placeholder", {
+				title: "Persisted placeholder",
+			});
+
+			store.syncSessions(
+				[
+					{
+						sessionId: "placeholder",
+						title: "Authoritative session",
+						backendId: "backend-1",
+						backendLabel: "Backend",
+						createdAt: "2026-07-01T00:00:00.000Z",
+						updatedAt: "2026-07-01T00:00:00.000Z",
+						machineId: "machine-1",
+					},
+				],
+				["machine-1"],
+			);
+
+			expect(useChatStore.getState().sessions.placeholder).toMatchObject({
+				title: "Authoritative session",
+				machineId: "machine-1",
+			});
+		});
+
+		it("tracks Team ownership as an authoritative session classification", () => {
+			const store = useChatStore.getState();
+			const baseSummary = {
+				sessionId: "remote-worker",
+				title: "Remote worker",
+				backendId: "backend-1",
+				backendLabel: "Backend",
+				createdAt: "2026-07-01T00:00:00.000Z",
+				updatedAt: "2026-07-01T00:00:00.000Z",
+				machineId: "machine-1",
+			};
+
+			store.syncSessions(
+				[{ ...baseSummary, agentTeamOwned: true }],
+				["machine-1"],
+			);
+			expect(
+				useChatStore.getState().sessions["remote-worker"].agentTeamOwned,
+			).toBe(true);
+
+			store.syncSessions([baseSummary], ["machine-1"]);
+			expect(
+				useChatStore.getState().sessions["remote-worker"].agentTeamOwned,
+			).toBeUndefined();
+		});
+
 		it("replaces and clears summary metadata by property presence", () => {
 			const store = useChatStore.getState();
 			store.createLocalSession("s1", {
@@ -914,17 +1044,21 @@ describe("chat-store", () => {
 				],
 			});
 
-			store.syncSessions([
-				{
-					sessionId: "s1",
-					title: "Session",
-					backendId: "backend-1",
-					backendLabel: "Backend",
-					createdAt: "2024-01-01T00:00:00Z",
-					updatedAt: "2024-01-01T00:00:00Z",
-					configOptions: [],
-				},
-			]);
+			store.syncSessions(
+				[
+					{
+						sessionId: "s1",
+						title: "Session",
+						backendId: "backend-1",
+						backendLabel: "Backend",
+						createdAt: "2024-01-01T00:00:00Z",
+						updatedAt: "2024-01-01T00:00:00Z",
+						machineId: "machine-1",
+						configOptions: [],
+					},
+				],
+				["machine-1"],
+			);
 
 			expect(useChatStore.getState().sessions.s1.configOptions).toEqual([]);
 			expect(useChatStore.getState().sessions.s1.modelId).toBeUndefined();
@@ -978,19 +1112,22 @@ describe("chat-store", () => {
 			store.addUserMessage("s1", "stale");
 			store.updateSessionCursor("s1", 1, 5);
 
-			store.syncSessions([
-				{
-					sessionId: "s1",
-					title: "Attached Session",
-					backendId: "backend-1",
-					backendLabel: "Claude",
-					createdAt: "2024-01-01T00:00:00Z",
-					updatedAt: "2024-01-01T00:00:00Z",
-					machineId: "machine-1",
-					revision: 3,
-					isAttached: true,
-				},
-			]);
+			store.syncSessions(
+				[
+					{
+						sessionId: "s1",
+						title: "Attached Session",
+						backendId: "backend-1",
+						backendLabel: "Claude",
+						createdAt: "2024-01-01T00:00:00Z",
+						updatedAt: "2024-01-01T00:00:00Z",
+						machineId: "machine-1",
+						revision: 3,
+						isAttached: true,
+					},
+				],
+				["machine-1"],
+			);
 
 			const session = useChatStore.getState().sessions.s1;
 			expect(session.revision).toBe(3);
@@ -1010,25 +1147,88 @@ describe("chat-store", () => {
 			store.addUserMessage("s1", "keep me");
 			store.updateSessionCursor("s1", 1, 2);
 
-			store.syncSessions([
-				{
-					sessionId: "s1",
-					title: "Detached Session",
-					backendId: "backend-1",
-					backendLabel: "Claude",
-					createdAt: "2024-01-01T00:00:00Z",
-					updatedAt: "2024-01-01T00:00:00Z",
-					machineId: "machine-1",
-					revision: 4,
-					isAttached: false,
-				},
-			]);
+			store.syncSessions(
+				[
+					{
+						sessionId: "s1",
+						title: "Detached Session",
+						backendId: "backend-1",
+						backendLabel: "Claude",
+						createdAt: "2024-01-01T00:00:00Z",
+						updatedAt: "2024-01-01T00:00:00Z",
+						machineId: "machine-1",
+						revision: 4,
+						isAttached: false,
+					},
+				],
+				["machine-1"],
+			);
 
 			const session = useChatStore.getState().sessions.s1;
 			expect(session.revision).toBe(1);
 			expect(session.lastAppliedSeq).toBe(2);
 			expect(session.messages).toHaveLength(1);
 			expect(session.isAttached).toBe(false);
+		});
+
+		it("treats explicit detached summaries as authoritative without resetting history", () => {
+			const store = useChatStore.getState();
+			store.createLocalSession("s1", {
+				title: "Previously attached",
+				backendId: "backend-1",
+				backendLabel: "Claude",
+				machineId: "machine-1",
+			});
+			store.markSessionAttached({
+				sessionId: "s1",
+				machineId: "machine-1",
+				attachedAt: "2024-01-01T00:00:00Z",
+				revision: 1,
+			});
+			store.addUserMessage("s1", "keep me");
+			store.appendAssistantChunk("s1", "finish streaming");
+			store.updateSessionCursor("s1", 1, 7);
+			store.setSending("s1", true);
+			store.setCanceling("s1", true);
+			useChatStore.setState((state) => ({
+				sessions: {
+					...state.sessions,
+					s1: {
+						...state.sessions.s1,
+						detachedAt: "2024-01-02T00:00:00Z",
+						detachedReason: "gateway_disconnect",
+					},
+				},
+			}));
+
+			store.syncSessions(
+				[
+					{
+						sessionId: "s1",
+						title: "Previously attached",
+						backendId: "backend-1",
+						backendLabel: "Claude",
+						createdAt: "2024-01-01T00:00:00Z",
+						updatedAt: "2024-01-03T00:00:00Z",
+						machineId: "machine-1",
+						revision: 4,
+						isAttached: false,
+					},
+				],
+				["machine-1"],
+			);
+
+			const session = useChatStore.getState().sessions.s1;
+			expect(session.isAttached).toBe(false);
+			expect(session.detachedReason).toBe("unknown");
+			expect(session.detachedAt).toBe("2024-01-02T00:00:00Z");
+			expect(session.sending).toBe(false);
+			expect(session.canceling).toBe(false);
+			expect(session.streamingMessageId).toBeUndefined();
+			expect(session.messages).toHaveLength(2);
+			expect(session.messages.at(-1)?.isStreaming).toBe(false);
+			expect(session.revision).toBe(1);
+			expect(session.lastAppliedSeq).toBe(7);
 		});
 	});
 
