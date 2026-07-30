@@ -422,7 +422,7 @@ describe("MailboxService durable delivery", () => {
 		expect(JSON.stringify(refs)).not.toContain("deliveredSessionId");
 	});
 
-	test("member turn completion writes idle notification and wakes leader only when settled", async () => {
+	test("member turn completion is idempotent and wakes leader only when settled", async () => {
 		setMemberState(dbPath, leaderMemberId, {
 			sessionId: "session-leader",
 			lifecycle: "running",
@@ -453,7 +453,10 @@ describe("MailboxService durable delivery", () => {
 			},
 		});
 
-		await runtime.onMemberTurnCompleted(agentTeamId, workerMemberId);
+		await Promise.all([
+			runtime.onMemberTurnCompleted(agentTeamId, workerMemberId),
+			runtime.onMemberTurnCompleted(agentTeamId, workerMemberId),
+		]);
 		expect(readMailboxRows(dbPath)).toHaveLength(1);
 		expect(injected).toHaveLength(0);
 

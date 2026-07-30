@@ -123,7 +123,7 @@ export class TeamRuntime {
 		const member = members.find(
 			(candidate) => candidate.member_id === memberId,
 		);
-		if (!member || member.role === "leader") {
+		if (!member || member.role === "leader" || member.lifecycle !== "running") {
 			return;
 		}
 		const leader = members.find((candidate) => candidate.role === "leader");

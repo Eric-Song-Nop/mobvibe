@@ -1809,6 +1809,7 @@ export class SessionManager {
 			updated: [this.buildSummary(record)],
 			removed: [],
 		});
+		this.handleLeaderLocalTeamTurnCompleted(sessionId);
 	}
 
 	recordTurnEnd(
@@ -1833,13 +1834,7 @@ export class SessionManager {
 			updated: [summary],
 			removed: [],
 		});
-		const teamMember = this.findLeaderLocalTeamMemberBySessionId(sessionId);
-		if (teamMember && teamMember.role !== "leader") {
-			void this.teamRuntime.onMemberTurnCompleted(
-				teamMember.agentTeamId,
-				teamMember.memberId,
-			);
-		}
+		this.handleLeaderLocalTeamTurnCompleted(sessionId);
 	}
 
 	async injectTeamMailboxPrompt(input: {
@@ -3141,6 +3136,40 @@ export class SessionManager {
 			};
 		}
 		return undefined;
+	}
+
+	private handleLeaderLocalTeamTurnCompleted(sessionId: string): void {
+		try {
+			const teamMember = this.findLeaderLocalTeamMemberBySessionId(sessionId);
+			if (!teamMember || teamMember.role === "leader") {
+				return;
+			}
+			void this.teamRuntime
+				.onMemberTurnCompleted(teamMember.agentTeamId, teamMember.memberId)
+				.catch((error) => {
+					logger.warn(
+						{
+							sessionId,
+							agentTeamId: teamMember.agentTeamId,
+							memberId: teamMember.memberId,
+							errorCode:
+								error instanceof AppError
+									? error.detail.code
+									: "INTERNAL_ERROR",
+						},
+						"agent_team_turn_completion_failed",
+					);
+				});
+		} catch (error) {
+			logger.warn(
+				{
+					sessionId,
+					errorCode:
+						error instanceof AppError ? error.detail.code : "INTERNAL_ERROR",
+				},
+				"agent_team_turn_completion_lookup_failed",
+			);
+		}
 	}
 
 	private findTeamSessionBinding(

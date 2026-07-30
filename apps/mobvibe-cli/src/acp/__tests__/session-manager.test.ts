@@ -6670,6 +6670,64 @@ describe("SessionManager", () => {
 	});
 
 	describe("completeMessageSend", () => {
+		const prepareLocalTeamMember = async () => {
+			mockConnection.getSessionCapabilities.mockReturnValue({
+				list: true,
+				load: true,
+				mcp: { acp: true },
+			});
+			let createdCount = 0;
+			mockConnection.createSession.mockImplementation(
+				async (...args: unknown[]) => {
+					createdCount += 1;
+					const params = args[0] as {
+						teamMcpDeclaration?: { serverId?: string };
+						teamMcpHandlers?: {
+							handleConnect(input: { serverId: string }): unknown;
+							handleListTools(input: {
+								serverId: string;
+								toolNames: string[];
+							}): void;
+						};
+					};
+					const serverId = params.teamMcpDeclaration?.serverId;
+					if (params.teamMcpHandlers && serverId) {
+						params.teamMcpHandlers.handleConnect({ serverId });
+						params.teamMcpHandlers.handleListTools({
+							serverId,
+							toolNames: expectedRemoteTeamTools,
+						});
+					}
+					return {
+						sessionId:
+							createdCount === 1
+								? "leader-completion-session"
+								: "member-completion-session",
+						modes: null,
+						configOptions: null,
+					};
+				},
+			);
+			const created = await sessionManager.createAgentTeamRun({
+				machineId: mockConfig.machineId,
+				backendId: "backend-1",
+				workspaceRootCwd: "/home/user/project",
+			});
+			const spawned = await sessionManager.spawnAgentTeamMember({
+				agentTeamId: created.team.agentTeamId,
+				requestedByMemberId: created.team.leaderMemberId,
+				name: "Completion Worker",
+			});
+			if (!spawned.ok) {
+				throw new Error("Expected local Team member spawn to succeed");
+			}
+			return {
+				agentTeamId: created.team.agentTeamId,
+				memberId: spawned.memberId,
+				sessionId: "member-completion-session",
+			};
+		};
+
 		it("commits the result and emits its turn_end as one terminal operation", async () => {
 			const created = await sessionManager.createSession({
 				cwd: "/home/user/project",
@@ -6704,6 +6762,126 @@ describe("SessionManager", () => {
 					kind: "turn_end",
 					payload: { stopReason: "end_turn" },
 				}),
+			);
+		});
+
+		it("completes a local Team member on the production message path exactly once", async () => {
+			const teamMember = await prepareLocalTeamMember();
+			const claim = sessionManager.claimMessageSend(
+				teamMember.sessionId,
+				"message-team-completion",
+			);
+			if (claim.status !== "claimed") {
+				throw new Error("Expected Team message claim");
+			}
+
+			sessionManager.completeMessageSend(
+				teamMember.sessionId,
+				"message-team-completion",
+				claim.claimId,
+				"end_turn",
+			);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			const internals =
+				sessionManager as unknown as SessionManagerTeamInternals;
+			expect(
+				internals.agentTeamStore
+					.getAgentTeam({ agentTeamId: teamMember.agentTeamId })
+					.team?.members.find(
+						(member) => member.memberId === teamMember.memberId,
+					)?.lifecycle,
+			).toBe("completed");
+			expect(mockConnection.prompt).toHaveBeenCalledTimes(1);
+			expect(mockConnection.prompt).toHaveBeenCalledWith(
+				"leader-completion-session",
+				[
+					expect.objectContaining({
+						type: "text",
+						text: expect.stringContaining("Turn completed"),
+					}),
+				],
+			);
+
+			sessionManager.recordTurnEnd(teamMember.sessionId, "end_turn");
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			expect(mockConnection.prompt).toHaveBeenCalledTimes(1);
+		});
+
+		it("does not apply Team completion to an ordinary session", async () => {
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const teamChanged = mock(() => {});
+			sessionManager.onAgentTeamChanged(teamChanged);
+			const claim = sessionManager.claimMessageSend(
+				created.sessionId,
+				"message-ordinary-completion",
+			);
+			if (claim.status !== "claimed") {
+				throw new Error("Expected ordinary message claim");
+			}
+
+			sessionManager.completeMessageSend(
+				created.sessionId,
+				"message-ordinary-completion",
+				claim.claimId,
+				"end_turn",
+			);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			expect(teamChanged).not.toHaveBeenCalled();
+			expect(mockConnection.prompt).not.toHaveBeenCalled();
+		});
+
+		it("keeps a completed prompt durable when Team completion handling fails", async () => {
+			const teamMember = await prepareLocalTeamMember();
+			const internals =
+				sessionManager as unknown as SessionManagerTeamInternals;
+			const completionFailure = mock(
+				(_agentTeamId: string, _memberId: string) =>
+					Promise.reject(new Error("injected Team completion failure")),
+			);
+			internals.teamRuntime.onMemberTurnCompleted = completionFailure;
+			loggerWarnMock.mockClear();
+			const claim = sessionManager.claimMessageSend(
+				teamMember.sessionId,
+				"message-team-completion-failure",
+			);
+			if (claim.status !== "claimed") {
+				throw new Error("Expected Team message claim");
+			}
+
+			expect(() =>
+				sessionManager.completeMessageSend(
+					teamMember.sessionId,
+					"message-team-completion-failure",
+					claim.claimId,
+					"end_turn",
+				),
+			).not.toThrow();
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			expect(completionFailure).toHaveBeenCalledWith(
+				teamMember.agentTeamId,
+				teamMember.memberId,
+			);
+			expect(
+				sessionManager.getMessageSendResult(
+					teamMember.sessionId,
+					"message-team-completion-failure",
+				),
+			).toEqual({ stopReason: "end_turn" });
+			expect(loggerWarnMock).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId: teamMember.sessionId,
+					agentTeamId: teamMember.agentTeamId,
+					memberId: teamMember.memberId,
+					errorCode: "INTERNAL_ERROR",
+				}),
+				"agent_team_turn_completion_failed",
 			);
 		});
 	});
