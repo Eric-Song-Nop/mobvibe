@@ -30,8 +30,13 @@ import { useTranslation } from "react-i18next";
 import { UserMenu } from "@/components/auth/UserMenu";
 import PlanIndicator from "@/components/plan/plan-indicator";
 import { useIsMobile } from "@/hooks/use-mobile";
-import type { PlanEntry } from "@/lib/acp";
+import type { PlanEntry, PlanUpdateContent } from "@/lib/acp";
 import type { ChatSession } from "@/lib/chat-store";
+import {
+	formatReportedTokenCount,
+	formatSessionCost,
+	formatSessionTokenUsage,
+} from "@/lib/session-usage";
 
 export type AppHeaderProps = {
 	backendLabel?: string;
@@ -41,11 +46,14 @@ export type AppHeaderProps = {
 	branchLabel?: string;
 	subdirectoryLabel?: string;
 	contextLeftPercent?: number;
+	sessionUsage?: ChatSession["usage"];
+	reportedTokenUsage?: ChatSession["reportedTokenUsage"];
 	statusMessage?: string;
 	warningMessage?: string;
 	streamError?: ChatSession["streamError"];
 	loadingMessage?: string;
 	plan?: PlanEntry[];
+	plans?: PlanUpdateContent[];
 	onOpenMobileMenu: () => void;
 	onOpenFileExplorer?: () => void;
 	onOpenCommandPalette?: () => void;
@@ -63,6 +71,7 @@ type SessionDetailItem = {
 	key: string;
 	label: string;
 	value: string;
+	numeric?: boolean;
 };
 
 function SessionDetailsContent({ items }: { items: SessionDetailItem[] }) {
@@ -73,7 +82,12 @@ function SessionDetailsContent({ items }: { items: SessionDetailItem[] }) {
 					<dt className="text-muted-foreground text-[11px] font-medium">
 						{item.label}
 					</dt>
-					<dd className="text-sm break-words">{item.value}</dd>
+					<dd
+						className={`text-sm break-words${item.numeric ? " font-mono tabular-nums" : ""}`}
+						translate={item.numeric ? "no" : undefined}
+					>
+						{item.value}
+					</dd>
 				</div>
 			))}
 		</dl>
@@ -88,11 +102,14 @@ export const AppHeader = memo(function AppHeader({
 	branchLabel,
 	subdirectoryLabel,
 	contextLeftPercent,
+	sessionUsage,
+	reportedTokenUsage,
 	statusMessage,
 	warningMessage,
 	streamError,
 	loadingMessage,
 	plan,
+	plans,
 	onOpenMobileMenu,
 	onOpenFileExplorer,
 	onOpenCommandPalette,
@@ -105,13 +122,35 @@ export const AppHeader = memo(function AppHeader({
 	showForceReload = false,
 	forceReloadDisabled = false,
 }: AppHeaderProps) {
-	const { t } = useTranslation();
+	const { t, i18n } = useTranslation();
 	const isMobile = useIsMobile();
 	const [detailsOpen, setDetailsOpen] = useState(false);
 	const summaryLabel = workspaceLabel ?? backendLabel;
 	const hasContextLeftPercent =
 		typeof contextLeftPercent === "number" &&
 		Number.isFinite(contextLeftPercent);
+	const locale = i18n.resolvedLanguage ?? i18n.language;
+	const tokenUsage = formatSessionTokenUsage(sessionUsage, locale);
+	const cumulativeCost = formatSessionCost(sessionUsage?.cost, locale);
+	const reportedTokenSummary = reportedTokenUsage
+		? [
+				formatReportedTokenCount(reportedTokenUsage.totalTokens, locale),
+				formatReportedTokenCount(reportedTokenUsage.inputTokens, locale),
+				formatReportedTokenCount(reportedTokenUsage.outputTokens, locale),
+			].join(" / ")
+		: undefined;
+	const reportedThoughtTokens = formatReportedTokenCount(
+		reportedTokenUsage?.thoughtTokens,
+		locale,
+	);
+	const reportedCacheReadTokens = formatReportedTokenCount(
+		reportedTokenUsage?.cachedReadTokens,
+		locale,
+	);
+	const reportedCacheWriteTokens = formatReportedTokenCount(
+		reportedTokenUsage?.cachedWriteTokens,
+		locale,
+	);
 	const detailItems: SessionDetailItem[] = [
 		backendLabel
 			? {
@@ -153,6 +192,55 @@ export const AppHeader = memo(function AppHeader({
 					key: "contextLeft",
 					label: t("session.context.contextLeftLabel"),
 					value: `${contextLeftPercent}%`,
+					numeric: true,
+				}
+			: null,
+		tokenUsage
+			? {
+					key: "contextTokens",
+					label: t("session.context.contextTokensLabel"),
+					value: tokenUsage,
+					numeric: true,
+				}
+			: null,
+		cumulativeCost
+			? {
+					key: "cumulativeCost",
+					label: t("session.context.cumulativeCostLabel"),
+					value: cumulativeCost,
+					numeric: true,
+				}
+			: null,
+		reportedTokenSummary
+			? {
+					key: "reportedTokenUsage",
+					label: t("session.context.reportedTokenUsageLabel"),
+					value: reportedTokenSummary,
+					numeric: true,
+				}
+			: null,
+		reportedThoughtTokens
+			? {
+					key: "reportedThoughtTokens",
+					label: t("session.context.reportedThoughtTokensLabel"),
+					value: reportedThoughtTokens,
+					numeric: true,
+				}
+			: null,
+		reportedCacheReadTokens
+			? {
+					key: "reportedCacheReadTokens",
+					label: t("session.context.reportedCacheReadTokensLabel"),
+					value: reportedCacheReadTokens,
+					numeric: true,
+				}
+			: null,
+		reportedCacheWriteTokens
+			? {
+					key: "reportedCacheWriteTokens",
+					label: t("session.context.reportedCacheWriteTokensLabel"),
+					value: reportedCacheWriteTokens,
+					numeric: true,
 				}
 			: null,
 	].filter((item): item is SessionDetailItem => item !== null);
@@ -162,7 +250,10 @@ export const AppHeader = memo(function AppHeader({
 			executionMode ||
 			branchLabel ||
 			subdirectoryLabel ||
-			hasContextLeftPercent,
+			hasContextLeftPercent ||
+			tokenUsage ||
+			cumulativeCost ||
+			reportedTokenSummary,
 	);
 	const detailsTitle = t("session.context.details");
 	const detailsTrigger = showDetailsTrigger ? (
@@ -292,7 +383,9 @@ export const AppHeader = memo(function AppHeader({
 							{summaryLabel}
 						</Badge>
 					) : null}
-					{plan && plan.length > 0 ? <PlanIndicator plan={plan} /> : null}
+					{(plan && plan.length > 0) || (plans && plans.length > 0) ? (
+						<PlanIndicator plan={plan} plans={plans} />
+					) : null}
 					<div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
 						{showDetailsTrigger ? (
 							isMobile ? (

@@ -26,6 +26,7 @@ export function SessionWorkspace({ controller }: SessionWorkspaceProps) {
 		handleForceReload,
 		handleModeChange,
 		handleModelChange,
+		handleSessionConfigChange,
 		handleOpenCreateDialog,
 		handlePermissionDecision,
 		handleScrollToMessage,
@@ -33,8 +34,10 @@ export function SessionWorkspace({ controller }: SessionWorkspaceProps) {
 		handleSyncHistory,
 		isModeSwitching,
 		isModelSwitching,
+		pendingConfigId,
 		loadingMessage,
 		plan,
+		plans,
 		selectedMachineId,
 		statusMessage,
 		streamError,
@@ -92,11 +95,14 @@ export function SessionWorkspace({ controller }: SessionWorkspaceProps) {
 				branchLabel={activeSession?.worktreeBranch}
 				subdirectoryLabel={subdirectoryLabel}
 				contextLeftPercent={contextLeftPercent}
+				sessionUsage={activeSession?.usage}
+				reportedTokenUsage={activeSession?.reportedTokenUsage}
 				statusMessage={statusMessage}
 				warningMessage={warningMessage}
 				streamError={streamError}
 				loadingMessage={loadingMessage}
 				plan={plan}
+				plans={plans}
 				onOpenMobileMenu={() => uiActions.setMobileMenuOpen(true)}
 				onOpenFileExplorer={() => uiActions.setFileExplorerOpen(true)}
 				onOpenCommandPalette={() => uiActions.setCommandPaletteOpen(true)}
@@ -128,8 +134,10 @@ export function SessionWorkspace({ controller }: SessionWorkspaceProps) {
 				activeSessionId={activeSessionId}
 				isModeSwitching={isModeSwitching}
 				isModelSwitching={isModelSwitching}
+				pendingConfigId={pendingConfigId}
 				onModeChange={handleModeChange}
 				onModelChange={handleModelChange}
+				onSessionConfigChange={handleSessionConfigChange}
 				onSend={handleSend}
 				onCancel={handleCancel}
 			/>

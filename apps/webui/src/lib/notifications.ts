@@ -9,6 +9,7 @@ import {
 } from "@/lib/api";
 import { isInTauri } from "@/lib/auth";
 import { useNotificationStore } from "@/lib/notification-store";
+import { getToolCallMetaHints } from "@/lib/tool-call-meta";
 
 export type NotificationVariant = ToastVariant;
 
@@ -253,10 +254,9 @@ export const notifyPermissionRequest = (
 	},
 	context?: { sessions?: Record<string, SessionSummary> },
 ) => {
+	const meta = getToolCallMetaHints(payload.toolCall?._meta);
 	const toolLabel =
-		payload.toolCall?.title ??
-		(payload.toolCall?._meta?.name as string | undefined) ??
-		i18n.t("toolCall.toolCall");
+		payload.toolCall?.title ?? meta.name ?? i18n.t("toolCall.toolCall");
 	pushNotification(
 		{
 			title: i18n.t("notifications.permissionRequest"),

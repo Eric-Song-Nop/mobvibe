@@ -1,4 +1,7 @@
-import { resolveWorktreeBranchName } from "@mobvibe/shared";
+import {
+	resolveWorktreeBranchName,
+	type SetSessionConfigOptionParams,
+} from "@mobvibe/shared";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PermissionResultNotification } from "@/lib/acp";
@@ -13,6 +16,7 @@ import {
 	normalizeError,
 } from "@/lib/error-utils";
 import { getBackendCapability, type Machine } from "@/lib/machines-store";
+import { shouldActivateSessionOnSelect } from "@/lib/session-selection";
 import { useUiStore } from "@/lib/ui-store";
 import { buildSessionTitle } from "@/lib/ui-utils";
 
@@ -26,6 +30,7 @@ type Mutations = {
 		mutateAsync: (params: {
 			backendId: string;
 			cwd: string;
+			additionalDirectories?: string[];
 			title?: string;
 			machineId: string;
 			worktree?: {
@@ -59,6 +64,14 @@ type Mutations = {
 	archiveSessionMutation: {
 		mutateAsync: (params: { sessionId: string }) => Promise<unknown>;
 	};
+	closeSessionMutation: {
+		mutateAsync: (params: { sessionId: string }) => Promise<unknown>;
+	};
+	deleteSessionMutation: {
+		mutateAsync: (params: { sessionId: string }) => Promise<unknown>;
+		isPending: boolean;
+		variables?: { sessionId: string };
+	};
 	bulkArchiveSessionsMutation: {
 		mutateAsync: (params: { sessionIds: string[] }) => Promise<unknown>;
 		isPending: boolean;
@@ -77,14 +90,22 @@ type Mutations = {
 		isPending: boolean;
 		variables?: { sessionId: string };
 	};
+	setSessionConfigOptionMutation: {
+		mutate: (params: SetSessionConfigOptionParams) => void;
+		isPending: boolean;
+		variables?: SetSessionConfigOptionParams;
+	};
 	sendMessageMutation: {
 		mutate: (params: {
 			sessionId: string;
 			prompt: ChatSession["inputContents"];
-			messageId?: string;
+			messageId: string;
+			revision: number;
+			encryptionRequired: boolean;
 			draft?: {
 				input: string;
 				inputContents: ChatSession["inputContents"];
+				revision?: number;
 			};
 		}) => void;
 	};
@@ -98,6 +119,7 @@ type Mutations = {
 };
 
 type ChatActions = {
+	setActiveSessionId: (sessionId: string | undefined) => void;
 	setAppError: (error: ChatSession["error"]) => void;
 	renameSession: (sessionId: string, title: string) => void;
 	setError: (sessionId: string, error: ChatSession["error"]) => void;
@@ -120,8 +142,7 @@ type UiActions = {
 	setDraftTitle: (title: string) => void;
 	setDraftBackendId: (id: string | undefined) => void;
 	setDraftCwd: (cwd: string | undefined) => void;
-	setCreateDialogMode: (mode: "session" | "agent-team") => void;
-	setDraftTeamTarget: (target: string) => void;
+	setDraftAdditionalDirectories: (directories: string[]) => void;
 	resetDraftWorktree: () => void;
 	clearEditingSession: () => void;
 };
@@ -173,6 +194,7 @@ export function useSessionHandlers({
 }: UseSessionHandlersParams) {
 	const { t } = useTranslation();
 	const [isForceReloading, setIsForceReloading] = useState(false);
+	const deletingSessionIdRef = useRef<string | null>(null);
 	const activeSessionRef = useRef(activeSession);
 	activeSessionRef.current = activeSession;
 
@@ -229,6 +251,7 @@ export function useSessionHandlers({
 		}
 
 		uiActions.setDraftCwd(initialCwd);
+		uiActions.setDraftAdditionalDirectories([]);
 		uiActions.resetDraftWorktree();
 		uiActions.setMobileMenuOpen(false);
 		uiActions.setCreateDialogOpen(true);
@@ -271,7 +294,7 @@ export function useSessionHandlers({
 			draftTitle,
 			draftBackendId,
 			draftCwd,
-			draftTeamTarget,
+			draftAdditionalDirectories,
 			draftWorktreeEnabled,
 			draftWorktreeBranch,
 			draftWorktreeSuggestedBranch,
@@ -299,14 +322,31 @@ export function useSessionHandlers({
 		const defaultTitle = buildSessionTitle(sessionList, t);
 		const isUserCustomTitle = title.length > 0 && title !== defaultTitle;
 		chatActions.setAppError(undefined);
-		const isAgentTeamMode = createDialogMode === "agent-team";
-		const target = draftTeamTarget.trim();
-		if (isAgentTeamMode && target.length === 0) {
-			chatActions.setAppError(
-				createFallbackError(
-					t("errors.createAgentTeamTargetRequired"),
-					"request",
-				),
+		const additionalDirectories =
+			getBackendCapability(
+				machines[selectedMachineId],
+				draftBackendId,
+				"additionalDirectories",
+			) === true
+				? draftAdditionalDirectories.filter(
+						(directory, index, directories) =>
+							directory !== draftCwd &&
+							directories.indexOf(directory) === index,
+					)
+				: [];
+
+		let worktree:
+			| {
+					branch?: string;
+					baseBranch?: string;
+					sourceCwd: string;
+					relativeCwd?: string;
+			  }
+			| undefined;
+
+		if (draftWorktreeEnabled) {
+			const branch = resolveWorktreeBranchName(
+				draftWorktreeBranch.trim() || draftWorktreeSuggestedBranch,
 			);
 			return;
 		}
@@ -350,6 +390,7 @@ export function useSessionHandlers({
 			await mutations.createSessionMutation.mutateAsync({
 				backendId: draftBackendId,
 				cwd: draftCwd,
+				...(additionalDirectories.length > 0 ? { additionalDirectories } : {}),
 				title: isUserCustomTitle ? title : undefined,
 				machineId: selectedMachineId,
 				worktree,
@@ -387,6 +428,75 @@ export function useSessionHandlers({
 			}
 		},
 		[mutations.archiveSessionMutation],
+	);
+
+	const handleCloseSession = useCallback(
+		async (sessionId: string) => {
+			try {
+				await mutations.closeSessionMutation.mutateAsync({ sessionId });
+			} catch {
+				return;
+			}
+		},
+		[mutations.closeSessionMutation],
+	);
+
+	const handleDeleteSession = useCallback(
+		async (sessionId: string): Promise<boolean> => {
+			if (deletingSessionIdRef.current !== null) {
+				return false;
+			}
+			const session = useChatStore.getState().sessions[sessionId];
+			const machine = session?.machineId
+				? machines[session.machineId]
+				: undefined;
+			if (
+				!session ||
+				getBackendCapability(machine, session.backendId, "delete") !== true
+			) {
+				chatActions.setAppError(
+					createFallbackError(t("errors.sessionDeleteNotSupported"), "session"),
+				);
+				return false;
+			}
+
+			const currentIndex = sessionList.findIndex(
+				(candidate) => candidate.sessionId === sessionId,
+			);
+			const nextSessionId =
+				sessionId === activeSessionId && currentIndex >= 0
+					? (sessionList[currentIndex + 1]?.sessionId ??
+						sessionList[currentIndex - 1]?.sessionId)
+					: undefined;
+
+			deletingSessionIdRef.current = sessionId;
+			try {
+				await mutations.deleteSessionMutation.mutateAsync({ sessionId });
+				if (nextSessionId) {
+					const nextSession = useChatStore.getState().sessions[nextSessionId];
+					if (nextSession) {
+						chatActions.setActiveSessionId(nextSessionId);
+						if (shouldActivateSessionOnSelect(nextSession)) {
+							void activateSession(nextSession);
+						}
+					}
+				}
+				return true;
+			} catch {
+				return false;
+			} finally {
+				deletingSessionIdRef.current = null;
+			}
+		},
+		[
+			activateSession,
+			activeSessionId,
+			chatActions,
+			machines,
+			mutations.deleteSessionMutation,
+			sessionList,
+			t,
+		],
 	);
 
 	const handleBulkArchiveSessions = useCallback(
@@ -456,6 +566,47 @@ export function useSessionHandlers({
 		mutations.setSessionModelMutation.mutate({
 			sessionId: activeSessionId,
 			modelId,
+		});
+	};
+
+	const handleSessionConfigChange = async (
+		configId: string,
+		value: string | boolean,
+	) => {
+		if (!activeSessionId || !activeSessionRef.current) {
+			return;
+		}
+		const readySession = await ensureSessionAttached();
+		if (!readySession) {
+			return;
+		}
+		const option = readySession.configOptions?.find(
+			(configOption) => configOption.id === configId,
+		);
+		if (!option || option.currentValue === value) {
+			return;
+		}
+		if (option.type === "boolean") {
+			if (typeof value !== "boolean") {
+				return;
+			}
+			chatActions.setError(activeSessionId, undefined);
+			mutations.setSessionConfigOptionMutation.mutate({
+				sessionId: activeSessionId,
+				configId,
+				type: "boolean",
+				value,
+			});
+			return;
+		}
+		if (typeof value !== "string") {
+			return;
+		}
+		chatActions.setError(activeSessionId, undefined);
+		mutations.setSessionConfigOptionMutation.mutate({
+			sessionId: activeSessionId,
+			configId,
+			value,
 		});
 	};
 
@@ -549,8 +700,16 @@ export function useSessionHandlers({
 			chatActions.setError(activeSessionId, buildSessionE2EEKeyMissingError());
 			return;
 		}
+		if (readySession.revision === undefined) {
+			chatActions.setError(activeSessionId, buildSessionNotReadyError());
+			return;
+		}
 
-		const messageId = crypto.randomUUID();
+		const messageId =
+			latestDraft?.messageId !== undefined &&
+			latestDraft.messageRevision !== undefined
+				? latestDraft.messageId
+				: crypto.randomUUID();
 
 		chatActions.setSending(activeSessionId, true);
 		chatActions.setCanceling(activeSessionId, false);
@@ -566,9 +725,12 @@ export function useSessionHandlers({
 			sessionId: activeSessionId,
 			prompt: latestPromptContents,
 			messageId,
+			revision: readySession.revision,
+			encryptionRequired: readySession.e2eeStatus === "ok",
 			draft: {
 				input: latestPromptText,
 				inputContents: latestPromptContents,
+				revision: readySession.revision,
 			},
 		});
 	};
@@ -576,14 +738,20 @@ export function useSessionHandlers({
 	return {
 		isForceReloading,
 		isBulkArchiving: mutations.bulkArchiveSessionsMutation.isPending,
+		deletingSessionId: mutations.deleteSessionMutation.isPending
+			? mutations.deleteSessionMutation.variables?.sessionId
+			: undefined,
 		handleOpenCreateDialog,
 		handleCreateSession,
 		handleRenameSubmit,
 		handleArchiveSession,
+		handleCloseSession,
+		handleDeleteSession,
 		handleBulkArchiveSessions,
 		handlePermissionDecision,
 		handleModeChange,
 		handleModelChange,
+		handleSessionConfigChange,
 		handleCancel,
 		handleForceReload,
 		handleSyncHistory,

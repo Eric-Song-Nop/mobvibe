@@ -12,7 +12,11 @@ import { getGatewayConfig, tauriOrigins } from "./config.js";
 import { closeDb } from "./db/index.js";
 import { auth } from "./lib/auth.js";
 import { logger } from "./lib/logger.js";
-import { createFlyReplayMiddleware } from "./middleware/fly-replay.js";
+import {
+	createFlyReplayMiddleware,
+	INSTANCE_ROUTING_ALLOWED_HEADERS,
+	INSTANCE_ROUTING_EXPOSED_HEADERS,
+} from "./middleware/fly-replay.js";
 import { setupAgentTeamRoutes } from "./routes/agent-teams.js";
 import { setupDeviceRoutes } from "./routes/device.js";
 import { setupFsRoutes } from "./routes/fs.js";
@@ -20,13 +24,18 @@ import { setupHealthRoutes } from "./routes/health.js";
 import { setupMachineRoutes } from "./routes/machines.js";
 import { setupNotificationRoutes } from "./routes/notifications.js";
 import { setupSessionRoutes } from "./routes/sessions.js";
+import {
+	createRegisteredAffinityServices,
+	shutdownAffinityServices,
+} from "./services/affinity-initialization.js";
+import { renewActiveUserAffinities } from "./services/affinity-renewal.js";
 import { CliRegistry } from "./services/cli-registry.js";
-import { InstanceRegistry } from "./services/instance-registry.js";
+import type { InstanceRegistry } from "./services/instance-registry.js";
 import { NotificationService } from "./services/notification-service.js";
 import { closeRedis, initRedis } from "./services/redis.js";
 import { SessionRouter } from "./services/session-router.js";
 import { TeamRouter } from "./services/team-router.js";
-import { UserAffinityManager } from "./services/user-affinity.js";
+import type { UserAffinityManager } from "./services/user-affinity.js";
 import { setupCliHandlers } from "./socket/cli-handlers.js";
 import { setupWebuiHandlers } from "./socket/webui-handlers.js";
 
@@ -76,18 +85,14 @@ async function initAffinity() {
 	const redis = await initRedis(config.redisUrl);
 	if (!redis) return;
 
-	instanceRegistry = new InstanceRegistry(
+	const affinityServices = await createRegisteredAffinityServices(
 		redis,
 		config.instanceId,
 		config.flyRegion,
 	);
-	userAffinity = new UserAffinityManager(
-		redis,
-		config.instanceId,
-		config.flyRegion,
-	);
+	instanceRegistry = affinityServices.instanceRegistry;
+	userAffinity = affinityServices.userAffinity;
 
-	await instanceRegistry.register();
 	instanceRegistry.startHeartbeatLoop(() => {
 		// Count unique user IDs across CLI and WebUI
 		const cliUserIds = new Set(cliRegistry.getConnectedUserIds());
@@ -101,13 +106,13 @@ async function initAffinity() {
 
 	// Renew affinity TTLs every 60s
 	affinityRenewTimer = setInterval(() => {
-		const cliUserIds = new Set(cliRegistry.getConnectedUserIds());
-		for (const socket of io.of("/webui").sockets.values()) {
-			const uid = (socket as unknown as { data: { userId?: string } }).data
-				.userId;
-			if (uid) cliUserIds.add(uid);
-		}
-		userAffinity?.renewAll(Array.from(cliUserIds)).catch((err) => {
+		const affinity = userAffinity;
+		if (!affinity) return;
+		void renewActiveUserAffinities(
+			affinity,
+			cliRegistry,
+			io.of("/webui").sockets.values(),
+		).catch((err) => {
 			logger.warn({ err }, "affinity_renew_failed");
 		});
 	}, 60_000);
@@ -130,7 +135,7 @@ const corsConfig = {
 		}
 		callback(null, isAllowedOrigin(origin));
 	},
-	allowedHeaders: ["Content-Type", "Authorization"],
+	allowedHeaders: [...INSTANCE_ROUTING_ALLOWED_HEADERS],
 	methods: ["GET", "POST"],
 	credentials: true,
 };
@@ -209,7 +214,7 @@ const sessionRouter = new SessionRouter(cliRegistry);
 const teamRouter = new TeamRouter(cliRegistry);
 
 // Setup webui handlers first to get the emitter function
-const webuiEmitter = setupWebuiHandlers(io, cliRegistry, userAffinity);
+const webuiEmitter = setupWebuiHandlers(io, cliRegistry, () => userAffinity);
 const notificationService = new NotificationService({
 	config,
 	resolveSessionTitle: (userId, sessionId) =>
@@ -258,25 +263,40 @@ setupCliHandlers(
 				}
 				break;
 			case "permission:request":
-				webuiEmitter.emitPermissionRequest(
-					payload as Parameters<typeof webuiEmitter.emitPermissionRequest>[0],
-				);
+				if (userId) {
+					webuiEmitter.emitPermissionRequest(
+						payload as Parameters<typeof webuiEmitter.emitPermissionRequest>[0],
+						userId,
+					);
+				} else {
+					logger.warn({ event }, "emitToWebui_missing_userId");
+				}
 				break;
 			case "permission:result":
-				webuiEmitter.emitPermissionResult(
-					payload as Parameters<typeof webuiEmitter.emitPermissionResult>[0],
-				);
+				if (userId) {
+					webuiEmitter.emitPermissionResult(
+						payload as Parameters<typeof webuiEmitter.emitPermissionResult>[0],
+						userId,
+					);
+				} else {
+					logger.warn({ event }, "emitToWebui_missing_userId");
+				}
 				break;
 			case "session:event":
-				webuiEmitter.emitSessionEvent(
-					payload as Parameters<typeof webuiEmitter.emitSessionEvent>[0],
-				);
+				if (userId) {
+					webuiEmitter.emitSessionEvent(
+						payload as Parameters<typeof webuiEmitter.emitSessionEvent>[0],
+						userId,
+					);
+				} else {
+					logger.warn({ event }, "emitToWebui_missing_userId");
+				}
 				break;
 			default:
 				logger.warn({ event }, "emitToWebui_unhandled_event");
 		}
 	},
-	userAffinity,
+	() => userAffinity,
 	config,
 	notificationService,
 );
@@ -321,7 +341,8 @@ app.use(
 			}
 			callback(null, isAllowedOrigin(origin));
 		},
-		allowedHeaders: ["Content-Type", "Authorization"],
+		allowedHeaders: [...INSTANCE_ROUTING_ALLOWED_HEADERS],
+		exposedHeaders: [...INSTANCE_ROUTING_EXPOSED_HEADERS],
 		methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
 		credentials: true,
 	}),
@@ -343,6 +364,16 @@ setupHealthRoutes(healthRouter, config, {
 });
 app.use("/", healthRouter);
 
+// Always install replay routing before stateful route handlers; the provider
+// activates it once Redis affinity is initialized and otherwise is a no-op.
+const replayMiddleware = createFlyReplayMiddleware(
+	() => userAffinity,
+	config.instanceId,
+);
+app.use("/api/machines", replayMiddleware);
+app.use("/acp", replayMiddleware);
+app.use("/fs", replayMiddleware);
+
 // Machine routes (for CLI registration)
 const machineRouter = express.Router();
 setupMachineRoutes(machineRouter, cliRegistry);
@@ -356,17 +387,6 @@ app.use("/", deviceRouter);
 const notificationRouter = express.Router();
 setupNotificationRoutes(notificationRouter, notificationService);
 app.use("/api/notifications", notificationRouter);
-
-// Fly-replay middleware for stateful routes (when affinity is enabled)
-if (userAffinity) {
-	const replayMiddleware = createFlyReplayMiddleware(
-		userAffinity,
-		config.instanceId,
-	);
-	app.use("/api/machines", replayMiddleware);
-	app.use("/acp", replayMiddleware);
-	app.use("/fs", replayMiddleware);
-}
 
 // Routes
 const acpRouter = express.Router();
@@ -404,9 +424,8 @@ const shutdown = async (signal: string) => {
 		if (affinityRenewTimer) {
 			clearInterval(affinityRenewTimer);
 		}
-		if (instanceRegistry) {
-			instanceRegistry.stopHeartbeatLoop();
-			await instanceRegistry.deregister();
+		if (instanceRegistry && userAffinity) {
+			await shutdownAffinityServices({ instanceRegistry, userAffinity });
 		}
 		await closeRedis();
 		await stopServer();

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -23,6 +23,13 @@ vi.mock("react-i18next", () => ({
 				"session.archiveAllTitle": "Archive all sessions",
 				"session.archiveAllDescription": `Archive ${options?.count ?? 0} sessions`,
 				"session.archiveAllConfirm": "Confirm archive all",
+				"session.closeTitle": "Close session",
+				"session.closeDescription": "Close this session and keep history",
+				"session.closeConfirm": "Confirm close",
+				"session.deleteTitle": "Delete Session?",
+				"session.deleteDescription": "Delete Agent and Mobvibe copies",
+				"session.deleteConfirm": "Delete Session",
+				"session.deleting": "Deleting…",
 			};
 			return translations[key] ?? key;
 		},
@@ -80,16 +87,26 @@ vi.mock("@/components/machines/RegisterMachineDialog", () => ({
 vi.mock("@/components/session/SessionSidebar", () => ({
 	SessionSidebar: ({
 		onCreateSession,
+		onCloseSessionRequest,
+		onDeleteSessionRequest,
 		onArchiveSessionRequest,
 		onArchiveAllSessionsRequest,
 	}: {
 		onCreateSession: (mode: "workspace" | "session") => void;
+		onCloseSessionRequest: (sessionId: string) => void;
+		onDeleteSessionRequest: (sessionId: string) => void;
 		onArchiveSessionRequest: (sessionId: string) => void;
 		onArchiveAllSessionsRequest: (sessionIds: string[]) => void;
 	}) => (
 		<div>
 			<button type="button" onClick={() => onCreateSession("session")}>
 				New Session
+			</button>
+			<button type="button" onClick={() => onCloseSessionRequest("session-1")}>
+				Close One
+			</button>
+			<button type="button" onClick={() => onDeleteSessionRequest("session-1")}>
+				Delete One
 			</button>
 			<button
 				type="button"
@@ -134,16 +151,29 @@ vi.mock("@mobvibe/ui/alert-dialog", () => ({
 	AlertDialogAction: ({
 		children,
 		onClick,
+		disabled,
 	}: {
 		children: ReactNode;
 		onClick?: () => void;
+		disabled?: boolean;
+		variant?: string;
 	}) => (
-		<button type="button" onClick={onClick}>
+		<button type="button" disabled={disabled} onClick={onClick}>
 			{children}
 		</button>
 	),
-	AlertDialogCancel: ({ children }: { children: ReactNode }) => (
-		<button type="button">{children}</button>
+	AlertDialogCancel: ({
+		children,
+		onClick,
+		disabled,
+	}: {
+		children: ReactNode;
+		onClick?: () => void;
+		disabled?: boolean;
+	}) => (
+		<button type="button" disabled={disabled} onClick={onClick}>
+			{children}
+		</button>
 	),
 }));
 
@@ -176,6 +206,10 @@ const renderSidebar = (
 				onCreateSession={props?.onCreateSession ?? vi.fn()}
 				onSelectSession={props?.onSelectSession ?? vi.fn()}
 				onEditSubmit={props?.onEditSubmit ?? vi.fn()}
+				onCloseSession={props?.onCloseSession ?? vi.fn()}
+				onDeleteSession={
+					props?.onDeleteSession ?? vi.fn().mockResolvedValue(true)
+				}
 				onArchiveSession={props?.onArchiveSession ?? vi.fn()}
 				onArchiveAllSessions={props?.onArchiveAllSessions ?? vi.fn()}
 				isBulkArchiving={props?.isBulkArchiving ?? false}
@@ -248,5 +282,79 @@ describe("AppSidebar mobile modal flow", () => {
 		await user.click(screen.getByRole("button", { name: "Confirm archive" }));
 
 		expect(onArchiveSession).toHaveBeenCalledWith("session-1");
+	});
+
+	it("keeps close confirmation open and calls the distinct close action", async () => {
+		const onCloseSession = vi.fn();
+		const onArchiveSession = vi.fn();
+		const user = userEvent.setup();
+		renderSidebar({ onCloseSession, onArchiveSession });
+
+		await user.click(screen.getAllByText("Close One")[0]!);
+
+		expect(useUiStore.getState().mobileMenuOpen).toBe(false);
+		expect(
+			screen.getByText("Close this session and keep history"),
+		).toBeVisible();
+
+		await user.click(screen.getByRole("button", { name: "Confirm close" }));
+
+		expect(onCloseSession).toHaveBeenCalledWith("session-1");
+		expect(onArchiveSession).not.toHaveBeenCalled();
+	});
+
+	it("uses a separate delete confirmation and honors cancel", async () => {
+		const onDeleteSession = vi.fn().mockResolvedValue(true);
+		const user = userEvent.setup();
+		renderSidebar({ onDeleteSession });
+
+		await user.click(screen.getAllByText("Delete One")[0]!);
+
+		expect(screen.getByText("Delete Agent and Mobvibe copies")).toBeVisible();
+		await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+		expect(onDeleteSession).not.toHaveBeenCalled();
+		expect(
+			screen.queryByText("Delete Agent and Mobvibe copies"),
+		).not.toBeInTheDocument();
+	});
+
+	it("confirms delete through its distinct handler", async () => {
+		const onDeleteSession = vi.fn().mockResolvedValue(true);
+		const onArchiveSession = vi.fn();
+		const user = userEvent.setup();
+		renderSidebar({ onDeleteSession, onArchiveSession });
+
+		await user.click(screen.getAllByText("Delete One")[0]!);
+		await user.click(screen.getByRole("button", { name: "Delete Session" }));
+
+		expect(onDeleteSession).toHaveBeenCalledTimes(1);
+		expect(onDeleteSession).toHaveBeenCalledWith("session-1");
+		expect(onArchiveSession).not.toHaveBeenCalled();
+	});
+
+	it("disables duplicate delete confirmation while the request is pending", async () => {
+		let resolveDelete: ((deleted: boolean) => void) | undefined;
+		const onDeleteSession = vi.fn(
+			() =>
+				new Promise<boolean>((resolve) => {
+					resolveDelete = resolve;
+				}),
+		);
+		const user = userEvent.setup();
+		renderSidebar({ onDeleteSession });
+
+		await user.click(screen.getAllByText("Delete One")[0]!);
+		await user.click(screen.getByRole("button", { name: "Delete Session" }));
+
+		const pendingButton = screen.getByRole("button", { name: "Deleting…" });
+		expect(pendingButton).toBeDisabled();
+		await user.click(pendingButton);
+		expect(onDeleteSession).toHaveBeenCalledTimes(1);
+
+		resolveDelete?.(true);
+		await waitFor(() => {
+			expect(screen.queryByText("Delete Agent and Mobvibe copies")).toBeNull();
+		});
 	});
 });

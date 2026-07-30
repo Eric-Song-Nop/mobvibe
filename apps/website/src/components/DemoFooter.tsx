@@ -1,4 +1,9 @@
-import { Button } from "@mobvibe/ui/button";
+import {
+	InputGroup,
+	InputGroupAddon,
+	InputGroupButton,
+	InputGroupTextarea,
+} from "@mobvibe/ui/input-group";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { GetStartedDialog } from "@/components/GetStartedDialog";
@@ -11,9 +16,12 @@ export function DemoFooter() {
 	return (
 		<footer className="bg-background/90 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shrink-0">
 			<div className="mx-auto w-full max-w-5xl">
-				<div className="relative flex flex-col border border-input focus-within:border-foreground/30">
-					<textarea
-						className="min-h-10 resize-none whitespace-pre-wrap break-words bg-transparent px-2.5 py-2 text-xs outline-none placeholder:text-muted-foreground md:min-h-16"
+				<InputGroup className="min-h-10 md:min-h-16">
+					<InputGroupTextarea
+						aria-label={t("footer.composerLabel")}
+						name="demo-message"
+						autoComplete="off"
+						className="min-h-10 whitespace-pre-wrap break-words text-xs md:min-h-16"
 						placeholder={t("footer.placeholder")}
 						value={value}
 						onChange={(e) => setValue(e.target.value)}
@@ -25,15 +33,18 @@ export function DemoFooter() {
 						}}
 						rows={1}
 					/>
-					<div className="flex items-center gap-1 px-2 pb-2">
-						<div className="flex-1" />
+					<InputGroupAddon align="block-end" className="justify-end">
 						<GetStartedDialog open={dialogOpen} onOpenChange={setDialogOpen}>
-							<Button size="icon-sm">
+							<InputGroupButton
+								size="icon-sm"
+								variant="default"
+								aria-label={t("footer.go")}
+							>
 								<span className="text-xs">{t("footer.go")}</span>
-							</Button>
+							</InputGroupButton>
 						</GetStartedDialog>
-					</div>
-				</div>
+					</InputGroupAddon>
+				</InputGroup>
 			</div>
 		</footer>
 	);

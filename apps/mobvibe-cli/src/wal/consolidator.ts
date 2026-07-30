@@ -15,7 +15,7 @@ export function isStubPayload(payload: unknown): boolean {
  *
  * Rules:
  * 1. Filter out legacy `{_c:true}` stubs (backward compat).
- * 2. Merge consecutive same-kind `agent_message_chunk` / `agent_thought_chunk` → one event.
+ * 2. Merge consecutive text chunks of the same kind and ACP message boundary.
  * 3. Merge `tool_call` + consecutive same-toolCallId `tool_call_update` that reach terminal status → one `tool_call`.
  * 4. Merge consecutive same-terminalId `terminal_output` → one event.
  * 5. Consecutive `usage_update` → keep only the last.
@@ -37,7 +37,7 @@ export function consolidateEventsForRead(events: WalEvent[]): WalEvent[] {
 		switch (event.kind) {
 			case "agent_message_chunk":
 			case "agent_thought_chunk": {
-				const group = collectConsecutive(filtered, i, event.kind);
+				const group = collectConsecutiveTextChunks(filtered, i, event.kind);
 				result.push(mergeChunks(group));
 				i += group.length;
 				break;
@@ -74,6 +74,36 @@ export function consolidateEventsForRead(events: WalEvent[]): WalEvent[] {
 	}
 
 	return result;
+}
+
+/**
+ * Collect text chunks that belong to the same ACP message. Agents that omit
+ * messageId retain the legacy consecutive-chunk behavior. Non-text content is
+ * always a boundary so read-time consolidation never replaces it with text.
+ */
+function collectConsecutiveTextChunks(
+	events: WalEvent[],
+	startIdx: number,
+	kind: "agent_message_chunk" | "agent_thought_chunk",
+): WalEvent[] {
+	const anchor = events[startIdx];
+	if (!isTextChunk(anchor)) {
+		return [anchor];
+	}
+	const protocolMessageId = extractProtocolMessageId(anchor);
+	const group: WalEvent[] = [anchor];
+	for (let i = startIdx + 1; i < events.length; i++) {
+		const event = events[i];
+		if (
+			event.kind !== kind ||
+			!isTextChunk(event) ||
+			extractProtocolMessageId(event) !== protocolMessageId
+		) {
+			break;
+		}
+		group.push(event);
+	}
+	return group;
 }
 
 // ========== Private Helpers ==========
@@ -279,6 +309,20 @@ function extractToolCallId(event: WalEvent): string | undefined {
 	const notification = event.payload as SessionNotification;
 	const update = notification?.update as { toolCallId?: string } | undefined;
 	return update?.toolCallId;
+}
+
+function isTextChunk(event: WalEvent): boolean {
+	const notification = event.payload as SessionNotification;
+	const update = notification?.update as
+		| { content?: { type?: string } }
+		| undefined;
+	return update?.content?.type === "text";
+}
+
+function extractProtocolMessageId(event: WalEvent): string | undefined {
+	const notification = event.payload as SessionNotification;
+	const update = notification?.update as { messageId?: unknown } | undefined;
+	return typeof update?.messageId === "string" ? update.messageId : undefined;
 }
 
 function extractToolCallStatus(event: WalEvent): string | undefined {

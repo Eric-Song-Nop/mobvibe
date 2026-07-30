@@ -9,7 +9,7 @@ import type { Server, Socket } from "socket.io";
 import { auth } from "../lib/auth.js";
 import { logger } from "../lib/logger.js";
 import type { CliRegistry } from "../services/cli-registry.js";
-import type { UserAffinityManager } from "../services/user-affinity.js";
+import type { UserAffinityProvider } from "../services/user-affinity.js";
 
 /**
  * Extended Socket with user context.
@@ -24,7 +24,7 @@ interface AuthenticatedSocket extends Socket {
 export function setupWebuiHandlers(
 	io: Server,
 	cliRegistry: CliRegistry,
-	userAffinity: UserAffinityManager | null = null,
+	getUserAffinity: UserAffinityProvider = () => null,
 ) {
 	const webuiNamespace = io.of("/webui");
 
@@ -36,17 +36,29 @@ export function setupWebuiHandlers(
 	>();
 	// socketId -> userId (for quick lookup)
 	const socketUserMap = new Map<string, string | undefined>();
+	const removeSessionSubscription = (sessionId: string, socketId: string) => {
+		const subscribers = sessionSubscriptions.get(sessionId);
+		if (!subscribers) return;
+		subscribers.delete(socketId);
+		if (subscribers.size === 0) {
+			sessionSubscriptions.delete(sessionId);
+		}
+	};
 
 	const emitToSubscribers = (
 		sessionId: string,
 		event: string,
 		payload: unknown,
+		userId: string,
 	) => {
 		const subscribers = sessionSubscriptions.get(sessionId);
 		if (!subscribers) {
 			return;
 		}
-		for (const socketId of subscribers.keys()) {
+		for (const [socketId, subscriberUserId] of subscribers) {
+			if (subscriberUserId !== userId) {
+				continue;
+			}
 			const socket = webuiNamespace.sockets.get(socketId) as
 				| AuthenticatedSocket
 				| undefined;
@@ -116,6 +128,30 @@ export function setupWebuiHandlers(
 				next(new Error("AUTH_REQUIRED"));
 				return;
 			}
+
+			const userAffinity = getUserAffinity();
+			if (userAffinity) {
+				const claimed = await userAffinity.claimUser(session.user.id);
+				if (!claimed) {
+					const target = await userAffinity.getUserInstance(session.user.id);
+					logger.info(
+						{
+							userId: session.user.id,
+							targetInstance: target?.instanceId,
+						},
+						"webui_affinity_wrong_instance",
+					);
+					next(
+						new Error(
+							target?.instanceId
+								? `WRONG_INSTANCE:${target.instanceId}`
+								: "AFFINITY_UNAVAILABLE",
+						),
+					);
+					return;
+				}
+			}
+
 			socket.data.userId = session.user.id;
 			socket.data.userEmail = session.user.email;
 			next();
@@ -136,6 +172,7 @@ export function setupWebuiHandlers(
 		socketUserMap.set(socket.id, userId);
 
 		// Claim user affinity for this instance
+		const userAffinity = getUserAffinity();
 		if (userAffinity) {
 			userAffinity.claimUser(userId).catch((err) => {
 				logger.warn({ err, userId }, "webui_claim_user_failed");
@@ -188,41 +225,28 @@ export function setupWebuiHandlers(
 		// Unsubscribe from session updates
 		socket.on("unsubscribe:session", (payload: { sessionId: string }) => {
 			const { sessionId } = payload;
-			sessionSubscriptions.get(sessionId)?.delete(socket.id);
+			removeSessionSubscription(sessionId, socket.id);
 			logger.info({ socketId: socket.id, sessionId }, "webui_unsubscribed");
 		});
 
 		// Disconnect
 		socket.on("disconnect", () => {
 			// Remove from all subscriptions
-			for (const subscribers of sessionSubscriptions.values()) {
-				subscribers.delete(socket.id);
+			for (const sessionId of sessionSubscriptions.keys()) {
+				removeSessionSubscription(sessionId, socket.id);
 			}
 			socketUserMap.delete(socket.id);
 			logger.info({ socketId: socket.id }, "webui_disconnected");
 
-			// Release user affinity if no more connections for this user
-			if (userAffinity && userId) {
-				const hasCliConnections = cliRegistry.getClisForUser(userId).length > 0;
-				const hasOtherWebuiConnections = Array.from(
-					webuiNamespace.sockets.values(),
-				).some(
-					(s) =>
-						s.id !== socket.id &&
-						(s as AuthenticatedSocket).data.userId === userId,
-				);
-				if (!hasCliConnections && !hasOtherWebuiConnections) {
-					userAffinity.releaseUser(userId).catch((err) => {
-						logger.warn({ err, userId }, "webui_release_user_failed");
-					});
-				}
-			}
+			// Affinity is TTL-based rather than eagerly released. Otherwise an old
+			// disconnect can race a reconnect on this instance and delete its lease.
 		});
 	});
 
 	// Return emitter functions for CLI handlers to use
 	return {
 		emitToUser,
+		getTrackedSessionCount: () => sessionSubscriptions.size,
 		hasUserConnections: (userId: string) =>
 			Array.from(webuiNamespace.sockets.values()).some(
 				(socket) => (socket as AuthenticatedSocket).data.userId === userId,
@@ -239,14 +263,30 @@ export function setupWebuiHandlers(
 				(subscriberUserId) => subscriberUserId === userId,
 			);
 		},
-		emitSessionEvent: (event: SessionEvent) => {
-			emitToSubscribers(event.sessionId, "session:event", event);
+		emitSessionEvent: (event: SessionEvent, userId: string) => {
+			emitToSubscribers(event.sessionId, "session:event", event, userId);
 		},
-		emitPermissionRequest: (payload: PermissionRequestPayload) => {
-			emitToSubscribers(payload.sessionId, "permission:request", payload);
+		emitPermissionRequest: (
+			payload: PermissionRequestPayload,
+			userId: string,
+		) => {
+			emitToSubscribers(
+				payload.sessionId,
+				"permission:request",
+				payload,
+				userId,
+			);
 		},
-		emitPermissionResult: (payload: PermissionDecisionPayload) => {
-			emitToSubscribers(payload.sessionId, "permission:result", payload);
+		emitPermissionResult: (
+			payload: PermissionDecisionPayload,
+			userId: string,
+		) => {
+			emitToSubscribers(
+				payload.sessionId,
+				"permission:result",
+				payload,
+				userId,
+			);
 		},
 	};
 }

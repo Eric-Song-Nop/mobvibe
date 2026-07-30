@@ -2,6 +2,9 @@ packages:
   - apps/*
   - packages/*
 
+overrides:
+  "@types/react": ~19.0.10
+
 onlyBuiltDependencies:
   - esbuild
   - msw

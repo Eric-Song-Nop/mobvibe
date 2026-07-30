@@ -1,5 +1,7 @@
+import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { CliConfig } from "../../config.js";
+import type { WalCompactor, WalStore } from "../../wal/index.js";
 import { DaemonManager } from "../daemon.js";
 
 const createConfig = (): CliConfig => ({
@@ -113,6 +115,70 @@ class RuntimeHarness extends DaemonManager {
 	}
 }
 
+class ShutdownHarness extends DaemonManager {
+	writePidFileMock = mock((_pid: number) => Promise.resolve());
+	removePidFileMock = mock(() => Promise.resolve());
+	fakeCryptoService = createFakeCryptoService();
+	fakeSessionManager = {
+		shutdown: mock(() => Promise.resolve()),
+	};
+	fakeSocketClient = {
+		connect: mock(() => {}),
+		disconnect: mock(() => {}),
+	};
+
+	override async writePidFile(pid: number): Promise<void> {
+		await this.writePidFileMock(pid);
+	}
+
+	override async removePidFile(): Promise<void> {
+		await this.removePidFileMock();
+	}
+
+	protected override async createRuntimeCryptoService() {
+		return this.fakeCryptoService as never;
+	}
+
+	protected override createSessionManager(_cryptoService: unknown) {
+		return this.fakeSessionManager as never;
+	}
+
+	protected override createSocketClient(
+		_sessionManager: unknown,
+		_cryptoService: unknown,
+	) {
+		return this.fakeSocketClient as never;
+	}
+}
+
+class CompactionShutdownHarness extends ShutdownHarness {
+	private resolveCompaction: () => void = () => {};
+	compactAllMock = mock(
+		() =>
+			new Promise<void>((resolve) => {
+				this.resolveCompaction = resolve;
+			}),
+	);
+
+	finishCompaction(): void {
+		this.resolveCompaction();
+	}
+
+	protected createWalCompactor(
+		_walStore: WalStore,
+		_config: CliConfig["compaction"],
+		_db: Database,
+	): WalCompactor {
+		return { compactAll: this.compactAllMock } as never;
+	}
+}
+
+class BoundedCompactionShutdownHarness extends CompactionShutdownHarness {
+	protected override getCompactionShutdownTimeoutMs(): number {
+		return 10;
+	}
+}
+
 describe("DaemonManager no-e2ee", () => {
 	let startHarness: StartHarness;
 	let runtimeHarness: RuntimeHarness;
@@ -153,5 +219,153 @@ describe("DaemonManager no-e2ee", () => {
 
 		expect(runtimeHarness.runtimeCryptoOptions).toBeUndefined();
 		expect(runtimeHarness.fakeSocketClient.connect).toHaveBeenCalled();
+	});
+});
+
+describe("DaemonManager shutdown", () => {
+	test("bounds the wait for a stuck in-flight compaction", async () => {
+		const config = createConfig();
+		config.walDbPath = `/tmp/mobvibe-test/compaction-timeout-${Date.now()}-${Math.random()
+			.toString(36)
+			.slice(2)}.db`;
+		config.compaction.enabled = true;
+		config.compaction.runOnStartup = true;
+		const harness = new BoundedCompactionShutdownHarness(config);
+		const previousSigterm = new Set(process.listeners("SIGTERM"));
+		const runPromise = harness.runForeground();
+		for (let attempt = 0; attempt < 10; attempt++) {
+			if (
+				process
+					.listeners("SIGTERM")
+					.some((listener) => !previousSigterm.has(listener))
+			) {
+				break;
+			}
+			await Promise.resolve();
+		}
+
+		const sigtermHandler = process
+			.listeners("SIGTERM")
+			.find((listener) => !previousSigterm.has(listener));
+		if (!sigtermHandler) {
+			throw new Error("SIGTERM handler was not registered");
+		}
+		sigtermHandler("SIGTERM");
+
+		try {
+			const completedWithinDeadline = await Promise.race([
+				runPromise.then(() => true),
+				new Promise<false>((resolve) => setTimeout(() => resolve(false), 100)),
+			]);
+			expect(completedWithinDeadline).toBe(true);
+			expect(harness.fakeSocketClient.disconnect).toHaveBeenCalledTimes(1);
+			expect(harness.fakeSessionManager.shutdown).toHaveBeenCalledTimes(1);
+		} finally {
+			harness.finishCompaction();
+			await runPromise;
+			for (const listener of process.listeners("SIGTERM")) {
+				if (!previousSigterm.has(listener)) {
+					process.removeListener("SIGTERM", listener);
+				}
+			}
+		}
+	});
+
+	test("waits for in-flight compaction before closing its databases", async () => {
+		const config = createConfig();
+		config.walDbPath = `/tmp/mobvibe-test/compaction-${Date.now()}-${Math.random()
+			.toString(36)
+			.slice(2)}.db`;
+		config.compaction.enabled = true;
+		config.compaction.runOnStartup = true;
+		const harness = new CompactionShutdownHarness(config);
+		const previousSigterm = new Set(process.listeners("SIGTERM"));
+		const runPromise = harness.runForeground();
+		for (let attempt = 0; attempt < 10; attempt++) {
+			if (
+				process
+					.listeners("SIGTERM")
+					.some((listener) => !previousSigterm.has(listener))
+			) {
+				break;
+			}
+			await Promise.resolve();
+		}
+
+		const sigtermHandler = process
+			.listeners("SIGTERM")
+			.find((listener) => !previousSigterm.has(listener));
+		if (!sigtermHandler) {
+			throw new Error("SIGTERM handler was not registered");
+		}
+		sigtermHandler("SIGTERM");
+
+		try {
+			const completedBeforeCompaction = await Promise.race([
+				runPromise.then(() => true),
+				new Promise<false>((resolve) => setTimeout(() => resolve(false), 25)),
+			]);
+			expect(harness.compactAllMock).toHaveBeenCalledTimes(1);
+			expect(completedBeforeCompaction).toBe(false);
+
+			harness.finishCompaction();
+			await runPromise;
+		} finally {
+			harness.finishCompaction();
+			for (const listener of process.listeners("SIGTERM")) {
+				if (!previousSigterm.has(listener)) {
+					process.removeListener("SIGTERM", listener);
+				}
+			}
+		}
+	});
+
+	test("runForeground resolves after graceful SIGTERM cleanup", async () => {
+		const harness = new ShutdownHarness(createConfig());
+		const previousSigint = new Set(process.listeners("SIGINT"));
+		const previousSigterm = new Set(process.listeners("SIGTERM"));
+		const runPromise = harness.runForeground();
+		for (let attempt = 0; attempt < 10; attempt++) {
+			if (
+				process
+					.listeners("SIGTERM")
+					.some((listener) => !previousSigterm.has(listener))
+			) {
+				break;
+			}
+			await Promise.resolve();
+		}
+
+		const sigtermHandler = process
+			.listeners("SIGTERM")
+			.find((listener) => !previousSigterm.has(listener));
+		if (!sigtermHandler) {
+			throw new Error("SIGTERM handler was not registered");
+		}
+		sigtermHandler("SIGTERM");
+
+		let completed = false;
+		try {
+			completed = await Promise.race([
+				runPromise.then(() => true),
+				new Promise<false>((resolve) => setTimeout(() => resolve(false), 25)),
+			]);
+		} finally {
+			for (const listener of process.listeners("SIGINT")) {
+				if (!previousSigint.has(listener)) {
+					process.removeListener("SIGINT", listener);
+				}
+			}
+			for (const listener of process.listeners("SIGTERM")) {
+				if (!previousSigterm.has(listener)) {
+					process.removeListener("SIGTERM", listener);
+				}
+			}
+		}
+
+		expect(completed).toBe(true);
+		expect(harness.fakeSocketClient.disconnect).toHaveBeenCalledTimes(1);
+		expect(harness.fakeSessionManager.shutdown).toHaveBeenCalledTimes(1);
+		expect(harness.removePidFileMock).toHaveBeenCalledTimes(1);
 	});
 });

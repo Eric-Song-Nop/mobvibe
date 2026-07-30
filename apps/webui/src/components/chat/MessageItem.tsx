@@ -1,13 +1,19 @@
 import { Copy01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Badge } from "@mobvibe/ui/badge";
+import { Bubble, BubbleContent } from "@mobvibe/ui/bubble";
 import { Button } from "@mobvibe/ui/button";
 import { Card, CardContent } from "@mobvibe/ui/card";
+import {
+	Message,
+	MessageAvatar,
+	MessageContent,
+	MessageHeader,
+} from "@mobvibe/ui/message";
 import { memo, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { UnifiedDiffView } from "@/components/chat/DiffView";
 import { LazyStreamdown } from "@/components/chat/LazyStreamdown";
-import i18n from "@/i18n";
 import type {
 	AudioContent,
 	ContentBlock,
@@ -25,6 +31,8 @@ import {
 	useChatStore,
 } from "@/lib/chat-store";
 import { getCodeAccentFillClass } from "@/lib/code-highlight";
+import { getContentBlocksText } from "@/lib/content-block-utils";
+import { getToolCallMetaHints } from "@/lib/tool-call-meta";
 import { cn } from "@/lib/utils";
 
 type PermissionDecisionPayload = {
@@ -111,7 +119,12 @@ const isAbsolutePath = (pathValue: string) => pathValue.startsWith("/");
 
 const resolveFilePathFromUri = (uri: string) => {
 	if (uri.startsWith("file://")) {
-		return decodeURIComponent(uri.slice("file://".length));
+		try {
+			const decodedPath = decodeURIComponent(uri.slice("file://".length));
+			return isAbsolutePath(decodedPath) ? decodedPath : null;
+		} catch {
+			return null;
+		}
 	}
 	if (uri.startsWith("/")) {
 		return uri;
@@ -150,8 +163,47 @@ const formatBytes = (value: number) => {
 	return `${(kb / 1024).toFixed(1)} MB`;
 };
 
-const buildDataUri = (mimeType: string, data: string) =>
-	`data:${mimeType};base64,${data}`;
+const MAX_INLINE_MEDIA_BYTES = 2 * 1024 * 1024;
+const MAX_INLINE_MEDIA_BASE64_CHARS = Math.ceil(MAX_INLINE_MEDIA_BYTES / 3) * 4;
+const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
+const SAFE_IMAGE_MIME_TYPES = new Set([
+	"image/avif",
+	"image/gif",
+	"image/jpeg",
+	"image/png",
+	"image/webp",
+]);
+const SAFE_AUDIO_MIME_TYPES = new Set([
+	"audio/aac",
+	"audio/flac",
+	"audio/mp4",
+	"audio/mpeg",
+	"audio/ogg",
+	"audio/wav",
+	"audio/webm",
+	"audio/x-wav",
+]);
+
+const buildSafeDataUri = (
+	mimeType: string,
+	data: string,
+	allowedMimeTypes: ReadonlySet<string>,
+) => {
+	const normalizedMimeType = mimeType.trim().toLowerCase();
+	const paddingLength = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+	const decodedByteLength = (data.length / 4) * 3 - paddingLength;
+	if (
+		!allowedMimeTypes.has(normalizedMimeType) ||
+		data.length === 0 ||
+		data.length % 4 !== 0 ||
+		data.length > MAX_INLINE_MEDIA_BASE64_CHARS ||
+		!BASE64_PATTERN.test(data) ||
+		decodedByteLength > MAX_INLINE_MEDIA_BYTES
+	) {
+		return undefined;
+	}
+	return `data:${normalizedMimeType};base64,${data}`;
+};
 
 const renderResourceLabel = (
 	label: string,
@@ -163,7 +215,7 @@ const renderResourceLabel = (
 		return (
 			<button
 				type="button"
-				className="text-xs text-primary hover:underline"
+				className="break-all text-left text-xs text-primary hover:underline"
 				onClick={(event) => {
 					event.preventDefault();
 					onOpenFilePreview(filePath);
@@ -179,13 +231,13 @@ const renderResourceLabel = (
 				href={uri}
 				target="_blank"
 				rel="noreferrer"
-				className="text-xs text-primary hover:underline"
+				className="break-all text-xs text-primary hover:underline"
 			>
 				{label}
 			</a>
 		);
 	}
-	return <span className="text-xs text-foreground">{label}</span>;
+	return <span className="break-all text-xs text-foreground">{label}</span>;
 };
 
 const renderTextContent = (text: string, key: string) => (
@@ -213,14 +265,12 @@ const renderImageContent = (
 	onOpenFilePreview?: (path: string) => void,
 ) => {
 	const label = resolveResourceLabel(content.uri ?? getLabel("toolCall.image"));
-	const source = content.data
-		? buildDataUri(content.mimeType, content.data)
-		: (content.uri ?? undefined);
-	const canPreviewInline =
-		source !== undefined &&
-		(source.startsWith("data:") ||
-			source.startsWith("http://") ||
-			source.startsWith("https://"));
+	const source = buildSafeDataUri(
+		content.mimeType,
+		content.data,
+		SAFE_IMAGE_MIME_TYPES,
+	);
+	const canPreviewInline = source !== undefined;
 	return (
 		<div
 			key={key}
@@ -239,8 +289,10 @@ const renderImageContent = (
 				<img
 					src={source}
 					alt={label}
+					width={640}
+					height={360}
 					loading="lazy"
-					className="mt-2 max-h-48 rounded border border-border"
+					className="mt-2 h-auto max-h-48 max-w-full rounded border border-border"
 				/>
 			) : (
 				<div className="mt-2 text-[11px] text-muted-foreground">
@@ -256,7 +308,11 @@ const renderAudioContent = (
 	key: string,
 	getLabel: (key: string, options?: Record<string, unknown>) => string,
 ) => {
-	const source = buildDataUri(content.mimeType, content.data);
+	const source = buildSafeDataUri(
+		content.mimeType,
+		content.data,
+		SAFE_AUDIO_MIME_TYPES,
+	);
 	return (
 		<div
 			key={key}
@@ -266,10 +322,16 @@ const renderAudioContent = (
 				<span>{getLabel("toolCall.audio")}</span>
 				<span>{content.mimeType}</span>
 			</div>
-			<audio controls className="mt-2 w-full">
-				<source src={source} type={content.mimeType} />
-				<track kind="captions" />
-			</audio>
+			{source ? (
+				<audio controls className="mt-2 w-full">
+					<source src={source} type={content.mimeType} />
+					<track kind="captions" />
+				</audio>
+			) : (
+				<div className="mt-2 text-[11px] text-muted-foreground">
+					{getLabel("toolCall.imagePreviewUnavailable")}
+				</div>
+			)}
 		</div>
 	);
 };
@@ -350,65 +412,9 @@ const renderResourceLink = (
 const extractUserMessageText = (
 	message: Extract<ChatMessage, { kind: "text" }>,
 ): string => {
-	const blocks = message.contentBlocks;
+	const blocks = message.contentBlocks ?? [];
 	if (blocks.length === 0) return message.content;
-	return blocks
-		.filter(
-			(b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text",
-		)
-		.map((b) => b.text)
-		.join("\n");
-};
-
-const renderUserContent = (
-	message: Extract<ChatMessage, { kind: "text" }>,
-	onOpenFilePreview?: (path: string) => void,
-) => {
-	const contentBlocks = message.contentBlocks ?? [];
-	if (contentBlocks.length === 0) {
-		return <LazyStreamdown>{message.content}</LazyStreamdown>;
-	}
-	const parts = contentBlocks.map((block, index) => {
-		if (block.type === "text") {
-			return (
-				<LazyStreamdown key={`text-${index}`}>{block.text}</LazyStreamdown>
-			);
-		}
-		if (block.type === "image") {
-			return renderImageContent(
-				block,
-				`image-${index}`,
-				(key, options) => i18n.t(key, options),
-				onOpenFilePreview,
-			);
-		}
-		if (block.type === "resource_link") {
-			const label = `@${block.name}`;
-			const filePath = resolveFilePathFromUri(block.uri);
-			if (filePath && onOpenFilePreview) {
-				return (
-					<button
-						key={`resource-${index}`}
-						type="button"
-						className="text-primary hover:underline"
-						onClick={(event) => {
-							event.preventDefault();
-							onOpenFilePreview(filePath);
-						}}
-					>
-						{label}
-					</button>
-				);
-			}
-			return (
-				<span key={`resource-${index}`} className="text-foreground">
-					{label}
-				</span>
-			);
-		}
-		return null;
-	});
-	return <div className="flex flex-col gap-2">{parts}</div>;
+	return getContentBlocksText(blocks);
 };
 
 const renderContentBlock = (
@@ -431,6 +437,38 @@ const renderContentBlock = (
 		default:
 			return renderUnknownContent(content, key);
 	}
+};
+
+const renderMessageContentBlocks = (
+	contentBlocks: readonly ContentBlock[] | undefined,
+	fallbackContent: string,
+	getLabel: (key: string, options?: Record<string, unknown>) => string,
+	onOpenFilePreview?: (path: string) => void,
+) => {
+	const blocks =
+		contentBlocks && contentBlocks.length > 0
+			? contentBlocks
+			: fallbackContent
+				? [{ type: "text" as const, text: fallbackContent }]
+				: [];
+	return (
+		<div className="flex min-w-0 flex-col gap-2">
+			{blocks.map((block, index) =>
+				block.type === "text" ? (
+					<LazyStreamdown key={`message-text-${index}`}>
+						{block.text}
+					</LazyStreamdown>
+				) : (
+					renderContentBlock(
+						block,
+						`message-${block.type}-${index}`,
+						getLabel,
+						onOpenFilePreview,
+					)
+				),
+			)}
+		</div>
+	);
 };
 
 const isDiffPayload = (
@@ -774,10 +812,16 @@ export const ToolCallItemContent = ({
 
 type ThoughtItemContentProps = {
 	message: Extract<ChatMessage, { kind: "thought" }>;
+	onOpenFilePreview?: (path: string) => void;
 };
 
-export const ThoughtItemContent = ({ message }: ThoughtItemContentProps) => {
+export const ThoughtItemContent = ({
+	message,
+	onOpenFilePreview,
+}: ThoughtItemContentProps) => {
 	const { t } = useTranslation();
+	const getLabel = (key: string, options?: Record<string, unknown>) =>
+		t(key, { defaultValue: key, ...options });
 	return (
 		<div className="flex flex-col gap-1 items-start">
 			<details className="w-full max-w-[85%]">
@@ -788,7 +832,12 @@ export const ThoughtItemContent = ({ message }: ThoughtItemContentProps) => {
 					</span>
 				</summary>
 				<div className="mt-1 ml-3.5 pl-2 border-l border-muted text-xs text-muted-foreground">
-					<LazyStreamdown>{message.content}</LazyStreamdown>
+					{renderMessageContentBlocks(
+						message.contentBlocks,
+						message.content,
+						getLabel,
+						onOpenFilePreview,
+					)}
 				</div>
 			</details>
 		</div>
@@ -869,14 +918,12 @@ const MessageItemInner = ({
 		);
 	}
 	if (message.kind === "permission") {
-		const meta = message.toolCall?._meta;
+		const meta = getToolCallMetaHints(message.toolCall?._meta);
 		const toolLabel =
-			message.toolCall?.title ??
-			(meta?.name as string | undefined) ??
-			getLabel("toolCall.toolCall");
+			message.toolCall?.title ?? meta.name ?? getLabel("toolCall.toolCall");
 		const toolId = message.toolCall?.toolCallId ?? message.requestId;
-		const toolCommand = meta?.command as string | undefined;
-		const toolArgs = (meta?.args as string[] | undefined)?.join(" ");
+		const toolCommand = meta.command;
+		const toolArgs = meta.args?.join(" ");
 		const isDisabled =
 			message.outcome !== undefined || message.decisionState === "submitting";
 		return (
@@ -962,82 +1009,103 @@ const MessageItemInner = ({
 	}
 	// Thought messages: collapsible light block
 	if (message.kind === "thought") {
-		return <ThoughtItemContent message={message} />;
+		return (
+			<ThoughtItemContent
+				message={message}
+				onOpenFilePreview={onOpenFilePreview}
+			/>
+		);
 	}
 	// User messages: bubble style with hover-reveal copy button
 	if (isUser && message.kind === "text") {
 		return (
-			<div className="flex flex-col gap-1 items-end">
-				{isPendingUserMessage || isFailedUserMessage ? (
-					<div
-						className="flex max-w-[85%] items-center gap-2 self-end text-[11px]"
-						aria-live="polite"
-					>
-						<Badge variant={isFailedUserMessage ? "destructive" : "secondary"}>
-							{isFailedUserMessage
-								? t("chat.messageFailed")
-								: t("chat.messagePending")}
-						</Badge>
-						{isFailedUserMessage ? (
-							<span className="text-destructive">
-								{t("chat.messageFailedHint")}
-							</span>
-						) : null}
-					</div>
-				) : null}
-				<div className="group/user-msg flex items-center gap-1.5 max-w-[85%]">
-					{!message.isStreaming && (
-						<button
-							type="button"
-							className="shrink-0 flex items-center justify-center size-6 rounded-full border border-border bg-background text-muted-foreground shadow-sm transition-[opacity,background-color,color] hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 md:opacity-0 group-hover/user-msg:opacity-100 focus-visible:opacity-100"
-							onClick={(e) => {
-								e.stopPropagation();
-								handleCopy();
-							}}
-							aria-label={t("chat.copyMessage")}
+			<Message align="end">
+				<MessageContent className="items-end gap-1">
+					{isPendingUserMessage || isFailedUserMessage ? (
+						<MessageHeader
+							className="justify-end gap-2 px-0"
+							aria-live="polite"
 						>
-							<HugeiconsIcon
-								icon={copied ? Tick02Icon : Copy01Icon}
-								size={14}
-								aria-hidden="true"
-							/>
-						</button>
-					)}
-					<Card
-						size="sm"
-						className={cn(
-							"min-w-0",
-							isFailedUserMessage
-								? "border-destructive/40 bg-destructive/10"
-								: isPendingUserMessage
-									? "border-primary/30 border-dashed bg-primary/5"
-									: "border-primary/30 bg-primary/10",
-							message.isStreaming ? "opacity-90" : "opacity-100",
+							<Badge
+								variant={isFailedUserMessage ? "destructive" : "secondary"}
+							>
+								{isFailedUserMessage
+									? t("chat.messageFailed")
+									: t("chat.messagePending")}
+							</Badge>
+							{isFailedUserMessage ? (
+								<span className="text-destructive">
+									{t("chat.messageFailedHint")}
+								</span>
+							) : null}
+						</MessageHeader>
+					) : null}
+					<div className="group/user-msg flex w-full items-center justify-end gap-1.5">
+						{!message.isStreaming && (
+							<Button
+								type="button"
+								variant="outline"
+								size="icon-xs"
+								className="rounded-full text-muted-foreground md:opacity-0 group-hover/user-msg:opacity-100 focus-visible:opacity-100"
+								onClick={(event) => {
+									event.stopPropagation();
+									handleCopy();
+								}}
+								aria-label={t("chat.copyMessage")}
+								title={t("chat.copyMessage")}
+							>
+								<HugeiconsIcon
+									icon={copied ? Tick02Icon : Copy01Icon}
+									aria-hidden="true"
+								/>
+							</Button>
 						)}
-					>
-						<CardContent className="text-sm">
-							{renderUserContent(message, onOpenFilePreview)}
-						</CardContent>
-					</Card>
-				</div>
-			</div>
+						<Bubble
+							align="end"
+							variant={
+								isFailedUserMessage
+									? "destructive"
+									: isPendingUserMessage
+										? "outline"
+										: "tinted"
+							}
+							className={message.isStreaming ? "opacity-90" : "opacity-100"}
+						>
+							<BubbleContent>
+								{renderMessageContentBlocks(
+									message.contentBlocks,
+									message.content,
+									getLabel,
+									onOpenFilePreview,
+								)}
+							</BubbleContent>
+						</Bubble>
+					</div>
+				</MessageContent>
+			</Message>
 		);
 	}
-	// Assistant messages: no bubble, just bullet point + content
+	// Assistant messages use the ghost bubble so rich markdown stays visually open.
 	return (
-		<div className="flex flex-col gap-1 items-start">
-			<div className="flex items-start gap-2 max-w-full">
+		<Message>
+			<MessageAvatar className="min-w-2 self-start bg-transparent">
 				<span className="mt-1.5 size-2 shrink-0 rounded-full bg-foreground" />
-				<div
-					className={cn(
-						"min-w-0 text-sm",
-						message.isStreaming ? "opacity-90" : "opacity-100",
-					)}
-				>
-					<LazyStreamdown>{message.content}</LazyStreamdown>
-				</div>
-			</div>
-		</div>
+			</MessageAvatar>
+			<MessageContent>
+				<Bubble variant="ghost" className="max-w-full">
+					<BubbleContent
+						className={message.isStreaming ? "opacity-90" : "opacity-100"}
+					>
+						{renderMessageContentBlocks(
+							message.contentBlocks,
+							message.content,
+							getLabel,
+							onOpenFilePreview,
+						)}
+					</BubbleContent>
+				</Bubble>
+			</MessageContent>
+		</Message>
 	);
 };
 

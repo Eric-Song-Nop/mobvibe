@@ -284,6 +284,161 @@ describe("useSessionBackfill", () => {
 		expect(mockFetch).toHaveBeenCalledTimes(2);
 	});
 
+	it("derives pagination progress from events when nextAfterSeq is omitted", async () => {
+		const onEvents = vi.fn();
+
+		mockFetch
+			.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						sessionId: "session-1",
+						machineId: "machine-1",
+						revision: 1,
+						events: [
+							{
+								sessionId: "session-1",
+								revision: 1,
+								seq: 3,
+								kind: "agent_message_chunk",
+								payload: {},
+							},
+						],
+						hasMore: true,
+					}),
+			})
+			.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						sessionId: "session-1",
+						machineId: "machine-1",
+						revision: 1,
+						events: [],
+						hasMore: false,
+					}),
+			});
+
+		const { result } = renderHook(() =>
+			useSessionBackfill({
+				gatewayUrl: "http://localhost:3005",
+				onEvents,
+			}),
+		);
+
+		await act(async () => {
+			await result.current.startBackfill("session-1", 1, 2);
+		});
+
+		expect(mockFetch).toHaveBeenNthCalledWith(
+			2,
+			expect.stringContaining("afterSeq=3"),
+			expect.any(Object),
+		);
+	});
+
+	it("continues after an empty consolidated page when nextAfterSeq advances", async () => {
+		const onEvents = vi.fn();
+		const onComplete = vi.fn();
+		const onError = vi.fn();
+
+		mockFetch
+			.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						sessionId: "session-1",
+						machineId: "machine-1",
+						revision: 1,
+						events: [],
+						nextAfterSeq: 5,
+						hasMore: true,
+					}),
+			})
+			.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						sessionId: "session-1",
+						machineId: "machine-1",
+						revision: 1,
+						events: [
+							{
+								sessionId: "session-1",
+								revision: 1,
+								seq: 6,
+								kind: "agent_message_chunk",
+								payload: {},
+							},
+						],
+						nextAfterSeq: 6,
+						hasMore: false,
+					}),
+			});
+
+		const { result } = renderHook(() =>
+			useSessionBackfill({
+				gatewayUrl: "http://localhost:3005",
+				onEvents,
+				onComplete,
+				onError,
+			}),
+		);
+
+		await act(async () => {
+			await result.current.startBackfill("session-1", 1, 2);
+		});
+
+		expect(mockFetch).toHaveBeenNthCalledWith(
+			2,
+			expect.stringContaining("afterSeq=5"),
+			expect.any(Object),
+		);
+		expect(onEvents).toHaveBeenCalledOnce();
+		expect(onComplete).toHaveBeenCalledWith("session-1", 1);
+		expect(onError).not.toHaveBeenCalled();
+	});
+
+	it("fails a paginated response whose cursor does not advance", async () => {
+		const onComplete = vi.fn();
+		const onError = vi.fn();
+
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					sessionId: "session-1",
+					machineId: "machine-1",
+					revision: 1,
+					events: [],
+					nextAfterSeq: 2,
+					hasMore: true,
+				}),
+		});
+
+		const { result } = renderHook(() =>
+			useSessionBackfill({
+				gatewayUrl: "http://localhost:3005",
+				onEvents: vi.fn(),
+				onComplete,
+				onError,
+			}),
+		);
+
+		await act(async () => {
+			await result.current.startBackfill("session-1", 1, 2);
+		});
+
+		expect(mockFetch).toHaveBeenCalledOnce();
+		expect(onComplete).not.toHaveBeenCalled();
+		expect(onError).toHaveBeenCalledWith(
+			"session-1",
+			expect.objectContaining({
+				message: "Backfill cursor did not advance beyond seq 2",
+			}),
+		);
+	});
+
 	it("P0-3: starting new backfill cancels previous one (generation check)", async () => {
 		const onEvents = vi.fn();
 		const onComplete = vi.fn();
@@ -397,17 +552,68 @@ describe("useSessionBackfill", () => {
 			}),
 		);
 
-		void result.current.startBackfill("session-1", 1, 0);
+		let pendingBackfill: Promise<void> | undefined;
+		await act(async () => {
+			pendingBackfill = result.current.startBackfill("session-1", 1, 0);
+			await Promise.resolve();
+		});
 
 		await act(async () => {
 			result.current.cancelBackfill("session-1");
-			await Promise.resolve();
+			await pendingBackfill;
 		});
 
 		expect(abortSignal?.aborted).toBe(true);
 		expect(onEvents).not.toHaveBeenCalled();
 		expect(onError).not.toHaveBeenCalled();
 		expect(onComplete).not.toHaveBeenCalled();
+	});
+
+	it("cancels an active backfill when its owner unmounts", async () => {
+		const onEvents = vi.fn();
+		const onComplete = vi.fn();
+		const onError = vi.fn();
+		let requestSignal: AbortSignal | undefined;
+
+		mockFetch.mockImplementationOnce(
+			(_input: RequestInfo | URL, init?: RequestInit) =>
+				new Promise((_resolve, reject) => {
+					requestSignal = init?.signal as AbortSignal | undefined;
+					requestSignal?.addEventListener("abort", () => {
+						const abortError = new Error("Aborted");
+						abortError.name = "AbortError";
+						reject(abortError);
+					});
+				}),
+		);
+
+		const { result, unmount } = renderHook(() =>
+			useSessionBackfill({
+				gatewayUrl: "http://localhost:3005",
+				onEvents,
+				onComplete,
+				onError,
+			}),
+		);
+
+		let pendingBackfill: Promise<void> | undefined;
+		await act(async () => {
+			pendingBackfill = result.current.startBackfill("session-1", 1, 0);
+			await Promise.resolve();
+		});
+
+		unmount();
+
+		try {
+			expect(requestSignal?.aborted).toBe(true);
+		} finally {
+			result.current.cancelAll();
+			await pendingBackfill;
+		}
+
+		expect(onEvents).not.toHaveBeenCalled();
+		expect(onComplete).not.toHaveBeenCalled();
+		expect(onError).not.toHaveBeenCalled();
 	});
 
 	it("updates isBackfilling when an empty backfill starts and completes", async () => {

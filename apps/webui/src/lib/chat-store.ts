@@ -6,6 +6,10 @@ import type {
 	PermissionOutcome,
 	PermissionToolCall,
 	PlanEntry,
+	PlanUpdateContent,
+	ReportedTokenUsage,
+	SessionConfigOption,
+	SessionEvent,
 	SessionModelOption,
 	SessionModeOption,
 	SessionSummary,
@@ -15,17 +19,92 @@ import type {
 	ToolCallStatus,
 	ToolCallUpdate,
 } from "@mobvibe/shared";
-import { create } from "zustand";
+import {
+	ACP_MAX_ACTIVE_PLANS,
+	sanitizePlanSessionUpdate,
+} from "@mobvibe/shared";
+import { create, type StateCreator } from "zustand";
 import { persist } from "zustand/middleware";
 import i18n from "@/i18n";
-import { createDefaultContentBlocks } from "./content-block-utils";
+import {
+	appendContentBlock,
+	createDefaultContentBlocks,
+	hasSameTextBlockMetadata,
+	normalizeContentBlock,
+} from "./content-block-utils";
 import type { E2EEStatus } from "./e2ee";
 import { getStorageAdapter } from "./storage-adapter";
+
+const UTF8_ENCODER = new TextEncoder();
+
+export const CHAT_ACTIVE_PLANS_MAX_BYTES = 1024 * 1024;
+
+const activePlansFitPersistenceLimit = (plans: PlanUpdateContent[]) => {
+	try {
+		return (
+			UTF8_ENCODER.encode(JSON.stringify(plans)).byteLength <=
+			CHAT_ACTIVE_PLANS_MAX_BYTES
+		);
+	} catch {
+		return false;
+	}
+};
+
+const sanitizeLegacyPlan = (value: unknown): PlanEntry[] | undefined => {
+	if (value === undefined) return undefined;
+	const update = sanitizePlanSessionUpdate({
+		sessionUpdate: "plan",
+		entries: value,
+	});
+	return update?.sessionUpdate === "plan" ? update.entries : undefined;
+};
+
+const sanitizePlanContent = (value: unknown): PlanUpdateContent | undefined => {
+	const update = sanitizePlanSessionUpdate({
+		sessionUpdate: "plan_update",
+		plan: value,
+	});
+	return update?.sessionUpdate === "plan_update" ? update.plan : undefined;
+};
+
+const sanitizePlanId = (value: unknown): string | undefined => {
+	const update = sanitizePlanSessionUpdate({
+		sessionUpdate: "plan_removed",
+		planId: value,
+	});
+	return update?.sessionUpdate === "plan_removed" ? update.planId : undefined;
+};
+
+const sanitizeActivePlans = (
+	value: unknown,
+): PlanUpdateContent[] | undefined => {
+	if (!Array.isArray(value)) return undefined;
+	const plans: PlanUpdateContent[] = [];
+	for (const rawPlan of value) {
+		const plan = sanitizePlanContent(rawPlan);
+		if (!plan) continue;
+		const existingIndex = plans.findIndex(
+			(existing) => existing.planId === plan.planId,
+		);
+		if (existingIndex < 0 && plans.length >= ACP_MAX_ACTIVE_PLANS) continue;
+		const nextPlans = [...plans];
+		if (existingIndex >= 0) {
+			nextPlans[existingIndex] = plan;
+		} else {
+			nextPlans.push(plan);
+		}
+		if (!activePlansFitPersistenceLimit(nextPlans)) continue;
+		plans.splice(0, plans.length, ...nextPlans);
+	}
+	return plans.length > 0 ? plans : undefined;
+};
 
 export type ChatRole = "user" | "assistant";
 
 type TextMessage = {
 	id: string;
+	/** ACP message boundary identifier; unrelated to the local message id. */
+	protocolMessageId?: string;
 	role: ChatRole;
 	kind: "text";
 	content: string;
@@ -36,13 +115,24 @@ type TextMessage = {
 	provisional?: boolean;
 	/** Message failed to send and needs user attention */
 	failed?: boolean;
+	/** True when content is being reconstructed from persisted user chunks. */
+	serverChunked?: boolean;
+	/** Last persisted user chunk folded into this message. */
+	lastServerChunkSeq?: number;
+	/** Server-only message reconstructed from legacy chunks without messageId. */
+	legacyServerChunked?: boolean;
+	/** Legacy echo accumulated while confirming an optimistic multi-block prompt. */
+	legacyServerEchoBlocks?: ContentBlock[];
 };
 
 type ThoughtMessage = {
 	id: string;
+	/** ACP message boundary identifier; unrelated to the local message id. */
+	protocolMessageId?: string;
 	role: "assistant";
 	kind: "thought";
 	content: string;
+	contentBlocks: ContentBlock[];
 	createdAt: string;
 	isStreaming: boolean;
 };
@@ -117,6 +207,9 @@ export type SessionRestoreSnapshot = {
 	streamingMessageId?: string;
 	streamingMessageRole?: ChatRole;
 	streamingThoughtId?: string;
+	reportedTokenUsage?: ReportedTokenUsage;
+	plan?: PlanEntry[];
+	plans?: PlanUpdateContent[];
 };
 
 export type ChatSession = {
@@ -138,6 +231,7 @@ export type ChatSession = {
 	backendId?: string;
 	backendLabel?: string;
 	cwd?: string;
+	additionalDirectories?: string[];
 	agentName?: string;
 	modelId?: string;
 	modelName?: string;
@@ -145,6 +239,7 @@ export type ChatSession = {
 	modeName?: string;
 	availableModes?: SessionModeOption[];
 	availableModels?: SessionModelOption[];
+	configOptions?: SessionConfigOption[];
 	availableCommands?: AvailableCommand[];
 	/** Machine ID that owns this session */
 	machineId?: string;
@@ -155,6 +250,7 @@ export type ChatSession = {
 		| "agent_exit"
 		| "cli_disconnect"
 		| "gateway_disconnect"
+		| "session_close"
 		| "unknown";
 	isLoading?: boolean;
 	historySyncing?: boolean;
@@ -167,6 +263,8 @@ export type ChatSession = {
 		size: number;
 		cost?: { amount: number; currency: string };
 	};
+	/** Latest bounded token snapshot reported by an Agent prompt response. */
+	reportedTokenUsage?: ReportedTokenUsage;
 	/** Agent-defined metadata from session_info_update RFD */
 	_meta?: Record<string, unknown> | null;
 	/** WAL cursor tracking for sync */
@@ -182,6 +280,8 @@ export type ChatSession = {
 	workspaceRootCwd?: string;
 	/** Agent execution plan entries (replaced in full on each update) */
 	plan?: PlanEntry[];
+	/** Ordered, independently replaceable plans from the Draft Plan Operations RFD. */
+	plans?: PlanUpdateContent[];
 	/** Whether the title was manually set by the user (immune to agent auto-update) */
 	isTitlePinned?: boolean;
 };
@@ -267,6 +367,7 @@ type ChatState = {
 			backendId?: string;
 			backendLabel?: string;
 			cwd?: string;
+			additionalDirectories?: string[];
 			agentName?: string;
 			modelId?: string;
 			modelName?: string;
@@ -274,6 +375,7 @@ type ChatState = {
 			modeName?: string;
 			availableModes?: SessionModeOption[];
 			availableModels?: SessionModelOption[];
+			configOptions?: SessionConfigOption[];
 			availableCommands?: AvailableCommand[];
 			createdAt?: string;
 			updatedAt?: string;
@@ -282,6 +384,8 @@ type ChatState = {
 			worktreeSourceCwd?: string;
 			worktreeBranch?: string;
 			workspaceRootCwd?: string;
+			_meta?: Record<string, unknown> | null;
+			isTitlePinned?: boolean;
 		},
 	) => void;
 	syncSessions: (summaries: SessionSummary[]) => void;
@@ -301,6 +405,7 @@ type ChatState = {
 				| "title"
 				| "updatedAt"
 				| "cwd"
+				| "additionalDirectories"
 				| "workspaceRootCwd"
 				| "agentName"
 				| "modelId"
@@ -309,16 +414,20 @@ type ChatState = {
 				| "modeName"
 				| "availableModes"
 				| "availableModels"
+				| "configOptions"
 				| "availableCommands"
 				| "worktreeSourceCwd"
 				| "worktreeBranch"
 				| "usage"
+				| "reportedTokenUsage"
 				| "_meta"
 				| "plan"
 				| "isTitlePinned"
 			>
 		>,
 	) => void;
+	upsertPlan: (sessionId: string, plan: PlanUpdateContent) => void;
+	removePlan: (sessionId: string, planId: string) => void;
 	addUserMessage: (
 		sessionId: string,
 		content: string,
@@ -329,7 +438,13 @@ type ChatState = {
 		},
 	) => void;
 	/** Confirm a provisional user message or append a new one (backfill) */
-	confirmOrAppendUserMessage: (sessionId: string, text: string) => void;
+	confirmOrAppendUserMessage: (
+		sessionId: string,
+		chunk: ContentBlock | string,
+		sendMessageId?: string,
+		eventSeq?: number,
+		protocolMessageId?: string,
+	) => void;
 	markUserMessageFailed: (sessionId: string, messageId: string) => void;
 	addStatusMessage: (
 		sessionId: string,
@@ -339,8 +454,16 @@ type ChatState = {
 			variant?: StatusVariant;
 		},
 	) => void;
-	appendAssistantChunk: (sessionId: string, content: string) => void;
-	appendThoughtChunk: (sessionId: string, content: string) => void;
+	appendAssistantChunk: (
+		sessionId: string,
+		content: ContentBlock | string,
+		protocolMessageId?: string,
+	) => void;
+	appendThoughtChunk: (
+		sessionId: string,
+		content: ContentBlock | string,
+		protocolMessageId?: string,
+	) => void;
 	addPermissionRequest: (
 		sessionId: string,
 		payload: {
@@ -372,6 +495,11 @@ type ChatState = {
 		},
 	) => void;
 	finalizeAssistantMessage: (sessionId: string) => void;
+	/** Reduce one WAL event and advance its cursor in one state/persist commit. */
+	applySessionEventTransaction: (
+		event: Pick<SessionEvent, "sessionId" | "revision" | "seq">,
+		applyEvent: (actions: SessionEventTransactionActions) => void,
+	) => void;
 	/** Update session cursor (revision + lastAppliedSeq) */
 	updateSessionCursor: (
 		sessionId: string,
@@ -386,6 +514,26 @@ type ChatState = {
 		status: ChatSession["e2eeStatus"],
 	) => void;
 };
+
+export type SessionEventTransactionActions = Pick<
+	ChatState,
+	| "appendAssistantChunk"
+	| "appendThoughtChunk"
+	| "confirmOrAppendUserMessage"
+	| "updateSessionMeta"
+	| "upsertPlan"
+	| "removePlan"
+	| "setStreamError"
+	| "addPermissionRequest"
+	| "setPermissionDecisionState"
+	| "setPermissionOutcome"
+	| "addToolCall"
+	| "updateToolCall"
+	| "appendTerminalOutput"
+	| "finalizeAssistantMessage"
+	| "setSending"
+	| "setCanceling"
+>;
 
 export const selectTerminalOutputSnapshot = (
 	state: Pick<ChatState, "sessions">,
@@ -414,6 +562,58 @@ const createMessage = (role: ChatRole, content: string): TextMessage => ({
 	createdAt: new Date().toISOString(),
 	isStreaming: true,
 });
+
+const isSameContentBlock = (left: ContentBlock, right: ContentBlock): boolean =>
+	JSON.stringify(left) === JSON.stringify(right);
+
+const coalesceTextBlocks = (blocks: ContentBlock[]): ContentBlock[] => {
+	let result: ContentBlock[] = [];
+	for (const block of blocks) {
+		result = appendContentBlock(result, block);
+	}
+	return result;
+};
+
+const contentBlockMatches = (
+	left: ContentBlock,
+	right: ContentBlock,
+): boolean => isSameContentBlock(left, right);
+
+const isContentBlockSequencePrefix = (
+	candidateBlocks: ContentBlock[],
+	expectedBlocks: ContentBlock[],
+): boolean => {
+	const candidate = coalesceTextBlocks(candidateBlocks);
+	const expected = coalesceTextBlocks(expectedBlocks);
+	if (candidate.length > expected.length) return false;
+	return candidate.every((block, index) => {
+		const expectedBlock = expected[index];
+		if (!expectedBlock) return false;
+		if (
+			index === candidate.length - 1 &&
+			block.type === "text" &&
+			expectedBlock.type === "text"
+		) {
+			return (
+				hasSameTextBlockMetadata(block, expectedBlock) &&
+				expectedBlock.text.startsWith(block.text)
+			);
+		}
+		return contentBlockMatches(block, expectedBlock);
+	});
+};
+
+const areContentBlockSequencesEqual = (
+	leftBlocks: ContentBlock[],
+	rightBlocks: ContentBlock[],
+): boolean => {
+	const left = coalesceTextBlocks(leftBlocks);
+	const right = coalesceTextBlocks(rightBlocks);
+	return (
+		left.length === right.length &&
+		left.every((block, index) => contentBlockMatches(block, right[index]))
+	);
+};
 
 const isTextMessage = (message: ChatMessage): message is TextMessage =>
 	message.kind === "text" || message.kind === undefined;
@@ -552,6 +752,7 @@ const createSessionState = (
 		backendId?: string;
 		backendLabel?: string;
 		cwd?: string;
+		additionalDirectories?: string[];
 		agentName?: string;
 		modelId?: string;
 		modelName?: string;
@@ -559,6 +760,7 @@ const createSessionState = (
 		modeName?: string;
 		availableModes?: SessionModeOption[];
 		availableModels?: SessionModelOption[];
+		configOptions?: SessionConfigOption[];
 		availableCommands?: AvailableCommand[];
 		createdAt?: string;
 		updatedAt?: string;
@@ -567,6 +769,8 @@ const createSessionState = (
 		worktreeSourceCwd?: string;
 		worktreeBranch?: string;
 		workspaceRootCwd?: string;
+		_meta?: Record<string, unknown> | null;
+		isTitlePinned?: boolean;
 	},
 ): ChatSession => ({
 	sessionId,
@@ -587,6 +791,7 @@ const createSessionState = (
 	backendId: options?.backendId,
 	backendLabel: options?.backendLabel,
 	cwd: options?.cwd,
+	additionalDirectories: options?.additionalDirectories,
 	agentName: options?.agentName,
 	modelId: options?.modelId,
 	modelName: options?.modelName,
@@ -594,6 +799,7 @@ const createSessionState = (
 	modeName: options?.modeName,
 	availableModes: options?.availableModes,
 	availableModels: options?.availableModels,
+	configOptions: options?.configOptions,
 	availableCommands: options?.availableCommands,
 	machineId: options?.machineId,
 	isCreating: options?.isCreating,
@@ -607,6 +813,8 @@ const createSessionState = (
 	worktreeSourceCwd: options?.worktreeSourceCwd,
 	worktreeBranch: options?.worktreeBranch,
 	workspaceRootCwd: options?.workspaceRootCwd,
+	_meta: options?._meta,
+	isTitlePinned: options?.isTitlePinned,
 });
 
 const resetSessionContentForRevision = (
@@ -620,6 +828,8 @@ const resetSessionContentForRevision = (
 	streamingMessageRole: undefined,
 	streamingThoughtId: undefined,
 	plan: undefined,
+	plans: undefined,
+	reportedTokenUsage: undefined,
 	revision,
 	lastAppliedSeq: 0,
 });
@@ -628,6 +838,21 @@ const resetSessionContentForRevision = (
  * Merge a server session summary into an existing local session state.
  * Shared by handleSessionsChanged (added/updated) and syncSessions.
  */
+const selectNewestValidTimestamp = (
+	...values: Array<string | null | undefined>
+): string | undefined => {
+	let selected: string | undefined;
+	let selectedTime = Number.NEGATIVE_INFINITY;
+	for (const value of values) {
+		if (value === undefined || value === null) continue;
+		const parsed = Date.parse(value);
+		if (Number.isNaN(parsed) || parsed <= selectedTime) continue;
+		selected = value;
+		selectedTime = parsed;
+	}
+	return selected;
+};
+
 const mergeSessionFromSummary = (
 	existing: ChatSession,
 	summary: {
@@ -638,6 +863,7 @@ const mergeSessionFromSummary = (
 		backendId?: string;
 		backendLabel?: string | null;
 		cwd?: string;
+		additionalDirectories?: string[];
 		agentName?: string | null;
 		modelId?: string | null;
 		modelName?: string | null;
@@ -645,7 +871,9 @@ const mergeSessionFromSummary = (
 		modeName?: string | null;
 		availableModes?: ChatSession["availableModes"];
 		availableModels?: ChatSession["availableModels"];
+		configOptions?: ChatSession["configOptions"];
 		availableCommands?: ChatSession["availableCommands"];
+		_meta?: ChatSession["_meta"];
 		machineId?: string;
 		worktreeSourceCwd?: string | null;
 		worktreeBranch?: string | null;
@@ -674,26 +902,42 @@ const mergeSessionFromSummary = (
 					: {}),
 			}
 		: {};
+	const replacesConfigState = summary.configOptions !== undefined;
 
 	return {
 		...baseSession,
 		title: summary.title ?? baseSession.title,
 		error: summary.error,
 		createdAt: summary.createdAt ?? baseSession.createdAt,
-		updatedAt: summary.updatedAt ?? baseSession.updatedAt,
+		updatedAt: selectNewestValidTimestamp(
+			baseSession.updatedAt,
+			summary.updatedAt,
+		),
 		backendId: summary.backendId ?? baseSession.backendId,
 		backendLabel: summary.backendLabel ?? baseSession.backendLabel,
 		cwd: summary.cwd ?? baseSession.cwd,
+		additionalDirectories:
+			summary.additionalDirectories ?? baseSession.additionalDirectories,
 		workspaceRootCwd: summary.workspaceRootCwd ?? baseSession.workspaceRootCwd,
 		agentName: summary.agentName ?? baseSession.agentName,
-		modelId: summary.modelId ?? baseSession.modelId,
-		modelName: summary.modelName ?? baseSession.modelName,
+		modelId: replacesConfigState
+			? (summary.modelId ?? undefined)
+			: (summary.modelId ?? baseSession.modelId),
+		modelName: replacesConfigState
+			? (summary.modelName ?? undefined)
+			: (summary.modelName ?? baseSession.modelName),
 		modeId: summary.modeId ?? baseSession.modeId,
 		modeName: summary.modeName ?? baseSession.modeName,
 		availableModes: summary.availableModes ?? baseSession.availableModes,
-		availableModels: summary.availableModels ?? baseSession.availableModels,
+		availableModels: replacesConfigState
+			? (summary.availableModels ?? undefined)
+			: (summary.availableModels ?? baseSession.availableModels),
+		configOptions: summary.configOptions ?? baseSession.configOptions,
 		availableCommands:
 			summary.availableCommands ?? baseSession.availableCommands,
+		...("_meta" in summary && summary._meta !== undefined
+			? { _meta: summary._meta }
+			: {}),
 		machineId: summary.machineId ?? baseSession.machineId,
 		isCreating: false,
 		isTitlePinned: summary.isTitlePinned ?? baseSession.isTitlePinned,
@@ -705,6 +949,9 @@ const mergeSessionFromSummary = (
 };
 
 const STORAGE_KEY = "mobvibe.chat-store";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
 
 const sanitizeMessageForPersist = (message: ChatMessage): ChatMessage => {
 	if (isTextMessage(message)) {
@@ -741,9 +988,10 @@ const sanitizeSessionForPersist = (session: ChatSession): ChatSession => ({
 	detachedAt: undefined,
 	detachedReason: undefined,
 	e2eeStatus: undefined,
-	plan: undefined,
 	historySyncing: false,
 	historySyncWarning: undefined,
+	plan: sanitizeLegacyPlan(session.plan),
+	plans: sanitizeActivePlans(session.plans),
 	// Preserve messages even when cursor is set so detached sessions keep history.
 	// Backfill applies only new events based on the cursor.
 	messages: session.messages.map(sanitizeMessageForPersist),
@@ -751,6 +999,35 @@ const sanitizeSessionForPersist = (session: ChatSession): ChatSession => ({
 	revision: session.revision,
 	lastAppliedSeq: session.lastAppliedSeq,
 });
+
+const sanitizePersistedChatState = (persisted: unknown): PersistedChatState => {
+	const state = isRecord(persisted) ? persisted : {};
+	const rawSessions = isRecord(state.sessions) ? state.sessions : {};
+	const sessions: Record<string, ChatSession> = {};
+	for (const [sessionId, rawSession] of Object.entries(rawSessions)) {
+		if (!isRecord(rawSession)) continue;
+		sessions[sessionId] = {
+			...(rawSession as ChatSession),
+			plan: sanitizeLegacyPlan(rawSession.plan),
+			plans: sanitizeActivePlans(rawSession.plans),
+		};
+	}
+	const lastCreatedCwd = isRecord(state.lastCreatedCwd)
+		? Object.fromEntries(
+				Object.entries(state.lastCreatedCwd).filter(
+					(entry): entry is [string, string] => typeof entry[1] === "string",
+				),
+			)
+		: {};
+	return {
+		sessions,
+		activeSessionId:
+			typeof state.activeSessionId === "string"
+				? state.activeSessionId
+				: undefined,
+		lastCreatedCwd,
+	};
+};
 
 const partializeChatState = (state: ChatState): PersistedChatState => ({
 	sessions: Object.keys(state.sessions).reduce<Record<string, ChatSession>>(
@@ -768,9 +1045,80 @@ const partializeChatState = (state: ChatState): PersistedChatState => ({
 	lastCreatedCwd: state.lastCreatedCwd,
 });
 
+type ChatStateSetter = Parameters<StateCreator<ChatState>>[0];
+type ChatStateUpdate =
+	| ChatState
+	| Partial<ChatState>
+	| ((state: ChatState) => ChatState | Partial<ChatState>);
+type FlexibleChatStateSetter = (
+	partial: ChatStateUpdate,
+	replace?: boolean,
+) => void;
+type ChatStateFactory = (
+	set: ChatStateSetter,
+	applySessionEventTransaction: ChatState["applySessionEventTransaction"],
+) => ChatState;
+
+const withSessionEventTransactions = (
+	createState: ChatStateFactory,
+): StateCreator<ChatState> => {
+	return (commitSet) => {
+		let transactionState: ChatState | undefined;
+		let actions: ChatState;
+		const commit = commitSet as unknown as FlexibleChatStateSetter;
+		const set = ((partial: ChatStateUpdate, replace?: boolean) => {
+			if (transactionState === undefined) {
+				commit(partial, replace);
+				return;
+			}
+
+			const nextState =
+				typeof partial === "function" ? partial(transactionState) : partial;
+			if (Object.is(nextState, transactionState)) return;
+			transactionState = replace
+				? (nextState as ChatState)
+				: { ...transactionState, ...nextState };
+		}) as ChatStateSetter;
+		const applySessionEventTransaction: ChatState["applySessionEventTransaction"] =
+			(event, applyEvent) =>
+				commitSet((state) => {
+					const session = state.sessions[event.sessionId];
+					if (!session) return state;
+					if (
+						session.revision !== undefined &&
+						event.revision < session.revision
+					) {
+						return state;
+					}
+					if (
+						session.revision === event.revision &&
+						(session.lastAppliedSeq ?? 0) >= event.seq
+					) {
+						return state;
+					}
+
+					transactionState = state;
+					try {
+						applyEvent(actions);
+						actions.updateSessionCursor(
+							event.sessionId,
+							event.revision,
+							event.seq,
+						);
+						return transactionState;
+					} finally {
+						transactionState = undefined;
+					}
+				});
+
+		actions = createState(set, applySessionEventTransaction);
+		return actions;
+	};
+};
+
 export const useChatStore = create<ChatState>()(
 	persist(
-		(set) => ({
+		withSessionEventTransactions((set, applySessionEventTransaction) => ({
 			sessions: {},
 			activeSessionId: undefined,
 			lastCreatedCwd: {},
@@ -915,6 +1263,7 @@ export const useChatStore = create<ChatState>()(
 									backendId: added.backendId,
 									backendLabel: added.backendLabel,
 									cwd: added.cwd,
+									additionalDirectories: added.additionalDirectories,
 									agentName: added.agentName,
 									modelId: added.modelId,
 									modelName: added.modelName,
@@ -922,6 +1271,7 @@ export const useChatStore = create<ChatState>()(
 									modeName: added.modeName,
 									availableModes: added.availableModes,
 									availableModels: added.availableModels,
+									configOptions: added.configOptions,
 									availableCommands: added.availableCommands,
 									createdAt: added.createdAt,
 									updatedAt: added.updatedAt,
@@ -964,6 +1314,9 @@ export const useChatStore = create<ChatState>()(
 								streamingMessageId: undefined,
 								streamingMessageRole: undefined,
 								streamingThoughtId: undefined,
+								plan: undefined,
+								plans: undefined,
+								reportedTokenUsage: undefined,
 								revision: undefined,
 								lastAppliedSeq: 0,
 							},
@@ -1002,6 +1355,15 @@ export const useChatStore = create<ChatState>()(
 								...(snapshot?.streamingThoughtId !== undefined
 									? { streamingThoughtId: snapshot.streamingThoughtId }
 									: {}),
+								...(snapshot?.reportedTokenUsage !== undefined
+									? { reportedTokenUsage: snapshot.reportedTokenUsage }
+									: {}),
+								...(snapshot && Object.hasOwn(snapshot, "plan")
+									? { plan: sanitizeLegacyPlan(snapshot.plan) }
+									: {}),
+								...(snapshot && Object.hasOwn(snapshot, "plans")
+									? { plans: sanitizeActivePlans(snapshot.plans) }
+									: {}),
 							},
 						},
 					};
@@ -1033,8 +1395,10 @@ export const useChatStore = create<ChatState>()(
 								backendId: summary.backendId,
 								backendLabel: summary.backendLabel,
 								cwd: summary.cwd,
+								additionalDirectories: summary.additionalDirectories,
 								availableModes: summary.availableModes,
 								availableModels: summary.availableModels,
+								configOptions: summary.configOptions,
 								availableCommands: summary.availableCommands,
 								machineId: summary.machineId,
 								worktreeSourceCwd: summary.worktreeSourceCwd,
@@ -1170,16 +1534,28 @@ export const useChatStore = create<ChatState>()(
 						nextSession.title = payload.title;
 					}
 					if (payload.updatedAt !== undefined) {
-						nextSession.updatedAt = payload.updatedAt;
+						nextSession.updatedAt = selectNewestValidTimestamp(
+							session.updatedAt,
+							payload.updatedAt,
+						);
 					}
 					if (payload.cwd !== undefined) {
 						nextSession.cwd = payload.cwd;
+					}
+					if (payload.additionalDirectories !== undefined) {
+						nextSession.additionalDirectories = payload.additionalDirectories;
 					}
 					if (payload.workspaceRootCwd !== undefined) {
 						nextSession.workspaceRootCwd = payload.workspaceRootCwd;
 					}
 					if (payload.agentName !== undefined) {
 						nextSession.agentName = payload.agentName;
+					}
+					if (payload.configOptions !== undefined) {
+						nextSession.configOptions = payload.configOptions;
+						nextSession.modelId = undefined;
+						nextSession.modelName = undefined;
+						nextSession.availableModels = undefined;
 					}
 					if (payload.modelId !== undefined) {
 						nextSession.modelId = payload.modelId;
@@ -1211,11 +1587,15 @@ export const useChatStore = create<ChatState>()(
 					if (payload.usage !== undefined) {
 						nextSession.usage = payload.usage;
 					}
+					if ("reportedTokenUsage" in payload) {
+						nextSession.reportedTokenUsage = payload.reportedTokenUsage;
+					}
 					if (payload._meta !== undefined) {
 						nextSession._meta = payload._meta;
 					}
 					if (payload.plan !== undefined) {
-						nextSession.plan = payload.plan;
+						const plan = sanitizeLegacyPlan(payload.plan);
+						if (plan) nextSession.plan = plan;
 					}
 					if (payload.isTitlePinned !== undefined) {
 						nextSession.isTitlePinned = payload.isTitlePinned;
@@ -1227,10 +1607,87 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
+			upsertPlan: (sessionId, rawPlan) =>
+				set((state) => {
+					const session = state.sessions[sessionId];
+					const plan = sanitizePlanContent(rawPlan);
+					if (!session || !plan) return state;
+					const plans = session.plans ?? [];
+					const existingIndex = plans.findIndex(
+						(existing) => existing.planId === plan.planId,
+					);
+					if (existingIndex < 0 && plans.length >= ACP_MAX_ACTIVE_PLANS) {
+						return state;
+					}
+					const nextPlans = [...plans];
+					if (existingIndex >= 0) {
+						nextPlans[existingIndex] = plan;
+					} else {
+						nextPlans.push(plan);
+					}
+					if (!activePlansFitPersistenceLimit(nextPlans)) return state;
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: { ...session, plans: nextPlans },
+						},
+					};
+				}),
+			removePlan: (sessionId, rawPlanId) =>
+				set((state) => {
+					const session = state.sessions[sessionId];
+					const planId = sanitizePlanId(rawPlanId);
+					if (!session || !planId || !session.plans) return state;
+					const nextPlans = session.plans.filter(
+						(plan) => plan.planId !== planId,
+					);
+					if (nextPlans.length === session.plans.length) return state;
+					return {
+						sessions: {
+							...state.sessions,
+							[sessionId]: {
+								...session,
+								plans: nextPlans.length > 0 ? nextPlans : undefined,
+							},
+						},
+					};
+				}),
 			addUserMessage: (sessionId, content, options) =>
 				set((state) => {
 					const session =
 						state.sessions[sessionId] ?? createSessionState(sessionId);
+					const existingMessageIndex = options?.messageId
+						? session.messages.findIndex(
+								(message) => message.id === options.messageId,
+							)
+						: -1;
+					if (existingMessageIndex >= 0) {
+						const existingMessage = session.messages[existingMessageIndex];
+						if (
+							existingMessage.role !== "user" ||
+							existingMessage.kind !== "text" ||
+							(!existingMessage.provisional && !existingMessage.failed)
+						) {
+							return state;
+						}
+
+						const messages = [...session.messages];
+						messages[existingMessageIndex] = {
+							...existingMessage,
+							content,
+							contentBlocks:
+								options?.contentBlocks ?? createDefaultContentBlocks(content),
+							provisional: options?.provisional ?? existingMessage.provisional,
+							failed: false,
+						};
+						return {
+							sessions: {
+								...state.sessions,
+								[sessionId]: { ...session, messages },
+							},
+						};
+					}
+
 					const nextMessage = {
 						...createMessage("user", content),
 						id: options?.messageId ?? createLocalId(),
@@ -1250,19 +1707,123 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
-			confirmOrAppendUserMessage: (sessionId, text) =>
+			confirmOrAppendUserMessage: (
+				sessionId,
+				chunk,
+				sendMessageId,
+				eventSeq,
+				protocolMessageId,
+			) =>
 				set((state: ChatState) => {
 					const session = state.sessions[sessionId];
 					if (!session) return state;
+					const contentBlock = normalizeContentBlock(chunk);
+					const text = contentBlock.type === "text" ? contentBlock.text : "";
 
-					// Search backward for a provisional user message (stop at assistant boundary)
+					let boundary = 0;
 					for (let i = session.messages.length - 1; i >= 0; i--) {
-						const msg = session.messages[i];
-						if (msg.role === "assistant") break;
-						if (msg.role === "user" && msg.kind === "text" && msg.provisional) {
-							// Confirm the optimistic message
+						if (session.messages[i].role === "assistant") {
+							boundary = i + 1;
+							break;
+						}
+					}
+
+					if (!sendMessageId && eventSeq !== undefined) {
+						let provisionalMatch:
+							| { index: number; echoBlocks: ContentBlock[] }
+							| undefined;
+						for (
+							let index = boundary;
+							index < session.messages.length;
+							index++
+						) {
+							const message = session.messages[index];
+							if (
+								message.role !== "user" ||
+								message.kind !== "text" ||
+								message.provisional !== true ||
+								(message.protocolMessageId !== undefined &&
+									protocolMessageId !== undefined &&
+									message.protocolMessageId !== protocolMessageId)
+							) {
+								continue;
+							}
+							const previousEcho = message.legacyServerEchoBlocks ?? [];
+							if (
+								previousEcho.length > 0 &&
+								message.lastServerChunkSeq !== eventSeq - 1
+							) {
+								continue;
+							}
+							const echoBlocks = [...previousEcho, contentBlock];
+							const expectedBlocks =
+								message.contentBlocks ??
+								createDefaultContentBlocks(message.content);
+							if (isContentBlockSequencePrefix(echoBlocks, expectedBlocks)) {
+								provisionalMatch = { index, echoBlocks };
+								break;
+							}
+						}
+
+						if (provisionalMatch) {
+							const message = session.messages[provisionalMatch.index];
+							if (message.role !== "user" || message.kind !== "text") {
+								return state;
+							}
+							const expectedBlocks =
+								message.contentBlocks ??
+								createDefaultContentBlocks(message.content);
+							const confirmed = areContentBlockSequencesEqual(
+								provisionalMatch.echoBlocks,
+								expectedBlocks,
+							);
 							const messages = [...session.messages];
-							messages[i] = { ...msg, provisional: false, failed: false };
+							messages[provisionalMatch.index] = {
+								...message,
+								...(protocolMessageId !== undefined
+									? { protocolMessageId }
+									: {}),
+								provisional: confirmed ? false : message.provisional,
+								failed: confirmed ? false : message.failed,
+								legacyServerChunked: confirmed ? undefined : true,
+								legacyServerEchoBlocks: confirmed
+									? undefined
+									: provisionalMatch.echoBlocks,
+								lastServerChunkSeq: confirmed ? undefined : eventSeq,
+							};
+							return {
+								sessions: {
+									...state.sessions,
+									[sessionId]: { ...session, messages },
+								},
+							};
+						}
+
+						const lastMessage = session.messages.at(-1);
+						if (
+							lastMessage?.role === "user" &&
+							lastMessage.kind === "text" &&
+							lastMessage.provisional !== true &&
+							lastMessage.legacyServerChunked === true &&
+							lastMessage.lastServerChunkSeq === eventSeq - 1 &&
+							(lastMessage.protocolMessageId === undefined ||
+								protocolMessageId === undefined ||
+								lastMessage.protocolMessageId === protocolMessageId)
+						) {
+							const content = `${lastMessage.content}${text}`;
+							const messages = [...session.messages];
+							messages[messages.length - 1] = {
+								...lastMessage,
+								...(protocolMessageId !== undefined
+									? { protocolMessageId }
+									: {}),
+								content,
+								contentBlocks: appendContentBlock(
+									lastMessage.contentBlocks ?? [],
+									contentBlock,
+								),
+								lastServerChunkSeq: eventSeq,
+							};
 							return {
 								sessions: {
 									...state.sessions,
@@ -1272,15 +1833,134 @@ export const useChatStore = create<ChatState>()(
 						}
 					}
 
+					let matchIndex = -1;
+					if (sendMessageId) {
+						matchIndex = session.messages.findIndex(
+							(message) =>
+								message.id === sendMessageId &&
+								message.role === "user" &&
+								message.kind === "text" &&
+								(message.protocolMessageId === undefined ||
+									protocolMessageId === undefined ||
+									message.protocolMessageId === protocolMessageId),
+						);
+					} else if (protocolMessageId) {
+						matchIndex = session.messages.findIndex(
+							(message, index) =>
+								index >= boundary &&
+								message.role === "user" &&
+								message.kind === "text" &&
+								message.protocolMessageId === protocolMessageId,
+						);
+					}
+					if (matchIndex < 0 && !sendMessageId) {
+						matchIndex = session.messages.findIndex(
+							(message, index) =>
+								index >= boundary &&
+								message.role === "user" &&
+								message.kind === "text" &&
+								message.provisional === true &&
+								(message.protocolMessageId === undefined ||
+									protocolMessageId === undefined ||
+									message.protocolMessageId === protocolMessageId) &&
+								(contentBlock.type === "text"
+									? message.content === text
+									: (
+											message.contentBlocks ??
+											createDefaultContentBlocks(message.content)
+										).some((candidate) =>
+											isSameContentBlock(candidate, contentBlock),
+										)),
+						);
+					}
+
+					const matchedMessage =
+						matchIndex >= 0 ? session.messages[matchIndex] : undefined;
+					if (
+						matchedMessage?.role === "user" &&
+						matchedMessage.kind === "text"
+					) {
+						if (matchedMessage.provisional !== true) {
+							if (!matchedMessage.serverChunked) {
+								return state;
+							}
+							if (
+								eventSeq !== undefined &&
+								matchedMessage.lastServerChunkSeq !== undefined &&
+								eventSeq <= matchedMessage.lastServerChunkSeq
+							) {
+								return state;
+							}
+							const existingBlocks = matchedMessage.contentBlocks ?? [];
+							if (
+								eventSeq === undefined &&
+								sendMessageId !== undefined &&
+								existingBlocks.some((candidate) =>
+									isSameContentBlock(candidate, contentBlock),
+								)
+							) {
+								return state;
+							}
+
+							const content = `${matchedMessage.content}${text}`;
+							const messages = [...session.messages];
+							messages[matchIndex] = {
+								...matchedMessage,
+								content,
+								contentBlocks: appendContentBlock(existingBlocks, contentBlock),
+								...(eventSeq !== undefined
+									? { lastServerChunkSeq: eventSeq }
+									: {}),
+							};
+							return {
+								sessions: {
+									...state.sessions,
+									[sessionId]: { ...session, messages },
+								},
+							};
+						}
+						const messages = [...session.messages];
+						messages[matchIndex] = {
+							...matchedMessage,
+							...(protocolMessageId !== undefined ? { protocolMessageId } : {}),
+							provisional: false,
+							failed: false,
+						};
+						return {
+							sessions: {
+								...state.sessions,
+								[sessionId]: { ...session, messages },
+							},
+						};
+					}
+
 					// No provisional found → append new message (backfill scenario)
+					const canUseSendMessageId =
+						sendMessageId !== undefined &&
+						!session.messages.some((message) => message.id === sendMessageId);
 					const newMsg: TextMessage = {
-						id: createLocalId(),
+						id: canUseSendMessageId ? sendMessageId : createLocalId(),
 						role: "user",
 						kind: "text",
 						content: text,
-						contentBlocks: createDefaultContentBlocks(text),
+						contentBlocks: [contentBlock],
 						createdAt: new Date().toISOString(),
 						isStreaming: false,
+						...(protocolMessageId !== undefined ? { protocolMessageId } : {}),
+						...(sendMessageId || protocolMessageId
+							? {
+									serverChunked: true,
+									...(eventSeq !== undefined
+										? { lastServerChunkSeq: eventSeq }
+										: {}),
+								}
+							: eventSeq !== undefined
+								? {
+										serverChunked: true,
+										legacyServerChunked: true,
+										lastServerChunkSeq: eventSeq,
+									}
+								: {}),
 					};
 					return {
 						sessions: {
@@ -1335,15 +2015,38 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
-			appendAssistantChunk: (sessionId, content) =>
+			appendAssistantChunk: (sessionId, content, protocolMessageId) =>
 				set((state: ChatState) => {
 					const session =
 						state.sessions[sessionId] ?? createSessionState(sessionId);
 					let { streamingMessageId, streamingMessageRole } = session;
 					let messages = session.messages;
+					const streamingMessage = streamingMessageId
+						? messages.find((message) => message.id === streamingMessageId)
+						: undefined;
+					const startsNewProtocolMessage =
+						protocolMessageId !== undefined &&
+						(!streamingMessage ||
+							!isTextMessage(streamingMessage) ||
+							streamingMessage.protocolMessageId !== protocolMessageId);
 
-					if (!streamingMessageId || streamingMessageRole !== "assistant") {
-						const message = createMessage("assistant", "");
+					if (
+						!streamingMessageId ||
+						streamingMessageRole !== "assistant" ||
+						startsNewProtocolMessage
+					) {
+						if (streamingMessageId) {
+							messages = messages.map((message) =>
+								message.id === streamingMessageId && isTextMessage(message)
+									? { ...message, isStreaming: false }
+									: message,
+							);
+						}
+						const message = {
+							...createMessage("assistant", ""),
+							contentBlocks: [],
+							...(protocolMessageId !== undefined ? { protocolMessageId } : {}),
+						};
 						streamingMessageId = message.id;
 						streamingMessageRole = "assistant";
 						messages = [...messages, message];
@@ -1355,10 +2058,15 @@ export const useChatStore = create<ChatState>()(
 					const msg = messages[idx];
 					if (!isTextMessage(msg)) return state;
 
-					const nextContent = `${msg.content}${content}`;
-					const nextBlocks = msg.contentBlocks.map((b) =>
-						b.type === "text" ? { ...b, text: nextContent } : b,
-					);
+					const contentBlock = normalizeContentBlock(content);
+					const nextContent =
+						contentBlock.type === "text"
+							? `${msg.content}${contentBlock.text}`
+							: msg.content;
+					const existingBlocks =
+						msg.contentBlocks ??
+						(msg.content ? createDefaultContentBlocks(msg.content) : []);
+					const nextBlocks = appendContentBlock(existingBlocks, contentBlock);
 
 					messages = [
 						...messages.slice(0, idx),
@@ -1378,19 +2086,35 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
-			appendThoughtChunk: (sessionId, content) =>
+			appendThoughtChunk: (sessionId, content, protocolMessageId) =>
 				set((state: ChatState) => {
 					const session =
 						state.sessions[sessionId] ?? createSessionState(sessionId);
 					let { streamingThoughtId } = session;
 					let messages = session.messages;
+					const streamingThought = streamingThoughtId
+						? messages.find((message) => message.id === streamingThoughtId)
+						: undefined;
+					const startsNewProtocolMessage =
+						protocolMessageId !== undefined &&
+						(streamingThought?.kind !== "thought" ||
+							streamingThought.protocolMessageId !== protocolMessageId);
 
-					if (!streamingThoughtId) {
+					if (!streamingThoughtId || startsNewProtocolMessage) {
+						if (streamingThoughtId) {
+							messages = messages.map((message) =>
+								message.id === streamingThoughtId && message.kind === "thought"
+									? { ...message, isStreaming: false }
+									: message,
+							);
+						}
 						const thought: ThoughtMessage = {
 							id: createLocalId(),
+							...(protocolMessageId !== undefined ? { protocolMessageId } : {}),
 							role: "assistant",
 							kind: "thought",
 							content: "",
+							contentBlocks: [],
 							createdAt: new Date().toISOString(),
 							isStreaming: true,
 						};
@@ -1404,9 +2128,21 @@ export const useChatStore = create<ChatState>()(
 					const msg = messages[idx];
 					if (msg.kind !== "thought") return state;
 
+					const contentBlock = normalizeContentBlock(content);
+					const nextContent =
+						contentBlock.type === "text"
+							? `${msg.content}${contentBlock.text}`
+							: msg.content;
+					const existingBlocks =
+						msg.contentBlocks ??
+						(msg.content ? createDefaultContentBlocks(msg.content) : []);
 					messages = [
 						...messages.slice(0, idx),
-						{ ...msg, content: msg.content + content },
+						{
+							...msg,
+							content: nextContent,
+							contentBlocks: appendContentBlock(existingBlocks, contentBlock),
+						},
 						...messages.slice(idx + 1),
 					];
 
@@ -1616,6 +2352,7 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
+			applySessionEventTransaction,
 			updateSessionCursor: (sessionId, revision, lastAppliedSeq) =>
 				set((state: ChatState) => {
 					const session = state.sessions[sessionId];
@@ -1658,6 +2395,8 @@ export const useChatStore = create<ChatState>()(
 								streamingMessageRole: undefined,
 								streamingThoughtId: undefined,
 								plan: undefined,
+								plans: undefined,
+								reportedTokenUsage: undefined,
 								revision: newRevision,
 								lastAppliedSeq: 0,
 							},
@@ -1676,18 +2415,22 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
-		}),
+		})),
 		{
 			name: STORAGE_KEY,
-			version: 1,
+			version: 2,
 			migrate: (persisted, version) => {
+				const sanitized = sanitizePersistedChatState(persisted);
 				if (version === 0) {
-					const state = persisted as Record<string, unknown>;
 					// v0 had lastCreatedCwd as string | undefined; discard it
-					state.lastCreatedCwd = {};
+					sanitized.lastCreatedCwd = {};
 				}
-				return persisted as PersistedChatState;
+				return sanitized;
 			},
+			merge: (persisted, current) => ({
+				...current,
+				...sanitizePersistedChatState(persisted),
+			}),
 			partialize: partializeChatState,
 			storage: {
 				getItem: (name) => {

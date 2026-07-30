@@ -1,9 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
-import type { ContentBlock } from "@/lib/acp";
 import * as apiModule from "@/lib/api";
 import { useSessionMutations } from "../useSessionMutations";
 
@@ -26,12 +25,22 @@ vi.mock("@/lib/chat-store", async (importOriginal) => {
 });
 
 const mockBootstrapSessionE2EE = vi.hoisted(() => vi.fn(() => "ok"));
+const mockForgetSession = vi.hoisted(() => vi.fn());
+const mockPushNotification = vi.hoisted(() => vi.fn());
 const mockUiStoreState = vi.hoisted(() => ({
 	setChatDraft: vi.fn(),
+	clearChatDraft: vi.fn(),
 }));
 
 vi.mock("@/lib/e2ee", () => ({
 	bootstrapSessionE2EE: mockBootstrapSessionE2EE,
+	e2ee: { forgetSession: mockForgetSession },
+}));
+
+vi.mock("@/lib/notification-store", () => ({
+	useNotificationStore: {
+		getState: () => ({ pushNotification: mockPushNotification }),
+	},
 }));
 
 vi.mock("@/lib/ui-store", () => ({
@@ -49,12 +58,16 @@ vi.mock("@/lib/api", async () => {
 		createAgentTeam: vi.fn(),
 		renameSession: vi.fn(),
 		archiveSession: vi.fn(),
+		closeSession: vi.fn(),
+		deleteSession: vi.fn(),
 		cancelSession: vi.fn(),
 		setSessionMode: vi.fn(),
 		setSessionModel: vi.fn(),
+		setSessionConfigOption: vi.fn(),
 		sendMessage: vi.fn(),
 		sendPermissionDecision: vi.fn(),
 		loadSession: vi.fn(),
+		resumeSession: vi.fn(),
 		reloadSession: vi.fn(),
 	};
 });
@@ -84,6 +97,8 @@ describe("useSessionMutations", () => {
 		setCanceling: vi.fn(),
 		setStreamError: vi.fn(),
 		updateSessionMeta: vi.fn(),
+		upsertPlan: vi.fn(),
+		removePlan: vi.fn(),
 		addUserMessage: vi.fn(),
 		addStatusMessage: vi.fn(),
 		appendAssistantChunk: vi.fn(),
@@ -121,6 +136,7 @@ describe("useSessionMutations", () => {
 		mockStore = createMockStore();
 		mockChatStoreState.sessions = {};
 		mockUiStoreState.setChatDraft.mockReset();
+		mockUiStoreState.clearChatDraft.mockReset();
 		vi.clearAllMocks();
 	});
 
@@ -144,6 +160,8 @@ describe("useSessionMutations", () => {
 				availableCommands: [],
 				machineId: "machine-1",
 				wrappedDek: "wrapped-dek-1",
+				_meta: { created: true },
+				isTitlePinned: true,
 			};
 			vi.mocked(apiModule.createSession).mockResolvedValue(mockSession);
 
@@ -177,6 +195,8 @@ describe("useSessionMutations", () => {
 				availableModes: mockSession.availableModes,
 				availableModels: mockSession.availableModels,
 				availableCommands: mockSession.availableCommands,
+				_meta: { created: true },
+				isTitlePinned: true,
 			});
 
 			// Optimistic session should be removed
@@ -190,6 +210,7 @@ describe("useSessionMutations", () => {
 			expect(mockBootstrapSessionE2EE).toHaveBeenCalledWith(
 				"new-session",
 				"wrapped-dek-1",
+				undefined,
 			);
 			expect(mockStore.setSessionE2EEStatus).toHaveBeenCalledWith(
 				"new-session",
@@ -259,6 +280,7 @@ describe("useSessionMutations", () => {
 
 			expect(mockBootstrapSessionE2EE).toHaveBeenCalledWith(
 				"plain-session",
+				undefined,
 				undefined,
 			);
 			expect(mockStore.setSessionE2EEStatus).toHaveBeenCalledWith(
@@ -522,9 +544,11 @@ describe("useSessionMutations", () => {
 				wrapper,
 			});
 
-			await result.current.createSessionMutation.mutateAsync({
-				backendId: "backend-1",
-				title: "Test Session",
+			await act(async () => {
+				await result.current.createSessionMutation.mutateAsync({
+					backendId: "backend-1",
+					title: "Test Session",
+				});
 			});
 
 			// Both optimistic and real sessions should be created
@@ -744,6 +768,136 @@ describe("useSessionMutations", () => {
 		});
 	});
 
+	describe("closeSessionMutation", () => {
+		it("keeps history and marks the session detached", async () => {
+			vi.mocked(apiModule.closeSession).mockResolvedValue({
+				sessionId: "session-1",
+				title: "Session",
+				backendId: "backend-1",
+				backendLabel: "Backend",
+				createdAt: "2026-01-01T00:00:00.000Z",
+				updatedAt: "2026-01-01T00:01:00.000Z",
+				machineId: "machine-1",
+				isAttached: false,
+			});
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.closeSessionMutation.mutateAsync({
+				sessionId: "session-1",
+			});
+
+			expect(mockStore.removeSession).not.toHaveBeenCalled();
+			expect(mockStore.markSessionDetached).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId: "session-1",
+					machineId: "machine-1",
+					reason: "session_close",
+				}),
+			);
+			expect(mockStore.addStatusMessage).toHaveBeenCalledWith(
+				"session-1",
+				expect.objectContaining({
+					title: "Session closed; local history was kept",
+				}),
+			);
+		});
+	});
+
+	describe("deleteSessionMutation", () => {
+		it("cancels an in-flight sessions snapshot before starting deletion", async () => {
+			let finishCancellation: (() => void) | undefined;
+			const cancelQueries = vi
+				.spyOn(queryClient, "cancelQueries")
+				.mockImplementationOnce(
+					() =>
+						new Promise<void>((resolve) => {
+							finishCancellation = resolve;
+						}),
+				);
+			vi.mocked(apiModule.deleteSession).mockResolvedValue({ ok: true });
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			let deletion: Promise<unknown> | undefined;
+			act(() => {
+				deletion = result.current.deleteSessionMutation.mutateAsync({
+					sessionId: "session-1",
+				});
+			});
+			await act(async () => {
+				await Promise.resolve();
+			});
+
+			expect(cancelQueries).toHaveBeenCalledWith({ queryKey: ["sessions"] });
+			expect(apiModule.deleteSession).not.toHaveBeenCalled();
+			finishCancellation?.();
+			await deletion;
+			expect(vi.mocked(apiModule.deleteSession).mock.calls[0]?.[0]).toEqual({
+				sessionId: "session-1",
+			});
+		});
+
+		it("clears cached history, draft, and session key only after success", async () => {
+			vi.mocked(apiModule.deleteSession).mockResolvedValue({ ok: true });
+			const onSessionDeleted = vi.fn();
+			queryClient.setQueryData(["sessions"], {
+				sessions: [
+					{ sessionId: "session-1", title: "Delete me" },
+					{ sessionId: "session-2", title: "Keep me" },
+				],
+			});
+			const { result } = renderHook(
+				() => useSessionMutations(mockStore, { onSessionDeleted }),
+				{ wrapper },
+			);
+
+			await result.current.deleteSessionMutation.mutateAsync({
+				sessionId: "session-1",
+			});
+
+			expect(mockStore.removeSession).toHaveBeenCalledWith("session-1");
+			expect(onSessionDeleted).toHaveBeenCalledWith("session-1");
+			expect(mockUiStoreState.clearChatDraft).toHaveBeenCalledWith("session-1");
+			expect(mockForgetSession).toHaveBeenCalledWith("session-1");
+			expect(queryClient.getQueryData(["sessions"])).toEqual({
+				sessions: [{ sessionId: "session-2", title: "Keep me" }],
+			});
+		});
+
+		it("preserves cached history, draft, and session key when remote delete fails", async () => {
+			vi.mocked(apiModule.deleteSession).mockRejectedValue(
+				new Error("Agent unavailable"),
+			);
+			const cached = {
+				sessions: [{ sessionId: "session-1", title: "Keep me" }],
+			};
+			queryClient.setQueryData(["sessions"], cached);
+			const onSessionDeleted = vi.fn();
+			const { result } = renderHook(
+				() => useSessionMutations(mockStore, { onSessionDeleted }),
+				{ wrapper },
+			);
+
+			await expect(
+				result.current.deleteSessionMutation.mutateAsync({
+					sessionId: "session-1",
+				}),
+			).rejects.toThrow("Agent unavailable");
+
+			expect(mockStore.removeSession).not.toHaveBeenCalled();
+			expect(onSessionDeleted).not.toHaveBeenCalled();
+			expect(mockUiStoreState.clearChatDraft).not.toHaveBeenCalled();
+			expect(mockForgetSession).not.toHaveBeenCalled();
+			expect(queryClient.getQueryData(["sessions"])).toEqual(cached);
+			expect(mockPushNotification).toHaveBeenCalledWith(
+				expect.objectContaining({ variant: "error" }),
+			);
+		});
+	});
+
 	describe("cancelSessionMutation", () => {
 		it("should cancel session successfully", async () => {
 			vi.mocked(apiModule.cancelSession).mockResolvedValue({ ok: true });
@@ -803,6 +957,8 @@ describe("useSessionMutations", () => {
 				backendLabel: "Backend",
 				createdAt: "2025-01-01T00:00:00Z",
 				updatedAt: "2025-01-01T00:00:00Z",
+				_meta: null,
+				isTitlePinned: true,
 			};
 
 			vi.mocked(apiModule.setSessionMode).mockResolvedValue(mockSummary);
@@ -821,6 +977,8 @@ describe("useSessionMutations", () => {
 				expect.objectContaining({
 					modeId: "mode-1",
 					modeName: "Chat Mode",
+					_meta: null,
+					isTitlePinned: true,
 				}),
 			);
 		});
@@ -856,6 +1014,62 @@ describe("useSessionMutations", () => {
 					modelId: "model-1",
 					modelName: "GPT-4",
 				}),
+			);
+		});
+	});
+
+	describe("setSessionConfigOptionMutation", () => {
+		it("replaces session config state with the complete ordered response", async () => {
+			const configOptions = [
+				{
+					type: "boolean" as const,
+					id: "safe-mode",
+					name: "Safe mode",
+					currentValue: true,
+				},
+				{
+					type: "select" as const,
+					id: "model",
+					name: "Model",
+					currentValue: "model-1",
+					options: [{ value: "model-1", name: "Model 1" }],
+				},
+			];
+			const mockSummary = {
+				sessionId: "session-1",
+				title: "Session",
+				backendId: "backend-1",
+				backendLabel: "Backend",
+				createdAt: "2025-01-01T00:00:00Z",
+				updatedAt: "2025-01-01T00:00:00Z",
+				configOptions,
+			};
+
+			vi.mocked(apiModule.setSessionConfigOption).mockResolvedValue(
+				mockSummary,
+			);
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.setSessionConfigOptionMutation.mutateAsync({
+				sessionId: "session-1",
+				configId: "safe-mode",
+				type: "boolean",
+				value: true,
+			});
+
+			expect(
+				vi.mocked(apiModule.setSessionConfigOption).mock.calls[0]?.[0],
+			).toEqual({
+				sessionId: "session-1",
+				configId: "safe-mode",
+				type: "boolean",
+				value: true,
+			});
+			expect(mockStore.updateSessionMeta).toHaveBeenCalledWith(
+				"session-1",
+				expect.objectContaining({ configOptions }),
 			);
 		});
 	});
@@ -939,15 +1153,51 @@ describe("useSessionMutations", () => {
 			await result.current.sendMessageMutation.mutateAsync({
 				sessionId: "session-1",
 				prompt: [{ type: "text", text: "Hello" }],
+				messageId: "user-msg-1",
+				revision: 1,
+				encryptionRequired: false,
 			});
 
+			expect(apiModule.sendMessage).toHaveBeenCalledWith({
+				sessionId: "session-1",
+				prompt: [{ type: "text", text: "Hello" }],
+				messageId: "user-msg-1",
+				revision: 1,
+				encryptionRequired: false,
+			});
 			expect(mockStore.finalizeAssistantMessage).toHaveBeenCalledWith(
 				"session-1",
 			);
 			expect(mockStore.setSending).toHaveBeenCalledWith("session-1", false);
 		});
 
-		it("marks the optimistic message failed and restores the draft on error", async () => {
+		it("passes the session revision and encryption requirement to the API", async () => {
+			vi.mocked(apiModule.sendMessage).mockResolvedValue({
+				stopReason: "end_turn",
+			});
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.sendMessageMutation.mutateAsync({
+				sessionId: "session-1",
+				prompt: [{ type: "text", text: "Encrypted" }],
+				messageId: "encrypted-msg-1",
+				revision: 9,
+				encryptionRequired: true,
+			});
+
+			expect(apiModule.sendMessage).toHaveBeenCalledWith({
+				sessionId: "session-1",
+				prompt: [{ type: "text", text: "Encrypted" }],
+				messageId: "encrypted-msg-1",
+				revision: 9,
+				encryptionRequired: true,
+			});
+		});
+
+		it("retains the message id when restoring a draft after a transient transport error", async () => {
 			vi.mocked(apiModule.sendMessage).mockRejectedValue(new Error("offline"));
 
 			const { result } = renderHook(() => useSessionMutations(mockStore), {
@@ -959,9 +1209,12 @@ describe("useSessionMutations", () => {
 					sessionId: "session-1",
 					prompt: [{ type: "text", text: "Hello" }],
 					messageId: "user-msg-1",
+					revision: 4,
+					encryptionRequired: false,
 					draft: {
 						input: "Hello",
 						inputContents: [{ type: "text", text: "Hello" }],
+						revision: 4,
 					},
 				}),
 			).rejects.toThrow("offline");
@@ -973,8 +1226,52 @@ describe("useSessionMutations", () => {
 			expect(mockUiStoreState.setChatDraft).toHaveBeenCalledWith("session-1", {
 				input: "Hello",
 				inputContents: [{ type: "text", text: "Hello" }],
+				messageId: "user-msg-1",
+				messageRevision: 4,
 			});
 			expect(mockStore.setAppError).toHaveBeenCalled();
+		});
+
+		it("restores an unknown-outcome draft without reusing the indeterminate message id", async () => {
+			const outcomeUnknown = {
+				code: "MESSAGE_OUTCOME_UNKNOWN" as const,
+				message:
+					"The previous delivery outcome is unknown. Send it again as a new message.",
+				retryable: false,
+				scope: "request" as const,
+			};
+			vi.mocked(apiModule.sendMessage).mockRejectedValue(
+				new apiModule.ApiError(outcomeUnknown),
+			);
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await expect(
+				result.current.sendMessageMutation.mutateAsync({
+					sessionId: "session-1",
+					prompt: [{ type: "text", text: "Hello" }],
+					messageId: "indeterminate-msg-1",
+					revision: 4,
+					encryptionRequired: false,
+					draft: {
+						input: "Hello",
+						inputContents: [{ type: "text", text: "Hello" }],
+						revision: 4,
+					},
+				}),
+			).rejects.toThrow(outcomeUnknown.message);
+
+			expect(mockStore.markUserMessageFailed).toHaveBeenCalledWith(
+				"session-1",
+				"indeterminate-msg-1",
+			);
+			expect(mockUiStoreState.setChatDraft).toHaveBeenCalledWith("session-1", {
+				input: "Hello",
+				inputContents: [{ type: "text", text: "Hello" }],
+			});
+			expect(mockStore.setAppError).toHaveBeenCalledWith(outcomeUnknown);
 		});
 
 		it("should handle undefined variables gracefully", async () => {
@@ -986,9 +1283,7 @@ describe("useSessionMutations", () => {
 				wrapper,
 			});
 
-			await result.current.sendMessageMutation.mutateAsync(
-				undefined as unknown as { sessionId: string; prompt: ContentBlock[] },
-			);
+			await result.current.sendMessageMutation.mutateAsync(undefined as never);
 
 			// Should not call finalizeAssistantMessage with undefined
 			// This test verifies the onSettled logic handles undefined correctly
@@ -1005,6 +1300,88 @@ describe("useSessionMutations", () => {
 			updatedAt: "2025-01-01T00:00:00Z",
 			revision: 5,
 		};
+
+		it("bootstraps the DEK returned by load before marking E2EE ready", async () => {
+			vi.mocked(apiModule.loadSession).mockResolvedValue({
+				...mockLoadResponse,
+				wrappedDek: "wrapped-load-revision-5",
+			});
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.loadSessionMutation.mutateAsync({
+				sessionId: "session-1",
+				cwd: "/project",
+				backendId: "backend-1",
+			});
+
+			expect(mockBootstrapSessionE2EE).toHaveBeenCalledWith(
+				"session-1",
+				"wrapped-load-revision-5",
+				5,
+			);
+			expect(mockStore.setSessionE2EEStatus).toHaveBeenCalledWith(
+				"session-1",
+				"ok",
+			);
+		});
+
+		it("keeps legacy load responses usable without E2EE metadata", async () => {
+			mockBootstrapSessionE2EE.mockReturnValueOnce("none");
+			vi.mocked(apiModule.loadSession).mockResolvedValue({
+				...mockLoadResponse,
+				revision: undefined,
+				wrappedDek: undefined,
+			});
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.loadSessionMutation.mutateAsync({
+				sessionId: "session-1",
+				cwd: "/project",
+				backendId: "backend-1",
+			});
+
+			expect(mockBootstrapSessionE2EE).toHaveBeenCalledWith(
+				"session-1",
+				undefined,
+				undefined,
+			);
+			expect(mockStore.setSessionE2EEStatus).toHaveBeenCalledWith(
+				"session-1",
+				"none",
+			);
+		});
+
+		it("applies metadata replacement and pinned-title state from load", async () => {
+			vi.mocked(apiModule.loadSession).mockResolvedValue({
+				...mockLoadResponse,
+				_meta: null,
+				isTitlePinned: true,
+			});
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.loadSessionMutation.mutateAsync({
+				sessionId: "session-1",
+				cwd: "/project",
+				backendId: "backend-1",
+			});
+
+			expect(mockStore.updateSessionMeta).toHaveBeenCalledWith(
+				"session-1",
+				expect.objectContaining({
+					_meta: null,
+					isTitlePinned: true,
+				}),
+			);
+		});
 
 		it("resets session when revision differs from current", async () => {
 			// Current session has revision 3, server returns 5
@@ -1097,6 +1474,44 @@ describe("useSessionMutations", () => {
 		});
 	});
 
+	describe("resumeSessionMutation", () => {
+		it("keeps the current revision content while refreshing session metadata", async () => {
+			mockChatStoreState.sessions = {
+				"session-1": { revision: 5 },
+			};
+			vi.mocked(apiModule.resumeSession).mockResolvedValue({
+				sessionId: "session-1",
+				title: "Resumed Session",
+				backendId: "backend-1",
+				backendLabel: "Backend 1",
+				createdAt: "2025-01-01T00:00:00Z",
+				updatedAt: "2025-01-02T00:00:00Z",
+				revision: 5,
+				wrappedDek: "wrapped-revision-5",
+			});
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+			await result.current.resumeSessionMutation.mutateAsync({
+				sessionId: "session-1",
+				cwd: "/project",
+				backendId: "backend-1",
+			});
+
+			expect(mockStore.resetSessionForRevision).not.toHaveBeenCalled();
+			expect(mockStore.updateSessionMeta).toHaveBeenCalledWith(
+				"session-1",
+				expect.objectContaining({ updatedAt: "2025-01-02T00:00:00Z" }),
+			);
+			expect(mockBootstrapSessionE2EE).toHaveBeenCalledWith(
+				"session-1",
+				"wrapped-revision-5",
+				5,
+			);
+		});
+	});
+
 	describe("reloadSessionMutation (conditional reset)", () => {
 		const mockReloadResponse = {
 			sessionId: "session-1",
@@ -1107,6 +1522,33 @@ describe("useSessionMutations", () => {
 			updatedAt: "2025-01-01T00:00:00Z",
 			revision: 7,
 		};
+
+		it("bootstraps the DEK returned by reload for its new revision", async () => {
+			vi.mocked(apiModule.reloadSession).mockResolvedValue({
+				...mockReloadResponse,
+				wrappedDek: "wrapped-reload-revision-7",
+			});
+
+			const { result } = renderHook(() => useSessionMutations(mockStore), {
+				wrapper,
+			});
+
+			await result.current.reloadSessionMutation.mutateAsync({
+				sessionId: "session-1",
+				cwd: "/project",
+				backendId: "backend-1",
+			});
+
+			expect(mockBootstrapSessionE2EE).toHaveBeenCalledWith(
+				"session-1",
+				"wrapped-reload-revision-7",
+				7,
+			);
+			expect(mockStore.setSessionE2EEStatus).toHaveBeenCalledWith(
+				"session-1",
+				"ok",
+			);
+		});
 
 		it("resets session when revision differs from current", async () => {
 			mockChatStoreState.sessions = {

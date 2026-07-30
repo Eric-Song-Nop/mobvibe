@@ -125,6 +125,7 @@ export function ToolCallGroup({
 								<ThoughtItemContent
 									key={item.id}
 									message={item as Extract<ChatMessage, { kind: "thought" }>}
+									onOpenFilePreview={onOpenFilePreview}
 								/>
 							);
 						})}

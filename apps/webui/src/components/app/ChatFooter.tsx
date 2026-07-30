@@ -1,5 +1,6 @@
 import {
 	ArrowUp01Icon,
+	Cancel01Icon,
 	Image01Icon,
 	StopIcon,
 } from "@hugeicons/core-free-icons";
@@ -8,6 +9,16 @@ import {
 	PROMPT_IMAGE_MIME_TYPES,
 	validatePromptImageBlocks,
 } from "@mobvibe/shared";
+import {
+	Attachment,
+	AttachmentAction,
+	AttachmentActions,
+	AttachmentContent,
+	AttachmentDescription,
+	AttachmentGroup,
+	AttachmentMedia,
+	AttachmentTitle,
+} from "@mobvibe/ui/attachment";
 import { badgeVariants } from "@mobvibe/ui/badge";
 import { Button } from "@mobvibe/ui/button";
 import {
@@ -30,6 +41,10 @@ import {
 import { useTranslation } from "react-i18next";
 import { CommandCombobox } from "@/components/app/CommandCombobox";
 import { ResourceCombobox } from "@/components/app/ResourceCombobox";
+import {
+	SessionConfigControls,
+	type SessionConfigValue,
+} from "@/components/app/SessionConfigControls";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { AvailableCommand, ContentBlock, ResourceLink } from "@/lib/acp";
 import {
@@ -51,8 +66,10 @@ export type ChatFooterProps = {
 	activeSessionId: string | undefined;
 	isModeSwitching: boolean;
 	isModelSwitching: boolean;
+	pendingConfigId?: string;
 	onModeChange: (modeId: string) => void;
 	onModelChange: (modelId: string) => void;
+	onSessionConfigChange: (configId: string, value: SessionConfigValue) => void;
 	onSend: () => void;
 	onCancel: () => void;
 };
@@ -430,8 +447,10 @@ export function ChatFooter({
 	activeSessionId,
 	isModeSwitching,
 	isModelSwitching,
+	pendingConfigId,
 	onModeChange,
 	onModelChange,
+	onSessionConfigChange,
 	onSend,
 	onCancel,
 }: ChatFooterProps) {
@@ -447,6 +466,13 @@ export function ChatFooter({
 	const availableModels = activeSession?.availableModels ?? [];
 	const availableModes = activeSession?.availableModes ?? [];
 	const availableCommands = activeSession?.availableCommands ?? [];
+	const configOptions = activeSession?.configOptions ?? [];
+	const hasConfigModel = configOptions.some(
+		(option) => option.type === "select" && option.category === "model",
+	);
+	const hasConfigMode = configOptions.some(
+		(option) => option.type === "select" && option.category === "mode",
+	);
 	const modelLabel = activeSession?.modelName ?? activeSession?.modelId;
 	const modeLabel = activeSession?.modeName ?? activeSession?.modeId;
 	const isReady = Boolean(
@@ -1221,42 +1247,41 @@ export function ChatFooter({
 					/>
 
 					{imageAttachments.length > 0 ? (
-						<div className="flex flex-wrap gap-2 border-b border-input px-2.5 py-2">
+						<AttachmentGroup className="border-b border-input px-2.5 py-2">
 							{imageAttachments.map((image, index) => (
-								<div
-									key={`${image.uri ?? "upload"}-${index}`}
-									className="bg-muted/40 flex items-start gap-2 border border-input p-2"
-								>
-									<img
-										src={`data:${image.mimeType};base64,${image.data}`}
-										alt={image.uri ?? `Attached image ${index + 1}`}
-										width={48}
-										height={48}
-										loading="lazy"
-										className="size-12 object-cover"
-									/>
-									<div className="flex min-w-0 flex-col gap-1">
-										<span className="max-w-40 truncate text-[11px] text-foreground">
+								<Attachment key={`${image.uri ?? "upload"}-${index}`} size="sm">
+									<AttachmentMedia variant="image">
+										<img
+											src={`data:${image.mimeType};base64,${image.data}`}
+											alt={image.uri ?? `Attached image ${index + 1}`}
+											width={32}
+											height={32}
+											loading="lazy"
+										/>
+									</AttachmentMedia>
+									<AttachmentContent>
+										<AttachmentTitle>
 											{image.uri
 												? (resolveFilePathFromUri(image.uri) ?? image.uri)
 												: `Image ${index + 1}`}
-										</span>
-										<span className="text-[10px] text-muted-foreground">
+										</AttachmentTitle>
+										<AttachmentDescription>
 											{image.mimeType}
-										</span>
-										<Button
+										</AttachmentDescription>
+									</AttachmentContent>
+									<AttachmentActions>
+										<AttachmentAction
 											type="button"
-											variant="ghost"
-											size="xs"
-											className="h-auto justify-start px-0 text-[10px]"
+											aria-label="Remove"
+											title="Remove"
 											onClick={() => handleRemoveImageAttachment(index)}
 										>
-											Remove
-										</Button>
-									</div>
-								</div>
+											<HugeiconsIcon icon={Cancel01Icon} aria-hidden="true" />
+										</AttachmentAction>
+									</AttachmentActions>
+								</Attachment>
 							))}
-						</div>
+						</AttachmentGroup>
 					) : null}
 
 					{attachmentError ? (
@@ -1289,7 +1314,13 @@ export function ChatFooter({
 
 					{/* Bottom toolbar */}
 					<div className="flex items-center gap-1 px-2 pb-2">
-						{availableModels.length > 0 ? (
+						<SessionConfigControls
+							options={configOptions}
+							disabled={!canMutateSession}
+							pendingConfigId={pendingConfigId}
+							onChange={onSessionConfigChange}
+						/>
+						{!hasConfigModel && availableModels.length > 0 ? (
 							<Select
 								value={activeSession?.modelId ?? ""}
 								onValueChange={onModelChange}
@@ -1309,13 +1340,13 @@ export function ChatFooter({
 									))}
 								</SelectContent>
 							</Select>
-						) : modelLabel ? (
+						) : !hasConfigModel && modelLabel ? (
 							<span className="max-w-32 truncate px-1 py-0.5 text-xs text-muted-foreground">
 								{modelLabel}
 							</span>
 						) : null}
 
-						{availableModes.length > 0 ? (
+						{!hasConfigMode && availableModes.length > 0 ? (
 							<Select
 								value={activeSession?.modeId ?? ""}
 								onValueChange={onModeChange}
@@ -1335,7 +1366,7 @@ export function ChatFooter({
 									))}
 								</SelectContent>
 							</Select>
-						) : modeLabel ? (
+						) : !hasConfigMode && modeLabel ? (
 							<span className="max-w-32 truncate px-1 py-0.5 text-xs text-muted-foreground">
 								{modeLabel}
 							</span>
@@ -1354,7 +1385,6 @@ export function ChatFooter({
 							<HugeiconsIcon
 								icon={Image01Icon}
 								strokeWidth={2}
-								className="size-4"
 								aria-hidden="true"
 							/>
 						</Button>
@@ -1372,7 +1402,6 @@ export function ChatFooter({
 							<HugeiconsIcon
 								icon={activeSession?.sending ? StopIcon : ArrowUp01Icon}
 								strokeWidth={2}
-								className="size-4"
 								aria-hidden="true"
 							/>
 							<span className="sr-only">

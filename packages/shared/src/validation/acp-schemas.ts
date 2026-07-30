@@ -7,7 +7,23 @@
  * - Error boundary payload capture
  */
 
-import { zSessionNotification } from "@agentclientprotocol/sdk/dist/schema/zod.gen.js";
+import type { SessionNotification } from "@agentclientprotocol/sdk";
+import { z } from "zod";
+
+// The SDK validates notifications at the transport boundary but no longer exports
+// its generated Zod schemas. WAL recovery only needs a resilient envelope check:
+// preserve the complete update payload (including future update variants) while
+// rejecting values that cannot be routed as session notifications.
+const sessionNotificationSchema = z
+	.object({
+		sessionId: z.string().min(1),
+		update: z
+			.object({
+				sessionUpdate: z.string().min(1),
+			})
+			.loose(),
+	})
+	.loose();
 
 /**
  * Validate a SessionNotification payload (e.g. from WAL backfill).
@@ -15,12 +31,12 @@ import { zSessionNotification } from "@agentclientprotocol/sdk/dist/schema/zod.g
  */
 export function parseSessionNotification(payload: unknown): {
 	success: boolean;
-	data?: unknown;
+	data?: SessionNotification;
 	error?: unknown;
 } {
-	const result = zSessionNotification.safeParse(payload);
+	const result = sessionNotificationSchema.safeParse(payload);
 	if (result.success) {
-		return { success: true, data: result.data };
+		return { success: true, data: result.data as SessionNotification };
 	}
 	return { success: false, error: result.error };
 }

@@ -1,6 +1,8 @@
 {
 	"common": {
 		"appName": "Mobvibe",
+		"languageSelector": "Language",
+		"skipToContent": "Skip to main content",
 		"languages": {
 			"zh": "Chinese",
 			"en": "English"
@@ -15,6 +17,8 @@
 	},
 	"sidebar": {
 		"closeSidebar": "Close sidebar",
+		"navigationDescription": "Browse the interactive Mobvibe feature demos.",
+		"navigationTitle": "Feature navigation",
 		"groups": {
 			"intro": "About Mobvibe",
 			"getting-started": "Getting Started",
@@ -36,7 +40,8 @@
 		"emptyState": "Select a feature to see it in action."
 	},
 	"footer": {
-		"placeholder": "Start your own session...",
+		"composerLabel": "Try the Mobvibe demo",
+		"placeholder": "Start your own session…",
 		"go": "Go"
 	},
 	"legal": {
@@ -64,6 +69,8 @@
 		"step1Title": "1. Install & Login",
 		"step1Description": "This installs the CLI and connects your machine to the gateway.",
 		"copyCommand": "Copy command",
+		"copyError": "Copy failed. Select and copy the command manually.",
+		"copySuccess": "Command copied.",
 		"step2Title": "2. Open Mobvibe",
 		"webApp": "Web App",
 		"androidApk": "Android APK",

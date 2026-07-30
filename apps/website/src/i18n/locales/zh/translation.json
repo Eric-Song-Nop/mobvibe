@@ -1,6 +1,8 @@
 {
 	"common": {
 		"appName": "Mobvibe",
+		"languageSelector": "语言",
+		"skipToContent": "跳转到主要内容",
 		"languages": {
 			"zh": "中文",
 			"en": "English"
@@ -15,6 +17,8 @@
 	},
 	"sidebar": {
 		"closeSidebar": "关闭侧边栏",
+		"navigationDescription": "浏览 Mobvibe 功能的交互演示。",
+		"navigationTitle": "功能导航",
 		"groups": {
 			"intro": "了解 Mobvibe",
 			"getting-started": "快速上手",
@@ -36,7 +40,8 @@
 		"emptyState": "选择一个功能来查看演示。"
 	},
 	"footer": {
-		"placeholder": "开始你自己的会话...",
+		"composerLabel": "试用 Mobvibe 演示",
+		"placeholder": "开始你自己的会话…",
 		"demoMode": "演示模式",
 		"go": "发送"
 	},
@@ -65,6 +70,8 @@
 		"step1Title": "1. 安装并登录",
 		"step1Description": "安装 CLI 并将你的机器连接到网关。",
 		"copyCommand": "复制命令",
+		"copyError": "复制失败，请手动选择并复制命令。",
+		"copySuccess": "命令已复制。",
 		"step2Title": "2. 打开 Mobvibe",
 		"webApp": "Web 应用",
 		"androidApk": "Android APK",

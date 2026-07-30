@@ -82,6 +82,7 @@ See `.env.example` for a fully commented template.
 | `POST` | `/acp/session/cancel` | Cancel running operation |
 | `POST` | `/acp/session/mode` | Change session mode |
 | `POST` | `/acp/session/model` | Change session model |
+| `POST` | `/acp/session/config-option` | Change a protocol-native session config option |
 
 ### Messaging
 
@@ -136,6 +137,7 @@ Events to CLI (RPC):
 - `rpc:session:cancel` - Cancel session
 - `rpc:session:mode` - Change mode
 - `rpc:session:model` - Change model
+- `rpc:session:config` - Change a protocol-native session config option
 - `rpc:message:send` - Send message
 - `rpc:permission:decision` - Permission decision
 - `rpc:fs:*` - File system operations

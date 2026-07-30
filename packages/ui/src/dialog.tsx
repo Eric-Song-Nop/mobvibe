@@ -65,6 +65,29 @@ function DialogClose({
 	return <DialogPrimitive.Close data-slot="dialog-close" {...props} />;
 }
 
+function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
+	return (
+		<div
+			data-slot="dialog-header"
+			className={cn("flex flex-col gap-1 text-left", className)}
+			{...props}
+		/>
+	);
+}
+
+function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
+	return (
+		<div
+			data-slot="dialog-footer"
+			className={cn(
+				"flex flex-col-reverse gap-2 sm:flex-row sm:justify-end",
+				className,
+			)}
+			{...props}
+		/>
+	);
+}
+
 function DialogTitle({
 	className,
 	...props
@@ -98,6 +121,8 @@ export {
 	DialogOverlay,
 	DialogContent,
 	DialogClose,
+	DialogFooter,
+	DialogHeader,
 	DialogTitle,
 	DialogDescription,
 };

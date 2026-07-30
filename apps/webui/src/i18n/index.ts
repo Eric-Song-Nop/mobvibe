@@ -22,6 +22,15 @@ export const resolveSupportedLanguage = (
 	return "en";
 };
 
+export const syncDocumentLanguage = (language?: string | null): void => {
+	if (typeof document === "undefined") {
+		return;
+	}
+	document.documentElement.lang = resolveSupportedLanguage(language);
+};
+
+i18n.on("languageChanged", syncDocumentLanguage);
+
 void i18n
 	.use(LanguageDetector)
 	.use(initReactI18next)
@@ -41,6 +50,7 @@ void i18n
 			caches: ["localStorage"],
 			lookupLocalStorage: I18N_STORAGE_KEY,
 		},
-	});
+	})
+	.then(() => syncDocumentLanguage(i18n.resolvedLanguage ?? i18n.language));
 
 export default i18n;

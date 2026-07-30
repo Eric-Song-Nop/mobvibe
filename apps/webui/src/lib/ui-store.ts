@@ -55,6 +55,10 @@ const SESSION_WIDTH_MAX = 520;
 export type ChatDraft = {
 	input: string;
 	inputContents: ContentBlock[];
+	/** Reused only when retrying an unchanged failed send. */
+	messageId?: string;
+	/** Revision that originally attempted messageId. */
+	messageRevision?: number;
 };
 
 export type CreateDialogMode = "session" | "agent-team";
@@ -76,6 +80,7 @@ type UiState = {
 	draftTitle: string;
 	draftBackendId?: string;
 	draftCwd?: string;
+	draftAdditionalDirectories: string[];
 	draftWorktreeEnabled: boolean;
 	draftWorktreeBranch: string;
 	draftWorktreeSuggestedBranch?: string;
@@ -99,6 +104,7 @@ type UiState = {
 	setDraftTitle: (value: string) => void;
 	setDraftBackendId: (value?: string) => void;
 	setDraftCwd: (value?: string) => void;
+	setDraftAdditionalDirectories: (value: string[]) => void;
 	setDraftWorktreeEnabled: (value: boolean) => void;
 	setDraftWorktreeBranch: (value: string) => void;
 	setDraftWorktreeSuggestedBranch: (value?: string) => void;
@@ -126,6 +132,7 @@ export const useUiStore = create<UiState>((set) => ({
 	draftTitle: "",
 	draftBackendId: undefined,
 	draftCwd: undefined,
+	draftAdditionalDirectories: [],
 	draftWorktreeEnabled: false,
 	draftWorktreeBranch: "",
 	draftWorktreeSuggestedBranch: undefined,
@@ -160,6 +167,8 @@ export const useUiStore = create<UiState>((set) => ({
 	setDraftTitle: (value) => set({ draftTitle: value }),
 	setDraftBackendId: (value) => set({ draftBackendId: value }),
 	setDraftCwd: (value) => set({ draftCwd: value }),
+	setDraftAdditionalDirectories: (value) =>
+		set({ draftAdditionalDirectories: value }),
 	setDraftWorktreeEnabled: (value) => set({ draftWorktreeEnabled: value }),
 	setDraftWorktreeBranch: (value) => set({ draftWorktreeBranch: value }),
 	setDraftWorktreeSuggestedBranch: (value) =>

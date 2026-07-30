@@ -1,10 +1,4 @@
-import path from "node:path";
-import {
-	AppError,
-	createErrorDetail,
-	createInternalError,
-	type ErrorDetail,
-} from "@mobvibe/shared";
+import { createErrorDetail, createInternalError } from "@mobvibe/shared";
 import type { Router } from "express";
 import { logger } from "../lib/logger.js";
 import {
@@ -14,6 +8,11 @@ import {
 } from "../middleware/auth.js";
 import type { CliRegistry } from "../services/cli-registry.js";
 import type { TeamRouter } from "../services/team-router.js";
+import {
+	type ErrorResponse,
+	respondAppError,
+	respondError,
+} from "./error-response.js";
 
 const FORBIDDEN_KEYS = new Set([
 	"prompt",
@@ -27,14 +26,6 @@ const FORBIDDEN_KEYS = new Set([
 	"dek",
 	"secret",
 ]);
-
-const respondError = (
-	response: { status: (code: number) => { json: (body: unknown) => void } },
-	detail: ErrorDetail,
-	status = 500,
-) => {
-	response.status(status).json({ error: detail });
-};
 
 const buildRequestValidationError = (message = "Invalid request") =>
 	createErrorDetail({
@@ -90,59 +81,10 @@ const optionalString = (value: unknown): string | undefined => {
 	return trimmed.length > 0 ? trimmed : undefined;
 };
 
-const normalizeRelativeCwd = (value: unknown): string | undefined => {
-	const trimmed = optionalString(value);
-	if (!trimmed) return undefined;
-	if (path.posix.isAbsolute(trimmed) || path.win32.isAbsolute(trimmed)) {
-		throw new AppError(
-			buildRequestValidationError(
-				"worktree.relativeCwd must be a relative subdirectory",
-			),
-			400,
-		);
+const mapRouteError = (response: ErrorResponse, error: unknown) => {
+	if (respondAppError(response, error)) {
+		return;
 	}
-	const segments = trimmed.split(/[/\\]+/).filter(Boolean);
-	if (
-		segments.length === 0 ||
-		segments.some((segment) => segment === "." || segment === "..")
-	) {
-		throw new AppError(
-			buildRequestValidationError(
-				"worktree.relativeCwd must be a normalized subdirectory path",
-			),
-			400,
-		);
-	}
-	return segments.join("/");
-};
-
-const parseWorktreeOptions = (value: unknown) => {
-	if (!value || typeof value !== "object" || Array.isArray(value)) {
-		return undefined;
-	}
-	const worktree = value as Record<string, unknown>;
-	const sourceCwd = optionalString(worktree.sourceCwd);
-	if (!sourceCwd) return undefined;
-	const branch = optionalString(worktree.branch);
-	const baseBranch = optionalString(worktree.baseBranch);
-	if (branch?.startsWith("-") || baseBranch?.startsWith("-")) {
-		throw new AppError(
-			buildRequestValidationError("Branch name cannot start with '-'"),
-			400,
-		);
-	}
-	return {
-		branch,
-		baseBranch,
-		sourceCwd,
-		relativeCwd: normalizeRelativeCwd(worktree.relativeCwd),
-	};
-};
-
-const mapRouteError = (
-	response: { status: (code: number) => { json: (body: unknown) => void } },
-	error: unknown,
-) => {
 	const message = getErrorMessage(error);
 	if (error instanceof AppError) {
 		respondError(response, error.detail, error.status);

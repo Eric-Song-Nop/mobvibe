@@ -115,6 +115,21 @@ describe("E2EEManager", () => {
 		);
 	});
 
+	it("forgetSession zeroizes only the selected session DEK", async () => {
+		const sessionDek = new Uint8Array([10, 20, 30]);
+		mockUnwrapDEK.mockReturnValueOnce(sessionDek);
+		await e2ee.addPairedSecret(btoa("test-secret"));
+		e2ee.unwrapSessionDek("session-forget", "wrapped-dek", 1);
+		e2ee.unwrapSessionDek("session-keep", "wrapped-dek", 1);
+
+		e2ee.forgetSession("session-forget");
+
+		expect(sessionDek).toEqual(new Uint8Array([0, 0, 0]));
+		expect(e2ee.hasSessionDek("session-forget", 1)).toBe(false);
+		expect(e2ee.hasSessionDek("session-keep", 1)).toBe(true);
+		expect(e2ee.isEnabled()).toBe(true);
+	});
+
 	it("bootstrapSessionE2EE returns none without wrappedDek", () => {
 		expect(bootstrapSessionE2EE("session-none")).toBe("none");
 		expect(mockUnwrapDEK).not.toHaveBeenCalled();
@@ -144,7 +159,7 @@ describe("E2EEManager", () => {
 
 	it("decryptEvent decrypts encrypted payloads", async () => {
 		await e2ee.addPairedSecret(btoa("test-secret"));
-		e2ee.unwrapSessionDek("session-1", "wrapped-dek");
+		e2ee.unwrapSessionDek("session-1", "wrapped-dek", 1);
 
 		const original = { text: "decrypted" };
 		const encrypted = { t: "encrypted", c: btoa(JSON.stringify(original)) };
@@ -155,28 +170,35 @@ describe("E2EEManager", () => {
 		expect(mockDecryptPayload).toHaveBeenCalled();
 	});
 
-	it("decryptEvent logs warning on failure", async () => {
+	it("decryptEvent surfaces failure instead of returning ciphertext as applied", async () => {
 		await e2ee.addPairedSecret(btoa("test-secret"));
-		e2ee.unwrapSessionDek("session-1", "wrapped-dek");
+		e2ee.unwrapSessionDek("session-1", "wrapped-dek", 1);
 
 		mockDecryptPayload.mockImplementationOnce(() => {
 			throw new Error("decrypt failed");
 		});
 
-		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const event = makeEvent("session-1", {
 			t: "encrypted",
 			c: "bad-data",
 		});
 
-		const result = e2ee.decryptEvent(event);
-		expect(result).toEqual(event);
-		expect(warnSpy).toHaveBeenCalledWith(
-			"[E2EE] Failed to decrypt event",
-			"session-1",
-			expect.any(Error),
-		);
-		warnSpy.mockRestore();
+		expect(() => e2ee.decryptEvent(event)).toThrow("decrypt failed");
+	});
+
+	it("requires the DEK for the event revision", async () => {
+		await e2ee.addPairedSecret(btoa("test-secret"));
+		e2ee.unwrapSessionDek("session-1", "wrapped-revision-1", 1);
+
+		const event = {
+			...makeEvent("session-1", { t: "encrypted", c: "x" }),
+			revision: 2,
+		};
+
+		expect(e2ee.hasSessionDek("session-1", 1)).toBe(true);
+		expect(e2ee.hasSessionDek("session-1", 2)).toBe(false);
+		expect(e2ee.decryptEvent(event)).toBe(event);
+		expect(mockDecryptPayload).not.toHaveBeenCalled();
 	});
 
 	it("loadFromStorage restores state from localStorage", async () => {
@@ -433,9 +455,71 @@ describe("E2EEManager", () => {
 			});
 		});
 
+		it("fails closed instead of encrypting with a DEK from another revision", async () => {
+			await e2ee.addPairedSecret(btoa("test-secret"));
+			e2ee.unwrapSessionDek("session-1", "wrapped-revision-1", 1);
+
+			expect(() =>
+				e2ee.encryptPayloadForSession(
+					"session-1",
+					[{ type: "text", text: "revision two" }],
+					2,
+					true,
+				),
+			).toThrow("matching session encryption key");
+			expect(mockEncryptPayload).not.toHaveBeenCalled();
+		});
+
+		it("fails closed when an encrypted session has no DEK", () => {
+			expect(() =>
+				e2ee.encryptPayloadForSession(
+					"session-no-dek",
+					[{ type: "text", text: "secret" }],
+					3,
+					true,
+				),
+			).toThrow("matching session encryption key");
+			expect(mockEncryptPayload).not.toHaveBeenCalled();
+		});
+
+		it("fails closed when encryption is required without a revision", async () => {
+			await e2ee.addPairedSecret(btoa("test-secret"));
+			e2ee.unwrapSessionDek(
+				"session-unknown-revision",
+				"wrapped-revision-1",
+				1,
+			);
+
+			expect(() =>
+				e2ee.encryptPayloadForSession(
+					"session-unknown-revision",
+					[{ type: "text", text: "unknown revision" }],
+					undefined,
+					true,
+				),
+			).toThrow("matching session encryption key");
+			expect(mockEncryptPayload).not.toHaveBeenCalled();
+		});
+
+		it("keeps legacy plaintext sessions plaintext despite a stale cached DEK", async () => {
+			await e2ee.addPairedSecret(btoa("test-secret"));
+			e2ee.unwrapSessionDek("legacy-session", "wrapped-revision-1", 1);
+
+			const payload = [{ type: "text", text: "legacy gateway" }];
+			const result = e2ee.encryptPayloadForSession(
+				"legacy-session",
+				payload,
+				undefined,
+				false,
+			);
+
+			expect(result).toBe(payload);
+			expect(mockEncryptPayload).not.toHaveBeenCalled();
+		});
+
 		it("round-trip: encrypt then decrypt same DEK", async () => {
 			await e2ee.addPairedSecret(btoa("test-secret"));
-			e2ee.unwrapSessionDek("session-rt", "wrapped-dek");
+			e2ee.unwrapSessionDek("session-rt", "wrapped-dek", 1);
 
 			const original = [{ type: "text", text: "round trip" }];
 			const encrypted = e2ee.encryptPayloadForSession("session-rt", original);

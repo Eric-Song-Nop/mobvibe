@@ -216,36 +216,102 @@ const MIGRATIONS = [
 	{
 		version: 8,
 		up: `
-      CREATE TABLE IF NOT EXISTS agent_team_tool_intents (
-        intent_id TEXT PRIMARY KEY,
-        agent_team_id TEXT NOT NULL,
-        requested_by_member_id TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        payload_local_json TEXT NOT NULL,
-        status TEXT NOT NULL,
-        source_refs_json TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY (agent_team_id) REFERENCES agent_teams(agent_team_id),
-        FOREIGN KEY (requested_by_member_id) REFERENCES agent_team_members(member_id)
-      );
+			-- Completed message sends are durable idempotency records. The prompt
+			-- itself remains in the session event WAL; only the terminal result is
+			-- stored here so a gateway retry cannot execute the agent twice.
+			CREATE TABLE IF NOT EXISTS message_send_results (
+				session_id TEXT NOT NULL,
+				message_id TEXT NOT NULL,
+				stop_reason TEXT NOT NULL,
+				completed_at TEXT NOT NULL,
+				PRIMARY KEY (session_id, message_id)
+			);
 
-      CREATE INDEX IF NOT EXISTS idx_agent_team_tool_intents_team
-        ON agent_team_tool_intents (agent_team_id, created_at);
-    `,
+			CREATE INDEX IF NOT EXISTS idx_message_send_results_completed_at
+				ON message_send_results (completed_at);
+		`,
 	},
 	{
 		version: 9,
 		up: `
-      ALTER TABLE agent_team_mailbox_messages ADD COLUMN wake_error_json TEXT;
+			-- DEKs are never stored in plaintext. wrapped_dek is a sealed box
+			-- encrypted to the content keypair derived from the CLI master secret.
+			CREATE TABLE IF NOT EXISTS session_revision_keys (
+				session_id TEXT NOT NULL,
+				revision INTEGER NOT NULL,
+				wrapped_dek TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				PRIMARY KEY (session_id, revision)
+			);
 
-      CREATE INDEX IF NOT EXISTS idx_agent_team_mailbox_unread
-        ON agent_team_mailbox_messages (agent_team_id, to_member_id, read_at, created_at);
-    `,
+			CREATE INDEX IF NOT EXISTS idx_session_revision_keys_session
+				ON session_revision_keys (session_id, revision);
+		`,
+	},
+	{
+		version: 10,
+		up: `
+			-- A durable claim closes the crash window between starting an ACP
+			-- prompt and recording its terminal result. A claim left behind by a
+			-- terminated daemon is intentionally treated as indeterminate instead
+			-- of executing the same external side effects again.
+			CREATE TABLE IF NOT EXISTS message_send_claims (
+				session_id TEXT NOT NULL,
+				message_id TEXT NOT NULL,
+				claim_id TEXT NOT NULL,
+				claimed_at TEXT NOT NULL,
+				PRIMARY KEY (session_id, message_id)
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_message_send_claims_claimed_at
+				ON message_send_claims (claimed_at);
+		`,
+	},
+	{
+		version: 11,
+		up: `
+			-- Bind a WAL database to the non-secret public identity derived from
+			-- the master secret. A daemon using another account/key must fail
+			-- closed instead of advertising or replaying the previous user's data.
+			CREATE TABLE IF NOT EXISTS wal_encryption_identity (
+				id INTEGER PRIMARY KEY CHECK (id = 1),
+				key_identity TEXT NOT NULL,
+				bound_at TEXT NOT NULL
+			);
+		`,
+	},
+	{
+		version: 12,
+		up: `
+			-- ACP additionalDirectories is complete ordered session state. Keep it
+			-- with both attached/WAL sessions and agent-discovered sessions.
+			ALTER TABLE sessions
+				ADD COLUMN additional_directories_json TEXT NOT NULL DEFAULT '[]';
+			ALTER TABLE discovered_sessions
+				ADD COLUMN additional_directories_json TEXT NOT NULL DEFAULT '[]';
+		`,
+	},
+	{
+		version: 13,
+		up: `
+			-- session/list metadata is a complete opaque snapshot. Persist it so
+			-- detached sessions keep the same metadata across daemon restarts.
+			ALTER TABLE discovered_sessions
+				ADD COLUMN meta_json TEXT;
+		`,
+	},
+	{
+		version: 14,
+		up: `
+			-- Preserve the bounded, agent-reported prompt usage snapshot with the
+			-- durable idempotency result. Legacy completed sends remain NULL.
+			ALTER TABLE message_send_results
+				ADD COLUMN usage_json TEXT;
+		`,
 	},
 ];
 
-export function runMigrations(db: Database): void {
+export function runMigrations(db: Database): number {
 	// Enable WAL mode for better concurrency
 	db.exec("PRAGMA journal_mode = WAL");
 	db.exec("PRAGMA synchronous = NORMAL");
@@ -260,14 +326,19 @@ export function runMigrations(db: Database): void {
 	} catch {
 		// Table doesn't exist yet, version is 0
 	}
+	const initialVersion = currentVersion;
 
 	// Run pending migrations
 	for (const migration of MIGRATIONS) {
 		if (migration.version > currentVersion) {
-			db.exec(migration.up);
-			db.exec(
-				`INSERT INTO schema_version (version) VALUES (${migration.version})`,
-			);
+			const applyMigration = db.transaction(() => {
+				db.exec(migration.up);
+				db.exec(
+					`INSERT INTO schema_version (version) VALUES (${migration.version})`,
+				);
+			});
+			applyMigration();
 		}
 	}
+	return initialVersion;
 }

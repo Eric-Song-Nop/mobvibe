@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as apiModule from "@/lib/api";
 import type { ChatSession } from "@/lib/chat-store";
 import { createDefaultContentBlocks } from "@/lib/content-block-utils";
@@ -24,6 +24,7 @@ const mockUiStoreState = vi.hoisted(() => ({
 	draftTitle: "",
 	draftBackendId: undefined as string | undefined,
 	draftCwd: undefined as string | undefined,
+	draftAdditionalDirectories: [] as string[],
 	draftWorktreeEnabled: false,
 	draftWorktreeBranch: "",
 	draftWorktreeSuggestedBranch: undefined as string | undefined,
@@ -35,6 +36,8 @@ const mockUiStoreState = vi.hoisted(() => ({
 		{
 			input: string;
 			inputContents: ReturnType<typeof createDefaultContentBlocks>;
+			messageId?: string;
+			messageRevision?: number;
 		}
 	>,
 	clearChatDraft: vi.fn<(sessionId: string) => void>(),
@@ -72,6 +75,7 @@ const createMockUiActions = (): UseSessionHandlersParams["uiActions"] => ({
 	setDraftTitle: vi.fn(),
 	setDraftBackendId: vi.fn(),
 	setDraftCwd: vi.fn(),
+	setDraftAdditionalDirectories: vi.fn(),
 	resetDraftWorktree: vi.fn(),
 	setCreateDialogMode: vi.fn(),
 	setDraftTeamTarget: vi.fn(),
@@ -79,6 +83,7 @@ const createMockUiActions = (): UseSessionHandlersParams["uiActions"] => ({
 });
 
 const createMockChatActions = (): UseSessionHandlersParams["chatActions"] => ({
+	setActiveSessionId: vi.fn(),
 	setAppError: vi.fn(),
 	renameSession: vi.fn(),
 	setError: vi.fn(),
@@ -98,10 +103,17 @@ const createMockMutations = (): UseSessionHandlersParams["mutations"] => ({
 	},
 	renameSessionMutation: { mutate: vi.fn() },
 	archiveSessionMutation: { mutateAsync: vi.fn() },
+	closeSessionMutation: { mutateAsync: vi.fn() },
+	deleteSessionMutation: {
+		mutateAsync: vi.fn(),
+		isPending: false,
+		variables: undefined,
+	},
 	bulkArchiveSessionsMutation: { mutateAsync: vi.fn(), isPending: false },
 	cancelSessionMutation: { mutate: vi.fn(), mutateAsync: vi.fn() },
 	setSessionModeMutation: { mutate: vi.fn(), isPending: false },
 	setSessionModelMutation: { mutate: vi.fn(), isPending: false },
+	setSessionConfigOptionMutation: { mutate: vi.fn(), isPending: false },
 	sendMessageMutation: { mutate: vi.fn() },
 	permissionDecisionMutation: { mutate: vi.fn() },
 });
@@ -118,6 +130,7 @@ const createBaseSession = (overrides: Partial<ChatSession> = {}): ChatSession =>
 		canceling: false,
 		isLoading: false,
 		e2eeStatus: "none",
+		revision: 1,
 		input: "",
 		inputContents: [],
 		messages: [],
@@ -178,6 +191,7 @@ describe("useSessionHandlers — handleOpenCreateDialog", () => {
 		mockUiStoreState.draftTitle = "";
 		mockUiStoreState.draftBackendId = undefined;
 		mockUiStoreState.draftCwd = undefined;
+		mockUiStoreState.draftAdditionalDirectories = [];
 		mockUiStoreState.draftWorktreeEnabled = false;
 		mockUiStoreState.draftWorktreeBranch = "";
 		mockUiStoreState.draftWorktreeSuggestedBranch = undefined;
@@ -373,6 +387,79 @@ describe("useSessionHandlers — handleOpenCreateDialog", () => {
 			"/projects/repo/apps/webui",
 		);
 	});
+
+	describe("handleDeleteSession", () => {
+		afterEach(() => {
+			mockChatStoreState.sessions = {};
+		});
+
+		it("rejects calls when the backend did not advertise delete", async () => {
+			const session = createBaseSession();
+			mockChatStoreState.sessions = { "session-1": session };
+			const { result } = renderHandlers({
+				activeSessionId: "session-1",
+				activeSession: session,
+				sessionList: [session],
+				machines: {
+					"machine-1": {
+						machineId: "machine-1",
+						connected: true,
+						backendCapabilities: {
+							"backend-1": { list: true, load: true, delete: false },
+						},
+					},
+				},
+			});
+
+			let deleted = true;
+			await act(async () => {
+				deleted = await result.current.handleDeleteSession("session-1");
+			});
+
+			expect(deleted).toBe(false);
+			expect(
+				mutations.deleteSessionMutation.mutateAsync,
+			).not.toHaveBeenCalled();
+			expect(chatActions.setAppError).toHaveBeenCalled();
+		});
+
+		it("selects the adjacent session after deleting the active session", async () => {
+			const session = createBaseSession();
+			const nextSession = createBaseSession({
+				sessionId: "session-2",
+				title: "Session 2",
+			});
+			mockChatStoreState.sessions = {
+				"session-1": session,
+				"session-2": nextSession,
+			};
+			vi.mocked(mutations.deleteSessionMutation.mutateAsync).mockResolvedValue({
+				ok: true,
+			});
+			const { result } = renderHandlers({
+				activeSessionId: "session-1",
+				activeSession: session,
+				sessionList: [session, nextSession],
+				machines: {
+					"machine-1": {
+						machineId: "machine-1",
+						connected: true,
+						backendCapabilities: {
+							"backend-1": { list: true, load: true, delete: true },
+						},
+					},
+				},
+			});
+
+			let deleted = false;
+			await act(async () => {
+				deleted = await result.current.handleDeleteSession("session-1");
+			});
+
+			expect(deleted).toBe(true);
+			expect(chatActions.setActiveSessionId).toHaveBeenCalledWith("session-2");
+		});
+	});
 });
 
 describe("useSessionHandlers — handleCreateSession", () => {
@@ -427,6 +514,7 @@ describe("useSessionHandlers — handleCreateSession", () => {
 		mockUiStoreState.draftTitle = "Feature Session";
 		mockUiStoreState.draftBackendId = "backend-1";
 		mockUiStoreState.draftCwd = "/projects/repo/apps/webui";
+		mockUiStoreState.draftAdditionalDirectories = [];
 		mockUiStoreState.draftWorktreeEnabled = true;
 		mockUiStoreState.draftWorktreeBranch = "feat/live-cwd";
 		mockUiStoreState.draftWorktreeSuggestedBranch = undefined;
@@ -578,6 +666,45 @@ describe("useSessionHandlers — handleCreateSession", () => {
 			},
 		});
 	});
+
+	it("submits normalized additional directories only for a capable backend", async () => {
+		mockUiStoreState.draftWorktreeEnabled = false;
+		mockUiStoreState.draftAdditionalDirectories = [
+			"/projects/repo/apps/webui",
+			"/data",
+			"/data",
+			"/shared",
+		];
+		vi.mocked(mutations.createSessionMutation.mutateAsync).mockResolvedValue(
+			{},
+		);
+		const { result } = renderHandlers({
+			machines: {
+				"machine-1": {
+					machineId: "machine-1",
+					connected: true,
+					backendCapabilities: {
+						"backend-1": {
+							list: true,
+							load: true,
+							additionalDirectories: true,
+						},
+					},
+				},
+			},
+		});
+
+		await result.current.handleCreateSession();
+
+		expect(mutations.createSessionMutation.mutateAsync).toHaveBeenCalledWith({
+			backendId: "backend-1",
+			cwd: "/projects/repo/apps/webui",
+			additionalDirectories: ["/data", "/shared"],
+			title: "Feature Session",
+			machineId: "machine-1",
+			worktree: undefined,
+		});
+	});
 });
 
 describe("useSessionHandlers — handleSend", () => {
@@ -668,9 +795,107 @@ describe("useSessionHandlers — handleSend", () => {
 			sessionId: "session-1",
 			prompt: promptContents,
 			messageId: expect.any(String),
+			revision: 1,
+			encryptionRequired: false,
 			draft: {
 				input: "Ship it",
 				inputContents: promptContents,
+				revision: 1,
+			},
+		});
+	});
+
+	it("reuses the failed send id when retrying an unchanged restored draft", async () => {
+		const promptContents = createDefaultContentBlocks("Retry exactly once");
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Retry exactly once",
+			inputContents: promptContents,
+			messageId: "failed-msg-1",
+			messageRevision: 7,
+		};
+
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({ revision: 7 }),
+		});
+
+		await act(async () => {
+			await result.current.handleSend();
+		});
+
+		expect(chatActions.addUserMessage).toHaveBeenCalledWith(
+			"session-1",
+			"Retry exactly once",
+			expect.objectContaining({ messageId: "failed-msg-1" }),
+		);
+		expect(mutations.sendMessageMutation.mutate).toHaveBeenCalledWith({
+			sessionId: "session-1",
+			prompt: promptContents,
+			messageId: "failed-msg-1",
+			revision: 7,
+			encryptionRequired: false,
+			draft: {
+				input: "Retry exactly once",
+				inputContents: promptContents,
+				revision: 7,
+			},
+		});
+	});
+
+	it("pins encrypted sends to the ready session revision", async () => {
+		const promptContents = createDefaultContentBlocks("Encrypted prompt");
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Encrypted prompt",
+			inputContents: promptContents,
+		};
+
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({
+				e2eeStatus: "ok",
+				revision: 12,
+			}),
+		});
+
+		await act(async () => {
+			await result.current.handleSend();
+		});
+
+		expect(mutations.sendMessageMutation.mutate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				revision: 12,
+				encryptionRequired: true,
+			}),
+		);
+	});
+
+	it("retries an older failed message id on the current revision", async () => {
+		const promptContents = createDefaultContentBlocks(
+			"Run in the new revision",
+		);
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Run in the new revision",
+			inputContents: promptContents,
+			messageId: "failed-msg-from-revision-7",
+			messageRevision: 7,
+		};
+
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({ revision: 8 }),
+		});
+
+		await act(async () => {
+			await result.current.handleSend();
+		});
+
+		expect(mutations.sendMessageMutation.mutate).toHaveBeenCalledWith({
+			sessionId: "session-1",
+			prompt: promptContents,
+			messageId: "failed-msg-from-revision-7",
+			revision: 8,
+			encryptionRequired: false,
+			draft: {
+				input: "Run in the new revision",
+				inputContents: promptContents,
+				revision: 8,
 			},
 		});
 	});
@@ -701,6 +926,56 @@ describe("useSessionHandlers — handleSend", () => {
 		const { result } = renderHandlers({
 			activeSession: createBaseSession({
 				e2eeStatus: undefined,
+			}),
+		});
+
+		await act(async () => {
+			await result.current.handleSend();
+		});
+
+		expect(chatActions.setError).toHaveBeenCalledWith(
+			"session-1",
+			buildSessionNotReadyError(),
+		);
+		expect(chatActions.setSending).not.toHaveBeenCalled();
+		expect(mutations.sendMessageMutation.mutate).not.toHaveBeenCalled();
+	});
+
+	it("does not send an encrypted session whose revision is unresolved", async () => {
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Top secret prompt",
+			inputContents: createDefaultContentBlocks("Top secret prompt"),
+		};
+
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({
+				e2eeStatus: "ok",
+				revision: undefined,
+			}),
+		});
+
+		await act(async () => {
+			await result.current.handleSend();
+		});
+
+		expect(chatActions.setError).toHaveBeenCalledWith(
+			"session-1",
+			buildSessionNotReadyError(),
+		);
+		expect(chatActions.setSending).not.toHaveBeenCalled();
+		expect(mutations.sendMessageMutation.mutate).not.toHaveBeenCalled();
+	});
+
+	it("does not send a no-E2EE session whose revision is unresolved", async () => {
+		mockUiStoreState.chatDrafts["session-1"] = {
+			input: "Plaintext prompt",
+			inputContents: createDefaultContentBlocks("Plaintext prompt"),
+		};
+
+		const { result } = renderHandlers({
+			activeSession: createBaseSession({
+				e2eeStatus: "none",
+				revision: undefined,
 			}),
 		});
 
@@ -753,9 +1028,12 @@ describe("useSessionHandlers — handleSend", () => {
 			sessionId: "session-1",
 			prompt: promptContents,
 			messageId: expect.any(String),
+			revision: 1,
+			encryptionRequired: false,
 			draft: {
 				input: "",
 				inputContents: promptContents,
+				revision: 1,
 			},
 		});
 	});
@@ -797,9 +1075,12 @@ describe("useSessionHandlers — handleSend", () => {
 			sessionId: "session-1",
 			prompt: promptContents,
 			messageId: expect.any(String),
+			revision: 1,
+			encryptionRequired: false,
 			draft: {
 				input: "",
 				inputContents: promptContents,
+				revision: 1,
 			},
 		});
 	});
@@ -839,9 +1120,12 @@ describe("useSessionHandlers — handleSend", () => {
 			sessionId: "session-1",
 			prompt: promptContents,
 			messageId: expect.any(String),
+			revision: 1,
+			encryptionRequired: false,
 			draft: {
 				input: "Ship it",
 				inputContents: promptContents,
+				revision: 1,
 			},
 		});
 	});
@@ -987,6 +1271,77 @@ describe("useSessionHandlers — mode and model switching", () => {
 			sessionId: "session-1",
 			modelId: "model-new",
 		});
+	});
+
+	it("sets select and boolean session config options with protocol-native shapes", async () => {
+		const session = createBaseSession({
+			configOptions: [
+				{
+					type: "select",
+					id: "model",
+					name: "Model",
+					currentValue: "model-old",
+					options: [
+						{ value: "model-old", name: "Old" },
+						{ value: "model-new", name: "New" },
+					],
+				},
+				{
+					type: "boolean",
+					id: "safe-mode",
+					name: "Safe mode",
+					currentValue: false,
+				},
+			],
+		});
+		mockChatStoreState.sessions = { "session-1": session };
+		const { result } = renderHandlers({ activeSession: session });
+
+		await act(async () => {
+			await result.current.handleSessionConfigChange("model", "model-new");
+			await result.current.handleSessionConfigChange("safe-mode", true);
+		});
+
+		expect(
+			mutations.setSessionConfigOptionMutation.mutate,
+		).toHaveBeenNthCalledWith(1, {
+			sessionId: "session-1",
+			configId: "model",
+			value: "model-new",
+		});
+		expect(
+			mutations.setSessionConfigOptionMutation.mutate,
+		).toHaveBeenNthCalledWith(2, {
+			sessionId: "session-1",
+			configId: "safe-mode",
+			type: "boolean",
+			value: true,
+		});
+	});
+
+	it("ignores unchanged, unknown, or mismatched session config values", async () => {
+		const session = createBaseSession({
+			configOptions: [
+				{
+					type: "boolean",
+					id: "safe-mode",
+					name: "Safe mode",
+					currentValue: false,
+				},
+			],
+		});
+		mockChatStoreState.sessions = { "session-1": session };
+		const { result } = renderHandlers({ activeSession: session });
+
+		await act(async () => {
+			await result.current.handleSessionConfigChange("safe-mode", false);
+			await result.current.handleSessionConfigChange("safe-mode", "yes");
+			await result.current.handleSessionConfigChange("missing", true);
+		});
+
+		expect(
+			mutations.setSessionConfigOptionMutation.mutate,
+		).not.toHaveBeenCalled();
 	});
 
 	it("does not switch mode when activation does not attach", async () => {

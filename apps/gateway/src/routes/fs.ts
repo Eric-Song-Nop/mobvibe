@@ -1,8 +1,4 @@
-import {
-	createErrorDetail,
-	createInternalError,
-	type ErrorDetail,
-} from "@mobvibe/shared";
+import { createErrorDetail, createInternalError } from "@mobvibe/shared";
 import type { Router } from "express";
 import {
 	type AuthenticatedRequest,
@@ -10,20 +6,13 @@ import {
 	requireAuth,
 } from "../middleware/auth.js";
 import type { SessionRouter } from "../services/session-router.js";
+import { respondAppError, respondError } from "./error-response.js";
 
 const getErrorMessage = (error: unknown) => {
 	if (error instanceof Error) {
 		return error.message;
 	}
 	return String(error);
-};
-
-const respondError = (
-	response: { status: (code: number) => { json: (body: unknown) => void } },
-	detail: ErrorDetail,
-	status = 500,
-) => {
-	response.status(status).json({ error: detail });
 };
 
 const buildRequestValidationError = (message = "Invalid request") =>
@@ -69,6 +58,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 			const result = await sessionRouter.getHostFsRoots({ machineId }, userId);
 			response.json(result);
 		} catch (error) {
+			if (respondAppError(response, error)) return;
 			const message = getErrorMessage(error);
 			if (message.includes("Machine not found")) {
 				respondError(response, buildAuthorizationError(message), 404);
@@ -111,6 +101,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 			);
 			response.json(result);
 		} catch (error) {
+			if (respondAppError(response, error)) return;
 			const message = getErrorMessage(error);
 			if (message.includes("Machine not found")) {
 				respondError(response, buildAuthorizationError(message), 404);
@@ -146,6 +137,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				const result = await sessionRouter.getFsRoots(sessionId, userId);
 				response.json(result);
 			} catch (error) {
+				if (respondAppError(response, error)) return;
 				const message = getErrorMessage(error);
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
@@ -187,6 +179,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				);
 				response.json(result);
 			} catch (error) {
+				if (respondAppError(response, error)) return;
 				const message = getErrorMessage(error);
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
@@ -228,6 +221,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				);
 				response.json(result);
 			} catch (error) {
+				if (respondAppError(response, error)) return;
 				const message = getErrorMessage(error);
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
@@ -267,6 +261,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				);
 				response.json(result);
 			} catch (error) {
+				if (respondAppError(response, error)) return;
 				const message = getErrorMessage(error);
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
@@ -303,6 +298,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				const result = await sessionRouter.getGitStatus(sessionId, userId);
 				response.json(result);
 			} catch (error) {
+				if (respondAppError(response, error)) return;
 				const message = getErrorMessage(error);
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
@@ -344,6 +340,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				);
 				response.json(result);
 			} catch (error) {
+				if (respondAppError(response, error)) return;
 				const message = getErrorMessage(error);
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
@@ -400,6 +397,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				);
 				response.json(result);
 			} catch (error) {
+				if (respondAppError(response, error)) return;
 				const message = getErrorMessage(error);
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
@@ -440,6 +438,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				);
 				response.json(result);
 			} catch (error) {
+				if (respondAppError(response, error)) return;
 				const message = getErrorMessage(error);
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
@@ -486,6 +485,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				);
 				response.json(result);
 			} catch (error) {
+				if (respondAppError(response, error)) return;
 				const message = getErrorMessage(error);
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
@@ -524,6 +524,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				);
 				response.json(result);
 			} catch (error) {
+				if (respondAppError(response, error)) return;
 				const message = getErrorMessage(error);
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
@@ -564,6 +565,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				);
 				response.json(result);
 			} catch (error) {
+				if (respondAppError(response, error)) return;
 				const message = getErrorMessage(error);
 				if (message.includes("Machine not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
@@ -602,6 +604,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				);
 				response.json(result);
 			} catch (error) {
+				if (respondAppError(response, error)) return;
 				const message = getErrorMessage(error);
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
@@ -640,6 +643,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				);
 				response.json(result);
 			} catch (error) {
+				if (respondAppError(response, error)) return;
 				const message = getErrorMessage(error);
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
@@ -692,6 +696,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				);
 				response.json(result);
 			} catch (error) {
+				if (respondAppError(response, error)) return;
 				const message = getErrorMessage(error);
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
@@ -735,6 +740,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				);
 				response.json(result);
 			} catch (error) {
+				if (respondAppError(response, error)) return;
 				const message = getErrorMessage(error);
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);
@@ -783,6 +789,7 @@ export function setupFsRoutes(router: Router, sessionRouter: SessionRouter) {
 				);
 				response.json(result);
 			} catch (error) {
+				if (respondAppError(response, error)) return;
 				const message = getErrorMessage(error);
 				if (message.includes("Session not found")) {
 					respondError(response, buildAuthorizationError(message), 404);

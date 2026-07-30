@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { isDeepStrictEqual } from "node:util";
 import type {
 	AcpBackendSummary,
 	AgentSessionCapabilities,
@@ -8,6 +9,7 @@ import type {
 	SessionsChangedPayload,
 } from "@mobvibe/shared";
 import type { Socket } from "socket.io";
+import { sanitizeAgentSessionCapabilities } from "./agent-capability-sanitizer.js";
 
 export type CliRecord = {
 	machineId: string;
@@ -17,12 +19,46 @@ export type CliRecord = {
 	connectedAt: Date;
 	sessions: SessionSummary[];
 	backends: AcpBackendSummary[];
+	protocolCapabilities?: CliRegistrationInfo["protocolCapabilities"];
 	/** User ID from auth */
 	userId?: string;
 	/** Device key ID used to authenticate this CLI */
 	deviceId?: string;
 	/** Per-backend capabilities */
 	backendCapabilities?: Record<string, AgentSessionCapabilities>;
+};
+
+const mergeDiscoveredSession = (
+	existing: SessionSummary,
+	discovered: SessionSummary,
+): SessionSummary => {
+	// The attached session is the live authority. Discovery is only allowed to
+	// refresh detached snapshots, otherwise a stale list page could overwrite
+	// active metadata or a locally pinned title.
+	if (existing.isAttached === true) {
+		return existing;
+	}
+	return {
+		...existing,
+		...discovered,
+		title: existing.isTitlePinned ? existing.title : discovered.title,
+		...(existing.isTitlePinned !== undefined
+			? { isTitlePinned: existing.isTitlePinned }
+			: {}),
+		...(existing.isAttached !== undefined
+			? { isAttached: existing.isAttached }
+			: {}),
+	};
+};
+
+const mergeSessionMetadata = (
+	existing: SessionSummary,
+	incoming: SessionSummary,
+): SessionSummary => {
+	if (Object.hasOwn(incoming, "_meta") || !Object.hasOwn(existing, "_meta")) {
+		return incoming;
+	}
+	return { ...incoming, _meta: existing._meta };
 };
 
 export class CliRegistry extends EventEmitter {
@@ -56,6 +92,9 @@ export class CliRegistry extends EventEmitter {
 					}
 				}
 			}
+			if (existing.socket.id !== socket.id) {
+				existing.socket.disconnect(true);
+			}
 		}
 
 		const record: CliRecord = {
@@ -66,6 +105,7 @@ export class CliRegistry extends EventEmitter {
 			connectedAt: new Date(),
 			sessions: [],
 			backends: info.backends ?? [],
+			protocolCapabilities: info.protocolCapabilities,
 			userId: authInfo?.userId,
 			deviceId: authInfo?.deviceId,
 		};
@@ -131,10 +171,44 @@ export class CliRegistry extends EventEmitter {
 			return;
 		}
 
+		const previousById = new Map(
+			record.sessions.map((session) => [session.sessionId, session]),
+		);
+		const nextById = new Map(
+			sessions.map((session) => {
+				const previous = previousById.get(session.sessionId);
+				return [
+					session.sessionId,
+					previous ? mergeSessionMetadata(previous, session) : session,
+				] as const;
+			}),
+		);
+		const added: SessionSummary[] = [];
+		const updated: SessionSummary[] = [];
+		for (const session of nextById.values()) {
+			const previous = previousById.get(session.sessionId);
+			if (!previous) {
+				added.push({ ...session, machineId: record.machineId });
+			} else if (!isDeepStrictEqual(previous, session)) {
+				updated.push({ ...session, machineId: record.machineId });
+			}
+		}
+		const removed = record.sessions
+			.filter((session) => !nextById.has(session.sessionId))
+			.map((session) => session.sessionId);
+
 		// Replace the entire list — the CLI now sends the complete set
 		// (active + discovered), so stale entries are cleaned up naturally.
-		record.sessions = sessions;
+		record.sessions = Array.from(nextById.values());
 		this.emit("sessions:updated", record.machineId, record.sessions);
+		if (added.length > 0 || updated.length > 0 || removed.length > 0) {
+			this.emit(
+				"sessions:changed",
+				record.machineId,
+				{ added, updated, removed } satisfies SessionsChangedPayload,
+				record.userId,
+			);
+		}
 	}
 
 	/**
@@ -149,9 +223,34 @@ export class CliRegistry extends EventEmitter {
 		if (!record) {
 			return undefined;
 		}
+		const normalizedBackendCapabilities = payload.backendCapabilities
+			? Object.fromEntries(
+					record.backends.flatMap((backend) => {
+						const snapshot = payload.backendCapabilities?.[backend.backendId];
+						return snapshot
+							? [
+									[
+										backend.backendId,
+										sanitizeAgentSessionCapabilities(snapshot),
+									] as const,
+								]
+							: [];
+					}),
+				)
+			: undefined;
+		const normalizedPayload: SessionsChangedPayload = {
+			...payload,
+			backendCapabilities: normalizedBackendCapabilities,
+			updated: payload.updated.map((updated) => {
+				const existing = record.sessions.find(
+					(session) => session.sessionId === updated.sessionId,
+				);
+				return existing ? mergeSessionMetadata(existing, updated) : updated;
+			}),
+		};
 
 		// Remove sessions
-		for (const removedId of payload.removed) {
+		for (const removedId of normalizedPayload.removed) {
 			const index = record.sessions.findIndex((s) => s.sessionId === removedId);
 			if (index !== -1) {
 				record.sessions.splice(index, 1);
@@ -159,7 +258,7 @@ export class CliRegistry extends EventEmitter {
 		}
 
 		// Update sessions
-		for (const updated of payload.updated) {
+		for (const updated of normalizedPayload.updated) {
 			const index = record.sessions.findIndex(
 				(s) => s.sessionId === updated.sessionId,
 			);
@@ -169,7 +268,7 @@ export class CliRegistry extends EventEmitter {
 		}
 
 		// Add new sessions
-		for (const added of payload.added) {
+		for (const added of normalizedPayload.added) {
 			const existing = record.sessions.find(
 				(s) => s.sessionId === added.sessionId,
 			);
@@ -180,12 +279,16 @@ export class CliRegistry extends EventEmitter {
 
 		// Emit the enhanced payload with machineId
 		const enhancedPayload: SessionsChangedPayload = {
-			added: payload.added.map((s) => ({ ...s, machineId: record.machineId })),
-			updated: payload.updated.map((s) => ({
+			added: normalizedPayload.added.map((s) => ({
 				...s,
 				machineId: record.machineId,
 			})),
-			removed: payload.removed,
+			updated: normalizedPayload.updated.map((s) => ({
+				...s,
+				machineId: record.machineId,
+			})),
+			removed: normalizedPayload.removed,
+			backendCapabilities: normalizedBackendCapabilities,
 		};
 
 		this.emit(
@@ -215,29 +318,39 @@ export class CliRegistry extends EventEmitter {
 	}
 
 	/**
-	 * Add discovered historical sessions to a CLI record.
-	 * Only adds sessions that don't already exist (to avoid overwriting active sessions).
+	 * Add or refresh discovered historical sessions on a CLI record.
+	 * Attached sessions remain authoritative and pinned titles are preserved.
 	 */
 	addDiscoveredSessions(
 		socketId: string,
 		sessions: SessionSummary[],
-	): SessionSummary[] {
+	): Pick<SessionsChangedPayload, "added" | "updated" | "removed"> {
 		const record = this.cliBySocketId.get(socketId);
 		if (!record) {
-			return [];
+			return { added: [], updated: [], removed: [] };
 		}
 
 		const added: SessionSummary[] = [];
+		const updated: SessionSummary[] = [];
 		for (const session of sessions) {
-			const exists = record.sessions.some(
-				(s) => s.sessionId === session.sessionId,
+			const existingIndex = record.sessions.findIndex(
+				(existing) => existing.sessionId === session.sessionId,
 			);
-			if (!exists) {
+			if (existingIndex === -1) {
 				record.sessions.push(session);
 				added.push(session);
+				continue;
+			}
+			const merged = mergeDiscoveredSession(
+				record.sessions[existingIndex],
+				session,
+			);
+			if (!isDeepStrictEqual(record.sessions[existingIndex], merged)) {
+				record.sessions[existingIndex] = merged;
+				updated.push(merged);
 			}
 		}
-		return added;
+		return { added, updated, removed: [] };
 	}
 
 	/**
@@ -267,11 +380,8 @@ export class CliRegistry extends EventEmitter {
 			}
 
 			const existing = record.sessions[existingIndex];
-			const merged: SessionSummary = { ...existing, ...session };
-			const hasChanges = (
-				Object.keys(session) as Array<keyof SessionSummary>
-			).some((key) => existing[key] !== merged[key]);
-			if (hasChanges) {
+			const merged = mergeDiscoveredSession(existing, session);
+			if (!isDeepStrictEqual(existing, merged)) {
 				record.sessions[existingIndex] = merged;
 				updated.push(merged);
 			}
@@ -412,10 +522,28 @@ export class CliRegistry extends EventEmitter {
 	): void {
 		const record = this.cliBySocketId.get(socketId);
 		if (!record) return;
+		const registeredBackendIds = new Set(
+			record.backends.map((backend) => backend.backendId),
+		);
+		const sanitizedCapabilities: Record<string, AgentSessionCapabilities> = {};
+		for (const [backendId, snapshot] of Object.entries(capabilities)) {
+			if (!registeredBackendIds.has(backendId)) continue;
+			sanitizedCapabilities[backendId] =
+				sanitizeAgentSessionCapabilities(snapshot);
+		}
+		if (Object.keys(sanitizedCapabilities).length === 0) return;
 		record.backendCapabilities = {
 			...record.backendCapabilities,
-			...capabilities,
+			...sanitizedCapabilities,
 		};
+		this.emitCliStatus({
+			machineId: record.machineId,
+			connected: true,
+			hostname: record.hostname,
+			sessionCount: record.sessions.length,
+			userId: record.userId,
+			backendCapabilities: record.backendCapabilities,
+		});
 	}
 
 	onCliStatus(listener: (payload: CliStatusPayload) => void) {

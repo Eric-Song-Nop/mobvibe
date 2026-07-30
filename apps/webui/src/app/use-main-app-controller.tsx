@@ -87,6 +87,8 @@ export function useMainAppController() {
 			setSessionE2EEStatus: s.setSessionE2EEStatus,
 			setStreamError: s.setStreamError,
 			updateSessionMeta: s.updateSessionMeta,
+			upsertPlan: s.upsertPlan,
+			removePlan: s.removePlan,
 			addUserMessage: s.addUserMessage,
 			addStatusMessage: s.addStatusMessage,
 			appendAssistantChunk: s.appendAssistantChunk,
@@ -142,8 +144,7 @@ export function useMainAppController() {
 			setDraftTitle: s.setDraftTitle,
 			setDraftBackendId: s.setDraftBackendId,
 			setDraftCwd: s.setDraftCwd,
-			setCreateDialogMode: s.setCreateDialogMode,
-			setDraftTeamTarget: s.setDraftTeamTarget,
+			setDraftAdditionalDirectories: s.setDraftAdditionalDirectories,
 			resetDraftWorktree: s.resetDraftWorktree,
 			setSelectedWorkspace: s.setSelectedWorkspace,
 		})),
@@ -159,42 +160,49 @@ export function useMainAppController() {
 	const defaultBackendId = availableBackends[0]?.backendId;
 	useMachinesQuery();
 
-	const mutations = useSessionMutations(chatActions);
-
 	const { activateSession, activationState } =
 		useSessionActivation(chatActions);
 
 	const isActivating = activationState.phase !== "idle";
 
-	const { syncSessionSummaries, syncSessionHistory, isBackfilling } = useSocket(
-		{
-			syncSessions: chatActions.syncSessions,
-			setSending: chatActions.setSending,
-			setCanceling: chatActions.setCanceling,
-			finalizeAssistantMessage: chatActions.finalizeAssistantMessage,
-			appendAssistantChunk: chatActions.appendAssistantChunk,
-			appendThoughtChunk: chatActions.appendThoughtChunk,
-			confirmOrAppendUserMessage: chatActions.confirmOrAppendUserMessage,
-			updateSessionMeta: chatActions.updateSessionMeta,
-			setStreamError: chatActions.setStreamError,
-			addPermissionRequest: chatActions.addPermissionRequest,
-			setPermissionDecisionState: chatActions.setPermissionDecisionState,
-			setPermissionOutcome: chatActions.setPermissionOutcome,
-			addToolCall: chatActions.addToolCall,
-			updateToolCall: chatActions.updateToolCall,
-			appendTerminalOutput: chatActions.appendTerminalOutput,
-			handleSessionsChanged: chatActions.handleSessionsChanged,
-			markSessionAttached: chatActions.markSessionAttached,
-			markSessionDetached: chatActions.markSessionDetached,
-			createLocalSession: chatActions.createLocalSession,
-			updateSessionCursor: chatActions.updateSessionCursor,
-			resetSessionForRevision: chatActions.resetSessionForRevision,
-			onReconnect: () => {
-				queryClient.invalidateQueries({ queryKey: ["sessions"] });
-				queryClient.invalidateQueries({ queryKey: ["acp-backends"] });
-			},
+	const {
+		syncSessionSummaries,
+		syncSessionHistory,
+		clearTrackedSession,
+		isBackfilling,
+	} = useSocket({
+		syncSessions: chatActions.syncSessions,
+		setSending: chatActions.setSending,
+		setCanceling: chatActions.setCanceling,
+		finalizeAssistantMessage: chatActions.finalizeAssistantMessage,
+		appendAssistantChunk: chatActions.appendAssistantChunk,
+		appendThoughtChunk: chatActions.appendThoughtChunk,
+		confirmOrAppendUserMessage: chatActions.confirmOrAppendUserMessage,
+		updateSessionMeta: chatActions.updateSessionMeta,
+		upsertPlan: chatActions.upsertPlan,
+		removePlan: chatActions.removePlan,
+		setStreamError: chatActions.setStreamError,
+		addPermissionRequest: chatActions.addPermissionRequest,
+		setPermissionDecisionState: chatActions.setPermissionDecisionState,
+		setPermissionOutcome: chatActions.setPermissionOutcome,
+		addToolCall: chatActions.addToolCall,
+		updateToolCall: chatActions.updateToolCall,
+		appendTerminalOutput: chatActions.appendTerminalOutput,
+		handleSessionsChanged: chatActions.handleSessionsChanged,
+		markSessionAttached: chatActions.markSessionAttached,
+		markSessionDetached: chatActions.markSessionDetached,
+		createLocalSession: chatActions.createLocalSession,
+		updateSessionCursor: chatActions.updateSessionCursor,
+		resetSessionForRevision: chatActions.resetSessionForRevision,
+		onReconnect: () => {
+			queryClient.invalidateQueries({ queryKey: ["sessions"] });
+			queryClient.invalidateQueries({ queryKey: ["acp-backends"] });
 		},
-	);
+	});
+
+	const mutations = useSessionMutations(chatActions, {
+		onSessionDeleted: clearTrackedSession,
+	});
 
 	const { machines, selectedMachineId, setSelectedMachineId } =
 		useMachinesStore(
@@ -233,14 +241,18 @@ export function useMainAppController() {
 	const {
 		isForceReloading,
 		isBulkArchiving,
+		deletingSessionId,
 		handleOpenCreateDialog,
 		handleCreateSession,
 		handleRenameSubmit,
 		handleArchiveSession,
+		handleCloseSession,
+		handleDeleteSession,
 		handleBulkArchiveSessions,
 		handlePermissionDecision,
 		handleModeChange,
 		handleModelChange,
+		handleSessionConfigChange,
 		handleCancel,
 		handleForceReload,
 		handleSyncHistory,
@@ -273,7 +285,11 @@ export function useMainAppController() {
 			for (const session of sessionsQuery.data.sessions) {
 				setSessionE2EEStatus(
 					session.sessionId,
-					bootstrapSessionE2EE(session.sessionId, session.wrappedDek),
+					bootstrapSessionE2EE(
+						session.sessionId,
+						session.wrappedDek,
+						session.revision,
+					),
 				);
 			}
 		}
@@ -565,6 +581,13 @@ export function useMainAppController() {
 		) {
 			return t("session.switchingModel");
 		}
+		if (
+			mutations.setSessionConfigOptionMutation.isPending &&
+			mutations.setSessionConfigOptionMutation.variables?.sessionId ===
+				activeSessionId
+		) {
+			return t("chat.updatingSessionConfig");
+		}
 		if (activeSession?.historySyncing) {
 			return t("session.syncingHistory");
 		}
@@ -582,6 +605,8 @@ export function useMainAppController() {
 		mutations.setSessionModeMutation.variables,
 		mutations.setSessionModelMutation.isPending,
 		mutations.setSessionModelMutation.variables,
+		mutations.setSessionConfigOptionMutation.isPending,
+		mutations.setSessionConfigOptionMutation.variables?.sessionId,
 		selectedMachineId,
 		t,
 	]);
@@ -625,6 +650,12 @@ export function useMainAppController() {
 	const isModelSwitching =
 		mutations.setSessionModelMutation.isPending &&
 		mutations.setSessionModelMutation.variables?.sessionId === activeSessionId;
+	const pendingConfigId =
+		mutations.setSessionConfigOptionMutation.isPending &&
+		mutations.setSessionConfigOptionMutation.variables?.sessionId ===
+			activeSessionId
+			? mutations.setSessionConfigOptionMutation.variables.configId
+			: undefined;
 
 	return {
 		activeSession,
@@ -644,12 +675,15 @@ export function useMainAppController() {
 		filePreviewPath,
 		forceReloadDisabled,
 		handleArchiveSession,
+		handleCloseSession,
+		handleDeleteSession,
 		handleBulkArchiveSessions,
 		handleCancel,
 		handleCreateSession,
 		handleForceReload,
 		handleModeChange,
 		handleModelChange,
+		handleSessionConfigChange,
 		handleOpenCreateDialog,
 		handlePermissionDecision,
 		handleRenameSubmit,
@@ -659,14 +693,15 @@ export function useMainAppController() {
 		handleSend,
 		handleSyncHistory,
 		isBulkArchiving,
-		isCreatingSession:
-			mutations.createSessionMutation.isPending ||
-			mutations.createAgentTeamRunMutation.isPending,
+		deletingSessionId,
+		isCreatingSession: mutations.createSessionMutation.isPending,
 		isModeSwitching,
 		isModelSwitching,
+		pendingConfigId,
 		loadingMessage,
 		mutationsSnapshot,
 		plan: activeSession?.plan,
+		plans: activeSession?.plans,
 		selectedMachineId,
 		sessionList,
 		sidebarSessionList,
