@@ -22,6 +22,8 @@ import {
 	generateMasterSecret,
 	initCrypto,
 	isEncryptedPayload,
+	type PermissionDecisionPayload,
+	type PermissionRequestPayload,
 	unwrapDEK,
 } from "@mobvibe/shared";
 import type { CliConfig } from "../../config.js";
@@ -97,6 +99,7 @@ class SessionManager extends BaseSessionManager {
 
 type SessionManagerTeamInternals = {
 	agentTeamStore: AgentTeamStore;
+	permissionRequests: Map<string, unknown>;
 	teamRuntime: TeamRuntime;
 	waitForTeamToolsReady(agentTeamId: string, memberId: string): Promise<void>;
 };
@@ -308,6 +311,22 @@ const prepareTeamSessionConnection = (
 			binding.handlers.handleDisconnect({ serverId: binding.serverId });
 		}
 	});
+};
+
+const requirePermissionHandler = () => {
+	if (!permissionHandlerCallback) {
+		throw new Error("Permission handler was not registered");
+	}
+	return permissionHandlerCallback;
+};
+
+const requireSessionRevision = <T extends { revision?: number }>(
+	session: T | undefined,
+): T & { revision: number } => {
+	if (!session || session.revision === undefined) {
+		throw new Error("Expected session revision");
+	}
+	return session as T & { revision: number };
 };
 
 const createMockConfig = (): CliConfig => ({
@@ -4445,6 +4464,398 @@ describe("SessionManager", () => {
 					mcp: expect.objectContaining({ phase: "tools_ready" }),
 				}),
 			);
+		});
+
+		it("auto-approves leader permissions with allow_always without entering the UI pending flow", async () => {
+			prepareTeamSessionConnection(
+				mockConnection,
+				"leader-session-auto-permission",
+				expectedTeamTools,
+			);
+			const permissionRequests: PermissionRequestPayload[] = [];
+			const permissionResults: PermissionDecisionPayload[] = [];
+			const emittedPermissionKinds: string[] = [];
+			sessionManager.onPermissionRequest((payload) => {
+				permissionRequests.push(payload);
+			});
+			sessionManager.onPermissionResult((payload) => {
+				permissionResults.push(payload);
+			});
+			sessionManager.onSessionEvent((event) => {
+				if (
+					event.kind === "permission_request" ||
+					event.kind === "permission_result"
+				) {
+					emittedPermissionKinds.push(event.kind);
+				}
+			});
+			const created = await sessionManager.createAgentTeamRun({
+				machineId: mockConfig.machineId,
+				backendId: "backend-1",
+				workspaceRootCwd: "/home/user/project",
+			});
+			const leaderSession = requireSessionRevision(created.leaderSession);
+			const controller = new AbortController();
+			const decisionPromise = requirePermissionHandler()(
+				{
+					sessionId: leaderSession.sessionId,
+					toolCall: {
+						toolCallId: "leader-tool-auto",
+						title: "Leader tool",
+					},
+					options: [
+						{
+							optionId: "leader-allow-once",
+							name: "Allow once",
+							kind: "allow_once",
+						},
+						{
+							optionId: "leader-reject",
+							name: "Reject",
+							kind: "reject_once",
+						},
+						{
+							optionId: "leader-allow-always",
+							name: "Always allow",
+							kind: "allow_always",
+						},
+					],
+				},
+				"leader-auto-permission",
+				controller.signal,
+			);
+			controller.abort();
+			const decision = await Promise.race([
+				decisionPromise,
+				new Promise<"pending">((resolve) =>
+					setTimeout(() => resolve("pending"), 10),
+				),
+			]);
+
+			expect(decision).toEqual({
+				outcome: {
+					outcome: "selected",
+					optionId: "leader-allow-always",
+				},
+			});
+			expect(permissionRequests).toEqual([]);
+			expect(permissionResults).toEqual([
+				{
+					sessionId: leaderSession.sessionId,
+					requestId: "string:leader-auto-permission",
+					outcome: {
+						outcome: "selected",
+						optionId: "leader-allow-always",
+					},
+				},
+			]);
+			expect(emittedPermissionKinds).toEqual([
+				"permission_request",
+				"permission_result",
+			]);
+			const internals =
+				sessionManager as unknown as SessionManagerTeamInternals;
+			expect(internals.permissionRequests.size).toBe(0);
+			const team = internals.agentTeamStore.getAgentTeam({
+				agentTeamId: created.team.agentTeamId,
+			}).team;
+			expect(team?.members[0]?.pendingPermissionCount).toBe(0);
+			expect(
+				sessionManager
+					.getSessionEvents({
+						sessionId: leaderSession.sessionId,
+						revision: leaderSession.revision,
+						afterSeq: 0,
+					})
+					.events.filter((event) => event.kind.startsWith("permission_")),
+			).toEqual([
+				expect.objectContaining({
+					kind: "permission_request",
+					payload: expect.objectContaining({
+						sessionId: leaderSession.sessionId,
+						requestId: "string:leader-auto-permission",
+					}),
+				}),
+				expect.objectContaining({
+					kind: "permission_result",
+					payload: {
+						sessionId: leaderSession.sessionId,
+						requestId: "string:leader-auto-permission",
+						outcome: {
+							outcome: "selected",
+							optionId: "leader-allow-always",
+						},
+					},
+				}),
+			]);
+		});
+
+		it("auto-approves member permissions with allow_once when allow_always is unavailable", async () => {
+			const leaderConnection = createMockConnection();
+			const memberConnection = createMockConnection();
+			prepareTeamSessionConnection(
+				leaderConnection,
+				"leader-session-before-member-permission",
+				expectedTeamTools,
+			);
+			prepareTeamSessionConnection(
+				memberConnection,
+				"member-session-auto-permission",
+				expectedTeamTools,
+			);
+			const connections = [leaderConnection, memberConnection];
+			sessionManager.createConnection = () => {
+				const connection = connections.shift();
+				if (!connection) throw new Error("Unexpected connection request");
+				return connection as unknown as AcpConnection;
+			};
+			const permissionRequests: PermissionRequestPayload[] = [];
+			const emittedPermissionKinds: string[] = [];
+			sessionManager.onPermissionRequest((payload) => {
+				permissionRequests.push(payload);
+			});
+			sessionManager.onSessionEvent((event) => {
+				if (
+					event.kind === "permission_request" ||
+					event.kind === "permission_result"
+				) {
+					emittedPermissionKinds.push(event.kind);
+				}
+			});
+			const created = await sessionManager.createAgentTeamRun({
+				machineId: mockConfig.machineId,
+				backendId: "backend-1",
+				workspaceRootCwd: "/home/user/project",
+			});
+			const spawned = await sessionManager.spawnAgentTeamMember({
+				agentTeamId: created.team.agentTeamId,
+				requestedByMemberId: created.team.leaderMemberId,
+				name: "Auto Worker",
+			});
+			if (!spawned.ok) {
+				throw new Error("Expected member spawn to succeed");
+			}
+			const controller = new AbortController();
+			const decisionPromise = requirePermissionHandler()(
+				{
+					sessionId: spawned.sessionId,
+					toolCall: {
+						toolCallId: "member-tool-auto",
+						title: "Member tool",
+					},
+					options: [
+						{
+							optionId: "member-reject",
+							name: "Reject",
+							kind: "reject_once",
+						},
+						{
+							optionId: "member-allow-once",
+							name: "Allow once",
+							kind: "allow_once",
+						},
+					],
+				},
+				"member-auto-permission",
+				controller.signal,
+			);
+			const decision = await Promise.race([
+				decisionPromise,
+				new Promise<"pending">((resolve) =>
+					setTimeout(() => resolve("pending"), 10),
+				),
+			]);
+			if (decision === "pending") {
+				controller.abort();
+			}
+
+			expect(decision).toEqual({
+				outcome: {
+					outcome: "selected",
+					optionId: "member-allow-once",
+				},
+			});
+			expect(permissionRequests).toEqual([]);
+			expect(emittedPermissionKinds).toEqual([
+				"permission_request",
+				"permission_result",
+			]);
+			const internals =
+				sessionManager as unknown as SessionManagerTeamInternals;
+			expect(internals.permissionRequests.size).toBe(0);
+			const team = internals.agentTeamStore.getAgentTeam({
+				agentTeamId: created.team.agentTeamId,
+			}).team;
+			expect(
+				team?.members.find((member) => member.memberId === spawned.memberId)
+					?.pendingPermissionCount,
+			).toBe(0);
+			const memberSession = sessionManager
+				.listSessions()
+				.find((session) => session.sessionId === spawned.sessionId);
+			const memberSessionWithRevision = requireSessionRevision(memberSession);
+			expect(
+				sessionManager
+					.getSessionEvents({
+						sessionId: spawned.sessionId,
+						revision: memberSessionWithRevision.revision,
+						afterSeq: 0,
+					})
+					.events.filter((event) => event.kind.startsWith("permission_")),
+			).toEqual([
+				expect.objectContaining({
+					kind: "permission_request",
+					payload: expect.objectContaining({
+						sessionId: spawned.sessionId,
+						requestId: "string:member-auto-permission",
+					}),
+				}),
+				expect.objectContaining({
+					kind: "permission_result",
+					payload: expect.objectContaining({
+						sessionId: spawned.sessionId,
+						requestId: "string:member-auto-permission",
+						outcome: {
+							outcome: "selected",
+							optionId: "member-allow-once",
+						},
+					}),
+				}),
+			]);
+		});
+
+		it("keeps ordinary session permissions in the existing UI confirmation flow", async () => {
+			const permissionRequests: PermissionRequestPayload[] = [];
+			sessionManager.onPermissionRequest((payload) => {
+				permissionRequests.push(payload);
+			});
+			const created = await sessionManager.createSession({
+				cwd: "/home/user/project",
+				backendId: "backend-1",
+			});
+			const ordinarySession = requireSessionRevision(created);
+			const decisionPromise = requirePermissionHandler()(
+				{
+					sessionId: created.sessionId,
+					toolCall: {
+						toolCallId: "ordinary-tool",
+						title: "Ordinary tool",
+					},
+					options: [
+						{
+							optionId: "ordinary-allow-always",
+							name: "Always allow",
+							kind: "allow_always",
+						},
+						{
+							optionId: "ordinary-allow-once",
+							name: "Allow once",
+							kind: "allow_once",
+						},
+					],
+				},
+				"ordinary-permission",
+				new AbortController().signal,
+			);
+
+			expect(permissionRequests).toEqual([
+				expect.objectContaining({
+					sessionId: created.sessionId,
+					requestId: "string:ordinary-permission",
+				}),
+			]);
+			const internals =
+				sessionManager as unknown as SessionManagerTeamInternals;
+			expect(internals.permissionRequests.size).toBe(1);
+			sessionManager.resolvePermissionRequest(
+				created.sessionId,
+				"string:ordinary-permission",
+				{
+					outcome: "selected",
+					optionId: "ordinary-allow-once",
+				},
+			);
+			await expect(decisionPromise).resolves.toEqual({
+				outcome: {
+					outcome: "selected",
+					optionId: "ordinary-allow-once",
+				},
+			});
+			expect(
+				sessionManager
+					.getSessionEvents({
+						sessionId: created.sessionId,
+						revision: ordinarySession.revision,
+						afterSeq: 0,
+					})
+					.events.filter((event) => event.kind.startsWith("permission_"))
+					.map((event) => event.kind),
+			).toEqual(["permission_request", "permission_result"]);
+		});
+
+		it("uses the ordinary confirmation flow for a Team permission without an allow option", async () => {
+			prepareTeamSessionConnection(
+				mockConnection,
+				"leader-session-reject-only-permission",
+				expectedTeamTools,
+			);
+			const permissionRequests: PermissionRequestPayload[] = [];
+			sessionManager.onPermissionRequest((payload) => {
+				permissionRequests.push(payload);
+			});
+			const created = await sessionManager.createAgentTeamRun({
+				machineId: mockConfig.machineId,
+				backendId: "backend-1",
+				workspaceRootCwd: "/home/user/project",
+			});
+			const leaderSession = requireSessionRevision(created.leaderSession);
+			const decisionPromise = requirePermissionHandler()(
+				{
+					sessionId: leaderSession.sessionId,
+					toolCall: {
+						toolCallId: "team-reject-only-tool",
+						title: "Reject-only tool",
+					},
+					options: [
+						{
+							optionId: "team-reject-once",
+							name: "Reject",
+							kind: "reject_once",
+						},
+						{
+							optionId: "team-reject-always",
+							name: "Always reject",
+							kind: "reject_always",
+						},
+					],
+				},
+				"team-reject-only-permission",
+				new AbortController().signal,
+			);
+
+			expect(permissionRequests).toEqual([
+				expect.objectContaining({
+					sessionId: leaderSession.sessionId,
+					requestId: "string:team-reject-only-permission",
+				}),
+			]);
+			const internals =
+				sessionManager as unknown as SessionManagerTeamInternals;
+			expect(internals.permissionRequests.size).toBe(1);
+			sessionManager.resolvePermissionRequest(
+				leaderSession.sessionId,
+				"string:team-reject-only-permission",
+				{
+					outcome: "selected",
+					optionId: "team-reject-once",
+				},
+			);
+			await expect(decisionPromise).resolves.toEqual({
+				outcome: {
+					outcome: "selected",
+					optionId: "team-reject-once",
+				},
+			});
 		});
 
 		it("cleans up a created leader session when Team MCP readiness times out", async () => {

@@ -1741,6 +1741,23 @@ export class SessionManager {
 		return event;
 	}
 
+	private appendAndEmitEventsAtomically(
+		sessionId: string,
+		revision: number,
+		events: readonly WalEventInput[],
+	): SessionEvent[] {
+		if (this.isSessionDeletionGuarded(sessionId)) {
+			return [];
+		}
+		const sessionEvents = this.walStore
+			.appendEventsAtomically(sessionId, revision, events)
+			.map((event) => this.toSessionEvent(event));
+		for (const event of sessionEvents) {
+			this.emitSessionEvent(event);
+		}
+		return sessionEvents;
+	}
+
 	private toSessionEvent(walEvent: WalEvent): SessionEvent {
 		const protocolMessageId = this.extractProtocolMessageId(walEvent.payload);
 		return {
@@ -2644,7 +2661,7 @@ export class SessionManager {
 	}
 
 	private buildPermissionRequestPayload(
-		record: PermissionRequestRecord,
+		record: Pick<PermissionRequestRecord, "sessionId" | "requestId" | "params">,
 	): PermissionRequestPayload {
 		return {
 			sessionId: record.sessionId,
@@ -2653,6 +2670,48 @@ export class SessionManager {
 			options: record.params.options,
 			toolCall: record.params.toolCall,
 		};
+	}
+
+	private selectTeamPermissionAllowOption(
+		sessionId: string,
+		params: RequestPermissionRequest,
+	): RequestPermissionRequest["options"][number] | undefined {
+		if (!this.findTeamMemberBySessionId(sessionId)) {
+			return undefined;
+		}
+		return (
+			params.options.find((option) => option.kind === "allow_always") ??
+			params.options.find((option) => option.kind === "allow_once")
+		);
+	}
+
+	private autoApproveTeamPermission(
+		sessionId: string,
+		requestId: string,
+		params: RequestPermissionRequest,
+		optionId: string,
+		sessionRecord: SessionRecord,
+	): Promise<RequestPermissionResponse> {
+		const outcome: RequestPermissionResponse["outcome"] = {
+			outcome: "selected",
+			optionId,
+		};
+		const requestPayload = this.buildPermissionRequestPayload({
+			sessionId,
+			requestId,
+			params,
+		});
+		const resultPayload: PermissionDecisionPayload = {
+			sessionId,
+			requestId,
+			outcome,
+		};
+		this.appendAndEmitEventsAtomically(sessionId, sessionRecord.revision, [
+			{ kind: "permission_request", payload: requestPayload },
+			{ kind: "permission_result", payload: resultPayload },
+		]);
+		this.permissionResultEmitter.emit("result", resultPayload);
+		return Promise.resolve({ outcome });
 	}
 
 	private handlePermissionRequest(
@@ -2672,6 +2731,20 @@ export class SessionManager {
 		const existing = this.permissionRequests.get(key);
 		if (existing) {
 			return existing.promise;
+		}
+		const sessionRecord = this.sessions.get(sessionId);
+		const automaticAllowOption = this.selectTeamPermissionAllowOption(
+			sessionId,
+			params,
+		);
+		if (sessionRecord && automaticAllowOption) {
+			return this.autoApproveTeamPermission(
+				sessionId,
+				requestId,
+				params,
+				automaticAllowOption.optionId,
+				sessionRecord,
+			);
 		}
 		let resolver: (response: RequestPermissionResponse) => void = () => {};
 		const promise = new Promise<RequestPermissionResponse>((resolve) => {
@@ -2713,7 +2786,6 @@ export class SessionManager {
 		const payload = this.buildPermissionRequestPayload(permRecord);
 
 		// Write permission request to WAL
-		const sessionRecord = this.sessions.get(sessionId);
 		if (sessionRecord) {
 			this.writeAndEmitEvent(
 				sessionId,
