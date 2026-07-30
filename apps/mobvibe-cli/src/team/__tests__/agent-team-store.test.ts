@@ -463,6 +463,161 @@ describe("AgentTeamStore durable metadata", () => {
 		expect(serialized).not.toContain("prompt");
 		expect(serialized).not.toContain("providerToken");
 	});
+
+	test("binds a leader-local remote execution route idempotently and recovers it", () => {
+		const created = store.createAgentTeam({
+			machineId: "leader-machine",
+			backendId: "backend-leader",
+			workspaceRootCwd: "/workspace/project",
+			title: "Remote execution Team",
+		});
+		const { memberId } = store.addTeamMember({
+			agentTeamId: created.team.agentTeamId,
+			backendId: "backend-worker",
+			name: "Remote worker",
+		});
+		const bindingParams = {
+			agentTeamId: created.team.agentTeamId,
+			memberId,
+			executionMachineId: "worker-machine",
+			workerRelayKeyId: "worker-relay-key",
+			bootstrapOperationId: "bootstrap-operation",
+		};
+
+		const first = store.bindTeamMemberExecution(bindingParams);
+		const replay = store.bindTeamMemberExecution(bindingParams);
+
+		expect(replay).toEqual(first);
+		expect(
+			store.getTeamMemberExecution(created.team.agentTeamId, memberId),
+		).toEqual(first);
+		expect(store.listTeamMemberExecutions(created.team.agentTeamId)).toEqual([
+			first,
+		]);
+
+		store.close();
+		store = new AgentTeamStore(dbPath);
+
+		expect(
+			store.getTeamMemberExecution(created.team.agentTeamId, memberId),
+		).toEqual(first);
+		expect(
+			JSON.stringify(
+				store.getAgentTeam({ agentTeamId: created.team.agentTeamId }).team,
+			),
+		).not.toContain("worker-machine");
+	});
+
+	test("rejects conflicting or invalid remote execution bindings", () => {
+		const firstTeam = store.createAgentTeam({
+			machineId: "leader-machine",
+			backendId: "backend-leader",
+			workspaceRootCwd: "/workspace/first",
+		});
+		const secondTeam = store.createAgentTeam({
+			machineId: "leader-machine",
+			backendId: "backend-leader",
+			workspaceRootCwd: "/workspace/second",
+		});
+		const firstMember = store.addTeamMember({
+			agentTeamId: firstTeam.team.agentTeamId,
+			backendId: "backend-worker",
+			name: "First worker",
+		});
+		const secondMember = store.addTeamMember({
+			agentTeamId: secondTeam.team.agentTeamId,
+			backendId: "backend-worker",
+			name: "Second worker",
+		});
+		const binding = {
+			agentTeamId: firstTeam.team.agentTeamId,
+			memberId: firstMember.memberId,
+			executionMachineId: "worker-machine",
+			workerRelayKeyId: "worker-relay-key",
+			bootstrapOperationId: "bootstrap-operation",
+		};
+		store.bindTeamMemberExecution(binding);
+
+		for (const conflicting of [
+			{ ...binding, executionMachineId: "other-machine" },
+			{ ...binding, workerRelayKeyId: "other-relay-key" },
+			{ ...binding, bootstrapOperationId: "other-bootstrap-operation" },
+		]) {
+			expect(() => store.bindTeamMemberExecution(conflicting)).toThrow(
+				"execution binding conflict",
+			);
+		}
+		expect(() =>
+			store.bindTeamMemberExecution({
+				...binding,
+				agentTeamId: secondTeam.team.agentTeamId,
+			}),
+		).toThrow("Agent Team member not found");
+		expect(() =>
+			store.bindTeamMemberExecution({
+				agentTeamId: firstTeam.team.agentTeamId,
+				memberId: "missing-member",
+				executionMachineId: "worker-machine",
+				workerRelayKeyId: "worker-relay-key",
+				bootstrapOperationId: "missing-member-bootstrap",
+			}),
+		).toThrow("Agent Team member not found");
+		expect(() =>
+			store.bindTeamMemberExecution({
+				agentTeamId: secondTeam.team.agentTeamId,
+				memberId: secondMember.memberId,
+				executionMachineId: "worker-machine",
+				workerRelayKeyId: "worker-relay-key",
+				bootstrapOperationId: binding.bootstrapOperationId,
+			}),
+		).toThrow("bootstrap operation conflict");
+	});
+
+	test("removes remote execution bindings without exposing route metadata in projections", () => {
+		const created = store.createAgentTeam({
+			machineId: "leader-machine",
+			backendId: "backend-leader",
+			workspaceRootCwd: "/workspace/project",
+		});
+		const { memberId } = store.addTeamMember({
+			agentTeamId: created.team.agentTeamId,
+			backendId: "backend-worker",
+			name: "Remote worker",
+		});
+		store.bindTeamMemberExecution({
+			agentTeamId: created.team.agentTeamId,
+			memberId,
+			executionMachineId: "private-worker-machine",
+			workerRelayKeyId: "private-worker-relay-key",
+			bootstrapOperationId: "private-bootstrap-operation",
+		});
+
+		const serializedGet = JSON.stringify(
+			store.getAgentTeam({ agentTeamId: created.team.agentTeamId }),
+		);
+		const serializedList = JSON.stringify(store.listAgentTeams());
+		for (const forbidden of [
+			"executionMachineId",
+			"workerRelayKeyId",
+			"bootstrapOperationId",
+			"private-worker-machine",
+			"private-worker-relay-key",
+			"private-bootstrap-operation",
+		]) {
+			expect(serializedGet).not.toContain(forbidden);
+			expect(serializedList).not.toContain(forbidden);
+		}
+
+		expect(
+			store.removeTeamMemberExecution(created.team.agentTeamId, memberId),
+		).toBe(true);
+		expect(
+			store.removeTeamMemberExecution(created.team.agentTeamId, memberId),
+		).toBe(false);
+		expect(
+			store.getTeamMemberExecution(created.team.agentTeamId, memberId),
+		).toBeNull();
+	});
 });
 
 describe("Agent Team content boundary", () => {
@@ -515,6 +670,7 @@ describe("Agent Team migrations", () => {
 			expect(names).toContain("agent_team_command_journal");
 			expect(names).toContain("team_relay_operations");
 			expect(names).toContain("remote_team_session_bindings");
+			expect(names).toContain("agent_team_member_executions");
 
 			const mailboxColumns = db
 				.query("PRAGMA table_info(agent_team_mailbox_messages)")
@@ -526,7 +682,7 @@ describe("Agent Team migrations", () => {
 			const schemaVersion = db
 				.query("SELECT MAX(version) AS version FROM schema_version")
 				.get() as { version: number };
-			expect(schemaVersion.version).toBe(18);
+			expect(schemaVersion.version).toBe(19);
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });
@@ -599,6 +755,169 @@ describe("Agent Team migrations", () => {
 		}
 	});
 
+	test("creates a leader-only member execution table with strict ownership and uniqueness", () => {
+		const tempDir = fs.mkdtempSync(
+			path.join(os.tmpdir(), "agent-team-execution-schema-"),
+		);
+		const dbPath = path.join(tempDir, "events.db");
+		const db = new Database(dbPath);
+
+		try {
+			runMigrations(db);
+
+			const columns = db
+				.query("PRAGMA table_info(agent_team_member_executions)")
+				.all() as Array<{ name: string }>;
+			const columnNames = columns.map(({ name }) => name);
+			expect(columnNames).toEqual([
+				"agent_team_id",
+				"member_id",
+				"execution_machine_id",
+				"worker_relay_key_id",
+				"bootstrap_operation_id",
+				"created_at",
+				"updated_at",
+			]);
+			for (const forbiddenColumn of [
+				"role",
+				"name",
+				"prompt",
+				"task",
+				"mailbox",
+				"body",
+				"worktree",
+			]) {
+				expect(columnNames).not.toContain(forbiddenColumn);
+			}
+
+			const foreignKeys = db
+				.query("PRAGMA foreign_key_list(agent_team_member_executions)")
+				.all() as Array<{
+				table: string;
+				from: string;
+				to: string;
+				on_delete: string;
+			}>;
+			expect(foreignKeys).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						table: "agent_teams",
+						from: "agent_team_id",
+						to: "agent_team_id",
+						on_delete: "CASCADE",
+					}),
+					expect.objectContaining({
+						table: "agent_team_members",
+						from: "agent_team_id",
+						to: "agent_team_id",
+						on_delete: "CASCADE",
+					}),
+					expect.objectContaining({
+						table: "agent_team_members",
+						from: "member_id",
+						to: "member_id",
+						on_delete: "CASCADE",
+					}),
+				]),
+			);
+
+			db.exec(`
+				INSERT INTO agent_teams (
+					agent_team_id, machine_id, workspace_root_cwd, title, lifecycle,
+					leader_member_id, workspace_mode, created_at, updated_at
+				) VALUES (
+					'team-a', 'leader-machine', '/workspace', 'Team A', 'running',
+					'member-a', 'shared', '2026-01-01T00:00:00.000Z',
+					'2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO agent_team_members (
+					member_id, agent_team_id, role, name, backend_id, lifecycle, health,
+					created_at, updated_at
+				) VALUES (
+					'member-a', 'team-a', 'member', 'Member A', 'backend-a',
+					'running', 'healthy', '2026-01-01T00:00:00.000Z',
+					'2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO agent_team_member_executions (
+					agent_team_id, member_id, execution_machine_id,
+					worker_relay_key_id, bootstrap_operation_id, created_at, updated_at
+				) VALUES (
+					'team-a', 'member-a', 'worker-a', 'relay-a', 'bootstrap-a',
+					'2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO agent_teams (
+					agent_team_id, machine_id, workspace_root_cwd, title, lifecycle,
+					leader_member_id, workspace_mode, created_at, updated_at
+				) VALUES (
+					'team-b', 'leader-machine', '/workspace', 'Team B', 'running',
+					'member-b', 'shared', '2026-01-01T00:00:00.000Z',
+					'2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO agent_team_members (
+					member_id, agent_team_id, role, name, backend_id, lifecycle, health,
+					created_at, updated_at
+				) VALUES (
+					'member-b', 'team-b', 'member', 'Member B', 'backend-b',
+					'running', 'healthy', '2026-01-01T00:00:00.000Z',
+					'2026-01-01T00:00:00.000Z'
+				);
+			`);
+			const insertExecution = db.query(`
+				INSERT INTO agent_team_member_executions (
+					agent_team_id, member_id, execution_machine_id,
+					worker_relay_key_id, bootstrap_operation_id, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?)
+			`);
+			expect(() =>
+				insertExecution.run(
+					"team-a",
+					"member-a",
+					"worker-b",
+					"relay-b",
+					"bootstrap-b",
+					"2026-01-01T00:00:00.000Z",
+					"2026-01-01T00:00:00.000Z",
+				),
+			).toThrow("UNIQUE constraint failed");
+			expect(() =>
+				insertExecution.run(
+					"team-b",
+					"member-b",
+					"worker-b",
+					"relay-b",
+					"bootstrap-a",
+					"2026-01-01T00:00:00.000Z",
+					"2026-01-01T00:00:00.000Z",
+				),
+			).toThrow("UNIQUE constraint failed");
+			expect(() =>
+				insertExecution.run(
+					"team-a",
+					"member-b",
+					"worker-b",
+					"relay-b",
+					"bootstrap-b",
+					"2026-01-01T00:00:00.000Z",
+					"2026-01-01T00:00:00.000Z",
+				),
+			).toThrow("FOREIGN KEY constraint failed");
+
+			db.exec(`
+				DELETE FROM agent_team_mcp_status
+				WHERE agent_team_id = 'team-a' AND member_id = 'member-a';
+				DELETE FROM agent_team_members
+				WHERE agent_team_id = 'team-a' AND member_id = 'member-a';
+			`);
+			const remaining = db
+				.query("SELECT COUNT(*) AS count FROM agent_team_member_executions")
+				.get() as { count: number };
+			expect(remaining.count).toBe(0);
+		} finally {
+			db.close();
+			fs.rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	test("upgrades v17 without replacing leader-local Team facts", () => {
 		const tempDir = fs.mkdtempSync(
 			path.join(os.tmpdir(), "agent-team-migrate-v17-"),
@@ -635,6 +954,7 @@ describe("Agent Team migrations", () => {
 
 				DROP TABLE IF EXISTS team_relay_operations;
 				DROP TABLE IF EXISTS remote_team_session_bindings;
+				DROP TABLE IF EXISTS agent_team_member_executions;
 				DELETE FROM schema_version WHERE version > 17;
 			`);
 
@@ -682,7 +1002,98 @@ describe("Agent Team migrations", () => {
 			const schemaVersion = db
 				.query("SELECT MAX(version) AS version FROM schema_version")
 				.get();
-			expect(schemaVersion).toEqual({ version: 18 });
+			expect(schemaVersion).toEqual({ version: 19 });
+		} finally {
+			db.close();
+			fs.rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("upgrades v18 to v19 without replacing leader facts or worker relay rows", () => {
+		const tempDir = fs.mkdtempSync(
+			path.join(os.tmpdir(), "agent-team-migrate-v18-"),
+		);
+		const dbPath = path.join(tempDir, "events.db");
+		const db = new Database(dbPath);
+
+		try {
+			runMigrations(db);
+			db.exec(`
+				INSERT INTO agent_teams (
+					agent_team_id, machine_id, workspace_root_cwd, title, lifecycle,
+					leader_member_id, workspace_mode, created_at, updated_at
+				) VALUES (
+					'team-local', 'leader-machine', '/workspace', 'Local Team', 'running',
+					'member-local', 'shared', '2026-01-01T00:00:00.000Z',
+					'2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO agent_team_members (
+					member_id, agent_team_id, role, name, backend_id, lifecycle, health,
+					created_at, updated_at
+				) VALUES (
+					'member-local', 'team-local', 'member', 'Member', 'backend-local',
+					'running', 'healthy', '2026-01-01T00:00:00.000Z',
+					'2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO agent_team_mailbox_messages (
+					message_id, agent_team_id, from_member_id, to_member_id,
+					body_local_json, wake_status, created_at
+				) VALUES (
+					'message-local', 'team-local', 'member-local', 'member-local',
+					'{"text":"leader-only"}', 'pending', '2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO team_relay_operations (
+					source_machine_id, operation_id, request_digest, status, claim_id,
+					claimed_at
+				) VALUES (
+					'leader-machine', 'relay-operation', 'digest', 'in_progress',
+					'claim', '2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO remote_team_session_bindings (
+					server_id, agent_team_id, member_id, leader_machine_id, backend_id,
+					lifecycle, created_at, updated_at
+				) VALUES (
+					'server-worker', 'team-remote', 'member-remote', 'leader-machine',
+					'backend-worker', 'creating', '2026-01-01T00:00:00.000Z',
+					'2026-01-01T00:00:00.000Z'
+				);
+
+				DROP TABLE IF EXISTS agent_team_member_executions;
+				DELETE FROM schema_version WHERE version > 18;
+			`);
+
+			expect(runMigrations(db)).toBe(18);
+			expect(
+				db
+					.query(
+						"SELECT title FROM agent_teams WHERE agent_team_id = 'team-local'",
+					)
+					.get(),
+			).toEqual({ title: "Local Team" });
+			expect(
+				db
+					.query(
+						"SELECT body_local_json FROM agent_team_mailbox_messages WHERE message_id = 'message-local'",
+					)
+					.get(),
+			).toEqual({ body_local_json: '{"text":"leader-only"}' });
+			expect(
+				db
+					.query(
+						"SELECT status, claim_id FROM team_relay_operations WHERE operation_id = 'relay-operation'",
+					)
+					.get(),
+			).toEqual({ status: "in_progress", claim_id: "claim" });
+			expect(
+				db
+					.query(
+						"SELECT server_id, lifecycle FROM remote_team_session_bindings WHERE server_id = 'server-worker'",
+					)
+					.get(),
+			).toEqual({ server_id: "server-worker", lifecycle: "creating" });
+			expect(
+				db.query("SELECT MAX(version) AS version FROM schema_version").get(),
+			).toEqual({ version: 19 });
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });
@@ -842,7 +1253,7 @@ describe("Agent Team migrations", () => {
 			const schemaVersion = db
 				.query("SELECT MAX(version) AS version FROM schema_version")
 				.get() as { version: number };
-			expect(schemaVersion.version).toBe(18);
+			expect(schemaVersion.version).toBe(19);
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });

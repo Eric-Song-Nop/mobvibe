@@ -38,6 +38,16 @@ export type TeamCommandJournalClaim =
 	| { status: "in_progress" }
 	| { status: "conflict" };
 
+export type AgentTeamMemberExecution = {
+	agentTeamId: string;
+	memberId: string;
+	executionMachineId: string;
+	workerRelayKeyId: string;
+	bootstrapOperationId: string;
+	createdAt: string;
+	updatedAt: string;
+};
+
 export class AgentTeamStore {
 	private db: Database;
 	private stmtInsertTeam: ReturnType<Database["query"]>;
@@ -49,6 +59,12 @@ export class AgentTeamStore {
 	private stmtListTeams: ReturnType<Database["query"]>;
 	private stmtListActiveTeams: ReturnType<Database["query"]>;
 	private stmtListMembers: ReturnType<Database["query"]>;
+	private stmtGetMemberForExecution: ReturnType<Database["query"]>;
+	private stmtGetMemberExecution: ReturnType<Database["query"]>;
+	private stmtGetMemberExecutionByBootstrap: ReturnType<Database["query"]>;
+	private stmtListMemberExecutions: ReturnType<Database["query"]>;
+	private stmtInsertMemberExecution: ReturnType<Database["query"]>;
+	private stmtDeleteMemberExecution: ReturnType<Database["query"]>;
 	private stmtListMcpStatuses: ReturnType<Database["query"]>;
 	private stmtListMailboxMessages: ReturnType<Database["query"]>;
 	private stmtListTasks: ReturnType<Database["query"]>;
@@ -134,6 +150,47 @@ export class AgentTeamStore {
 		this.stmtListMembers = this.db.query(`
       SELECT * FROM agent_team_members WHERE agent_team_id = $agentTeamId ORDER BY created_at ASC
     `);
+		this.stmtGetMemberForExecution = this.db.query(`
+			SELECT 1
+			FROM agent_team_members
+			WHERE agent_team_id = $agentTeamId
+				AND member_id = $memberId
+			LIMIT 1
+		`);
+		this.stmtGetMemberExecution = this.db.query(`
+			SELECT agent_team_id, member_id, execution_machine_id,
+				worker_relay_key_id, bootstrap_operation_id, created_at, updated_at
+			FROM agent_team_member_executions
+			WHERE agent_team_id = $agentTeamId
+				AND member_id = $memberId
+		`);
+		this.stmtGetMemberExecutionByBootstrap = this.db.query(`
+			SELECT agent_team_id, member_id, execution_machine_id,
+				worker_relay_key_id, bootstrap_operation_id, created_at, updated_at
+			FROM agent_team_member_executions
+			WHERE bootstrap_operation_id = $bootstrapOperationId
+		`);
+		this.stmtListMemberExecutions = this.db.query(`
+			SELECT agent_team_id, member_id, execution_machine_id,
+				worker_relay_key_id, bootstrap_operation_id, created_at, updated_at
+			FROM agent_team_member_executions
+			WHERE agent_team_id = $agentTeamId
+			ORDER BY created_at ASC, member_id ASC
+		`);
+		this.stmtInsertMemberExecution = this.db.query(`
+			INSERT INTO agent_team_member_executions (
+				agent_team_id, member_id, execution_machine_id,
+				worker_relay_key_id, bootstrap_operation_id, created_at, updated_at
+			) VALUES (
+				$agentTeamId, $memberId, $executionMachineId,
+				$workerRelayKeyId, $bootstrapOperationId, $createdAt, $updatedAt
+			)
+		`);
+		this.stmtDeleteMemberExecution = this.db.query(`
+			DELETE FROM agent_team_member_executions
+			WHERE agent_team_id = $agentTeamId
+				AND member_id = $memberId
+		`);
 		this.stmtListMcpStatuses = this.db.query(`
       SELECT * FROM agent_team_mcp_status WHERE agent_team_id = $agentTeamId
     `);
@@ -415,6 +472,99 @@ export class AgentTeamStore {
 		return this.stmtListMembers.all({
 			$agentTeamId: agentTeamId,
 		}) as AgentTeamMemberRow[];
+	}
+
+	bindTeamMemberExecution(params: {
+		agentTeamId: string;
+		memberId: string;
+		executionMachineId: string;
+		workerRelayKeyId: string;
+		bootstrapOperationId: string;
+	}): AgentTeamMemberExecution {
+		return this.db
+			.transaction(() => {
+				const memberExists =
+					this.stmtGetMemberForExecution.get({
+						$agentTeamId: params.agentTeamId,
+						$memberId: params.memberId,
+					}) !== null;
+				if (!memberExists) {
+					throw new Error(
+						`Agent Team member not found: ${params.agentTeamId}/${params.memberId}`,
+					);
+				}
+
+				const existing = this.getTeamMemberExecution(
+					params.agentTeamId,
+					params.memberId,
+				);
+				if (existing) {
+					if (isExactMemberExecution(existing, params)) {
+						return existing;
+					}
+					throw new Error(
+						`Agent Team member execution binding conflict: ${params.memberId}`,
+					);
+				}
+
+				const operationOwner = this.stmtGetMemberExecutionByBootstrap.get({
+					$bootstrapOperationId: params.bootstrapOperationId,
+				}) as AgentTeamMemberExecutionRow | null;
+				if (operationOwner) {
+					throw new Error(
+						`Agent Team bootstrap operation conflict: ${params.bootstrapOperationId}`,
+					);
+				}
+
+				const now = new Date().toISOString();
+				this.stmtInsertMemberExecution.run({
+					$agentTeamId: params.agentTeamId,
+					$memberId: params.memberId,
+					$executionMachineId: params.executionMachineId,
+					$workerRelayKeyId: params.workerRelayKeyId,
+					$bootstrapOperationId: params.bootstrapOperationId,
+					$createdAt: now,
+					$updatedAt: now,
+				});
+				const inserted = this.getTeamMemberExecution(
+					params.agentTeamId,
+					params.memberId,
+				);
+				if (!inserted) {
+					throw new Error(
+						`Agent Team member execution was not persisted: ${params.memberId}`,
+					);
+				}
+				return inserted;
+			})
+			.immediate();
+	}
+
+	getTeamMemberExecution(
+		agentTeamId: string,
+		memberId: string,
+	): AgentTeamMemberExecution | null {
+		const row = this.stmtGetMemberExecution.get({
+			$agentTeamId: agentTeamId,
+			$memberId: memberId,
+		}) as AgentTeamMemberExecutionRow | null;
+		return row ? memberExecutionRowToBinding(row) : null;
+	}
+
+	listTeamMemberExecutions(agentTeamId: string): AgentTeamMemberExecution[] {
+		return (
+			this.stmtListMemberExecutions.all({
+				$agentTeamId: agentTeamId,
+			}) as AgentTeamMemberExecutionRow[]
+		).map(memberExecutionRowToBinding);
+	}
+
+	removeTeamMemberExecution(agentTeamId: string, memberId: string): boolean {
+		const removed = this.stmtDeleteMemberExecution.run({
+			$agentTeamId: agentTeamId,
+			$memberId: memberId,
+		});
+		return removed.changes === 1;
 	}
 
 	listLocalTasks(agentTeamId: string): AgentTeamTaskLocalRow[] {
@@ -1063,6 +1213,45 @@ type TeamCommandJournalRow = {
 	result_local_json: string | null;
 	error_local_json: string | null;
 };
+
+type AgentTeamMemberExecutionRow = {
+	agent_team_id: string;
+	member_id: string;
+	execution_machine_id: string;
+	worker_relay_key_id: string;
+	bootstrap_operation_id: string;
+	created_at: string;
+	updated_at: string;
+};
+
+function memberExecutionRowToBinding(
+	row: AgentTeamMemberExecutionRow,
+): AgentTeamMemberExecution {
+	return {
+		agentTeamId: row.agent_team_id,
+		memberId: row.member_id,
+		executionMachineId: row.execution_machine_id,
+		workerRelayKeyId: row.worker_relay_key_id,
+		bootstrapOperationId: row.bootstrap_operation_id,
+		createdAt: row.created_at,
+		updatedAt: row.updated_at,
+	};
+}
+
+function isExactMemberExecution(
+	existing: AgentTeamMemberExecution,
+	params: {
+		executionMachineId: string;
+		workerRelayKeyId: string;
+		bootstrapOperationId: string;
+	},
+): boolean {
+	return (
+		existing.executionMachineId === params.executionMachineId &&
+		existing.workerRelayKeyId === params.workerRelayKeyId &&
+		existing.bootstrapOperationId === params.bootstrapOperationId
+	);
+}
 
 function journalRowToClaim(
 	row: TeamCommandJournalRow,

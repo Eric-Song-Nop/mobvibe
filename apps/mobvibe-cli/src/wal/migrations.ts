@@ -512,7 +512,36 @@ const MIGRATIONS: readonly Migration[] = [
 				ON remote_team_session_bindings (
 					leader_machine_id,
 					updated_at
-				);
+			);
+		`,
+	},
+	{
+		version: 19,
+		up: `
+			-- Remote member placement is leader-authoritative routing truth.
+			-- It is deliberately separate from the gateway-facing Team
+			-- projection and contains no user-authored Team content.
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_team_members_team_member
+				ON agent_team_members (agent_team_id, member_id);
+
+			CREATE TABLE IF NOT EXISTS agent_team_member_executions (
+				agent_team_id TEXT NOT NULL,
+				member_id TEXT NOT NULL PRIMARY KEY,
+				execution_machine_id TEXT NOT NULL,
+				worker_relay_key_id TEXT NOT NULL,
+				bootstrap_operation_id TEXT NOT NULL UNIQUE,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL,
+				FOREIGN KEY (agent_team_id)
+					REFERENCES agent_teams(agent_team_id)
+					ON DELETE CASCADE,
+				FOREIGN KEY (agent_team_id, member_id)
+					REFERENCES agent_team_members(agent_team_id, member_id)
+					ON DELETE CASCADE
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_agent_team_member_executions_team
+				ON agent_team_member_executions (agent_team_id, created_at);
 		`,
 	},
 ];
