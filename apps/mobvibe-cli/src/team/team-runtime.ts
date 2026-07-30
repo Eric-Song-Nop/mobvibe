@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { TeamSourceRef } from "@mobvibe/shared";
 import { logger } from "../lib/logger.js";
 import type { AgentTeamStore, MailboxWakeMessage } from "./agent-team-store.js";
@@ -13,9 +14,12 @@ import {
 	type TeamToolHandlersOptions,
 } from "./team-tool-handlers.js";
 
+const DEFAULT_PENDING_WAKE_SWEEP_INTERVAL_MS = 30_000;
+
 export type TeamRuntimeOptions = Omit<TeamToolHandlersOptions, "store"> & {
 	store: AgentTeamStore;
 	sessionManager?: TeamSessionInjector;
+	pendingWakeSweepIntervalMs?: number;
 };
 
 export type TeamSessionInjector = {
@@ -41,6 +45,10 @@ export class TeamRuntime {
 	private readonly sessionManager?: TeamSessionInjector;
 	private readonly mailboxService: MailboxService;
 	private readonly onAgentTeamChanged?: TeamRuntimeOptions["onAgentTeamChanged"];
+	private readonly memberWakeFlights = new Map<string, Promise<void>>();
+	private pendingWakeSweepTimer?: ReturnType<typeof setInterval>;
+	private lifecycleGeneration = 0;
+	private stopped = false;
 
 	constructor(options: TeamRuntimeOptions) {
 		this.store = options.store;
@@ -72,92 +80,83 @@ export class TeamRuntime {
 				dispatcher: this.commandBus,
 			}),
 		});
+		this.startPendingWakeSweep(
+			options.pendingWakeSweepIntervalMs ??
+				DEFAULT_PENDING_WAKE_SWEEP_INTERVAL_MS,
+		);
 	}
 
-	async wakeMember(agentTeamId: string, memberId: string): Promise<void> {
-		const member = this.store
-			.listTeamMembers(agentTeamId)
-			.find((candidate) => candidate.member_id === memberId);
-		if (!member?.session_id || !this.sessionManager) {
-			return;
+	wakeMember(agentTeamId: string, memberId: string): Promise<void> {
+		if (this.stopped || this.store.isClosed() || !this.sessionManager) {
+			return Promise.resolve();
 		}
-		const messages = this.store.readUnreadAndMark(agentTeamId, memberId);
-		if (messages.length === 0) {
-			return;
+		const flightKey = JSON.stringify([agentTeamId, memberId]);
+		const existing = this.memberWakeFlights.get(flightKey);
+		if (existing) {
+			return existing;
 		}
-		const promptText = buildMailboxPrompt(
-			messages,
-			this.store.listTeamMembers(agentTeamId),
-		);
-		try {
-			const sessionRef = await this.sessionManager.injectTeamMailboxPrompt({
-				agentTeamId,
-				memberId,
-				sessionId: member.session_id,
-				text: promptText,
+		const generation = this.lifecycleGeneration;
+		const flight = Promise.resolve()
+			.then(() => this.drainMemberMailbox(agentTeamId, memberId, generation))
+			.finally(() => {
+				if (this.memberWakeFlights.get(flightKey) === flight) {
+					this.memberWakeFlights.delete(flightKey);
+				}
 			});
-			for (const message of messages) {
-				this.store.updateWakeMetadata({
-					messageId: message.messageId,
-					wakeStatus: "sent",
-					deliveredSessionId: member.session_id,
-					sourceRefs: [sessionRef],
-				});
-			}
-		} catch (error) {
-			const safeError = toSafeWakeError(error);
-			for (const message of messages) {
-				this.store.updateWakeMetadata({
-					messageId: message.messageId,
-					wakeStatus: "failed",
-					error: safeError,
-				});
-			}
-		}
+		this.memberWakeFlights.set(flightKey, flight);
+		return flight;
 	}
 
 	async onMemberTurnCompleted(
 		agentTeamId: string,
 		memberId: string,
+		turnId: string = randomUUID(),
 	): Promise<void> {
-		const members = this.store.listTeamMembers(agentTeamId);
-		const member = members.find(
-			(candidate) => candidate.member_id === memberId,
-		);
-		if (!member || member.role === "leader" || member.lifecycle !== "running") {
-			return;
-		}
-		const leader = members.find((candidate) => candidate.role === "leader");
-		if (!leader) {
-			return;
-		}
-		this.store.updateTeamMemberRuntimeState({
+		const completion = this.store.applyTeamRuntimeTurnCompletion({
+			turnId,
 			agentTeamId,
 			memberId,
-			lifecycle: "completed",
 		});
-		this.store.createMailboxMessages({
-			agentTeamId,
-			fromMemberId: memberId,
-			recipients: [{ memberId: leader.member_id, name: leader.name }],
-			body: {
-				message: "Turn completed",
-				type: "idle_notification",
-			},
-		});
-		this.emitCurrentTeam(agentTeamId);
-		if (this.areNonLeaderMembersSettled(agentTeamId)) {
-			void this.wakeMember(agentTeamId, leader.member_id).catch((error) => {
-				logger.warn(
-					{
-						agentTeamId,
-						memberId: leader.member_id,
-						errorName: error instanceof Error ? error.name : "UnknownError",
-					},
-					"agent_team_member_wake_failed",
-				);
-			});
+		if (completion.status === "ignored") {
+			return;
 		}
+		this.emitCurrentTeam(agentTeamId);
+		let shouldWakeLeader = false;
+		try {
+			shouldWakeLeader = this.areNonLeaderMembersSettled(agentTeamId);
+		} catch (error) {
+			this.logPostCommitFailure(
+				error,
+				"agent_team_runtime_settled_check_failed",
+				agentTeamId,
+				completion.leaderMemberId,
+			);
+		}
+		if (shouldWakeLeader) {
+			void this.wakeMember(agentTeamId, completion.leaderMemberId).catch(
+				(error) => {
+					this.logPostCommitFailure(
+						error,
+						"agent_team_member_wake_failed",
+						agentTeamId,
+						completion.leaderMemberId,
+					);
+				},
+			);
+		}
+	}
+
+	stop(): void {
+		if (this.stopped) {
+			return;
+		}
+		this.stopped = true;
+		this.lifecycleGeneration += 1;
+		if (this.pendingWakeSweepTimer) {
+			clearInterval(this.pendingWakeSweepTimer);
+			this.pendingWakeSweepTimer = undefined;
+		}
+		this.memberWakeFlights.clear();
 	}
 
 	private async sendMessageAndWake(
@@ -207,8 +206,16 @@ export class TeamRuntime {
 	}
 
 	private emitCurrentTeam(agentTeamId: string): void {
-		const team = this.store.getAgentTeam({ agentTeamId }).team;
-		if (team) this.onAgentTeamChanged?.(team);
+		try {
+			const team = this.store.getAgentTeam({ agentTeamId }).team;
+			if (team) this.onAgentTeamChanged?.(team);
+		} catch (error) {
+			this.logPostCommitFailure(
+				error,
+				"agent_team_projection_listener_failed",
+				agentTeamId,
+			);
+		}
 	}
 
 	private areNonLeaderMembersSettled(agentTeamId: string): boolean {
@@ -223,6 +230,134 @@ export class TeamRuntime {
 						member.lifecycle,
 					),
 			)
+		);
+	}
+
+	private async drainMemberMailbox(
+		agentTeamId: string,
+		memberId: string,
+		generation: number,
+	): Promise<void> {
+		while (this.isGenerationActive(generation)) {
+			const member = this.store
+				.listTeamMembers(agentTeamId)
+				.find((candidate) => candidate.member_id === memberId);
+			if (!member?.session_id || !this.sessionManager) {
+				return;
+			}
+			const messages = this.store.listUnreadForWake(agentTeamId, memberId);
+			if (messages.length === 0) {
+				return;
+			}
+			const promptText = buildMailboxPrompt(
+				messages,
+				this.store.listTeamMembers(agentTeamId),
+			);
+			let sessionRef: TeamSourceRef;
+			try {
+				sessionRef = await this.sessionManager.injectTeamMailboxPrompt({
+					agentTeamId,
+					memberId,
+					sessionId: member.session_id,
+					text: promptText,
+				});
+			} catch (error) {
+				if (!this.isGenerationActive(generation)) {
+					return;
+				}
+				const safeError = toSafeWakeError(error);
+				for (const message of messages) {
+					this.store.updateWakeMetadata({
+						messageId: message.messageId,
+						wakeStatus: "failed",
+						error: safeError,
+					});
+				}
+				return;
+			}
+			if (!this.isGenerationActive(generation)) {
+				return;
+			}
+			this.store.completeMailboxWake({
+				messageIds: messages.map((message) => message.messageId),
+				deliveredSessionId: member.session_id,
+				sourceRefs: [sessionRef],
+			});
+		}
+	}
+
+	private startPendingWakeSweep(intervalMs: number): void {
+		if (!this.sessionManager) {
+			return;
+		}
+		const safeIntervalMs =
+			Number.isFinite(intervalMs) && intervalMs > 0
+				? Math.floor(intervalMs)
+				: DEFAULT_PENDING_WAKE_SWEEP_INTERVAL_MS;
+		const generation = this.lifecycleGeneration;
+		queueMicrotask(() => {
+			this.sweepPendingWakes(generation);
+		});
+		this.pendingWakeSweepTimer = setInterval(() => {
+			this.sweepPendingWakes(generation);
+		}, safeIntervalMs);
+		this.pendingWakeSweepTimer.unref();
+	}
+
+	private sweepPendingWakes(generation: number): void {
+		if (!this.isGenerationActive(generation)) {
+			return;
+		}
+		let recipients: ReturnType<AgentTeamStore["listPendingWakeRecipients"]>;
+		try {
+			recipients = this.store.listPendingWakeRecipients();
+		} catch (error) {
+			if (this.isGenerationActive(generation)) {
+				this.logPostCommitFailure(
+					error,
+					"agent_team_pending_wake_sweep_failed",
+				);
+			}
+			return;
+		}
+		for (const recipient of recipients) {
+			if (!this.isGenerationActive(generation)) {
+				return;
+			}
+			void this.wakeMember(recipient.agentTeamId, recipient.memberId).catch(
+				(error) => {
+					this.logPostCommitFailure(
+						error,
+						"agent_team_pending_wake_failed",
+						recipient.agentTeamId,
+						recipient.memberId,
+					);
+				},
+			);
+		}
+	}
+
+	private isGenerationActive(generation: number): boolean {
+		return (
+			!this.stopped &&
+			!this.store.isClosed() &&
+			this.lifecycleGeneration === generation
+		);
+	}
+
+	private logPostCommitFailure(
+		error: unknown,
+		event: string,
+		agentTeamId?: string,
+		memberId?: string,
+	): void {
+		logger.warn(
+			{
+				...(agentTeamId ? { agentTeamId } : {}),
+				...(memberId ? { memberId } : {}),
+				errorName: error instanceof Error ? error.name : "UnknownError",
+			},
+			event,
 		);
 	}
 }

@@ -75,7 +75,10 @@ import {
 import { TeamRelayStore } from "../team/team-relay-store.js";
 import { TeamRuntime } from "../team/team-runtime.js";
 import { TeamRuntimeOutboxDispatcher } from "../team/team-runtime-outbox-dispatcher.js";
-import { createLeaderTeamRuntimeRelayHandler } from "../team/team-runtime-relay.js";
+import {
+	createLeaderTeamRuntimeRelayHandler,
+	isRecoverableTeamTurnCompletedRelayRequest,
+} from "../team/team-runtime-relay.js";
 import type { SpawnMemberResult } from "../team/team-tool-handlers.js";
 import {
 	consolidateEventsForRead,
@@ -601,6 +604,7 @@ export class SessionManager {
 	private readonly agentTeamStore: AgentTeamStore;
 	private readonly teamRelayStore: TeamRelayStore;
 	private readonly teamRuntime: TeamRuntime;
+	private readonly teamRelayProtocol?: TeamRelayProtocol;
 	private readonly teamRelayClient?: TeamRelayClient;
 	private readonly teamRuntimeOutboxDispatcher?: TeamRuntimeOutboxDispatcher;
 	private readonly remoteTeamMcpPort?: RemoteTeamMcpPort;
@@ -636,6 +640,7 @@ export class SessionManager {
 	private idleConnections = new Map<string, AcpConnection>();
 	/** Serializes every operation that may acquire or release a backend process. */
 	private readonly backendLifecycleTails = new Map<string, Promise<void>>();
+	private teamRelayTransportAttached = false;
 	private shuttingDown = false;
 
 	/** Per-backend capabilities cache */
@@ -743,7 +748,6 @@ export class SessionManager {
 			});
 			if (cryptoService) {
 				const protocol = new TeamRelayProtocol({
-					machineId: config.machineId,
 					cryptoService,
 				});
 				const client = new TeamRelayClient({ protocol });
@@ -751,6 +755,7 @@ export class SessionManager {
 					store: this.teamRelayStore,
 					relay: client,
 				});
+				this.teamRelayProtocol = protocol;
 				this.teamRelayClient = client;
 				this.teamRuntimeOutboxDispatcher = new TeamRuntimeOutboxDispatcher({
 					store: this.teamRelayStore,
@@ -778,6 +783,7 @@ export class SessionManager {
 				this.teamRelayEndpoint = new TeamRelayEndpoint({
 					protocol,
 					store: this.teamRelayStore,
+					recoverAbandoned: isRecoverableTeamTurnCompletedRelayRequest,
 					handlers: {
 						...createLeaderTeamRelayHandlers({
 							store: this.agentTeamStore,
@@ -803,6 +809,9 @@ export class SessionManager {
 	}
 
 	attachTeamRelayTransport(transport: TeamRelayWireTransport): void {
+		if (this.shuttingDown) {
+			throw new Error("Session manager is shutting down");
+		}
 		const client = this.teamRelayClient;
 		if (!client) {
 			throw createCapabilityNotSupportedError(
@@ -810,7 +819,37 @@ export class SessionManager {
 			);
 		}
 		client.attachTransport(transport);
-		void this.teamRuntimeOutboxDispatcher?.start();
+		this.teamRelayTransportAttached = true;
+	}
+
+	bindTeamRelayMachineIdentity(machineId: string): void {
+		if (this.shuttingDown) {
+			throw new Error("Session manager is shutting down");
+		}
+		const protocol = this.teamRelayProtocol;
+		if (!protocol) {
+			throw createCapabilityNotSupportedError(
+				"Encrypted Team relay is not available",
+			);
+		}
+		protocol.bindMachineIdentity(machineId);
+	}
+
+	setTeamRelayTransportReady(ready: boolean): boolean {
+		const dispatcher = this.teamRuntimeOutboxDispatcher;
+		if (!dispatcher || this.shuttingDown) {
+			return false;
+		}
+		if (!ready) {
+			dispatcher.pause();
+			return true;
+		}
+		if (!this.teamRelayTransportAttached) {
+			throw new Error("Team relay transport is not attached");
+		}
+		void this.teamRelayProtocol?.machineId;
+		void dispatcher.start();
+		return true;
 	}
 
 	async handleTeamRelayRequest(
@@ -4077,6 +4116,7 @@ export class SessionManager {
 	 */
 	async shutdown(): Promise<void> {
 		this.shuttingDown = true;
+		this.teamRuntime.stop();
 		this.teamRuntimeOutboxDispatcher?.stop();
 		await Promise.all(Array.from(this.backendLifecycleTails.values()));
 		await this.closeAll();

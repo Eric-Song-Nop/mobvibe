@@ -114,6 +114,33 @@ const TEAM_RUNTIME_OUTBOX_DELIVERED_INDEX_SCHEMA = `
 		WHERE status = 'delivered';
 `;
 
+const AGENT_TEAM_RUNTIME_INBOX_SCHEMA = `
+	-- Runtime events become leader-authored facts only through this local inbox.
+	-- The event receipt, member transition, and notification are committed by
+	-- AgentTeamStore in one SQLite transaction.
+	CREATE TABLE IF NOT EXISTS agent_team_runtime_inbox (
+		turn_id TEXT NOT NULL PRIMARY KEY,
+		agent_team_id TEXT NOT NULL,
+		member_id TEXT NOT NULL,
+		leader_member_id TEXT NOT NULL,
+		notification_message_id TEXT NOT NULL UNIQUE,
+		applied_at TEXT NOT NULL,
+		FOREIGN KEY (agent_team_id)
+			REFERENCES agent_teams(agent_team_id)
+			ON DELETE CASCADE,
+		FOREIGN KEY (agent_team_id, member_id)
+			REFERENCES agent_team_members(agent_team_id, member_id)
+			ON DELETE CASCADE,
+		FOREIGN KEY (agent_team_id, leader_member_id)
+			REFERENCES agent_team_members(agent_team_id, member_id)
+			ON DELETE CASCADE,
+		CHECK (member_id <> leader_member_id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_agent_team_runtime_inbox_team
+		ON agent_team_runtime_inbox (agent_team_id, member_id, applied_at);
+`;
+
 const TEAM_RUNTIME_OUTBOX_BACKFILL_SCHEMA = `
 	-- Reconcile terminal events committed before this migration. A canonical
 	-- replay is safe because the leader relay journal is exactly-once by
@@ -253,6 +280,24 @@ function reconcileDivergentMigrationHistory(
 	}
 	if (currentVersion >= 21 && tableExists(db, "team_runtime_outbox")) {
 		db.exec(TEAM_RUNTIME_OUTBOX_DELIVERED_INDEX_SCHEMA);
+	}
+	if (currentVersion >= 22) {
+		if (
+			tableExists(db, "team_relay_operations") &&
+			!columnExists(db, "team_relay_operations", "claim_owner_id")
+		) {
+			db.exec(`
+				ALTER TABLE team_relay_operations
+					ADD COLUMN claim_owner_id TEXT NOT NULL DEFAULT 'legacy';
+			`);
+		}
+		if (
+			tableExists(db, "agent_teams") &&
+			tableExists(db, "agent_team_members") &&
+			tableExists(db, "agent_team_mailbox_messages")
+		) {
+			db.exec(AGENT_TEAM_RUNTIME_INBOX_SCHEMA);
+		}
 	}
 }
 
@@ -734,6 +779,18 @@ const MIGRATIONS: readonly Migration[] = [
 	{
 		version: 21,
 		up: TEAM_RUNTIME_OUTBOX_DELIVERED_INDEX_SCHEMA,
+	},
+	{
+		version: 22,
+		up: (db) => {
+			if (!columnExists(db, "team_relay_operations", "claim_owner_id")) {
+				db.exec(`
+					ALTER TABLE team_relay_operations
+						ADD COLUMN claim_owner_id TEXT NOT NULL DEFAULT 'legacy';
+				`);
+			}
+			db.exec(AGENT_TEAM_RUNTIME_INBOX_SCHEMA);
+		},
 	},
 ];
 

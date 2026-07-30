@@ -19,6 +19,7 @@ import {
 	type RpcRequest,
 	type RpcResponse,
 	type SendTeamRelayResult,
+	TEAM_RELAY_GATEWAY_RPC_TIMEOUT_MS,
 	type TeamRelayExecuteRpcParams,
 	type TeamRelayExecuteRpcResult,
 } from "@mobvibe/shared";
@@ -33,8 +34,6 @@ type PendingRpc<T> = {
 	reject: (error: Error) => void;
 	timeout: NodeJS.Timeout;
 };
-
-const RPC_TIMEOUT = 120000;
 
 export class TeamRouter {
 	private pendingRpcs = new Map<string, PendingRpc<unknown>>();
@@ -127,6 +126,7 @@ export class TeamRouter {
 			.filter(
 				(candidate) =>
 					candidate !== authenticatedSource &&
+					candidate.teamRelayReady &&
 					candidate.teamRelayKey !== undefined &&
 					candidate.backends.some(
 						(backend) => backend.backendId === params.backendId,
@@ -328,7 +328,8 @@ export class TeamRouter {
 		if (
 			registered !== source ||
 			!registered.userId ||
-			!registered.teamRelayKey
+			!registered.teamRelayKey ||
+			!registered.teamRelayReady
 		) {
 			throw new AppError(
 				createErrorDetail({
@@ -361,7 +362,7 @@ export class TeamRouter {
 		if (!target || target === authenticatedSource) {
 			this.throwRelayPeerNotFound();
 		}
-		if (!target.teamRelayKey) {
+		if (!target.teamRelayKey || !target.teamRelayReady) {
 			throw new AppError(
 				createErrorDetail({
 					code: "CAPABILITY_NOT_SUPPORTED",
@@ -419,7 +420,7 @@ export class TeamRouter {
 			const timeout = setTimeout(() => {
 				this.pendingRpcs.delete(requestId);
 				reject(new Error("RPC timeout"));
-			}, RPC_TIMEOUT);
+			}, TEAM_RELAY_GATEWAY_RPC_TIMEOUT_MS);
 			this.pendingRpcs.set(requestId, {
 				socketId: socket.id,
 				resolve: (result) => resolve(result as TResult),

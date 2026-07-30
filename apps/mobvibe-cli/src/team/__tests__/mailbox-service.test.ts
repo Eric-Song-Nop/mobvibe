@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { AgentTeamStore } from "../agent-team-store.js";
 import { MailboxService } from "../mailbox-service.js";
-import { TeamRuntime } from "../team-runtime.js";
+import { TeamRuntime, type TeamRuntimeOptions } from "../team-runtime.js";
 
 type MailboxRow = {
 	message_id: string;
@@ -28,8 +28,16 @@ describe("MailboxService durable delivery", () => {
 	let leaderMemberId: string;
 	let workerMemberId: string;
 	let reviewerMemberId: string;
+	let runtimes: TeamRuntime[];
+
+	const createRuntime = (options: TeamRuntimeOptions): TeamRuntime => {
+		const runtime = new TeamRuntime(options);
+		runtimes.push(runtime);
+		return runtime;
+	};
 
 	beforeEach(() => {
+		runtimes = [];
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "mailbox-service-"));
 		dbPath = path.join(tempDir, "events.db");
 		store = new AgentTeamStore(dbPath);
@@ -59,6 +67,9 @@ describe("MailboxService durable delivery", () => {
 	});
 
 	afterEach(() => {
+		for (const runtime of runtimes) {
+			runtime.stop();
+		}
 		store.close();
 		fs.rmSync(tempDir, { recursive: true, force: true });
 	});
@@ -340,7 +351,7 @@ describe("MailboxService durable delivery", () => {
 			throw new Error("Expected setup delivery to succeed");
 		}
 		const injected: string[] = [];
-		const runtime = new TeamRuntime({
+		const runtime = createRuntime({
 			store,
 			sessionManager: {
 				injectTeamMailboxPrompt: async (input) => {
@@ -396,7 +407,7 @@ describe("MailboxService durable delivery", () => {
 		if (!sent.ok) {
 			throw new Error("Expected setup delivery to succeed");
 		}
-		const runtime = new TeamRuntime({
+		const runtime = createRuntime({
 			store,
 			sessionManager: {
 				injectTeamMailboxPrompt: async () => {
@@ -410,6 +421,7 @@ describe("MailboxService durable delivery", () => {
 		const [row] = readMailboxRows(dbPath);
 		expect(row.body_local_json).toContain("still durable");
 		expect(row.wake_status).toBe("failed");
+		expect(row.read_at).toBeNull();
 		const refs = JSON.parse(row.source_refs_json ?? "[]");
 		expect(refs).toEqual(
 			expect.arrayContaining([
@@ -420,6 +432,273 @@ describe("MailboxService durable delivery", () => {
 			]),
 		);
 		expect(JSON.stringify(refs)).not.toContain("deliveredSessionId");
+	});
+
+	test("stop fences an in-flight injection before the durable store closes", async () => {
+		setMemberState(dbPath, workerMemberId, {
+			sessionId: "session-worker",
+			lifecycle: "running",
+		});
+		service.sendMessage(
+			{ agentTeamId, memberId: leaderMemberId, role: "leader" },
+			{ to: workerMemberId, message: "survive shutdown" },
+		);
+		let observeInjection: (() => void) | undefined;
+		const injectionObserved = new Promise<void>((resolve) => {
+			observeInjection = resolve;
+		});
+		let releaseInjection: (() => void) | undefined;
+		const injectionGate = new Promise<void>((resolve) => {
+			releaseInjection = resolve;
+		});
+		const runtime = createRuntime({
+			store,
+			sessionManager: {
+				injectTeamMailboxPrompt: async (input) => {
+					observeInjection?.();
+					await injectionGate;
+					return {
+						type: "session_event",
+						agentTeamId: input.agentTeamId,
+						memberId: input.memberId,
+						sessionId: input.sessionId,
+						revision: 1,
+						seq: 1,
+					};
+				},
+			},
+		});
+
+		const wake = runtime.wakeMember(agentTeamId, workerMemberId);
+		await injectionObserved;
+		expect(readMailboxRows(dbPath)).toEqual([
+			expect.objectContaining({
+				read_at: null,
+				wake_status: "pending",
+			}),
+		]);
+
+		runtime.stop();
+		store.close();
+		releaseInjection?.();
+
+		await expect(wake).resolves.toBeUndefined();
+		expect(readMailboxRows(dbPath)).toEqual([
+			expect.objectContaining({
+				read_at: null,
+				wake_status: "pending",
+			}),
+		]);
+	});
+
+	test("periodic sweep recovers mail inserted after the startup sweep", async () => {
+		setMemberState(dbPath, workerMemberId, {
+			sessionId: "session-worker",
+			lifecycle: "running",
+		});
+		let observeInjection: (() => void) | undefined;
+		const injectionObserved = new Promise<void>((resolve) => {
+			observeInjection = resolve;
+		});
+		const injected: string[] = [];
+		const runtime = createRuntime({
+			store,
+			pendingWakeSweepIntervalMs: 5,
+			sessionManager: {
+				injectTeamMailboxPrompt: async (input) => {
+					injected.push(input.text);
+					observeInjection?.();
+					return {
+						type: "session_event",
+						agentTeamId: input.agentTeamId,
+						memberId: input.memberId,
+						sessionId: input.sessionId,
+						revision: 1,
+						seq: 1,
+					};
+				},
+			},
+		});
+		await Promise.resolve();
+
+		service.sendMessage(
+			{ agentTeamId, memberId: leaderMemberId, role: "leader" },
+			{ to: workerMemberId, message: "missed producer wake" },
+		);
+
+		const recovery = await Promise.race([
+			injectionObserved.then(() => "injected" as const),
+			new Promise<"timed_out">((resolve) => {
+				setTimeout(() => resolve("timed_out"), 100);
+			}),
+		]);
+		expect(recovery).toBe("injected");
+		await runtime.wakeMember(agentTeamId, workerMemberId);
+		expect(injected).toHaveLength(1);
+		expect(injected[0]).toContain("missed producer wake");
+		expect(readMailboxRows(dbPath)).toEqual([
+			expect.objectContaining({
+				read_at: expect.any(String),
+				wake_status: "sent",
+			}),
+		]);
+	});
+
+	test("restart repairs and sweeps a legacy nonterminal wake without replaying its completed turn", async () => {
+		setMemberState(dbPath, leaderMemberId, {
+			sessionId: "session-leader",
+			lifecycle: "running",
+		});
+		setMemberState(dbPath, workerMemberId, {
+			sessionId: "session-worker",
+			lifecycle: "running",
+		});
+		setMemberState(dbPath, reviewerMemberId, {
+			sessionId: "session-reviewer",
+			lifecycle: "completed",
+		});
+		const failedRuntime = createRuntime({
+			store,
+			sessionManager: {
+				injectTeamMailboxPrompt: async () => {
+					throw new Error("leader ACP unavailable before restart");
+				},
+			},
+		});
+
+		await failedRuntime.onMemberTurnCompleted(
+			agentTeamId,
+			workerMemberId,
+			"turn-completed-before-restart",
+		);
+		await failedRuntime.wakeMember(agentTeamId, leaderMemberId);
+		expect(readMailboxRows(dbPath)).toEqual([
+			expect.objectContaining({
+				read_at: null,
+				wake_status: "failed",
+			}),
+		]);
+		const legacyDb = new Database(dbPath);
+		try {
+			legacyDb
+				.query(`
+					UPDATE agent_team_mailbox_messages
+					SET read_at = $readAt
+					WHERE wake_status = 'failed'
+				`)
+				.run({ $readAt: "2026-07-31T00:00:00.000Z" });
+		} finally {
+			legacyDb.close();
+		}
+
+		failedRuntime.stop();
+		store.close();
+		store = new AgentTeamStore(dbPath);
+		let observeInjection: (() => void) | undefined;
+		const injectionObserved = new Promise<void>((resolve) => {
+			observeInjection = resolve;
+		});
+		const recoveredRuntime = createRuntime({
+			store,
+			sessionManager: {
+				injectTeamMailboxPrompt: async (input) => {
+					observeInjection?.();
+					return {
+						type: "session_event",
+						agentTeamId: input.agentTeamId,
+						memberId: input.memberId,
+						sessionId: input.sessionId,
+						revision: 1,
+						seq: 1,
+					};
+				},
+			},
+		});
+
+		const recovery = await Promise.race([
+			injectionObserved.then(() => "injected" as const),
+			new Promise<"timed_out">((resolve) => {
+				setTimeout(() => resolve("timed_out"), 100);
+			}),
+		]);
+		expect(recovery).toBe("injected");
+		expect(readMailboxRows(dbPath)).toEqual([
+			expect.objectContaining({
+				read_at: expect.any(String),
+				wake_status: "sent",
+			}),
+		]);
+		recoveredRuntime.stop();
+	});
+
+	test("serializes overlapping wakes for the same member and drains new mail", async () => {
+		setMemberState(dbPath, workerMemberId, {
+			sessionId: "session-worker",
+			lifecycle: "running",
+		});
+		service.sendMessage(
+			{ agentTeamId, memberId: leaderMemberId, role: "leader" },
+			{ to: workerMemberId, message: "first" },
+		);
+		let releaseFirst: (() => void) | undefined;
+		const firstGate = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		let observeFirst: (() => void) | undefined;
+		const firstObserved = new Promise<void>((resolve) => {
+			observeFirst = resolve;
+		});
+		let activeInjections = 0;
+		let maxActiveInjections = 0;
+		const injected: string[] = [];
+		const runtime = createRuntime({
+			store,
+			sessionManager: {
+				injectTeamMailboxPrompt: async (input) => {
+					activeInjections += 1;
+					maxActiveInjections = Math.max(maxActiveInjections, activeInjections);
+					injected.push(input.text);
+					if (injected.length === 1) {
+						observeFirst?.();
+						await firstGate;
+					}
+					activeInjections -= 1;
+					return {
+						type: "session_event",
+						agentTeamId: input.agentTeamId,
+						memberId: input.memberId,
+						sessionId: input.sessionId,
+						revision: 1,
+						seq: injected.length,
+					};
+				},
+			},
+		});
+
+		const firstWake = runtime.wakeMember(agentTeamId, workerMemberId);
+		await firstObserved;
+		service.sendMessage(
+			{ agentTeamId, memberId: leaderMemberId, role: "leader" },
+			{ to: workerMemberId, message: "second" },
+		);
+		const secondWake = runtime.wakeMember(agentTeamId, workerMemberId);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		const callsBeforeRelease = injected.length;
+		const overlapBeforeRelease = maxActiveInjections;
+		releaseFirst?.();
+		await Promise.all([firstWake, secondWake]);
+
+		expect(callsBeforeRelease).toBe(1);
+		expect(overlapBeforeRelease).toBe(1);
+		expect(maxActiveInjections).toBe(1);
+		expect(injected).toHaveLength(2);
+		expect(injected[0]).toContain("first");
+		expect(injected[1]).toContain("second");
+		expect(
+			readMailboxRows(dbPath).every(
+				(row) => row.read_at !== null && row.wake_status === "sent",
+			),
+		).toBe(true);
 	});
 
 	test("member turn completion is idempotent and wakes leader only when settled", async () => {
@@ -436,7 +715,7 @@ describe("MailboxService durable delivery", () => {
 			lifecycle: "running",
 		});
 		const injected: string[] = [];
-		const runtime = new TeamRuntime({
+		const runtime = createRuntime({
 			store,
 			sessionManager: {
 				injectTeamMailboxPrompt: async (input) => {
@@ -454,13 +733,25 @@ describe("MailboxService durable delivery", () => {
 		});
 
 		await Promise.all([
-			runtime.onMemberTurnCompleted(agentTeamId, workerMemberId),
-			runtime.onMemberTurnCompleted(agentTeamId, workerMemberId),
+			runtime.onMemberTurnCompleted(
+				agentTeamId,
+				workerMemberId,
+				"turn-worker-1",
+			),
+			runtime.onMemberTurnCompleted(
+				agentTeamId,
+				workerMemberId,
+				"turn-worker-1",
+			),
 		]);
 		expect(readMailboxRows(dbPath)).toHaveLength(1);
 		expect(injected).toHaveLength(0);
 
-		await runtime.onMemberTurnCompleted(agentTeamId, reviewerMemberId);
+		await runtime.onMemberTurnCompleted(
+			agentTeamId,
+			reviewerMemberId,
+			"turn-reviewer-1",
+		);
 
 		const rows = readMailboxRows(dbPath);
 		expect(rows).toHaveLength(2);
@@ -488,7 +779,7 @@ describe("MailboxService durable delivery", () => {
 			sessionId: "session-reviewer",
 			lifecycle: "completed",
 		});
-		const runtime = new TeamRuntime({
+		const runtime = createRuntime({
 			store,
 			sessionManager: {
 				injectTeamMailboxPrompt: () => new Promise<never>(() => {}),
@@ -497,7 +788,11 @@ describe("MailboxService durable delivery", () => {
 
 		const outcome = await Promise.race([
 			runtime
-				.onMemberTurnCompleted(agentTeamId, workerMemberId)
+				.onMemberTurnCompleted(
+					agentTeamId,
+					workerMemberId,
+					"turn-worker-no-wait",
+				)
 				.then(() => "completed" as const),
 			new Promise<"timed_out">((resolve) => {
 				setTimeout(() => resolve("timed_out"), 0);
@@ -512,6 +807,66 @@ describe("MailboxService durable delivery", () => {
 				?.lifecycle,
 		).toBe("completed");
 		expect(readMailboxRows(dbPath)).toHaveLength(1);
+	});
+
+	test("projection listener failure is isolated after the durable commit", async () => {
+		setMemberState(dbPath, leaderMemberId, {
+			sessionId: "session-leader",
+			lifecycle: "running",
+		});
+		setMemberState(dbPath, workerMemberId, {
+			sessionId: "session-worker",
+			lifecycle: "running",
+		});
+		setMemberState(dbPath, reviewerMemberId, {
+			sessionId: "session-reviewer",
+			lifecycle: "completed",
+		});
+		let observeInjection: (() => void) | undefined;
+		const injectionObserved = new Promise<void>((resolve) => {
+			observeInjection = resolve;
+		});
+		const runtime = createRuntime({
+			store,
+			onAgentTeamChanged: () => {
+				throw new Error("projection listener unavailable");
+			},
+			sessionManager: {
+				injectTeamMailboxPrompt: async (input) => {
+					observeInjection?.();
+					return {
+						type: "session_event",
+						agentTeamId: input.agentTeamId,
+						memberId: input.memberId,
+						sessionId: input.sessionId,
+						revision: 1,
+						seq: 1,
+					};
+				},
+			},
+		});
+
+		await expect(
+			runtime.onMemberTurnCompleted(
+				agentTeamId,
+				workerMemberId,
+				"turn-projection-listener-failure",
+			),
+		).resolves.toBeUndefined();
+		await expect(
+			Promise.race([
+				injectionObserved.then(() => "injected" as const),
+				new Promise<"timed_out">((resolve) => {
+					setTimeout(() => resolve("timed_out"), 100);
+				}),
+			]),
+		).resolves.toBe("injected");
+		expect(readMailboxRows(dbPath)).toEqual([
+			expect.objectContaining({
+				read_at: expect.any(String),
+				wake_status: "sent",
+			}),
+		]);
 	});
 });
 

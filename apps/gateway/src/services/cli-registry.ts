@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { isDeepStrictEqual } from "node:util";
 import type {
@@ -23,6 +24,10 @@ export type CliRecord = {
 	backends: AcpBackendSummary[];
 	protocolCapabilities?: CliRegistrationInfo["protocolCapabilities"];
 	teamRelayKey?: TeamRelayPublicKey;
+	/** One-time proof scoped to this exact socket registration. */
+	teamRelayRegistrationId?: string;
+	/** True only after the CLI has bound the Gateway's canonical machine ID. */
+	teamRelayReady: boolean;
 	/** User ID from auth */
 	userId?: string;
 	/** Device key ID used to authenticate this CLI */
@@ -100,6 +105,9 @@ export class CliRegistry extends EventEmitter {
 			}
 		}
 
+		const teamRelayKey = isTeamRelayPublicKey(info.teamRelayKey)
+			? { ...info.teamRelayKey }
+			: undefined;
 		const record: CliRecord = {
 			machineId: info.machineId,
 			hostname: info.hostname,
@@ -109,9 +117,13 @@ export class CliRegistry extends EventEmitter {
 			sessions: [],
 			backends: info.backends ?? [],
 			protocolCapabilities: info.protocolCapabilities,
-			...(isTeamRelayPublicKey(info.teamRelayKey)
-				? { teamRelayKey: { ...info.teamRelayKey } }
+			...(teamRelayKey
+				? {
+						teamRelayKey,
+						teamRelayRegistrationId: randomUUID(),
+					}
 				: {}),
+			teamRelayReady: false,
 			userId: authInfo?.userId,
 			deviceId: authInfo?.deviceId,
 		};
@@ -139,6 +151,32 @@ export class CliRegistry extends EventEmitter {
 		});
 
 		return record;
+	}
+
+	/**
+	 * Enable Team relay only for the current socket registration. The token is
+	 * rotated whenever a machine reconnects, so delayed packets from an older
+	 * socket generation cannot activate the replacement connection.
+	 */
+	markTeamRelayReady(socketId: string, rawPayload: unknown): boolean {
+		const record = this.cliBySocketId.get(socketId);
+		if (
+			!record?.teamRelayKey ||
+			!record.teamRelayRegistrationId ||
+			typeof rawPayload !== "object" ||
+			rawPayload === null
+		) {
+			return false;
+		}
+		const payload = rawPayload as Record<string, unknown>;
+		if (
+			payload.registrationId !== record.teamRelayRegistrationId ||
+			payload.relayKeyId !== record.teamRelayKey.keyId
+		) {
+			return false;
+		}
+		record.teamRelayReady = true;
+		return true;
 	}
 
 	unregister(socketId: string): CliRecord | undefined {

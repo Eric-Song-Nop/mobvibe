@@ -126,7 +126,9 @@ type SessionManagerTeamInternals = {
 
 type SessionManagerTeamRelayApi = {
 	attachTeamRelayTransport(transport: TeamRelayWireTransport): void;
+	bindTeamRelayMachineIdentity(machineId: string): void;
 	handleTeamRelayRequest(params: unknown): Promise<TeamRelayExecuteRpcResult>;
+	setTeamRelayTransportReady(ready: boolean): boolean;
 };
 
 type SessionManagerBackendInternals = {
@@ -430,10 +432,12 @@ describe("SessionManager", () => {
 
 	type RemoteWorkerRelayBehavior = {
 		attachTransport?: boolean;
+		leaderMachineId?: string;
 		outgoingError?: Error;
 		outgoingResponse?: (
 			request: VerifiedTeamRelayRequest,
 		) => unknown | Promise<unknown>;
+		workerMachineId?: string;
 	};
 
 	const prepareEncryptedRemoteWorker = async (
@@ -452,11 +456,11 @@ describe("SessionManager", () => {
 			mockConnection as unknown as AcpConnection;
 
 		const workerProtocol = new TeamRelayProtocol({
-			machineId: mockConfig.machineId,
+			machineId: behavior.workerMachineId ?? mockConfig.machineId,
 			cryptoService: workerCrypto,
 		});
 		const leaderProtocol = new TeamRelayProtocol({
-			machineId: "leader-machine",
+			machineId: behavior.leaderMachineId ?? "leader-machine",
 			cryptoService: leaderCrypto,
 		});
 		const outgoingRequests: VerifiedTeamRelayRequest[] = [];
@@ -500,8 +504,10 @@ describe("SessionManager", () => {
 			sendTeamRelay,
 		};
 		const relayApi = sessionManager as unknown as SessionManagerTeamRelayApi;
+		relayApi.bindTeamRelayMachineIdentity(workerProtocol.machineId);
 		if (behavior.attachTransport !== false) {
 			relayApi.attachTeamRelayTransport(transport);
+			relayApi.setTeamRelayTransportReady(true);
 		}
 		return {
 			internals: sessionManager as unknown as SessionManagerTeamInternals,
@@ -665,9 +671,10 @@ describe("SessionManager", () => {
 			resolveTeamRelayPeer,
 			sendTeamRelay,
 		};
-		(
-			sessionManager as unknown as SessionManagerTeamRelayApi
-		).attachTeamRelayTransport(transport);
+		const relayApi = sessionManager as unknown as SessionManagerTeamRelayApi;
+		relayApi.bindTeamRelayMachineIdentity(leaderProtocol.machineId);
+		relayApi.attachTeamRelayTransport(transport);
+		relayApi.setTeamRelayTransportReady(true);
 
 		const created = await sessionManager.createAgentTeamRun({
 			machineId: mockConfig.machineId,
@@ -870,6 +877,30 @@ describe("SessionManager", () => {
 			releaseConnect();
 			await Promise.all([probe, shutdown]);
 			expect(mockConnection.disconnect).toHaveBeenCalled();
+		});
+
+		it("stops the pending Team wake sweep before closing its durable store", async () => {
+			const internals =
+				sessionManager as unknown as SessionManagerTeamInternals;
+			const shutdownOrder: string[] = [];
+			const originalStop = internals.teamRuntime.stop.bind(
+				internals.teamRuntime,
+			);
+			const originalClose = internals.agentTeamStore.close.bind(
+				internals.agentTeamStore,
+			);
+			internals.teamRuntime.stop = mock(() => {
+				shutdownOrder.push("runtime.stop");
+				originalStop();
+			});
+			internals.agentTeamStore.close = mock(() => {
+				shutdownOrder.push("store.close");
+				originalClose();
+			});
+
+			await sessionManager.shutdown();
+
+			expect(shutdownOrder).toEqual(["runtime.stop", "store.close"]);
 		});
 
 		it("times out an Agent authentication flow and discards the process", async () => {
@@ -6337,6 +6368,78 @@ describe("SessionManager", () => {
 	});
 
 	describe("remote Team worker bootstrap", () => {
+		it("keeps the Team relay lifecycle terminal after SessionManager shutdown", async () => {
+			const harness = await prepareEncryptedRemoteWorker();
+
+			await sessionManager.shutdown();
+
+			expect(harness.relayApi.setTeamRelayTransportReady(true)).toBe(false);
+			expect(harness.relayApi.setTeamRelayTransportReady(false)).toBe(false);
+			expect(() =>
+				harness.relayApi.attachTeamRelayTransport(harness.transport),
+			).toThrow("Session manager is shutting down");
+			expect(() =>
+				harness.relayApi.bindTeamRelayMachineIdentity(
+					harness.workerProtocol.machineId,
+				),
+			).toThrow("Session manager is shutting down");
+		});
+
+		it("uses the Gateway canonical machine identity for real encrypted relay roundtrips", async () => {
+			const canonicalWorkerMachineId = "user-1:test-machine-id";
+			const canonicalLeaderMachineId = "user-1:leader-machine";
+			const harness = await prepareEncryptedRemoteWorker({
+				workerMachineId: canonicalWorkerMachineId,
+				leaderMachineId: canonicalLeaderMachineId,
+				outgoingResponse: (request) => ({
+					operationId: request.operationId,
+					accepted: true,
+				}),
+			});
+			const fixture = createRemoteBootstrapFixture(
+				"bootstrap-canonical-machine-identity",
+				"canonical-machine-identity",
+			);
+			prepareTeamSessionConnection(
+				mockConnection,
+				"remote-worker-session-canonical",
+				expectedRemoteTeamTools,
+			);
+
+			const response = await harness.relayApi.handleTeamRelayRequest(
+				sealRemoteBootstrap(harness, fixture),
+			);
+			expect(
+				openRemoteBootstrapResponse(harness, fixture.operationId, response),
+			).toEqual(
+				expect.objectContaining({
+					sessionId: "remote-worker-session-canonical",
+				}),
+			);
+
+			const claim = sessionManager.claimMessageSend(
+				"remote-worker-session-canonical",
+				"remote-worker-message-canonical",
+			);
+			if (claim.status !== "claimed") {
+				throw new Error("Expected canonical remote worker message claim");
+			}
+			sessionManager.completeMessageSend(
+				"remote-worker-session-canonical",
+				"remote-worker-message-canonical",
+				claim.claimId,
+				"end_turn",
+			);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			expect(harness.outgoingRequests).toContainEqual(
+				expect.objectContaining({
+					sourceMachineId: canonicalWorkerMachineId,
+					targetMachineId: canonicalLeaderMachineId,
+				}),
+			);
+		});
+
 		it("persists a creating binding before ACP session/new and activates it without local Team facts", async () => {
 			const harness = await prepareEncryptedRemoteWorker();
 			const fixture = createRemoteBootstrapFixture(
@@ -6534,7 +6637,7 @@ describe("SessionManager", () => {
 			).toBe("active");
 		});
 
-		it("drains a durable worker completion after relay transport attachment", async () => {
+		it("waits for registered relay readiness before draining a durable worker completion", async () => {
 			const harness = await prepareEncryptedRemoteWorker({
 				attachTransport: false,
 				outgoingResponse: (request) => ({
@@ -6587,6 +6690,14 @@ describe("SessionManager", () => {
 			).toEqual({ stopReason: "end_turn" });
 
 			harness.relayApi.attachTeamRelayTransport(harness.transport);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			expect(harness.outgoingRequests).toHaveLength(0);
+			expect(harness.internals.teamRelayStore.listRuntimeOutbox()).toEqual([
+				expect.objectContaining({ status: "pending", attemptCount: 0 }),
+			]);
+
+			harness.relayApi.setTeamRelayTransportReady(true);
 			await new Promise((resolve) => setTimeout(resolve, 0));
 
 			expect(harness.outgoingRequests).toHaveLength(1);

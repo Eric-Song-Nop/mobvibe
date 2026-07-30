@@ -154,6 +154,17 @@ export const parseTeamRuntimeRelayPayload = (
 	};
 };
 
+export const isRecoverableTeamTurnCompletedRelayRequest = (
+	request: VerifiedTeamRelayRequest,
+): boolean => {
+	try {
+		parseTeamRuntimeRelayPayload(request);
+		return true;
+	} catch {
+		return false;
+	}
+};
+
 export const parseTeamRuntimeRelayAck = (
 	value: unknown,
 	expectedOperationId: string,
@@ -222,6 +233,7 @@ export const createLeaderTeamRuntimeRelayHandler = (
 			await options.runtime.onMemberTurnCompleted(
 				event.agentTeamId,
 				event.memberId,
+				event.turnId,
 			);
 		} catch {
 			throw internalRuntimeRelayError();

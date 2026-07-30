@@ -143,6 +143,30 @@ describe("TeamRuntimeOutboxDispatcher", () => {
 		]);
 	});
 
+	test("leases an in-flight entry beyond the 130 second relay ACK window", async () => {
+		let finishRelayCall:
+			| ((value: { operationId: string; accepted: true }) => void)
+			| undefined;
+		relayCall = (_input) =>
+			new Promise((resolve) => {
+				finishRelayCall = resolve;
+			});
+		appendTurnEnd();
+
+		const draining = createDispatcher().start();
+		await Promise.resolve();
+
+		const [entry] = store.listRuntimeOutbox();
+		expect(entry?.status).toBe("in_flight");
+		expect(entry?.leaseExpiresAt).toBe(new Date(now + 150_000).toISOString());
+
+		finishRelayCall?.({
+			operationId: entry?.operationId ?? "",
+			accepted: true,
+		});
+		await draining;
+	});
+
 	test("parks a malformed ACK as a permanent protocol failure", async () => {
 		appendTurnEnd();
 		relayCall = async (input) => ({
@@ -334,6 +358,47 @@ describe("TeamRuntimeOutboxDispatcher", () => {
 			}),
 		);
 		expect(activeTimers()).toHaveLength(0);
+	});
+
+	test("pauses new claims while preserving an in-flight ACK and resumes later work", async () => {
+		appendTurnEnd();
+		let resolveRelay: ((value: unknown) => void) | undefined;
+		relayCall = () =>
+			new Promise((resolve) => {
+				resolveRelay = resolve;
+			});
+		const currentDispatcher = createDispatcher();
+
+		const started = currentDispatcher.start();
+		expect(store.listRuntimeOutbox()[0]?.status).toBe("in_flight");
+		currentDispatcher.pause();
+		resolveRelay?.({
+			operationId: calls[0]?.operationId,
+			accepted: true,
+		});
+		await started;
+
+		expect(store.listRuntimeOutbox()[0]).toEqual(
+			expect.objectContaining({ status: "delivered", attemptCount: 1 }),
+		);
+		expect(activeTimers()).toHaveLength(0);
+
+		appendTurnEnd();
+		await currentDispatcher.wake();
+		expect(calls).toHaveLength(1);
+		expect(store.listRuntimeOutbox()[1]).toEqual(
+			expect.objectContaining({ status: "pending", attemptCount: 0 }),
+		);
+
+		relayCall = async (input) => ({
+			operationId: input.operationId,
+			accepted: true,
+		});
+		await currentDispatcher.start();
+		expect(calls).toHaveLength(2);
+		expect(store.listRuntimeOutbox()[1]).toEqual(
+			expect.objectContaining({ status: "delivered", attemptCount: 1 }),
+		);
 	});
 
 	test("schedules recovery for a persisted unexpired lease", async () => {

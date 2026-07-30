@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import {
 	afterEach,
 	beforeAll,
@@ -17,6 +18,7 @@ import {
 	type TeamRelayExecuteRpcParams,
 } from "@mobvibe/shared";
 import { CliCryptoService } from "../../e2ee/crypto-service.js";
+import { AgentTeamStore } from "../agent-team-store.js";
 import { TeamRelayEndpoint } from "../team-relay-endpoint.js";
 import {
 	TeamRelayProtocol,
@@ -24,6 +26,12 @@ import {
 	type VerifiedTeamRelayRequest,
 } from "../team-relay-protocol.js";
 import { TeamRelayStore } from "../team-relay-store.js";
+import { TeamRuntime } from "../team-runtime.js";
+import {
+	createLeaderTeamRuntimeRelayHandler,
+	createTeamTurnCompletedRelayPayload,
+	isRecoverableTeamTurnCompletedRelayRequest,
+} from "../team-runtime-relay.js";
 
 beforeAll(async () => {
 	await initCrypto();
@@ -37,18 +45,25 @@ const createProtocol = (machineId: string, seed: number) =>
 
 describe("TeamRelayEndpoint", () => {
 	let tempDir: string;
+	let dbPath: string;
 	let store: TeamRelayStore;
+	let agentTeamStore: AgentTeamStore | undefined;
+	let runtimes: TeamRuntime[];
 	let leader: TeamRelayProtocol;
 	let worker: TeamRelayProtocol;
 
 	beforeEach(() => {
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "team-relay-endpoint-"));
-		store = new TeamRelayStore(path.join(tempDir, "events.db"));
+		dbPath = path.join(tempDir, "events.db");
+		store = new TeamRelayStore(dbPath);
+		runtimes = [];
 		leader = createProtocol("leader-machine", 1);
 		worker = createProtocol("worker-machine", 2);
 	});
 
 	afterEach(() => {
+		for (const runtime of runtimes) runtime.stop();
+		agentTeamStore?.close();
 		store.close();
 		fs.rmSync(tempDir, { recursive: true, force: true });
 	});
@@ -83,6 +98,134 @@ describe("TeamRelayEndpoint", () => {
 			targetRelayKey: worker.relayKey,
 			ciphertext: response.ciphertext,
 		});
+
+	const createRuntimeParams = (input: {
+		agentTeamId: string;
+		memberId: string;
+		sessionId: string;
+		revision?: number;
+		seq?: number;
+	}): {
+		params: TeamRelayExecuteRpcParams;
+		operationId: string;
+		turnId: string;
+	} => {
+		const payload = createTeamTurnCompletedRelayPayload({
+			agentTeamId: input.agentTeamId,
+			memberId: input.memberId,
+			sessionId: input.sessionId,
+			revision: input.revision ?? 1,
+			seq: input.seq ?? 1,
+		});
+		const request = worker.sealRequest({
+			operationId: payload.operationId,
+			operation: "member.runtime",
+			targetMachineId: leader.machineId,
+			targetRelayKey: leader.relayKey,
+			payload,
+		});
+		return {
+			params: {
+				operationId: payload.operationId,
+				sourceMachineId: worker.machineId,
+				sourceRelayKey: worker.relayKey,
+				ciphertext: request.ciphertext,
+			},
+			operationId: payload.operationId,
+			turnId: payload.turnId,
+		};
+	};
+
+	const openRuntimeResponse = (
+		response: Awaited<ReturnType<TeamRelayEndpoint["handle"]>>,
+		operationId: string,
+	) =>
+		worker.openResponse({
+			operationId,
+			operation: "member.runtime",
+			targetMachineId: leader.machineId,
+			targetRelayKey: leader.relayKey,
+			ciphertext: response.ciphertext,
+		});
+
+	const createLeaderTeam = () => {
+		agentTeamStore = new AgentTeamStore(dbPath);
+		const created = agentTeamStore.createAgentTeam({
+			machineId: leader.machineId,
+			workspaceRootCwd: "/workspace",
+			backendId: "backend-leader",
+			title: "Runtime recovery team",
+			leaderName: "Leader",
+		});
+		const memberId = agentTeamStore.addTeamMember({
+			agentTeamId: created.team.agentTeamId,
+			backendId: "backend-worker",
+			name: "Worker",
+			role: "member",
+		}).memberId;
+		const sessionId = "worker-session";
+		agentTeamStore.updateTeamMemberRuntimeState({
+			agentTeamId: created.team.agentTeamId,
+			memberId,
+			sessionId,
+			lifecycle: "running",
+		});
+		agentTeamStore.bindTeamMemberExecution({
+			agentTeamId: created.team.agentTeamId,
+			memberId,
+			executionMachineId: worker.machineId,
+			workerRelayKeyId: worker.relayKey.keyId,
+			bootstrapOperationId: "bootstrap-worker",
+		});
+		return {
+			agentTeamId: created.team.agentTeamId,
+			leaderMemberId: created.team.leaderMemberId,
+			memberId,
+			sessionId,
+		};
+	};
+
+	const countRuntimeFacts = (turnId: string) => {
+		const db = new Database(dbPath, { readonly: true });
+		try {
+			const inbox = db
+				.query(
+					"SELECT COUNT(*) AS count FROM agent_team_runtime_inbox WHERE turn_id = ?",
+				)
+				.get(turnId) as { count: number };
+			const notifications = db
+				.query(`
+					SELECT COUNT(*) AS count
+					FROM agent_team_mailbox_messages
+					WHERE json_extract(body_local_json, '$.type') = 'idle_notification'
+				`)
+				.get() as { count: number };
+			return {
+				inbox: inbox.count,
+				notifications: notifications.count,
+			};
+		} finally {
+			db.close();
+		}
+	};
+
+	const readRelayOperation = (operationId: string) => {
+		const db = new Database(dbPath, { readonly: true });
+		try {
+			return db
+				.query(`
+					SELECT status, claim_owner_id AS claimOwnerId
+					FROM team_relay_operations
+					WHERE operation_id = ?
+				`)
+				.get(operationId) as {
+				status: string;
+				claimOwnerId: string;
+			};
+		} finally {
+			db.close();
+		}
+	};
 
 	test("persists and replays a completed result without repeating the side effect", async () => {
 		const bootstrap = mock(
@@ -164,6 +307,8 @@ describe("TeamRelayEndpoint", () => {
 				worker.relayKey.keyId,
 			),
 		});
+		store.close();
+		store = new TeamRelayStore(path.join(tempDir, "events.db"));
 		const bootstrap = mock(async () => ({ sessionId: "session-2" }));
 		const endpoint = new TeamRelayEndpoint({
 			protocol: worker,
@@ -184,6 +329,151 @@ describe("TeamRelayEndpoint", () => {
 			);
 		}
 		expect(bootstrap).not.toHaveBeenCalled();
+	});
+
+	test("recovers an abandoned operation only through an explicit policy", async () => {
+		const params = createExecuteParams({ memberId: "member-1" });
+		store.claimOperation({
+			sourceMachineId: leader.machineId,
+			operationId: "operation-1",
+			requestDigest: TeamRelayEndpoint.digestRequest(
+				worker.openRequest(params),
+				worker.relayKey.keyId,
+			),
+		});
+		store.close();
+		store = new TeamRelayStore(path.join(tempDir, "events.db"));
+		const bootstrap = mock(async () => ({ sessionId: "session-recovered" }));
+		const recoverAbandoned = mock(() => true);
+		const endpoint = new TeamRelayEndpoint({
+			protocol: worker,
+			store,
+			handlers: { "member.bootstrap": bootstrap },
+			recoverAbandoned,
+		});
+
+		expect(openResponse(await endpoint.handle(params))).toEqual({
+			sessionId: "session-recovered",
+		});
+		expect(recoverAbandoned).toHaveBeenCalledTimes(1);
+		expect(bootstrap).toHaveBeenCalledTimes(1);
+	});
+
+	test("takes over an abandoned runtime claim after its leader-local fact committed", async () => {
+		const team = createLeaderTeam();
+		const runtimeRequest = createRuntimeParams(team);
+		const verifiedRequest = leader.openRequest(runtimeRequest.params);
+		store.claimOperation({
+			sourceMachineId: worker.machineId,
+			operationId: runtimeRequest.operationId,
+			requestDigest: TeamRelayEndpoint.digestRequest(
+				verifiedRequest,
+				leader.relayKey.keyId,
+			),
+		});
+		const runtimeBeforeCrash = new TeamRuntime({
+			store: agentTeamStore as AgentTeamStore,
+		});
+		runtimes.push(runtimeBeforeCrash);
+		await runtimeBeforeCrash.onMemberTurnCompleted(
+			team.agentTeamId,
+			team.memberId,
+			runtimeRequest.turnId,
+		);
+		expect(countRuntimeFacts(runtimeRequest.turnId)).toEqual({
+			inbox: 1,
+			notifications: 1,
+		});
+		const abandonedClaim = readRelayOperation(runtimeRequest.operationId);
+		expect(abandonedClaim.status).toBe("in_progress");
+
+		runtimeBeforeCrash.stop();
+		agentTeamStore?.close();
+		agentTeamStore = undefined;
+		store.close();
+		store = new TeamRelayStore(dbPath);
+		agentTeamStore = new AgentTeamStore(dbPath);
+		const runtimeAfterRestart = new TeamRuntime({ store: agentTeamStore });
+		runtimes.push(runtimeAfterRestart);
+		const endpoint = new TeamRelayEndpoint({
+			protocol: leader,
+			store,
+			handlers: {
+				"member.runtime": createLeaderTeamRuntimeRelayHandler({
+					store: agentTeamStore,
+					runtime: runtimeAfterRestart,
+				}),
+			},
+			recoverAbandoned: isRecoverableTeamTurnCompletedRelayRequest,
+		});
+
+		for (const response of [
+			await endpoint.handle(runtimeRequest.params),
+			await endpoint.handle(runtimeRequest.params),
+		]) {
+			expect(openRuntimeResponse(response, runtimeRequest.operationId)).toEqual(
+				{
+					operationId: runtimeRequest.operationId,
+					accepted: true,
+				},
+			);
+		}
+		expect(
+			agentTeamStore
+				.listTeamMembers(team.agentTeamId)
+				.find((member) => member.member_id === team.memberId)?.lifecycle,
+		).toBe("completed");
+		expect(countRuntimeFacts(runtimeRequest.turnId)).toEqual({
+			inbox: 1,
+			notifications: 1,
+		});
+		const completedClaim = readRelayOperation(runtimeRequest.operationId);
+		expect(completedClaim.status).toBe("completed");
+		expect(completedClaim.claimOwnerId).not.toBe(abandonedClaim.claimOwnerId);
+	});
+
+	test("projection listener failure cannot persist a terminal runtime relay failure", async () => {
+		const team = createLeaderTeam();
+		const runtimeRequest = createRuntimeParams(team);
+		const projectionListener = mock(() => {
+			throw new Error("projection listener unavailable");
+		});
+		const runtime = new TeamRuntime({
+			store: agentTeamStore as AgentTeamStore,
+			onAgentTeamChanged: projectionListener,
+		});
+		runtimes.push(runtime);
+		const endpoint = new TeamRelayEndpoint({
+			protocol: leader,
+			store,
+			handlers: {
+				"member.runtime": createLeaderTeamRuntimeRelayHandler({
+					store: agentTeamStore as AgentTeamStore,
+					runtime,
+				}),
+			},
+			recoverAbandoned: isRecoverableTeamTurnCompletedRelayRequest,
+		});
+
+		for (const response of [
+			await endpoint.handle(runtimeRequest.params),
+			await endpoint.handle(runtimeRequest.params),
+		]) {
+			expect(openRuntimeResponse(response, runtimeRequest.operationId)).toEqual(
+				{
+					operationId: runtimeRequest.operationId,
+					accepted: true,
+				},
+			);
+		}
+		expect(projectionListener).toHaveBeenCalledTimes(1);
+		expect(countRuntimeFacts(runtimeRequest.turnId)).toEqual({
+			inbox: 1,
+			notifications: 1,
+		});
+		expect(readRelayOperation(runtimeRequest.operationId).status).toBe(
+			"completed",
+		);
 	});
 
 	test("persists a sanitized handler failure and replays it exactly", async () => {

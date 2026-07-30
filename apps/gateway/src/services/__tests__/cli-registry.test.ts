@@ -2,6 +2,7 @@ import type {
 	CliRegistrationInfo,
 	SessionSummary,
 	SessionsChangedPayload,
+	TeamRelayPublicKey,
 } from "@mobvibe/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CliRegistry } from "../cli-registry.js";
@@ -27,6 +28,15 @@ const createMockRegistrationInfo = (
 	backends: [{ backendId: "backend-1", backendLabel: "Claude Code" }],
 	...overrides,
 });
+
+const createMockRelayKey = (seed: number): TeamRelayPublicKey => {
+	const publicKey = Buffer.alloc(32, seed).toString("base64");
+	return {
+		version: 1,
+		keyId: `x25519:${publicKey}`,
+		publicKey,
+	};
+};
 
 const createMockSessionSummary = (
 	overrides: Partial<SessionSummary> = {},
@@ -122,6 +132,102 @@ describe("CliRegistry", () => {
 
 			registry.unregister("socket-1");
 			expect(registry.getClisForUser("user-1")).toHaveLength(0);
+		});
+
+		it("requires the current socket, registration token, and relay key before marking relay ready", () => {
+			const socket = createMockSocket("socket-1");
+			const relayKey = createMockRelayKey(1);
+			const record = registry.register(
+				socket,
+				createMockRegistrationInfo({
+					machineId: "machine-1",
+					teamRelayKey: relayKey,
+				}),
+				{ userId: "user-1", deviceId: "device-1" },
+			);
+
+			expect(record.teamRelayReady).toBe(false);
+			expect(record.teamRelayRegistrationId).toEqual(expect.any(String));
+			expect(
+				registry.markTeamRelayReady("unknown-socket", {
+					registrationId: record.teamRelayRegistrationId,
+					relayKeyId: relayKey.keyId,
+				}),
+			).toBe(false);
+			expect(
+				registry.markTeamRelayReady(socket.id, {
+					registrationId: "stale-registration",
+					relayKeyId: relayKey.keyId,
+				}),
+			).toBe(false);
+			expect(
+				registry.markTeamRelayReady(socket.id, {
+					registrationId: record.teamRelayRegistrationId,
+					relayKeyId: createMockRelayKey(2).keyId,
+				}),
+			).toBe(false);
+			expect(record.teamRelayReady).toBe(false);
+
+			expect(
+				registry.markTeamRelayReady(socket.id, {
+					registrationId: record.teamRelayRegistrationId,
+					relayKeyId: relayKey.keyId,
+				}),
+			).toBe(true);
+			expect(record.teamRelayReady).toBe(true);
+			expect(
+				registry.markTeamRelayReady(socket.id, {
+					registrationId: record.teamRelayRegistrationId,
+					relayKeyId: relayKey.keyId,
+				}),
+			).toBe(true);
+		});
+
+		it("rotates relay registration tokens and rejects stale reconnect generations", () => {
+			const relayKey = createMockRelayKey(1);
+			const firstSocket = createMockSocket("socket-1");
+			const firstRecord = registry.register(
+				firstSocket,
+				createMockRegistrationInfo({
+					machineId: "machine-1",
+					teamRelayKey: relayKey,
+				}),
+				{ userId: "user-1", deviceId: "device-1" },
+			);
+			const firstRegistrationId = firstRecord.teamRelayRegistrationId;
+			const secondSocket = createMockSocket("socket-2");
+			const secondRecord = registry.register(
+				secondSocket,
+				createMockRegistrationInfo({
+					machineId: "machine-1",
+					teamRelayKey: relayKey,
+				}),
+				{ userId: "user-1", deviceId: "device-1" },
+			);
+
+			expect(secondRecord.teamRelayRegistrationId).not.toBe(
+				firstRegistrationId,
+			);
+			expect(secondRecord.teamRelayReady).toBe(false);
+			expect(
+				registry.markTeamRelayReady(firstSocket.id, {
+					registrationId: firstRegistrationId,
+					relayKeyId: relayKey.keyId,
+				}),
+			).toBe(false);
+			expect(
+				registry.markTeamRelayReady(secondSocket.id, {
+					registrationId: firstRegistrationId,
+					relayKeyId: relayKey.keyId,
+				}),
+			).toBe(false);
+			expect(secondRecord.teamRelayReady).toBe(false);
+			expect(
+				registry.markTeamRelayReady(secondSocket.id, {
+					registrationId: secondRecord.teamRelayRegistrationId,
+					relayKeyId: relayKey.keyId,
+				}),
+			).toBe(true);
 		});
 	});
 

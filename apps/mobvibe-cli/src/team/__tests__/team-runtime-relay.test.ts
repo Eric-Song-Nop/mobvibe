@@ -5,6 +5,7 @@ import type { VerifiedTeamRelayRequest } from "../team-relay-protocol.js";
 import {
 	createLeaderTeamRuntimeRelayHandler,
 	createTeamTurnCompletedRelayPayload,
+	isRecoverableTeamTurnCompletedRelayRequest,
 	parseTeamRuntimeRelayAck,
 	parseTeamRuntimeRelayPayload,
 } from "../team-runtime-relay.js";
@@ -197,6 +198,26 @@ describe("Team runtime relay payload", () => {
 		});
 	});
 
+	test("marks only strict turn-completed payloads safe for abandoned recovery", () => {
+		expect(
+			isRecoverableTeamTurnCompletedRelayRequest(createRequest()),
+		).toBeTrue();
+		expect(
+			isRecoverableTeamTurnCompletedRelayRequest(
+				createRequest({
+					operationId: "lifecycle-operation-1",
+					payload: {
+						agentTeamId: payload.agentTeamId,
+						memberId: payload.memberId,
+						kind: "member_started",
+						payload: {},
+						sourceRefs: [],
+					},
+				}),
+			),
+		).toBeFalse();
+	});
+
 	test("rejects unsupported versions, types, extra facts, and outer operation mismatches", async () => {
 		const malformedRequests = [
 			createRequest({
@@ -316,6 +337,7 @@ describe("leader Team runtime relay handler", () => {
 		expect(harness.onMemberTurnCompleted).toHaveBeenCalledWith(
 			payload.agentTeamId,
 			payload.memberId,
+			payload.turnId,
 		);
 	});
 

@@ -44,6 +44,32 @@ const toExecuteParams = (
 });
 
 describe("TeamRelayProtocol", () => {
+	test("binds the Gateway canonical machine identity exactly once", () => {
+		const cryptoService = new CliCryptoService(new Uint8Array(32).fill(1));
+		const protocol = new TeamRelayProtocol({ cryptoService });
+		const target = createProtocol("user-1:worker-machine", 2);
+
+		expect(() => protocol.machineId).toThrow(
+			"Team relay machine identity is not bound",
+		);
+		expect(() =>
+			protocol.sealRequest({
+				operationId: "operation-unregistered",
+				operation: "member.bootstrap",
+				targetMachineId: target.machineId,
+				targetRelayKey: target.relayKey,
+				payload: {},
+			}),
+		).toThrow("Team relay machine identity is not bound");
+
+		protocol.bindMachineIdentity("user-1:leader-machine");
+		protocol.bindMachineIdentity("user-1:leader-machine");
+		expect(protocol.machineId).toBe("user-1:leader-machine");
+		expect(() => protocol.bindMachineIdentity("user-2:leader-machine")).toThrow(
+			"Team relay machine identity is already bound",
+		);
+	});
+
 	test("round-trips encrypted requests and responses with reversed identity bindings", () => {
 		const leader = createProtocol("leader-machine", 1);
 		const worker = createProtocol("worker-machine", 2);

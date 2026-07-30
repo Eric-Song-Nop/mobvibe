@@ -5,6 +5,7 @@ import type {
 	SessionSummary,
 	TeamRelayCiphertext,
 	TeamRelayPublicKey,
+	TeamRelayReadyAck,
 } from "@mobvibe/shared";
 import {
 	AppError,
@@ -1509,7 +1510,7 @@ describe("setupCliHandlers", () => {
 		);
 	});
 
-	it("uses user affinity initialized after handlers are installed", async () => {
+	it("keeps Team relay gated until canonical identity binding is proven", async () => {
 		const localRegistry = new CliRegistry();
 		const localHandlers: Record<string, (payload?: unknown) => void> = {};
 		let localConnectionHandler: ((socket: Socket) => void) | undefined;
@@ -1525,6 +1526,7 @@ describe("setupCliHandlers", () => {
 			claimUser: ReturnType<typeof vi.fn>;
 			releaseUser: ReturnType<typeof vi.fn>;
 		} | null = null;
+		let finishClaim: ((claimed: boolean) => void) | undefined;
 		setupCliHandlers(
 			localIo,
 			localRegistry,
@@ -1546,20 +1548,150 @@ describe("setupCliHandlers", () => {
 		} as unknown as Socket;
 		localConnectionHandler?.(localSocket);
 		affinity = {
-			claimUser: vi.fn(async () => true),
+			claimUser: vi.fn(
+				() =>
+					new Promise<boolean>((resolve) => {
+						finishClaim = resolve;
+					}),
+			),
 			releaseUser: vi.fn(async () => undefined),
 		};
+		const relayKey = createMockRelayKey(1);
 
 		localHandlers["cli:register"]?.(
-			createMockRegistrationInfo({ machineId: "raw-machine-1" }),
+			createMockRegistrationInfo({
+				machineId: "raw-machine-1",
+				teamRelayKey: relayKey,
+			}),
 		);
 
 		await vi.waitFor(() => {
 			expect(affinity?.claimUser).toHaveBeenCalledWith("user-1");
+			expect(localRegistry.getCliBySocketId(localSocket.id)).toBeDefined();
 		});
-		await localHandlers.disconnect?.("transport close");
+		const record = localRegistry.getCliBySocketId(localSocket.id);
+		if (!record?.teamRelayRegistrationId) {
+			throw new Error("Missing Team relay registration proof");
+		}
+		expect(record.teamRelayReady).toBe(false);
+		expect(localSocket.emit).not.toHaveBeenCalledWith(
+			"cli:registered",
+			expect.anything(),
+		);
 
-		expect(affinity.releaseUser).not.toHaveBeenCalled();
+		finishClaim?.(true);
+		await vi.waitFor(() => {
+			expect(localSocket.emit).toHaveBeenCalledWith("cli:registered", {
+				machineId: "machine-1",
+				userId: "user-1",
+				teamRelayRegistrationId: record.teamRelayRegistrationId,
+			});
+		});
+
+		localHandlers["cli:team-relay-ready"]?.({
+			registrationId: record.teamRelayRegistrationId,
+			relayKeyId: relayKey.keyId,
+		});
+
+		expect(record.teamRelayReady).toBe(true);
+	});
+
+	it("acknowledges Team relay readiness with the exact current proof", () => {
+		const relayKey = createMockRelayKey(1);
+		const record = registry.register(
+			socket,
+			createMockRegistrationInfo({
+				machineId: "machine-1",
+				teamRelayKey: relayKey,
+			}),
+			{ userId: "user-1", deviceId: "device-123" },
+		);
+		if (!record.teamRelayRegistrationId) {
+			throw new Error("Missing Team relay registration proof");
+		}
+		const ack = vi.fn<(response: unknown) => void>();
+		const expectedAck = {
+			accepted: true,
+			registrationId: record.teamRelayRegistrationId,
+			relayKeyId: relayKey.keyId,
+		} satisfies TeamRelayReadyAck;
+
+		socketHandlers["cli:team-relay-ready"]?.(
+			{
+				registrationId: record.teamRelayRegistrationId,
+				relayKeyId: relayKey.keyId,
+			},
+			ack,
+		);
+
+		expect(ack).toHaveBeenCalledOnce();
+		expect(ack).toHaveBeenCalledWith(expectedAck);
+		expect(record.teamRelayReady).toBe(true);
+	});
+
+	it("rejects stale Team relay proofs without enabling the registration", () => {
+		const relayKey = createMockRelayKey(1);
+		const record = registry.register(
+			socket,
+			createMockRegistrationInfo({
+				machineId: "machine-1",
+				teamRelayKey: relayKey,
+			}),
+			{ userId: "user-1", deviceId: "device-123" },
+		);
+		if (!record.teamRelayRegistrationId) {
+			throw new Error("Missing Team relay registration proof");
+		}
+		const rejectedAck = { accepted: false } satisfies TeamRelayReadyAck;
+		const staleRegistrationAck = vi.fn<(response: unknown) => void>();
+
+		socketHandlers["cli:team-relay-ready"]?.(
+			{
+				registrationId: "stale-registration",
+				relayKeyId: relayKey.keyId,
+			},
+			staleRegistrationAck,
+		);
+
+		expect(staleRegistrationAck).toHaveBeenCalledOnce();
+		expect(staleRegistrationAck).toHaveBeenCalledWith(rejectedAck);
+		expect(record.teamRelayReady).toBe(false);
+
+		const staleKeyAck = vi.fn<(response: unknown) => void>();
+		socketHandlers["cli:team-relay-ready"]?.(
+			{
+				registrationId: record.teamRelayRegistrationId,
+				relayKeyId: createMockRelayKey(2).keyId,
+			},
+			staleKeyAck,
+		);
+
+		expect(staleKeyAck).toHaveBeenCalledOnce();
+		expect(staleKeyAck).toHaveBeenCalledWith(rejectedAck);
+		expect(record.teamRelayReady).toBe(false);
+	});
+
+	it("accepts Team relay readiness when the optional ACK is omitted", () => {
+		const relayKey = createMockRelayKey(1);
+		const record = registry.register(
+			socket,
+			createMockRegistrationInfo({
+				machineId: "machine-1",
+				teamRelayKey: relayKey,
+			}),
+			{ userId: "user-1", deviceId: "device-123" },
+		);
+		if (!record.teamRelayRegistrationId) {
+			throw new Error("Missing Team relay registration proof");
+		}
+
+		expect(() => {
+			socketHandlers["cli:team-relay-ready"]?.({
+				registrationId: record.teamRelayRegistrationId,
+				relayKeyId: relayKey.keyId,
+			});
+		}).not.toThrow();
+		expect(record.teamRelayReady).toBe(true);
 	});
 
 	it("atomically claims affinity before accepting a CLI connection", async () => {

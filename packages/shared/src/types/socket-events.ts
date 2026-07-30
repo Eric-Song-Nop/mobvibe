@@ -134,6 +134,33 @@ export type CliRegistrationInfo = {
 	};
 };
 
+/** Canonical identity and the one-time proof needed to enable Team relay. */
+export type CliRegisteredInfo = {
+	machineId: string;
+	userId?: string;
+	/**
+	 * Present when the Gateway accepted a Team relay key. Older Gateways may omit
+	 * it; in that case the CLI keeps ordinary sessions online but fails Team
+	 * relay closed.
+	 */
+	teamRelayRegistrationId?: string;
+};
+
+/** Proves that the CLI synchronously bound the current canonical identity. */
+export type TeamRelayReadyPayload = {
+	registrationId: string;
+	relayKeyId: string;
+};
+
+/** Gateway confirmation that the exact current Team relay proof was accepted. */
+export type TeamRelayReadyAck =
+	| { accepted: false }
+	| {
+			accepted: true;
+			registrationId: string;
+			relayKeyId: string;
+	  };
+
 // CLI error payload (sent when auth fails)
 export type CliErrorPayload = {
 	code: string;
@@ -391,6 +418,10 @@ export type SessionDetachedPayload = {
 // All content now flows through session:event with appropriate kind
 export interface CliToGatewayEvents {
 	"cli:register": (info: CliRegistrationInfo) => void;
+	"cli:team-relay-ready": (
+		payload: TeamRelayReadyPayload,
+		ack: (response: TeamRelayReadyAck) => void,
+	) => void;
 	"cli:heartbeat": () => void;
 	"session:event": (event: SessionEvent) => void;
 	"session:attached": (payload: SessionAttachedPayload) => void;
@@ -420,7 +451,7 @@ export interface CliToGatewayEvents {
 
 // Gateway -> CLI events
 export interface GatewayToCliEvents {
-	"cli:registered": (info: { machineId: string; userId?: string }) => void;
+	"cli:registered": (info: CliRegisteredInfo) => void;
 	"cli:error": (payload: CliErrorPayload) => void;
 	"events:ack": (payload: EventsAckPayload) => void;
 

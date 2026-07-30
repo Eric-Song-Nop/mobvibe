@@ -58,7 +58,7 @@ type TeamRelayResponseEnvelope = Omit<TeamRelayRequestEnvelope, "payload"> & {
 };
 
 type TeamRelayProtocolOptions = {
-	machineId: string;
+	machineId?: string;
 	cryptoService: CliCryptoService;
 };
 
@@ -118,18 +118,35 @@ export class TeamRelayRemoteError extends Error {
 }
 
 export class TeamRelayProtocol {
-	readonly machineId: string;
 	readonly cryptoService: CliCryptoService;
+	private boundMachineId?: string;
 	private readonly verifiedRequests = new WeakSet<object>();
 
 	constructor(options: TeamRelayProtocolOptions) {
-		if (
-			!isBoundedIdentifier(options.machineId, TEAM_RELAY_MACHINE_ID_MAX_BYTES)
-		) {
+		this.cryptoService = options.cryptoService;
+		if (options.machineId !== undefined) {
+			this.bindMachineIdentity(options.machineId);
+		}
+	}
+
+	get machineId(): string {
+		if (!this.boundMachineId) {
+			throw new Error("Team relay machine identity is not bound");
+		}
+		return this.boundMachineId;
+	}
+
+	bindMachineIdentity(machineId: string): void {
+		if (!isBoundedIdentifier(machineId, TEAM_RELAY_MACHINE_ID_MAX_BYTES)) {
 			throw new Error("Invalid local Team relay machine identity");
 		}
-		this.machineId = options.machineId;
-		this.cryptoService = options.cryptoService;
+		if (this.boundMachineId !== undefined) {
+			if (this.boundMachineId !== machineId) {
+				throw new Error("Team relay machine identity is already bound");
+			}
+			return;
+		}
+		this.boundMachineId = machineId;
 	}
 
 	get relayKey(): TeamRelayPublicKey {

@@ -4,6 +4,9 @@ import {
 	parsePlaceTeamRelayPeerResult,
 	parseResolveTeamRelayPeerResult,
 	parseSendTeamRelayResult,
+	TEAM_RELAY_CLIENT_ACK_TIMEOUT_MS,
+	TEAM_RELAY_GATEWAY_RPC_TIMEOUT_MS,
+	TEAM_RELAY_OUTBOX_LEASE_MS,
 	type TeamRelayCiphertext,
 	type TeamRelayPublicKey,
 } from "../src/index.js";
@@ -28,6 +31,20 @@ const createCiphertext = (
 		t: "encrypted",
 		c: Buffer.alloc(64, seed).toString("base64"),
 	},
+});
+
+describe("Team relay timeout budget", () => {
+	it("keeps each outer timeout beyond the layer it contains", () => {
+		expect(TEAM_RELAY_GATEWAY_RPC_TIMEOUT_MS).toBe(120_000);
+		expect(TEAM_RELAY_CLIENT_ACK_TIMEOUT_MS).toBe(130_000);
+		expect(TEAM_RELAY_OUTBOX_LEASE_MS).toBe(150_000);
+		expect(TEAM_RELAY_GATEWAY_RPC_TIMEOUT_MS).toBeLessThan(
+			TEAM_RELAY_CLIENT_ACK_TIMEOUT_MS,
+		);
+		expect(TEAM_RELAY_CLIENT_ACK_TIMEOUT_MS).toBeLessThan(
+			TEAM_RELAY_OUTBOX_LEASE_MS,
+		);
+	});
 });
 
 describe("Team relay placement parsing", () => {

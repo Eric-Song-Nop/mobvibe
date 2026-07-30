@@ -48,8 +48,30 @@ export type AgentTeamMemberExecution = {
 	updatedAt: string;
 };
 
+export type TeamRuntimeTurnCompletion =
+	| {
+			status: "applied" | "replayed";
+			leaderMemberId: string;
+			notificationMessageId: string;
+	  }
+	| { status: "ignored" };
+
+export type PendingMailboxWakeRecipient = {
+	agentTeamId: string;
+	memberId: string;
+};
+
+type AgentTeamRuntimeInboxRow = {
+	turn_id: string;
+	agent_team_id: string;
+	member_id: string;
+	leader_member_id: string;
+	notification_message_id: string;
+};
+
 export class AgentTeamStore {
 	private db: Database;
+	private closed = false;
 	private stmtInsertTeam: ReturnType<Database["query"]>;
 	private stmtInsertMember: ReturnType<Database["query"]>;
 	private stmtInsertMcpStatus: ReturnType<Database["query"]>;
@@ -253,6 +275,7 @@ export class AgentTeamStore {
 		this.stmtUpdateMailboxWakeMetadata = this.db.query(`
       UPDATE agent_team_mailbox_messages
       SET wake_status = $wakeStatus,
+          read_at = CASE WHEN $wakeStatus = 'failed' THEN NULL ELSE read_at END,
           wake_error_json = $wakeErrorJson,
           source_refs_json = $sourceRefsJson
       WHERE message_id = $messageId
@@ -745,6 +768,128 @@ export class AgentTeamStore {
 		return deliveries;
 	}
 
+	applyTeamRuntimeTurnCompletion(params: {
+		turnId: string;
+		agentTeamId: string;
+		memberId: string;
+	}): TeamRuntimeTurnCompletion {
+		if (!params.turnId.trim()) {
+			throw new Error("Runtime turn ID must not be blank");
+		}
+
+		return this.db
+			.transaction((): TeamRuntimeTurnCompletion => {
+				const existing = this.db
+					.query(`
+						SELECT turn_id, agent_team_id, member_id, leader_member_id,
+							notification_message_id
+						FROM agent_team_runtime_inbox
+						WHERE turn_id = $turnId
+					`)
+					.get({ $turnId: params.turnId }) as AgentTeamRuntimeInboxRow | null;
+				if (existing) {
+					if (
+						existing.agent_team_id !== params.agentTeamId ||
+						existing.member_id !== params.memberId
+					) {
+						throw new Error("Agent Team runtime turn identity conflict");
+					}
+					return {
+						status: "replayed",
+						leaderMemberId: existing.leader_member_id,
+						notificationMessageId: existing.notification_message_id,
+					};
+				}
+
+				const members = this.stmtListMembers.all({
+					$agentTeamId: params.agentTeamId,
+				}) as AgentTeamMemberRow[];
+				const member = members.find(
+					(candidate) => candidate.member_id === params.memberId,
+				);
+				if (
+					!member ||
+					member.role === "leader" ||
+					member.lifecycle !== "running"
+				) {
+					return { status: "ignored" };
+				}
+				const leader = members.find((candidate) => candidate.role === "leader");
+				if (!leader) {
+					return { status: "ignored" };
+				}
+
+				const appliedAt = new Date().toISOString();
+				const notificationMessageId = randomUUID();
+				this.db
+					.query(`
+						INSERT INTO agent_team_runtime_inbox (
+							turn_id, agent_team_id, member_id, leader_member_id,
+							notification_message_id, applied_at
+						) VALUES (
+							$turnId, $agentTeamId, $memberId, $leaderMemberId,
+							$notificationMessageId, $appliedAt
+						)
+					`)
+					.run({
+						$turnId: params.turnId,
+						$agentTeamId: params.agentTeamId,
+						$memberId: params.memberId,
+						$leaderMemberId: leader.member_id,
+						$notificationMessageId: notificationMessageId,
+						$appliedAt: appliedAt,
+					});
+				const updated = this.stmtUpdateMemberRuntime.run({
+					$agentTeamId: params.agentTeamId,
+					$memberId: params.memberId,
+					$sessionId: null,
+					$lifecycle: "completed",
+					$health: null,
+					$errorJson: null,
+					$worktreeSourceCwd: null,
+					$worktreeBranch: null,
+					$updatedAt: appliedAt,
+				});
+				if (updated.changes !== 1) {
+					throw new Error("Agent Team runtime member transition failed");
+				}
+				const sourceRefs: TeamSourceRef[] = [
+					{
+						type: "mailbox_message",
+						agentTeamId: params.agentTeamId,
+						messageId: notificationMessageId,
+						fromMemberId: params.memberId,
+						toMemberId: leader.member_id,
+					},
+				];
+				this.stmtInsertMailboxMessage.run({
+					$messageId: notificationMessageId,
+					$agentTeamId: params.agentTeamId,
+					$fromMemberId: params.memberId,
+					$toMemberId: leader.member_id,
+					$bodyLocalJson: JSON.stringify({
+						message: "Turn completed",
+						type: "idle_notification",
+					}),
+					$sourceRefsJson: JSON.stringify(sourceRefs),
+					$readAt: null,
+					$wakeStatus: "pending",
+					$wakeErrorJson: null,
+					$createdAt: appliedAt,
+				});
+				this.stmtTouchTeam.run({
+					$agentTeamId: params.agentTeamId,
+					$updatedAt: appliedAt,
+				});
+				return {
+					status: "applied",
+					leaderMemberId: leader.member_id,
+					notificationMessageId,
+				};
+			})
+			.immediate();
+	}
+
 	updateMailboxWake(params: {
 		messageId: string;
 		wakeStatus: TeamMailboxWakeStatus;
@@ -827,6 +972,131 @@ export class AgentTeamStore {
 				.run(readAt, ...rows.map((row) => row.message_id));
 			return rows.map(rowToWakeMessage);
 		})();
+	}
+
+	listUnreadForWake(
+		agentTeamId: string,
+		memberId: string,
+	): MailboxWakeMessage[] {
+		return (
+			this.db
+				.query(`
+					SELECT message_id, agent_team_id, from_member_id, to_member_id,
+						body_local_json, source_refs_json, read_at, wake_status,
+						wake_error_json, created_at
+					FROM agent_team_mailbox_messages
+					WHERE agent_team_id = $agentTeamId
+						AND to_member_id = $memberId
+						AND wake_status IN ('pending', 'failed')
+					ORDER BY created_at ASC
+				`)
+				.all({
+					$agentTeamId: agentTeamId,
+					$memberId: memberId,
+				}) as AgentTeamMailboxMessageLocalRow[]
+		).map(rowToWakeMessage);
+	}
+
+	listPendingWakeRecipients(): PendingMailboxWakeRecipient[] {
+		const rows = this.db
+			.query(`
+				SELECT mailbox.agent_team_id, mailbox.to_member_id
+				FROM agent_team_mailbox_messages AS mailbox
+				INNER JOIN agent_team_members AS recipient
+					ON recipient.agent_team_id = mailbox.agent_team_id
+					AND recipient.member_id = mailbox.to_member_id
+				WHERE mailbox.wake_status IN ('pending', 'failed')
+					AND mailbox.to_member_id IS NOT NULL
+					AND recipient.session_id IS NOT NULL
+					AND (
+						COALESCE(
+							json_extract(mailbox.body_local_json, '$.type'),
+							''
+						) <> 'idle_notification'
+						OR NOT EXISTS (
+							SELECT 1
+							FROM agent_team_members AS unsettled
+							WHERE unsettled.agent_team_id = mailbox.agent_team_id
+								AND unsettled.role <> 'leader'
+								AND unsettled.lifecycle IN (
+									'starting',
+									'creating_session',
+									'running'
+								)
+						)
+					)
+				GROUP BY mailbox.agent_team_id, mailbox.to_member_id
+				ORDER BY MIN(mailbox.created_at) ASC
+			`)
+			.all() as Array<{
+			agent_team_id: string;
+			to_member_id: string;
+		}>;
+		return rows.map((row) => ({
+			agentTeamId: row.agent_team_id,
+			memberId: row.to_member_id,
+		}));
+	}
+
+	completeMailboxWake(params: {
+		messageIds: string[];
+		deliveredSessionId: string;
+		sourceRefs: TeamSourceRef[];
+	}): void {
+		if (params.messageIds.length === 0) {
+			return;
+		}
+		const readAt = new Date().toISOString();
+		this.db
+			.transaction(() => {
+				const teamIds = new Set<string>();
+				for (const messageId of params.messageIds) {
+					const row = this.stmtGetMailboxMessage.get({
+						$messageId: messageId,
+					}) as AgentTeamMailboxMessageLocalRow | null;
+					if (!row) {
+						throw new Error(`Mailbox message not found: ${messageId}`);
+					}
+					const existingRefs = parseSourceRefs(row.source_refs_json);
+					const updatedRefs = mergeSourceRefs(
+						existingRefs.map((ref) =>
+							ref.type === "mailbox_message" && ref.messageId === messageId
+								? {
+										...ref,
+										deliveredSessionId: params.deliveredSessionId,
+									}
+								: ref,
+						),
+						params.sourceRefs,
+					);
+					const completed = this.db
+						.query(`
+							UPDATE agent_team_mailbox_messages
+							SET read_at = $readAt,
+								wake_status = 'sent',
+								wake_error_json = NULL,
+								source_refs_json = $sourceRefsJson
+							WHERE message_id = $messageId
+								AND wake_status IN ('pending', 'failed')
+						`)
+						.run({
+							$messageId: messageId,
+							$readAt: readAt,
+							$sourceRefsJson: JSON.stringify(updatedRefs),
+						});
+					if (completed.changes !== 1) {
+						throw new Error(`Mailbox wake was already completed: ${messageId}`);
+					}
+					teamIds.add(row.agent_team_id);
+				}
+				for (const agentTeamId of teamIds) {
+					this.stmtTouchTeam.run({
+						$agentTeamId: agentTeamId,
+						$updatedAt: readAt,
+					});
+				}
+			})
+			.immediate();
 	}
 
 	updateWakeMetadata(params: {
@@ -1023,7 +1293,15 @@ export class AgentTeamStore {
 	}
 
 	close(): void {
+		if (this.closed) {
+			return;
+		}
+		this.closed = true;
 		this.db.close();
+	}
+
+	isClosed(): boolean {
+		return this.closed;
 	}
 
 	private projectTeam(row: AgentTeamRow) {

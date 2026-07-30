@@ -1,3 +1,4 @@
+import { TEAM_RELAY_OUTBOX_LEASE_MS } from "@mobvibe/shared";
 import type { TeamRelayCallInput } from "./team-relay-client.js";
 import { TeamRelayRemoteError } from "./team-relay-protocol.js";
 import type {
@@ -10,7 +11,7 @@ import {
 } from "./team-runtime-relay.js";
 
 const DEFAULT_CLAIM_LIMIT = 1;
-const DEFAULT_LEASE_DURATION_MS = 120_000;
+const DEFAULT_LEASE_DURATION_MS = TEAM_RELAY_OUTBOX_LEASE_MS;
 const DEFAULT_RETRY_BASE_DELAY_MS = 1_000;
 const DEFAULT_UNKNOWN_OUTCOME_RETRY_BASE_DELAY_MS = 30_000;
 const DEFAULT_RETRY_MAX_DELAY_MS = 300_000;
@@ -81,6 +82,7 @@ export class TeamRuntimeOutboxDispatcher {
 	private readonly cleanupIntervalMs: number;
 	private readonly cleanupBatchLimit: number;
 	private started = false;
+	private paused = false;
 	private stopped = false;
 	private drainRequested = false;
 	private drainPromise?: Promise<void>;
@@ -141,6 +143,7 @@ export class TeamRuntimeOutboxDispatcher {
 			return Promise.resolve();
 		}
 		this.started = true;
+		this.paused = false;
 		return this.wake();
 	}
 
@@ -165,6 +168,15 @@ export class TeamRuntimeOutboxDispatcher {
 		});
 		this.drainPromise = trackedDrain;
 		return trackedDrain;
+	}
+
+	pause(): void {
+		if (this.stopped || this.paused) {
+			return;
+		}
+		this.paused = true;
+		this.drainRequested = false;
+		this.clearScheduledTimer();
 	}
 
 	stop(): void {
@@ -233,7 +245,7 @@ export class TeamRuntimeOutboxDispatcher {
 				throw new Error("Runtime outbox operation identity changed");
 			}
 		} catch (error) {
-			if (this.isActive()) {
+			if (this.canPersistDispatchOutcome()) {
 				this.fail(entry, "INVALID_RUNTIME_RELAY_PAYLOAD", error);
 			}
 			return;
@@ -248,12 +260,12 @@ export class TeamRuntimeOutboxDispatcher {
 				payload,
 			});
 		} catch (error) {
-			if (this.isActive()) {
+			if (this.canPersistDispatchOutcome()) {
 				this.handleCallFailure(entry, error);
 			}
 			return;
 		}
-		if (!this.isActive()) {
+		if (!this.canPersistDispatchOutcome()) {
 			return;
 		}
 
@@ -263,7 +275,7 @@ export class TeamRuntimeOutboxDispatcher {
 			this.fail(entry, "INVALID_RUNTIME_RELAY_ACK", error);
 			return;
 		}
-		if (!this.isActive()) {
+		if (!this.canPersistDispatchOutcome()) {
 			return;
 		}
 		const deliveredAt = this.currentTime().iso;
@@ -444,6 +456,10 @@ export class TeamRuntimeOutboxDispatcher {
 	}
 
 	private isActive(): boolean {
+		return this.started && !this.paused && !this.stopped;
+	}
+
+	private canPersistDispatchOutcome(): boolean {
 		return this.started && !this.stopped;
 	}
 

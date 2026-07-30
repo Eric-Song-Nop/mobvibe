@@ -253,6 +253,7 @@ export type {
 	CancelSessionParams,
 	CancelSessionResponse,
 	CliErrorPayload,
+	CliRegisteredInfo,
 	CliRegistrationInfo,
 	CliStatusPayload,
 	CliToGatewayEvents,
@@ -336,6 +337,8 @@ export type {
 	SetSessionModelParams,
 	SetSessionModeParams,
 	StreamErrorPayload,
+	TeamRelayReadyAck,
+	TeamRelayReadyPayload,
 	WebuiToGatewayEvents,
 } from "./types/socket-events.js";
 export type {
@@ -364,9 +367,12 @@ export {
 	parseTeamRelayExecuteRpcResult,
 	TEAM_RELAY_BACKEND_ID_MAX_BYTES,
 	TEAM_RELAY_CIPHERTEXT_MAX_BYTES,
+	TEAM_RELAY_CLIENT_ACK_TIMEOUT_MS,
 	TEAM_RELAY_ENVELOPE_VERSION,
+	TEAM_RELAY_GATEWAY_RPC_TIMEOUT_MS,
 	TEAM_RELAY_MACHINE_ID_MAX_BYTES,
 	TEAM_RELAY_OPERATION_ID_MAX_BYTES,
+	TEAM_RELAY_OUTBOX_LEASE_MS,
 } from "./types/team-relay.js";
 // Validation utilities (Zod schemas from SDK)
 export { parseSessionNotification } from "./validation/acp-schemas.js";

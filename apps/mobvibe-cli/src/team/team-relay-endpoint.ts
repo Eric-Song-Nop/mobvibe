@@ -28,6 +28,7 @@ type TeamRelayEndpointOptions = {
 	protocol: TeamRelayProtocol;
 	store: TeamRelayStore;
 	handlers: TeamRelayOperationHandlers;
+	recoverAbandoned?: (request: VerifiedTeamRelayRequest) => boolean;
 };
 
 type ClaimedRelayOperation = Extract<
@@ -39,11 +40,15 @@ export class TeamRelayEndpoint {
 	private readonly protocol: TeamRelayProtocol;
 	private readonly store: TeamRelayStore;
 	private readonly handlers: TeamRelayOperationHandlers;
+	private readonly recoverAbandoned?: (
+		request: VerifiedTeamRelayRequest,
+	) => boolean;
 
 	constructor(options: TeamRelayEndpointOptions) {
 		this.protocol = options.protocol;
 		this.store = options.store;
 		this.handlers = options.handlers;
+		this.recoverAbandoned = options.recoverAbandoned;
 	}
 
 	static digestRequest(
@@ -86,6 +91,7 @@ export class TeamRelayEndpoint {
 				sourceMachineId: request.sourceMachineId,
 				operationId: request.operationId,
 				requestDigest,
+				recoverAbandoned: this.recoverAbandoned?.(request) === true,
 			});
 		} catch (error) {
 			return this.protocol.sealFailure(request, error);

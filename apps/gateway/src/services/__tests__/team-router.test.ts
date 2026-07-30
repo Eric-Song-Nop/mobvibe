@@ -53,6 +53,19 @@ const createCiphertext = (
 	},
 });
 
+const markRelayReady = (registry: CliRegistry, record: CliRecord): void => {
+	if (!record.teamRelayKey || !record.teamRelayRegistrationId) {
+		throw new Error("Relay-ready test fixture requires a relay registration");
+	}
+	const marked = registry.markTeamRelayReady(record.socket.id, {
+		registrationId: record.teamRelayRegistrationId,
+		relayKeyId: record.teamRelayKey.keyId,
+	});
+	if (!marked) {
+		throw new Error("Failed to mark relay-ready test fixture");
+	}
+};
+
 type TeamRelayRouterUnderTest = TeamRouter & {
 	placeRelayPeer(
 		params: unknown,
@@ -405,8 +418,9 @@ describe("TeamRouter", () => {
 					deviceId: "device-1",
 				},
 			);
+			markRelayReady(cliRegistry, source);
 			targetSocket = createMockSocket("socket-2");
-			cliRegistry.register(
+			const target = cliRegistry.register(
 				targetSocket,
 				createRegistration("machine-2", targetRelayKey),
 				{
@@ -414,6 +428,7 @@ describe("TeamRouter", () => {
 					deviceId: "device-2",
 				},
 			);
+			markRelayReady(cliRegistry, target);
 			relayRouter = teamRouter as TeamRelayRouterUnderTest;
 		});
 
@@ -435,9 +450,47 @@ describe("TeamRouter", () => {
 			});
 		});
 
+		it("keeps registered but unready peers and sources out of relay routing", async () => {
+			const unreadyTargetSocket = createMockSocket("socket-unready-target");
+			const unreadyTarget = cliRegistry.register(
+				unreadyTargetSocket,
+				createRegistration("machine-0", createRelayKey(8)),
+				{
+					userId: "user-1",
+					deviceId: "device-unready-target",
+				},
+			);
+
+			await expect(
+				relayRouter.placeRelayPeer({ backendId: "backend-1" }, source),
+			).resolves.toEqual({
+				targetMachineId: "machine-2",
+				relayKey: targetRelayKey,
+			});
+			await expect(
+				relayRouter.resolveRelayPeer(
+					{ targetMachineId: unreadyTarget.machineId },
+					source,
+				),
+			).rejects.toThrow("Team relay unavailable");
+
+			const unreadySourceSocket = createMockSocket("socket-unready-source");
+			const unreadySource = cliRegistry.register(
+				unreadySourceSocket,
+				createRegistration("machine-unready-source", createRelayKey(9)),
+				{
+					userId: "user-1",
+					deviceId: "device-unready-source",
+				},
+			);
+			await expect(
+				relayRouter.placeRelayPeer({ backendId: "backend-1" }, unreadySource),
+			).rejects.toThrow("Team relay unavailable");
+		});
+
 		it("selects an eligible worker deterministically by machine ID", async () => {
 			const laterSocket = createMockSocket("socket-later");
-			cliRegistry.register(
+			const later = cliRegistry.register(
 				laterSocket,
 				createRegistration("machine-z", createRelayKey(7)),
 				{
@@ -445,9 +498,10 @@ describe("TeamRouter", () => {
 					deviceId: "device-later",
 				},
 			);
+			markRelayReady(cliRegistry, later);
 			const firstSocket = createMockSocket("socket-first");
 			const firstRelayKey = createRelayKey(6);
-			cliRegistry.register(
+			const first = cliRegistry.register(
 				firstSocket,
 				createRegistration("machine-0", firstRelayKey),
 				{
@@ -455,6 +509,7 @@ describe("TeamRouter", () => {
 					deviceId: "device-first",
 				},
 			);
+			markRelayReady(cliRegistry, first);
 
 			await expect(
 				relayRouter.placeRelayPeer({ backendId: "backend-1" }, source),
@@ -476,7 +531,7 @@ describe("TeamRouter", () => {
 				},
 			);
 			const wrongBackendSocket = createMockSocket("socket-place-wrong-backend");
-			cliRegistry.register(
+			const wrongBackend = cliRegistry.register(
 				wrongBackendSocket,
 				{
 					...createRegistration(
@@ -492,8 +547,9 @@ describe("TeamRouter", () => {
 					deviceId: "device-place-wrong-backend",
 				},
 			);
+			markRelayReady(cliRegistry, wrongBackend);
 			const crossUserSocket = createMockSocket("socket-place-cross-user");
-			cliRegistry.register(
+			const crossUser = cliRegistry.register(
 				crossUserSocket,
 				createRegistration("machine-place-cross-user", createRelayKey(6)),
 				{
@@ -501,6 +557,7 @@ describe("TeamRouter", () => {
 					deviceId: "device-place-cross-user",
 				},
 			);
+			markRelayReady(cliRegistry, crossUser);
 
 			await expect(
 				relayRouter.placeRelayPeer({ backendId: "backend-1" }, source),
@@ -750,7 +807,7 @@ describe("TeamRouter", () => {
 
 		it("does not reveal whether an offline or cross-user target exists", async () => {
 			const otherUserSocket = createMockSocket("socket-other-user");
-			cliRegistry.register(
+			const otherUser = cliRegistry.register(
 				otherUserSocket,
 				createRegistration("machine-other-user", createRelayKey(7)),
 				{
@@ -758,6 +815,7 @@ describe("TeamRouter", () => {
 					deviceId: "device-other-user",
 				},
 			);
+			markRelayReady(cliRegistry, otherUser);
 
 			for (const targetMachineId of ["machine-offline", "machine-other-user"]) {
 				await expect(

@@ -60,6 +60,70 @@ describe("TeamRelayStore operation journal", () => {
 		});
 	});
 
+	test("fences an explicitly recoverable operation into a new daemon epoch", () => {
+		const originalClaim = store.claimOperation({
+			sourceMachineId: "worker-machine",
+			operationId: "runtime-operation-1",
+			requestDigest: "runtime-digest-1",
+		});
+		if (originalClaim.status !== "claimed") {
+			throw new Error("Expected a new relay operation claim");
+		}
+
+		expect(
+			store.claimOperation({
+				sourceMachineId: "worker-machine",
+				operationId: "runtime-operation-1",
+				requestDigest: "runtime-digest-1",
+				recoverAbandoned: true,
+			}),
+		).toEqual({ status: "in_progress" });
+
+		store.close();
+		store = new TeamRelayStore(dbPath);
+		expect(
+			store.claimOperation({
+				sourceMachineId: "worker-machine",
+				operationId: "runtime-operation-1",
+				requestDigest: "runtime-digest-1",
+			}),
+		).toEqual({ status: "in_progress" });
+
+		const recoveredClaim = store.claimOperation({
+			sourceMachineId: "worker-machine",
+			operationId: "runtime-operation-1",
+			requestDigest: "runtime-digest-1",
+			recoverAbandoned: true,
+		});
+		expect(recoveredClaim).toEqual({
+			status: "claimed",
+			claimId: expect.any(String),
+		});
+		if (recoveredClaim.status !== "claimed") {
+			throw new Error("Expected an abandoned relay operation recovery");
+		}
+		expect(recoveredClaim.claimId).not.toBe(originalClaim.claimId);
+
+		expect(() =>
+			store.completeOperation({
+				sourceMachineId: "worker-machine",
+				operationId: "runtime-operation-1",
+				requestDigest: "runtime-digest-1",
+				claimId: originalClaim.claimId,
+				result: { accepted: true },
+			}),
+		).toThrow("Team relay operation claim is no longer active");
+		expect(
+			store.completeOperation({
+				sourceMachineId: "worker-machine",
+				operationId: "runtime-operation-1",
+				requestDigest: "runtime-digest-1",
+				claimId: recoveredClaim.claimId,
+				result: { accepted: true },
+			}),
+		).toEqual({ accepted: true });
+	});
+
 	test("replays the exact completed result after restart", () => {
 		const claim = store.claimOperation({
 			sourceMachineId: "leader-machine",

@@ -19,6 +19,8 @@ import type {
 	SessionsChangedPayload,
 	SessionsDiscoveredPayload,
 	SignedAuthToken,
+	TeamRelayReadyAck,
+	TeamRelayReadyPayload,
 } from "@mobvibe/shared";
 import {
 	AppError,
@@ -530,6 +532,11 @@ export function setupCliHandlers(
 				socket.emit("cli:registered", {
 					machineId: record.machineId,
 					userId,
+					...(record.teamRelayRegistrationId
+						? {
+								teamRelayRegistrationId: record.teamRelayRegistrationId,
+							}
+						: {}),
 				});
 				logger.info(
 					{
@@ -571,6 +578,37 @@ export function setupCliHandlers(
 				}
 			});
 		});
+
+		// This event deliberately bypasses pre-registration buffering. Only the
+		// one-time proof issued for the current socket can activate Team relay.
+		socket.on(
+			"cli:team-relay-ready",
+			(
+				payload: TeamRelayReadyPayload,
+				ack?: (response: TeamRelayReadyAck) => void,
+			) => {
+				const accepted = cliRegistry.markTeamRelayReady(socket.id, payload);
+				const record = cliRegistry.getCliBySocketId(socket.id);
+				if (
+					!accepted ||
+					!record?.teamRelayRegistrationId ||
+					!record.teamRelayKey
+				) {
+					ack?.({ accepted: false });
+					logger.warn({ socketId: socket.id }, "cli_team_relay_ready_rejected");
+					return;
+				}
+				ack?.({
+					accepted: true,
+					registrationId: record.teamRelayRegistrationId,
+					relayKeyId: record.teamRelayKey.keyId,
+				});
+				logger.info(
+					{ socketId: socket.id, machineId: record.machineId },
+					"cli_team_relay_ready",
+				);
+			},
+		);
 
 		// Heartbeat
 		socket.on("cli:heartbeat", () => {

@@ -618,6 +618,148 @@ describe("AgentTeamStore durable metadata", () => {
 			store.getTeamMemberExecution(created.team.agentTeamId, memberId),
 		).toBeNull();
 	});
+
+	test("atomically applies and replays one durable member turn completion", () => {
+		const created = store.createAgentTeam({
+			machineId: "leader-machine",
+			backendId: "backend-leader",
+			workspaceRootCwd: "/workspace/project",
+		});
+		const agentTeamId = created.team.agentTeamId;
+		const leaderMemberId = created.team.leaderMemberId;
+		const { memberId } = store.addTeamMember({
+			agentTeamId,
+			backendId: "backend-worker",
+			name: "Remote worker",
+		});
+		store.updateTeamMemberRuntime({
+			agentTeamId,
+			memberId: leaderMemberId,
+			sessionId: "leader-session",
+			lifecycle: "running",
+		});
+		store.updateTeamMemberRuntime({
+			agentTeamId,
+			memberId,
+			sessionId: "worker-session",
+			lifecycle: "running",
+		});
+
+		const rejectingDb = new Database(dbPath);
+		try {
+			rejectingDb.exec(`
+				CREATE TRIGGER reject_runtime_notification
+				BEFORE INSERT ON agent_team_mailbox_messages
+				BEGIN
+					SELECT RAISE(ABORT, 'runtime notification unavailable');
+				END;
+			`);
+		} finally {
+			rejectingDb.close();
+		}
+
+		const input = {
+			turnId: "turn-runtime-1",
+			agentTeamId,
+			memberId,
+		};
+		expect(() => store.applyTeamRuntimeTurnCompletion(input)).toThrow(
+			"runtime notification unavailable",
+		);
+		expect(
+			store
+				.getAgentTeam({ agentTeamId })
+				.team?.members.find((member) => member.memberId === input.memberId)
+				?.lifecycle,
+		).toBe("running");
+
+		const rollbackDb = new Database(dbPath);
+		try {
+			expect(
+				rollbackDb
+					.query("SELECT COUNT(*) AS count FROM agent_team_runtime_inbox")
+					.get(),
+			).toEqual({ count: 0 });
+			expect(
+				rollbackDb
+					.query("SELECT COUNT(*) AS count FROM agent_team_mailbox_messages")
+					.get(),
+			).toEqual({ count: 0 });
+			rollbackDb.exec("DROP TRIGGER reject_runtime_notification");
+		} finally {
+			rollbackDb.close();
+		}
+
+		const applied = store.applyTeamRuntimeTurnCompletion(input);
+		const replayed = store.applyTeamRuntimeTurnCompletion(input);
+		if (applied.status !== "applied" || replayed.status !== "replayed") {
+			throw new Error("Expected one applied and one replayed runtime turn");
+		}
+
+		expect(applied).toEqual({
+			status: "applied",
+			leaderMemberId,
+			notificationMessageId: expect.any(String),
+		});
+		expect(replayed).toEqual({
+			...applied,
+			status: "replayed",
+		});
+		expect(
+			store
+				.getAgentTeam({ agentTeamId })
+				.team?.members.find((member) => member.memberId === input.memberId)
+				?.lifecycle,
+		).toBe("completed");
+
+		const durableDb = new Database(dbPath, { readonly: true });
+		try {
+			expect(
+				durableDb
+					.query(`
+						SELECT turn_id, agent_team_id, member_id, leader_member_id,
+							notification_message_id
+						FROM agent_team_runtime_inbox
+					`)
+					.all(),
+			).toEqual([
+				{
+					turn_id: input.turnId,
+					agent_team_id: agentTeamId,
+					member_id: input.memberId,
+					leader_member_id: leaderMemberId,
+					notification_message_id: applied.notificationMessageId,
+				},
+			]);
+			expect(
+				durableDb
+					.query(`
+						SELECT message_id, from_member_id, to_member_id, body_local_json
+						FROM agent_team_mailbox_messages
+					`)
+					.all(),
+			).toEqual([
+				{
+					message_id: applied.notificationMessageId,
+					from_member_id: input.memberId,
+					to_member_id: leaderMemberId,
+					body_local_json: JSON.stringify({
+						message: "Turn completed",
+						type: "idle_notification",
+					}),
+				},
+			]);
+		} finally {
+			durableDb.close();
+		}
+
+		expect(() =>
+			store.applyTeamRuntimeTurnCompletion({
+				...input,
+				memberId: leaderMemberId,
+			}),
+		).toThrow("runtime turn identity conflict");
+	});
 });
 
 describe("Agent Team content boundary", () => {
@@ -672,6 +814,7 @@ describe("Agent Team migrations", () => {
 			expect(names).toContain("remote_team_session_bindings");
 			expect(names).toContain("agent_team_member_executions");
 			expect(names).toContain("team_runtime_outbox");
+			expect(names).toContain("agent_team_runtime_inbox");
 
 			const mailboxColumns = db
 				.query("PRAGMA table_info(agent_team_mailbox_messages)")
@@ -683,7 +826,7 @@ describe("Agent Team migrations", () => {
 			const schemaVersion = db
 				.query("SELECT MAX(version) AS version FROM schema_version")
 				.get() as { version: number };
-			expect(schemaVersion.version).toBe(21);
+			expect(schemaVersion.version).toBe(22);
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });
@@ -713,6 +856,7 @@ describe("Agent Team migrations", () => {
 				"error_local_json",
 				"claimed_at",
 				"completed_at",
+				"claim_owner_id",
 			]);
 
 			const bindingColumns = db
@@ -814,6 +958,18 @@ describe("Agent Team migrations", () => {
 			expect(runtimeDeliveredIndex).toEqual({
 				name: "idx_team_runtime_outbox_delivered",
 			});
+
+			const runtimeInboxColumns = db
+				.query("PRAGMA table_info(agent_team_runtime_inbox)")
+				.all() as Array<{ name: string }>;
+			expect(runtimeInboxColumns.map(({ name }) => name)).toEqual([
+				"turn_id",
+				"agent_team_id",
+				"member_id",
+				"leader_member_id",
+				"notification_message_id",
+				"applied_at",
+			]);
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });
@@ -1067,14 +1223,14 @@ describe("Agent Team migrations", () => {
 			const schemaVersion = db
 				.query("SELECT MAX(version) AS version FROM schema_version")
 				.get();
-			expect(schemaVersion).toEqual({ version: 21 });
+			expect(schemaVersion).toEqual({ version: 22 });
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
 
-	test("upgrades v18 through v21 without replacing leader facts or worker relay rows", () => {
+	test("upgrades v18 through v22 without replacing leader facts or worker relay rows", () => {
 		const tempDir = fs.mkdtempSync(
 			path.join(os.tmpdir(), "agent-team-migrate-v18-"),
 		);
@@ -1158,7 +1314,7 @@ describe("Agent Team migrations", () => {
 			).toEqual({ server_id: "server-worker", lifecycle: "creating" });
 			expect(
 				db.query("SELECT MAX(version) AS version FROM schema_version").get(),
-			).toEqual({ version: 21 });
+			).toEqual({ version: 22 });
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });
@@ -1269,7 +1425,7 @@ describe("Agent Team migrations", () => {
 				);
 				DELETE FROM team_runtime_outbox;
 				DROP INDEX idx_team_runtime_outbox_delivered;
-				DELETE FROM schema_version WHERE version = 21;
+				DELETE FROM schema_version WHERE version >= 21;
 			`);
 
 			expect(runMigrations(db)).toBe(20);
@@ -1286,7 +1442,7 @@ describe("Agent Team migrations", () => {
 			).toEqual({ name: "idx_team_runtime_outbox_delivered" });
 			expect(
 				db.query("SELECT MAX(version) AS version FROM schema_version").get(),
-			).toEqual({ version: 21 });
+			).toEqual({ version: 22 });
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });
@@ -1304,7 +1460,7 @@ describe("Agent Team migrations", () => {
 			runMigrations(db);
 			db.exec(`
 				DROP TRIGGER enqueue_team_runtime_after_turn_end;
-				DELETE FROM schema_version WHERE version = 21;
+				DELETE FROM schema_version WHERE version >= 21;
 				INSERT INTO sessions (
 					session_id, machine_id, backend_id, current_revision,
 					created_at, updated_at
@@ -1506,7 +1662,7 @@ describe("Agent Team migrations", () => {
 			const schemaVersion = db
 				.query("SELECT MAX(version) AS version FROM schema_version")
 				.get() as { version: number };
-			expect(schemaVersion.version).toBe(21);
+			expect(schemaVersion.version).toBe(22);
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });

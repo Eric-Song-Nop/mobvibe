@@ -71,6 +71,7 @@ type TeamRelayOperationRow = {
 	request_digest: string;
 	status: string;
 	claim_id: string;
+	claim_owner_id: string;
 	result_local_json: string | null;
 	error_local_json: string | null;
 	claimed_at: string;
@@ -113,6 +114,7 @@ type TeamRuntimeOutboxRow = {
 
 export class TeamRelayStore {
 	private readonly db: Database;
+	private readonly claimOwnerId = randomUUID();
 
 	constructor(dbPath: string) {
 		const directory = path.dirname(dbPath);
@@ -127,6 +129,11 @@ export class TeamRelayStore {
 		sourceMachineId: string;
 		operationId: string;
 		requestDigest: string;
+		/**
+		 * Fence a claim owned by an earlier daemon epoch. This is safe only
+		 * when the operation has its own atomic, durable replay receipt.
+		 */
+		recoverAbandoned?: boolean;
 	}): TeamRelayOperationClaim {
 		const claim = this.db.transaction((): TeamRelayOperationClaim => {
 			const existing = this.getOperation(
@@ -134,7 +141,7 @@ export class TeamRelayStore {
 				params.operationId,
 			);
 			if (existing) {
-				return operationRowToClaim(existing, params.requestDigest);
+				return this.resolveOperationClaim(existing, params);
 			}
 
 			const claimId = randomUUID();
@@ -142,14 +149,15 @@ export class TeamRelayStore {
 				.query(`
 					INSERT OR IGNORE INTO team_relay_operations (
 						source_machine_id, operation_id, request_digest, status,
-						claim_id, claimed_at
-					) VALUES (?, ?, ?, 'in_progress', ?, ?)
+						claim_id, claim_owner_id, claimed_at
+					) VALUES (?, ?, ?, 'in_progress', ?, ?, ?)
 				`)
 				.run(
 					params.sourceMachineId,
 					params.operationId,
 					params.requestDigest,
 					claimId,
+					this.claimOwnerId,
 					new Date().toISOString(),
 				);
 			if (inserted.changes === 1) {
@@ -163,7 +171,7 @@ export class TeamRelayStore {
 			if (!raced) {
 				throw new Error("Team relay operation claim was not persisted");
 			}
-			return operationRowToClaim(raced, params.requestDigest);
+			return this.resolveOperationClaim(raced, params);
 		});
 		return claim.immediate();
 	}
@@ -628,6 +636,57 @@ export class TeamRelayStore {
 			`)
 			.get(sourceMachineId, operationId) as TeamRelayOperationRow | null;
 		return row ?? undefined;
+	}
+
+	private resolveOperationClaim(
+		row: TeamRelayOperationRow,
+		params: {
+			sourceMachineId: string;
+			operationId: string;
+			requestDigest: string;
+			recoverAbandoned?: boolean;
+		},
+	): TeamRelayOperationClaim {
+		const current = operationRowToClaim(row, params.requestDigest);
+		if (
+			current.status !== "in_progress" ||
+			!params.recoverAbandoned ||
+			row.claim_owner_id === this.claimOwnerId
+		) {
+			return current;
+		}
+
+		const claimId = randomUUID();
+		const updated = this.db
+			.query(`
+				UPDATE team_relay_operations
+				SET claim_id = ?, claim_owner_id = ?, claimed_at = ?
+				WHERE source_machine_id = ?
+					AND operation_id = ?
+					AND request_digest = ?
+					AND status = 'in_progress'
+					AND claim_id = ?
+					AND claim_owner_id = ?
+			`)
+			.run(
+				claimId,
+				this.claimOwnerId,
+				new Date().toISOString(),
+				params.sourceMachineId,
+				params.operationId,
+				params.requestDigest,
+				row.claim_id,
+				row.claim_owner_id,
+			);
+		if (updated.changes === 1) {
+			return { status: "claimed", claimId };
+		}
+
+		const raced = this.getOperation(params.sourceMachineId, params.operationId);
+		if (!raced) {
+			throw new Error("Team relay operation recovery was not persisted");
+		}
+		return operationRowToClaim(raced, params.requestDigest);
 	}
 
 	private requireRemoteSessionBinding(
