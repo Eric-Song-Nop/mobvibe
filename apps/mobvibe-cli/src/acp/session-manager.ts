@@ -74,6 +74,7 @@ import {
 } from "../team/team-relay-protocol.js";
 import { TeamRelayStore } from "../team/team-relay-store.js";
 import { TeamRuntime } from "../team/team-runtime.js";
+import { createLeaderTeamRuntimeRelayHandler } from "../team/team-runtime-relay.js";
 import type { SpawnMemberResult } from "../team/team-tool-handlers.js";
 import {
 	consolidateEventsForRead,
@@ -760,6 +761,10 @@ export class SessionManager {
 						...createLeaderTeamRelayHandlers({
 							store: this.agentTeamStore,
 							dispatcher: this.teamRuntime.commandBus,
+						}),
+						"member.runtime": createLeaderTeamRuntimeRelayHandler({
+							store: this.agentTeamStore,
+							runtime: this.teamRuntime,
 						}),
 						"member.bootstrap": (request) =>
 							this.bootstrapRemoteTeamSession(

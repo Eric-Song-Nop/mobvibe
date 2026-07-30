@@ -1,4 +1,5 @@
 import type { TeamSourceRef } from "@mobvibe/shared";
+import { logger } from "../lib/logger.js";
 import type { AgentTeamStore, MailboxWakeMessage } from "./agent-team-store.js";
 import { MailboxService } from "./mailbox-service.js";
 import { TeamCommandBus } from "./team-command-bus.js";
@@ -144,10 +145,19 @@ export class TeamRuntime {
 				type: "idle_notification",
 			},
 		});
-		if (this.areNonLeaderMembersSettled(agentTeamId)) {
-			await this.wakeMember(agentTeamId, leader.member_id);
-		}
 		this.emitCurrentTeam(agentTeamId);
+		if (this.areNonLeaderMembersSettled(agentTeamId)) {
+			void this.wakeMember(agentTeamId, leader.member_id).catch((error) => {
+				logger.warn(
+					{
+						agentTeamId,
+						memberId: leader.member_id,
+						errorName: error instanceof Error ? error.name : "UnknownError",
+					},
+					"agent_team_member_wake_failed",
+				);
+			});
+		}
 	}
 
 	private async sendMessageAndWake(

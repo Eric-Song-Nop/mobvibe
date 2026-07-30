@@ -474,6 +474,45 @@ describe("MailboxService durable delivery", () => {
 		expect(projection).not.toContain("Turn completed");
 		expect(projection).not.toContain("idle_notification");
 	});
+
+	test("member turn completion does not wait for the leader prompt", async () => {
+		setMemberState(dbPath, leaderMemberId, {
+			sessionId: "session-leader",
+			lifecycle: "running",
+		});
+		setMemberState(dbPath, workerMemberId, {
+			sessionId: "session-worker",
+			lifecycle: "running",
+		});
+		setMemberState(dbPath, reviewerMemberId, {
+			sessionId: "session-reviewer",
+			lifecycle: "completed",
+		});
+		const runtime = new TeamRuntime({
+			store,
+			sessionManager: {
+				injectTeamMailboxPrompt: () => new Promise<never>(() => {}),
+			},
+		});
+
+		const outcome = await Promise.race([
+			runtime
+				.onMemberTurnCompleted(agentTeamId, workerMemberId)
+				.then(() => "completed" as const),
+			new Promise<"timed_out">((resolve) => {
+				setTimeout(() => resolve("timed_out"), 0);
+			}),
+		]);
+
+		expect(outcome).toBe("completed");
+		expect(
+			store
+				.getAgentTeam({ agentTeamId })
+				.team?.members.find((member) => member.memberId === workerMemberId)
+				?.lifecycle,
+		).toBe("completed");
+		expect(readMailboxRows(dbPath)).toHaveLength(1);
+	});
 });
 
 function readMailboxRows(dbPath: string): MailboxRow[] {

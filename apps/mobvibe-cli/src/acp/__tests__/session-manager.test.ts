@@ -5658,6 +5658,80 @@ describe("SessionManager", () => {
 			});
 		});
 
+		it("applies a remote member turn completion only to leader Team facts", async () => {
+			const harness = await prepareEncryptedLeaderForRemoteSpawn();
+			const spawned = await sessionManager.spawnAgentTeamMember({
+				agentTeamId: harness.created.team.agentTeamId,
+				requestedByMemberId: harness.created.team.leaderMemberId,
+				name: "Remote Runtime Worker",
+				backendId: "backend-remote",
+			});
+			if (!spawned.ok) {
+				throw new Error("Expected remote member spawn to succeed");
+			}
+
+			const operationId = "remote-runtime-turn-completed";
+			const sealed = harness.workerProtocol.sealRequest({
+				operationId,
+				operation: "member.runtime",
+				targetMachineId: harness.leaderProtocol.machineId,
+				targetRelayKey: harness.leaderProtocol.relayKey,
+				payload: {
+					version: 1,
+					type: "turn_completed",
+					operationId,
+					agentTeamId: harness.created.team.agentTeamId,
+					memberId: spawned.memberId,
+					turnId: "remote-turn-1",
+				},
+			});
+			const relayRequest = {
+				operationId,
+				sourceMachineId: harness.workerProtocol.machineId,
+				sourceRelayKey: harness.workerProtocol.relayKey,
+				ciphertext: sealed.ciphertext,
+			};
+			const response = await (
+				sessionManager as unknown as SessionManagerTeamRelayApi
+			).handleTeamRelayRequest(relayRequest);
+			const result = harness.workerProtocol.openResponse({
+				operationId,
+				operation: "member.runtime",
+				targetMachineId: harness.leaderProtocol.machineId,
+				targetRelayKey: harness.leaderProtocol.relayKey,
+				ciphertext: response.ciphertext,
+			});
+
+			expect(result).toEqual({ operationId, accepted: true });
+			expect(
+				harness.internals.agentTeamStore
+					.getAgentTeam({
+						agentTeamId: harness.created.team.agentTeamId,
+					})
+					.team?.members.find((member) => member.memberId === spawned.memberId)
+					?.lifecycle,
+			).toBe("completed");
+			expect(
+				sessionManager
+					.listSessions()
+					.some((session) => session.sessionId === "remote-member-session"),
+			).toBe(false);
+
+			const replayResponse = await (
+				sessionManager as unknown as SessionManagerTeamRelayApi
+			).handleTeamRelayRequest(relayRequest);
+			expect(
+				harness.workerProtocol.openResponse({
+					operationId,
+					operation: "member.runtime",
+					targetMachineId: harness.leaderProtocol.machineId,
+					targetRelayKey: harness.leaderProtocol.relayKey,
+					ciphertext: replayResponse.ciphertext,
+				}),
+			).toEqual({ operationId, accepted: true });
+			expect(mockConnection.prompt).toHaveBeenCalledTimes(1);
+		});
+
 		it("treats remote bootstrap results containing leader-owned facts as outcome unknown", async () => {
 			const harness = await prepareEncryptedLeaderForRemoteSpawn({
 				response: (request) => {
