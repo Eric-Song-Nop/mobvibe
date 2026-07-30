@@ -87,6 +87,56 @@ describe("AgentTeamStore durable metadata", () => {
 		}
 	});
 
+	test("rejects a member whose team does not exist", () => {
+		expect(() =>
+			store.addTeamMember({
+				agentTeamId: "missing-team",
+				backendId: "backend-claude",
+				name: "Orphan member",
+			}),
+		).toThrow("FOREIGN KEY constraint failed");
+	});
+
+	test("rejects a mailbox message whose team does not exist", () => {
+		expect(() =>
+			store.createMailboxMessages({
+				agentTeamId: "missing-team",
+				fromMemberId: "missing-sender",
+				recipients: [
+					{
+						memberId: "missing-recipient",
+						name: "Missing recipient",
+					},
+				],
+				body: { message: "orphan message" },
+			}),
+		).toThrow("FOREIGN KEY constraint failed");
+	});
+
+	test("rejects a task whose team does not exist", () => {
+		expect(() =>
+			store.createTeamTask({
+				agentTeamId: "missing-team",
+				ownerMemberId: null,
+				status: "todo",
+				body: { title: "Orphan task" },
+				blockedBy: [],
+			}),
+		).toThrow("FOREIGN KEY constraint failed");
+	});
+
+	test("rejects a tool intent whose team does not exist", () => {
+		expect(() =>
+			store.createTeamToolIntent({
+				agentTeamId: "missing-team",
+				requestedByMemberId: "missing-member",
+				kind: "spawn_member",
+				payload: {},
+				sourceRefs: [],
+			}),
+		).toThrow("FOREIGN KEY constraint failed");
+	});
+
 	test("recovers stable metadata after reopening the same SQLite file", () => {
 		const created = store.createAgentTeam({
 			machineId: "machine-1",
@@ -443,6 +493,11 @@ describe("Agent Team migrations", () => {
 
 		try {
 			runMigrations(db);
+			const foreignKeys = db.query("PRAGMA foreign_keys").get() as {
+				foreign_keys: number;
+			};
+			expect(foreignKeys.foreign_keys).toBe(1);
+
 			const tableNames = db
 				.query("SELECT name FROM sqlite_master WHERE type = 'table'")
 				.all() as Array<{ name: string }>;

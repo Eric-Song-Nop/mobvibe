@@ -411,6 +411,9 @@ export function runMigrations(db: Database): number {
 	// Enable WAL mode for better concurrency
 	db.exec("PRAGMA journal_mode = WAL");
 	db.exec("PRAGMA synchronous = NORMAL");
+	// SQLite foreign-key enforcement is connection-local, so every store
+	// connection must enable it when initializing the schema.
+	db.exec("PRAGMA foreign_keys = ON");
 
 	// Get current version
 	let currentVersion = 0;
