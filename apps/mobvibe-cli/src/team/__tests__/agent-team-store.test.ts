@@ -513,6 +513,8 @@ describe("Agent Team migrations", () => {
 			expect(names).toContain("agent_team_summary_refs");
 			expect(names).toContain("agent_team_tool_intents");
 			expect(names).toContain("agent_team_command_journal");
+			expect(names).toContain("team_relay_operations");
+			expect(names).toContain("remote_team_session_bindings");
 
 			const mailboxColumns = db
 				.query("PRAGMA table_info(agent_team_mailbox_messages)")
@@ -524,7 +526,163 @@ describe("Agent Team migrations", () => {
 			const schemaVersion = db
 				.query("SELECT MAX(version) AS version FROM schema_version")
 				.get() as { version: number };
-			expect(schemaVersion.version).toBe(17);
+			expect(schemaVersion.version).toBe(18);
+		} finally {
+			db.close();
+			fs.rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("creates operational relay tables without Team fact columns or foreign keys", () => {
+		const tempDir = fs.mkdtempSync(
+			path.join(os.tmpdir(), "agent-team-relay-schema-"),
+		);
+		const dbPath = path.join(tempDir, "events.db");
+		const db = new Database(dbPath);
+
+		try {
+			runMigrations(db);
+
+			const relayOperationColumns = db
+				.query("PRAGMA table_info(team_relay_operations)")
+				.all() as Array<{ name: string }>;
+			expect(relayOperationColumns.map(({ name }) => name)).toEqual([
+				"source_machine_id",
+				"operation_id",
+				"request_digest",
+				"status",
+				"claim_id",
+				"result_local_json",
+				"error_local_json",
+				"claimed_at",
+				"completed_at",
+			]);
+
+			const bindingColumns = db
+				.query("PRAGMA table_info(remote_team_session_bindings)")
+				.all() as Array<{ name: string }>;
+			const bindingColumnNames = bindingColumns.map(({ name }) => name);
+			expect(bindingColumnNames).toEqual([
+				"server_id",
+				"agent_team_id",
+				"member_id",
+				"leader_machine_id",
+				"backend_id",
+				"session_id",
+				"lifecycle",
+				"created_at",
+				"updated_at",
+			]);
+			for (const forbiddenColumn of [
+				"role",
+				"name",
+				"prompt",
+				"task",
+				"mailbox",
+				"body",
+				"worktree",
+			]) {
+				expect(bindingColumnNames).not.toContain(forbiddenColumn);
+			}
+
+			const relayForeignKeys = db
+				.query("PRAGMA foreign_key_list(team_relay_operations)")
+				.all();
+			const bindingForeignKeys = db
+				.query("PRAGMA foreign_key_list(remote_team_session_bindings)")
+				.all();
+			expect(relayForeignKeys).toEqual([]);
+			expect(bindingForeignKeys).toEqual([]);
+		} finally {
+			db.close();
+			fs.rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("upgrades v17 without replacing leader-local Team facts", () => {
+		const tempDir = fs.mkdtempSync(
+			path.join(os.tmpdir(), "agent-team-migrate-v17-"),
+		);
+		const dbPath = path.join(tempDir, "events.db");
+		const db = new Database(dbPath);
+
+		try {
+			runMigrations(db);
+			db.exec(`
+				INSERT INTO agent_teams (
+					agent_team_id, machine_id, workspace_root_cwd, title, lifecycle,
+					leader_member_id, workspace_mode, created_at, updated_at
+				) VALUES (
+					'team-local', 'leader-machine', '/workspace', 'Local Team', 'running',
+					'member-local', 'shared', '2026-01-01T00:00:00.000Z',
+					'2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO agent_team_members (
+					member_id, agent_team_id, role, name, backend_id, lifecycle, health,
+					created_at, updated_at
+				) VALUES (
+					'member-local', 'team-local', 'leader', 'Leader', 'backend-local',
+					'running', 'healthy', '2026-01-01T00:00:00.000Z',
+					'2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO agent_team_mailbox_messages (
+					message_id, agent_team_id, from_member_id, to_member_id,
+					body_local_json, wake_status, created_at
+				) VALUES (
+					'message-local', 'team-local', 'member-local', 'member-local',
+					'{"text":"leader-only"}', 'pending', '2026-01-01T00:00:00.000Z'
+				);
+
+				DROP TABLE IF EXISTS team_relay_operations;
+				DROP TABLE IF EXISTS remote_team_session_bindings;
+				DELETE FROM schema_version WHERE version > 17;
+			`);
+
+			expect(runMigrations(db)).toBe(17);
+
+			const team = db
+				.query(`
+					SELECT machine_id, title, leader_member_id
+					FROM agent_teams
+					WHERE agent_team_id = 'team-local'
+				`)
+				.get();
+			expect(team).toEqual({
+				machine_id: "leader-machine",
+				title: "Local Team",
+				leader_member_id: "member-local",
+			});
+
+			const message = db
+				.query(`
+					SELECT body_local_json
+					FROM agent_team_mailbox_messages
+					WHERE message_id = 'message-local'
+				`)
+				.get();
+			expect(message).toEqual({ body_local_json: '{"text":"leader-only"}' });
+
+			const relayTables = db
+				.query(`
+					SELECT name
+					FROM sqlite_master
+					WHERE type = 'table'
+						AND name IN (
+							'team_relay_operations',
+							'remote_team_session_bindings'
+						)
+					ORDER BY name
+				`)
+				.all();
+			expect(relayTables).toEqual([
+				{ name: "remote_team_session_bindings" },
+				{ name: "team_relay_operations" },
+			]);
+
+			const schemaVersion = db
+				.query("SELECT MAX(version) AS version FROM schema_version")
+				.get();
+			expect(schemaVersion).toEqual({ version: 18 });
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });
@@ -684,7 +842,7 @@ describe("Agent Team migrations", () => {
 			const schemaVersion = db
 				.query("SELECT MAX(version) AS version FROM schema_version")
 				.get() as { version: number };
-			expect(schemaVersion.version).toBe(17);
+			expect(schemaVersion.version).toBe(18);
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });

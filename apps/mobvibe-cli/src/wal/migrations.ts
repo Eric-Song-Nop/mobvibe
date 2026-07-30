@@ -450,6 +450,68 @@ const MIGRATIONS: readonly Migration[] = [
 					agent_team_id,
 					caller_member_id,
 					claimed_at
+			);
+		`,
+	},
+	{
+		version: 18,
+		up: `
+			-- Worker-local relay idempotency is intentionally independent from
+			-- leader-authoritative Team facts. In-progress operations are never
+			-- reclaimed automatically because a crashed side effect is unknown.
+			CREATE TABLE IF NOT EXISTS team_relay_operations (
+				source_machine_id TEXT NOT NULL,
+				operation_id TEXT NOT NULL,
+				request_digest TEXT NOT NULL,
+				status TEXT NOT NULL,
+				claim_id TEXT NOT NULL,
+				result_local_json TEXT,
+				error_local_json TEXT,
+				claimed_at TEXT NOT NULL,
+				completed_at TEXT,
+				PRIMARY KEY (source_machine_id, operation_id),
+				CHECK (status IN ('in_progress', 'completed', 'failed')),
+				CHECK (
+					(status = 'in_progress'
+						AND result_local_json IS NULL
+						AND error_local_json IS NULL
+						AND completed_at IS NULL)
+					OR (status = 'completed'
+						AND result_local_json IS NOT NULL
+						AND error_local_json IS NULL
+						AND completed_at IS NOT NULL)
+					OR (status = 'failed'
+						AND result_local_json IS NULL
+						AND error_local_json IS NOT NULL
+						AND completed_at IS NOT NULL)
+				)
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_team_relay_operations_status
+				ON team_relay_operations (status, claimed_at);
+
+			-- A worker stores only the routing state needed to attach a remote
+			-- ACP session. Team roles and all user-authored facts stay solely on
+			-- the leader machine.
+			CREATE TABLE IF NOT EXISTS remote_team_session_bindings (
+				server_id TEXT NOT NULL PRIMARY KEY,
+				agent_team_id TEXT NOT NULL,
+				member_id TEXT NOT NULL,
+				leader_machine_id TEXT NOT NULL,
+				backend_id TEXT NOT NULL,
+				session_id TEXT UNIQUE,
+				lifecycle TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL,
+				UNIQUE (agent_team_id, member_id),
+				CHECK (lifecycle IN ('creating', 'active', 'failed', 'closed')),
+				CHECK (lifecycle <> 'active' OR session_id IS NOT NULL)
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_remote_team_session_bindings_leader
+				ON remote_team_session_bindings (
+					leader_machine_id,
+					updated_at
 				);
 		`,
 	},

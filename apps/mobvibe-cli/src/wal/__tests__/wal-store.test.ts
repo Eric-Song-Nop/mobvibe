@@ -90,6 +90,49 @@ describe("WalStore", () => {
 			expect(walStore.hasDurableData()).toBeTrue();
 		});
 
+		it("detects a claimed Team relay operation as durable user data", () => {
+			const db = new Database(dbPath);
+			db.query(`
+				INSERT INTO team_relay_operations (
+					source_machine_id, operation_id, request_digest, status,
+					claim_id, claimed_at
+				) VALUES (?, ?, ?, ?, ?, ?)
+			`).run(
+				"leader-machine",
+				"operation-1",
+				"digest-1",
+				"in_progress",
+				"claim-1",
+				new Date().toISOString(),
+			);
+			db.close();
+
+			expect(walStore.hasDurableData()).toBeTrue();
+		});
+
+		it("detects a remote Team session binding as durable user data", () => {
+			const db = new Database(dbPath);
+			const now = new Date().toISOString();
+			db.query(`
+				INSERT INTO remote_team_session_bindings (
+					server_id, agent_team_id, member_id, leader_machine_id,
+					backend_id, lifecycle, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			`).run(
+				"mobvibe-team:team-1:member-1",
+				"team-1",
+				"member-1",
+				"leader-machine",
+				"backend-1",
+				"creating",
+				now,
+				now,
+			);
+			db.close();
+
+			expect(walStore.hasDurableData()).toBeTrue();
+		});
+
 		it("detects a compaction record left after session cleanup", () => {
 			const db = new Database(dbPath);
 			db.query(`
