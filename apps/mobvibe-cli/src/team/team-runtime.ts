@@ -1,6 +1,7 @@
 import type { TeamSourceRef } from "@mobvibe/shared";
 import type { AgentTeamStore, MailboxWakeMessage } from "./agent-team-store.js";
 import { MailboxService } from "./mailbox-service.js";
+import { TeamCommandBus } from "./team-command-bus.js";
 import { TeamMcpRouter } from "./team-mcp-router.js";
 import {
 	type SpawnMemberResult,
@@ -30,6 +31,7 @@ export type TeamSessionInjector = {
 
 export class TeamRuntime {
 	readonly toolHandlers: TeamToolHandlers;
+	readonly commandBus: TeamCommandBus;
 	readonly mcpRouter: TeamMcpRouter;
 	private readonly store: AgentTeamStore;
 	private readonly sessionManager?: TeamSessionInjector;
@@ -55,9 +57,14 @@ export class TeamRuntime {
 					((caller, args) => this.spawnMember(caller, args)),
 			},
 		});
+		this.commandBus = new TeamCommandBus({
+			store: options.store,
+			handlers: this.toolHandlers,
+		});
 		this.mcpRouter = new TeamMcpRouter({
 			store: options.store,
 			handlers: this.toolHandlers,
+			dispatcher: this.commandBus,
 		});
 	}
 

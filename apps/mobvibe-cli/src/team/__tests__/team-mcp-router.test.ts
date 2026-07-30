@@ -4,6 +4,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { AgentTeamStore } from "../agent-team-store.js";
+import {
+	TeamCommandBus,
+	type TeamCommandEnvelope,
+} from "../team-command-bus.js";
 import { TeamMcpProtocolAdapter } from "../team-mcp-protocol.js";
 import { TeamMcpRouter } from "../team-mcp-router.js";
 import {
@@ -25,6 +29,7 @@ describe("TeamMcpRouter", () => {
 	let requestPermission: ReturnType<typeof mock>;
 	let onAgentTeamChanged: ReturnType<typeof mock>;
 	let spawnMember: ReturnType<typeof mock>;
+	let handlers: TeamToolHandlers;
 
 	beforeEach(() => {
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "team-mcp-router-"));
@@ -60,13 +65,17 @@ describe("TeamMcpRouter", () => {
 				requestedByMemberId: caller.memberId,
 			}),
 		);
-		const handlers = new TeamToolHandlers({
+		handlers = new TeamToolHandlers({
 			store,
 			requestPermission,
 			onAgentTeamChanged,
 			services: { spawnMember },
 		});
-		router = new TeamMcpRouter({ store, handlers });
+		router = new TeamMcpRouter({
+			store,
+			handlers,
+			dispatcher: new TeamCommandBus({ store, handlers }),
+		});
 	});
 
 	afterEach(() => {
@@ -211,6 +220,46 @@ describe("TeamMcpRouter", () => {
 		});
 
 		expect(result.caller.memberId).toBe(leaderMemberId);
+	});
+
+	test("routes tool calls through a versioned command dispatcher", async () => {
+		const dispatch = mock((envelope: TeamCommandEnvelope) =>
+			Promise.resolve({
+				operationId: envelope.operationId,
+				result: {
+					caller: {
+						agentTeamId: envelope.agentTeamId,
+						memberId: envelope.callerMemberId,
+						role: "leader" as const,
+					},
+					toolName: envelope.toolName,
+					data: { source: "command-dispatcher" },
+				},
+			}),
+		);
+		const dispatcherRouter = new TeamMcpRouter({
+			store,
+			handlers,
+			dispatcher: { dispatch },
+		});
+		const serverId = `mobvibe-team:${agentTeamId}:${leaderMemberId}`;
+		dispatcherRouter.handleConnect({ serverId });
+
+		const result = await dispatcherRouter.handleToolCall({
+			serverId,
+			toolName: "mobvibe_team_members",
+			args: { ignored: true },
+		});
+
+		expect(dispatch).toHaveBeenCalledWith({
+			version: 1,
+			operationId: expect.any(String),
+			agentTeamId,
+			callerMemberId: leaderMemberId,
+			toolName: "mobvibe_team_members",
+			args: { ignored: true },
+		});
+		expect(result.data).toEqual({ source: "command-dispatcher" });
 	});
 
 	test("send_message persists from router-bound caller and ignores spoofed args", async () => {

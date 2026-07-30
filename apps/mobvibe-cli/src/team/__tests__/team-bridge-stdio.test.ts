@@ -8,6 +8,7 @@ import {
 	buildPerSessionTeamStdioBridge,
 	buildTeamStdioBridgeToolManifest,
 } from "../team-bridge-stdio.js";
+import { TeamCommandBus } from "../team-command-bus.js";
 import { TeamMcpRouter } from "../team-mcp-router.js";
 import {
 	EXPECTED_TEAM_TOOL_NAMES,
@@ -119,9 +120,11 @@ describe("per-session stdio bridge fallback", () => {
 		});
 		const agentTeamId = created.team.agentTeamId;
 		const memberId = created.team.leaderMemberId;
+		const handlers = new TeamToolHandlers({ store });
 		const router = new TeamMcpRouter({
 			store,
-			handlers: new TeamToolHandlers({ store }),
+			handlers,
+			dispatcher: new TeamCommandBus({ store, handlers }),
 		});
 		const serverId = `mobvibe-team:${agentTeamId}:${memberId}`;
 

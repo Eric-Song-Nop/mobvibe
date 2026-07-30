@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
 	createErrorDetail,
 	type TeamMcpTransport,
@@ -9,6 +10,10 @@ import type {
 	TeamToolIntentKind,
 } from "./agent-team-store.js";
 import {
+	TEAM_COMMAND_ENVELOPE_VERSION,
+	type TeamCommandDispatcher,
+} from "./team-command-bus.js";
+import {
 	EXPECTED_TEAM_TOOL_NAMES,
 	type TeamToolCaller,
 	type TeamToolHandlers,
@@ -18,7 +23,8 @@ import {
 
 export type TeamMcpRouterOptions = {
 	store: AgentTeamStore;
-	handlers: TeamToolHandlers;
+	handlers: Pick<TeamToolHandlers, "recordLifecycleIntent">;
+	dispatcher: TeamCommandDispatcher;
 };
 
 type ServerBinding = TeamToolCaller & {
@@ -108,11 +114,15 @@ export class TeamMcpRouter {
 		args: unknown;
 	}): Promise<TeamToolResult> {
 		const binding = this.requireBinding(input.serverId);
-		return this.options.handlers.dispatch({
-			caller: binding,
+		const execution = await this.options.dispatcher.dispatch({
+			version: TEAM_COMMAND_ENVELOPE_VERSION,
+			operationId: randomUUID(),
+			agentTeamId: binding.agentTeamId,
+			callerMemberId: binding.memberId,
 			toolName: input.toolName,
 			args: input.args,
 		});
+		return execution.result;
 	}
 
 	async recordLifecycleIntent(input: {
