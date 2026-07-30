@@ -488,6 +488,7 @@ describe("TeamRelayStore remote runtime outbox", () => {
 			leaseId: claimed.leaseId,
 			nextAttemptAt: "2099-01-01T00:05:00.000Z",
 			errorCode: "TRANSPORT_UNAVAILABLE",
+			rescheduledAt: "2099-01-01T00:00:01.000Z",
 		});
 
 		expect(deferred).toEqual(
@@ -497,6 +498,7 @@ describe("TeamRelayStore remote runtime outbox", () => {
 				nextAttemptAt: "2099-01-01T00:05:00.000Z",
 				lastErrorCode: "TRANSPORT_UNAVAILABLE",
 				leaseId: undefined,
+				updatedAt: "2099-01-01T00:00:01.000Z",
 			}),
 		);
 		expect(
@@ -513,6 +515,48 @@ describe("TeamRelayStore remote runtime outbox", () => {
 				limit: 10,
 			})[0],
 		).toEqual(expect.objectContaining({ id: claimed.id, attemptCount: 2 }));
+	});
+
+	test("reports only the next actionable member head for timer scheduling", () => {
+		expect(store.getNextRuntimeOutboxDueAt()).toBeUndefined();
+		activateRemoteSession();
+		appendTurnEnd();
+		appendTurnEnd();
+		const [, second] = store.listRuntimeOutbox();
+		if (!second?.nextAttemptAt) {
+			throw new Error("Expected a second pending completion");
+		}
+		const [claimed] = store.claimDueRuntimeOutbox({
+			now: "2099-01-01T00:00:00.000Z",
+			leaseExpiresAt: "2099-01-01T00:01:00.000Z",
+		});
+		if (!claimed) {
+			throw new Error("Expected the member head to be claimed");
+		}
+
+		expect(store.getNextRuntimeOutboxDueAt()).toBe("2099-01-01T00:01:00.000Z");
+		store.rescheduleRuntimeOutbox({
+			id: claimed.id,
+			leaseId: claimed.leaseId,
+			nextAttemptAt: "2099-01-01T00:05:00.000Z",
+			errorCode: "TRANSPORT_UNAVAILABLE",
+			rescheduledAt: "2099-01-01T00:00:01.000Z",
+		});
+		expect(store.getNextRuntimeOutboxDueAt()).toBe("2099-01-01T00:05:00.000Z");
+
+		const [reclaimed] = store.claimDueRuntimeOutbox({
+			now: "2099-01-01T00:05:00.000Z",
+			leaseExpiresAt: "2099-01-01T00:06:00.000Z",
+		});
+		if (!reclaimed) {
+			throw new Error("Expected the deferred member head to be reclaimed");
+		}
+		store.markRuntimeOutboxDelivered({
+			id: reclaimed.id,
+			leaseId: reclaimed.leaseId,
+			deliveredAt: "2099-01-01T00:05:01.000Z",
+		});
+		expect(store.getNextRuntimeOutboxDueAt()).toBe(second.nextAttemptAt);
 	});
 
 	test("persists a permanent failure only for its current lease", () => {

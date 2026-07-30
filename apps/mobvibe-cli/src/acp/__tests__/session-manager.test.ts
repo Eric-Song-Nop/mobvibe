@@ -45,7 +45,7 @@ import {
 	TeamRelayRemoteError,
 	type VerifiedTeamRelayRequest,
 } from "../../team/team-relay-protocol.js";
-import type { TeamRelayStore } from "../../team/team-relay-store.js";
+import { TeamRelayStore } from "../../team/team-relay-store.js";
 import type { TeamRuntime } from "../../team/team-runtime.js";
 import { createTeamTurnCompletedRelayPayload } from "../../team/team-runtime-relay.js";
 import { WalStore } from "../../wal/wal-store.js";
@@ -429,8 +429,11 @@ describe("SessionManager", () => {
 	];
 
 	type RemoteWorkerRelayBehavior = {
+		attachTransport?: boolean;
 		outgoingError?: Error;
-		outgoingResponse?: (request: VerifiedTeamRelayRequest) => unknown;
+		outgoingResponse?: (
+			request: VerifiedTeamRelayRequest,
+		) => unknown | Promise<unknown>;
 	};
 
 	const prepareEncryptedRemoteWorker = async (
@@ -474,7 +477,7 @@ describe("SessionManager", () => {
 				}
 				const response = leaderProtocol.sealSuccess(
 					request,
-					behavior.outgoingResponse(request),
+					await behavior.outgoingResponse(request),
 				);
 				return {
 					operationId: params.operationId,
@@ -497,13 +500,16 @@ describe("SessionManager", () => {
 			sendTeamRelay,
 		};
 		const relayApi = sessionManager as unknown as SessionManagerTeamRelayApi;
-		relayApi.attachTeamRelayTransport(transport);
+		if (behavior.attachTransport !== false) {
+			relayApi.attachTeamRelayTransport(transport);
+		}
 		return {
 			internals: sessionManager as unknown as SessionManagerTeamInternals,
 			leaderProtocol,
 			outgoingRequests,
 			relayApi,
 			sendTeamRelay,
+			transport,
 			workerProtocol,
 		};
 	};
@@ -6505,6 +6511,13 @@ describe("SessionManager", () => {
 				throw new Error("Expected a string runtime relay operation ID");
 			}
 			expect(runtimeRequest.operationId).toBe(runtimeOperationId);
+			expect(harness.internals.teamRelayStore.listRuntimeOutbox()).toEqual([
+				expect.objectContaining({
+					operationId: runtimeOperationId,
+					status: "delivered",
+					attemptCount: 1,
+				}),
+			]);
 			expect(
 				sessionManager.getMessageSendResult(
 					"remote-worker-session-runtime",
@@ -6519,6 +6532,67 @@ describe("SessionManager", () => {
 					"remote-worker-session-runtime",
 				)?.lifecycle,
 			).toBe("active");
+		});
+
+		it("drains a durable worker completion after relay transport attachment", async () => {
+			const harness = await prepareEncryptedRemoteWorker({
+				attachTransport: false,
+				outgoingResponse: (request) => ({
+					operationId: request.operationId,
+					accepted: true,
+				}),
+			});
+			const fixture = createRemoteBootstrapFixture(
+				"bootstrap-runtime-attach",
+				"runtime-attach",
+			);
+			prepareTeamSessionConnection(
+				mockConnection,
+				"remote-worker-session-runtime-attach",
+				expectedRemoteTeamTools,
+			);
+			const bootstrapResponse = await harness.relayApi.handleTeamRelayRequest(
+				sealRemoteBootstrap(harness, fixture),
+			);
+			openRemoteBootstrapResponse(
+				harness,
+				fixture.operationId,
+				bootstrapResponse,
+			);
+			const claim = sessionManager.claimMessageSend(
+				"remote-worker-session-runtime-attach",
+				"remote-worker-message-runtime-attach",
+			);
+			if (claim.status !== "claimed") {
+				throw new Error("Expected remote worker message claim");
+			}
+
+			sessionManager.completeMessageSend(
+				"remote-worker-session-runtime-attach",
+				"remote-worker-message-runtime-attach",
+				claim.claimId,
+				"end_turn",
+			);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			expect(harness.outgoingRequests).toHaveLength(0);
+			expect(harness.internals.teamRelayStore.listRuntimeOutbox()).toEqual([
+				expect.objectContaining({ status: "pending", attemptCount: 0 }),
+			]);
+			expect(
+				sessionManager.getMessageSendResult(
+					"remote-worker-session-runtime-attach",
+					"remote-worker-message-runtime-attach",
+				),
+			).toEqual({ stopReason: "end_turn" });
+
+			harness.relayApi.attachTeamRelayTransport(harness.transport);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			expect(harness.outgoingRequests).toHaveLength(1);
+			expect(harness.internals.teamRelayStore.listRuntimeOutbox()).toEqual([
+				expect.objectContaining({ status: "delivered", attemptCount: 1 }),
+			]);
 		});
 
 		it("keeps a worker prompt completed when runtime relay fails", async () => {
@@ -6562,6 +6636,13 @@ describe("SessionManager", () => {
 			await new Promise((resolve) => setTimeout(resolve, 0));
 
 			expect(harness.sendTeamRelay).toHaveBeenCalledTimes(1);
+			expect(harness.internals.teamRelayStore.listRuntimeOutbox()).toEqual([
+				expect.objectContaining({
+					status: "pending",
+					attemptCount: 1,
+					lastErrorCode: "TEAM_RELAY_TRANSPORT_FAILED",
+				}),
+			]);
 			expect(
 				sessionManager.getMessageSendResult(
 					"remote-worker-session-runtime-failure",
@@ -6580,6 +6661,104 @@ describe("SessionManager", () => {
 			expect(harness.internals.agentTeamStore.listAgentTeams().teams).toEqual(
 				[],
 			);
+			await sessionManager.shutdown();
+		});
+
+		it("shuts down without waiting for an in-flight runtime relay", async () => {
+			let resolveRuntimeRelay: ((value: unknown) => void) | undefined;
+			const runtimeRelayResult = new Promise<unknown>((resolve) => {
+				resolveRuntimeRelay = resolve;
+			});
+			const harness = await prepareEncryptedRemoteWorker({
+				outgoingResponse: () => runtimeRelayResult,
+			});
+			const fixture = createRemoteBootstrapFixture(
+				"bootstrap-runtime-shutdown",
+				"runtime-shutdown",
+			);
+			prepareTeamSessionConnection(
+				mockConnection,
+				"remote-worker-session-runtime-shutdown",
+				expectedRemoteTeamTools,
+			);
+			const bootstrapResponse = await harness.relayApi.handleTeamRelayRequest(
+				sealRemoteBootstrap(harness, fixture),
+			);
+			openRemoteBootstrapResponse(
+				harness,
+				fixture.operationId,
+				bootstrapResponse,
+			);
+			const claim = sessionManager.claimMessageSend(
+				"remote-worker-session-runtime-shutdown",
+				"remote-worker-message-runtime-shutdown",
+			);
+			if (claim.status !== "claimed") {
+				throw new Error("Expected remote worker message claim");
+			}
+			sessionManager.completeMessageSend(
+				"remote-worker-session-runtime-shutdown",
+				"remote-worker-message-runtime-shutdown",
+				claim.claimId,
+				"end_turn",
+			);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(harness.outgoingRequests).toHaveLength(1);
+			expect(
+				harness.internals.teamRelayStore.listRuntimeOutbox()[0]?.status,
+			).toBe("in_flight");
+
+			const shutdown = sessionManager.shutdown();
+			let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+			const shutdownOutcome = await Promise.race([
+				shutdown.then(() => "shutdown" as const),
+				new Promise<"timeout">((resolve) => {
+					timeoutHandle = setTimeout(() => resolve("timeout"), 100);
+				}),
+			]);
+			if (timeoutHandle) {
+				clearTimeout(timeoutHandle);
+			}
+			if (shutdownOutcome === "timeout") {
+				const request = harness.outgoingRequests[0];
+				resolveRuntimeRelay?.({
+					operationId: request?.operationId,
+					accepted: true,
+				});
+				await shutdown;
+			}
+			expect(shutdownOutcome).toBe("shutdown");
+
+			let reopenedStore = new TeamRelayStore(mockConfig.walDbPath);
+			expect(reopenedStore.listRuntimeOutbox()[0]).toEqual(
+				expect.objectContaining({
+					status: "in_flight",
+					attemptCount: 1,
+					deliveredAt: undefined,
+				}),
+			);
+			reopenedStore.close();
+
+			loggerWarnMock.mockClear();
+			const request = harness.outgoingRequests[0];
+			resolveRuntimeRelay?.({
+				operationId: request?.operationId,
+				accepted: true,
+			});
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(loggerWarnMock).not.toHaveBeenCalledWith(
+				expect.anything(),
+				"remote_team_runtime_outbox_dispatch_failed",
+			);
+			reopenedStore = new TeamRelayStore(mockConfig.walDbPath);
+			expect(reopenedStore.listRuntimeOutbox()[0]).toEqual(
+				expect.objectContaining({
+					status: "in_flight",
+					attemptCount: 1,
+					deliveredAt: undefined,
+				}),
+			);
+			reopenedStore.close();
 		});
 
 		it("auto-approves permissions for an active remote member binding", async () => {
@@ -6832,6 +7011,56 @@ describe("SessionManager", () => {
 					"remote-worker-session-backend-affinity",
 				)?.lifecycle,
 			).toBe("active");
+		});
+
+		it("dispatches a worker turn buffered during reload after its durable commit", async () => {
+			const harness = await prepareEncryptedRemoteWorker({
+				outgoingResponse: (request) => ({
+					operationId: request.operationId,
+					accepted: true,
+				}),
+			});
+			const fixture = createRemoteBootstrapFixture(
+				"bootstrap-remote-buffered-turn",
+				"buffered-turn",
+			);
+			const sessionId = "remote-worker-session-buffered-turn";
+			prepareTeamSessionConnection(
+				mockConnection,
+				sessionId,
+				expectedRemoteTeamTools,
+			);
+			const response = await harness.relayApi.handleTeamRelayRequest(
+				sealRemoteBootstrap(harness, fixture),
+			);
+			openRemoteBootstrapResponse(harness, fixture.operationId, response);
+			let outboxSizeDuringReload = -1;
+			mockConnection.loadSession.mockImplementationOnce(async () => {
+				sessionManager.recordTurnEnd(sessionId, "end_turn");
+				outboxSizeDuringReload =
+					harness.internals.teamRelayStore.listRuntimeOutbox().length;
+				return { modes: null, configOptions: null };
+			});
+
+			await sessionManager.reloadSession(
+				sessionId,
+				fixture.cwd,
+				fixture.backendId,
+				fixture.additionalDirectories,
+			);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			expect(outboxSizeDuringReload).toBe(0);
+			expect(harness.outgoingRequests).toHaveLength(1);
+			expect(harness.internals.teamRelayStore.listRuntimeOutbox()).toEqual([
+				expect.objectContaining({
+					sourceSessionId: sessionId,
+					sourceRevision: 2,
+					sourceSeq: 1,
+					status: "delivered",
+					attemptCount: 1,
+				}),
+			]);
 		});
 
 		it("restores the remote MCP router for reload, resume, and load", async () => {

@@ -409,6 +409,32 @@ export class TeamRelayStore {
 		return rows.map(runtimeOutboxRowToEntry);
 	}
 
+	getNextRuntimeOutboxDueAt(): string | undefined {
+		const row = this.db
+			.query(`
+				SELECT MIN(
+					CASE candidate.status
+						WHEN 'pending' THEN candidate.next_attempt_at
+						WHEN 'in_flight' THEN candidate.lease_expires_at
+					END
+				) AS due_at
+				FROM team_runtime_outbox AS candidate
+				WHERE candidate.status IN ('pending', 'in_flight')
+					AND NOT EXISTS (
+						SELECT 1
+						FROM team_runtime_outbox AS earlier
+						WHERE earlier.agent_team_id = candidate.agent_team_id
+							AND earlier.member_id = candidate.member_id
+							AND earlier.status IN ('pending', 'in_flight')
+							AND earlier.id < candidate.id
+					)
+			`)
+			.get() as { due_at: string | null };
+		return row.due_at === null
+			? undefined
+			: parseIsoTimestamp(row.due_at, "Runtime outbox due time");
+	}
+
 	claimDueRuntimeOutbox(params: {
 		now: string;
 		leaseExpiresAt: string;
@@ -502,10 +528,15 @@ export class TeamRelayStore {
 		leaseId: string;
 		nextAttemptAt: string;
 		errorCode: string;
+		rescheduledAt: string;
 	}): TeamRuntimeOutboxEntry {
 		const nextAttemptAt = parseIsoTimestamp(
 			params.nextAttemptAt,
 			"Runtime outbox next attempt",
+		);
+		const rescheduledAt = parseIsoTimestamp(
+			params.rescheduledAt,
+			"Runtime outbox reschedule time",
 		);
 		const errorCode = parseErrorCode(params.errorCode);
 		this.updateClaimedRuntimeOutbox({
@@ -522,7 +553,7 @@ export class TeamRelayStore {
 						updated_at = ?
 				WHERE id = ? AND status = 'in_flight' AND lease_id = ?
 			`,
-			values: [nextAttemptAt, errorCode, new Date().toISOString()],
+			values: [nextAttemptAt, errorCode, rescheduledAt],
 		});
 		return this.requireRuntimeOutboxEntry(params.id);
 	}

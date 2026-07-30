@@ -74,11 +74,8 @@ import {
 } from "../team/team-relay-protocol.js";
 import { TeamRelayStore } from "../team/team-relay-store.js";
 import { TeamRuntime } from "../team/team-runtime.js";
-import {
-	createLeaderTeamRuntimeRelayHandler,
-	createTeamTurnCompletedRelayPayload,
-	parseTeamRuntimeRelayAck,
-} from "../team/team-runtime-relay.js";
+import { TeamRuntimeOutboxDispatcher } from "../team/team-runtime-outbox-dispatcher.js";
+import { createLeaderTeamRuntimeRelayHandler } from "../team/team-runtime-relay.js";
 import type { SpawnMemberResult } from "../team/team-tool-handlers.js";
 import {
 	consolidateEventsForRead,
@@ -605,6 +602,7 @@ export class SessionManager {
 	private readonly teamRelayStore: TeamRelayStore;
 	private readonly teamRuntime: TeamRuntime;
 	private readonly teamRelayClient?: TeamRelayClient;
+	private readonly teamRuntimeOutboxDispatcher?: TeamRuntimeOutboxDispatcher;
 	private readonly remoteTeamMcpPort?: RemoteTeamMcpPort;
 	private readonly remoteTeamMcpRouter?: TeamMcpRouter;
 	private readonly teamRelayEndpoint?: TeamRelayEndpoint;
@@ -754,6 +752,25 @@ export class SessionManager {
 					relay: client,
 				});
 				this.teamRelayClient = client;
+				this.teamRuntimeOutboxDispatcher = new TeamRuntimeOutboxDispatcher({
+					store: this.teamRelayStore,
+					relay: client,
+					onFailure: ({ entry, error }) => {
+						this.logRemoteTeamTurnCompletionRelayFailure(
+							entry.sourceSessionId,
+							entry,
+							error,
+						);
+					},
+					onInternalError: (error) => {
+						logger.warn(
+							{
+								errorName: error instanceof Error ? error.name : "UnknownError",
+							},
+							"remote_team_runtime_outbox_dispatch_failed",
+						);
+					},
+				});
 				this.remoteTeamMcpPort = remoteMcpPort;
 				this.remoteTeamMcpRouter = new TeamMcpRouter({
 					port: remoteMcpPort,
@@ -793,6 +810,7 @@ export class SessionManager {
 			);
 		}
 		client.attachTransport(transport);
+		void this.teamRuntimeOutboxDispatcher?.start();
 	}
 
 	async handleTeamRelayRequest(
@@ -3177,11 +3195,7 @@ export class SessionManager {
 			return;
 		}
 		if (terminalEvent) {
-			this.relayRemoteTeamMemberCompletion(
-				sessionId,
-				teamMember,
-				terminalEvent,
-			);
+			void this.teamRuntimeOutboxDispatcher?.wake();
 		}
 	}
 
@@ -3206,49 +3220,6 @@ export class SessionManager {
 					"agent_team_turn_completion_failed",
 				);
 			});
-	}
-
-	private relayRemoteTeamMemberCompletion(
-		sessionId: string,
-		teamMember: Extract<ResolvedTeamSessionBinding, { kind: "remote_worker" }>,
-		terminalEvent: Pick<WalEvent, "revision" | "seq">,
-	): void {
-		try {
-			const relay = this.teamRelayClient;
-			if (!relay) {
-				throw new Error("Team relay is not available");
-			}
-			const payload = createTeamTurnCompletedRelayPayload({
-				agentTeamId: teamMember.agentTeamId,
-				memberId: teamMember.memberId,
-				sessionId,
-				revision: terminalEvent.revision,
-				seq: terminalEvent.seq,
-			});
-			void relay
-				.call({
-					operationId: payload.operationId,
-					operation: "member.runtime",
-					targetMachineId: teamMember.leaderMachineId,
-					payload,
-				})
-				.then((result) => {
-					parseTeamRuntimeRelayAck(result, payload.operationId);
-				})
-				.catch((error) => {
-					this.logRemoteTeamTurnCompletionRelayFailure(
-						sessionId,
-						teamMember,
-						error,
-					);
-				});
-		} catch (error) {
-			this.logRemoteTeamTurnCompletionRelayFailure(
-				sessionId,
-				teamMember,
-				error,
-			);
-		}
 	}
 
 	private logRemoteTeamTurnCompletionRelayFailure(
@@ -4106,6 +4077,7 @@ export class SessionManager {
 	 */
 	async shutdown(): Promise<void> {
 		this.shuttingDown = true;
+		this.teamRuntimeOutboxDispatcher?.stop();
 		await Promise.all(Array.from(this.backendLifecycleTails.values()));
 		await this.closeAll();
 		this.agentTeamStore.close();
@@ -4724,6 +4696,7 @@ export class SessionManager {
 				events: this.toWalEventInputs(resumeBuffer.events),
 				wrappedDek,
 			});
+			this.wakeRuntimeOutboxForCommittedEvents(committed.events);
 			committedEvents = committed.events;
 			delete record.pendingReload;
 		} catch (error) {
@@ -4993,6 +4966,7 @@ export class SessionManager {
 				revision = committed.revision;
 				committedEvents = committed.events;
 			}
+			this.wakeRuntimeOutboxForCommittedEvents(committedEvents);
 			if (hasExistingHistory) {
 				logger.debug({ sessionId, revision }, "load_session_bump_revision");
 			}
@@ -5187,6 +5161,7 @@ export class SessionManager {
 				events: this.toWalEventInputs(bufferedEvents),
 				wrappedDek,
 			});
+			this.wakeRuntimeOutboxForCommittedEvents(committed.events);
 			return {
 				agentInfo,
 				committed,
@@ -5296,6 +5271,14 @@ export class SessionManager {
 					"committed_reload_event_emit_failed",
 				);
 			}
+		}
+	}
+
+	private wakeRuntimeOutboxForCommittedEvents(
+		events: readonly WalEvent[],
+	): void {
+		if (events.some((event) => event.kind === "turn_end")) {
+			void this.teamRuntimeOutboxDispatcher?.wake();
 		}
 	}
 
