@@ -3,6 +3,8 @@ import type {
 	CliRegistrationInfo,
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
+	PlaceTeamRelayPeerParams,
+	PlaceTeamRelayPeerResult,
 	ResolveTeamRelayPeerParams,
 	ResolveTeamRelayPeerResult,
 	RpcError,
@@ -416,7 +418,7 @@ export function setupCliHandlers(
 		};
 
 		const handleTeamRelayRequest = async <TResult>(
-			event: "team-relay:resolve" | "team-relay:send",
+			event: "team-relay:place" | "team-relay:resolve" | "team-relay:send",
 			rawRequest: unknown,
 			ack: ((response: RpcResponse<TResult>) => void) | undefined,
 			operation: (params: unknown) => Promise<TResult>,
@@ -574,6 +576,23 @@ export function setupCliHandlers(
 		socket.on("cli:heartbeat", () => {
 			// Just acknowledge
 		});
+
+		socket.on(
+			"team-relay:place",
+			(
+				request: RpcRequest<PlaceTeamRelayPeerParams>,
+				ack: (response: RpcResponse<PlaceTeamRelayPeerResult>) => void,
+			) => {
+				withRegisteredCli("team-relay:place", request, (record) => {
+					void handleTeamRelayRequest(
+						"team-relay:place",
+						request,
+						ack,
+						(params) => teamRouter.placeRelayPeer(params, record),
+					);
+				});
+			},
+		);
 
 		socket.on(
 			"team-relay:resolve",

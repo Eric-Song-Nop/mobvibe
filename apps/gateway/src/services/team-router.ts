@@ -9,6 +9,9 @@ import {
 	type GetAgentTeamRpcResult,
 	type ListAgentTeamsRpcParams,
 	type ListAgentTeamsRpcResult,
+	type PlaceTeamRelayPeerResult,
+	parsePlaceTeamRelayPeerParams,
+	parsePlaceTeamRelayPeerResult,
 	parseResolveTeamRelayPeerParams,
 	parseSendTeamRelayParams,
 	parseTeamRelayExecuteRpcResult,
@@ -107,6 +110,49 @@ export class TeamRouter {
 	): Promise<ResolveTeamRelayPeerResult> {
 		const params = this.parseResolveRelayParams(rawParams);
 		const target = this.resolveRelayTarget(params.targetMachineId, source);
+		return {
+			targetMachineId: target.machineId,
+			relayKey: { ...target.teamRelayKey },
+		};
+	}
+
+	async placeRelayPeer(
+		rawParams: unknown,
+		source: CliRecord,
+	): Promise<PlaceTeamRelayPeerResult> {
+		const params = this.parsePlaceRelayParams(rawParams);
+		const authenticatedSource = this.resolveAuthenticatedRelaySource(source);
+		const target = this.cliRegistry
+			.getClisForUser(authenticatedSource.userId)
+			.filter(
+				(candidate) =>
+					candidate !== authenticatedSource &&
+					candidate.teamRelayKey !== undefined &&
+					candidate.backends.some(
+						(backend) => backend.backendId === params.backendId,
+					),
+			)
+			.sort((left, right) =>
+				left.machineId === right.machineId
+					? 0
+					: left.machineId < right.machineId
+						? -1
+						: 1,
+			)
+			.find((candidate) => {
+				try {
+					parsePlaceTeamRelayPeerResult({
+						targetMachineId: candidate.machineId,
+						relayKey: candidate.teamRelayKey,
+					});
+					return true;
+				} catch {
+					return false;
+				}
+			});
+		if (!target?.teamRelayKey) {
+			this.throwRelayPeerNotFound();
+		}
 		return {
 			targetMachineId: target.machineId,
 			relayKey: { ...target.teamRelayKey },
@@ -242,6 +288,22 @@ export class TeamRouter {
 		}
 	}
 
+	private parsePlaceRelayParams(rawParams: unknown) {
+		try {
+			return parsePlaceTeamRelayPeerParams(rawParams);
+		} catch {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Invalid Team relay request",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+	}
+
 	private parseSendRelayParams(rawParams: unknown) {
 		try {
 			return parseSendTeamRelayParams(rawParams);
@@ -297,15 +359,7 @@ export class TeamRouter {
 			authenticatedSource.userId,
 		);
 		if (!target || target === authenticatedSource) {
-			throw new AppError(
-				createErrorDetail({
-					code: "AUTHORIZATION_FAILED",
-					message: "Team relay peer not found",
-					retryable: false,
-					scope: "request",
-				}),
-				404,
-			);
+			this.throwRelayPeerNotFound();
 		}
 		if (!target.teamRelayKey) {
 			throw new AppError(
@@ -322,6 +376,18 @@ export class TeamRouter {
 			userId: string;
 			teamRelayKey: NonNullable<CliRecord["teamRelayKey"]>;
 		};
+	}
+
+	private throwRelayPeerNotFound(): never {
+		throw new AppError(
+			createErrorDetail({
+				code: "AUTHORIZATION_FAILED",
+				message: "Team relay peer not found",
+				retryable: false,
+				scope: "request",
+			}),
+			404,
+		);
 	}
 
 	private parseRelayResponse(

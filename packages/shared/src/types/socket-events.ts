@@ -30,6 +30,8 @@ import type {
 	SessionsChangedPayload,
 } from "./session.js";
 import type {
+	PlaceTeamRelayPeerParams,
+	PlaceTeamRelayPeerResult,
 	ResolveTeamRelayPeerParams,
 	ResolveTeamRelayPeerResult,
 	SendTeamRelayParams,
@@ -399,6 +401,10 @@ export interface CliToGatewayEvents {
 	"sessions:changed": (payload: SessionsChangedPayload) => void;
 	"sessions:discovered": (payload: SessionsDiscoveredPayload) => void;
 	"agent-teams:changed": (payload: AgentTeamsChangedPayload) => void;
+	"team-relay:place": (
+		request: RpcRequest<PlaceTeamRelayPeerParams>,
+		ack: (response: RpcResponse<PlaceTeamRelayPeerResult>) => void,
+	) => void;
 	"team-relay:resolve": (
 		request: RpcRequest<ResolveTeamRelayPeerParams>,
 		ack: (response: RpcResponse<ResolveTeamRelayPeerResult>) => void,

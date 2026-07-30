@@ -3,6 +3,7 @@ import type { EncryptedPayload } from "../crypto/types.js";
 export const TEAM_RELAY_ENVELOPE_VERSION = 1 as const;
 export const TEAM_RELAY_OPERATION_ID_MAX_BYTES = 128;
 export const TEAM_RELAY_MACHINE_ID_MAX_BYTES = 256;
+export const TEAM_RELAY_BACKEND_ID_MAX_BYTES = 256;
 export const TEAM_RELAY_CIPHERTEXT_MAX_BYTES = 4 * 1024 * 1024;
 
 const TEAM_RELAY_PUBLIC_KEY_BYTES = 32;
@@ -39,6 +40,16 @@ export type ResolveTeamRelayPeerResult = {
 	relayKey: TeamRelayPublicKey;
 };
 
+/** Metadata-only request for an eligible remote worker. */
+export type PlaceTeamRelayPeerParams = {
+	backendId: string;
+};
+
+export type PlaceTeamRelayPeerResult = {
+	targetMachineId: string;
+	relayKey: TeamRelayPublicKey;
+};
+
 /** Source CLI request to forward an encrypted operation to another machine. */
 export type SendTeamRelayParams = {
 	operationId: string;
@@ -50,6 +61,12 @@ export type SendTeamRelayResult = {
 	operationId: string;
 	targetMachineId: string;
 	ciphertext: TeamRelayCiphertext;
+};
+
+export type SendTeamRelayResultBinding = {
+	operationId: string;
+	targetMachineId: string;
+	recipientKeyId: string;
 };
 
 /** Authenticated Gateway-to-target request. Source fields are Gateway-stamped. */
@@ -173,6 +190,17 @@ export const parseResolveTeamRelayPeerParams = (
 			),
 	);
 
+export const parsePlaceTeamRelayPeerParams = (
+	value: unknown,
+): PlaceTeamRelayPeerParams =>
+	parseRelayRequest<PlaceTeamRelayPeerParams>(
+		value,
+		(record) =>
+			hasExactKeys(record, ["backendId"]) &&
+			isBoundedIdentifier(record.backendId, TEAM_RELAY_BACKEND_ID_MAX_BYTES) &&
+			record.backendId.trim().length > 0,
+	);
+
 export const parseSendTeamRelayParams = (value: unknown): SendTeamRelayParams =>
 	parseRelayRequest<SendTeamRelayParams>(
 		value,
@@ -187,6 +215,70 @@ export const parseSendTeamRelayParams = (value: unknown): SendTeamRelayParams =>
 				TEAM_RELAY_MACHINE_ID_MAX_BYTES,
 			) &&
 			isTeamRelayCiphertext(record.ciphertext),
+	);
+
+const parseRelayResponse = <T>(
+	value: unknown,
+	isValid: (record: Record<string, unknown>) => boolean,
+): T => {
+	if (!isRecord(value) || !isValid(value)) {
+		throw new Error("Invalid Team relay response");
+	}
+	return value as T;
+};
+
+const parseTeamRelayPeerResult = <T extends PlaceTeamRelayPeerResult>(
+	value: unknown,
+	expectedTargetMachineId?: string,
+): T =>
+	parseRelayResponse<T>(
+		value,
+		(record) =>
+			hasExactKeys(record, ["targetMachineId", "relayKey"]) &&
+			isBoundedIdentifier(
+				record.targetMachineId,
+				TEAM_RELAY_MACHINE_ID_MAX_BYTES,
+			) &&
+			isTeamRelayPublicKey(record.relayKey) &&
+			(expectedTargetMachineId === undefined ||
+				record.targetMachineId === expectedTargetMachineId),
+	);
+
+export const parseResolveTeamRelayPeerResult = (
+	value: unknown,
+	expectedTargetMachineId?: string,
+): ResolveTeamRelayPeerResult =>
+	parseTeamRelayPeerResult<ResolveTeamRelayPeerResult>(
+		value,
+		expectedTargetMachineId,
+	);
+
+export const parsePlaceTeamRelayPeerResult = (
+	value: unknown,
+): PlaceTeamRelayPeerResult =>
+	parseTeamRelayPeerResult<PlaceTeamRelayPeerResult>(value);
+
+export const parseSendTeamRelayResult = (
+	value: unknown,
+	expected?: SendTeamRelayResultBinding,
+): SendTeamRelayResult =>
+	parseRelayResponse<SendTeamRelayResult>(
+		value,
+		(record) =>
+			hasExactKeys(record, ["operationId", "targetMachineId", "ciphertext"]) &&
+			isBoundedIdentifier(
+				record.operationId,
+				TEAM_RELAY_OPERATION_ID_MAX_BYTES,
+			) &&
+			isBoundedIdentifier(
+				record.targetMachineId,
+				TEAM_RELAY_MACHINE_ID_MAX_BYTES,
+			) &&
+			isTeamRelayCiphertext(record.ciphertext) &&
+			(expected === undefined ||
+				(record.operationId === expected.operationId &&
+					record.targetMachineId === expected.targetMachineId &&
+					record.ciphertext.recipientKeyId === expected.recipientKeyId)),
 	);
 
 export const parseTeamRelayExecuteRpcParams = (
@@ -215,17 +307,14 @@ export const parseTeamRelayExecuteRpcParams = (
 
 export const parseTeamRelayExecuteRpcResult = (
 	value: unknown,
-): TeamRelayExecuteRpcResult => {
-	if (
-		!isRecord(value) ||
-		!hasExactKeys(value, ["operationId", "ciphertext"]) ||
-		!isBoundedIdentifier(
-			value.operationId,
-			TEAM_RELAY_OPERATION_ID_MAX_BYTES,
-		) ||
-		!isTeamRelayCiphertext(value.ciphertext)
-	) {
-		throw new Error("Invalid Team relay response");
-	}
-	return value as TeamRelayExecuteRpcResult;
-};
+): TeamRelayExecuteRpcResult =>
+	parseRelayResponse<TeamRelayExecuteRpcResult>(
+		value,
+		(record) =>
+			hasExactKeys(record, ["operationId", "ciphertext"]) &&
+			isBoundedIdentifier(
+				record.operationId,
+				TEAM_RELAY_OPERATION_ID_MAX_BYTES,
+			) &&
+			isTeamRelayCiphertext(record.ciphertext),
+	);

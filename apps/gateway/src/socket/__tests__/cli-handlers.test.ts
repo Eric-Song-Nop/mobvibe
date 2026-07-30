@@ -127,6 +127,7 @@ describe("setupCliHandlers", () => {
 	let teamRouter: {
 		handleRpcResponse: ReturnType<typeof vi.fn>;
 		handleCliDisconnect: ReturnType<typeof vi.fn>;
+		placeRelayPeer: ReturnType<typeof vi.fn>;
 		resolveRelayPeer: ReturnType<typeof vi.fn>;
 		relay: ReturnType<typeof vi.fn>;
 	};
@@ -155,6 +156,7 @@ describe("setupCliHandlers", () => {
 		teamRouter = {
 			handleRpcResponse: vi.fn(),
 			handleCliDisconnect: vi.fn(),
+			placeRelayPeer: vi.fn(),
 			resolveRelayPeer: vi.fn(),
 			relay: vi.fn(),
 		};
@@ -312,7 +314,7 @@ describe("setupCliHandlers", () => {
 		);
 	});
 
-	it("routes Team relay resolve and send through the authenticated CLI record", async () => {
+	it("routes Team relay placement, resolve, and send through the authenticated CLI record", async () => {
 		const sourceRelayKey = createMockRelayKey(1);
 		const targetRelayKey = createMockRelayKey(2);
 		const responseCiphertext = createMockRelayCiphertext(
@@ -334,14 +336,26 @@ describe("setupCliHandlers", () => {
 			targetMachineId: "machine-target",
 			relayKey: targetRelayKey,
 		});
+		teamRouter.placeRelayPeer.mockResolvedValue({
+			targetMachineId: "machine-target",
+			relayKey: targetRelayKey,
+		});
 		teamRouter.relay.mockResolvedValue({
 			operationId: "operation-1",
 			targetMachineId: "machine-target",
 			ciphertext: responseCiphertext,
 		});
+		const placeAck = vi.fn();
 		const resolveAck = vi.fn();
 		const sendAck = vi.fn();
 
+		socketHandlers["team-relay:place"]?.(
+			{
+				requestId: "place-request-1",
+				params: { backendId: "backend-1" },
+			},
+			placeAck,
+		);
 		socketHandlers["team-relay:resolve"]?.(
 			{
 				requestId: "resolve-request-1",
@@ -366,6 +380,10 @@ describe("setupCliHandlers", () => {
 		);
 
 		await vi.waitFor(() => {
+			expect(teamRouter.placeRelayPeer).toHaveBeenCalledWith(
+				{ backendId: "backend-1" },
+				record,
+			);
 			expect(teamRouter.resolveRelayPeer).toHaveBeenCalledWith(
 				{ targetMachineId: "machine-target" },
 				record,
@@ -378,6 +396,13 @@ describe("setupCliHandlers", () => {
 				},
 				record,
 			);
+			expect(placeAck).toHaveBeenCalledWith({
+				requestId: "place-request-1",
+				result: {
+					targetMachineId: "machine-target",
+					relayKey: targetRelayKey,
+				},
+			});
 			expect(resolveAck).toHaveBeenCalledWith({
 				requestId: "resolve-request-1",
 				result: {

@@ -54,6 +54,13 @@ const createCiphertext = (
 });
 
 type TeamRelayRouterUnderTest = TeamRouter & {
+	placeRelayPeer(
+		params: unknown,
+		source: CliRecord,
+	): Promise<{
+		targetMachineId: string;
+		relayKey: TeamRelayPublicKey;
+	}>;
 	resolveRelayPeer(
 		params: unknown,
 		source: CliRecord,
@@ -417,6 +424,136 @@ describe("TeamRouter", () => {
 				targetMachineId: "machine-2",
 				relayKey: targetRelayKey,
 			});
+		});
+
+		it("places on a same-user worker with the requested backend and excludes the source", async () => {
+			await expect(
+				relayRouter.placeRelayPeer({ backendId: "backend-1" }, source),
+			).resolves.toEqual({
+				targetMachineId: "machine-2",
+				relayKey: targetRelayKey,
+			});
+		});
+
+		it("selects an eligible worker deterministically by machine ID", async () => {
+			const laterSocket = createMockSocket("socket-later");
+			cliRegistry.register(
+				laterSocket,
+				createRegistration("machine-z", createRelayKey(7)),
+				{
+					userId: "user-1",
+					deviceId: "device-later",
+				},
+			);
+			const firstSocket = createMockSocket("socket-first");
+			const firstRelayKey = createRelayKey(6);
+			cliRegistry.register(
+				firstSocket,
+				createRegistration("machine-0", firstRelayKey),
+				{
+					userId: "user-1",
+					deviceId: "device-first",
+				},
+			);
+
+			await expect(
+				relayRouter.placeRelayPeer({ backendId: "backend-1" }, source),
+			).resolves.toEqual({
+				targetMachineId: "machine-0",
+				relayKey: firstRelayKey,
+			});
+		});
+
+		it("filters no-key, wrong-backend, offline, and cross-user workers without leaking topology", async () => {
+			cliRegistry.unregister(targetSocket.id);
+			const noKeySocket = createMockSocket("socket-place-no-key");
+			cliRegistry.register(
+				noKeySocket,
+				createRegistration("machine-place-no-key"),
+				{
+					userId: "user-1",
+					deviceId: "device-place-no-key",
+				},
+			);
+			const wrongBackendSocket = createMockSocket("socket-place-wrong-backend");
+			cliRegistry.register(
+				wrongBackendSocket,
+				{
+					...createRegistration(
+						"machine-place-wrong-backend",
+						createRelayKey(5),
+					),
+					backends: [
+						{ backendId: "other-backend", backendLabel: "Other Agent" },
+					],
+				},
+				{
+					userId: "user-1",
+					deviceId: "device-place-wrong-backend",
+				},
+			);
+			const crossUserSocket = createMockSocket("socket-place-cross-user");
+			cliRegistry.register(
+				crossUserSocket,
+				createRegistration("machine-place-cross-user", createRelayKey(6)),
+				{
+					userId: "user-2",
+					deviceId: "device-place-cross-user",
+				},
+			);
+
+			await expect(
+				relayRouter.placeRelayPeer({ backendId: "backend-1" }, source),
+			).rejects.toThrow("Team relay peer not found");
+			expect(noKeySocket.emit).not.toHaveBeenCalled();
+			expect(wrongBackendSocket.emit).not.toHaveBeenCalled();
+			expect(crossUserSocket.emit).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			["missing backend", {}],
+			["empty backend", { backendId: "" }],
+			["blank backend", { backendId: "   " }],
+			["oversized backend", { backendId: "x".repeat(257) }],
+			["oversized UTF-8 backend", { backendId: "界".repeat(86) }],
+			[
+				"forged source",
+				{ backendId: "backend-1", sourceMachineId: "victim-machine" },
+			],
+			[
+				"Team identifier",
+				{ backendId: "backend-1", agentTeamId: "team-secret" },
+			],
+			[
+				"member identifier",
+				{ backendId: "backend-1", memberId: "member-secret" },
+			],
+			[
+				"Team data",
+				{ backendId: "backend-1", team: { title: "must-not-reach-gateway" } },
+			],
+		])("rejects placement input with %s", async (_label, params) => {
+			await expect(relayRouter.placeRelayPeer(params, source)).rejects.toThrow(
+				"Invalid Team relay request",
+			);
+			expect(targetSocket.emit).not.toHaveBeenCalled();
+		});
+
+		it("requires the authenticated placement source to have a relay key", async () => {
+			const noKeySourceSocket = createMockSocket("socket-place-source-no-key");
+			const noKeySource = cliRegistry.register(
+				noKeySourceSocket,
+				createRegistration("machine-place-source-no-key"),
+				{
+					userId: "user-1",
+					deviceId: "device-place-source-no-key",
+				},
+			);
+
+			await expect(
+				relayRouter.placeRelayPeer({ backendId: "backend-1" }, noKeySource),
+			).rejects.toThrow("Team relay unavailable");
+			expect(targetSocket.emit).not.toHaveBeenCalled();
 		});
 
 		it("stamps authenticated source identity and forwards ciphertext unchanged", async () => {
