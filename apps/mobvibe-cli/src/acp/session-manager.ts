@@ -520,6 +520,11 @@ type DiscoverManagedSessionsOptions = {
 	cursor?: string;
 };
 
+type TeamReadinessCleanupContext = {
+	agentTeamId: string;
+	memberId: string;
+};
+
 export class SessionManager {
 	private sessions = new Map<string, SessionRecord>();
 	private discoveredSessions = new Map<string, AcpSessionInfo>();
@@ -2295,8 +2300,9 @@ export class SessionManager {
 		});
 		this.emitCurrentAgentTeam(agentTeamId, "updated");
 
+		let leaderSession: SessionSummary | undefined;
 		try {
-			const leaderSession = await this.createTeamSession({
+			leaderSession = await this.createTeamSession({
 				backendId: params.backendId,
 				cwd: params.workspaceRootCwd,
 				title: params.title,
@@ -2329,6 +2335,13 @@ export class SessionManager {
 			return { team, leaderSession };
 		} catch (error) {
 			const detail = toTeamCreateErrorDetail(error);
+			if (leaderSession) {
+				await this.cleanupFailedTeamSession({
+					agentTeamId,
+					memberId: leaderMemberId,
+					sessionId: leaderSession.sessionId,
+				});
+			}
 			this.agentTeamStore.updateTeamRuntimeState({
 				agentTeamId,
 				lifecycle: "failed",
@@ -2430,8 +2443,9 @@ export class SessionManager {
 		});
 		this.emitCurrentAgentTeam(input.agentTeamId, "updated");
 
+		let session: SessionSummary | undefined;
 		try {
-			const session = await this.createTeamSession({
+			session = await this.createTeamSession({
 				backendId,
 				title: memberName,
 				agentTeamId: input.agentTeamId,
@@ -2454,6 +2468,13 @@ export class SessionManager {
 			};
 		} catch (error) {
 			const detail = toTeamCreateErrorDetail(error);
+			if (session) {
+				await this.cleanupFailedTeamSession({
+					agentTeamId: input.agentTeamId,
+					memberId,
+					sessionId: session.sessionId,
+				});
+			}
 			this.agentTeamStore.updateTeamMemberRuntime({
 				agentTeamId: input.agentTeamId,
 				memberId,
@@ -2464,6 +2485,62 @@ export class SessionManager {
 			this.emitCurrentAgentTeam(input.agentTeamId, "updated");
 			return { ok: false, memberId, error: detail };
 		}
+	}
+
+	private async cleanupFailedTeamSession(input: {
+		agentTeamId: string;
+		memberId: string;
+		sessionId: string;
+	}): Promise<void> {
+		const record = this.sessions.get(input.sessionId);
+		if (!record) {
+			return;
+		}
+
+		try {
+			if (!record.connection.supportsSessionClose()) {
+				throw createCapabilityNotSupportedError(
+					"Agent does not support session/close capability",
+				);
+			}
+			await record.connection.closeSession(input.sessionId);
+		} catch (error) {
+			this.logTeamReadinessCleanupFailure(input, "session_close", error);
+		}
+
+		try {
+			await this.disposeAttachedSession(input.sessionId, {
+				reason: "session_close",
+				teamReadinessCleanup: {
+					agentTeamId: input.agentTeamId,
+					memberId: input.memberId,
+				},
+			});
+		} catch (error) {
+			this.logTeamReadinessCleanupFailure(input, "dispose", error);
+		}
+	}
+
+	private logTeamReadinessCleanupFailure(
+		input: {
+			agentTeamId: string;
+			memberId: string;
+			sessionId: string;
+		},
+		cleanupStep: string,
+		error: unknown,
+	): void {
+		logger.warn(
+			{
+				agentTeamId: input.agentTeamId,
+				memberId: input.memberId,
+				sessionId: input.sessionId,
+				cleanupStep,
+				errorCode:
+					error instanceof AppError ? error.detail.code : "INTERNAL_ERROR",
+			},
+			"agent_team_readiness_cleanup_failed",
+		);
 	}
 
 	private async waitForTeamToolsReady(
@@ -3102,6 +3179,7 @@ export class SessionManager {
 				| "session_close"
 				| "unknown";
 			detachedSummary?: SessionSummary;
+			teamReadinessCleanup?: TeamReadinessCleanupContext;
 		},
 	): Promise<boolean> {
 		const record = this.sessions.get(sessionId);
@@ -3114,25 +3192,46 @@ export class SessionManager {
 			record.unsubscribeTerminal?.();
 			record.unsubscribeStatus?.();
 		} catch (error) {
-			logger.error({ err: error, sessionId }, "session_unsubscribe_failed");
+			this.logSessionDisposeFailure(
+				error,
+				sessionId,
+				"unsubscribe",
+				"session_unsubscribe_failed",
+				options?.teamReadinessCleanup,
+			);
 		}
 		try {
 			this.cancelPermissionRequests(sessionId);
 		} catch (error) {
-			logger.error(
-				{ err: error, sessionId },
+			this.logSessionDisposeFailure(
+				error,
+				sessionId,
+				"permission_cancel",
 				"session_permission_cancel_failed",
+				options?.teamReadinessCleanup,
 			);
 		}
 		try {
 			await record.connection.disconnect();
 		} catch (error) {
-			logger.error({ err: error, sessionId }, "session_disconnect_failed");
+			this.logSessionDisposeFailure(
+				error,
+				sessionId,
+				"disconnect",
+				"session_disconnect_failed",
+				options?.teamReadinessCleanup,
+			);
 		}
 		try {
 			this.emitSessionDetached(sessionId, options?.reason ?? "unknown");
 		} catch (error) {
-			logger.error({ err: error, sessionId }, "session_detach_emit_failed");
+			this.logSessionDisposeFailure(
+				error,
+				sessionId,
+				"detach_emit",
+				"session_detach_emit_failed",
+				options?.teamReadinessCleanup,
+			);
 		}
 		this.sessions.delete(sessionId);
 		try {
@@ -3150,12 +3249,33 @@ export class SessionManager {
 						},
 			);
 		} catch (error) {
-			logger.error(
-				{ err: error, sessionId },
+			this.logSessionDisposeFailure(
+				error,
+				sessionId,
+				"change_emit",
 				"session_close_change_emit_failed",
+				options?.teamReadinessCleanup,
 			);
 		}
 		return true;
+	}
+
+	private logSessionDisposeFailure(
+		error: unknown,
+		sessionId: string,
+		cleanupStep: string,
+		defaultEvent: string,
+		teamReadinessCleanup?: TeamReadinessCleanupContext,
+	): void {
+		if (teamReadinessCleanup) {
+			this.logTeamReadinessCleanupFailure(
+				{ ...teamReadinessCleanup, sessionId },
+				cleanupStep,
+				error,
+			);
+			return;
+		}
+		logger.error({ err: error, sessionId }, defaultEvent);
 	}
 
 	async closeAll(): Promise<void> {

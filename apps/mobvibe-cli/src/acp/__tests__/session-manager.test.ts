@@ -15,6 +15,8 @@ import { RequestError } from "@agentclientprotocol/sdk";
 import {
 	ACP_PLAN_MARKDOWN_MAX_BYTES,
 	type AgentSessionCapabilities,
+	AppError,
+	createErrorDetail,
 	decryptPayload,
 	deriveContentKeyPair,
 	generateMasterSecret,
@@ -71,6 +73,8 @@ const mockResolveGitProjectContext = mock((cwd: string) =>
 const { SessionManager: BaseSessionManager } = await import(
 	"../session-manager.js"
 );
+const { logger: mockedLogger } = await import("../../lib/logger.js");
+const loggerWarnMock = mockedLogger.warn as unknown as ReturnType<typeof mock>;
 
 const gitDependencies = {
 	createGitWorktree: mockCreateGitWorktree,
@@ -94,6 +98,7 @@ class SessionManager extends BaseSessionManager {
 type SessionManagerTeamInternals = {
 	agentTeamStore: AgentTeamStore;
 	teamRuntime: TeamRuntime;
+	waitForTeamToolsReady(agentTeamId: string, memberId: string): Promise<void>;
 };
 
 /**
@@ -248,6 +253,62 @@ const createMockConnection = () => ({
 		};
 	}),
 });
+
+type TeamMcpTestHandlers = {
+	handleConnect(input: { serverId: string }): unknown;
+	handleListTools(input: { serverId: string; toolNames: string[] }): void;
+	handleDisconnect(input: { serverId: string }): unknown;
+};
+
+type TeamMcpTestBinding = {
+	handlers: TeamMcpTestHandlers;
+	serverId: string;
+};
+
+const bindTeamMcpForTest = (
+	params: unknown,
+	toolNames?: string[],
+): TeamMcpTestBinding => {
+	const options = params as {
+		teamMcpDeclaration?: { serverId?: string };
+		teamMcpHandlers?: TeamMcpTestHandlers;
+	};
+	const serverId = options.teamMcpDeclaration?.serverId;
+	const handlers = options.teamMcpHandlers;
+	if (!handlers || !serverId) {
+		throw new Error("Expected Team MCP options");
+	}
+	handlers.handleConnect({ serverId });
+	if (toolNames) {
+		handlers.handleListTools({ serverId, toolNames });
+	}
+	return { handlers, serverId };
+};
+
+const prepareTeamSessionConnection = (
+	connection: ReturnType<typeof createMockConnection>,
+	sessionId: string,
+	toolNames?: string[],
+): void => {
+	let binding: TeamMcpTestBinding | undefined;
+	connection.getSessionCapabilities.mockReturnValue({
+		list: true,
+		load: true,
+		close: true,
+		mcp: { acp: true },
+	});
+	connection.createSession.mockImplementationOnce(
+		async (...args: unknown[]) => {
+			binding = bindTeamMcpForTest(args[0], toolNames);
+			return { sessionId, modes: null, configOptions: null };
+		},
+	);
+	connection.disconnect.mockImplementation(async () => {
+		if (binding) {
+			binding.handlers.handleDisconnect({ serverId: binding.serverId });
+		}
+	});
+};
 
 const createMockConfig = (): CliConfig => ({
 	gatewayUrl: "http://localhost:3005",
@@ -4386,6 +4447,117 @@ describe("SessionManager", () => {
 			);
 		});
 
+		it("cleans up a created leader session when Team MCP readiness times out", async () => {
+			prepareTeamSessionConnection(
+				mockConnection,
+				"leader-session-readiness-timeout",
+			);
+			const readinessError = new AppError(
+				createErrorDetail({
+					code: "SESSION_NOT_READY",
+					message: "Timed out waiting for Team MCP tools readiness",
+					retryable: true,
+					scope: "session",
+				}),
+				504,
+			);
+			const internals =
+				sessionManager as unknown as SessionManagerTeamInternals;
+			internals.waitForTeamToolsReady = mock(() =>
+				Promise.reject(readinessError),
+			);
+
+			await expect(
+				sessionManager.createAgentTeamRun({
+					machineId: mockConfig.machineId,
+					backendId: "backend-1",
+					workspaceRootCwd: "/home/user/project",
+					title: "Timeout Team",
+				}),
+			).rejects.toBe(readinessError);
+
+			expect(mockConnection.closeSession).toHaveBeenCalledWith(
+				"leader-session-readiness-timeout",
+			);
+			expect(mockConnection.disconnect).toHaveBeenCalledTimes(1);
+			expect(
+				sessionManager
+					.listSessions()
+					.some(
+						(session) =>
+							session.sessionId === "leader-session-readiness-timeout",
+					),
+			).toBe(false);
+			const [failedTeam] = internals.agentTeamStore.listAgentTeams().teams;
+			expect(failedTeam.lifecycle).toBe("failed");
+			expect(failedTeam.members[0]).toEqual(
+				expect.objectContaining({
+					sessionId: "leader-session-readiness-timeout",
+					lifecycle: "failed",
+					health: "error",
+					error: expect.objectContaining({ code: "SESSION_NOT_READY" }),
+					mcp: expect.objectContaining({ phase: "not_started" }),
+				}),
+			);
+		});
+
+		it("keeps the readiness error primary when leader cleanup fails", async () => {
+			prepareTeamSessionConnection(mockConnection, "leader-session-degraded", [
+				...expectedTeamTools.slice(0, -1),
+			]);
+			const cleanupSecret = "provider cleanup secret";
+			mockConnection.closeSession.mockRejectedValueOnce(
+				new Error(cleanupSecret),
+			);
+			loggerWarnMock.mockClear();
+
+			await expect(
+				sessionManager.createAgentTeamRun({
+					machineId: mockConfig.machineId,
+					backendId: "backend-1",
+					workspaceRootCwd: "/home/user/project",
+					title: "Degraded Team",
+				}),
+			).rejects.toMatchObject({
+				detail: expect.objectContaining({
+					code: "CAPABILITY_NOT_SUPPORTED",
+				}),
+			});
+
+			expect(mockConnection.closeSession).toHaveBeenCalledWith(
+				"leader-session-degraded",
+			);
+			expect(mockConnection.disconnect).toHaveBeenCalledTimes(1);
+			const internals =
+				sessionManager as unknown as SessionManagerTeamInternals;
+			const [failedTeam] = internals.agentTeamStore.listAgentTeams().teams;
+			expect(failedTeam.lifecycle).toBe("failed");
+			expect(failedTeam.members[0]).toEqual(
+				expect.objectContaining({
+					sessionId: "leader-session-degraded",
+					lifecycle: "failed",
+					health: "error",
+					error: expect.objectContaining({
+						code: "CAPABILITY_NOT_SUPPORTED",
+					}),
+					mcp: expect.objectContaining({ phase: "not_started" }),
+				}),
+			);
+			expect(loggerWarnMock).toHaveBeenCalledWith(
+				expect.objectContaining({
+					agentTeamId: failedTeam.agentTeamId,
+					memberId: failedTeam.leaderMemberId,
+					sessionId: "leader-session-degraded",
+					cleanupStep: "session_close",
+					errorCode: "INTERNAL_ERROR",
+				}),
+				"agent_team_readiness_cleanup_failed",
+			);
+			expect(JSON.stringify(loggerWarnMock.mock.calls)).not.toContain(
+				cleanupSecret,
+			);
+		});
+
 		it("restores Team MCP options when reloading, resuming, and loading a leader session", async () => {
 			mockConnection.getSessionCapabilities.mockReturnValue({
 				list: true,
@@ -4617,6 +4789,169 @@ describe("SessionManager", () => {
 					worktreeSourceCwd: "/home/user/project",
 					worktreeBranch: "team/run",
 				}),
+			);
+		});
+
+		it("cleans up a created member session when Team MCP readiness times out", async () => {
+			const leaderConnection = createMockConnection();
+			const memberConnection = createMockConnection();
+			prepareTeamSessionConnection(
+				leaderConnection,
+				"leader-session-before-member-timeout",
+				expectedTeamTools,
+			);
+			prepareTeamSessionConnection(
+				memberConnection,
+				"member-session-readiness-timeout",
+			);
+			const connections = [leaderConnection, memberConnection];
+			sessionManager.createConnection = () => {
+				const connection = connections.shift();
+				if (!connection) throw new Error("Unexpected connection request");
+				return connection as unknown as AcpConnection;
+			};
+			const created = await sessionManager.createAgentTeamRun({
+				machineId: mockConfig.machineId,
+				backendId: "backend-1",
+				workspaceRootCwd: "/home/user/project",
+			});
+			const readinessError = new AppError(
+				createErrorDetail({
+					code: "SESSION_NOT_READY",
+					message: "Timed out waiting for Team MCP tools readiness",
+					retryable: true,
+					scope: "session",
+				}),
+				504,
+			);
+			const internals =
+				sessionManager as unknown as SessionManagerTeamInternals;
+			internals.waitForTeamToolsReady = mock(() =>
+				Promise.reject(readinessError),
+			);
+
+			const result = await sessionManager.spawnAgentTeamMember({
+				agentTeamId: created.team.agentTeamId,
+				requestedByMemberId: created.team.leaderMemberId,
+				name: "Timeout Worker",
+			});
+
+			expect(result).toEqual(
+				expect.objectContaining({
+					ok: false,
+					memberId: expect.any(String),
+					error: expect.objectContaining({ code: "SESSION_NOT_READY" }),
+				}),
+			);
+			expect(memberConnection.closeSession).toHaveBeenCalledWith(
+				"member-session-readiness-timeout",
+			);
+			expect(memberConnection.disconnect).toHaveBeenCalledTimes(1);
+			expect(leaderConnection.closeSession).not.toHaveBeenCalled();
+			expect(leaderConnection.disconnect).not.toHaveBeenCalled();
+			expect(
+				sessionManager
+					.listSessions()
+					.map((session) => session.sessionId)
+					.sort(),
+			).toEqual(["leader-session-before-member-timeout"]);
+			const team = internals.agentTeamStore.getAgentTeam({
+				agentTeamId: created.team.agentTeamId,
+			}).team;
+			expect(team?.lifecycle).toBe("running");
+			expect(team?.members).toContainEqual(
+				expect.objectContaining({
+					name: "Timeout Worker",
+					sessionId: "member-session-readiness-timeout",
+					lifecycle: "failed",
+					health: "error",
+					error: expect.objectContaining({ code: "SESSION_NOT_READY" }),
+					mcp: expect.objectContaining({ phase: "not_started" }),
+				}),
+			);
+		});
+
+		it("keeps a degraded member error primary when member cleanup fails", async () => {
+			const leaderConnection = createMockConnection();
+			const memberConnection = createMockConnection();
+			prepareTeamSessionConnection(
+				leaderConnection,
+				"leader-session-before-member-degraded",
+				expectedTeamTools,
+			);
+			prepareTeamSessionConnection(
+				memberConnection,
+				"member-session-degraded",
+				expectedTeamTools.slice(0, -1),
+			);
+			const cleanupSecret = "member cleanup provider secret";
+			memberConnection.closeSession.mockRejectedValueOnce(
+				new Error(cleanupSecret),
+			);
+			const connections = [leaderConnection, memberConnection];
+			sessionManager.createConnection = () => {
+				const connection = connections.shift();
+				if (!connection) throw new Error("Unexpected connection request");
+				return connection as unknown as AcpConnection;
+			};
+			const created = await sessionManager.createAgentTeamRun({
+				machineId: mockConfig.machineId,
+				backendId: "backend-1",
+				workspaceRootCwd: "/home/user/project",
+			});
+			loggerWarnMock.mockClear();
+
+			const result = await sessionManager.spawnAgentTeamMember({
+				agentTeamId: created.team.agentTeamId,
+				requestedByMemberId: created.team.leaderMemberId,
+				name: "Degraded Worker",
+			});
+
+			expect(result).toEqual(
+				expect.objectContaining({
+					ok: false,
+					memberId: expect.any(String),
+					error: expect.objectContaining({
+						code: "CAPABILITY_NOT_SUPPORTED",
+					}),
+				}),
+			);
+			expect(memberConnection.closeSession).toHaveBeenCalledWith(
+				"member-session-degraded",
+			);
+			expect(memberConnection.disconnect).toHaveBeenCalledTimes(1);
+			const internals =
+				sessionManager as unknown as SessionManagerTeamInternals;
+			const team = internals.agentTeamStore.getAgentTeam({
+				agentTeamId: created.team.agentTeamId,
+			}).team;
+			const failedMember = team?.members.find(
+				(member) => member.name === "Degraded Worker",
+			);
+			expect(team?.lifecycle).toBe("running");
+			expect(failedMember).toEqual(
+				expect.objectContaining({
+					sessionId: "member-session-degraded",
+					lifecycle: "failed",
+					health: "error",
+					error: expect.objectContaining({
+						code: "CAPABILITY_NOT_SUPPORTED",
+					}),
+					mcp: expect.objectContaining({ phase: "not_started" }),
+				}),
+			);
+			expect(loggerWarnMock).toHaveBeenCalledWith(
+				expect.objectContaining({
+					agentTeamId: created.team.agentTeamId,
+					memberId: failedMember?.memberId,
+					sessionId: "member-session-degraded",
+					cleanupStep: "session_close",
+					errorCode: "INTERNAL_ERROR",
+				}),
+				"agent_team_readiness_cleanup_failed",
+			);
+			expect(JSON.stringify(loggerWarnMock.mock.calls)).not.toContain(
+				cleanupSecret,
 			);
 		});
 
