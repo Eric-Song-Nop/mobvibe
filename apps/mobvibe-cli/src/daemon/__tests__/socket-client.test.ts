@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import type { AgentTeamSummary, SessionEvent } from "@mobvibe/shared";
+import type {
+	AgentTeamSummary,
+	SessionEvent,
+	TeamRelayCiphertext,
+	TeamRelayExecuteRpcParams,
+	TeamRelayPublicKey,
+} from "@mobvibe/shared";
 import type { CliConfig } from "../../config.js";
 
 const socketHandlers = new Map<string, (...args: Array<unknown>) => void>();
@@ -40,17 +46,51 @@ const createdTeam: AgentTeamSummary = {
 	updatedAt: "2026-05-13T00:00:00.000Z",
 };
 
+const createRelayKey = (seed: number): TeamRelayPublicKey => {
+	const publicKey = Buffer.alloc(32, seed).toString("base64");
+	return {
+		version: 1,
+		keyId: `x25519:${publicKey}`,
+		publicKey,
+	};
+};
+
+const createRelayCiphertext = (
+	recipientKeyId: string,
+	seed: number,
+): TeamRelayCiphertext => ({
+	version: 1,
+	recipientKeyId,
+	wrappedDek: Buffer.alloc(80, seed).toString("base64"),
+	payload: {
+		t: "encrypted",
+		c: Buffer.alloc(64, seed).toString("base64"),
+	},
+});
+
+const getLastSocketEmission = (event: string): unknown[] => {
+	const call = [...socketMock.emit.mock.calls]
+		.reverse()
+		.find((candidate) => (candidate as unknown[])[0] === event);
+	if (!call) {
+		throw new Error(`Missing ${event} emission`);
+	}
+	return call as unknown[];
+};
+
 mock.module("socket.io-client", () => ({
 	io: mock((_url: string, _options: unknown) => socketMock),
 }));
 
+const loggerMock = {
+	info: mock(() => {}),
+	debug: mock(() => {}),
+	warn: mock(() => {}),
+	error: mock(() => {}),
+};
+
 mock.module("../../lib/logger.js", () => ({
-	logger: {
-		info: mock(() => {}),
-		debug: mock(() => {}),
-		warn: mock(() => {}),
-		error: mock(() => {}),
-	},
+	logger: loggerMock,
 }));
 
 const { SocketClient } = await import("../socket-client.js");
@@ -179,7 +219,9 @@ describe("SocketClient restore semantics", () => {
 		encryptEvent: ReturnType<typeof mock>;
 		decryptRpcPayload: ReturnType<typeof mock>;
 		getWrappedDek: ReturnType<typeof mock>;
+		getTeamRelayPublicKey: ReturnType<typeof mock>;
 	};
+	let teamRelayRequestHandler: ReturnType<typeof mock>;
 
 	beforeEach(() => {
 		socketHandlers.clear();
@@ -188,6 +230,10 @@ describe("SocketClient restore semantics", () => {
 		socketMock.connect.mockClear();
 		socketMock.disconnect.mockClear();
 		socketMock.io.opts.extraHeaders = {};
+		loggerMock.info.mockClear();
+		loggerMock.debug.mockClear();
+		loggerMock.warn.mockClear();
+		loggerMock.error.mockClear();
 		sessionEventListener = undefined;
 		agentTeamChangedListener = undefined;
 		promptConnection = {
@@ -305,13 +351,21 @@ describe("SocketClient restore semantics", () => {
 			})),
 			decryptRpcPayload: mock((_sessionId: string, data: unknown) => data),
 			getWrappedDek: mock(() => null),
+			getTeamRelayPublicKey: mock(() => createRelayKey(1)),
 		};
+		teamRelayRequestHandler = mock((params: TeamRelayExecuteRpcParams) =>
+			Promise.resolve({
+				operationId: params.operationId,
+				ciphertext: createRelayCiphertext(params.sourceRelayKey.keyId, 4),
+			}),
+		);
 
 		client = new SocketClient({
 			config: createConfig(),
 			sessionManager: sessionManager as never,
 			cryptoService: cryptoService as never,
-		});
+			teamRelayRequestHandler,
+		} as never);
 	});
 
 	afterEach(() => {
@@ -405,6 +459,355 @@ describe("SocketClient restore semantics", () => {
 			requestId: "req-agent-logout",
 			result: { capabilities: { list: false, load: false } },
 		});
+	});
+
+	test("registers a Team relay public key whether content E2EE is disabled or enabled", async () => {
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		if (!connectHandler) {
+			throw new Error("connect handler not registered");
+		}
+
+		for (const contentEncryptionEnabled of [false, true]) {
+			cryptoService.contentEncryptionEnabled = contentEncryptionEnabled;
+			socketMock.emit.mockClear();
+
+			await connectHandler();
+
+			expect(cryptoService.getTeamRelayPublicKey).toHaveBeenCalled();
+			expect(getLastSocketEmission("cli:register")[1]).toEqual(
+				expect.objectContaining({
+					machineId: "machine-1",
+					teamRelayKey: createRelayKey(1),
+				}),
+			);
+		}
+	});
+
+	test("places and resolves Team relay peers through strictly bound acknowledgments", async () => {
+		const targetRelayKey = createRelayKey(2);
+		const placement = client.placeTeamRelayPeer({ backendId: "backend-1" });
+		const placeEmission = getLastSocketEmission("team-relay:place");
+		const placeRequest = placeEmission[1] as {
+			requestId: string;
+			params: unknown;
+		};
+		expect(Object.keys(placeRequest).sort()).toEqual(["params", "requestId"]);
+		expect(placeRequest.params).toEqual({ backendId: "backend-1" });
+		(placeEmission[2] as (response: unknown) => void)({
+			requestId: placeRequest.requestId,
+			result: {
+				targetMachineId: "machine-2",
+				relayKey: targetRelayKey,
+			},
+		});
+		await expect(placement).resolves.toEqual({
+			targetMachineId: "machine-2",
+			relayKey: targetRelayKey,
+		});
+
+		const resolution = client.resolveTeamRelayPeer({
+			targetMachineId: "machine-2",
+		});
+		const resolveEmission = getLastSocketEmission("team-relay:resolve");
+		const resolveRequest = resolveEmission[1] as {
+			requestId: string;
+			params: unknown;
+		};
+		(resolveEmission[2] as (response: unknown) => void)({
+			requestId: resolveRequest.requestId,
+			result: {
+				targetMachineId: "machine-2",
+				relayKey: targetRelayKey,
+			},
+		});
+		await expect(resolution).resolves.toEqual({
+			targetMachineId: "machine-2",
+			relayKey: targetRelayKey,
+		});
+	});
+
+	test("binds Team relay send acknowledgments to request, operation, target, and local recipient key", async () => {
+		const targetRelayKey = createRelayKey(2);
+		const outboundCiphertext = createRelayCiphertext(targetRelayKey.keyId, 3);
+		const returnedCiphertext = createRelayCiphertext(
+			createRelayKey(1).keyId,
+			4,
+		);
+		const send = client.sendTeamRelay({
+			operationId: "operation-stable",
+			targetMachineId: "machine-2",
+			ciphertext: outboundCiphertext,
+		});
+		const emission = getLastSocketEmission("team-relay:send");
+		const request = emission[1] as {
+			requestId: string;
+			params: {
+				operationId: string;
+				targetMachineId: string;
+				ciphertext: TeamRelayCiphertext;
+			};
+		};
+		(emission[2] as (response: unknown) => void)({
+			requestId: request.requestId,
+			result: {
+				operationId: "operation-stable",
+				targetMachineId: "machine-2",
+				ciphertext: returnedCiphertext,
+			},
+		});
+
+		await expect(send).resolves.toEqual({
+			operationId: "operation-stable",
+			targetMachineId: "machine-2",
+			ciphertext: returnedCiphertext,
+		});
+		expect(request.params).toEqual({
+			operationId: "operation-stable",
+			targetMachineId: "machine-2",
+			ciphertext: outboundCiphertext,
+		});
+	});
+
+	test("rejects malformed or mismatched Team relay send acknowledgments without retrying or rewriting", async () => {
+		const targetRelayKey = createRelayKey(2);
+		const outboundCiphertext = createRelayCiphertext(targetRelayKey.keyId, 3);
+		const returnedCiphertext = createRelayCiphertext(
+			createRelayKey(1).keyId,
+			4,
+		);
+		const invalidResponses = [
+			(requestId: string) => ({
+				requestId: `${requestId}-spoofed`,
+				result: {
+					operationId: "operation-stable",
+					targetMachineId: "machine-2",
+					ciphertext: returnedCiphertext,
+				},
+			}),
+			(requestId: string) => ({
+				requestId,
+				result: {
+					operationId: "operation-spoofed",
+					targetMachineId: "machine-2",
+					ciphertext: returnedCiphertext,
+				},
+			}),
+			(requestId: string) => ({
+				requestId,
+				result: {
+					operationId: "operation-stable",
+					targetMachineId: "machine-spoofed",
+					ciphertext: returnedCiphertext,
+				},
+			}),
+			(requestId: string) => ({
+				requestId,
+				result: {
+					operationId: "operation-stable",
+					targetMachineId: "machine-2",
+					ciphertext: createRelayCiphertext(createRelayKey(9).keyId, 5),
+				},
+			}),
+			(requestId: string) => ({
+				requestId,
+				result: {
+					operationId: "operation-stable",
+					targetMachineId: "machine-2",
+					ciphertext: returnedCiphertext,
+				},
+				extra: "must-fail",
+			}),
+		];
+
+		for (const createInvalidResponse of invalidResponses) {
+			socketMock.emit.mockClear();
+			const pending = client.sendTeamRelay({
+				operationId: "operation-stable",
+				targetMachineId: "machine-2",
+				ciphertext: outboundCiphertext,
+			});
+			const rejection = pending.then(
+				() => undefined,
+				(error: unknown) => error,
+			);
+			const emission = getLastSocketEmission("team-relay:send");
+			const request = emission[1] as {
+				requestId: string;
+				params: { operationId: string };
+			};
+
+			(emission[2] as (response: unknown) => void)(
+				createInvalidResponse(request.requestId),
+			);
+
+			expect(await rejection).toBeInstanceOf(Error);
+			expect(request.params.operationId).toBe("operation-stable");
+			expect(
+				socketMock.emit.mock.calls.filter(
+					(call) => (call as unknown[])[0] === "team-relay:send",
+				),
+			).toHaveLength(1);
+		}
+	});
+
+	test("validates bounded Team relay RpcError acknowledgments before failing generically", async () => {
+		const validError = {
+			code: "AUTHORIZATION_FAILED",
+			message: "Team relay peer not found",
+			retryable: false,
+			scope: "request",
+			status: 404,
+		};
+		const cases = [
+			[validError, "Team relay request failed"],
+			[{ ...validError, code: "x".repeat(65) }, "Invalid Team relay response"],
+			[
+				{ ...validError, message: "x".repeat(1025) },
+				"Invalid Team relay response",
+			],
+			[{ ...validError, retryable: "false" }, "Invalid Team relay response"],
+			[{ ...validError, scope: "private" }, "Invalid Team relay response"],
+			[{ ...validError, status: 200 }, "Invalid Team relay response"],
+			[
+				{ ...validError, detail: "must-not-be-accepted" },
+				"Invalid Team relay response",
+			],
+		] as const;
+
+		for (const [error, expectedMessage] of cases) {
+			socketMock.emit.mockClear();
+			const pending = client.placeTeamRelayPeer({ backendId: "backend-1" });
+			const rejection = pending.then(
+				() => undefined,
+				(caught: unknown) => caught,
+			);
+			const emission = getLastSocketEmission("team-relay:place");
+			const request = emission[1] as { requestId: string };
+
+			(emission[2] as (response: unknown) => void)({
+				requestId: request.requestId,
+				error,
+			});
+
+			expect(await rejection).toEqual(
+				expect.objectContaining({ message: expectedMessage }),
+			);
+			expect(
+				socketMock.emit.mock.calls.filter(
+					(call) => (call as unknown[])[0] === "team-relay:place",
+				),
+			).toHaveLength(1);
+		}
+	});
+
+	test("times out a Team relay acknowledgment without retrying or changing operationId", async () => {
+		(
+			client as unknown as {
+				teamRelayAckTimeoutMs: number;
+			}
+		).teamRelayAckTimeoutMs = 5;
+		const targetRelayKey = createRelayKey(2);
+		const pending = client.sendTeamRelay({
+			operationId: "operation-timeout-stable",
+			targetMachineId: "machine-2",
+			ciphertext: createRelayCiphertext(targetRelayKey.keyId, 3),
+		});
+		const emission = getLastSocketEmission("team-relay:send");
+		const request = emission[1] as {
+			params: { operationId: string };
+		};
+
+		await expect(pending).rejects.toThrow("Team relay request timed out");
+		expect(request.params.operationId).toBe("operation-timeout-stable");
+		expect(
+			socketMock.emit.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "team-relay:send",
+			),
+		).toHaveLength(1);
+	});
+
+	test("strictly parses inbound Team relay execute RPCs before dispatch", async () => {
+		const sourceRelayKey = createRelayKey(2);
+		const request: TeamRelayExecuteRpcParams = {
+			operationId: "operation-execute",
+			sourceMachineId: "machine-source",
+			sourceRelayKey,
+			ciphertext: createRelayCiphertext(createRelayKey(1).keyId, 3),
+		};
+		const handler = socketHandlers.get("rpc:team-relay:execute");
+		if (!handler) {
+			throw new Error("Team relay execute handler not registered");
+		}
+
+		await handler({
+			requestId: "execute-request-1",
+			params: request,
+		});
+
+		expect(teamRelayRequestHandler).toHaveBeenCalledWith(request);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "execute-request-1",
+			result: {
+				operationId: "operation-execute",
+				ciphertext: createRelayCiphertext(sourceRelayKey.keyId, 4),
+			},
+		});
+	});
+
+	test("fails invalid or sensitive Team relay execute requests generically", async () => {
+		const handler = socketHandlers.get("rpc:team-relay:execute");
+		if (!handler) {
+			throw new Error("Team relay execute handler not registered");
+		}
+		const sourceRelayKey = createRelayKey(2);
+		const params: TeamRelayExecuteRpcParams = {
+			operationId: "operation-sensitive",
+			sourceMachineId: "machine-source",
+			sourceRelayKey,
+			ciphertext: createRelayCiphertext(createRelayKey(1).keyId, 3),
+		};
+
+		await handler({
+			requestId: "execute-invalid",
+			params: { ...params, agentTeamId: "must-not-cross-wire" },
+		});
+		expect(teamRelayRequestHandler).not.toHaveBeenCalled();
+
+		teamRelayRequestHandler.mockImplementationOnce(() =>
+			Promise.reject(new Error("ENOENT /Users/alice/private/team.json")),
+		);
+		await handler({
+			requestId: "execute-sensitive",
+			params,
+		});
+
+		for (const requestId of ["execute-invalid", "execute-sensitive"]) {
+			expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+				requestId,
+				error: {
+					code: "INTERNAL_ERROR",
+					message: "Internal server error",
+					retryable: true,
+					scope: "request",
+					status: 500,
+				},
+			});
+		}
+		expect(JSON.stringify(socketMock.emit.mock.calls)).not.toContain("ENOENT");
+		expect(JSON.stringify(socketMock.emit.mock.calls)).not.toContain(
+			"/Users/alice",
+		);
+		const serializedLogs = JSON.stringify([
+			...loggerMock.warn.mock.calls,
+			...loggerMock.error.mock.calls,
+		]);
+		expect(serializedLogs).not.toContain("agentTeamId");
+		expect(serializedLogs).not.toContain("must-not-cross-wire");
+		expect(serializedLogs).not.toContain(params.ciphertext.wrappedDek);
+		expect(serializedLogs).not.toContain("ENOENT");
+		expect(serializedLogs).not.toContain("/Users/alice");
 	});
 
 	test("replays unacked events after reconnect using the durable revision", async () => {

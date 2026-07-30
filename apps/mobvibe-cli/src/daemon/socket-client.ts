@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -10,15 +11,24 @@ import type {
 	FsRoot,
 	GatewayToCliEvents,
 	GitBranchesForCwdResponse,
+	PlaceTeamRelayPeerParams,
+	PlaceTeamRelayPeerResult,
+	ResolveTeamRelayPeerParams,
+	ResolveTeamRelayPeerResult,
+	RpcRequest,
 	RpcResponse,
 	SendMessageParams,
 	SendMessageResult,
+	SendTeamRelayParams,
+	SendTeamRelayResult,
 	SessionEvent,
 	SessionEventsResponse,
 	SessionFsFilePreview,
 	SessionFsResourceEntry,
 	SessionSummary,
 	StopReason,
+	TeamRelayExecuteRpcParams,
+	TeamRelayExecuteRpcResult,
 } from "@mobvibe/shared";
 import {
 	AppError,
@@ -27,7 +37,16 @@ import {
 	createSignedToken,
 	getPromptImageBlocks,
 	isEncryptedPayload,
+	parsePlaceTeamRelayPeerParams,
+	parsePlaceTeamRelayPeerResult,
+	parseResolveTeamRelayPeerParams,
+	parseResolveTeamRelayPeerResult,
+	parseSendTeamRelayParams,
+	parseSendTeamRelayResult,
+	parseTeamRelayExecuteRpcParams,
+	parseTeamRelayExecuteRpcResult,
 	sanitizeReportedTokenUsage,
+	TEAM_RELAY_OPERATION_ID_MAX_BYTES,
 	validatePromptImageBlocks,
 } from "@mobvibe/shared";
 import ignore, { type Ignore } from "ignore";
@@ -56,11 +75,17 @@ import { logger } from "../lib/logger.js";
 import { buildHostFsEntries, buildHostFsRoots } from "./host-fs.js";
 import { resolveWithinCwd } from "./path-utils.js";
 
+export type TeamRelayRequestHandler = (
+	params: TeamRelayExecuteRpcParams,
+) => Promise<TeamRelayExecuteRpcResult>;
+
 type SocketClientOptions = {
 	config: CliConfig;
 	sessionManager: SessionManager;
 	/** Crypto service for E2EE */
 	cryptoService: CliCryptoService;
+	/** Opaque Team relay execution; protocol/decryption is owned elsewhere. */
+	teamRelayRequestHandler?: TeamRelayRequestHandler;
 };
 
 type NormalizedSendMessageParams = Omit<SendMessageParams, "messageId"> & {
@@ -204,6 +229,129 @@ const DISCOVER_THROTTLE_MS = 60_000;
 const WAL_REPLAY_BATCH_SIZE = 100;
 const MAX_PENDING_LIVE_EVENTS = 1000;
 const MAX_PENDING_LIVE_EVENT_BYTES = 8 * 1024 * 1024;
+const TEAM_RELAY_ACK_TIMEOUT_MS = 30_000;
+const INVALID_TEAM_RELAY_REQUEST_ID = "invalid-team-relay-request";
+const TEAM_RELAY_ERROR_CODE_MAX_BYTES = 64;
+const TEAM_RELAY_ERROR_MESSAGE_MAX_BYTES = 1024;
+const TEAM_RELAY_ERROR_CODES = new Set([
+	"ACP_CONNECT_FAILED",
+	"ACP_PROCESS_EXITED",
+	"ACP_CONNECTION_CLOSED",
+	"ACP_PROTOCOL_MISMATCH",
+	"AGENT_AUTHENTICATION_REQUIRED",
+	"AGENT_AUTHENTICATION_FAILED",
+	"SESSION_NOT_FOUND",
+	"SESSION_NOT_READY",
+	"SESSION_BUSY",
+	"CAPABILITY_NOT_SUPPORTED",
+	"REQUEST_VALIDATION_FAILED",
+	"MESSAGE_OUTCOME_UNKNOWN",
+	"INSTANCE_AFFINITY_CHANGED",
+	"AUTHORIZATION_FAILED",
+	"STREAM_DISCONNECTED",
+	"GIT_WORKTREE_FAILED",
+	"INTERNAL_ERROR",
+]);
+const TEAM_RELAY_ERROR_SCOPES = new Set([
+	"service",
+	"session",
+	"stream",
+	"request",
+]);
+
+type TeamRelayAckEvent =
+	| "team-relay:place"
+	| "team-relay:resolve"
+	| "team-relay:send";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+const hasExactKeys = (
+	value: Record<string, unknown>,
+	expectedKeys: readonly string[],
+): boolean => {
+	const actualKeys = Object.keys(value);
+	return (
+		actualKeys.length === expectedKeys.length &&
+		expectedKeys.every((key) => Object.hasOwn(value, key))
+	);
+};
+
+const isTeamRelayRequestId = (value: unknown): value is string =>
+	typeof value === "string" &&
+	value.length > 0 &&
+	!/\p{Cc}/u.test(value) &&
+	Buffer.byteLength(value, "utf8") <= TEAM_RELAY_OPERATION_ID_MAX_BYTES;
+
+const getTeamRelayRequestId = (value: unknown): string => {
+	try {
+		return isRecord(value) && isTeamRelayRequestId(value.requestId)
+			? value.requestId
+			: INVALID_TEAM_RELAY_REQUEST_ID;
+	} catch {
+		return INVALID_TEAM_RELAY_REQUEST_ID;
+	}
+};
+
+const isBoundedTeamRelayText = (
+	value: unknown,
+	maxBytes: number,
+): value is string =>
+	typeof value === "string" &&
+	value.length > 0 &&
+	!/\p{Cc}/u.test(value) &&
+	Buffer.byteLength(value, "utf8") <= maxBytes;
+
+const isTeamRelayRpcError = (value: unknown): boolean =>
+	isRecord(value) &&
+	hasExactKeys(value, ["code", "message", "retryable", "scope", "status"]) &&
+	isBoundedTeamRelayText(value.code, TEAM_RELAY_ERROR_CODE_MAX_BYTES) &&
+	TEAM_RELAY_ERROR_CODES.has(value.code) &&
+	isBoundedTeamRelayText(value.message, TEAM_RELAY_ERROR_MESSAGE_MAX_BYTES) &&
+	typeof value.retryable === "boolean" &&
+	typeof value.scope === "string" &&
+	TEAM_RELAY_ERROR_SCOPES.has(value.scope) &&
+	typeof value.status === "number" &&
+	Number.isInteger(value.status) &&
+	value.status >= 400 &&
+	value.status <= 599;
+
+const parseTeamRelayExecuteRequest = (
+	value: unknown,
+): RpcRequest<TeamRelayExecuteRpcParams> => {
+	if (
+		!isRecord(value) ||
+		!hasExactKeys(value, ["requestId", "params"]) ||
+		!isTeamRelayRequestId(value.requestId)
+	) {
+		throw new Error("Invalid Team relay request");
+	}
+	return {
+		requestId: value.requestId,
+		params: parseTeamRelayExecuteRpcParams(value.params),
+	};
+};
+
+const parseTeamRelayAck = <TResult>(
+	value: unknown,
+	expectedRequestId: string,
+	parseResult: (result: unknown) => TResult,
+): TResult => {
+	if (!isRecord(value) || value.requestId !== expectedRequestId) {
+		throw new Error("Invalid Team relay response");
+	}
+	if (hasExactKeys(value, ["requestId", "error"])) {
+		if (!isTeamRelayRpcError(value.error)) {
+			throw new Error("Invalid Team relay response");
+		}
+		throw new Error("Team relay request failed");
+	}
+	if (!hasExactKeys(value, ["requestId", "result"])) {
+		throw new Error("Invalid Team relay response");
+	}
+	return parseResult(value.result);
+};
 
 export class SocketClient extends EventEmitter {
 	private socket: Socket<GatewayToCliEvents, CliToGatewayEvents>;
@@ -218,6 +366,7 @@ export class SocketClient extends EventEmitter {
 	private pendingLiveEvents: SessionEvent[] = [];
 	private pendingLiveEventIncarnations: number[] = [];
 	private pendingLiveEventBytes = 0;
+	private teamRelayAckTimeoutMs = TEAM_RELAY_ACK_TIMEOUT_MS;
 	private readonly messageSendsInFlight = new Map<
 		string,
 		Promise<SendMessageResult>
@@ -573,6 +722,40 @@ export class SocketClient extends EventEmitter {
 					"rpc_agent_team_get_error",
 				);
 				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		this.socket.on("rpc:team-relay:execute", async (rawRequest: unknown) => {
+			const requestId = getTeamRelayRequestId(rawRequest);
+			try {
+				const request = parseTeamRelayExecuteRequest(rawRequest);
+				const ownRelayKey = this.options.cryptoService.getTeamRelayPublicKey();
+				if (request.params.ciphertext.recipientKeyId !== ownRelayKey.keyId) {
+					throw new Error("Team relay recipient key mismatch");
+				}
+				const handler = this.options.teamRelayRequestHandler;
+				if (!handler) {
+					throw new Error("Team relay request handler unavailable");
+				}
+				const result = parseTeamRelayExecuteRpcResult(
+					await handler(request.params),
+				);
+				if (
+					result.operationId !== request.params.operationId ||
+					result.ciphertext.recipientKeyId !==
+						request.params.sourceRelayKey.keyId
+				) {
+					throw new Error("Team relay response binding mismatch");
+				}
+				this.sendRpcResponse(request.requestId, result);
+			} catch {
+				logger.warn(
+					{ requestId, code: "TEAM_RELAY_EXECUTE_FAILED" },
+					"rpc_team_relay_execute_failed",
+				);
+				this.sendRpcError(requestId, new Error("Team relay request failed"), {
+					sensitive: true,
+				});
 			}
 		});
 
@@ -2227,6 +2410,65 @@ export class SocketClient extends EventEmitter {
 		return collected;
 	}
 
+	private sendTeamRelayRequest<TParams, TResult>(
+		event: TeamRelayAckEvent,
+		params: TParams,
+		parseResult: (result: unknown) => TResult,
+	): Promise<TResult> {
+		const requestId = randomUUID();
+		const request: RpcRequest<TParams> = { requestId, params };
+		return new Promise<TResult>((resolve, reject) => {
+			let settled = false;
+			let timeout: NodeJS.Timeout | undefined;
+			const finish = (complete: () => void) => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				if (timeout) {
+					clearTimeout(timeout);
+				}
+				complete();
+			};
+			const rejectOnce = (error: Error) => finish(() => reject(error));
+			timeout = setTimeout(() => {
+				rejectOnce(new Error("Team relay request timed out"));
+			}, this.teamRelayAckTimeoutMs);
+			timeout.unref?.();
+
+			const relaySocket = this.socket as unknown as {
+				emit: (
+					relayEvent: TeamRelayAckEvent,
+					relayRequest: RpcRequest<TParams>,
+					ack: (response: unknown) => void,
+				) => void;
+			};
+			try {
+				relaySocket.emit(event, request, (response) => {
+					if (settled) {
+						return;
+					}
+					try {
+						const result = parseTeamRelayAck(response, requestId, parseResult);
+						finish(() => resolve(result));
+					} catch (error) {
+						rejectOnce(
+							error instanceof Error
+								? error
+								: new Error("Invalid Team relay response"),
+						);
+					}
+				});
+			} catch (error) {
+				rejectOnce(
+					error instanceof Error
+						? error
+						: new Error("Team relay request failed"),
+				);
+			}
+		});
+	}
+
 	private sendRpcResponse<T>(requestId: string, result: T) {
 		const response: RpcResponse<T> = { requestId, result };
 		this.socket.emit("rpc:response", response);
@@ -2279,12 +2521,13 @@ export class SocketClient extends EventEmitter {
 	}
 
 	private register() {
-		const { config } = this.options;
+		const { config, cryptoService } = this.options;
 		logger.info({ machineId: config.machineId }, "cli_register_emit");
 		this.socket.emit("cli:register", {
 			machineId: config.machineId,
 			hostname: config.hostname,
 			version: config.clientVersion,
+			teamRelayKey: cryptoService.getTeamRelayPublicKey(),
 			protocolCapabilities: {
 				messageIdempotency: true,
 				messageRevisionPinning: true,
@@ -2492,6 +2735,53 @@ export class SocketClient extends EventEmitter {
 				}
 			}
 		}
+	}
+
+	async placeTeamRelayPeer(
+		params: PlaceTeamRelayPeerParams,
+	): Promise<PlaceTeamRelayPeerResult> {
+		const parsedParams = parsePlaceTeamRelayPeerParams(params);
+		return this.sendTeamRelayRequest(
+			"team-relay:place",
+			{ backendId: parsedParams.backendId },
+			parsePlaceTeamRelayPeerResult,
+		);
+	}
+
+	async resolveTeamRelayPeer(
+		params: ResolveTeamRelayPeerParams,
+	): Promise<ResolveTeamRelayPeerResult> {
+		const parsedParams = parseResolveTeamRelayPeerParams(params);
+		const targetMachineId = parsedParams.targetMachineId;
+		return this.sendTeamRelayRequest(
+			"team-relay:resolve",
+			{ targetMachineId },
+			(result) => parseResolveTeamRelayPeerResult(result, targetMachineId),
+		);
+	}
+
+	async sendTeamRelay(
+		params: SendTeamRelayParams,
+	): Promise<SendTeamRelayResult> {
+		const parsedParams = parseSendTeamRelayParams(params);
+		const operationId = parsedParams.operationId;
+		const targetMachineId = parsedParams.targetMachineId;
+		const recipientKeyId =
+			this.options.cryptoService.getTeamRelayPublicKey().keyId;
+		return this.sendTeamRelayRequest(
+			"team-relay:send",
+			{
+				operationId,
+				targetMachineId,
+				ciphertext: parsedParams.ciphertext,
+			},
+			(result) =>
+				parseSendTeamRelayResult(result, {
+					operationId,
+					targetMachineId,
+					recipientKeyId,
+				}),
+		);
 	}
 
 	connect() {
