@@ -1638,6 +1638,7 @@ export class DaemonManager {
 		process.on("SIGTERM", handleSigterm);
 
 		try {
+			sessionManager.attachTeamRelayTransport(socketClient);
 			socketClient.connect();
 			await shutdownComplete;
 		} catch (error) {
@@ -1694,6 +1695,8 @@ export class DaemonManager {
 			config: this.config,
 			sessionManager,
 			cryptoService,
+			teamRelayRequestHandler: (params) =>
+				sessionManager.handleTeamRelayRequest(params),
 		});
 	}
 
