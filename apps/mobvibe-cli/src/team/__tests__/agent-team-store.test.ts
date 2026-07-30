@@ -512,6 +512,7 @@ describe("Agent Team migrations", () => {
 			expect(names).toContain("agent_team_tasks");
 			expect(names).toContain("agent_team_summary_refs");
 			expect(names).toContain("agent_team_tool_intents");
+			expect(names).toContain("agent_team_command_journal");
 
 			const mailboxColumns = db
 				.query("PRAGMA table_info(agent_team_mailbox_messages)")
@@ -523,7 +524,7 @@ describe("Agent Team migrations", () => {
 			const schemaVersion = db
 				.query("SELECT MAX(version) AS version FROM schema_version")
 				.get() as { version: number };
-			expect(schemaVersion.version).toBe(16);
+			expect(schemaVersion.version).toBe(17);
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });
@@ -683,7 +684,7 @@ describe("Agent Team migrations", () => {
 			const schemaVersion = db
 				.query("SELECT MAX(version) AS version FROM schema_version")
 				.get() as { version: number };
-			expect(schemaVersion.version).toBe(16);
+			expect(schemaVersion.version).toBe(17);
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });

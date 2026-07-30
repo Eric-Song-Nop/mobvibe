@@ -405,6 +405,54 @@ const MIGRATIONS: readonly Migration[] = [
 			`);
 		},
 	},
+	{
+		version: 17,
+		up: `
+			-- Team command results and execution failures remain leader-local.
+			-- An in-progress row is never reclaimed automatically because the
+			-- external side-effect outcome may be unknown after a crash.
+			CREATE TABLE IF NOT EXISTS agent_team_command_journal (
+				source_scope TEXT NOT NULL,
+				operation_id TEXT NOT NULL,
+				agent_team_id TEXT NOT NULL,
+				caller_member_id TEXT NOT NULL,
+				payload_digest TEXT NOT NULL,
+				status TEXT NOT NULL,
+				claim_id TEXT NOT NULL,
+				result_local_json TEXT,
+				error_local_json TEXT,
+				claimed_at TEXT NOT NULL,
+				completed_at TEXT,
+				PRIMARY KEY (source_scope, operation_id),
+				UNIQUE (agent_team_id, caller_member_id, operation_id),
+				FOREIGN KEY (agent_team_id) REFERENCES agent_teams(agent_team_id),
+				FOREIGN KEY (caller_member_id)
+					REFERENCES agent_team_members(member_id),
+				CHECK (status IN ('in_progress', 'completed', 'failed')),
+				CHECK (
+					(status = 'in_progress'
+						AND result_local_json IS NULL
+						AND error_local_json IS NULL
+						AND completed_at IS NULL)
+					OR (status = 'completed'
+						AND result_local_json IS NOT NULL
+						AND error_local_json IS NULL
+						AND completed_at IS NOT NULL)
+					OR (status = 'failed'
+						AND result_local_json IS NULL
+						AND error_local_json IS NOT NULL
+						AND completed_at IS NOT NULL)
+				)
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_agent_team_command_journal_team
+				ON agent_team_command_journal (
+					agent_team_id,
+					caller_member_id,
+					claimed_at
+				);
+		`,
+	},
 ];
 
 export function runMigrations(db: Database): number {

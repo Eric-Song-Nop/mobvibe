@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
@@ -16,6 +17,7 @@ import {
 
 describe("TeamCommandBus", () => {
 	let tempDir: string;
+	let dbPath: string;
 	let store: AgentTeamStore;
 	let agentTeamId: string;
 	let leaderMemberId: string;
@@ -25,7 +27,8 @@ describe("TeamCommandBus", () => {
 
 	beforeEach(() => {
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "team-command-bus-"));
-		store = new AgentTeamStore(path.join(tempDir, "events.db"));
+		dbPath = path.join(tempDir, "events.db");
+		store = new AgentTeamStore(dbPath);
 		const created = store.createAgentTeam({
 			machineId: "leader-machine",
 			workspaceRootCwd: "/workspace",
@@ -271,6 +274,258 @@ describe("TeamCommandBus", () => {
 				version: 2,
 			} as unknown as TeamCommandEnvelope),
 		).rejects.toThrow("version");
+	});
+
+	test("replays the exact completed result after restart without repeating side effects", async () => {
+		const firstEnvelope = command(
+			"operation-replay",
+			"mobvibe_team_spawn_member",
+			{ name: "Reviewer", backendId: "backend-3" },
+			workerMemberId,
+		);
+		const first = await bus.dispatch(firstEnvelope);
+		expect(spawnMember).toHaveBeenCalledTimes(1);
+
+		const db = new Database(dbPath, { readonly: true });
+		try {
+			const row = db
+				.query(`
+					SELECT source_scope, payload_digest, status, result_local_json,
+						error_local_json
+					FROM agent_team_command_journal
+					WHERE operation_id = $operationId
+				`)
+				.get({ $operationId: firstEnvelope.operationId }) as {
+				source_scope: string;
+				payload_digest: string;
+				status: string;
+				result_local_json: string | null;
+				error_local_json: string | null;
+			};
+			expect(JSON.parse(row.source_scope)).toEqual({
+				agentTeamId,
+				callerMemberId: workerMemberId,
+			});
+			expect(row.payload_digest).toMatch(/^[a-f0-9]{64}$/);
+			expect(row.status).toBe("completed");
+			expect(JSON.parse(row.result_local_json ?? "null")).toEqual(first.result);
+			expect(row.error_local_json).toBeNull();
+		} finally {
+			db.close();
+		}
+
+		store.close();
+		store = new AgentTeamStore(dbPath);
+		const duplicateSpawn = mock(
+			(_caller: TeamToolCaller, _args: { name?: string; backendId?: string }) =>
+				Promise.reject(new Error("duplicate spawn must not execute")),
+		);
+		const replayHandlers = new TeamToolHandlers({
+			store,
+			services: { spawnMember: duplicateSpawn },
+		});
+		bus = new TeamCommandBus({ store, handlers: replayHandlers });
+
+		const replay = await bus.dispatch({
+			...firstEnvelope,
+			args: { backendId: "backend-3", name: "Reviewer" },
+		});
+
+		expect(replay).toEqual(first);
+		expect(duplicateSpawn).not.toHaveBeenCalled();
+	});
+
+	test("rejects reuse of an operationId with a different canonical payload", async () => {
+		const firstEnvelope = command(
+			"operation-conflict",
+			"mobvibe_team_spawn_member",
+			{ name: "Reviewer" },
+			workerMemberId,
+		);
+		await bus.dispatch(firstEnvelope);
+
+		await expect(
+			bus.dispatch({
+				...firstEnvelope,
+				args: { name: "Different member" },
+			}),
+		).rejects.toThrow("conflicts with its original payload");
+		expect(spawnMember).toHaveBeenCalledTimes(1);
+	});
+
+	test("scopes the same operationId independently for each caller", async () => {
+		const leaderResult = await bus.dispatch(
+			command(
+				"operation-shared",
+				"mobvibe_team_spawn_member",
+				{ name: "Reviewer" },
+				leaderMemberId,
+			),
+		);
+		const workerResult = await bus.dispatch(
+			command(
+				"operation-shared",
+				"mobvibe_team_spawn_member",
+				{ name: "Reviewer" },
+				workerMemberId,
+			),
+		);
+
+		expect(leaderResult.result.data).toEqual(
+			expect.objectContaining({ requestedByMemberId: leaderMemberId }),
+		);
+		expect(workerResult.result.data).toEqual(
+			expect.objectContaining({ requestedByMemberId: workerMemberId }),
+		);
+		expect(spawnMember).toHaveBeenCalledTimes(2);
+	});
+
+	test("returns outcome unknown for a claim left in progress after restart", async () => {
+		let markStarted: () => void = () => undefined;
+		const started = new Promise<void>((resolve) => {
+			markStarted = resolve;
+		});
+		const neverCompletes = new Promise<never>(() => undefined);
+		const interruptedSpawn = mock(
+			(
+				_caller: TeamToolCaller,
+				_args: { name?: string; backendId?: string },
+			) => {
+				markStarted();
+				return neverCompletes;
+			},
+		);
+		const interruptedHandlers = new TeamToolHandlers({
+			store,
+			services: { spawnMember: interruptedSpawn },
+		});
+		bus = new TeamCommandBus({ store, handlers: interruptedHandlers });
+		const envelope = command(
+			"operation-interrupted",
+			"mobvibe_team_spawn_member",
+			{ name: "Interrupted" },
+			workerMemberId,
+		);
+
+		const interruptedExecution = bus.dispatch(envelope);
+		await started;
+		store.close();
+		store = new AgentTeamStore(dbPath);
+		const duplicateSpawn = mock(
+			(_caller: TeamToolCaller, _args: { name?: string; backendId?: string }) =>
+				Promise.reject(new Error("unknown outcome must not retry")),
+		);
+		const replayHandlers = new TeamToolHandlers({
+			store,
+			services: { spawnMember: duplicateSpawn },
+		});
+		bus = new TeamCommandBus({ store, handlers: replayHandlers });
+
+		await expect(bus.dispatch(envelope)).rejects.toThrow("outcome is unknown");
+		expect(duplicateSpawn).not.toHaveBeenCalled();
+		void interruptedExecution;
+	});
+
+	test("keeps the claim in progress when result persistence fails after a side effect", async () => {
+		const originalComplete = store.completeTeamCommand.bind(store);
+		store.completeTeamCommand = mock(() => {
+			throw new Error("result persistence unavailable");
+		});
+		const envelope = command(
+			"operation-complete-failed",
+			"mobvibe_team_spawn_member",
+			{ name: "Created once" },
+			workerMemberId,
+		);
+
+		await expect(bus.dispatch(envelope)).rejects.toMatchObject({
+			code: "OUTCOME_UNKNOWN",
+		});
+		expect(spawnMember).toHaveBeenCalledTimes(1);
+
+		const db = new Database(dbPath, { readonly: true });
+		try {
+			const row = db
+				.query(`
+					SELECT status, result_local_json, error_local_json
+					FROM agent_team_command_journal
+					WHERE operation_id = $operationId
+				`)
+				.get({ $operationId: envelope.operationId }) as {
+				status: string;
+				result_local_json: string | null;
+				error_local_json: string | null;
+			};
+			expect(row).toEqual({
+				status: "in_progress",
+				result_local_json: null,
+				error_local_json: null,
+			});
+		} finally {
+			db.close();
+			store.completeTeamCommand = originalComplete;
+		}
+	});
+
+	test("persists execution errors locally and replays them without retry", async () => {
+		const failingSpawn = mock(
+			(_caller: TeamToolCaller, _args: { name?: string; backendId?: string }) =>
+				Promise.reject(new Error("leader-local spawn failure")),
+		);
+		const failingHandlers = new TeamToolHandlers({
+			store,
+			services: { spawnMember: failingSpawn },
+		});
+		bus = new TeamCommandBus({ store, handlers: failingHandlers });
+		const envelope = command(
+			"operation-failed",
+			"mobvibe_team_spawn_member",
+			{ name: "Failure" },
+			workerMemberId,
+		);
+
+		await expect(bus.dispatch(envelope)).rejects.toThrow(
+			"leader-local spawn failure",
+		);
+		store.close();
+		store = new AgentTeamStore(dbPath);
+		const duplicateSpawn = mock(
+			(_caller: TeamToolCaller, _args: { name?: string; backendId?: string }) =>
+				Promise.reject(new Error("failed command must not retry")),
+		);
+		const replayHandlers = new TeamToolHandlers({
+			store,
+			services: { spawnMember: duplicateSpawn },
+		});
+		bus = new TeamCommandBus({ store, handlers: replayHandlers });
+
+		await expect(bus.dispatch(envelope)).rejects.toThrow(
+			"leader-local spawn failure",
+		);
+		expect(duplicateSpawn).not.toHaveBeenCalled();
+
+		const db = new Database(dbPath, { readonly: true });
+		try {
+			const row = db
+				.query(`
+					SELECT status, result_local_json, error_local_json
+					FROM agent_team_command_journal
+					WHERE operation_id = $operationId
+				`)
+				.get({ $operationId: envelope.operationId }) as {
+				status: string;
+				result_local_json: string | null;
+				error_local_json: string | null;
+			};
+			expect(row.status).toBe("failed");
+			expect(row.result_local_json).toBeNull();
+			expect(JSON.parse(row.error_local_json ?? "null")).toEqual({
+				name: "Error",
+				message: "leader-local spawn failure",
+			});
+		} finally {
+			db.close();
+		}
 	});
 
 	test("TeamRuntime routes through the single command bus it constructs", async () => {

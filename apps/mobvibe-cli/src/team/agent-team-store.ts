@@ -26,6 +26,18 @@ import {
 	buildAgentTeamSummary,
 } from "./projection-builder.js";
 
+export type TeamCommandJournalError = {
+	name: string;
+	message: string;
+};
+
+export type TeamCommandJournalClaim =
+	| { status: "claimed"; claimId: string }
+	| { status: "completed"; result: unknown }
+	| { status: "failed"; error: TeamCommandJournalError }
+	| { status: "in_progress" }
+	| { status: "conflict" };
+
 export class AgentTeamStore {
 	private db: Database;
 	private stmtInsertTeam: ReturnType<Database["query"]>;
@@ -50,6 +62,10 @@ export class AgentTeamStore {
 	private stmtTouchTeam: ReturnType<Database["query"]>;
 	private stmtUpdateMcpStatus: ReturnType<Database["query"]>;
 	private stmtInsertToolIntent: ReturnType<Database["query"]>;
+	private stmtGetTeamCommandJournal: ReturnType<Database["query"]>;
+	private stmtInsertTeamCommandClaim: ReturnType<Database["query"]>;
+	private stmtCompleteTeamCommand: ReturnType<Database["query"]>;
+	private stmtFailTeamCommand: ReturnType<Database["query"]>;
 	private stmtInsertTask: ReturnType<Database["query"]>;
 	private stmtGetTask: ReturnType<Database["query"]>;
 	private stmtUpdateTask: ReturnType<Database["query"]>;
@@ -211,6 +227,48 @@ export class AgentTeamStore {
         $status, $sourceRefsJson, $createdAt, $updatedAt
       )
     `);
+		this.stmtGetTeamCommandJournal = this.db.query(`
+			SELECT source_scope, operation_id, payload_digest, status, claim_id,
+				result_local_json, error_local_json
+			FROM agent_team_command_journal
+			WHERE source_scope = $sourceScope
+				AND operation_id = $operationId
+		`);
+		this.stmtInsertTeamCommandClaim = this.db.query(`
+			INSERT OR IGNORE INTO agent_team_command_journal (
+				source_scope, operation_id, agent_team_id, caller_member_id,
+				payload_digest, status, claim_id, result_local_json,
+				error_local_json, claimed_at, completed_at
+			) VALUES (
+				$sourceScope, $operationId, $agentTeamId, $callerMemberId,
+				$payloadDigest, 'in_progress', $claimId, NULL, NULL,
+				$claimedAt, NULL
+			)
+		`);
+		this.stmtCompleteTeamCommand = this.db.query(`
+			UPDATE agent_team_command_journal
+			SET status = 'completed',
+				result_local_json = $resultLocalJson,
+				error_local_json = NULL,
+				completed_at = $completedAt
+			WHERE source_scope = $sourceScope
+				AND operation_id = $operationId
+				AND payload_digest = $payloadDigest
+				AND claim_id = $claimId
+				AND status = 'in_progress'
+		`);
+		this.stmtFailTeamCommand = this.db.query(`
+			UPDATE agent_team_command_journal
+			SET status = 'failed',
+				result_local_json = NULL,
+				error_local_json = $errorLocalJson,
+				completed_at = $completedAt
+			WHERE source_scope = $sourceScope
+				AND operation_id = $operationId
+				AND payload_digest = $payloadDigest
+				AND claim_id = $claimId
+				AND status = 'in_progress'
+		`);
 		this.stmtInsertTask = this.db.query(`
       INSERT INTO agent_team_tasks (
         task_id, agent_team_id, owner_member_id, status, body_local_json,
@@ -715,6 +773,105 @@ export class AgentTeamStore {
 		return intent;
 	}
 
+	claimTeamCommand(params: {
+		sourceScope: string;
+		operationId: string;
+		agentTeamId: string;
+		callerMemberId: string;
+		payloadDigest: string;
+	}): TeamCommandJournalClaim {
+		const transaction = this.db.transaction((): TeamCommandJournalClaim => {
+			const existing = this.getTeamCommandJournal(
+				params.sourceScope,
+				params.operationId,
+			);
+			if (existing) {
+				return journalRowToClaim(existing, params.payloadDigest);
+			}
+
+			const claimId = randomUUID();
+			const inserted = this.stmtInsertTeamCommandClaim.run({
+				$sourceScope: params.sourceScope,
+				$operationId: params.operationId,
+				$agentTeamId: params.agentTeamId,
+				$callerMemberId: params.callerMemberId,
+				$payloadDigest: params.payloadDigest,
+				$claimId: claimId,
+				$claimedAt: new Date().toISOString(),
+			});
+			if (inserted.changes === 1) {
+				return { status: "claimed", claimId };
+			}
+
+			const raced = this.getTeamCommandJournal(
+				params.sourceScope,
+				params.operationId,
+			);
+			if (!raced) {
+				throw new Error("Team command claim was not persisted");
+			}
+			return journalRowToClaim(raced, params.payloadDigest);
+		});
+		return transaction.immediate();
+	}
+
+	completeTeamCommand(params: {
+		sourceScope: string;
+		operationId: string;
+		payloadDigest: string;
+		claimId: string;
+		result: unknown;
+	}): unknown {
+		const resultLocalJson = serializeLocalJson(
+			params.result,
+			"Team command result",
+		);
+		return this.db
+			.transaction(() => {
+				const updated = this.stmtCompleteTeamCommand.run({
+					$sourceScope: params.sourceScope,
+					$operationId: params.operationId,
+					$payloadDigest: params.payloadDigest,
+					$claimId: params.claimId,
+					$resultLocalJson: resultLocalJson,
+					$completedAt: new Date().toISOString(),
+				});
+				if (updated.changes !== 1) {
+					throw new Error("Team command claim is no longer active");
+				}
+				return JSON.parse(resultLocalJson) as unknown;
+			})
+			.immediate();
+	}
+
+	failTeamCommand(params: {
+		sourceScope: string;
+		operationId: string;
+		payloadDigest: string;
+		claimId: string;
+		error: TeamCommandJournalError;
+	}): void {
+		const errorLocalJson = serializeLocalJson(
+			params.error,
+			"Team command error",
+		);
+		this.db
+			.transaction(() => {
+				const updated = this.stmtFailTeamCommand.run({
+					$sourceScope: params.sourceScope,
+					$operationId: params.operationId,
+					$payloadDigest: params.payloadDigest,
+					$claimId: params.claimId,
+					$errorLocalJson: errorLocalJson,
+					$completedAt: new Date().toISOString(),
+				});
+				if (updated.changes !== 1) {
+					throw new Error("Team command claim is no longer active");
+				}
+			})
+			.immediate();
+	}
+
 	close(): void {
 		this.db.close();
 	}
@@ -751,6 +908,16 @@ export class AgentTeamStore {
 			$agentTeamId: agentTeamId,
 			$taskId: taskId,
 		}) as AgentTeamTaskLocalRow | null;
+	}
+
+	private getTeamCommandJournal(
+		sourceScope: string,
+		operationId: string,
+	): TeamCommandJournalRow | null {
+		return this.stmtGetTeamCommandJournal.get({
+			$sourceScope: sourceScope,
+			$operationId: operationId,
+		}) as TeamCommandJournalRow | null;
 	}
 
 	private updateTaskRow(
@@ -886,6 +1053,67 @@ type AgentTeamMailboxMessageLocalRow = AgentTeamMailboxMessageRow & {
 	body_local_json: string;
 	wake_error_json: string | null;
 };
+
+type TeamCommandJournalRow = {
+	source_scope: string;
+	operation_id: string;
+	payload_digest: string;
+	status: string;
+	claim_id: string;
+	result_local_json: string | null;
+	error_local_json: string | null;
+};
+
+function journalRowToClaim(
+	row: TeamCommandJournalRow,
+	payloadDigest: string,
+): TeamCommandJournalClaim {
+	if (row.payload_digest !== payloadDigest) {
+		return { status: "conflict" };
+	}
+	switch (row.status) {
+		case "in_progress":
+			return { status: "in_progress" };
+		case "completed":
+			if (row.result_local_json === null) {
+				throw new Error("Completed Team command result is missing");
+			}
+			return {
+				status: "completed",
+				result: JSON.parse(row.result_local_json) as unknown,
+			};
+		case "failed":
+			if (row.error_local_json === null) {
+				throw new Error("Failed Team command error is missing");
+			}
+			return {
+				status: "failed",
+				error: parseJournalError(row.error_local_json),
+			};
+		default:
+			throw new Error(`Invalid Team command journal status: ${row.status}`);
+	}
+}
+
+function parseJournalError(value: string): TeamCommandJournalError {
+	const parsed = JSON.parse(value) as unknown;
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new Error("Invalid Team command journal error");
+	}
+	const record = parsed as Record<string, unknown>;
+	if (typeof record.name !== "string" || typeof record.message !== "string") {
+		throw new Error("Invalid Team command journal error");
+	}
+	return { name: record.name, message: record.message };
+}
+
+function serializeLocalJson(value: unknown, label: string): string {
+	const serialized = JSON.stringify(value);
+	if (serialized === undefined) {
+		throw new Error(`${label} is not JSON-serializable`);
+	}
+	return serialized;
+}
 
 function rowToWakeMessage(
 	row: AgentTeamMailboxMessageLocalRow,
