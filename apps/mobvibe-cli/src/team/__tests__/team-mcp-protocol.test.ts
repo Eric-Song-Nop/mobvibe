@@ -28,6 +28,25 @@ const createHandlers = (): TeamMcpProtocolHandlers => ({
 	handleDisconnect: mock(() => {}),
 });
 
+const initializeConnection = async (
+	adapter: TeamMcpProtocolAdapter,
+	connectionId: string,
+) => {
+	await adapter.message({
+		connectionId,
+		method: "initialize",
+		params: {
+			protocolVersion: "2025-06-18",
+			capabilities: {},
+			clientInfo: { name: "agent", version: "1.0.0" },
+		},
+	});
+	await adapter.notification({
+		connectionId,
+		method: "notifications/initialized",
+	});
+};
+
 describe("TeamMcpProtocolAdapter", () => {
 	test("binds an ACP server id to an opaque connection id", () => {
 		const handlers = createHandlers();
@@ -124,6 +143,167 @@ describe("TeamMcpProtocolAdapter", () => {
 		expect(() => adapter.disconnect({ connectionId })).toThrow(
 			"connection is not active",
 		);
+	});
+
+	test("rejects tool requests until the MCP initialization handshake completes", async () => {
+		const adapter = new TeamMcpProtocolAdapter();
+		adapter.configure({ declaration, handlers: createHandlers() });
+		const { connectionId } = adapter.connect({
+			serverId: declaration.serverId,
+		});
+
+		await expect(
+			adapter.message({ connectionId, method: "tools/list" }),
+		).rejects.toThrow("initialization handshake");
+		await expect(
+			adapter.message({
+				connectionId,
+				method: "tools/call",
+				params: { name: "mobvibe_team_members", arguments: {} },
+			}),
+		).rejects.toThrow("initialization handshake");
+
+		await adapter.message({
+			connectionId,
+			method: "initialize",
+			params: {
+				protocolVersion: "2025-06-18",
+				capabilities: {},
+				clientInfo: { name: "agent", version: "1.0.0" },
+			},
+		});
+
+		await expect(
+			adapter.message({ connectionId, method: "tools/list" }),
+		).rejects.toThrow("initialization handshake");
+
+		await adapter.notification({
+			connectionId,
+			method: "notifications/initialized",
+		});
+		await expect(
+			adapter.message({ connectionId, method: "tools/list" }),
+		).resolves.toEqual({
+			tools: expect.arrayContaining([
+				expect.objectContaining({ name: "mobvibe_team_members" }),
+			]),
+		});
+	});
+
+	test("rejects missing or malformed initialize params without advancing state", async () => {
+		const adapter = new TeamMcpProtocolAdapter();
+		adapter.configure({ declaration, handlers: createHandlers() });
+		const { connectionId } = adapter.connect({
+			serverId: declaration.serverId,
+		});
+
+		for (const params of [
+			undefined,
+			{},
+			{
+				protocolVersion: "",
+				capabilities: {},
+				clientInfo: { name: "agent", version: "1.0.0" },
+			},
+			{
+				protocolVersion: "2025-06-18",
+				capabilities: "tools",
+				clientInfo: { name: "agent", version: "1.0.0" },
+			},
+			{
+				protocolVersion: "2025-06-18",
+				capabilities: {},
+				clientInfo: { name: "agent" },
+			},
+		]) {
+			await expect(
+				adapter.message({
+					connectionId,
+					method: "initialize",
+					...(params === undefined ? {} : { params }),
+				}),
+			).rejects.toThrow("initialize");
+		}
+
+		await initializeConnection(adapter, connectionId);
+	});
+
+	test("negotiates an unsupported client protocol version to the supported version", async () => {
+		const adapter = new TeamMcpProtocolAdapter();
+		adapter.configure({ declaration, handlers: createHandlers() });
+		const { connectionId } = adapter.connect({
+			serverId: declaration.serverId,
+		});
+
+		const initialized = await adapter.message({
+			connectionId,
+			method: "initialize",
+			params: {
+				protocolVersion: "2099-01-01",
+				capabilities: {},
+				clientInfo: { name: "future-agent", version: "1.0.0" },
+			},
+		});
+
+		expect(initialized).toEqual(
+			expect.objectContaining({ protocolVersion: "2025-06-18" }),
+		);
+	});
+
+	test("marks structured Team tool failures as MCP execution errors", async () => {
+		const handlers: TeamMcpProtocolHandlers = {
+			...createHandlers(),
+			handleToolCall: mock((input) =>
+				Promise.resolve({
+					caller: {
+						agentTeamId: "team-1",
+						memberId: "member-1",
+						role: "leader" as const,
+					},
+					toolName: input.toolName,
+					data: {
+						ok: false,
+						error: { code: "REQUEST_VALIDATION_FAILED" },
+					},
+				}),
+			),
+		};
+		const adapter = new TeamMcpProtocolAdapter();
+		adapter.configure({ declaration, handlers });
+		const { connectionId } = adapter.connect({
+			serverId: declaration.serverId,
+		});
+		await initializeConnection(adapter, connectionId);
+
+		const result = await adapter.message({
+			connectionId,
+			method: "tools/call",
+			params: {
+				name: "mobvibe_team_send_message",
+				arguments: { to: "Missing", message: "hello" },
+			},
+		});
+
+		expect(result).toEqual(
+			expect.objectContaining({
+				isError: true,
+				structuredContent: expect.objectContaining({
+					data: expect.objectContaining({ ok: false }),
+				}),
+			}),
+		);
+	});
+
+	test("disconnects every active connection during reconfiguration", () => {
+		const handlers = createHandlers();
+		const adapter = new TeamMcpProtocolAdapter();
+		adapter.configure({ declaration, handlers });
+		adapter.connect({ serverId: declaration.serverId });
+		adapter.connect({ serverId: declaration.serverId });
+
+		adapter.configure(undefined);
+
+		expect(handlers.handleDisconnect).toHaveBeenCalledTimes(2);
 	});
 
 	test("does not route stale connection ids after session reconfiguration", async () => {

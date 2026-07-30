@@ -1201,6 +1201,43 @@ describe("AcpConnection", () => {
 				mcpServers: [declaration],
 			});
 		});
+
+		it("releases Team MCP bindings when the ACP connection enters an error state", async () => {
+			const request = mock(() =>
+				Promise.resolve({
+					sessionId: "session-1",
+					modes: null,
+					configOptions: null,
+				}),
+			);
+			const handlers = createTeamMcpHandlers();
+			const declaration = buildTeamMcpDeclaration({
+				agentTeamId: "team-1",
+				memberId: "member-1",
+			});
+			const internal = connection as unknown as {
+				state: "ready";
+				connection: { agent: { request: typeof request } };
+				teamMcpProtocol: {
+					connect(input: { serverId: string }): { connectionId: string };
+				};
+				updateStatus(state: "error"): void;
+			};
+			internal.state = "ready";
+			internal.connection = { agent: { request } };
+			await connection.createSession({
+				cwd: "/home/user/project",
+				teamMcpDeclaration: declaration,
+				teamMcpHandlers: handlers,
+			});
+			internal.teamMcpProtocol.connect({ serverId: declaration.serverId });
+
+			internal.updateStatus("error");
+
+			expect(handlers.handleDisconnect).toHaveBeenCalledWith({
+				serverId: declaration.serverId,
+			});
+		});
 	});
 
 	describe("resumeSession", () => {

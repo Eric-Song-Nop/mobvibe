@@ -4386,6 +4386,94 @@ describe("SessionManager", () => {
 			);
 		});
 
+		it("restores Team MCP options when reloading, resuming, and loading a leader session", async () => {
+			mockConnection.getSessionCapabilities.mockReturnValue({
+				list: true,
+				load: true,
+				resume: true,
+				close: true,
+				mcp: { acp: true },
+			});
+			mockConnection.createSession.mockImplementationOnce(
+				async (...args: unknown[]) => {
+					const params = args[0] as {
+						teamMcpDeclaration?: { serverId?: string };
+						teamMcpHandlers?: {
+							handleConnect(input: { serverId: string }): unknown;
+							handleListTools(input: {
+								serverId: string;
+								toolNames: string[];
+							}): void;
+						};
+					};
+					const serverId = params.teamMcpDeclaration?.serverId;
+					if (!params.teamMcpHandlers || !serverId) {
+						throw new Error("Expected Team MCP options");
+					}
+					params.teamMcpHandlers.handleConnect({ serverId });
+					params.teamMcpHandlers.handleListTools({
+						serverId,
+						toolNames: expectedTeamTools,
+					});
+					return {
+						sessionId: "leader-session-restore",
+						modes: null,
+						configOptions: null,
+					};
+				},
+			);
+			const created = await sessionManager.createAgentTeamRun({
+				machineId: mockConfig.machineId,
+				backendId: "backend-1",
+				workspaceRootCwd: "/home/user/project",
+			});
+			const expectedTeamMcp = expect.objectContaining({
+				teamMcpDeclaration: expect.objectContaining({
+					type: "acp",
+					serverId: `mobvibe-team:${created.team.agentTeamId}:${created.team.leaderMemberId}`,
+				}),
+				teamMcpHandlers: expect.any(Object),
+			});
+
+			await sessionManager.reloadSession(
+				"leader-session-restore",
+				"/home/user/project",
+				"backend-1",
+			);
+			expect(mockConnection.loadSession).toHaveBeenLastCalledWith(
+				"leader-session-restore",
+				"/home/user/project",
+				[],
+				expectedTeamMcp,
+			);
+
+			await sessionManager.closeSession("leader-session-restore");
+			await sessionManager.resumeSession(
+				"leader-session-restore",
+				"/home/user/project",
+				"backend-1",
+			);
+			expect(mockConnection.resumeSession).toHaveBeenLastCalledWith(
+				"leader-session-restore",
+				"/home/user/project",
+				[],
+				expectedTeamMcp,
+			);
+
+			await sessionManager.closeSession("leader-session-restore");
+			await sessionManager.loadSession(
+				"leader-session-restore",
+				"/home/user/project",
+				"backend-1",
+			);
+			expect(mockConnection.loadSession).toHaveBeenLastCalledWith(
+				"leader-session-restore",
+				"/home/user/project",
+				[],
+				expectedTeamMcp,
+			);
+		});
+
 		it("leaves failed team and leader projection when leader session creation fails", async () => {
 			mockConnection.getSessionCapabilities.mockReturnValueOnce({
 				list: true,

@@ -38,6 +38,13 @@ export type TeamMcpProtocolConfiguration = {
 	handlers: TeamMcpProtocolHandlers;
 };
 
+type TeamMcpConnectionPhase = "connected" | "initialize_responded" | "ready";
+
+type TeamMcpConnection = {
+	serverId: string;
+	phase: TeamMcpConnectionPhase;
+};
+
 type ToolDescriptor = {
 	name: TeamToolName;
 	description: string;
@@ -142,7 +149,7 @@ export const TEAM_MCP_TOOLS: readonly ToolDescriptor[] = [
 
 export class TeamMcpProtocolAdapter {
 	private configuration?: TeamMcpProtocolConfiguration;
-	private readonly serverIdByConnectionId = new Map<string, string>();
+	private readonly connections = new Map<string, TeamMcpConnection>();
 
 	configure(configuration?: TeamMcpProtocolConfiguration): void {
 		this.disconnectAll();
@@ -162,30 +169,53 @@ export class TeamMcpProtocolAdapter {
 			transport: "acp",
 		});
 		const connectionId = randomUUID();
-		this.serverIdByConnectionId.set(connectionId, params.serverId);
+		this.connections.set(connectionId, {
+			serverId: params.serverId,
+			phase: "connected",
+		});
 		return { connectionId };
 	}
 
 	async message(params: MessageMcpRequest): Promise<MessageMcpResponse> {
-		const { configuration, serverId } = this.requireConnection(
+		const { configuration, connection } = this.requireConnection(
 			params.connectionId,
 		);
+		const { serverId } = connection;
 		switch (params.method) {
-			case "initialize":
+			case "initialize": {
+				if (connection.phase !== "connected") {
+					throw RequestError.invalidRequest(
+						{ connectionId: params.connectionId },
+						"Team MCP initialize has already completed",
+					);
+				}
+				validateInitializeParams(params.params);
+				connection.phase = "initialize_responded";
 				return {
-					protocolVersion: readProtocolVersion(params.params),
+					protocolVersion: MCP_PROTOCOL_VERSION,
 					capabilities: { tools: {} },
 					serverInfo: { name: "mobvibe-team", version: "1.0.0" },
 				};
+			}
 			case "ping":
 				return {};
 			case "tools/list":
+				this.requireReadyConnection(
+					params.connectionId,
+					params.method,
+					connection,
+				);
 				configuration.handlers.handleListTools({
 					serverId,
 					toolNames: [...EXPECTED_TEAM_TOOL_NAMES],
 				});
 				return { tools: TEAM_MCP_TOOLS };
 			case "tools/call": {
+				this.requireReadyConnection(
+					params.connectionId,
+					params.method,
+					connection,
+				);
 				const call = parseToolCall(params.params);
 				const result = await configuration.handlers.handleToolCall({
 					serverId,
@@ -195,6 +225,7 @@ export class TeamMcpProtocolAdapter {
 				return {
 					content: [{ type: "text", text: JSON.stringify(result) }],
 					structuredContent: result,
+					...(isToolExecutionError(result) ? { isError: true } : {}),
 				};
 			}
 			default:
@@ -203,19 +234,26 @@ export class TeamMcpProtocolAdapter {
 	}
 
 	async notification(params: MessageMcpNotification): Promise<void> {
-		this.requireConnection(params.connectionId);
+		const { connection } = this.requireConnection(params.connectionId);
 		if (params.method === "notifications/initialized") {
+			if (connection.phase !== "initialize_responded") {
+				throw RequestError.invalidRequest(
+					{ connectionId: params.connectionId },
+					"Team MCP initialization handshake is not ready for notifications/initialized",
+				);
+			}
+			connection.phase = "ready";
 			return;
 		}
 		throw RequestError.methodNotFound(params.method);
 	}
 
 	disconnect(params: DisconnectMcpRequest): DisconnectMcpResponse {
-		const { configuration, serverId } = this.requireConnection(
+		const { configuration, connection } = this.requireConnection(
 			params.connectionId,
 		);
-		this.serverIdByConnectionId.delete(params.connectionId);
-		configuration.handlers.handleDisconnect({ serverId });
+		this.connections.delete(params.connectionId);
+		configuration.handlers.handleDisconnect({ serverId: connection.serverId });
 		return {};
 	}
 
@@ -228,26 +266,40 @@ export class TeamMcpProtocolAdapter {
 
 	private requireConnection(connectionId: string): {
 		configuration: TeamMcpProtocolConfiguration;
-		serverId: string;
+		connection: TeamMcpConnection;
 	} {
 		const configuration = this.requireConfiguration("mcp/message");
-		const serverId = this.serverIdByConnectionId.get(connectionId);
-		if (!serverId) {
+		const connection = this.connections.get(connectionId);
+		if (!connection) {
 			throw RequestError.invalidParams(
 				{ connectionId },
 				"Team MCP connection is not active",
 			);
 		}
-		return { configuration, serverId };
+		return { configuration, connection };
+	}
+
+	private requireReadyConnection(
+		connectionId: string,
+		method: string,
+		connection: TeamMcpConnection,
+	): void {
+		if (connection.phase === "ready") return;
+		throw RequestError.invalidRequest(
+			{ connectionId, method },
+			"Team MCP initialization handshake is not complete",
+		);
 	}
 
 	private disconnectAll(): void {
 		const configuration = this.configuration;
-		const serverIds = new Set(this.serverIdByConnectionId.values());
-		this.serverIdByConnectionId.clear();
+		const connections = [...this.connections.values()];
+		this.connections.clear();
 		if (!configuration) return;
-		for (const serverId of serverIds) {
-			configuration.handlers.handleDisconnect({ serverId });
+		for (const connection of connections) {
+			configuration.handlers.handleDisconnect({
+				serverId: connection.serverId,
+			});
 		}
 	}
 }
@@ -323,12 +375,33 @@ export const parseDisconnectMcpRequest = (
 	return { connectionId: params.connectionId };
 };
 
-function readProtocolVersion(
+function validateInitializeParams(
 	params: Record<string, unknown> | null | undefined,
-): string {
-	return typeof params?.protocolVersion === "string"
-		? params.protocolVersion
-		: MCP_PROTOCOL_VERSION;
+): void {
+	const record = requireRecord(params, "initialize params");
+	if (
+		typeof record.protocolVersion !== "string" ||
+		!record.protocolVersion.trim()
+	) {
+		throw RequestError.invalidParams(
+			undefined,
+			"initialize.protocolVersion must be a non-empty string",
+		);
+	}
+	requireRecord(record.capabilities, "initialize.capabilities");
+	const clientInfo = requireRecord(record.clientInfo, "initialize.clientInfo");
+	if (typeof clientInfo.name !== "string" || !clientInfo.name.trim()) {
+		throw RequestError.invalidParams(
+			undefined,
+			"initialize.clientInfo.name must be a non-empty string",
+		);
+	}
+	if (typeof clientInfo.version !== "string" || !clientInfo.version.trim()) {
+		throw RequestError.invalidParams(
+			undefined,
+			"initialize.clientInfo.version must be a non-empty string",
+		);
+	}
 }
 
 function parseToolCall(params: Record<string, unknown> | null | undefined): {
@@ -352,9 +425,19 @@ function parseToolCall(params: Record<string, unknown> | null | undefined): {
 	return { name: record.name as TeamToolName, arguments: args };
 }
 
+function isToolExecutionError(value: unknown): boolean {
+	if (!isRecord(value)) return false;
+	if (value.ok === false) return true;
+	return isRecord(value.data) && value.data.ok === false;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
-	if (!value || typeof value !== "object" || Array.isArray(value)) {
+	if (!isRecord(value)) {
 		throw RequestError.invalidParams(undefined, `${label} must be an object`);
 	}
-	return value as Record<string, unknown>;
+	return value;
 }

@@ -26,8 +26,13 @@ type ServerBinding = TeamToolCaller & {
 	transport: TeamMcpTransport;
 };
 
+type ServerBindingState = {
+	binding: ServerBinding;
+	connectionCount: number;
+};
+
 export class TeamMcpRouter {
-	private readonly bindings = new Map<string, ServerBinding>();
+	private readonly bindings = new Map<string, ServerBindingState>();
 
 	constructor(private readonly options: TeamMcpRouterOptions) {}
 
@@ -35,7 +40,18 @@ export class TeamMcpRouter {
 		serverId: string;
 		transport?: TeamMcpTransport;
 	}): TeamToolCaller {
-		const binding = this.bindServer(input.serverId, input.transport ?? "acp");
+		const existing = this.bindings.get(input.serverId);
+		const binding =
+			existing?.binding ??
+			this.createBinding(input.serverId, input.transport ?? "acp");
+		if (existing) {
+			existing.connectionCount += 1;
+		} else {
+			this.bindings.set(input.serverId, {
+				binding,
+				connectionCount: 1,
+			});
+		}
 		this.options.store.updateMcpStatus({
 			agentTeamId: binding.agentTeamId,
 			memberId: binding.memberId,
@@ -47,7 +63,20 @@ export class TeamMcpRouter {
 	}
 
 	handleDisconnect(input: { serverId: string }): void {
+		const state = this.bindings.get(input.serverId);
+		if (!state) return;
+		if (state.connectionCount > 1) {
+			state.connectionCount -= 1;
+			return;
+		}
 		this.bindings.delete(input.serverId);
+		this.options.store.updateMcpStatus({
+			agentTeamId: state.binding.agentTeamId,
+			memberId: state.binding.memberId,
+			transport: state.binding.transport,
+			serverId: input.serverId,
+			phase: "not_started",
+		});
 	}
 
 	handleListTools(input: { serverId: string; toolNames: string[] }): void {
@@ -101,7 +130,7 @@ export class TeamMcpRouter {
 		});
 	}
 
-	private bindServer(
+	private createBinding(
 		serverId: string,
 		transport: TeamMcpTransport,
 	): ServerBinding {
@@ -119,16 +148,15 @@ export class TeamMcpRouter {
 			memberId: parsed.memberId,
 			role: member.role === "leader" ? "leader" : "member",
 		};
-		this.bindings.set(serverId, binding);
 		return binding;
 	}
 
 	private requireBinding(serverId: string): ServerBinding {
-		const binding = this.bindings.get(serverId);
-		if (!binding) {
+		const state = this.bindings.get(serverId);
+		if (!state) {
 			throw new Error("Team MCP caller is not bound");
 		}
-		return binding;
+		return state.binding;
 	}
 }
 

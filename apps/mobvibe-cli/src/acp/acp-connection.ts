@@ -914,6 +914,16 @@ export class AcpConnection {
 	}
 
 	private updateStatus(state: AcpConnectionState, error?: ErrorDetail) {
+		if (state === "error") {
+			try {
+				this.configureTeamMcp(undefined);
+			} catch (cleanupError) {
+				logger.warn(
+					{ backendId: this.options.backend.id, err: cleanupError },
+					"team_mcp_error_cleanup_failed",
+				);
+			}
+		}
 		this.state = state;
 		this.error = error;
 		this.statusEmitter.emit("status", this.getStatus());

@@ -66,6 +66,7 @@ import {
 import {
 	AcpConnection,
 	normalizeAdditionalDirectories,
+	type TeamMcpSessionOptions,
 } from "./acp-connection.js";
 
 type PendingReloadEvent =
@@ -2546,6 +2547,25 @@ export class SessionManager {
 		return undefined;
 	}
 
+	private buildTeamMcpOptionsForSession(
+		sessionId: string,
+		capabilities: AgentSessionCapabilities,
+	): TeamMcpSessionOptions | undefined {
+		const member = this.findTeamMemberBySessionId(sessionId);
+		if (!member) {
+			return undefined;
+		}
+		const selection = buildTeamMcpSessionSelection({
+			capabilities,
+			agentTeamId: member.agentTeamId,
+			memberId: member.memberId,
+		});
+		return {
+			teamMcpDeclaration: selection.declaration,
+			teamMcpHandlers: this.teamRuntime.mcpRouter,
+		};
+	}
+
 	private buildPermissionRequestPayload(
 		record: PermissionRequestRecord,
 	): PermissionRequestPayload {
@@ -3700,11 +3720,23 @@ export class SessionManager {
 					"Agent does not support session resuming",
 				);
 			}
-			const response = await connection.resumeSession(
+			const teamMcp = this.buildTeamMcpOptionsForSession(
 				sessionId,
-				cwd,
-				normalizedAdditionalDirectories,
+				this.backendCapabilities.get(backend.id) ??
+					connection.getSessionCapabilities(),
 			);
+			const response = teamMcp
+				? await connection.resumeSession(
+						sessionId,
+						cwd,
+						normalizedAdditionalDirectories,
+						teamMcp,
+					)
+				: await connection.resumeSession(
+						sessionId,
+						cwd,
+						normalizedAdditionalDirectories,
+					);
 			connection.setPermissionHandler((params, requestId, signal) =>
 				this.handlePermissionRequest(sessionId, params, requestId, signal),
 			);
@@ -3957,11 +3989,23 @@ export class SessionManager {
 			);
 
 			logger.debug({ sessionId }, "load_session_calling_acp");
-			const response = await connection.loadSession(
+			const teamMcp = this.buildTeamMcpOptionsForSession(
 				sessionId,
-				cwd,
-				normalizedAdditionalDirectories,
+				this.backendCapabilities.get(backend.id) ??
+					connection.getSessionCapabilities(),
 			);
+			const response = teamMcp
+				? await connection.loadSession(
+						sessionId,
+						cwd,
+						normalizedAdditionalDirectories,
+						teamMcp,
+					)
+				: await connection.loadSession(
+						sessionId,
+						cwd,
+						normalizedAdditionalDirectories,
+					);
 			logger.debug(
 				{
 					sessionId,
@@ -4186,11 +4230,23 @@ export class SessionManager {
 		let response: Awaited<ReturnType<typeof existing.connection.loadSession>>;
 		let projectContext: Awaited<ReturnType<typeof resolveGitProjectContext>>;
 		try {
-			response = await existing.connection.loadSession(
+			const teamMcp = this.buildTeamMcpOptionsForSession(
 				sessionId,
-				cwd,
-				normalizedAdditionalDirectories,
+				this.backendCapabilities.get(existing.backendId) ??
+					existing.connection.getSessionCapabilities(),
 			);
+			response = teamMcp
+				? await existing.connection.loadSession(
+						sessionId,
+						cwd,
+						normalizedAdditionalDirectories,
+						teamMcp,
+					)
+				: await existing.connection.loadSession(
+						sessionId,
+						cwd,
+						normalizedAdditionalDirectories,
+					);
 			if (reloadBuffer.error) {
 				throw reloadBuffer.error;
 			}

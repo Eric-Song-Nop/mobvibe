@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { AgentTeamStore } from "../agent-team-store.js";
+import { TeamMcpProtocolAdapter } from "../team-mcp-protocol.js";
 import { TeamMcpRouter } from "../team-mcp-router.js";
 import {
 	EXPECTED_TEAM_TOOL_NAMES,
@@ -82,6 +83,75 @@ describe("TeamMcpRouter", () => {
 		expect(team?.members[0].mcp?.serverId).toBe(serverId);
 		expect(team?.members[0].mcp?.phase).toBe("tools_waiting");
 		expect(team?.members[0].mcp?.phase).not.toBe("tools_ready");
+	});
+
+	test("keeps a second connection to the same server bound after the first disconnects", async () => {
+		const serverId = `mobvibe-team:${agentTeamId}:${leaderMemberId}`;
+		const adapter = new TeamMcpProtocolAdapter();
+		adapter.configure({
+			declaration: { type: "acp", name: "mobvibe-team", serverId },
+			handlers: router,
+		});
+		const first = adapter.connect({ serverId });
+		const second = adapter.connect({ serverId });
+		await adapter.message({
+			connectionId: second.connectionId,
+			method: "initialize",
+			params: {
+				protocolVersion: "2025-06-18",
+				capabilities: {},
+				clientInfo: { name: "agent", version: "1.0.0" },
+			},
+		});
+		await adapter.notification({
+			connectionId: second.connectionId,
+			method: "notifications/initialized",
+		});
+		await adapter.message({
+			connectionId: second.connectionId,
+			method: "tools/list",
+		});
+
+		adapter.disconnect({ connectionId: first.connectionId });
+
+		expect(
+			store.getAgentTeam({ agentTeamId }).team?.members[0].mcp?.phase,
+		).toBe("tools_ready");
+		const result = await adapter.message({
+			connectionId: second.connectionId,
+			method: "tools/call",
+			params: { name: "mobvibe_team_members", arguments: {} },
+		});
+		expect(result).toEqual(
+			expect.objectContaining({
+				structuredContent: expect.objectContaining({
+					caller: expect.objectContaining({ memberId: leaderMemberId }),
+				}),
+			}),
+		);
+
+		router.handleListTools({
+			serverId,
+			toolNames: EXPECTED_TEAM_TOOL_NAMES.filter(
+				(name) => name !== "mobvibe_team_task_update",
+			),
+		});
+		adapter.disconnect({ connectionId: second.connectionId });
+		const disconnectedMcp = store.getAgentTeam({ agentTeamId }).team?.members[0]
+			.mcp;
+		expect(disconnectedMcp).toEqual(
+			expect.objectContaining({
+				phase: "not_started",
+				serverId,
+			}),
+		);
+		expect(disconnectedMcp?.error).toBeUndefined();
+		expect(() =>
+			router.handleListTools({
+				serverId,
+				toolNames: [...EXPECTED_TEAM_TOOL_NAMES],
+			}),
+		).toThrow("not bound");
 	});
 
 	test("all expected list-tools names set tools_ready", () => {
