@@ -53,17 +53,24 @@ import { logger } from "../lib/logger.js";
 import { AgentTeamStore } from "../team/agent-team-store.js";
 import {
 	parseRemoteTeamBootstrapRequest,
+	parseRemoteTeamBootstrapResult,
 	type RemoteTeamBootstrapInput,
 } from "../team/remote-team-bootstrap.js";
 import { RemoteTeamMcpPort } from "../team/remote-team-mcp-port.js";
-import { buildTeamMcpSessionSelection } from "../team/team-capability.js";
+import {
+	buildTeamMcpServerId,
+	buildTeamMcpSessionSelection,
+} from "../team/team-capability.js";
 import { TeamMcpRouter } from "../team/team-mcp-router.js";
 import {
 	TeamRelayClient,
 	type TeamRelayWireTransport,
 } from "../team/team-relay-client.js";
 import { TeamRelayEndpoint } from "../team/team-relay-endpoint.js";
-import { TeamRelayProtocol } from "../team/team-relay-protocol.js";
+import {
+	TeamRelayProtocol,
+	TeamRelayRemoteError,
+} from "../team/team-relay-protocol.js";
 import { TeamRelayStore } from "../team/team-relay-store.js";
 import { TeamRuntime } from "../team/team-runtime.js";
 import type { SpawnMemberResult } from "../team/team-tool-handlers.js";
@@ -536,6 +543,15 @@ const toTeamCreateErrorDetail = (error: unknown) => {
 		scope: "session",
 	});
 };
+
+const createRemoteTeamBootstrapOutcomeUnknownDetail = () =>
+	createErrorDetail({
+		code: "MESSAGE_OUTCOME_UNKNOWN",
+		message:
+			"Remote Team member bootstrap outcome is unknown; inspect the bound worker before retrying",
+		retryable: false,
+		scope: "session",
+	});
 
 export type SessionManagerDependencies = {
 	validateWorkspacePath?: (cwd: string) => Promise<boolean>;
@@ -2623,21 +2639,16 @@ export class SessionManager {
 				}),
 			};
 		}
-		const backendId = input.backendId ?? leader.backend_id;
-		try {
-			this.resolveBackend(backendId);
-		} catch (error) {
+		const backendId = (input.backendId ?? leader.backend_id).trim();
+		if (!backendId) {
 			return {
 				ok: false,
-				error:
-					error instanceof AppError
-						? error.detail
-						: createErrorDetail({
-								code: "REQUEST_VALIDATION_FAILED",
-								message: "Invalid backend ID",
-								retryable: false,
-								scope: "request",
-							}),
+				error: createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "backendId is required",
+					retryable: false,
+					scope: "request",
+				}),
 			};
 		}
 		if (!leader.session_id) {
@@ -2665,6 +2676,30 @@ export class SessionManager {
 		}
 
 		const memberName = input.name ?? `Member ${members.length}`;
+		if (!this.backendById.has(backendId)) {
+			return this.spawnRemoteAgentTeamMember({
+				...input,
+				backendId,
+				memberName,
+				leaderSession,
+			});
+		}
+		try {
+			this.resolveBackend(backendId);
+		} catch (error) {
+			return {
+				ok: false,
+				error:
+					error instanceof AppError
+						? error.detail
+						: createErrorDetail({
+								code: "REQUEST_VALIDATION_FAILED",
+								message: "Invalid backend ID",
+								retryable: false,
+								scope: "request",
+							}),
+			};
+		}
 		const { memberId } = this.agentTeamStore.addTeamMember({
 			agentTeamId: input.agentTeamId,
 			backendId,
@@ -2721,6 +2756,195 @@ export class SessionManager {
 			this.emitCurrentAgentTeam(input.agentTeamId, "updated");
 			return { ok: false, memberId, error: detail };
 		}
+	}
+
+	private async spawnRemoteAgentTeamMember(input: {
+		agentTeamId: string;
+		requestedByMemberId: string;
+		backendId: string;
+		memberName: string;
+		leaderSession: SessionRecord;
+	}): Promise<SpawnMemberResult> {
+		const relay = this.teamRelayClient;
+		if (!relay) {
+			return {
+				ok: false,
+				error: createCapabilityNotSupportedError(
+					"Encrypted Team relay is not available",
+				).detail,
+			};
+		}
+
+		let placement: Awaited<ReturnType<TeamRelayClient["place"]>>;
+		try {
+			placement = await relay.place({ backendId: input.backendId });
+		} catch (error) {
+			return { ok: false, error: toTeamCreateErrorDetail(error) };
+		}
+
+		const { memberId } = this.agentTeamStore.addTeamMember({
+			agentTeamId: input.agentTeamId,
+			backendId: input.backendId,
+			name: input.memberName,
+			role: "member",
+		});
+		const operationId = randomUUID();
+		const serverId = buildTeamMcpServerId({
+			agentTeamId: input.agentTeamId,
+			memberId,
+		});
+		try {
+			this.agentTeamStore.bindTeamMemberExecution({
+				agentTeamId: input.agentTeamId,
+				memberId,
+				executionMachineId: placement.targetMachineId,
+				workerRelayKeyId: placement.relayKey.keyId,
+				bootstrapOperationId: operationId,
+			});
+			this.updateRemoteTeamMemberStarting({
+				agentTeamId: input.agentTeamId,
+				memberId,
+				serverId,
+			});
+		} catch (error) {
+			const detail = toTeamCreateErrorDetail(error);
+			this.updateRemoteTeamMemberFailure({
+				agentTeamId: input.agentTeamId,
+				memberId,
+				serverId,
+				detail,
+				outcomeUnknown: false,
+			});
+			return { ok: false, memberId, error: detail };
+		}
+
+		try {
+			const rawResult = await relay.call({
+				operationId,
+				operation: "member.bootstrap",
+				targetMachineId: placement.targetMachineId,
+				targetRelayKey: placement.relayKey,
+				expectedTargetRelayKeyId: placement.relayKey.keyId,
+				payload: {
+					operationId,
+					agentTeamId: input.agentTeamId,
+					memberId,
+					serverId,
+					backendId: input.backendId,
+					cwd: input.leaderSession.cwd,
+					additionalDirectories: [...input.leaderSession.additionalDirectories],
+				},
+			});
+			const result = parseRemoteTeamBootstrapResult(rawResult, {
+				operationId,
+				serverId,
+			});
+			this.completeRemoteTeamMemberBootstrap({
+				agentTeamId: input.agentTeamId,
+				memberId,
+				serverId,
+				sessionId: result.sessionId,
+				worktreeSourceCwd: input.leaderSession.worktreeSourceCwd,
+				worktreeBranch: input.leaderSession.worktreeBranch,
+			});
+			return {
+				ok: true,
+				memberId,
+				sessionId: result.sessionId,
+				backendId: input.backendId,
+				name: input.memberName,
+				requestedByMemberId: input.requestedByMemberId,
+			};
+		} catch (error) {
+			const outcomeUnknown =
+				!(error instanceof TeamRelayRemoteError) ||
+				error.detail.code === "MESSAGE_OUTCOME_UNKNOWN";
+			const detail = outcomeUnknown
+				? createRemoteTeamBootstrapOutcomeUnknownDetail()
+				: error.detail;
+			this.updateRemoteTeamMemberFailure({
+				agentTeamId: input.agentTeamId,
+				memberId,
+				serverId,
+				detail,
+				outcomeUnknown,
+			});
+			return { ok: false, memberId, error: detail };
+		}
+	}
+
+	private updateRemoteTeamMemberStarting(input: {
+		agentTeamId: string;
+		memberId: string;
+		serverId: string;
+	}): void {
+		this.agentTeamStore.updateTeamMemberRuntime({
+			agentTeamId: input.agentTeamId,
+			memberId: input.memberId,
+			lifecycle: "creating_session",
+			health: "healthy",
+		});
+		this.agentTeamStore.updateMcpStatus({
+			agentTeamId: input.agentTeamId,
+			memberId: input.memberId,
+			transport: "acp",
+			serverId: input.serverId,
+			phase: "server_starting",
+		});
+		this.emitCurrentAgentTeam(input.agentTeamId, "updated");
+	}
+
+	private completeRemoteTeamMemberBootstrap(input: {
+		agentTeamId: string;
+		memberId: string;
+		serverId: string;
+		sessionId: string;
+		worktreeSourceCwd?: string;
+		worktreeBranch?: string;
+	}): void {
+		this.agentTeamStore.updateTeamMemberRuntime({
+			agentTeamId: input.agentTeamId,
+			memberId: input.memberId,
+			sessionId: input.sessionId,
+			lifecycle: "running",
+			health: "healthy",
+			error: null,
+			worktreeSourceCwd: input.worktreeSourceCwd,
+			worktreeBranch: input.worktreeBranch,
+		});
+		this.agentTeamStore.updateMcpStatus({
+			agentTeamId: input.agentTeamId,
+			memberId: input.memberId,
+			transport: "acp",
+			serverId: input.serverId,
+			phase: "tools_ready",
+		});
+		this.emitCurrentAgentTeam(input.agentTeamId, "updated");
+	}
+
+	private updateRemoteTeamMemberFailure(input: {
+		agentTeamId: string;
+		memberId: string;
+		serverId: string;
+		detail: ReturnType<typeof createErrorDetail>;
+		outcomeUnknown: boolean;
+	}): void {
+		this.agentTeamStore.updateTeamMemberRuntime({
+			agentTeamId: input.agentTeamId,
+			memberId: input.memberId,
+			lifecycle: input.outcomeUnknown ? "creating_session" : "failed",
+			health: input.outcomeUnknown ? "degraded" : "error",
+			error: input.detail,
+		});
+		this.agentTeamStore.updateMcpStatus({
+			agentTeamId: input.agentTeamId,
+			memberId: input.memberId,
+			transport: "acp",
+			serverId: input.serverId,
+			phase: input.outcomeUnknown ? "degraded" : "error",
+			lastError: input.detail,
+		});
+		this.emitCurrentAgentTeam(input.agentTeamId, "updated");
 	}
 
 	private async cleanupFailedTeamSession(input: {

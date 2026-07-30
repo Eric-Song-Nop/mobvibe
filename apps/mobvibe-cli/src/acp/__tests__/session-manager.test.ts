@@ -24,6 +24,12 @@ import {
 	isEncryptedPayload,
 	type PermissionDecisionPayload,
 	type PermissionRequestPayload,
+	type PlaceTeamRelayPeerParams,
+	type PlaceTeamRelayPeerResult,
+	type ResolveTeamRelayPeerParams,
+	type ResolveTeamRelayPeerResult,
+	type SendTeamRelayParams,
+	type SendTeamRelayResult,
 	type TeamRelayExecuteRpcParams,
 	type TeamRelayExecuteRpcResult,
 	unwrapDEK,
@@ -36,6 +42,7 @@ import type { TeamRelayWireTransport } from "../../team/team-relay-client.js";
 import {
 	TeamRelayProtocol,
 	TeamRelayRemoteError,
+	type VerifiedTeamRelayRequest,
 } from "../../team/team-relay-protocol.js";
 import type { TeamRelayStore } from "../../team/team-relay-store.js";
 import type { TeamRuntime } from "../../team/team-runtime.js";
@@ -118,6 +125,10 @@ type SessionManagerTeamInternals = {
 type SessionManagerTeamRelayApi = {
 	attachTeamRelayTransport(transport: TeamRelayWireTransport): void;
 	handleTeamRelayRequest(params: unknown): Promise<TeamRelayExecuteRpcResult>;
+};
+
+type SessionManagerBackendInternals = {
+	resolveBackend(backendId: string): unknown;
 };
 
 /**
@@ -508,6 +519,142 @@ describe("SessionManager", () => {
 			targetRelayKey: harness.workerProtocol.relayKey,
 			ciphertext: response.ciphertext,
 		});
+
+	type RemoteSpawnRelayBehavior = {
+		placeError?: Error;
+		remoteFailure?: Error;
+		sendError?: Error;
+		response?: (request: VerifiedTeamRelayRequest) => unknown;
+	};
+
+	const prepareEncryptedLeaderForRemoteSpawn = async (
+		behavior: RemoteSpawnRelayBehavior = {},
+	) => {
+		await initCrypto();
+		await sessionManager.shutdown();
+
+		const leaderCrypto = new CliCryptoService(new Uint8Array(32).fill(51));
+		const workerCrypto = new CliCryptoService(new Uint8Array(32).fill(52));
+		sessionManager = new SessionManager(mockConfig, leaderCrypto, {
+			validateWorkspacePath: async () => true,
+		});
+		mockConnection = createMockConnection();
+		prepareTeamSessionConnection(
+			mockConnection,
+			"leader-session-for-remote-spawn",
+			expectedRemoteTeamTools,
+		);
+		const createConnection = mock(
+			() => mockConnection as unknown as AcpConnection,
+		);
+		sessionManager.createConnection = createConnection;
+
+		const leaderProtocol = new TeamRelayProtocol({
+			machineId: mockConfig.machineId,
+			cryptoService: leaderCrypto,
+		});
+		const workerProtocol = new TeamRelayProtocol({
+			machineId: "remote-worker-machine",
+			cryptoService: workerCrypto,
+		});
+		const verifiedRequests: VerifiedTeamRelayRequest[] = [];
+		const placeTeamRelayPeer = mock(
+			async (
+				_params: PlaceTeamRelayPeerParams,
+			): Promise<PlaceTeamRelayPeerResult> => {
+				if (behavior.placeError) {
+					throw behavior.placeError;
+				}
+				return {
+					targetMachineId: workerProtocol.machineId,
+					relayKey: workerProtocol.relayKey,
+				};
+			},
+		);
+		const resolveTeamRelayPeer = mock(
+			async (
+				_params: ResolveTeamRelayPeerParams,
+			): Promise<ResolveTeamRelayPeerResult> => {
+				throw new Error("Placed relay key must be used directly");
+			},
+		);
+		const sendTeamRelay = mock(
+			async (params: SendTeamRelayParams): Promise<SendTeamRelayResult> => {
+				const verified = workerProtocol.openRequest({
+					operationId: params.operationId,
+					sourceMachineId: leaderProtocol.machineId,
+					sourceRelayKey: leaderProtocol.relayKey,
+					ciphertext: params.ciphertext,
+				});
+				verifiedRequests.push(verified);
+				if (behavior.sendError) {
+					throw behavior.sendError;
+				}
+				const payload = verified.payload as { serverId?: unknown };
+				if (behavior.remoteFailure) {
+					const response = workerProtocol.sealFailure(
+						verified,
+						behavior.remoteFailure,
+					);
+					return {
+						operationId: params.operationId,
+						targetMachineId: params.targetMachineId,
+						ciphertext: response.ciphertext,
+					};
+				}
+				const value = behavior.response
+					? behavior.response(verified)
+					: {
+							operationId: verified.operationId,
+							serverId: payload.serverId,
+							sessionId: "remote-member-session",
+						};
+				const response = workerProtocol.sealSuccess(verified, value);
+				return {
+					operationId: params.operationId,
+					targetMachineId: params.targetMachineId,
+					ciphertext: response.ciphertext,
+				};
+			},
+		);
+		const transport: TeamRelayWireTransport = {
+			placeTeamRelayPeer,
+			resolveTeamRelayPeer,
+			sendTeamRelay,
+		};
+		(
+			sessionManager as unknown as SessionManagerTeamRelayApi
+		).attachTeamRelayTransport(transport);
+
+		const created = await sessionManager.createAgentTeamRun({
+			machineId: mockConfig.machineId,
+			backendId: "backend-1",
+			workspaceRootCwd: "/home/user/project",
+			title: "Cross-machine Team",
+			leaderName: "Leader",
+		});
+		const backendInternals =
+			sessionManager as unknown as SessionManagerBackendInternals;
+		const originalResolveBackend =
+			backendInternals.resolveBackend.bind(sessionManager);
+		const resolveBackend = mock((backendId: string) =>
+			originalResolveBackend(backendId),
+		);
+		backendInternals.resolveBackend = resolveBackend;
+
+		return {
+			createConnection,
+			created,
+			internals: sessionManager as unknown as SessionManagerTeamInternals,
+			leaderProtocol,
+			placeTeamRelayPeer,
+			resolveBackend,
+			resolveTeamRelayPeer,
+			sendTeamRelay,
+			verifiedRequests,
+			workerProtocol,
+		};
+	};
 
 	describe("Agent-managed authentication", () => {
 		it("probes capabilities without creating a session", async () => {
@@ -5320,6 +5467,445 @@ describe("SessionManager", () => {
 					worktreeBranch: "team/run",
 				}),
 			);
+		});
+
+		it("places and bootstraps a remote member while keeping Team facts authoritative on the leader", async () => {
+			const harness = await prepareEncryptedLeaderForRemoteSpawn();
+
+			const result = await sessionManager.spawnAgentTeamMember({
+				agentTeamId: harness.created.team.agentTeamId,
+				requestedByMemberId: harness.created.team.leaderMemberId,
+				name: "Remote Worker",
+				backendId: "backend-remote",
+			});
+
+			expect(result).toEqual({
+				ok: true,
+				memberId: expect.any(String),
+				sessionId: "remote-member-session",
+				backendId: "backend-remote",
+				name: "Remote Worker",
+				requestedByMemberId: harness.created.team.leaderMemberId,
+			});
+			if (!result.ok) {
+				throw new Error("Expected remote member spawn to succeed");
+			}
+			expect(harness.resolveBackend).not.toHaveBeenCalled();
+			expect(harness.createConnection).toHaveBeenCalledTimes(1);
+			expect(mockConnection.createSession).toHaveBeenCalledTimes(1);
+			expect(harness.placeTeamRelayPeer).toHaveBeenCalledWith({
+				backendId: "backend-remote",
+			});
+			expect(harness.resolveTeamRelayPeer).not.toHaveBeenCalled();
+			expect(harness.sendTeamRelay).toHaveBeenCalledTimes(1);
+
+			const [request] = harness.verifiedRequests;
+			if (!request) {
+				throw new Error("Expected encrypted remote bootstrap request");
+			}
+			const serverId = buildTeamMcpServerId({
+				agentTeamId: harness.created.team.agentTeamId,
+				memberId: result.memberId,
+			});
+			expect(request).toEqual(
+				expect.objectContaining({
+					operation: "member.bootstrap",
+					sourceMachineId: mockConfig.machineId,
+					targetMachineId: harness.workerProtocol.machineId,
+				}),
+			);
+			expect(request.payload).toEqual({
+				operationId: request.operationId,
+				agentTeamId: harness.created.team.agentTeamId,
+				memberId: result.memberId,
+				serverId,
+				backendId: "backend-remote",
+				cwd: "/home/user/project",
+				additionalDirectories: [],
+			});
+			expect(
+				Object.keys(request.payload as Record<string, unknown>).sort(),
+			).toEqual([
+				"additionalDirectories",
+				"agentTeamId",
+				"backendId",
+				"cwd",
+				"memberId",
+				"operationId",
+				"serverId",
+			]);
+
+			const execution = harness.internals.agentTeamStore.getTeamMemberExecution(
+				harness.created.team.agentTeamId,
+				result.memberId,
+			);
+			expect(execution).toEqual(
+				expect.objectContaining({
+					agentTeamId: harness.created.team.agentTeamId,
+					memberId: result.memberId,
+					executionMachineId: harness.workerProtocol.machineId,
+					workerRelayKeyId: harness.workerProtocol.relayKey.keyId,
+					bootstrapOperationId: request.operationId,
+				}),
+			);
+			const authoritativeTeam = harness.internals.agentTeamStore.getAgentTeam({
+				agentTeamId: harness.created.team.agentTeamId,
+			}).team;
+			expect(authoritativeTeam?.members).toContainEqual(
+				expect.objectContaining({
+					memberId: result.memberId,
+					role: "member",
+					name: "Remote Worker",
+					backendId: "backend-remote",
+					sessionId: "remote-member-session",
+					lifecycle: "running",
+					health: "healthy",
+					mcp: expect.objectContaining({
+						transport: "acp",
+						phase: "tools_ready",
+						serverId,
+					}),
+				}),
+			);
+			expect(
+				sessionManager.listSessions().map((session) => session.sessionId),
+			).toEqual(["leader-session-for-remote-spawn"]);
+			expect(
+				harness.internals.teamRelayStore.getRemoteSessionBindingByServerId(
+					serverId,
+				),
+			).toBeUndefined();
+		});
+
+		it("treats remote bootstrap results containing leader-owned facts as outcome unknown", async () => {
+			const harness = await prepareEncryptedLeaderForRemoteSpawn({
+				response: (request) => {
+					const payload = request.payload as { serverId: string };
+					return {
+						operationId: request.operationId,
+						serverId: payload.serverId,
+						sessionId: "untrusted-remote-session",
+						role: "leader",
+					};
+				},
+			});
+
+			const result = await sessionManager.spawnAgentTeamMember({
+				agentTeamId: harness.created.team.agentTeamId,
+				requestedByMemberId: harness.created.team.leaderMemberId,
+				name: "Untrusted Result Worker",
+				backendId: "backend-remote",
+			});
+
+			expect(result).toEqual(
+				expect.objectContaining({
+					ok: false,
+					memberId: expect.any(String),
+					error: expect.objectContaining({
+						code: "MESSAGE_OUTCOME_UNKNOWN",
+					}),
+				}),
+			);
+			const team = harness.internals.agentTeamStore.getAgentTeam({
+				agentTeamId: harness.created.team.agentTeamId,
+			}).team;
+			const failedMember = team?.members.find(
+				(member) => member.name === "Untrusted Result Worker",
+			);
+			expect(failedMember).toEqual(
+				expect.objectContaining({
+					sessionId: undefined,
+					lifecycle: "creating_session",
+					health: "degraded",
+					error: expect.objectContaining({
+						code: "MESSAGE_OUTCOME_UNKNOWN",
+					}),
+					mcp: expect.objectContaining({
+						phase: "degraded",
+						error: expect.objectContaining({
+							code: "MESSAGE_OUTCOME_UNKNOWN",
+						}),
+					}),
+				}),
+			);
+			if (!failedMember) {
+				throw new Error("Expected failed remote member fact");
+			}
+			expect(
+				harness.internals.agentTeamStore.getTeamMemberExecution(
+					harness.created.team.agentTeamId,
+					failedMember.memberId,
+				),
+			).toEqual(
+				expect.objectContaining({
+					executionMachineId: harness.workerProtocol.machineId,
+					workerRelayKeyId: harness.workerProtocol.relayKey.keyId,
+					bootstrapOperationId: harness.verifiedRequests[0]?.operationId,
+				}),
+			);
+		});
+
+		it("does not invent a member or execution route when placement fails", async () => {
+			const harness = await prepareEncryptedLeaderForRemoteSpawn({
+				placeError: new Error("no eligible remote worker"),
+			});
+
+			const result = await sessionManager.spawnAgentTeamMember({
+				agentTeamId: harness.created.team.agentTeamId,
+				requestedByMemberId: harness.created.team.leaderMemberId,
+				name: "Unplaced Worker",
+				backendId: "backend-remote",
+			});
+
+			expect(result).toEqual(
+				expect.objectContaining({
+					ok: false,
+					error: expect.objectContaining({ code: "INTERNAL_ERROR" }),
+				}),
+			);
+			expect(result).not.toHaveProperty("memberId");
+			const team = harness.internals.agentTeamStore.getAgentTeam({
+				agentTeamId: harness.created.team.agentTeamId,
+			}).team;
+			expect(
+				team?.members.find((member) => member.name === "Unplaced Worker"),
+			).toBeUndefined();
+			expect(
+				harness.internals.agentTeamStore.listTeamMemberExecutions(
+					harness.created.team.agentTeamId,
+				),
+			).toEqual([]);
+			expect(harness.sendTeamRelay).not.toHaveBeenCalled();
+			expect(harness.resolveBackend).not.toHaveBeenCalled();
+			expect(harness.createConnection).toHaveBeenCalledTimes(1);
+		});
+
+		it("keeps the member non-terminal and retains its route when bootstrap delivery has an unknown outcome", async () => {
+			const cases: Array<{
+				label: string;
+				behavior: RemoteSpawnRelayBehavior;
+			}> = [
+				{
+					label: "transport",
+					behavior: { sendError: new Error("relay response lost") },
+				},
+				{
+					label: "worker",
+					behavior: {
+						remoteFailure: new AppError(
+							createErrorDetail({
+								code: "MESSAGE_OUTCOME_UNKNOWN",
+								message: "Worker cannot prove bootstrap outcome",
+								retryable: true,
+								scope: "session",
+							}),
+							500,
+						),
+					},
+				},
+			];
+
+			for (const testCase of cases) {
+				const harness = await prepareEncryptedLeaderForRemoteSpawn(
+					testCase.behavior,
+				);
+				const memberName = `Uncertain ${testCase.label} Worker`;
+				const result = await sessionManager.spawnAgentTeamMember({
+					agentTeamId: harness.created.team.agentTeamId,
+					requestedByMemberId: harness.created.team.leaderMemberId,
+					name: memberName,
+					backendId: "backend-remote",
+				});
+
+				expect(result).toEqual(
+					expect.objectContaining({
+						ok: false,
+						memberId: expect.any(String),
+						error: expect.objectContaining({
+							code: "MESSAGE_OUTCOME_UNKNOWN",
+						}),
+					}),
+				);
+				const team = harness.internals.agentTeamStore.getAgentTeam({
+					agentTeamId: harness.created.team.agentTeamId,
+				}).team;
+				const uncertainMember = team?.members.find(
+					(member) => member.name === memberName,
+				);
+				expect(uncertainMember).toEqual(
+					expect.objectContaining({
+						sessionId: undefined,
+						lifecycle: "creating_session",
+						health: "degraded",
+						error: expect.objectContaining({
+							code: "MESSAGE_OUTCOME_UNKNOWN",
+						}),
+						mcp: expect.objectContaining({
+							phase: "degraded",
+							error: expect.objectContaining({
+								code: "MESSAGE_OUTCOME_UNKNOWN",
+							}),
+						}),
+					}),
+				);
+				const [request] = harness.verifiedRequests;
+				if (!uncertainMember || !request) {
+					throw new Error("Expected uncertain member and delivered bootstrap");
+				}
+				expect(
+					harness.internals.agentTeamStore.getTeamMemberExecution(
+						harness.created.team.agentTeamId,
+						uncertainMember.memberId,
+					),
+				).toEqual(
+					expect.objectContaining({
+						executionMachineId: harness.workerProtocol.machineId,
+						workerRelayKeyId: harness.workerProtocol.relayKey.keyId,
+						bootstrapOperationId: request.operationId,
+					}),
+				);
+				expect(harness.resolveBackend).not.toHaveBeenCalled();
+				expect(harness.createConnection).toHaveBeenCalledTimes(1);
+				expect(
+					sessionManager.listSessions().map((session) => session.sessionId),
+				).toEqual(["leader-session-for-remote-spawn"]);
+			}
+		});
+
+		it("marks a proven remote bootstrap failure terminal while retaining its bound route", async () => {
+			const harness = await prepareEncryptedLeaderForRemoteSpawn({
+				remoteFailure: new AppError(
+					createErrorDetail({
+						code: "CAPABILITY_NOT_SUPPORTED",
+						message: "Remote backend lacks native MCP-over-ACP",
+						retryable: false,
+						scope: "session",
+					}),
+					409,
+				),
+			});
+
+			const result = await sessionManager.spawnAgentTeamMember({
+				agentTeamId: harness.created.team.agentTeamId,
+				requestedByMemberId: harness.created.team.leaderMemberId,
+				name: "Rejected Remote Worker",
+				backendId: "backend-remote",
+			});
+
+			expect(result).toEqual(
+				expect.objectContaining({
+					ok: false,
+					memberId: expect.any(String),
+					error: expect.objectContaining({
+						code: "CAPABILITY_NOT_SUPPORTED",
+					}),
+				}),
+			);
+			const team = harness.internals.agentTeamStore.getAgentTeam({
+				agentTeamId: harness.created.team.agentTeamId,
+			}).team;
+			const failedMember = team?.members.find(
+				(member) => member.name === "Rejected Remote Worker",
+			);
+			expect(failedMember).toEqual(
+				expect.objectContaining({
+					sessionId: undefined,
+					lifecycle: "failed",
+					health: "error",
+					error: expect.objectContaining({
+						code: "CAPABILITY_NOT_SUPPORTED",
+					}),
+					mcp: expect.objectContaining({
+						phase: "error",
+						error: expect.objectContaining({
+							code: "CAPABILITY_NOT_SUPPORTED",
+						}),
+					}),
+				}),
+			);
+			const [request] = harness.verifiedRequests;
+			if (!failedMember || !request) {
+				throw new Error("Expected terminal remote failure and route");
+			}
+			expect(
+				harness.internals.agentTeamStore.getTeamMemberExecution(
+					harness.created.team.agentTeamId,
+					failedMember.memberId,
+				),
+			).toEqual(
+				expect.objectContaining({
+					executionMachineId: harness.workerProtocol.machineId,
+					workerRelayKeyId: harness.workerProtocol.relayKey.keyId,
+					bootstrapOperationId: request.operationId,
+				}),
+			);
+		});
+
+		it("keeps a locally available backend on the existing local spawn path", async () => {
+			const harness = await prepareEncryptedLeaderForRemoteSpawn();
+			prepareTeamSessionConnection(
+				mockConnection,
+				"local-member-session",
+				expectedTeamTools,
+			);
+
+			const result = await sessionManager.spawnAgentTeamMember({
+				agentTeamId: harness.created.team.agentTeamId,
+				requestedByMemberId: harness.created.team.leaderMemberId,
+				name: "Local Worker",
+				backendId: "backend-1",
+			});
+
+			expect(result).toEqual(
+				expect.objectContaining({
+					ok: true,
+					memberId: expect.any(String),
+					sessionId: "local-member-session",
+					backendId: "backend-1",
+				}),
+			);
+			if (!result.ok) {
+				throw new Error("Expected local member spawn to succeed");
+			}
+			expect(harness.resolveBackend).toHaveBeenCalledWith("backend-1");
+			expect(harness.placeTeamRelayPeer).not.toHaveBeenCalled();
+			expect(harness.resolveTeamRelayPeer).not.toHaveBeenCalled();
+			expect(harness.sendTeamRelay).not.toHaveBeenCalled();
+			expect(harness.createConnection).toHaveBeenCalledTimes(2);
+			expect(mockConnection.createSession).toHaveBeenCalledTimes(2);
+			expect(
+				harness.internals.agentTeamStore.getTeamMemberExecution(
+					harness.created.team.agentTeamId,
+					result.memberId,
+				),
+			).toBeNull();
+		});
+
+		it("normalizes a local backend ID before deciding whether to place remotely", async () => {
+			const harness = await prepareEncryptedLeaderForRemoteSpawn();
+			prepareTeamSessionConnection(
+				mockConnection,
+				"normalized-local-member-session",
+				expectedTeamTools,
+			);
+
+			const result = await sessionManager.spawnAgentTeamMember({
+				agentTeamId: harness.created.team.agentTeamId,
+				requestedByMemberId: harness.created.team.leaderMemberId,
+				name: "Normalized Local Worker",
+				backendId: " backend-1 ",
+			});
+
+			expect(result).toEqual(
+				expect.objectContaining({
+					ok: true,
+					sessionId: "normalized-local-member-session",
+					backendId: "backend-1",
+				}),
+			);
+			expect(harness.resolveBackend).toHaveBeenCalledWith("backend-1");
+			expect(harness.placeTeamRelayPeer).not.toHaveBeenCalled();
+			expect(harness.sendTeamRelay).not.toHaveBeenCalled();
 		});
 
 		it("cleans up a created member session when Team MCP readiness times out", async () => {
