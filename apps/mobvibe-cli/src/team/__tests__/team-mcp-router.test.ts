@@ -9,7 +9,11 @@ import {
 	type TeamCommandEnvelope,
 } from "../team-command-bus.js";
 import { TeamMcpProtocolAdapter } from "../team-mcp-protocol.js";
-import { TeamMcpRouter } from "../team-mcp-router.js";
+import {
+	createLeaderLocalTeamMcpPort,
+	type TeamMcpPort,
+	TeamMcpRouter,
+} from "../team-mcp-router.js";
 import {
 	EXPECTED_TEAM_TOOL_NAMES,
 	TeamToolHandlers,
@@ -72,9 +76,11 @@ describe("TeamMcpRouter", () => {
 			services: { spawnMember },
 		});
 		router = new TeamMcpRouter({
-			store,
-			handlers,
-			dispatcher: new TeamCommandBus({ store, handlers }),
+			port: createLeaderLocalTeamMcpPort({
+				store,
+				handlers,
+				dispatcher: new TeamCommandBus({ store, handlers }),
+			}),
 		});
 	});
 
@@ -238,9 +244,11 @@ describe("TeamMcpRouter", () => {
 			}),
 		);
 		const dispatcherRouter = new TeamMcpRouter({
-			store,
-			handlers,
-			dispatcher: { dispatch },
+			port: createLeaderLocalTeamMcpPort({
+				store,
+				handlers,
+				dispatcher: { dispatch },
+			}),
 		});
 		const serverId = `mobvibe-team:${agentTeamId}:${leaderMemberId}`;
 		dispatcherRouter.handleConnect({ serverId });
@@ -260,6 +268,79 @@ describe("TeamMcpRouter", () => {
 			args: { ignored: true },
 		});
 		expect(result.data).toEqual({ source: "command-dispatcher" });
+	});
+
+	test("routes a remote worker binding without requiring leader Team facts locally", async () => {
+		const remoteAgentTeamId = "11111111-1111-4111-8111-111111111111";
+		const remoteMemberId = "22222222-2222-4222-8222-222222222222";
+		const remoteServerId = `mobvibe-team:${remoteAgentTeamId}:${remoteMemberId}`;
+		const statusUpdates: Array<{ phase: string }> = [];
+		const dispatchCommand = mock(
+			(input: Parameters<TeamMcpPort["dispatchCommand"]>[0]) =>
+				Promise.resolve({
+					operationId: input.command.operationId,
+					result: {
+						caller: {
+							agentTeamId: remoteAgentTeamId,
+							memberId: remoteMemberId,
+							role: "member" as const,
+						},
+						toolName: input.command.toolName,
+						data: { source: "encrypted-leader-relay" },
+					},
+				}),
+		);
+		const remotePort: TeamMcpPort = {
+			resolveBinding: ({ serverId, transport }) => ({
+				serverId,
+				transport,
+				agentTeamId: remoteAgentTeamId,
+				memberId: remoteMemberId,
+				role: "member",
+				commandTarget: "leader_relay",
+			}),
+			updateStatus: ({ phase }) => {
+				statusUpdates.push({ phase });
+			},
+			dispatchCommand,
+			recordLifecycleIntent: () => {
+				throw new Error("not used");
+			},
+		};
+		const remoteRouter = new TeamMcpRouter({ port: remotePort });
+
+		remoteRouter.handleConnect({ serverId: remoteServerId });
+		remoteRouter.handleListTools({
+			serverId: remoteServerId,
+			toolNames: [...EXPECTED_TEAM_TOOL_NAMES],
+		});
+		const result = await remoteRouter.handleToolCall({
+			serverId: remoteServerId,
+			toolName: "mobvibe_team_members",
+			args: { memberId: "forged", sourceMachineId: "forged" },
+		});
+
+		expect(statusUpdates).toEqual([
+			{ phase: "tools_waiting" },
+			{ phase: "tools_ready" },
+		]);
+		expect(dispatchCommand).toHaveBeenCalledWith({
+			binding: expect.objectContaining({
+				agentTeamId: remoteAgentTeamId,
+				memberId: remoteMemberId,
+				commandTarget: "leader_relay",
+			}),
+			command: {
+				version: 1,
+				operationId: expect.any(String),
+				agentTeamId: remoteAgentTeamId,
+				callerMemberId: remoteMemberId,
+				toolName: "mobvibe_team_members",
+				args: { memberId: "forged", sourceMachineId: "forged" },
+			},
+		});
+		expect(result.data).toEqual({ source: "encrypted-leader-relay" });
+		expect(store.listTeamMembers(remoteAgentTeamId)).toEqual([]);
 	});
 
 	test("send_message persists from router-bound caller and ignores spoofed args", async () => {

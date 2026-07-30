@@ -9,7 +9,10 @@ import {
 	buildTeamStdioBridgeToolManifest,
 } from "../team-bridge-stdio.js";
 import { TeamCommandBus } from "../team-command-bus.js";
-import { TeamMcpRouter } from "../team-mcp-router.js";
+import {
+	createLeaderLocalTeamMcpPort,
+	TeamMcpRouter,
+} from "../team-mcp-router.js";
 import {
 	EXPECTED_TEAM_TOOL_NAMES,
 	TeamToolHandlers,
@@ -122,9 +125,11 @@ describe("per-session stdio bridge fallback", () => {
 		const memberId = created.team.leaderMemberId;
 		const handlers = new TeamToolHandlers({ store });
 		const router = new TeamMcpRouter({
-			store,
-			handlers,
-			dispatcher: new TeamCommandBus({ store, handlers }),
+			port: createLeaderLocalTeamMcpPort({
+				store,
+				handlers,
+				dispatcher: new TeamCommandBus({ store, handlers }),
+			}),
 		});
 		const serverId = `mobvibe-team:${agentTeamId}:${memberId}`;
 

@@ -2,7 +2,10 @@ import type { TeamSourceRef } from "@mobvibe/shared";
 import type { AgentTeamStore, MailboxWakeMessage } from "./agent-team-store.js";
 import { MailboxService } from "./mailbox-service.js";
 import { TeamCommandBus } from "./team-command-bus.js";
-import { TeamMcpRouter } from "./team-mcp-router.js";
+import {
+	createLeaderLocalTeamMcpPort,
+	TeamMcpRouter,
+} from "./team-mcp-router.js";
 import {
 	type SpawnMemberResult,
 	TeamToolHandlers,
@@ -62,9 +65,11 @@ export class TeamRuntime {
 			handlers: this.toolHandlers,
 		});
 		this.mcpRouter = new TeamMcpRouter({
-			store: options.store,
-			handlers: this.toolHandlers,
-			dispatcher: this.commandBus,
+			port: createLeaderLocalTeamMcpPort({
+				store: options.store,
+				handlers: this.toolHandlers,
+				dispatcher: this.commandBus,
+			}),
 		});
 	}
 

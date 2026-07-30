@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
 	createErrorDetail,
+	type ErrorDetail,
 	type TeamMcpTransport,
 	type TeamSourceRef,
 } from "@mobvibe/shared";
@@ -12,6 +13,8 @@ import type {
 import {
 	TEAM_COMMAND_ENVELOPE_VERSION,
 	type TeamCommandDispatcher,
+	type TeamCommandEnvelope,
+	type TeamCommandExecution,
 } from "./team-command-bus.js";
 import {
 	EXPECTED_TEAM_TOOL_NAMES,
@@ -21,21 +24,90 @@ import {
 	type TeamToolResult,
 } from "./team-tool-handlers.js";
 
+export type TeamMcpBinding = TeamToolCaller & {
+	serverId: string;
+	transport: TeamMcpTransport;
+	commandTarget: "leader_local" | "leader_relay";
+};
+
+export type TeamMcpPort = {
+	resolveBinding(input: {
+		serverId: string;
+		transport: TeamMcpTransport;
+	}): TeamMcpBinding;
+	updateStatus(input: {
+		binding: TeamMcpBinding;
+		phase: "not_started" | "tools_waiting" | "tools_ready" | "degraded";
+		lastError?: ErrorDetail;
+	}): void;
+	dispatchCommand(input: {
+		binding: TeamMcpBinding;
+		command: TeamCommandEnvelope;
+	}): Promise<TeamCommandExecution>;
+	recordLifecycleIntent(input: {
+		binding: TeamMcpBinding;
+		kind: TeamToolIntentKind;
+		payload: Record<string, unknown>;
+		sourceRefs: TeamSourceRef[];
+	}): Promise<TeamToolIntent> | TeamToolIntent;
+};
+
 export type TeamMcpRouterOptions = {
-	store: AgentTeamStore;
+	port: TeamMcpPort;
+};
+
+export type LeaderLocalTeamMcpPortOptions = {
+	store: Pick<AgentTeamStore, "listTeamMembers" | "updateMcpStatus">;
 	handlers: Pick<TeamToolHandlers, "recordLifecycleIntent">;
 	dispatcher: TeamCommandDispatcher;
 };
 
-type ServerBinding = TeamToolCaller & {
-	serverId: string;
-	transport: TeamMcpTransport;
-};
-
 type ServerBindingState = {
-	binding: ServerBinding;
+	binding: TeamMcpBinding;
 	connectionCount: number;
 };
+
+export function createLeaderLocalTeamMcpPort(
+	options: LeaderLocalTeamMcpPortOptions,
+): TeamMcpPort {
+	return {
+		resolveBinding: ({ serverId, transport }) => {
+			const parsed = parseServerId(serverId);
+			const member = options.store
+				.listTeamMembers(parsed.agentTeamId)
+				.find((row) => row.member_id === parsed.memberId);
+			if (!member) {
+				throw new Error("Team MCP member binding not found");
+			}
+			return {
+				serverId,
+				transport,
+				agentTeamId: parsed.agentTeamId,
+				memberId: parsed.memberId,
+				role: member.role === "leader" ? "leader" : "member",
+				commandTarget: "leader_local",
+			};
+		},
+		updateStatus: ({ binding, phase, lastError }) => {
+			options.store.updateMcpStatus({
+				agentTeamId: binding.agentTeamId,
+				memberId: binding.memberId,
+				transport: binding.transport,
+				serverId: binding.serverId,
+				phase,
+				lastError,
+			});
+		},
+		dispatchCommand: ({ command }) => options.dispatcher.dispatch(command),
+		recordLifecycleIntent: ({ binding, kind, payload, sourceRefs }) =>
+			options.handlers.recordLifecycleIntent({
+				caller: binding,
+				kind,
+				payload,
+				sourceRefs,
+			}),
+	};
+}
 
 export class TeamMcpRouter {
 	private readonly bindings = new Map<string, ServerBindingState>();
@@ -49,7 +121,10 @@ export class TeamMcpRouter {
 		const existing = this.bindings.get(input.serverId);
 		const binding =
 			existing?.binding ??
-			this.createBinding(input.serverId, input.transport ?? "acp");
+			this.options.port.resolveBinding({
+				serverId: input.serverId,
+				transport: input.transport ?? "acp",
+			});
 		if (existing) {
 			existing.connectionCount += 1;
 		} else {
@@ -58,11 +133,8 @@ export class TeamMcpRouter {
 				connectionCount: 1,
 			});
 		}
-		this.options.store.updateMcpStatus({
-			agentTeamId: binding.agentTeamId,
-			memberId: binding.memberId,
-			transport: binding.transport,
-			serverId: input.serverId,
+		this.options.port.updateStatus({
+			binding,
 			phase: "tools_waiting",
 		});
 		return binding;
@@ -76,11 +148,8 @@ export class TeamMcpRouter {
 			return;
 		}
 		this.bindings.delete(input.serverId);
-		this.options.store.updateMcpStatus({
-			agentTeamId: state.binding.agentTeamId,
-			memberId: state.binding.memberId,
-			transport: state.binding.transport,
-			serverId: input.serverId,
+		this.options.port.updateStatus({
+			binding: state.binding,
 			phase: "not_started",
 		});
 	}
@@ -90,11 +159,8 @@ export class TeamMcpRouter {
 		const missing = EXPECTED_TEAM_TOOL_NAMES.filter(
 			(name) => !input.toolNames.includes(name),
 		);
-		this.options.store.updateMcpStatus({
-			agentTeamId: binding.agentTeamId,
-			memberId: binding.memberId,
-			transport: binding.transport,
-			serverId: input.serverId,
+		this.options.port.updateStatus({
+			binding,
 			phase: missing.length === 0 ? "tools_ready" : "degraded",
 			lastError:
 				missing.length === 0
@@ -114,13 +180,16 @@ export class TeamMcpRouter {
 		args: unknown;
 	}): Promise<TeamToolResult> {
 		const binding = this.requireBinding(input.serverId);
-		const execution = await this.options.dispatcher.dispatch({
-			version: TEAM_COMMAND_ENVELOPE_VERSION,
-			operationId: randomUUID(),
-			agentTeamId: binding.agentTeamId,
-			callerMemberId: binding.memberId,
-			toolName: input.toolName,
-			args: input.args,
+		const execution = await this.options.port.dispatchCommand({
+			binding,
+			command: {
+				version: TEAM_COMMAND_ENVELOPE_VERSION,
+				operationId: randomUUID(),
+				agentTeamId: binding.agentTeamId,
+				callerMemberId: binding.memberId,
+				toolName: input.toolName,
+				args: input.args,
+			},
 		});
 		return execution.result;
 	}
@@ -132,36 +201,15 @@ export class TeamMcpRouter {
 		sourceRefs: TeamSourceRef[];
 	}): Promise<TeamToolIntent> {
 		const binding = this.requireBinding(input.serverId);
-		return this.options.handlers.recordLifecycleIntent({
-			caller: binding,
+		return this.options.port.recordLifecycleIntent({
+			binding,
 			kind: input.kind,
 			payload: input.payload,
 			sourceRefs: input.sourceRefs,
 		});
 	}
 
-	private createBinding(
-		serverId: string,
-		transport: TeamMcpTransport,
-	): ServerBinding {
-		const parsed = parseServerId(serverId);
-		const member = this.options.store
-			.listTeamMembers(parsed.agentTeamId)
-			.find((row) => row.member_id === parsed.memberId);
-		if (!member) {
-			throw new Error("Team MCP member binding not found");
-		}
-		const binding: ServerBinding = {
-			serverId,
-			transport,
-			agentTeamId: parsed.agentTeamId,
-			memberId: parsed.memberId,
-			role: member.role === "leader" ? "leader" : "member",
-		};
-		return binding;
-	}
-
-	private requireBinding(serverId: string): ServerBinding {
+	private requireBinding(serverId: string): TeamMcpBinding {
 		const state = this.bindings.get(serverId);
 		if (!state) {
 			throw new Error("Team MCP caller is not bound");
