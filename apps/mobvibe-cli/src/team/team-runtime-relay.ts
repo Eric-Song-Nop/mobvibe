@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
 	AppError,
 	createErrorDetail,
@@ -11,6 +12,9 @@ import type { TeamRuntime } from "./team-runtime.js";
 export const TEAM_RUNTIME_RELAY_VERSION = 1 as const;
 
 const TEAM_RUNTIME_IDENTIFIER_MAX_BYTES = 256;
+const TEAM_RUNTIME_SESSION_ID_MAX_BYTES = 1024;
+const TEAM_RUNTIME_OPERATION_PREFIX = "team-runtime:v1:";
+const TEAM_RUNTIME_TURN_ID_PATTERN = /^[0-9a-f]{64}$/;
 const TEAM_RUNTIME_PAYLOAD_KEYS = [
 	"version",
 	"type",
@@ -19,6 +23,7 @@ const TEAM_RUNTIME_PAYLOAD_KEYS = [
 	"memberId",
 	"turnId",
 ] as const;
+const TEAM_RUNTIME_ACK_KEYS = ["operationId", "accepted"] as const;
 const INVALID_IDENTIFIER_PATTERN = /[\p{Cc}\p{Cs}]/u;
 const UTF8_ENCODER = new TextEncoder();
 
@@ -36,6 +41,14 @@ export type TeamRuntimeRelayAck = {
 	accepted: true;
 };
 
+export type TeamTurnCompletedRelayInput = {
+	agentTeamId: string;
+	memberId: string;
+	sessionId: string;
+	revision: number;
+	seq: number;
+};
+
 export type LeaderTeamRuntimeRelayStore = Pick<
 	AgentTeamStore,
 	"getTeamMemberExecution" | "listTeamMembers"
@@ -44,6 +57,47 @@ export type LeaderTeamRuntimeRelayStore = Pick<
 export type LeaderTeamRuntimeRelayOptions = {
 	store: LeaderTeamRuntimeRelayStore;
 	runtime: Pick<TeamRuntime, "onMemberTurnCompleted">;
+};
+
+export const createTeamTurnCompletedRelayPayload = (
+	input: TeamTurnCompletedRelayInput,
+): TeamRuntimeRelayPayload => {
+	const agentTeamId = parseIdentifier(
+		input.agentTeamId,
+		TEAM_RUNTIME_IDENTIFIER_MAX_BYTES,
+	);
+	const memberId = parseIdentifier(
+		input.memberId,
+		TEAM_RUNTIME_IDENTIFIER_MAX_BYTES,
+	);
+	const sessionId = parseIdentifier(
+		input.sessionId,
+		TEAM_RUNTIME_SESSION_ID_MAX_BYTES,
+	);
+	const revision = parsePositiveSafeInteger(input.revision);
+	const seq = parsePositiveSafeInteger(input.seq);
+	const turnId = createHash("sha256")
+		.update(
+			JSON.stringify([
+				"member.runtime",
+				"turn_completed",
+				agentTeamId,
+				memberId,
+				sessionId,
+				revision,
+				seq,
+			]),
+		)
+		.digest("hex");
+
+	return {
+		version: TEAM_RUNTIME_RELAY_VERSION,
+		type: "turn_completed",
+		operationId: `${TEAM_RUNTIME_OPERATION_PREFIX}${turnId}`,
+		agentTeamId,
+		memberId,
+		turnId,
+	};
 };
 
 export const parseTeamRuntimeRelayPayload = (
@@ -73,6 +127,16 @@ export const parseTeamRuntimeRelayPayload = (
 	if (operationId !== request.operationId) {
 		throw invalidRuntimeRelayError();
 	}
+	const turnId = parseIdentifier(
+		payload.turnId,
+		TEAM_RUNTIME_IDENTIFIER_MAX_BYTES,
+	);
+	if (
+		!TEAM_RUNTIME_TURN_ID_PATTERN.test(turnId) ||
+		operationId !== `${TEAM_RUNTIME_OPERATION_PREFIX}${turnId}`
+	) {
+		throw invalidRuntimeRelayError();
+	}
 
 	return {
 		version: TEAM_RUNTIME_RELAY_VERSION,
@@ -86,8 +150,29 @@ export const parseTeamRuntimeRelayPayload = (
 			payload.memberId,
 			TEAM_RUNTIME_IDENTIFIER_MAX_BYTES,
 		),
-		turnId: parseIdentifier(payload.turnId, TEAM_RUNTIME_IDENTIFIER_MAX_BYTES),
+		turnId,
 	};
+};
+
+export const parseTeamRuntimeRelayAck = (
+	value: unknown,
+	expectedOperationId: string,
+): TeamRuntimeRelayAck => {
+	if (
+		!isPlainRecord(value) ||
+		!hasExactKeys(value, TEAM_RUNTIME_ACK_KEYS) ||
+		value.accepted !== true
+	) {
+		throw invalidRuntimeRelayError();
+	}
+	const operationId = parseIdentifier(
+		value.operationId,
+		TEAM_RELAY_OPERATION_ID_MAX_BYTES,
+	);
+	if (operationId !== expectedOperationId) {
+		throw invalidRuntimeRelayError();
+	}
+	return { operationId, accepted: true };
 };
 
 export const createLeaderTeamRuntimeRelayHandler = (
@@ -158,6 +243,13 @@ const parseIdentifier = (value: unknown, maxBytes: number): string => {
 		throw invalidRuntimeRelayError();
 	}
 	return value;
+};
+
+const parsePositiveSafeInteger = (value: unknown): number => {
+	if (!Number.isSafeInteger(value) || (value as number) <= 0) {
+		throw invalidRuntimeRelayError();
+	}
+	return value as number;
 };
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> => {

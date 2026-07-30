@@ -47,6 +47,7 @@ import {
 } from "../../team/team-relay-protocol.js";
 import type { TeamRelayStore } from "../../team/team-relay-store.js";
 import type { TeamRuntime } from "../../team/team-runtime.js";
+import { createTeamTurnCompletedRelayPayload } from "../../team/team-runtime-relay.js";
 import { WalStore } from "../../wal/wal-store.js";
 import type { AcpBackendStatus, AcpConnection } from "../acp-connection.js";
 import type { SessionManagerDependencies } from "../session-manager.js";
@@ -427,7 +428,14 @@ describe("SessionManager", () => {
 		"mobvibe_team_task_update",
 	];
 
-	const prepareEncryptedRemoteWorker = async () => {
+	type RemoteWorkerRelayBehavior = {
+		outgoingError?: Error;
+		outgoingResponse?: (request: VerifiedTeamRelayRequest) => unknown;
+	};
+
+	const prepareEncryptedRemoteWorker = async (
+		behavior: RemoteWorkerRelayBehavior = {},
+	) => {
 		await initCrypto();
 		await sessionManager.shutdown();
 
@@ -448,6 +456,33 @@ describe("SessionManager", () => {
 			machineId: "leader-machine",
 			cryptoService: leaderCrypto,
 		});
+		const outgoingRequests: VerifiedTeamRelayRequest[] = [];
+		const sendTeamRelay = mock(
+			async (params: SendTeamRelayParams): Promise<SendTeamRelayResult> => {
+				const request = leaderProtocol.openRequest({
+					operationId: params.operationId,
+					sourceMachineId: workerProtocol.machineId,
+					sourceRelayKey: workerProtocol.relayKey,
+					ciphertext: params.ciphertext,
+				});
+				outgoingRequests.push(request);
+				if (behavior.outgoingError) {
+					throw behavior.outgoingError;
+				}
+				if (!behavior.outgoingResponse) {
+					throw new Error("Unexpected outgoing Team relay");
+				}
+				const response = leaderProtocol.sealSuccess(
+					request,
+					behavior.outgoingResponse(request),
+				);
+				return {
+					operationId: params.operationId,
+					targetMachineId: params.targetMachineId,
+					ciphertext: response.ciphertext,
+				};
+			},
+		);
 		const transport: TeamRelayWireTransport = {
 			placeTeamRelayPeer: () =>
 				Promise.resolve({
@@ -459,15 +494,16 @@ describe("SessionManager", () => {
 					targetMachineId,
 					relayKey: leaderProtocol.relayKey,
 				}),
-			sendTeamRelay: () =>
-				Promise.reject(new Error("Unexpected outgoing Team relay")),
+			sendTeamRelay,
 		};
 		const relayApi = sessionManager as unknown as SessionManagerTeamRelayApi;
 		relayApi.attachTeamRelayTransport(transport);
 		return {
 			internals: sessionManager as unknown as SessionManagerTeamInternals,
 			leaderProtocol,
+			outgoingRequests,
 			relayApi,
+			sendTeamRelay,
 			workerProtocol,
 		};
 	};
@@ -5670,20 +5706,20 @@ describe("SessionManager", () => {
 				throw new Error("Expected remote member spawn to succeed");
 			}
 
-			const operationId = "remote-runtime-turn-completed";
+			const payload = createTeamTurnCompletedRelayPayload({
+				agentTeamId: harness.created.team.agentTeamId,
+				memberId: spawned.memberId,
+				sessionId: "remote-member-session",
+				revision: 1,
+				seq: 2,
+			});
+			const { operationId } = payload;
 			const sealed = harness.workerProtocol.sealRequest({
 				operationId,
 				operation: "member.runtime",
 				targetMachineId: harness.leaderProtocol.machineId,
 				targetRelayKey: harness.leaderProtocol.relayKey,
-				payload: {
-					version: 1,
-					type: "turn_completed",
-					operationId,
-					agentTeamId: harness.created.team.agentTeamId,
-					memberId: spawned.memberId,
-					turnId: "remote-turn-1",
-				},
+				payload,
 			});
 			const relayRequest = {
 				operationId,
@@ -6395,6 +6431,152 @@ describe("SessionManager", () => {
 				openRemoteBootstrapResponse(harness, fixture.operationId, response),
 			);
 			expect(mockConnection.createSession).toHaveBeenCalledTimes(1);
+			expect(harness.internals.agentTeamStore.listAgentTeams().teams).toEqual(
+				[],
+			);
+		});
+
+		it("relays a durable worker turn completion to the leader", async () => {
+			const harness = await prepareEncryptedRemoteWorker({
+				outgoingResponse: (request) => ({
+					operationId: request.operationId,
+					accepted: true,
+				}),
+			});
+			const fixture = createRemoteBootstrapFixture(
+				"bootstrap-runtime-completion",
+				"runtime-completion",
+			);
+			prepareTeamSessionConnection(
+				mockConnection,
+				"remote-worker-session-runtime",
+				expectedRemoteTeamTools,
+			);
+			const bootstrapResponse = await harness.relayApi.handleTeamRelayRequest(
+				sealRemoteBootstrap(harness, fixture),
+			);
+			openRemoteBootstrapResponse(
+				harness,
+				fixture.operationId,
+				bootstrapResponse,
+			);
+			const claim = sessionManager.claimMessageSend(
+				"remote-worker-session-runtime",
+				"remote-worker-message-runtime",
+			);
+			if (claim.status !== "claimed") {
+				throw new Error("Expected remote worker message claim");
+			}
+
+			sessionManager.completeMessageSend(
+				"remote-worker-session-runtime",
+				"remote-worker-message-runtime",
+				claim.claimId,
+				"end_turn",
+			);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			expect(harness.outgoingRequests).toHaveLength(1);
+			const [runtimeRequest] = harness.outgoingRequests;
+			if (!runtimeRequest) {
+				throw new Error("Expected a remote runtime relay request");
+			}
+			expect(runtimeRequest).toEqual(
+				expect.objectContaining({
+					operation: "member.runtime",
+					sourceMachineId: harness.workerProtocol.machineId,
+					targetMachineId: harness.leaderProtocol.machineId,
+					payload: {
+						version: 1,
+						type: "turn_completed",
+						operationId: expect.stringMatching(
+							/^team-runtime:v1:[0-9a-f]{64}$/,
+						),
+						agentTeamId: fixture.agentTeamId,
+						memberId: fixture.memberId,
+						turnId: expect.stringMatching(/^[0-9a-f]{64}$/),
+					},
+				}),
+			);
+			const runtimeOperationId = (
+				runtimeRequest.payload as { operationId?: unknown }
+			).operationId;
+			if (typeof runtimeOperationId !== "string") {
+				throw new Error("Expected a string runtime relay operation ID");
+			}
+			expect(runtimeRequest.operationId).toBe(runtimeOperationId);
+			expect(
+				sessionManager.getMessageSendResult(
+					"remote-worker-session-runtime",
+					"remote-worker-message-runtime",
+				),
+			).toEqual({ stopReason: "end_turn" });
+			expect(harness.internals.agentTeamStore.listAgentTeams().teams).toEqual(
+				[],
+			);
+			expect(
+				harness.internals.teamRelayStore.getRemoteSessionBindingBySessionId(
+					"remote-worker-session-runtime",
+				)?.lifecycle,
+			).toBe("active");
+		});
+
+		it("keeps a worker prompt completed when runtime relay fails", async () => {
+			const harness = await prepareEncryptedRemoteWorker({
+				outgoingError: new Error("runtime relay unavailable"),
+			});
+			const fixture = createRemoteBootstrapFixture(
+				"bootstrap-runtime-failure",
+				"runtime-failure",
+			);
+			prepareTeamSessionConnection(
+				mockConnection,
+				"remote-worker-session-runtime-failure",
+				expectedRemoteTeamTools,
+			);
+			const bootstrapResponse = await harness.relayApi.handleTeamRelayRequest(
+				sealRemoteBootstrap(harness, fixture),
+			);
+			openRemoteBootstrapResponse(
+				harness,
+				fixture.operationId,
+				bootstrapResponse,
+			);
+			const claim = sessionManager.claimMessageSend(
+				"remote-worker-session-runtime-failure",
+				"remote-worker-message-runtime-failure",
+			);
+			if (claim.status !== "claimed") {
+				throw new Error("Expected remote worker message claim");
+			}
+			loggerWarnMock.mockClear();
+
+			expect(() =>
+				sessionManager.completeMessageSend(
+					"remote-worker-session-runtime-failure",
+					"remote-worker-message-runtime-failure",
+					claim.claimId,
+					"end_turn",
+				),
+			).not.toThrow();
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			expect(harness.sendTeamRelay).toHaveBeenCalledTimes(1);
+			expect(
+				sessionManager.getMessageSendResult(
+					"remote-worker-session-runtime-failure",
+					"remote-worker-message-runtime-failure",
+				),
+			).toEqual({ stopReason: "end_turn" });
+			expect(loggerWarnMock).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sessionId: "remote-worker-session-runtime-failure",
+					agentTeamId: fixture.agentTeamId,
+					memberId: fixture.memberId,
+					errorName: "Error",
+				}),
+				"remote_team_turn_completion_relay_failed",
+			);
 			expect(harness.internals.agentTeamStore.listAgentTeams().teams).toEqual(
 				[],
 			);

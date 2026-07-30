@@ -74,7 +74,11 @@ import {
 } from "../team/team-relay-protocol.js";
 import { TeamRelayStore } from "../team/team-relay-store.js";
 import { TeamRuntime } from "../team/team-runtime.js";
-import { createLeaderTeamRuntimeRelayHandler } from "../team/team-runtime-relay.js";
+import {
+	createLeaderTeamRuntimeRelayHandler,
+	createTeamTurnCompletedRelayPayload,
+	parseTeamRuntimeRelayAck,
+} from "../team/team-runtime-relay.js";
 import type { SpawnMemberResult } from "../team/team-tool-handlers.js";
 import {
 	consolidateEventsForRead,
@@ -1814,7 +1818,7 @@ export class SessionManager {
 			updated: [this.buildSummary(record)],
 			removed: [],
 		});
-		this.handleLeaderLocalTeamTurnCompleted(sessionId);
+		this.handleTeamTurnCompleted(sessionId, terminalEvent);
 	}
 
 	recordTurnEnd(
@@ -1831,7 +1835,11 @@ export class SessionManager {
 		}
 		record.updatedAt = new Date();
 		const payload = { stopReason, ...(usage ? { usage } : {}) };
-		this.bufferOrWriteSessionEvent(record, "turn_end", payload);
+		const terminalEvent = this.bufferOrWriteSessionEvent(
+			record,
+			"turn_end",
+			payload,
+		);
 		// 将更新后的 updatedAt 推送给 WebUI，确保侧边栏排序正确
 		const summary = this.buildSummary(record);
 		this.emitSessionsChanged({
@@ -1839,7 +1847,7 @@ export class SessionManager {
 			updated: [summary],
 			removed: [],
 		});
-		this.handleLeaderLocalTeamTurnCompleted(sessionId);
+		this.handleTeamTurnCompleted(sessionId, terminalEvent);
 	}
 
 	async injectTeamMailboxPrompt(input: {
@@ -3143,28 +3151,13 @@ export class SessionManager {
 		return undefined;
 	}
 
-	private handleLeaderLocalTeamTurnCompleted(sessionId: string): void {
+	private handleTeamTurnCompleted(
+		sessionId: string,
+		terminalEvent?: Pick<WalEvent, "revision" | "seq">,
+	): void {
+		let teamMember: ResolvedTeamSessionBinding | undefined;
 		try {
-			const teamMember = this.findLeaderLocalTeamMemberBySessionId(sessionId);
-			if (!teamMember || teamMember.role === "leader") {
-				return;
-			}
-			void this.teamRuntime
-				.onMemberTurnCompleted(teamMember.agentTeamId, teamMember.memberId)
-				.catch((error) => {
-					logger.warn(
-						{
-							sessionId,
-							agentTeamId: teamMember.agentTeamId,
-							memberId: teamMember.memberId,
-							errorCode:
-								error instanceof AppError
-									? error.detail.code
-									: "INTERNAL_ERROR",
-						},
-						"agent_team_turn_completion_failed",
-					);
-				});
+			teamMember = this.findTeamSessionBinding(sessionId);
 		} catch (error) {
 			logger.warn(
 				{
@@ -3174,7 +3167,104 @@ export class SessionManager {
 				},
 				"agent_team_turn_completion_lookup_failed",
 			);
+			return;
 		}
+		if (!teamMember) {
+			return;
+		}
+		if (teamMember.kind === "leader_local") {
+			this.completeLeaderLocalTeamMember(sessionId, teamMember);
+			return;
+		}
+		if (terminalEvent) {
+			this.relayRemoteTeamMemberCompletion(
+				sessionId,
+				teamMember,
+				terminalEvent,
+			);
+		}
+	}
+
+	private completeLeaderLocalTeamMember(
+		sessionId: string,
+		teamMember: Extract<ResolvedTeamSessionBinding, { kind: "leader_local" }>,
+	): void {
+		if (teamMember.role === "leader") {
+			return;
+		}
+		void this.teamRuntime
+			.onMemberTurnCompleted(teamMember.agentTeamId, teamMember.memberId)
+			.catch((error) => {
+				logger.warn(
+					{
+						sessionId,
+						agentTeamId: teamMember.agentTeamId,
+						memberId: teamMember.memberId,
+						errorCode:
+							error instanceof AppError ? error.detail.code : "INTERNAL_ERROR",
+					},
+					"agent_team_turn_completion_failed",
+				);
+			});
+	}
+
+	private relayRemoteTeamMemberCompletion(
+		sessionId: string,
+		teamMember: Extract<ResolvedTeamSessionBinding, { kind: "remote_worker" }>,
+		terminalEvent: Pick<WalEvent, "revision" | "seq">,
+	): void {
+		try {
+			const relay = this.teamRelayClient;
+			if (!relay) {
+				throw new Error("Team relay is not available");
+			}
+			const payload = createTeamTurnCompletedRelayPayload({
+				agentTeamId: teamMember.agentTeamId,
+				memberId: teamMember.memberId,
+				sessionId,
+				revision: terminalEvent.revision,
+				seq: terminalEvent.seq,
+			});
+			void relay
+				.call({
+					operationId: payload.operationId,
+					operation: "member.runtime",
+					targetMachineId: teamMember.leaderMachineId,
+					payload,
+				})
+				.then((result) => {
+					parseTeamRuntimeRelayAck(result, payload.operationId);
+				})
+				.catch((error) => {
+					this.logRemoteTeamTurnCompletionRelayFailure(
+						sessionId,
+						teamMember,
+						error,
+					);
+				});
+		} catch (error) {
+			this.logRemoteTeamTurnCompletionRelayFailure(
+				sessionId,
+				teamMember,
+				error,
+			);
+		}
+	}
+
+	private logRemoteTeamTurnCompletionRelayFailure(
+		sessionId: string,
+		teamMember: Pick<ResolvedTeamSessionBinding, "agentTeamId" | "memberId">,
+		error: unknown,
+	): void {
+		logger.warn(
+			{
+				sessionId,
+				agentTeamId: teamMember.agentTeamId,
+				memberId: teamMember.memberId,
+				errorName: error instanceof Error ? error.name : "UnknownError",
+			},
+			"remote_team_turn_completion_relay_failed",
+		);
 	}
 
 	private findTeamSessionBinding(
