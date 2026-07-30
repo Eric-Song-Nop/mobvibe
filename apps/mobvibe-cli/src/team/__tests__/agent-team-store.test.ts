@@ -671,6 +671,7 @@ describe("Agent Team migrations", () => {
 			expect(names).toContain("team_relay_operations");
 			expect(names).toContain("remote_team_session_bindings");
 			expect(names).toContain("agent_team_member_executions");
+			expect(names).toContain("team_runtime_outbox");
 
 			const mailboxColumns = db
 				.query("PRAGMA table_info(agent_team_mailbox_messages)")
@@ -682,7 +683,7 @@ describe("Agent Team migrations", () => {
 			const schemaVersion = db
 				.query("SELECT MAX(version) AS version FROM schema_version")
 				.get() as { version: number };
-			expect(schemaVersion.version).toBe(19);
+			expect(schemaVersion.version).toBe(20);
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });
@@ -747,8 +748,61 @@ describe("Agent Team migrations", () => {
 			const bindingForeignKeys = db
 				.query("PRAGMA foreign_key_list(remote_team_session_bindings)")
 				.all();
+			const runtimeOutboxColumns = db
+				.query("PRAGMA table_info(team_runtime_outbox)")
+				.all() as Array<{ name: string }>;
+			const runtimeOutboxColumnNames = runtimeOutboxColumns.map(
+				({ name }) => name,
+			);
+			expect(runtimeOutboxColumnNames).toEqual([
+				"id",
+				"source_session_id",
+				"source_revision",
+				"source_seq",
+				"protocol_version",
+				"event_type",
+				"agent_team_id",
+				"member_id",
+				"target_machine_id",
+				"status",
+				"attempt_count",
+				"next_attempt_at",
+				"lease_id",
+				"lease_expires_at",
+				"last_error_code",
+				"last_attempt_at",
+				"delivered_at",
+				"created_at",
+				"updated_at",
+			]);
+			for (const forbiddenColumn of [
+				"role",
+				"name",
+				"prompt",
+				"task",
+				"mailbox",
+				"body",
+				"worktree",
+			]) {
+				expect(runtimeOutboxColumnNames).not.toContain(forbiddenColumn);
+			}
+			const runtimeOutboxForeignKeys = db
+				.query("PRAGMA foreign_key_list(team_runtime_outbox)")
+				.all();
+			const runtimeCaptureTrigger = db
+				.query(`
+					SELECT name
+					FROM sqlite_master
+					WHERE type = 'trigger'
+						AND name = 'enqueue_team_runtime_after_turn_end'
+				`)
+				.get();
 			expect(relayForeignKeys).toEqual([]);
 			expect(bindingForeignKeys).toEqual([]);
+			expect(runtimeOutboxForeignKeys).toEqual([]);
+			expect(runtimeCaptureTrigger).toEqual({
+				name: "enqueue_team_runtime_after_turn_end",
+			});
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });
@@ -1002,14 +1056,14 @@ describe("Agent Team migrations", () => {
 			const schemaVersion = db
 				.query("SELECT MAX(version) AS version FROM schema_version")
 				.get();
-			expect(schemaVersion).toEqual({ version: 19 });
+			expect(schemaVersion).toEqual({ version: 20 });
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
 
-	test("upgrades v18 to v19 without replacing leader facts or worker relay rows", () => {
+	test("upgrades v18 through v20 without replacing leader facts or worker relay rows", () => {
 		const tempDir = fs.mkdtempSync(
 			path.join(os.tmpdir(), "agent-team-migrate-v18-"),
 		);
@@ -1093,7 +1147,179 @@ describe("Agent Team migrations", () => {
 			).toEqual({ server_id: "server-worker", lifecycle: "creating" });
 			expect(
 				db.query("SELECT MAX(version) AS version FROM schema_version").get(),
-			).toEqual({ version: 19 });
+			).toEqual({ version: 20 });
+		} finally {
+			db.close();
+			fs.rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("backfills active remote member completions when upgrading from v19", () => {
+		const tempDir = fs.mkdtempSync(
+			path.join(os.tmpdir(), "agent-team-migrate-v19-outbox-"),
+		);
+		const dbPath = path.join(tempDir, "events.db");
+		const db = new Database(dbPath);
+
+		try {
+			runMigrations(db);
+			db.exec(`
+				DROP TRIGGER enqueue_team_runtime_after_turn_end;
+				DROP TABLE team_runtime_outbox;
+				DELETE FROM schema_version WHERE version = 20;
+
+				INSERT INTO sessions (
+					session_id, machine_id, backend_id, current_revision,
+					created_at, updated_at
+				) VALUES (
+					'remote-session', 'worker-machine', 'backend-worker', 1,
+					'2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO remote_team_session_bindings (
+					server_id, agent_team_id, member_id, leader_machine_id,
+					backend_id, session_id, lifecycle, created_at, updated_at
+				) VALUES (
+					'server-worker', 'team-remote', 'member-remote', 'leader-machine',
+					'backend-worker', 'remote-session', 'active',
+					'2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO session_events (
+					session_id, revision, seq, kind, payload, created_at
+				) VALUES (
+					'remote-session', 1, 1, 'turn_end',
+					'{"stopReason":"end_turn"}', '2026-01-01T00:00:01.000Z'
+				);
+			`);
+
+			expect(runMigrations(db)).toBe(19);
+			expect(
+				db
+					.query(`
+						SELECT
+							source_session_id,
+							source_revision,
+							source_seq,
+							agent_team_id,
+							member_id,
+							target_machine_id,
+							status,
+							next_attempt_at
+						FROM team_runtime_outbox
+					`)
+					.all(),
+			).toEqual([
+				{
+					source_session_id: "remote-session",
+					source_revision: 1,
+					source_seq: 1,
+					agent_team_id: "team-remote",
+					member_id: "member-remote",
+					target_machine_id: "leader-machine",
+					status: "pending",
+					next_attempt_at: "2026-01-01T00:00:01.000Z",
+				},
+			]);
+		} finally {
+			db.close();
+			fs.rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("does not resurrect cleared runtime work when reopening v20", () => {
+		const tempDir = fs.mkdtempSync(
+			path.join(os.tmpdir(), "agent-team-reopen-v20-outbox-"),
+		);
+		const dbPath = path.join(tempDir, "events.db");
+		const db = new Database(dbPath);
+
+		try {
+			runMigrations(db);
+			db.exec(`
+				INSERT INTO sessions (
+					session_id, machine_id, backend_id, current_revision,
+					created_at, updated_at
+				) VALUES (
+					'remote-session', 'worker-machine', 'backend-worker', 1,
+					'2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO remote_team_session_bindings (
+					server_id, agent_team_id, member_id, leader_machine_id,
+					backend_id, session_id, lifecycle, created_at, updated_at
+				) VALUES (
+					'server-worker', 'team-remote', 'member-remote', 'leader-machine',
+					'backend-worker', 'remote-session', 'active',
+					'2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO session_events (
+					session_id, revision, seq, kind, payload, created_at
+				) VALUES (
+					'remote-session', 1, 1, 'turn_end',
+					'{"stopReason":"end_turn"}', '2026-01-01T00:00:01.000Z'
+				);
+				DELETE FROM team_runtime_outbox;
+			`);
+
+			expect(runMigrations(db)).toBe(20);
+			expect(db.query("SELECT id FROM team_runtime_outbox").all()).toEqual([]);
+		} finally {
+			db.close();
+			fs.rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("backfills the capture gap before restoring a missing v20 trigger", () => {
+		const tempDir = fs.mkdtempSync(
+			path.join(os.tmpdir(), "agent-team-reconcile-v20-trigger-"),
+		);
+		const dbPath = path.join(tempDir, "events.db");
+		const db = new Database(dbPath);
+
+		try {
+			runMigrations(db);
+			db.exec(`
+				DROP TRIGGER enqueue_team_runtime_after_turn_end;
+				INSERT INTO sessions (
+					session_id, machine_id, backend_id, current_revision,
+					created_at, updated_at
+				) VALUES (
+					'remote-session', 'worker-machine', 'backend-worker', 1,
+					'2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO remote_team_session_bindings (
+					server_id, agent_team_id, member_id, leader_machine_id,
+					backend_id, session_id, lifecycle, created_at, updated_at
+				) VALUES (
+					'server-worker', 'team-remote', 'member-remote', 'leader-machine',
+					'backend-worker', 'remote-session', 'active',
+					'2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+				);
+				INSERT INTO session_events (
+					session_id, revision, seq, kind, payload, created_at
+				) VALUES (
+					'remote-session', 1, 1, 'turn_end',
+					'{"stopReason":"end_turn"}', '2026-01-01T00:00:01.000Z'
+				);
+			`);
+			expect(db.query("SELECT id FROM team_runtime_outbox").all()).toEqual([]);
+
+			expect(runMigrations(db)).toBe(20);
+			expect(
+				db
+					.query(
+						"SELECT source_session_id FROM team_runtime_outbox ORDER BY id",
+					)
+					.all(),
+			).toEqual([{ source_session_id: "remote-session" }]);
+			expect(
+				db
+					.query(`
+						SELECT name
+						FROM sqlite_master
+						WHERE type = 'trigger'
+							AND name = 'enqueue_team_runtime_after_turn_end'
+					`)
+					.get(),
+			).toEqual({ name: "enqueue_team_runtime_after_turn_end" });
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });
@@ -1253,7 +1479,7 @@ describe("Agent Team migrations", () => {
 			const schemaVersion = db
 				.query("SELECT MAX(version) AS version FROM schema_version")
 				.get() as { version: number };
-			expect(schemaVersion.version).toBe(19);
+			expect(schemaVersion.version).toBe(20);
 		} finally {
 			db.close();
 			fs.rmSync(tempDir, { recursive: true, force: true });

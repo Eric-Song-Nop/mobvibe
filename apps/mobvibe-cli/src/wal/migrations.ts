@@ -36,6 +36,143 @@ const SESSION_REVISION_KEYS_SCHEMA = `
 		ON session_revision_keys (session_id, revision);
 `;
 
+const TEAM_RUNTIME_OUTBOX_SCHEMA = `
+	-- A worker-local runtime outbox contains only immutable routing
+	-- identifiers and the source WAL position. Team-authored facts stay
+	-- exclusively in the leader's AgentTeamStore.
+	CREATE TABLE IF NOT EXISTS team_runtime_outbox (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		source_session_id TEXT NOT NULL,
+		source_revision INTEGER NOT NULL,
+		source_seq INTEGER NOT NULL,
+		protocol_version INTEGER NOT NULL,
+		event_type TEXT NOT NULL,
+		agent_team_id TEXT NOT NULL,
+		member_id TEXT NOT NULL,
+		target_machine_id TEXT NOT NULL,
+		status TEXT NOT NULL,
+		attempt_count INTEGER NOT NULL DEFAULT 0,
+		next_attempt_at TEXT,
+		lease_id TEXT,
+		lease_expires_at TEXT,
+		last_error_code TEXT,
+		last_attempt_at TEXT,
+		delivered_at TEXT,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		UNIQUE (source_session_id, source_revision, source_seq),
+		CHECK (source_revision > 0),
+		CHECK (source_seq > 0),
+		CHECK (protocol_version = 1),
+		CHECK (event_type = 'turn_completed'),
+		CHECK (status IN ('pending', 'in_flight', 'delivered', 'failed')),
+		CHECK (attempt_count >= 0),
+		CHECK (
+			(status = 'pending'
+				AND next_attempt_at IS NOT NULL
+				AND lease_id IS NULL
+				AND lease_expires_at IS NULL
+				AND delivered_at IS NULL)
+			OR (status = 'in_flight'
+				AND next_attempt_at IS NULL
+				AND lease_id IS NOT NULL
+				AND lease_expires_at IS NOT NULL
+				AND delivered_at IS NULL)
+			OR (status = 'delivered'
+				AND next_attempt_at IS NULL
+				AND lease_id IS NULL
+				AND lease_expires_at IS NULL
+				AND delivered_at IS NOT NULL)
+			OR (status = 'failed'
+				AND next_attempt_at IS NULL
+				AND lease_id IS NULL
+				AND lease_expires_at IS NULL
+				AND last_error_code IS NOT NULL
+				AND delivered_at IS NULL)
+		)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_team_runtime_outbox_due
+		ON team_runtime_outbox (
+			status,
+			next_attempt_at,
+			lease_expires_at
+		);
+
+	CREATE INDEX IF NOT EXISTS idx_team_runtime_outbox_member_order
+		ON team_runtime_outbox (
+			agent_team_id,
+			member_id,
+			status,
+			id
+		);
+`;
+
+const TEAM_RUNTIME_OUTBOX_BACKFILL_SCHEMA = `
+	-- Reconcile terminal events committed before this migration. A canonical
+	-- replay is safe because the leader relay journal is exactly-once by
+	-- source machine and operation identity.
+	INSERT OR IGNORE INTO team_runtime_outbox (
+		source_session_id, source_revision, source_seq,
+		protocol_version, event_type, agent_team_id, member_id,
+		target_machine_id, status, attempt_count, next_attempt_at,
+		created_at, updated_at
+	)
+	SELECT
+		events.session_id,
+		events.revision,
+		events.seq,
+		1,
+		'turn_completed',
+		bindings.agent_team_id,
+		bindings.member_id,
+		bindings.leader_machine_id,
+		'pending',
+		0,
+		events.created_at,
+		events.created_at,
+		events.created_at
+	FROM session_events AS events
+	INNER JOIN remote_team_session_bindings AS bindings
+		ON bindings.session_id = events.session_id
+		AND bindings.lifecycle = 'active'
+	WHERE events.kind = 'turn_end'
+	ORDER BY events.id;
+`;
+
+const TEAM_RUNTIME_OUTBOX_TRIGGER_SCHEMA = `
+	-- SQLite triggers run in the transaction that inserted the WAL event, so
+	-- terminal durability and relay durability cannot split.
+	CREATE TRIGGER IF NOT EXISTS enqueue_team_runtime_after_turn_end
+	AFTER INSERT ON session_events
+	WHEN NEW.kind = 'turn_end'
+	BEGIN
+		INSERT OR IGNORE INTO team_runtime_outbox (
+			source_session_id, source_revision, source_seq,
+			protocol_version, event_type, agent_team_id, member_id,
+			target_machine_id, status, attempt_count, next_attempt_at,
+			created_at, updated_at
+		)
+		SELECT
+			NEW.session_id,
+			NEW.revision,
+			NEW.seq,
+			1,
+			'turn_completed',
+			bindings.agent_team_id,
+			bindings.member_id,
+			bindings.leader_machine_id,
+			'pending',
+			0,
+			NEW.created_at,
+			NEW.created_at,
+			NEW.created_at
+		FROM remote_team_session_bindings AS bindings
+		WHERE bindings.session_id = NEW.session_id
+			AND bindings.lifecycle = 'active';
+	END;
+`;
+
 function tableExists(db: Database, tableName: string): boolean {
 	return (
 		db
@@ -43,6 +180,16 @@ function tableExists(db: Database, tableName: string): boolean {
 				"SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
 			)
 			.get(tableName) !== null
+	);
+}
+
+function triggerExists(db: Database, triggerName: string): boolean {
+	return (
+		db
+			.query(
+				"SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = ? LIMIT 1",
+			)
+			.get(triggerName) !== null
 	);
 }
 
@@ -56,6 +203,21 @@ function columnExists(
 			.query("SELECT 1 FROM pragma_table_info(?) WHERE name = ? LIMIT 1")
 			.get(tableName, columnName) !== null
 	);
+}
+
+function installTeamRuntimeOutboxCapture(
+	db: Database,
+	backfill: boolean,
+): void {
+	if (
+		tableExists(db, "session_events") &&
+		tableExists(db, "remote_team_session_bindings")
+	) {
+		if (backfill) {
+			db.exec(TEAM_RUNTIME_OUTBOX_BACKFILL_SCHEMA);
+		}
+		db.exec(TEAM_RUNTIME_OUTBOX_TRIGGER_SCHEMA);
+	}
 }
 
 function reconcileDivergentMigrationHistory(
@@ -73,6 +235,15 @@ function reconcileDivergentMigrationHistory(
 	}
 	if (currentVersion >= 9 && !tableExists(db, "session_revision_keys")) {
 		db.exec(SESSION_REVISION_KEYS_SCHEMA);
+	}
+	if (currentVersion >= 20) {
+		const outboxMissing = !tableExists(db, "team_runtime_outbox");
+		const captureTriggerMissing = !triggerExists(
+			db,
+			"enqueue_team_runtime_after_turn_end",
+		);
+		db.exec(TEAM_RUNTIME_OUTBOX_SCHEMA);
+		installTeamRuntimeOutboxCapture(db, outboxMissing || captureTriggerMissing);
 	}
 }
 
@@ -543,6 +714,13 @@ const MIGRATIONS: readonly Migration[] = [
 			CREATE INDEX IF NOT EXISTS idx_agent_team_member_executions_team
 				ON agent_team_member_executions (agent_team_id, created_at);
 		`,
+	},
+	{
+		version: 20,
+		up: (db) => {
+			db.exec(TEAM_RUNTIME_OUTBOX_SCHEMA);
+			installTeamRuntimeOutboxCapture(db, true);
+		},
 	},
 ];
 
