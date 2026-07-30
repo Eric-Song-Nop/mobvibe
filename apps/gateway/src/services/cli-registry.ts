@@ -7,7 +7,9 @@ import type {
 	CliStatusPayload,
 	SessionSummary,
 	SessionsChangedPayload,
+	TeamRelayPublicKey,
 } from "@mobvibe/shared";
+import { isTeamRelayPublicKey } from "@mobvibe/shared";
 import type { Socket } from "socket.io";
 import { sanitizeAgentSessionCapabilities } from "./agent-capability-sanitizer.js";
 
@@ -20,6 +22,7 @@ export type CliRecord = {
 	sessions: SessionSummary[];
 	backends: AcpBackendSummary[];
 	protocolCapabilities?: CliRegistrationInfo["protocolCapabilities"];
+	teamRelayKey?: TeamRelayPublicKey;
 	/** User ID from auth */
 	userId?: string;
 	/** Device key ID used to authenticate this CLI */
@@ -106,6 +109,9 @@ export class CliRegistry extends EventEmitter {
 			sessions: [],
 			backends: info.backends ?? [],
 			protocolCapabilities: info.protocolCapabilities,
+			...(isTeamRelayPublicKey(info.teamRelayKey)
+				? { teamRelayKey: { ...info.teamRelayKey } }
+				: {}),
 			userId: authInfo?.userId,
 			deviceId: authInfo?.deviceId,
 		};

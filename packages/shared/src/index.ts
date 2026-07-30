@@ -339,10 +339,27 @@ export type {
 	WebuiToGatewayEvents,
 } from "./types/socket-events.js";
 export type {
+	ResolveTeamRelayPeerParams,
+	ResolveTeamRelayPeerResult,
+	SendTeamRelayParams,
+	SendTeamRelayResult,
 	TeamRelayCiphertext,
+	TeamRelayExecuteRpcParams,
+	TeamRelayExecuteRpcResult,
 	TeamRelayPublicKey,
 } from "./types/team-relay.js";
-export { TEAM_RELAY_ENVELOPE_VERSION } from "./types/team-relay.js";
+export {
+	isTeamRelayCiphertext,
+	isTeamRelayPublicKey,
+	parseResolveTeamRelayPeerParams,
+	parseSendTeamRelayParams,
+	parseTeamRelayExecuteRpcParams,
+	parseTeamRelayExecuteRpcResult,
+	TEAM_RELAY_CIPHERTEXT_MAX_BYTES,
+	TEAM_RELAY_ENVELOPE_VERSION,
+	TEAM_RELAY_MACHINE_ID_MAX_BYTES,
+	TEAM_RELAY_OPERATION_ID_MAX_BYTES,
+} from "./types/team-relay.js";
 // Validation utilities (Zod schemas from SDK)
 export { parseSessionNotification } from "./validation/acp-schemas.js";
 export {

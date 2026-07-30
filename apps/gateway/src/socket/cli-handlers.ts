@@ -3,7 +3,13 @@ import type {
 	CliRegistrationInfo,
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
+	ResolveTeamRelayPeerParams,
+	ResolveTeamRelayPeerResult,
+	RpcError,
+	RpcRequest,
 	RpcResponse,
+	SendTeamRelayParams,
+	SendTeamRelayResult,
 	SessionAttachedPayload,
 	SessionDetachedPayload,
 	SessionEvent,
@@ -12,7 +18,13 @@ import type {
 	SessionsDiscoveredPayload,
 	SignedAuthToken,
 } from "@mobvibe/shared";
-import { initCrypto, verifySignedToken } from "@mobvibe/shared";
+import {
+	AppError,
+	createInternalError,
+	initCrypto,
+	TEAM_RELAY_OPERATION_ID_MAX_BYTES,
+	verifySignedToken,
+} from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
 import type { GatewayConfig } from "../config.js";
 import { logger } from "../lib/logger.js";
@@ -71,6 +83,80 @@ const getSerializedPayloadBytes = (payload: unknown): number | undefined => {
 	} catch {
 		return undefined;
 	}
+};
+
+const toTeamRelayRpcError = (error: unknown): RpcError => {
+	if (error instanceof AppError) {
+		switch (error.detail.code) {
+			case "REQUEST_VALIDATION_FAILED":
+				return {
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Invalid Team relay request",
+					retryable: false,
+					scope: "request",
+					status: 400,
+				};
+			case "AUTHORIZATION_FAILED":
+				return {
+					code: "AUTHORIZATION_FAILED",
+					message: "Team relay peer not found",
+					retryable: false,
+					scope: "request",
+					status: 404,
+				};
+			case "CAPABILITY_NOT_SUPPORTED":
+				return {
+					code: "CAPABILITY_NOT_SUPPORTED",
+					message: "Team relay unavailable",
+					retryable: false,
+					scope: "request",
+					status: 409,
+				};
+		}
+	}
+	return { ...createInternalError("request"), status: 500 };
+};
+
+const getTeamRelayRequestId = (request: unknown): string => {
+	if (
+		typeof request === "object" &&
+		request !== null &&
+		!Array.isArray(request) &&
+		"requestId" in request &&
+		typeof request.requestId === "string" &&
+		request.requestId.length > 0 &&
+		!/\p{Cc}/u.test(request.requestId) &&
+		Buffer.byteLength(request.requestId, "utf8") <=
+			TEAM_RELAY_OPERATION_ID_MAX_BYTES
+	) {
+		return request.requestId;
+	}
+	return "invalid-team-relay-request";
+};
+
+const parseTeamRelayRpcRequest = (request: unknown): RpcRequest<unknown> => {
+	const requestRecord =
+		typeof request === "object" && request !== null && !Array.isArray(request)
+			? (request as Record<string, unknown>)
+			: undefined;
+	if (
+		!requestRecord ||
+		Object.keys(requestRecord).length !== 2 ||
+		!Object.hasOwn(requestRecord, "requestId") ||
+		!Object.hasOwn(requestRecord, "params") ||
+		getTeamRelayRequestId(requestRecord) !== requestRecord.requestId
+	) {
+		throw new AppError(
+			{
+				code: "REQUEST_VALIDATION_FAILED",
+				message: "Invalid Team relay request",
+				retryable: false,
+				scope: "request",
+			},
+			400,
+		);
+	}
+	return request as RpcRequest<unknown>;
 };
 
 export type CliHandlersDeps = {
@@ -329,6 +415,39 @@ export function setupCliHandlers(
 			return true;
 		};
 
+		const handleTeamRelayRequest = async <TResult>(
+			event: "team-relay:resolve" | "team-relay:send",
+			rawRequest: unknown,
+			ack: ((response: RpcResponse<TResult>) => void) | undefined,
+			operation: (params: unknown) => Promise<TResult>,
+		): Promise<void> => {
+			if (typeof ack !== "function") {
+				logger.warn({ socketId: socket.id, event }, "team_relay_ack_missing");
+				return;
+			}
+			const requestId = getTeamRelayRequestId(rawRequest);
+			try {
+				const request = parseTeamRelayRpcRequest(rawRequest);
+				const result = await operation(request.params);
+				ack({ requestId, result });
+			} catch (error) {
+				logger.warn(
+					{
+						socketId: socket.id,
+						event,
+						requestId,
+						code:
+							error instanceof AppError ? error.detail.code : "INTERNAL_ERROR",
+					},
+					"team_relay_request_failed",
+				);
+				ack({
+					requestId,
+					error: toTeamRelayRpcError(error),
+				});
+			}
+		};
+
 		const registerCli = async (
 			info: CliRegistrationInfo,
 		): Promise<CliRecord | undefined> => {
@@ -455,6 +574,40 @@ export function setupCliHandlers(
 		socket.on("cli:heartbeat", () => {
 			// Just acknowledge
 		});
+
+		socket.on(
+			"team-relay:resolve",
+			(
+				request: RpcRequest<ResolveTeamRelayPeerParams>,
+				ack: (response: RpcResponse<ResolveTeamRelayPeerResult>) => void,
+			) => {
+				withRegisteredCli("team-relay:resolve", request, (record) => {
+					void handleTeamRelayRequest(
+						"team-relay:resolve",
+						request,
+						ack,
+						(params) => teamRouter.resolveRelayPeer(params, record),
+					);
+				});
+			},
+		);
+
+		socket.on(
+			"team-relay:send",
+			(
+				request: RpcRequest<SendTeamRelayParams>,
+				ack: (response: RpcResponse<SendTeamRelayResult>) => void,
+			) => {
+				withRegisteredCli("team-relay:send", request, (record) => {
+					void handleTeamRelayRequest(
+						"team-relay:send",
+						request,
+						ack,
+						(params) => teamRouter.relay(params, record),
+					);
+				});
+			},
+		);
 
 		// Sessions list update (initial sync and heartbeat)
 		socket.on("sessions:list", (sessions: SessionSummary[]) => {

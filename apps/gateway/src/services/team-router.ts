@@ -1,13 +1,23 @@
 import { randomUUID } from "node:crypto";
-import type {
-	CreateAgentTeamRpcParams,
-	CreateAgentTeamRpcResult,
-	GetAgentTeamRpcParams,
-	GetAgentTeamRpcResult,
-	ListAgentTeamsRpcParams,
-	ListAgentTeamsRpcResult,
-	RpcRequest,
-	RpcResponse,
+import {
+	AppError,
+	type CreateAgentTeamRpcParams,
+	type CreateAgentTeamRpcResult,
+	createErrorDetail,
+	createInternalError,
+	type GetAgentTeamRpcParams,
+	type GetAgentTeamRpcResult,
+	type ListAgentTeamsRpcParams,
+	type ListAgentTeamsRpcResult,
+	parseResolveTeamRelayPeerParams,
+	parseSendTeamRelayParams,
+	parseTeamRelayExecuteRpcResult,
+	type ResolveTeamRelayPeerResult,
+	type RpcRequest,
+	type RpcResponse,
+	type SendTeamRelayResult,
+	type TeamRelayExecuteRpcParams,
+	type TeamRelayExecuteRpcResult,
 } from "@mobvibe/shared";
 import type { Socket } from "socket.io";
 import { logger } from "../lib/logger.js";
@@ -91,6 +101,77 @@ export class TeamRouter {
 		);
 	}
 
+	async resolveRelayPeer(
+		rawParams: unknown,
+		source: CliRecord,
+	): Promise<ResolveTeamRelayPeerResult> {
+		const params = this.parseResolveRelayParams(rawParams);
+		const target = this.resolveRelayTarget(params.targetMachineId, source);
+		return {
+			targetMachineId: target.machineId,
+			relayKey: { ...target.teamRelayKey },
+		};
+	}
+
+	async relay(
+		rawParams: unknown,
+		source: CliRecord,
+	): Promise<SendTeamRelayResult> {
+		const params = this.parseSendRelayParams(rawParams);
+		const authenticatedSource = this.resolveAuthenticatedRelaySource(source);
+		const target = this.resolveRelayTarget(
+			params.targetMachineId,
+			authenticatedSource,
+		);
+		if (params.ciphertext.recipientKeyId !== target.teamRelayKey.keyId) {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Team relay recipient key mismatch",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+
+		logger.info(
+			{
+				operationId: params.operationId,
+				sourceMachineId: authenticatedSource.machineId,
+				targetMachineId: target.machineId,
+			},
+			"team_relay_rpc_start",
+		);
+		const result = await this.sendRpc<
+			TeamRelayExecuteRpcParams,
+			TeamRelayExecuteRpcResult
+		>(target.socket, "rpc:team-relay:execute", {
+			operationId: params.operationId,
+			sourceMachineId: authenticatedSource.machineId,
+			sourceRelayKey: { ...authenticatedSource.teamRelayKey },
+			ciphertext: params.ciphertext,
+		});
+		const parsedResult = this.parseRelayResponse(
+			result,
+			params.operationId,
+			authenticatedSource.teamRelayKey.keyId,
+		);
+		logger.info(
+			{
+				operationId: params.operationId,
+				sourceMachineId: authenticatedSource.machineId,
+				targetMachineId: target.machineId,
+			},
+			"team_relay_rpc_complete",
+		);
+		return {
+			operationId: parsedResult.operationId,
+			targetMachineId: target.machineId,
+			ciphertext: parsedResult.ciphertext,
+		};
+	}
+
 	handleRpcResponse(response: RpcResponse<unknown>, sourceSocketId?: string) {
 		const pending = this.pendingRpcs.get(response.requestId);
 		if (!pending) {
@@ -143,6 +224,123 @@ export class TeamRouter {
 			throw new Error("Machine not found");
 		}
 		return cli;
+	}
+
+	private parseResolveRelayParams(rawParams: unknown) {
+		try {
+			return parseResolveTeamRelayPeerParams(rawParams);
+		} catch {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Invalid Team relay request",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+	}
+
+	private parseSendRelayParams(rawParams: unknown) {
+		try {
+			return parseSendTeamRelayParams(rawParams);
+		} catch {
+			throw new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Invalid Team relay request",
+					retryable: false,
+					scope: "request",
+				}),
+				400,
+			);
+		}
+	}
+
+	private resolveAuthenticatedRelaySource(source: CliRecord): CliRecord & {
+		userId: string;
+		teamRelayKey: NonNullable<CliRecord["teamRelayKey"]>;
+	} {
+		const registered = this.cliRegistry.getCliBySocketId(source.socket.id);
+		if (
+			registered !== source ||
+			!registered.userId ||
+			!registered.teamRelayKey
+		) {
+			throw new AppError(
+				createErrorDetail({
+					code: "CAPABILITY_NOT_SUPPORTED",
+					message: "Team relay unavailable",
+					retryable: false,
+					scope: "request",
+				}),
+				409,
+			);
+		}
+		return registered as CliRecord & {
+			userId: string;
+			teamRelayKey: NonNullable<CliRecord["teamRelayKey"]>;
+		};
+	}
+
+	private resolveRelayTarget(
+		targetMachineId: string,
+		source: CliRecord,
+	): CliRecord & {
+		userId: string;
+		teamRelayKey: NonNullable<CliRecord["teamRelayKey"]>;
+	} {
+		const authenticatedSource = this.resolveAuthenticatedRelaySource(source);
+		const target = this.cliRegistry.getCliByMachineIdForUser(
+			targetMachineId,
+			authenticatedSource.userId,
+		);
+		if (!target || target === authenticatedSource) {
+			throw new AppError(
+				createErrorDetail({
+					code: "AUTHORIZATION_FAILED",
+					message: "Team relay peer not found",
+					retryable: false,
+					scope: "request",
+				}),
+				404,
+			);
+		}
+		if (!target.teamRelayKey) {
+			throw new AppError(
+				createErrorDetail({
+					code: "CAPABILITY_NOT_SUPPORTED",
+					message: "Team relay unavailable",
+					retryable: false,
+					scope: "request",
+				}),
+				409,
+			);
+		}
+		return target as CliRecord & {
+			userId: string;
+			teamRelayKey: NonNullable<CliRecord["teamRelayKey"]>;
+		};
+	}
+
+	private parseRelayResponse(
+		rawResult: unknown,
+		expectedOperationId: string,
+		expectedRecipientKeyId: string,
+	): TeamRelayExecuteRpcResult {
+		try {
+			const result = parseTeamRelayExecuteRpcResult(rawResult);
+			if (
+				result.operationId !== expectedOperationId ||
+				result.ciphertext.recipientKeyId !== expectedRecipientKeyId
+			) {
+				throw new Error("Team relay response binding mismatch");
+			}
+			return result;
+		} catch {
+			throw new AppError(createInternalError("service"), 502);
+		}
 	}
 
 	private sendRpc<TParams, TResult>(

@@ -29,6 +29,14 @@ import type {
 	SessionSummary,
 	SessionsChangedPayload,
 } from "./session.js";
+import type {
+	ResolveTeamRelayPeerParams,
+	ResolveTeamRelayPeerResult,
+	SendTeamRelayParams,
+	SendTeamRelayResult,
+	TeamRelayExecuteRpcParams,
+	TeamRelayPublicKey,
+} from "./team-relay.js";
 
 // Session event types for WAL-based persistence
 
@@ -113,6 +121,8 @@ export type CliRegistrationInfo = {
 	hostname: string;
 	version?: string;
 	backends?: AcpBackendSummary[];
+	/** Dedicated public identity for mandatory encrypted cross-machine Team relay. */
+	teamRelayKey?: TeamRelayPublicKey;
 	/** Optional wire-protocol features supported by this CLI version. */
 	protocolCapabilities?: {
 		/** The CLI durably deduplicates message sends by messageId. */
@@ -389,6 +399,14 @@ export interface CliToGatewayEvents {
 	"sessions:changed": (payload: SessionsChangedPayload) => void;
 	"sessions:discovered": (payload: SessionsDiscoveredPayload) => void;
 	"agent-teams:changed": (payload: AgentTeamsChangedPayload) => void;
+	"team-relay:resolve": (
+		request: RpcRequest<ResolveTeamRelayPeerParams>,
+		ack: (response: RpcResponse<ResolveTeamRelayPeerResult>) => void,
+	) => void;
+	"team-relay:send": (
+		request: RpcRequest<SendTeamRelayParams>,
+		ack: (response: RpcResponse<SendTeamRelayResult>) => void,
+	) => void;
 
 	// RPC responses
 	"rpc:response": (response: RpcResponse<unknown>) => void;
@@ -445,6 +463,9 @@ export interface GatewayToCliEvents {
 		request: RpcRequest<ListAgentTeamsRpcParams>,
 	) => void;
 	"rpc:agent-team:get": (request: RpcRequest<GetAgentTeamRpcParams>) => void;
+	"rpc:team-relay:execute": (
+		request: RpcRequest<TeamRelayExecuteRpcParams>,
+	) => void;
 
 	// Rename RPC request
 	"rpc:session:rename": (request: RpcRequest<RenameSessionParams>) => void;

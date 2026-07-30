@@ -3,8 +3,14 @@ import type {
 	AgentTeamsChangedPayload,
 	CliRegistrationInfo,
 	SessionSummary,
+	TeamRelayCiphertext,
+	TeamRelayPublicKey,
 } from "@mobvibe/shared";
-import { verifySignedToken } from "@mobvibe/shared";
+import {
+	AppError,
+	createErrorDetail,
+	verifySignedToken,
+} from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { logger } from "../../lib/logger.js";
@@ -60,6 +66,28 @@ const createMockRegistrationInfo = (
 	...overrides,
 });
 
+const createMockRelayKey = (seed: number): TeamRelayPublicKey => {
+	const publicKey = Buffer.alloc(32, seed).toString("base64");
+	return {
+		version: 1,
+		keyId: `x25519:${publicKey}`,
+		publicKey,
+	};
+};
+
+const createMockRelayCiphertext = (
+	recipientKeyId: string,
+	seed: number,
+): TeamRelayCiphertext => ({
+	version: 1,
+	recipientKeyId,
+	wrappedDek: Buffer.alloc(80, seed).toString("base64"),
+	payload: {
+		t: "encrypted",
+		c: Buffer.alloc(64, seed).toString("base64"),
+	},
+});
+
 const createMockAgentTeam = (
 	overrides: Partial<AgentTeamSummary> = {},
 ): AgentTeamSummary => ({
@@ -99,9 +127,14 @@ describe("setupCliHandlers", () => {
 	let teamRouter: {
 		handleRpcResponse: ReturnType<typeof vi.fn>;
 		handleCliDisconnect: ReturnType<typeof vi.fn>;
+		resolveRelayPeer: ReturnType<typeof vi.fn>;
+		relay: ReturnType<typeof vi.fn>;
 	};
 	let connectionHandler: ((socket: Socket) => void) | undefined;
-	let socketHandlers: Record<string, (payload?: unknown) => void>;
+	let socketHandlers: Record<
+		string,
+		(payload?: unknown, ack?: (response: unknown) => void) => void
+	>;
 	let socket: Socket;
 
 	beforeEach(() => {
@@ -122,15 +155,25 @@ describe("setupCliHandlers", () => {
 		teamRouter = {
 			handleRpcResponse: vi.fn(),
 			handleCliDisconnect: vi.fn(),
+			resolveRelayPeer: vi.fn(),
+			relay: vi.fn(),
 		};
 		socketHandlers = {};
 		socket = {
 			id: "socket-1",
 			handshake: { headers: {} },
 			data: { userId: "user-1", deviceId: "device-123" },
-			on: vi.fn((event: string, handler: (payload?: unknown) => void) => {
-				socketHandlers[event] = handler;
-			}),
+			on: vi.fn(
+				(
+					event: string,
+					handler: (
+						payload?: unknown,
+						ack?: (response: unknown) => void,
+					) => void,
+				) => {
+					socketHandlers[event] = handler;
+				},
+			),
 			emit: vi.fn(),
 			disconnect: vi.fn(),
 		} as unknown as Socket;
@@ -267,6 +310,264 @@ describe("setupCliHandlers", () => {
 			response,
 			socket.id,
 		);
+	});
+
+	it("routes Team relay resolve and send through the authenticated CLI record", async () => {
+		const sourceRelayKey = createMockRelayKey(1);
+		const targetRelayKey = createMockRelayKey(2);
+		const responseCiphertext = createMockRelayCiphertext(
+			sourceRelayKey.keyId,
+			4,
+		);
+		const record = registry.register(
+			socket,
+			createMockRegistrationInfo({
+				machineId: "machine-source",
+				teamRelayKey: sourceRelayKey,
+			}),
+			{
+				userId: "user-1",
+				deviceId: "device-123",
+			},
+		);
+		teamRouter.resolveRelayPeer.mockResolvedValue({
+			targetMachineId: "machine-target",
+			relayKey: targetRelayKey,
+		});
+		teamRouter.relay.mockResolvedValue({
+			operationId: "operation-1",
+			targetMachineId: "machine-target",
+			ciphertext: responseCiphertext,
+		});
+		const resolveAck = vi.fn();
+		const sendAck = vi.fn();
+
+		socketHandlers["team-relay:resolve"]?.(
+			{
+				requestId: "resolve-request-1",
+				params: { targetMachineId: "machine-target" },
+			},
+			resolveAck,
+		);
+		const requestCiphertext = createMockRelayCiphertext(
+			targetRelayKey.keyId,
+			3,
+		);
+		socketHandlers["team-relay:send"]?.(
+			{
+				requestId: "send-request-1",
+				params: {
+					operationId: "operation-1",
+					targetMachineId: "machine-target",
+					ciphertext: requestCiphertext,
+				},
+			},
+			sendAck,
+		);
+
+		await vi.waitFor(() => {
+			expect(teamRouter.resolveRelayPeer).toHaveBeenCalledWith(
+				{ targetMachineId: "machine-target" },
+				record,
+			);
+			expect(teamRouter.relay).toHaveBeenCalledWith(
+				{
+					operationId: "operation-1",
+					targetMachineId: "machine-target",
+					ciphertext: requestCiphertext,
+				},
+				record,
+			);
+			expect(resolveAck).toHaveBeenCalledWith({
+				requestId: "resolve-request-1",
+				result: {
+					targetMachineId: "machine-target",
+					relayKey: targetRelayKey,
+				},
+			});
+			expect(sendAck).toHaveBeenCalledWith({
+				requestId: "send-request-1",
+				result: {
+					operationId: "operation-1",
+					targetMachineId: "machine-target",
+					ciphertext: responseCiphertext,
+				},
+			});
+		});
+	});
+
+	it("sanitizes Team relay handler failures before acknowledging the source", async () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({
+				machineId: "machine-source",
+				teamRelayKey: createMockRelayKey(1),
+			}),
+			{
+				userId: "user-1",
+				deviceId: "device-123",
+			},
+		);
+		teamRouter.relay.mockRejectedValue(
+			new Error("ENOENT /Users/alice/private/team-relay.json"),
+		);
+		const ack = vi.fn();
+
+		socketHandlers["team-relay:send"]?.(
+			{
+				requestId: "send-request-private-error",
+				params: {
+					operationId: "operation-private-error",
+					targetMachineId: "machine-target",
+					ciphertext: createMockRelayCiphertext(createMockRelayKey(2).keyId, 3),
+				},
+			},
+			ack,
+		);
+
+		await vi.waitFor(() => {
+			expect(ack).toHaveBeenCalledWith({
+				requestId: "send-request-private-error",
+				error: {
+					code: "INTERNAL_ERROR",
+					message: "Internal server error",
+					retryable: true,
+					scope: "request",
+					status: 500,
+				},
+			});
+		});
+	});
+
+	it("does not leak structured Team relay business error messages or detail", async () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({
+				machineId: "machine-source",
+				teamRelayKey: createMockRelayKey(1),
+			}),
+			{
+				userId: "user-1",
+				deviceId: "device-123",
+			},
+		);
+		teamRouter.relay.mockRejectedValue(
+			new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "ENOENT /Users/alice/private/team-relay.json",
+					retryable: false,
+					scope: "request",
+					detail: "private target stack",
+				}),
+				422,
+			),
+		);
+		const ack = vi.fn();
+
+		socketHandlers["team-relay:send"]?.(
+			{
+				requestId: "send-request-structured-private-error",
+				params: {
+					operationId: "operation-structured-private-error",
+					targetMachineId: "machine-target",
+					ciphertext: createMockRelayCiphertext(createMockRelayKey(2).keyId, 3),
+				},
+			},
+			ack,
+		);
+
+		await vi.waitFor(() => {
+			expect(ack).toHaveBeenCalledWith({
+				requestId: "send-request-structured-private-error",
+				error: {
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Invalid Team relay request",
+					retryable: false,
+					scope: "request",
+					status: 400,
+				},
+			});
+		});
+	});
+
+	it("rejects plaintext fields outside Team relay params without dispatching", async () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({
+				machineId: "machine-source",
+				teamRelayKey: createMockRelayKey(1),
+			}),
+			{
+				userId: "user-1",
+				deviceId: "device-123",
+			},
+		);
+		const ack = vi.fn();
+
+		socketHandlers["team-relay:send"]?.(
+			{
+				requestId: "send-request-extra-field",
+				params: {
+					operationId: "operation-extra-field",
+					targetMachineId: "machine-target",
+					ciphertext: createMockRelayCiphertext(createMockRelayKey(2).keyId, 3),
+				},
+				body: { prompt: "must stay encrypted" },
+			},
+			ack,
+		);
+
+		await vi.waitFor(() => {
+			expect(teamRouter.relay).not.toHaveBeenCalled();
+			expect(ack).toHaveBeenCalledWith({
+				requestId: "send-request-extra-field",
+				error: {
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Invalid Team relay request",
+					retryable: false,
+					scope: "request",
+					status: 400,
+				},
+			});
+		});
+	});
+
+	it("bounds Team relay request IDs before logging or acknowledging them", async () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({
+				machineId: "machine-source",
+				teamRelayKey: createMockRelayKey(1),
+			}),
+			{
+				userId: "user-1",
+				deviceId: "device-123",
+			},
+		);
+		const ack = vi.fn();
+
+		socketHandlers["team-relay:resolve"]?.(
+			{
+				requestId: "x".repeat(129),
+				params: { targetMachineId: "machine-target" },
+			},
+			ack,
+		);
+
+		await vi.waitFor(() => {
+			expect(teamRouter.resolveRelayPeer).not.toHaveBeenCalled();
+			expect(ack).toHaveBeenCalledWith({
+				requestId: "invalid-team-relay-request",
+				error: {
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Invalid Team relay request",
+					retryable: false,
+					scope: "request",
+					status: 400,
+				},
+			});
+		});
 	});
 
 	it("drops invalid list metadata without dropping core sessions", () => {
