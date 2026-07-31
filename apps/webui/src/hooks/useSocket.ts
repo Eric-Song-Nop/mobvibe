@@ -1,4 +1,8 @@
-import { isEncryptedPayload, type SessionSummary } from "@mobvibe/shared";
+import {
+	type AgentTeamsChangedPayload,
+	isEncryptedPayload,
+	type SessionSummary,
+} from "@mobvibe/shared";
 import { useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -21,12 +25,12 @@ import { useSessionBackfill } from "@/hooks/use-session-backfill";
 import type { ChatStoreActions } from "@/hooks/useSessionMutations";
 import {
 	type CliStatusPayload,
-	type PermissionDecisionPayload,
-	type PermissionRequestPayload,
+	type GatewayPermissionDecisionPayload,
+	type GatewayPermissionRequestPayload,
+	type GatewaySessionsChangedPayload,
 	type SessionAttachedPayload,
 	type SessionDetachedPayload,
 	type SessionEvent,
-	type SessionsChangedPayload,
 } from "@/lib/acp";
 import { type ChatSession, useChatStore } from "@/lib/chat-store";
 import { bootstrapSessionE2EE, e2ee } from "@/lib/e2ee";
@@ -38,7 +42,13 @@ import {
 	notifyResponseCompleted,
 	notifySessionError,
 } from "@/lib/notifications";
+import {
+	isolateGatewaySessionDelta,
+	isolateSessionSnapshot,
+	isSessionMachineEventAccepted,
+} from "@/lib/session-source-isolation";
 import { gatewaySocket } from "@/lib/socket";
+import { useTeamStore } from "@/lib/team-store";
 
 type UseSocketOptions = {
 	// Legacy compatibility for older tests; the hook now reads sessions from the store.
@@ -49,8 +59,10 @@ type UseSocketOptions = {
 	finalizeAssistantMessage?: ChatStoreActions["finalizeAssistantMessage"];
 	upsertPlan?: ChatStoreActions["upsertPlan"];
 	removePlan?: ChatStoreActions["removePlan"];
-	/** Called on socket reconnect (not the initial connect) */
+	/** Called on every socket connect so authoritative projections can recover. */
 	onReconnect?: () => void;
+	/** Called when a newly registered CLI can provide a fresh Team snapshot. */
+	onAgentTeamsRefreshRequired?: () => void;
 } & Pick<
 	ChatStoreActions,
 	| "appendAssistantChunk"
@@ -71,6 +83,11 @@ type UseSocketOptions = {
 	| "updateSessionCursor"
 	| "resetSessionForRevision"
 >;
+
+type SessionProjectionSocketEvent =
+	| { type: "sessions_changed"; payload: GatewaySessionsChangedPayload }
+	| { type: "session_attached"; payload: SessionAttachedPayload }
+	| { type: "session_detached"; payload: SessionDetachedPayload };
 
 // Helper to get cursor from store directly (unified source of truth)
 const getCursor = (sessionId: string) => {
@@ -107,6 +124,7 @@ export function useSocket({
 	createLocalSession,
 	resetSessionForRevision,
 	onReconnect,
+	onAgentTeamsRefreshRequired,
 }: UseSocketOptions) {
 	const { t } = useTranslation();
 	const subscriptionManager = useRef(createSubscriptionManager()).current;
@@ -118,6 +136,8 @@ export function useSocket({
 		subscribedSessions,
 	} = subscriptionManager;
 	const sessionsRef = useRef(useChatStore.getState().sessions);
+	const onAgentTeamsRefreshRequiredRef = useRef(onAgentTeamsRefreshRequired);
+	onAgentTeamsRefreshRequiredRef.current = onAgentTeamsRefreshRequired;
 
 	useEffect(
 		() =>
@@ -129,6 +149,7 @@ export function useSocket({
 
 	// Pending events buffer for out-of-order events (local to hook)
 	const pendingEventsRef = useRef<Map<string, SessionEvent[]>>(new Map());
+	const sessionProjectionEventsRef = useRef<SessionProjectionSocketEvent[]>([]);
 
 	// Buffer for encrypted events received before DEK is ready
 	const encryptedBufferRef = useRef(createEncryptedEventBuffer());
@@ -145,17 +166,29 @@ export function useSocket({
 		((p: SessionDetachedPayload) => void) | undefined
 	>(undefined);
 	const handlePermissionRequestRef = useRef<
-		((p: PermissionRequestPayload) => void) | undefined
+		((p: GatewayPermissionRequestPayload) => void) | undefined
 	>(undefined);
 	const handlePermissionResultRef = useRef<
-		((p: PermissionDecisionPayload) => void) | undefined
+		((p: GatewayPermissionDecisionPayload) => void) | undefined
 	>(undefined);
 	const handleSessionsChangedRef = useRef<
-		((p: SessionsChangedPayload) => void) | undefined
+		((p: GatewaySessionsChangedPayload) => void) | undefined
 	>(undefined);
 	const handleSessionEventRef = useRef<((e: SessionEvent) => void) | undefined>(
 		undefined,
 	);
+	const applySessionAttachedRef = useRef<
+		((p: SessionAttachedPayload) => void) | undefined
+	>(undefined);
+	const applySessionDetachedRef = useRef<
+		((p: SessionDetachedPayload) => void) | undefined
+	>(undefined);
+	const applySessionsChangedRef = useRef<
+		((p: GatewaySessionsChangedPayload) => void) | undefined
+	>(undefined);
+	const applySessionProjectionEventRef = useRef<
+		((event: SessionProjectionSocketEvent) => void) | undefined
+	>(undefined);
 	const triggerBackfillRef = useRef<
 		| ((sessionId: string, revision: number, afterSeq: number) => void)
 		| undefined
@@ -277,6 +310,9 @@ export function useSocket({
 		gatewayUrl: gatewaySocket.getGatewayUrl(),
 		onEvents: (sessionId, events) => {
 			for (const rawEvent of [...events].sort((a, b) => a.seq - b.seq)) {
+				if (rawEvent.sessionId !== sessionId) {
+					continue;
+				}
 				ingestSessionEventRef.current?.(rawEvent, "backfill");
 			}
 			prunePendingEventsRef.current?.(sessionId);
@@ -377,11 +413,21 @@ export function useSocket({
 	);
 
 	const syncSessionSummaries = useCallback(
-		(summaries: SessionSummary[]) => {
-			for (const reset of getRevisionResetSessions(summaries)) {
+		(summaries: SessionSummary[], coveredMachineIds: string[]) => {
+			const isolated = isolateSessionSnapshot(
+				summaries,
+				coveredMachineIds,
+				sessionsRef.current,
+			);
+			for (const reset of getRevisionResetSessions(isolated.summaries)) {
 				clearRevisionRuntimeState(reset.sessionId, reset.revision);
 			}
-			syncSessions?.(summaries);
+			syncSessions?.(
+				isolated.summaries,
+				coveredMachineIds,
+				isolated.protectedSessionIds,
+			);
+			return isolated.summaries;
 		},
 		[clearRevisionRuntimeState, getRevisionResetSessions, syncSessions],
 	);
@@ -434,6 +480,14 @@ export function useSocket({
 		source: EventSource,
 	) => {
 		if (
+			!isSessionMachineEventAccepted(
+				incomingEvent,
+				useChatStore.getState().sessions,
+			)
+		) {
+			return;
+		}
+		if (
 			isEncryptedPayload(incomingEvent.payload) &&
 			!e2ee.hasSessionDek(incomingEvent.sessionId, incomingEvent.revision)
 		) {
@@ -467,7 +521,7 @@ export function useSocket({
 
 		let session = sessionsRef.current[event.sessionId];
 		if (!session) {
-			createLocalSession(event.sessionId);
+			createLocalSession(event.sessionId, { machineId: event.machineId });
 			session = sessionsRef.current[event.sessionId];
 		}
 
@@ -537,7 +591,12 @@ export function useSocket({
 	};
 
 	// Update handler refs
-	handleSessionAttachedRef.current = (payload: SessionAttachedPayload) => {
+	applySessionAttachedRef.current = (payload: SessionAttachedPayload) => {
+		if (
+			!isSessionMachineEventAccepted(payload, useChatStore.getState().sessions)
+		) {
+			return;
+		}
 		const currentSession = useChatStore.getState().sessions[payload.sessionId];
 		const shouldResetForRevision =
 			currentSession !== undefined &&
@@ -574,7 +633,12 @@ export function useSocket({
 		}
 	};
 
-	handleSessionDetachedRef.current = (payload: SessionDetachedPayload) => {
+	applySessionDetachedRef.current = (payload: SessionDetachedPayload) => {
+		if (
+			!isSessionMachineEventAccepted(payload, useChatStore.getState().sessions)
+		) {
+			return;
+		}
 		if (payload.reason === "gateway_disconnect") {
 			recoverableSessions.add(payload.sessionId);
 		} else {
@@ -583,7 +647,16 @@ export function useSocket({
 		markSessionDetached(payload);
 	};
 
-	handlePermissionRequestRef.current = (payload: PermissionRequestPayload) => {
+	handlePermissionRequestRef.current = (
+		payload: GatewayPermissionRequestPayload,
+	) => {
+		const sessions = useChatStore.getState().sessions;
+		if (
+			sessions[payload.sessionId] === undefined ||
+			!isSessionMachineEventAccepted(payload, sessions)
+		) {
+			return;
+		}
 		const sanitizedPayload = sanitizeInboundAcpPayload(payload);
 		if (!sanitizedPayload) return;
 		applyPermissionRequest({
@@ -596,20 +669,36 @@ export function useSocket({
 		});
 	};
 
-	handlePermissionResultRef.current = (payload: PermissionDecisionPayload) => {
+	handlePermissionResultRef.current = (
+		payload: GatewayPermissionDecisionPayload,
+	) => {
+		const sessions = useChatStore.getState().sessions;
+		if (
+			sessions[payload.sessionId] === undefined ||
+			!isSessionMachineEventAccepted(payload, sessions)
+		) {
+			return;
+		}
 		setPermissionOutcome(payload.sessionId, payload.requestId, payload.outcome);
 		setPermissionDecisionState(payload.sessionId, payload.requestId, "idle");
 	};
 
-	handleSessionsChangedRef.current = (payload: SessionsChangedPayload) => {
-		const addedOrUpdated = [...payload.added, ...payload.updated];
+	applySessionsChangedRef.current = (
+		payload: GatewaySessionsChangedPayload,
+	) => {
+		const isolated = isolateGatewaySessionDelta(
+			payload,
+			useChatStore.getState().sessions,
+		);
+		if (!isolated) return;
+		const addedOrUpdated = [...isolated.added, ...isolated.updated];
 		for (const reset of getRevisionResetSessions(addedOrUpdated)) {
 			clearRevisionRuntimeState(reset.sessionId, reset.revision);
 		}
-		for (const sessionId of payload.removed) {
+		for (const sessionId of isolated.removed) {
 			clearTrackedSession(sessionId);
 		}
-		handleSessionsChanged(payload);
+		handleSessionsChanged(isolated);
 
 		// Bootstrap session DEKs and keep runtime E2EE status in sync.
 		const { setSessionE2EEStatus } = useChatStore.getState();
@@ -625,20 +714,93 @@ export function useSocket({
 		}
 
 		// Extract per-backend capabilities if present
-		if (payload.backendCapabilities) {
-			const machineId =
-				payload.added[0]?.machineId ?? payload.updated[0]?.machineId;
-			if (machineId) {
-				useMachinesStore
-					.getState()
-					.updateBackendCapabilities(machineId, payload.backendCapabilities);
-			}
+		if (isolated.backendCapabilities) {
+			useMachinesStore
+				.getState()
+				.updateBackendCapabilities(
+					isolated.machineId,
+					isolated.backendCapabilities,
+				);
 		}
 	};
 
+	applySessionProjectionEventRef.current = (event) => {
+		switch (event.type) {
+			case "sessions_changed":
+				applySessionsChangedRef.current?.(event.payload);
+				break;
+			case "session_attached":
+				applySessionAttachedRef.current?.(event.payload);
+				break;
+			case "session_detached":
+				applySessionDetachedRef.current?.(event.payload);
+				break;
+		}
+	};
+
+	const enqueueOrApplySessionProjectionEvent = (
+		event: SessionProjectionSocketEvent,
+	) => {
+		if (useTeamStore.getState().isSessionProjectionRecoveryPending) {
+			sessionProjectionEventsRef.current.push(event);
+			return;
+		}
+		applySessionProjectionEventRef.current?.(event);
+	};
+
+	handleSessionAttachedRef.current = (payload) => {
+		enqueueOrApplySessionProjectionEvent({
+			type: "session_attached",
+			payload,
+		});
+	};
+	handleSessionDetachedRef.current = (payload) => {
+		enqueueOrApplySessionProjectionEvent({
+			type: "session_detached",
+			payload,
+		});
+	};
+	handleSessionsChangedRef.current = (payload) => {
+		enqueueOrApplySessionProjectionEvent({
+			type: "sessions_changed",
+			payload,
+		});
+	};
+
 	handleSessionEventRef.current = (incomingEvent: SessionEvent) => {
+		if (
+			!isSessionMachineEventAccepted(
+				incomingEvent,
+				useChatStore.getState().sessions,
+			)
+		) {
+			return;
+		}
 		ingestSessionEventRef.current?.(incomingEvent, "live");
 	};
+
+	useEffect(
+		() =>
+			useTeamStore.subscribe((state, previousState) => {
+				const recoveryCompleted =
+					previousState.isSessionProjectionRecoveryPending &&
+					!state.isSessionProjectionRecoveryPending;
+				const nextGenerationStarted =
+					previousState.isSessionProjectionRecoveryPending &&
+					state.isSessionProjectionRecoveryPending &&
+					previousState.sessionProjectionRecoveryGeneration !==
+						state.sessionProjectionRecoveryGeneration;
+				if (!recoveryCompleted && !nextGenerationStarted) {
+					return;
+				}
+				const bufferedEvents = sessionProjectionEventsRef.current;
+				sessionProjectionEventsRef.current = [];
+				for (const event of bufferedEvents) {
+					applySessionProjectionEventRef.current?.(event);
+				}
+			}),
+		[],
+	);
 
 	// Flush buffered encrypted events once a DEK becomes available
 	useEffect(() => {
@@ -669,12 +831,18 @@ export function useSocket({
 			handleSessionAttachedRef.current?.(p);
 		const onSessionDetached = (p: SessionDetachedPayload) =>
 			handleSessionDetachedRef.current?.(p);
-		const onPermissionRequest = (p: PermissionRequestPayload) =>
+		const onPermissionRequest = (p: GatewayPermissionRequestPayload) =>
 			handlePermissionRequestRef.current?.(p);
-		const onPermissionResult = (p: PermissionDecisionPayload) =>
+		const onPermissionResult = (p: GatewayPermissionDecisionPayload) =>
 			handlePermissionResultRef.current?.(p);
-		const onSessionsChanged = (p: SessionsChangedPayload) =>
+		const onSessionsChanged = (p: GatewaySessionsChangedPayload) =>
 			handleSessionsChangedRef.current?.(p);
+		const onAgentTeamsChanged = (p: AgentTeamsChangedPayload) => {
+			useTeamStore.getState().handleAgentTeamsChanged(p);
+		};
+		const onAgentTeamsRefreshRequired = () => {
+			onAgentTeamsRefreshRequiredRef.current?.();
+		};
 		const onSessionEvent = (e: SessionEvent) =>
 			handleSessionEventRef.current?.(e);
 
@@ -688,6 +856,10 @@ export function useSocket({
 		const unsubPermRes = gatewaySocket.onPermissionResult(onPermissionResult);
 		const unsubSessionsChanged =
 			gatewaySocket.onSessionsChanged(onSessionsChanged);
+		const unsubAgentTeamsChanged =
+			gatewaySocket.onAgentTeamsChanged(onAgentTeamsChanged);
+		const unsubAgentTeamsRefreshRequired =
+			gatewaySocket.onAgentTeamsRefreshRequired(onAgentTeamsRefreshRequired);
 		const unsubSessionEvent = gatewaySocket.onSessionEvent(onSessionEvent);
 
 		const unsubDisconnect = gatewaySocket.onDisconnect(() => {
@@ -711,6 +883,8 @@ export function useSocket({
 			unsubPermReq();
 			unsubPermRes();
 			unsubSessionsChanged();
+			unsubAgentTeamsChanged();
+			unsubAgentTeamsRefreshRequired();
 			unsubSessionEvent();
 			unsubDisconnect();
 			gatewaySocket.destroy();
@@ -873,6 +1047,7 @@ export function useSocket({
 						triggerBackfillRef.current?.(sessionId, revision, afterSeq);
 					}
 				}
+				onReconnectRef.current?.();
 				return;
 			}
 

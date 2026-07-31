@@ -79,14 +79,21 @@ class StartHarness extends DaemonManager {
 }
 
 class RuntimeHarness extends DaemonManager {
+	callOrder: string[] = [];
+	attachError?: Error;
 	runtimeCryptoOptions?: { noE2ee?: boolean };
 	writePidFileMock = mock((_pid: number) => Promise.resolve());
 	fakeCryptoService = createFakeCryptoService();
 	fakeSessionManager = {
+		attachTeamRelayTransport: mock((_transport: unknown) => {
+			this.callOrder.push("attach");
+			if (this.attachError) throw this.attachError;
+		}),
 		shutdown: mock(() => Promise.resolve()),
 	};
 	fakeSocketClient = {
 		connect: mock(() => {
+			this.callOrder.push("connect");
 			throw new Error("stop-after-connect");
 		}),
 		disconnect: mock(() => {}),
@@ -120,6 +127,7 @@ class ShutdownHarness extends DaemonManager {
 	removePidFileMock = mock(() => Promise.resolve());
 	fakeCryptoService = createFakeCryptoService();
 	fakeSessionManager = {
+		attachTeamRelayTransport: mock((_transport: unknown) => {}),
 		shutdown: mock(() => Promise.resolve()),
 	};
 	fakeSocketClient = {
@@ -148,6 +156,15 @@ class ShutdownHarness extends DaemonManager {
 		_cryptoService: unknown,
 	) {
 		return this.fakeSocketClient as never;
+	}
+}
+
+class SocketClientFactoryHarness extends DaemonManager {
+	createClient(sessionManager: unknown, cryptoService: unknown) {
+		return this.createSocketClient(
+			sessionManager as never,
+			cryptoService as never,
+		);
 	}
 }
 
@@ -219,6 +236,69 @@ describe("DaemonManager no-e2ee", () => {
 
 		expect(runtimeHarness.runtimeCryptoOptions).toBeUndefined();
 		expect(runtimeHarness.fakeSocketClient.connect).toHaveBeenCalled();
+	});
+
+	test("attaches the socket relay transport before connecting", async () => {
+		await expect(runtimeHarness.runForeground()).rejects.toThrow(
+			"stop-after-connect",
+		);
+
+		expect(
+			runtimeHarness.fakeSessionManager.attachTeamRelayTransport,
+		).toHaveBeenCalledWith(runtimeHarness.fakeSocketClient);
+		expect(runtimeHarness.callOrder.slice(0, 2)).toEqual(["attach", "connect"]);
+	});
+
+	test("uses the existing startup cleanup when relay attachment fails", async () => {
+		runtimeHarness.attachError = new Error("relay-attach-failed");
+
+		await expect(runtimeHarness.runForeground()).rejects.toThrow(
+			"relay-attach-failed",
+		);
+
+		expect(runtimeHarness.fakeSocketClient.connect).not.toHaveBeenCalled();
+		expect(runtimeHarness.fakeSocketClient.disconnect).toHaveBeenCalledTimes(1);
+		expect(runtimeHarness.fakeSessionManager.shutdown).toHaveBeenCalledTimes(1);
+	});
+
+	test("delegates incoming Team relay requests to the session manager", async () => {
+		const expectedResult = { responseId: "relay-response" };
+		const request = { requestId: "relay-request" };
+		const handleTeamRelayRequest = mock((_request: unknown) =>
+			Promise.resolve(expectedResult),
+		);
+		const noop = () => {};
+		const sessionManager = new Proxy(
+			{ handleTeamRelayRequest },
+			{
+				get(target, property) {
+					if (property in target) {
+						return target[property as keyof typeof target];
+					}
+					return noop;
+				},
+			},
+		);
+		const harness = new SocketClientFactoryHarness(createConfig());
+		const client = harness.createClient(
+			sessionManager,
+			createFakeCryptoService(),
+		);
+		const options = (
+			client as unknown as {
+				options: {
+					teamRelayRequestHandler?: (
+						params: unknown,
+					) => Promise<typeof expectedResult>;
+				};
+			}
+		).options;
+
+		expect(options.teamRelayRequestHandler).toBeDefined();
+		expect(await options.teamRelayRequestHandler?.(request)).toBe(
+			expectedResult,
+		);
+		expect(handleTeamRelayRequest).toHaveBeenCalledWith(request);
 	});
 });
 

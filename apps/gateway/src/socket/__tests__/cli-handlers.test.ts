@@ -3,8 +3,15 @@ import type {
 	AgentTeamsChangedPayload,
 	CliRegistrationInfo,
 	SessionSummary,
+	TeamRelayCiphertext,
+	TeamRelayPublicKey,
+	TeamRelayReadyAck,
 } from "@mobvibe/shared";
-import { verifySignedToken } from "@mobvibe/shared";
+import {
+	AppError,
+	createErrorDetail,
+	verifySignedToken,
+} from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { logger } from "../../lib/logger.js";
@@ -60,6 +67,28 @@ const createMockRegistrationInfo = (
 	...overrides,
 });
 
+const createMockRelayKey = (seed: number): TeamRelayPublicKey => {
+	const publicKey = Buffer.alloc(32, seed).toString("base64");
+	return {
+		version: 1,
+		keyId: `x25519:${publicKey}`,
+		publicKey,
+	};
+};
+
+const createMockRelayCiphertext = (
+	recipientKeyId: string,
+	seed: number,
+): TeamRelayCiphertext => ({
+	version: 1,
+	recipientKeyId,
+	wrappedDek: Buffer.alloc(80, seed).toString("base64"),
+	payload: {
+		t: "encrypted",
+		c: Buffer.alloc(64, seed).toString("base64"),
+	},
+});
+
 const createMockAgentTeam = (
 	overrides: Partial<AgentTeamSummary> = {},
 ): AgentTeamSummary => ({
@@ -99,9 +128,15 @@ describe("setupCliHandlers", () => {
 	let teamRouter: {
 		handleRpcResponse: ReturnType<typeof vi.fn>;
 		handleCliDisconnect: ReturnType<typeof vi.fn>;
+		placeRelayPeer: ReturnType<typeof vi.fn>;
+		resolveRelayPeer: ReturnType<typeof vi.fn>;
+		relay: ReturnType<typeof vi.fn>;
 	};
 	let connectionHandler: ((socket: Socket) => void) | undefined;
-	let socketHandlers: Record<string, (payload?: unknown) => void>;
+	let socketHandlers: Record<
+		string,
+		(payload?: unknown, ack?: (response: unknown) => void) => void
+	>;
 	let socket: Socket;
 
 	beforeEach(() => {
@@ -122,15 +157,26 @@ describe("setupCliHandlers", () => {
 		teamRouter = {
 			handleRpcResponse: vi.fn(),
 			handleCliDisconnect: vi.fn(),
+			placeRelayPeer: vi.fn(),
+			resolveRelayPeer: vi.fn(),
+			relay: vi.fn(),
 		};
 		socketHandlers = {};
 		socket = {
 			id: "socket-1",
 			handshake: { headers: {} },
 			data: { userId: "user-1", deviceId: "device-123" },
-			on: vi.fn((event: string, handler: (payload?: unknown) => void) => {
-				socketHandlers[event] = handler;
-			}),
+			on: vi.fn(
+				(
+					event: string,
+					handler: (
+						payload?: unknown,
+						ack?: (response: unknown) => void,
+					) => void,
+				) => {
+					socketHandlers[event] = handler;
+				},
+			),
 			emit: vi.fn(),
 			disconnect: vi.fn(),
 		} as unknown as Socket;
@@ -160,6 +206,194 @@ describe("setupCliHandlers", () => {
 		);
 
 		connectionHandler?.(socket);
+	});
+
+	it("does not request a Team refresh until the first full session list", async () => {
+		socketHandlers["cli:register"]?.(
+			createMockRegistrationInfo({ machineId: "raw-machine-1" }),
+		);
+
+		await vi.waitFor(() => {
+			expect(socket.emit).toHaveBeenCalledWith("cli:registered", {
+				machineId: "machine-1",
+				userId: "user-1",
+			});
+		});
+		expect(registry.getCliBySocketId(socket.id)?.sessionSnapshotReady).toBe(
+			false,
+		);
+		expect(emitToWebui).not.toHaveBeenCalled();
+	});
+
+	it("opens the Team refresh fence before emitting the first full session list", async () => {
+		const emittedEvents: string[] = [];
+		let snapshotAtRefresh: { ready: boolean; sessionIds: string[] } | undefined;
+		emitToWebui.mockImplementation((event: string) => {
+			emittedEvents.push(event);
+			if (event === "agent-teams:refresh-required") {
+				const record = registry.getCliBySocketId(socket.id);
+				snapshotAtRefresh = {
+					ready: record?.sessionSnapshotReady ?? false,
+					sessionIds:
+						record?.sessions.map((session) => session.sessionId) ?? [],
+				};
+			}
+		});
+		registry.onSessionsChanged((_machineId, payload, registeredUserId) => {
+			emitToWebui("sessions:changed", payload, registeredUserId);
+		});
+
+		socketHandlers["cli:register"]?.(
+			createMockRegistrationInfo({ machineId: "raw-machine-1" }),
+		);
+		await vi.waitFor(() => {
+			expect(registry.getCliBySocketId(socket.id)).toBeDefined();
+		});
+		emittedEvents.length = 0;
+
+		socketHandlers["sessions:list"]?.([
+			createMockSessionSummary({ sessionId: "first-full-session" }),
+		]);
+
+		expect(emittedEvents).toEqual([
+			"agent-teams:refresh-required",
+			"sessions:changed",
+		]);
+		expect(snapshotAtRefresh).toEqual({
+			ready: true,
+			sessionIds: ["first-full-session"],
+		});
+		expect(registry.getCliBySocketId(socket.id)?.sessionSnapshotReady).toBe(
+			true,
+		);
+	});
+
+	it("resets the session barrier when replacing the same machine", async () => {
+		const previousSocket = {
+			id: "previous-socket",
+			disconnect: vi.fn(),
+		} as unknown as Socket;
+		registry.register(
+			previousSocket,
+			createMockRegistrationInfo({ machineId: "machine-1" }),
+			{ userId: "user-1", deviceId: "previous-device" },
+		);
+		emitToWebui.mockClear();
+
+		socketHandlers["cli:register"]?.(
+			createMockRegistrationInfo({ machineId: "raw-machine-1" }),
+		);
+
+		await vi.waitFor(() => {
+			expect(previousSocket.disconnect).toHaveBeenCalledWith(true);
+			expect(socket.emit).toHaveBeenCalledWith("cli:registered", {
+				machineId: "machine-1",
+				userId: "user-1",
+			});
+		});
+		expect(registry.getCliBySocketId(socket.id)?.sessionSnapshotReady).toBe(
+			false,
+		);
+		expect(emitToWebui).not.toHaveBeenCalled();
+
+		socketHandlers["sessions:list"]?.([]);
+
+		expect(emitToWebui).toHaveBeenCalledOnce();
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"agent-teams:refresh-required",
+			{ reason: "cli_registered" },
+			"user-1",
+		);
+	});
+
+	it("does not request a Team refresh for backend capability updates", async () => {
+		socketHandlers["cli:register"]?.(
+			createMockRegistrationInfo({ machineId: "raw-machine-1" }),
+		);
+		await vi.waitFor(() => {
+			expect(registry.getCliBySocketId(socket.id)).toBeDefined();
+		});
+		expect(emitToWebui).not.toHaveBeenCalled();
+
+		registry.updateBackendCapabilities(socket.id, {
+			"backend-1": {
+				list: true,
+				load: true,
+			},
+		});
+
+		expect(emitToWebui).not.toHaveBeenCalled();
+	});
+
+	it("updates pre-barrier session state without exposing partial deltas", async () => {
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		const record = registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+		registry.onSessionsChanged((_machineId, payload, registeredUserId) => {
+			emitToWebui("sessions:changed", payload, registeredUserId);
+		});
+
+		socketHandlers["sessions:changed"]?.({
+			added: [
+				createMockSessionSummary({
+					sessionId: "incremental-before-ready",
+					isAttached: true,
+				}),
+			],
+			updated: [],
+			removed: [],
+		});
+		socketHandlers["sessions:discovered"]?.({
+			sessions: [
+				{
+					sessionId: "discovered-before-ready",
+					cwd: "/repo",
+					title: "Discovered",
+				},
+			],
+			backendId: "backend-1",
+			backendLabel: "Claude Code",
+		});
+		socketHandlers["session:attached"]?.({
+			sessionId: "incremental-before-ready",
+			attachedAt: "2026-07-31T00:00:00.000Z",
+		});
+		socketHandlers["session:detached"]?.({
+			sessionId: "incremental-before-ready",
+			detachedAt: "2026-07-31T00:01:00.000Z",
+			reason: "agent_exit",
+		});
+
+		expect(record.sessions.map((session) => session.sessionId)).toEqual([
+			"incremental-before-ready",
+			"discovered-before-ready",
+		]);
+		expect(record.sessionSnapshotReady).toBe(false);
+		expect(emitToWebui).not.toHaveBeenCalledWith(
+			"sessions:changed",
+			expect.anything(),
+			expect.anything(),
+		);
+		expect(emitToWebui).not.toHaveBeenCalledWith(
+			"session:attached",
+			expect.anything(),
+			expect.anything(),
+		);
+		expect(emitToWebui).not.toHaveBeenCalledWith(
+			"session:detached",
+			expect.anything(),
+			expect.anything(),
+		);
+
+		await socketHandlers.disconnect?.("transport close");
+
+		expect(emitToWebui).not.toHaveBeenCalledWith(
+			"session:detached",
+			expect.objectContaining({ reason: "cli_disconnect" }),
+			expect.anything(),
+		);
 	});
 
 	it("relays agent team changed events only to the owning user", () => {
@@ -269,6 +503,287 @@ describe("setupCliHandlers", () => {
 		);
 	});
 
+	it("routes Team relay placement, resolve, and send through the authenticated CLI record", async () => {
+		const sourceRelayKey = createMockRelayKey(1);
+		const targetRelayKey = createMockRelayKey(2);
+		const responseCiphertext = createMockRelayCiphertext(
+			sourceRelayKey.keyId,
+			4,
+		);
+		const record = registry.register(
+			socket,
+			createMockRegistrationInfo({
+				machineId: "machine-source",
+				teamRelayKey: sourceRelayKey,
+			}),
+			{
+				userId: "user-1",
+				deviceId: "device-123",
+			},
+		);
+		teamRouter.resolveRelayPeer.mockResolvedValue({
+			targetMachineId: "machine-target",
+			relayKey: targetRelayKey,
+		});
+		teamRouter.placeRelayPeer.mockResolvedValue({
+			targetMachineId: "machine-target",
+			relayKey: targetRelayKey,
+		});
+		teamRouter.relay.mockResolvedValue({
+			operationId: "operation-1",
+			targetMachineId: "machine-target",
+			ciphertext: responseCiphertext,
+		});
+		const placeAck = vi.fn();
+		const resolveAck = vi.fn();
+		const sendAck = vi.fn();
+
+		socketHandlers["team-relay:place"]?.(
+			{
+				requestId: "place-request-1",
+				params: { backendId: "backend-1" },
+			},
+			placeAck,
+		);
+		socketHandlers["team-relay:resolve"]?.(
+			{
+				requestId: "resolve-request-1",
+				params: { targetMachineId: "machine-target" },
+			},
+			resolveAck,
+		);
+		const requestCiphertext = createMockRelayCiphertext(
+			targetRelayKey.keyId,
+			3,
+		);
+		socketHandlers["team-relay:send"]?.(
+			{
+				requestId: "send-request-1",
+				params: {
+					operationId: "operation-1",
+					targetMachineId: "machine-target",
+					ciphertext: requestCiphertext,
+				},
+			},
+			sendAck,
+		);
+
+		await vi.waitFor(() => {
+			expect(teamRouter.placeRelayPeer).toHaveBeenCalledWith(
+				{ backendId: "backend-1" },
+				record,
+			);
+			expect(teamRouter.resolveRelayPeer).toHaveBeenCalledWith(
+				{ targetMachineId: "machine-target" },
+				record,
+			);
+			expect(teamRouter.relay).toHaveBeenCalledWith(
+				{
+					operationId: "operation-1",
+					targetMachineId: "machine-target",
+					ciphertext: requestCiphertext,
+				},
+				record,
+			);
+			expect(placeAck).toHaveBeenCalledWith({
+				requestId: "place-request-1",
+				result: {
+					targetMachineId: "machine-target",
+					relayKey: targetRelayKey,
+				},
+			});
+			expect(resolveAck).toHaveBeenCalledWith({
+				requestId: "resolve-request-1",
+				result: {
+					targetMachineId: "machine-target",
+					relayKey: targetRelayKey,
+				},
+			});
+			expect(sendAck).toHaveBeenCalledWith({
+				requestId: "send-request-1",
+				result: {
+					operationId: "operation-1",
+					targetMachineId: "machine-target",
+					ciphertext: responseCiphertext,
+				},
+			});
+		});
+	});
+
+	it("sanitizes Team relay handler failures before acknowledging the source", async () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({
+				machineId: "machine-source",
+				teamRelayKey: createMockRelayKey(1),
+			}),
+			{
+				userId: "user-1",
+				deviceId: "device-123",
+			},
+		);
+		teamRouter.relay.mockRejectedValue(
+			new Error("ENOENT /Users/alice/private/team-relay.json"),
+		);
+		const ack = vi.fn();
+
+		socketHandlers["team-relay:send"]?.(
+			{
+				requestId: "send-request-private-error",
+				params: {
+					operationId: "operation-private-error",
+					targetMachineId: "machine-target",
+					ciphertext: createMockRelayCiphertext(createMockRelayKey(2).keyId, 3),
+				},
+			},
+			ack,
+		);
+
+		await vi.waitFor(() => {
+			expect(ack).toHaveBeenCalledWith({
+				requestId: "send-request-private-error",
+				error: {
+					code: "INTERNAL_ERROR",
+					message: "Internal server error",
+					retryable: true,
+					scope: "request",
+					status: 500,
+				},
+			});
+		});
+	});
+
+	it("does not leak structured Team relay business error messages or detail", async () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({
+				machineId: "machine-source",
+				teamRelayKey: createMockRelayKey(1),
+			}),
+			{
+				userId: "user-1",
+				deviceId: "device-123",
+			},
+		);
+		teamRouter.relay.mockRejectedValue(
+			new AppError(
+				createErrorDetail({
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "ENOENT /Users/alice/private/team-relay.json",
+					retryable: false,
+					scope: "request",
+					detail: "private target stack",
+				}),
+				422,
+			),
+		);
+		const ack = vi.fn();
+
+		socketHandlers["team-relay:send"]?.(
+			{
+				requestId: "send-request-structured-private-error",
+				params: {
+					operationId: "operation-structured-private-error",
+					targetMachineId: "machine-target",
+					ciphertext: createMockRelayCiphertext(createMockRelayKey(2).keyId, 3),
+				},
+			},
+			ack,
+		);
+
+		await vi.waitFor(() => {
+			expect(ack).toHaveBeenCalledWith({
+				requestId: "send-request-structured-private-error",
+				error: {
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Invalid Team relay request",
+					retryable: false,
+					scope: "request",
+					status: 400,
+				},
+			});
+		});
+	});
+
+	it("rejects plaintext fields outside Team relay params without dispatching", async () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({
+				machineId: "machine-source",
+				teamRelayKey: createMockRelayKey(1),
+			}),
+			{
+				userId: "user-1",
+				deviceId: "device-123",
+			},
+		);
+		const ack = vi.fn();
+
+		socketHandlers["team-relay:send"]?.(
+			{
+				requestId: "send-request-extra-field",
+				params: {
+					operationId: "operation-extra-field",
+					targetMachineId: "machine-target",
+					ciphertext: createMockRelayCiphertext(createMockRelayKey(2).keyId, 3),
+				},
+				body: { prompt: "must stay encrypted" },
+			},
+			ack,
+		);
+
+		await vi.waitFor(() => {
+			expect(teamRouter.relay).not.toHaveBeenCalled();
+			expect(ack).toHaveBeenCalledWith({
+				requestId: "send-request-extra-field",
+				error: {
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Invalid Team relay request",
+					retryable: false,
+					scope: "request",
+					status: 400,
+				},
+			});
+		});
+	});
+
+	it("bounds Team relay request IDs before logging or acknowledging them", async () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({
+				machineId: "machine-source",
+				teamRelayKey: createMockRelayKey(1),
+			}),
+			{
+				userId: "user-1",
+				deviceId: "device-123",
+			},
+		);
+		const ack = vi.fn();
+
+		socketHandlers["team-relay:resolve"]?.(
+			{
+				requestId: "x".repeat(129),
+				params: { targetMachineId: "machine-target" },
+			},
+			ack,
+		);
+
+		await vi.waitFor(() => {
+			expect(teamRouter.resolveRelayPeer).not.toHaveBeenCalled();
+			expect(ack).toHaveBeenCalledWith({
+				requestId: "invalid-team-relay-request",
+				error: {
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Invalid Team relay request",
+					retryable: false,
+					scope: "request",
+					status: 400,
+				},
+			});
+		});
+	});
+
 	it("drops invalid list metadata without dropping core sessions", () => {
 		registry.register(socket, createMockRegistrationInfo(), {
 			userId: "user-1",
@@ -369,6 +884,7 @@ describe("setupCliHandlers", () => {
 			userId: "user-1",
 			deviceId: "device-123",
 		});
+		registry.updateSessions(socket.id, []);
 		vi.mocked(logger.warn).mockClear();
 
 		socketHandlers["sessions:discovered"]?.({
@@ -505,6 +1021,7 @@ describe("setupCliHandlers", () => {
 				deviceId: "device-123",
 			},
 		);
+		registry.updateSessions(socket.id, []);
 
 		socketHandlers["sessions:discovered"]?.({
 			sessions: [
@@ -529,13 +1046,54 @@ describe("setupCliHandlers", () => {
 		expect(emitToWebui).toHaveBeenCalledWith(
 			"sessions:changed",
 			expect.objectContaining({
+				machineId: "machine-1",
 				added: [
 					expect.objectContaining({
 						sessionId: "discovered-roots",
+						machineId: "machine-1",
 						additionalDirectories: ["/shared", "/data"],
 						_meta: { source: "agent", keep: null },
 					}),
 				],
+			}),
+			"user-1",
+		);
+	});
+
+	it("attributes capability-only discovery deltas to the registered machine", () => {
+		registry.register(
+			socket,
+			createMockRegistrationInfo({ machineId: "machine-1" }),
+			{
+				userId: "user-1",
+				deviceId: "device-123",
+			},
+		);
+		registry.updateSessions(socket.id, []);
+
+		socketHandlers["sessions:discovered"]?.({
+			sessions: [],
+			capabilities: {
+				list: true,
+				load: true,
+			},
+			backendId: "backend-1",
+			backendLabel: "Spoofed label",
+		});
+
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"sessions:changed",
+			expect.objectContaining({
+				machineId: "machine-1",
+				added: [],
+				updated: [],
+				removed: [],
+				backendCapabilities: {
+					"backend-1": expect.objectContaining({
+						list: true,
+						load: true,
+					}),
+				},
 			}),
 			"user-1",
 		);
@@ -550,6 +1108,7 @@ describe("setupCliHandlers", () => {
 				deviceId: "device-123",
 			},
 		);
+		registry.updateSessions(socket.id, []);
 		const initial = {
 			sessions: [
 				{
@@ -604,6 +1163,7 @@ describe("setupCliHandlers", () => {
 				deviceId: "device-123",
 			},
 		);
+		registry.updateSessions(socket.id, []);
 
 		socketHandlers["sessions:discovered"]?.({
 			sessions: [
@@ -658,7 +1218,9 @@ describe("setupCliHandlers", () => {
 		finishUpsert?.({ machineId: "machine-1", userId: "user-1" });
 
 		await vi.waitFor(() => {
-			expect(registry.getCliBySocketId(socket.id)?.sessions).toEqual([session]);
+			expect(registry.getCliBySocketId(socket.id)?.sessions).toEqual([
+				{ ...session, machineId: "machine-1" },
+			]);
 		});
 	});
 
@@ -871,10 +1433,11 @@ describe("setupCliHandlers", () => {
 			userId: "user-1",
 			deviceId: "device-123",
 		});
+		registry.updateSessions(socket.id, []);
 
 		socketHandlers["session:attached"]?.({
 			sessionId: "session-1",
-			machineId: "machine-1",
+			machineId: "spoofed-machine",
 			attachedAt: "2024-01-01T00:00:00Z",
 		});
 
@@ -896,10 +1459,11 @@ describe("setupCliHandlers", () => {
 			userId: "user-1",
 			deviceId: "device-123",
 		});
+		registry.updateSessions(socket.id, []);
 
 		socketHandlers["session:detached"]?.({
 			sessionId: "session-1",
-			machineId: "machine-1",
+			machineId: "spoofed-machine",
 			detachedAt: "2024-01-01T00:00:00Z",
 			reason: "agent_exit",
 		});
@@ -922,6 +1486,12 @@ describe("setupCliHandlers", () => {
 			userId: "user-1",
 			deviceId: "device-123",
 		});
+		registry.updateSessions(socket.id, [
+			createMockSessionSummary({
+				sessionId: "session-1",
+				isAttached: true,
+			}),
+		]);
 
 		socketHandlers["permission:request"]?.({
 			sessionId: "session-1",
@@ -944,6 +1514,12 @@ describe("setupCliHandlers", () => {
 			userId: "user-1",
 			deviceId: "device-123",
 		});
+		registry.updateSessions(socket.id, [
+			createMockSessionSummary({
+				sessionId: "session-1",
+				isAttached: true,
+			}),
+		]);
 
 		socketHandlers["permission:request"]?.({
 			sessionId: "session-1",
@@ -969,6 +1545,106 @@ describe("setupCliHandlers", () => {
 			"user-1",
 			expected,
 		);
+	});
+
+	it("binds permission request and result payloads to the unique ready owner", () => {
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+		registry.updateSessions(socket.id, [
+			createMockSessionSummary({
+				sessionId: "session-1",
+				isAttached: true,
+			}),
+		]);
+
+		socketHandlers["permission:request"]?.({
+			sessionId: "session-1",
+			requestId: "request-1",
+			options: [],
+			machineId: "forged-machine",
+		});
+		socketHandlers["permission:result"]?.({
+			sessionId: "session-1",
+			requestId: "request-1",
+			outcome: { outcome: "cancelled" },
+			machineId: "forged-machine",
+		});
+
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"permission:request",
+			expect.objectContaining({
+				sessionId: "session-1",
+				requestId: "request-1",
+				machineId: "machine-1",
+			}),
+			"user-1",
+		);
+		expect(emitToWebui).toHaveBeenCalledWith(
+			"permission:result",
+			expect.objectContaining({
+				sessionId: "session-1",
+				requestId: "request-1",
+				machineId: "machine-1",
+			}),
+			"user-1",
+		);
+	});
+
+	it("suppresses permission traffic when a raw session ID has multiple ready owners", () => {
+		const info = createMockRegistrationInfo({ machineId: "machine-1" });
+		registry.register(socket, info, {
+			userId: "user-1",
+			deviceId: "device-123",
+		});
+		registry.updateSessions(socket.id, [
+			createMockSessionSummary({
+				sessionId: "collision",
+				isAttached: true,
+			}),
+		]);
+		const secondSocket = {
+			id: "socket-2",
+			disconnect: vi.fn(),
+		} as unknown as Socket;
+		registry.register(
+			secondSocket,
+			createMockRegistrationInfo({ machineId: "machine-2" }),
+			{ userId: "user-1", deviceId: "device-2" },
+		);
+		registry.updateSessions(secondSocket.id, [
+			createMockSessionSummary({
+				sessionId: "collision",
+				isAttached: true,
+			}),
+		]);
+		emitToWebui.mockClear();
+		notificationService.notifyPermissionRequest.mockClear();
+
+		socketHandlers["permission:request"]?.({
+			sessionId: "collision",
+			requestId: "request-collision",
+			options: [],
+		});
+		socketHandlers["permission:result"]?.({
+			sessionId: "collision",
+			requestId: "request-collision",
+			outcome: { outcome: "cancelled" },
+		});
+
+		expect(emitToWebui).not.toHaveBeenCalledWith(
+			"permission:request",
+			expect.anything(),
+			expect.anything(),
+		);
+		expect(emitToWebui).not.toHaveBeenCalledWith(
+			"permission:result",
+			expect.anything(),
+			expect.anything(),
+		);
+		expect(notificationService.notifyPermissionRequest).not.toHaveBeenCalled();
 	});
 
 	it("does not dispatch permission notifications for inactive sessions", () => {
@@ -1183,7 +1859,7 @@ describe("setupCliHandlers", () => {
 		);
 	});
 
-	it("uses user affinity initialized after handlers are installed", async () => {
+	it("keeps Team relay gated until canonical identity binding is proven", async () => {
 		const localRegistry = new CliRegistry();
 		const localHandlers: Record<string, (payload?: unknown) => void> = {};
 		let localConnectionHandler: ((socket: Socket) => void) | undefined;
@@ -1199,6 +1875,7 @@ describe("setupCliHandlers", () => {
 			claimUser: ReturnType<typeof vi.fn>;
 			releaseUser: ReturnType<typeof vi.fn>;
 		} | null = null;
+		let finishClaim: ((claimed: boolean) => void) | undefined;
 		setupCliHandlers(
 			localIo,
 			localRegistry,
@@ -1220,20 +1897,150 @@ describe("setupCliHandlers", () => {
 		} as unknown as Socket;
 		localConnectionHandler?.(localSocket);
 		affinity = {
-			claimUser: vi.fn(async () => true),
+			claimUser: vi.fn(
+				() =>
+					new Promise<boolean>((resolve) => {
+						finishClaim = resolve;
+					}),
+			),
 			releaseUser: vi.fn(async () => undefined),
 		};
+		const relayKey = createMockRelayKey(1);
 
 		localHandlers["cli:register"]?.(
-			createMockRegistrationInfo({ machineId: "raw-machine-1" }),
+			createMockRegistrationInfo({
+				machineId: "raw-machine-1",
+				teamRelayKey: relayKey,
+			}),
 		);
 
 		await vi.waitFor(() => {
 			expect(affinity?.claimUser).toHaveBeenCalledWith("user-1");
+			expect(localRegistry.getCliBySocketId(localSocket.id)).toBeDefined();
 		});
-		await localHandlers.disconnect?.("transport close");
+		const record = localRegistry.getCliBySocketId(localSocket.id);
+		if (!record?.teamRelayRegistrationId) {
+			throw new Error("Missing Team relay registration proof");
+		}
+		expect(record.teamRelayReady).toBe(false);
+		expect(localSocket.emit).not.toHaveBeenCalledWith(
+			"cli:registered",
+			expect.anything(),
+		);
 
-		expect(affinity.releaseUser).not.toHaveBeenCalled();
+		finishClaim?.(true);
+		await vi.waitFor(() => {
+			expect(localSocket.emit).toHaveBeenCalledWith("cli:registered", {
+				machineId: "machine-1",
+				userId: "user-1",
+				teamRelayRegistrationId: record.teamRelayRegistrationId,
+			});
+		});
+
+		localHandlers["cli:team-relay-ready"]?.({
+			registrationId: record.teamRelayRegistrationId,
+			relayKeyId: relayKey.keyId,
+		});
+
+		expect(record.teamRelayReady).toBe(true);
+	});
+
+	it("acknowledges Team relay readiness with the exact current proof", () => {
+		const relayKey = createMockRelayKey(1);
+		const record = registry.register(
+			socket,
+			createMockRegistrationInfo({
+				machineId: "machine-1",
+				teamRelayKey: relayKey,
+			}),
+			{ userId: "user-1", deviceId: "device-123" },
+		);
+		if (!record.teamRelayRegistrationId) {
+			throw new Error("Missing Team relay registration proof");
+		}
+		const ack = vi.fn<(response: unknown) => void>();
+		const expectedAck = {
+			accepted: true,
+			registrationId: record.teamRelayRegistrationId,
+			relayKeyId: relayKey.keyId,
+		} satisfies TeamRelayReadyAck;
+
+		socketHandlers["cli:team-relay-ready"]?.(
+			{
+				registrationId: record.teamRelayRegistrationId,
+				relayKeyId: relayKey.keyId,
+			},
+			ack,
+		);
+
+		expect(ack).toHaveBeenCalledOnce();
+		expect(ack).toHaveBeenCalledWith(expectedAck);
+		expect(record.teamRelayReady).toBe(true);
+	});
+
+	it("rejects stale Team relay proofs without enabling the registration", () => {
+		const relayKey = createMockRelayKey(1);
+		const record = registry.register(
+			socket,
+			createMockRegistrationInfo({
+				machineId: "machine-1",
+				teamRelayKey: relayKey,
+			}),
+			{ userId: "user-1", deviceId: "device-123" },
+		);
+		if (!record.teamRelayRegistrationId) {
+			throw new Error("Missing Team relay registration proof");
+		}
+		const rejectedAck = { accepted: false } satisfies TeamRelayReadyAck;
+		const staleRegistrationAck = vi.fn<(response: unknown) => void>();
+
+		socketHandlers["cli:team-relay-ready"]?.(
+			{
+				registrationId: "stale-registration",
+				relayKeyId: relayKey.keyId,
+			},
+			staleRegistrationAck,
+		);
+
+		expect(staleRegistrationAck).toHaveBeenCalledOnce();
+		expect(staleRegistrationAck).toHaveBeenCalledWith(rejectedAck);
+		expect(record.teamRelayReady).toBe(false);
+
+		const staleKeyAck = vi.fn<(response: unknown) => void>();
+		socketHandlers["cli:team-relay-ready"]?.(
+			{
+				registrationId: record.teamRelayRegistrationId,
+				relayKeyId: createMockRelayKey(2).keyId,
+			},
+			staleKeyAck,
+		);
+
+		expect(staleKeyAck).toHaveBeenCalledOnce();
+		expect(staleKeyAck).toHaveBeenCalledWith(rejectedAck);
+		expect(record.teamRelayReady).toBe(false);
+	});
+
+	it("accepts Team relay readiness when the optional ACK is omitted", () => {
+		const relayKey = createMockRelayKey(1);
+		const record = registry.register(
+			socket,
+			createMockRegistrationInfo({
+				machineId: "machine-1",
+				teamRelayKey: relayKey,
+			}),
+			{ userId: "user-1", deviceId: "device-123" },
+		);
+		if (!record.teamRelayRegistrationId) {
+			throw new Error("Missing Team relay registration proof");
+		}
+
+		expect(() => {
+			socketHandlers["cli:team-relay-ready"]?.({
+				registrationId: record.teamRelayRegistrationId,
+				relayKeyId: relayKey.keyId,
+			});
+		}).not.toThrow();
+		expect(record.teamRelayReady).toBe(true);
 	});
 
 	it("atomically claims affinity before accepting a CLI connection", async () => {

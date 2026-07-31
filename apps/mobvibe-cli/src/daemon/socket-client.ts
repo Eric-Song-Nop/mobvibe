@@ -1,23 +1,37 @@
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type {
+	AgentTeamSummary,
 	CliToGatewayEvents,
 	ContentBlock,
+	ErrorDetail,
 	EventsAckPayload,
 	FsEntry,
 	FsRoot,
 	GatewayToCliEvents,
 	GitBranchesForCwdResponse,
+	PlaceTeamRelayPeerParams,
+	PlaceTeamRelayPeerResult,
+	ResolveTeamRelayPeerParams,
+	ResolveTeamRelayPeerResult,
+	RpcRequest,
 	RpcResponse,
 	SendMessageParams,
 	SendMessageResult,
+	SendTeamRelayParams,
+	SendTeamRelayResult,
 	SessionEvent,
 	SessionEventsResponse,
 	SessionFsFilePreview,
 	SessionFsResourceEntry,
 	SessionSummary,
 	StopReason,
+	TeamRelayExecuteRpcParams,
+	TeamRelayExecuteRpcResult,
+	TeamRelayReadyAck,
+	TeamRelayReadyPayload,
 } from "@mobvibe/shared";
 import {
 	AppError,
@@ -26,7 +40,17 @@ import {
 	createSignedToken,
 	getPromptImageBlocks,
 	isEncryptedPayload,
+	parsePlaceTeamRelayPeerParams,
+	parsePlaceTeamRelayPeerResult,
+	parseResolveTeamRelayPeerParams,
+	parseResolveTeamRelayPeerResult,
+	parseSendTeamRelayParams,
+	parseSendTeamRelayResult,
+	parseTeamRelayExecuteRpcParams,
+	parseTeamRelayExecuteRpcResult,
 	sanitizeReportedTokenUsage,
+	TEAM_RELAY_CLIENT_ACK_TIMEOUT_MS,
+	TEAM_RELAY_OPERATION_ID_MAX_BYTES,
 	validatePromptImageBlocks,
 } from "@mobvibe/shared";
 import ignore, { type Ignore } from "ignore";
@@ -52,16 +76,21 @@ import {
 	searchGitLog,
 } from "../lib/git-utils.js";
 import { logger } from "../lib/logger.js";
-import { AgentTeamStore } from "../team/agent-team-store.js";
+import { TeamRelayRemoteError } from "../team/team-relay-protocol.js";
 import { buildHostFsEntries, buildHostFsRoots } from "./host-fs.js";
 import { resolveWithinCwd } from "./path-utils.js";
+
+export type TeamRelayRequestHandler = (
+	params: TeamRelayExecuteRpcParams,
+) => Promise<TeamRelayExecuteRpcResult>;
 
 type SocketClientOptions = {
 	config: CliConfig;
 	sessionManager: SessionManager;
 	/** Crypto service for E2EE */
 	cryptoService: CliCryptoService;
-	agentTeamStore?: AgentTeamStore;
+	/** Opaque Team relay execution; protocol/decryption is owned elsewhere. */
+	teamRelayRequestHandler?: TeamRelayRequestHandler;
 };
 
 type NormalizedSendMessageParams = Omit<SendMessageParams, "messageId"> & {
@@ -205,6 +234,172 @@ const DISCOVER_THROTTLE_MS = 60_000;
 const WAL_REPLAY_BATCH_SIZE = 100;
 const MAX_PENDING_LIVE_EVENTS = 1000;
 const MAX_PENDING_LIVE_EVENT_BYTES = 8 * 1024 * 1024;
+const TEAM_RELAY_REGISTRATION_ACK_TIMEOUT_MS = 5_000;
+const TEAM_RELAY_REGISTRATION_ACK_ATTEMPTS = 3;
+const TEAM_RELAY_REGISTRATION_RETRY_BASE_DELAY_MS = 1_000;
+const TEAM_RELAY_REGISTRATION_RETRY_MAX_DELAY_MS = 30_000;
+const INVALID_TEAM_RELAY_REQUEST_ID = "invalid-team-relay-request";
+const TEAM_RELAY_ERROR_CODE_MAX_BYTES = 64;
+const TEAM_RELAY_ERROR_MESSAGE_MAX_BYTES = 1024;
+const TEAM_RELAY_REGISTRATION_ID_MAX_BYTES = 128;
+const TEAM_RELAY_ERROR_CODES = new Set([
+	"ACP_CONNECT_FAILED",
+	"ACP_PROCESS_EXITED",
+	"ACP_CONNECTION_CLOSED",
+	"ACP_PROTOCOL_MISMATCH",
+	"AGENT_AUTHENTICATION_REQUIRED",
+	"AGENT_AUTHENTICATION_FAILED",
+	"SESSION_NOT_FOUND",
+	"SESSION_NOT_READY",
+	"SESSION_BUSY",
+	"CAPABILITY_NOT_SUPPORTED",
+	"REQUEST_VALIDATION_FAILED",
+	"MESSAGE_OUTCOME_UNKNOWN",
+	"INSTANCE_AFFINITY_CHANGED",
+	"AUTHORIZATION_FAILED",
+	"STREAM_DISCONNECTED",
+	"GIT_WORKTREE_FAILED",
+	"INTERNAL_ERROR",
+]);
+const TEAM_RELAY_ERROR_SCOPES = new Set([
+	"service",
+	"session",
+	"stream",
+	"request",
+]);
+
+type TeamRelayRpcError = Omit<ErrorDetail, "detail"> & {
+	status: number;
+};
+
+type TeamRelayAckEvent =
+	| "team-relay:place"
+	| "team-relay:resolve"
+	| "team-relay:send";
+
+type TeamRelayRegistrationAttemptResult = "accepted" | "rejected";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+const hasExactKeys = (
+	value: Record<string, unknown>,
+	expectedKeys: readonly string[],
+): boolean => {
+	const actualKeys = Object.keys(value);
+	return (
+		actualKeys.length === expectedKeys.length &&
+		expectedKeys.every((key) => Object.hasOwn(value, key))
+	);
+};
+
+const isTeamRelayRequestId = (value: unknown): value is string =>
+	typeof value === "string" &&
+	value.length > 0 &&
+	!/\p{Cc}/u.test(value) &&
+	Buffer.byteLength(value, "utf8") <= TEAM_RELAY_OPERATION_ID_MAX_BYTES;
+
+const getTeamRelayRequestId = (value: unknown): string => {
+	try {
+		return isRecord(value) && isTeamRelayRequestId(value.requestId)
+			? value.requestId
+			: INVALID_TEAM_RELAY_REQUEST_ID;
+	} catch {
+		return INVALID_TEAM_RELAY_REQUEST_ID;
+	}
+};
+
+const isBoundedTeamRelayText = (
+	value: unknown,
+	maxBytes: number,
+): value is string =>
+	typeof value === "string" &&
+	value.length > 0 &&
+	!/\p{Cc}/u.test(value) &&
+	Buffer.byteLength(value, "utf8") <= maxBytes;
+
+const parseTeamRelayRegistrationId = (value: unknown): string => {
+	if (!isBoundedTeamRelayText(value, TEAM_RELAY_REGISTRATION_ID_MAX_BYTES)) {
+		throw new Error("Invalid Team relay registration proof");
+	}
+	return value;
+};
+
+const parseTeamRelayReadyAck = (
+	value: unknown,
+	expected: TeamRelayReadyPayload,
+): boolean => {
+	if (!isRecord(value)) {
+		throw new Error("Invalid Team relay readiness acknowledgment");
+	}
+	if (hasExactKeys(value, ["accepted"]) && value.accepted === false) {
+		return false;
+	}
+	if (
+		!hasExactKeys(value, ["accepted", "registrationId", "relayKeyId"]) ||
+		value.accepted !== true ||
+		value.registrationId !== expected.registrationId ||
+		value.relayKeyId !== expected.relayKeyId
+	) {
+		throw new Error("Invalid Team relay readiness acknowledgment");
+	}
+	return true;
+};
+
+const isTeamRelayRpcError = (value: unknown): value is TeamRelayRpcError =>
+	isRecord(value) &&
+	hasExactKeys(value, ["code", "message", "retryable", "scope", "status"]) &&
+	isBoundedTeamRelayText(value.code, TEAM_RELAY_ERROR_CODE_MAX_BYTES) &&
+	TEAM_RELAY_ERROR_CODES.has(value.code) &&
+	isBoundedTeamRelayText(value.message, TEAM_RELAY_ERROR_MESSAGE_MAX_BYTES) &&
+	typeof value.retryable === "boolean" &&
+	typeof value.scope === "string" &&
+	TEAM_RELAY_ERROR_SCOPES.has(value.scope) &&
+	typeof value.status === "number" &&
+	Number.isInteger(value.status) &&
+	value.status >= 400 &&
+	value.status <= 599;
+
+const parseTeamRelayExecuteRequest = (
+	value: unknown,
+): RpcRequest<TeamRelayExecuteRpcParams> => {
+	if (
+		!isRecord(value) ||
+		!hasExactKeys(value, ["requestId", "params"]) ||
+		!isTeamRelayRequestId(value.requestId)
+	) {
+		throw new Error("Invalid Team relay request");
+	}
+	return {
+		requestId: value.requestId,
+		params: parseTeamRelayExecuteRpcParams(value.params),
+	};
+};
+
+const parseTeamRelayAck = <TResult>(
+	value: unknown,
+	expectedRequestId: string,
+	parseResult: (result: unknown) => TResult,
+): TResult => {
+	if (!isRecord(value) || value.requestId !== expectedRequestId) {
+		throw new Error("Invalid Team relay response");
+	}
+	if (hasExactKeys(value, ["requestId", "error"])) {
+		if (!isTeamRelayRpcError(value.error)) {
+			throw new Error("Invalid Team relay response");
+		}
+		throw new TeamRelayRemoteError({
+			code: value.error.code,
+			message: value.error.message,
+			retryable: value.error.retryable,
+			scope: value.error.scope,
+		});
+	}
+	if (!hasExactKeys(value, ["requestId", "result"])) {
+		throw new Error("Invalid Team relay response");
+	}
+	return parseResult(value.result);
+};
 
 export class SocketClient extends EventEmitter {
 	private socket: Socket<GatewayToCliEvents, CliToGatewayEvents>;
@@ -216,10 +411,29 @@ export class SocketClient extends EventEmitter {
 	private walReplayGeneration = 0;
 	private walReplayActiveGeneration?: number;
 	private walReplayStartedGeneration?: number;
+	private teamRelayRegisteredGeneration?: number;
+	private teamRelayReadyGeneration?: number;
+	private readonly pendingTeamRelayRequests = new Map<
+		string,
+		(error: Error) => void
+	>();
 	private pendingLiveEvents: SessionEvent[] = [];
 	private pendingLiveEventIncarnations: number[] = [];
 	private pendingLiveEventBytes = 0;
-	private readonly agentTeamStore: AgentTeamStore;
+	private teamRelayAckTimeoutMs = TEAM_RELAY_CLIENT_ACK_TIMEOUT_MS;
+	private teamRelayRegistrationAckTimeoutMs =
+		TEAM_RELAY_REGISTRATION_ACK_TIMEOUT_MS;
+	private teamRelayRegistrationAckAttempts =
+		TEAM_RELAY_REGISTRATION_ACK_ATTEMPTS;
+	private teamRelayRegistrationRetryBaseDelayMs =
+		TEAM_RELAY_REGISTRATION_RETRY_BASE_DELAY_MS;
+	private teamRelayRegistrationRetryMaxDelayMs =
+		TEAM_RELAY_REGISTRATION_RETRY_MAX_DELAY_MS;
+	private teamRelayRegistrationRetryTimer?: {
+		generation: number;
+		timer: NodeJS.Timeout;
+		resolve: (shouldRetry: boolean) => void;
+	};
 	private readonly messageSendsInFlight = new Map<
 		string,
 		Promise<SendMessageResult>
@@ -238,8 +452,6 @@ export class SocketClient extends EventEmitter {
 	constructor(private readonly options: SocketClientOptions) {
 		super();
 		const { cryptoService } = options;
-		this.agentTeamStore =
-			options.agentTeamStore ?? new AgentTeamStore(options.config.walDbPath);
 		this.socket = io(`${options.config.gatewayUrl}/cli`, {
 			path: "/socket.io",
 			reconnection: true,
@@ -303,6 +515,29 @@ export class SocketClient extends EventEmitter {
 				return;
 			}
 			this.walReplayStartedGeneration = replayGeneration;
+			let teamRelayRegistrationConfirmation: Promise<boolean> | undefined;
+			try {
+				this.options.sessionManager.bindTeamRelayMachineIdentity(
+					info.machineId,
+				);
+				const registrationId = parseTeamRelayRegistrationId(
+					info.teamRelayRegistrationId,
+				);
+				const readyPayload = {
+					registrationId,
+					relayKeyId: this.options.cryptoService.getTeamRelayPublicKey().keyId,
+				} satisfies TeamRelayReadyPayload;
+				this.teamRelayRegisteredGeneration = replayGeneration;
+				teamRelayRegistrationConfirmation = this.confirmTeamRelayRegistration(
+					replayGeneration,
+					readyPayload,
+				);
+			} catch (error) {
+				this.degradeTeamRelayRegistration(
+					"team_relay_machine_identity_bind_failed",
+					error,
+				);
+			}
 			try {
 				await this.replayUnackedEvents(replayGeneration);
 			} catch (error) {
@@ -313,6 +548,15 @@ export class SocketClient extends EventEmitter {
 			}
 			if (replayGeneration !== this.walReplayGeneration || !this.connected) {
 				return;
+			}
+			if (
+				this.teamRelayRegisteredGeneration === replayGeneration &&
+				teamRelayRegistrationConfirmation
+			) {
+				void this.activateTeamRelayOutbound(
+					replayGeneration,
+					teamRelayRegistrationConfirmation,
+				);
 			}
 
 			// Throttle automatic discover on reconnect
@@ -394,7 +638,6 @@ export class SocketClient extends EventEmitter {
 
 	private setupRpcHandlers() {
 		const { sessionManager } = this.options;
-		const { agentTeamStore } = this;
 
 		this.socket.on("rpc:agent:capabilities", async (request) => {
 			try {
@@ -502,7 +745,7 @@ export class SocketClient extends EventEmitter {
 					},
 					"rpc_agent_team_create",
 				);
-				const result = agentTeamStore.createAgentTeam(request.params);
+				const result = await sessionManager.createAgentTeamRun(request.params);
 				this.sendRpcResponse(request.requestId, result);
 				this.socket.emit("agent-teams:changed", {
 					added: [result.team],
@@ -532,7 +775,7 @@ export class SocketClient extends EventEmitter {
 					},
 					"rpc_agent_teams_list",
 				);
-				const result = agentTeamStore.listAgentTeams(request.params);
+				const result = sessionManager.listAgentTeams(request.params);
 				logger.info(
 					{
 						requestId: request.requestId,
@@ -565,7 +808,7 @@ export class SocketClient extends EventEmitter {
 					},
 					"rpc_agent_team_get",
 				);
-				const result = agentTeamStore.getAgentTeam(request.params);
+				const result = sessionManager.getAgentTeam(request.params);
 				this.sendRpcResponse(request.requestId, result);
 			} catch (error) {
 				logger.error(
@@ -578,6 +821,43 @@ export class SocketClient extends EventEmitter {
 					"rpc_agent_team_get_error",
 				);
 				this.sendRpcError(request.requestId, error);
+			}
+		});
+
+		this.socket.on("rpc:team-relay:execute", async (rawRequest: unknown) => {
+			const requestId = getTeamRelayRequestId(rawRequest);
+			try {
+				if (!this.isTeamRelayRegistered()) {
+					throw new Error("Team relay transport is not registered");
+				}
+				const request = parseTeamRelayExecuteRequest(rawRequest);
+				const ownRelayKey = this.options.cryptoService.getTeamRelayPublicKey();
+				if (request.params.ciphertext.recipientKeyId !== ownRelayKey.keyId) {
+					throw new Error("Team relay recipient key mismatch");
+				}
+				const handler = this.options.teamRelayRequestHandler;
+				if (!handler) {
+					throw new Error("Team relay request handler unavailable");
+				}
+				const result = parseTeamRelayExecuteRpcResult(
+					await handler(request.params),
+				);
+				if (
+					result.operationId !== request.params.operationId ||
+					result.ciphertext.recipientKeyId !==
+						request.params.sourceRelayKey.keyId
+				) {
+					throw new Error("Team relay response binding mismatch");
+				}
+				this.sendRpcResponse(request.requestId, result);
+			} catch {
+				logger.warn(
+					{ requestId, code: "TEAM_RELAY_EXECUTE_FAILED" },
+					"rpc_team_relay_execute_failed",
+				);
+				this.sendRpcError(requestId, new Error("Team relay request failed"), {
+					sensitive: true,
+				});
 			}
 		});
 
@@ -2041,6 +2321,12 @@ export class SocketClient extends EventEmitter {
 			}
 		});
 
+		sessionManager.onAgentTeamChanged((payload) => {
+			if (this.connected) {
+				this.socket.emit("agent-teams:changed", payload);
+			}
+		});
+
 		sessionManager.onSessionAttached((payload) => {
 			if (this.connected) {
 				this.socket.emit("session:attached", payload);
@@ -2164,6 +2450,7 @@ export class SocketClient extends EventEmitter {
 	}
 
 	private beginWalReplayBarrier(): number {
+		this.clearTeamRelayRegistrationRetry();
 		const generation = ++this.walReplayGeneration;
 		this.walReplayActiveGeneration = generation;
 		this.walReplayStartedGeneration = undefined;
@@ -2174,6 +2461,8 @@ export class SocketClient extends EventEmitter {
 	}
 
 	private invalidateWalReplayBarrier(): void {
+		this.clearTeamRelayRegistrationRetry();
+		this.markTeamRelayUnavailable();
 		this.walReplayGeneration += 1;
 		this.walReplayActiveGeneration = undefined;
 		this.walReplayStartedGeneration = undefined;
@@ -2224,6 +2513,72 @@ export class SocketClient extends EventEmitter {
 			}
 		}
 		return collected;
+	}
+
+	private sendTeamRelayRequest<TParams, TResult>(
+		event: TeamRelayAckEvent,
+		params: TParams,
+		parseResult: (result: unknown) => TResult,
+	): Promise<TResult> {
+		if (!this.isTeamRelayReady()) {
+			return Promise.reject(
+				new Error("Team relay transport is not registered"),
+			);
+		}
+		const requestId = randomUUID();
+		const request: RpcRequest<TParams> = { requestId, params };
+		return new Promise<TResult>((resolve, reject) => {
+			let settled = false;
+			const finish = (complete: () => void) => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				this.pendingTeamRelayRequests.delete(requestId);
+				complete();
+			};
+			const rejectOnce = (error: Error) => finish(() => reject(error));
+			this.pendingTeamRelayRequests.set(requestId, rejectOnce);
+
+			try {
+				const relaySocket = this.socket.timeout(
+					this.teamRelayAckTimeoutMs,
+				) as unknown as {
+					volatile: {
+						emit: (
+							relayEvent: TeamRelayAckEvent,
+							relayRequest: RpcRequest<TParams>,
+							ack: (error: Error | null, response?: unknown) => void,
+						) => void;
+					};
+				};
+				relaySocket.volatile.emit(event, request, (error, response) => {
+					if (settled) {
+						return;
+					}
+					if (error) {
+						rejectOnce(new Error("Team relay request timed out"));
+						return;
+					}
+					try {
+						const result = parseTeamRelayAck(response, requestId, parseResult);
+						finish(() => resolve(result));
+					} catch (error) {
+						rejectOnce(
+							error instanceof Error
+								? error
+								: new Error("Invalid Team relay response"),
+						);
+					}
+				});
+			} catch (error) {
+				rejectOnce(
+					error instanceof Error
+						? error
+						: new Error("Team relay request failed"),
+				);
+			}
+		});
 	}
 
 	private sendRpcResponse<T>(requestId: string, result: T) {
@@ -2278,12 +2633,13 @@ export class SocketClient extends EventEmitter {
 	}
 
 	private register() {
-		const { config } = this.options;
+		const { config, cryptoService } = this.options;
 		logger.info({ machineId: config.machineId }, "cli_register_emit");
 		this.socket.emit("cli:register", {
 			machineId: config.machineId,
 			hostname: config.hostname,
 			version: config.clientVersion,
+			teamRelayKey: cryptoService.getTeamRelayPublicKey(),
 			protocolCapabilities: {
 				messageIdempotency: true,
 				messageRevisionPinning: true,
@@ -2493,6 +2849,53 @@ export class SocketClient extends EventEmitter {
 		}
 	}
 
+	async placeTeamRelayPeer(
+		params: PlaceTeamRelayPeerParams,
+	): Promise<PlaceTeamRelayPeerResult> {
+		const parsedParams = parsePlaceTeamRelayPeerParams(params);
+		return this.sendTeamRelayRequest(
+			"team-relay:place",
+			{ backendId: parsedParams.backendId },
+			parsePlaceTeamRelayPeerResult,
+		);
+	}
+
+	async resolveTeamRelayPeer(
+		params: ResolveTeamRelayPeerParams,
+	): Promise<ResolveTeamRelayPeerResult> {
+		const parsedParams = parseResolveTeamRelayPeerParams(params);
+		const targetMachineId = parsedParams.targetMachineId;
+		return this.sendTeamRelayRequest(
+			"team-relay:resolve",
+			{ targetMachineId },
+			(result) => parseResolveTeamRelayPeerResult(result, targetMachineId),
+		);
+	}
+
+	async sendTeamRelay(
+		params: SendTeamRelayParams,
+	): Promise<SendTeamRelayResult> {
+		const parsedParams = parseSendTeamRelayParams(params);
+		const operationId = parsedParams.operationId;
+		const targetMachineId = parsedParams.targetMachineId;
+		const recipientKeyId =
+			this.options.cryptoService.getTeamRelayPublicKey().keyId;
+		return this.sendTeamRelayRequest(
+			"team-relay:send",
+			{
+				operationId,
+				targetMachineId,
+				ciphertext: parsedParams.ciphertext,
+			},
+			(result) =>
+				parseSendTeamRelayResult(result, {
+					operationId,
+					targetMachineId,
+					recipientKeyId,
+				}),
+		);
+	}
+
 	connect() {
 		this.socket.connect();
 	}
@@ -2501,11 +2904,304 @@ export class SocketClient extends EventEmitter {
 		this.stopHeartbeat();
 		this.connected = false;
 		this.invalidateWalReplayBarrier();
-		this.agentTeamStore.close();
 		this.socket.disconnect();
+	}
+
+	emitUpdatedAgentTeamProjection(team: AgentTeamSummary): void {
+		this.socket.emit("agent-teams:changed", {
+			added: [],
+			updated: [team],
+			removed: [],
+			machineId: team.machineId,
+		});
 	}
 
 	isConnected() {
 		return this.connected;
+	}
+
+	private async confirmTeamRelayRegistration(
+		generation: number,
+		payload: TeamRelayReadyPayload,
+	): Promise<boolean> {
+		for (
+			let attempt = 1;
+			attempt <= this.teamRelayRegistrationAckAttempts;
+			attempt += 1
+		) {
+			if (!this.isCurrentTeamRelayRegistration(generation)) {
+				return false;
+			}
+			let rawAck: unknown;
+			try {
+				rawAck = await this.sendTeamRelayReadyProof(payload);
+			} catch (error) {
+				if (!this.isCurrentTeamRelayRegistration(generation)) {
+					return false;
+				}
+				logger.warn(
+					{
+						attempt,
+						errorName: error instanceof Error ? error.name : "UnknownError",
+					},
+					"team_relay_registration_ack_failed",
+				);
+				continue;
+			}
+			if (!this.isCurrentTeamRelayRegistration(generation)) {
+				return false;
+			}
+			return (
+				this.parseTeamRelayRegistrationAttempt(rawAck, payload) === "accepted"
+			);
+		}
+		logger.warn(
+			{ attempts: this.teamRelayRegistrationAckAttempts },
+			"team_relay_registration_ack_exhausted",
+		);
+
+		let retryAttempt = 0;
+		while (this.isCurrentTeamRelayRegistration(generation)) {
+			const shouldRetry = await this.waitForTeamRelayRegistrationRetry(
+				generation,
+				retryAttempt,
+			);
+			if (!shouldRetry) {
+				return false;
+			}
+			const attempt = this.teamRelayRegistrationAckAttempts + retryAttempt + 1;
+			let rawAck: unknown;
+			try {
+				rawAck = await this.sendTeamRelayReadyProof(payload);
+			} catch (error) {
+				if (!this.isCurrentTeamRelayRegistration(generation)) {
+					return false;
+				}
+				logger.warn(
+					{
+						attempt,
+						errorName: error instanceof Error ? error.name : "UnknownError",
+					},
+					"team_relay_registration_ack_failed",
+				);
+				retryAttempt += 1;
+				continue;
+			}
+			if (!this.isCurrentTeamRelayRegistration(generation)) {
+				return false;
+			}
+			return (
+				this.parseTeamRelayRegistrationAttempt(rawAck, payload) === "accepted"
+			);
+		}
+		return false;
+	}
+
+	private parseTeamRelayRegistrationAttempt(
+		rawAck: unknown,
+		payload: TeamRelayReadyPayload,
+	): TeamRelayRegistrationAttemptResult {
+		try {
+			const accepted = parseTeamRelayReadyAck(rawAck, payload);
+			if (!accepted) {
+				logger.warn("team_relay_registration_rejected");
+				return "rejected";
+			}
+			return "accepted";
+		} catch (error) {
+			logger.error(
+				{
+					errorName: error instanceof Error ? error.name : "UnknownError",
+				},
+				"team_relay_registration_ack_invalid",
+			);
+			return "rejected";
+		}
+	}
+
+	private waitForTeamRelayRegistrationRetry(
+		generation: number,
+		retryAttempt: number,
+	): Promise<boolean> {
+		if (!this.isCurrentTeamRelayRegistration(generation)) {
+			return Promise.resolve(false);
+		}
+		this.clearTeamRelayRegistrationRetry();
+		const exponentialDelay =
+			this.teamRelayRegistrationRetryBaseDelayMs *
+			2 ** Math.min(retryAttempt, 30);
+		const delayMs = Math.min(
+			exponentialDelay,
+			this.teamRelayRegistrationRetryMaxDelayMs,
+		);
+		return new Promise((resolve) => {
+			const timer = setTimeout(() => {
+				const retry = this.teamRelayRegistrationRetryTimer;
+				if (retry?.timer !== timer || retry.generation !== generation) {
+					return;
+				}
+				this.teamRelayRegistrationRetryTimer = undefined;
+				resolve(this.isCurrentTeamRelayRegistration(generation));
+			}, delayMs);
+			timer.unref();
+			this.teamRelayRegistrationRetryTimer = {
+				generation,
+				timer,
+				resolve,
+			};
+		});
+	}
+
+	private clearTeamRelayRegistrationRetry(): void {
+		const retry = this.teamRelayRegistrationRetryTimer;
+		if (!retry) {
+			return;
+		}
+		this.teamRelayRegistrationRetryTimer = undefined;
+		clearTimeout(retry.timer);
+		retry.resolve(false);
+	}
+
+	private sendTeamRelayReadyProof(
+		payload: TeamRelayReadyPayload,
+	): Promise<unknown> {
+		return new Promise((resolve, reject) => {
+			try {
+				const readySocket = this.socket.timeout(
+					this.teamRelayRegistrationAckTimeoutMs,
+				) as unknown as {
+					volatile: {
+						emit: (
+							event: "cli:team-relay-ready",
+							proof: TeamRelayReadyPayload,
+							ack: (error: Error | null, response?: TeamRelayReadyAck) => void,
+						) => void;
+					};
+				};
+				readySocket.volatile.emit(
+					"cli:team-relay-ready",
+					payload,
+					(error, response) => {
+						if (error) {
+							reject(error);
+							return;
+						}
+						resolve(response);
+					},
+				);
+			} catch (error) {
+				reject(error);
+			}
+		});
+	}
+
+	private async activateTeamRelayOutbound(
+		generation: number,
+		confirmation: Promise<boolean>,
+	): Promise<void> {
+		const confirmed = await confirmation;
+		if (!this.isCurrentTeamRelayRegistration(generation)) {
+			return;
+		}
+		if (!confirmed) {
+			this.markTeamRelayOutboundUnavailable();
+			return;
+		}
+		try {
+			this.markTeamRelayReady(generation);
+		} catch (error) {
+			this.degradeTeamRelayOutbound("team_relay_transport_ready_failed", error);
+		}
+	}
+
+	private isCurrentTeamRelayRegistration(generation: number): boolean {
+		return (
+			this.connected &&
+			this.socket.connected &&
+			generation === this.walReplayGeneration &&
+			this.teamRelayRegisteredGeneration === generation
+		);
+	}
+
+	private isTeamRelayReady(): boolean {
+		return (
+			this.connected &&
+			this.socket.connected &&
+			this.teamRelayReadyGeneration === this.walReplayGeneration
+		);
+	}
+
+	private isTeamRelayRegistered(): boolean {
+		return (
+			this.connected &&
+			this.socket.connected &&
+			this.teamRelayRegisteredGeneration === this.walReplayGeneration
+		);
+	}
+
+	private markTeamRelayReady(generation: number): void {
+		if (
+			!this.connected ||
+			!this.socket.connected ||
+			generation !== this.walReplayGeneration
+		) {
+			return;
+		}
+		this.teamRelayReadyGeneration = generation;
+		try {
+			const accepted =
+				this.options.sessionManager.setTeamRelayTransportReady(true);
+			if (!accepted) {
+				throw new Error("Team relay transport readiness was rejected");
+			}
+		} catch (error) {
+			this.teamRelayReadyGeneration = undefined;
+			throw error;
+		}
+	}
+
+	private markTeamRelayOutboundUnavailable(): void {
+		this.teamRelayReadyGeneration = undefined;
+		const unavailableError = new Error(
+			"Team relay transport became unavailable",
+		);
+		for (const rejectPending of [...this.pendingTeamRelayRequests.values()]) {
+			rejectPending(unavailableError);
+		}
+		try {
+			this.options.sessionManager.setTeamRelayTransportReady(false);
+		} catch (error) {
+			logger.error(
+				{ errorName: error instanceof Error ? error.name : "UnknownError" },
+				"team_relay_transport_pause_failed",
+			);
+		}
+	}
+
+	private markTeamRelayUnavailable(): void {
+		this.teamRelayRegisteredGeneration = undefined;
+		this.markTeamRelayOutboundUnavailable();
+	}
+
+	private degradeTeamRelayOutbound(reason: string, error: unknown): void {
+		logger.error(
+			{
+				errorName: error instanceof Error ? error.name : "UnknownError",
+				reason,
+			},
+			"team_relay_transport_failed",
+		);
+		this.markTeamRelayOutboundUnavailable();
+	}
+
+	private degradeTeamRelayRegistration(reason: string, error: unknown): void {
+		logger.error(
+			{
+				errorName: error instanceof Error ? error.name : "UnknownError",
+				reason,
+			},
+			"team_relay_registration_failed",
+		);
+		this.markTeamRelayUnavailable();
 	}
 }

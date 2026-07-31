@@ -28,6 +28,7 @@ import {
 	SelectValue,
 } from "@mobvibe/ui/select";
 import { Skeleton } from "@mobvibe/ui/skeleton";
+import { Textarea } from "@mobvibe/ui/textarea";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -81,10 +82,13 @@ export function CreateSessionDialog({
 		draftWorktreeBranch,
 		draftWorktreeSuggestedBranch,
 		draftWorktreeBaseBranch,
+		createDialogMode,
+		draftTeamTarget,
 		setDraftTitle,
 		setDraftBackendId,
 		setDraftCwd,
 		setDraftAdditionalDirectories,
+		setDraftTeamTarget,
 		setDraftWorktreeEnabled,
 		setDraftWorktreeBranch,
 		setDraftWorktreeSuggestedBranch,
@@ -103,6 +107,7 @@ export function CreateSessionDialog({
 	const machineDisplayName = selectedMachineId
 		? (machines[selectedMachineId]?.hostname ?? selectedMachineId.slice(0, 8))
 		: undefined;
+	const isAgentTeamMode = createDialogMode === "agent-team";
 
 	const rootsQuery = useQuery({
 		queryKey: ["fs-roots", selectedMachineId],
@@ -282,17 +287,24 @@ export function CreateSessionDialog({
 				className="max-h-[100svh] w-[100vw] max-w-none overflow-y-auto overscroll-contain sm:max-h-[calc(100svh-2rem)] sm:w-[92vw] sm:max-w-[92vw] lg:max-w-4xl"
 			>
 				<div className="grid gap-1.5 text-center sm:text-left">
-					<DialogTitle>{t("session.createTitle")}</DialogTitle>
+					<DialogTitle>
+						{isAgentTeamMode
+							? t("session.createTeamTitle")
+							: t("session.createTitle")}
+					</DialogTitle>
 					<DialogDescription>
-						{t("session.createDescription")}
+						{isAgentTeamMode
+							? t("session.createTeamDescription")
+							: t("session.createDescription")}
 					</DialogDescription>
 				</div>
-				{machineDisplayName ? (
+				{!isAgentTeamMode && machineDisplayName ? (
 					<div className="text-muted-foreground flex items-center gap-1.5 text-sm">
 						<HugeiconsIcon
 							icon={ComputerIcon}
 							strokeWidth={2}
 							className="size-4"
+							aria-hidden="true"
 						/>
 						<span>
 							{t("session.targetMachine", { name: machineDisplayName })}
@@ -301,7 +313,11 @@ export function CreateSessionDialog({
 				) : null}
 				<div className="flex min-w-0 flex-col gap-3">
 					<div className="flex flex-col gap-2">
-						<Label htmlFor="session-title">{t("session.titleLabel")}</Label>
+						<Label htmlFor="session-title">
+							{isAgentTeamMode
+								? t("session.teamTitleLabel")
+								: t("session.titleLabel")}
+						</Label>
 						<Input
 							id="session-title"
 							name="session-title"
@@ -311,6 +327,22 @@ export function CreateSessionDialog({
 							placeholder={t("session.titlePlaceholder")}
 						/>
 					</div>
+					{isAgentTeamMode ? (
+						<div className="flex flex-col gap-2">
+							<Label htmlFor="team-target">
+								{t("session.teamTargetLabel")}
+							</Label>
+							<Textarea
+								id="team-target"
+								name="team-target"
+								autoComplete="off"
+								value={draftTeamTarget}
+								onChange={(event) => setDraftTeamTarget(event.target.value)}
+								placeholder={t("session.teamTargetPlaceholder")}
+								className="min-h-28 resize-y"
+							/>
+						</div>
+					) : null}
 					<div className="flex flex-col gap-2">
 						<Label htmlFor="session-backend">{t("session.backendLabel")}</Label>
 						<Select
@@ -340,6 +372,7 @@ export function CreateSessionDialog({
 						backendId={draftBackendId || undefined}
 						enabled={open}
 						machineId={selectedMachineId ?? undefined}
+						placementNeutral={isAgentTeamMode}
 					/>
 					<div className="flex flex-col gap-2">
 						<Label htmlFor="session-cwd">{t("session.cwdLabel")}</Label>
@@ -364,7 +397,11 @@ export function CreateSessionDialog({
 						</InputGroup>
 						{!selectedMachineId ? (
 							<div className="text-destructive text-xs">
-								{t("errors.selectMachine")}
+								{t(
+									isAgentTeamMode
+										? "errors.agentTeamWorkspaceContextRequired"
+										: "errors.selectMachine",
+								)}
 							</div>
 						) : null}
 					</div>
@@ -587,6 +624,7 @@ export function CreateSessionDialog({
 							!draftBackendId ||
 							!draftCwd ||
 							!selectedMachineId ||
+							(isAgentTeamMode && draftTeamTarget.trim().length === 0) ||
 							isWorktreeCreateDisabled
 						}
 						onClick={onCreate}

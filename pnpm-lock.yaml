@@ -523,6 +523,11 @@ packages:
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
+  '@agentclientprotocol/sdk@0.21.0':
+    resolution: {integrity: sha512-ONj+Q8qOdNQp5XbH5jnMwzT9IKZJsSN0p0lkceS4GtUtNOPVLpNzSS8gqQdGMKfBvA0ESbkL8BTaSN1Rc9miEw==, tarball: https://registry.npmjs.org/@agentclientprotocol/sdk/-/sdk-0.21.0.tgz}
+    peerDependencies:
+      zod: ^3.25.0 || ^4.0.0
+
   '@antfu/ni@25.0.0':
     resolution: {integrity: sha512-9q/yCljni37pkMr4sPrI3G4jqdIk074+iukc5aFJl7kmDCCsiJrbZ6zKxnES1Gwg+i9RcDZwvktl23puGslmvA==, tarball: https://registry.npmjs.org/@antfu/ni/-/ni-25.0.0.tgz}
     hasBin: true
@@ -6132,6 +6137,10 @@ snapshots:
   '@adobe/css-tools@4.4.4': {}
 
   '@agentclientprotocol/sdk@1.2.1(zod@4.3.5)':
+    dependencies:
+      zod: 4.3.5
+
+  '@agentclientprotocol/sdk@0.21.0(zod@4.3.5)':
     dependencies:
       zod: 4.3.5
 

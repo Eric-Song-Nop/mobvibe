@@ -16,18 +16,29 @@ import { useSessionActivation } from "@/hooks/useSessionActivation";
 import { useSessionHandlers } from "@/hooks/useSessionHandlers";
 import { useSessionList } from "@/hooks/useSessionList";
 import { useSessionMutations } from "@/hooks/useSessionMutations";
-import { useSessionQueries } from "@/hooks/useSessionQueries";
+import {
+	refreshSessionQueriesAfterReconnect,
+	useSessionQueries,
+} from "@/hooks/useSessionQueries";
 import { useSocket } from "@/hooks/useSocket";
+import type { SessionsResponse } from "@/lib/api";
 import { useChatStore } from "@/lib/chat-store";
 import { bootstrapSessionE2EE } from "@/lib/e2ee";
 import { createFallbackError, normalizeError } from "@/lib/error-utils";
 import { isInputFocused, registerHotkeys } from "@/lib/hotkeys";
 import { getBackendCapability, useMachinesStore } from "@/lib/machines-store";
 import { ensureNotificationPermission } from "@/lib/notifications";
-import { shouldActivateSessionOnSelect } from "@/lib/session-selection";
+import {
+	shouldActivateSessionOnSelect,
+	sidebarEntryContainsAvailableSession,
+} from "@/lib/session-selection";
+import { resolveCoveredMachineIds } from "@/lib/session-source-isolation";
 import { getContextLeftPercent } from "@/lib/session-usage";
+import { useTeamStore } from "@/lib/team-store";
 import { useUiStore } from "@/lib/ui-store";
 import { getPathBasename } from "@/lib/ui-utils";
+
+const SESSIONS_QUERY_KEY = ["sessions"] as const;
 
 export function useMainAppController() {
 	const { t } = useTranslation();
@@ -44,6 +55,35 @@ export function useMainAppController() {
 			lastCreatedCwd: s.lastCreatedCwd,
 		})),
 	);
+	const {
+		activeAgentTeamId,
+		activeAgentTeam,
+		teamAppError,
+		isTeamProjectionReady,
+		isTeamProjectionRefreshing,
+		isSessionProjectionRecoveryPending,
+		isSessionProjectionSnapshotReady,
+		sessionProjectionRecoveryGeneration,
+		lastAbortedSessionProjectionRecoveryGeneration,
+	} = useTeamStore(
+		useShallow((s) => ({
+			activeAgentTeamId: s.activeAgentTeamId,
+			activeAgentTeam: s.activeAgentTeamId
+				? s.teams[s.activeAgentTeamId]
+				: undefined,
+			teamAppError: s.appError,
+			isTeamProjectionReady: s.isProjectionReady,
+			isTeamProjectionRefreshing: s.isProjectionRefreshing,
+			isSessionProjectionRecoveryPending: s.isSessionProjectionRecoveryPending,
+			isSessionProjectionSnapshotReady: s.isSessionProjectionSnapshotReady,
+			sessionProjectionRecoveryGeneration:
+				s.sessionProjectionRecoveryGeneration,
+			lastAbortedSessionProjectionRecoveryGeneration:
+				s.lastAbortedSessionProjectionRecoveryGeneration,
+		})),
+	);
+	const setActiveAgentTeamId = useTeamStore((s) => s.setActiveAgentTeamId);
+	const setTeamAppError = useTeamStore((s) => s.setAppError);
 
 	// Actions — stable refs, never trigger re-renders
 	const chatActions = useChatStore(
@@ -124,18 +164,36 @@ export function useMainAppController() {
 			setDraftBackendId: s.setDraftBackendId,
 			setDraftCwd: s.setDraftCwd,
 			setDraftAdditionalDirectories: s.setDraftAdditionalDirectories,
+			setCreateDialogMode: s.setCreateDialogMode,
+			setDraftTeamTarget: s.setDraftTeamTarget,
 			resetDraftWorktree: s.resetDraftWorktree,
 			setSelectedWorkspace: s.setSelectedWorkspace,
 		})),
 	);
 
 	const queryClient = useQueryClient();
+	const refreshAuthoritativeSessionQueries = useCallback(() => {
+		void refreshSessionQueriesAfterReconnect(queryClient).catch((error) => {
+			setTeamAppError(
+				normalizeError(
+					error,
+					createFallbackError(t("errors.sessionsFetchFailed"), "service"),
+				),
+			);
+		});
+	}, [queryClient, setTeamAppError, t]);
 	const {
 		sessionsQuery,
 		backendsQuery,
 		availableBackends,
 		discoverSessionsMutation,
 	} = useSessionQueries();
+	const lastCommittedSessionsResponseRef = useRef<SessionsResponse | undefined>(
+		isSessionProjectionRecoveryPending
+			? (queryClient.getQueryData<SessionsResponse>(SESSIONS_QUERY_KEY) ??
+					sessionsQuery.data)
+			: undefined,
+	);
 	const defaultBackendId = availableBackends[0]?.backendId;
 	useMachinesQuery();
 
@@ -173,10 +231,8 @@ export function useMainAppController() {
 		createLocalSession: chatActions.createLocalSession,
 		updateSessionCursor: chatActions.updateSessionCursor,
 		resetSessionForRevision: chatActions.resetSessionForRevision,
-		onReconnect: () => {
-			queryClient.invalidateQueries({ queryKey: ["sessions"] });
-			queryClient.invalidateQueries({ queryKey: ["acp-backends"] });
-		},
+		onReconnect: refreshAuthoritativeSessionQueries,
+		onAgentTeamsRefreshRequired: refreshAuthoritativeSessionQueries,
 	});
 
 	const mutations = useSessionMutations(chatActions, {
@@ -203,6 +259,7 @@ export function useMainAppController() {
 		selectedWorkspaceCwd,
 		effectiveWorkspaceCwd,
 		sessionList,
+		sidebarSessionList,
 	} = useSessionList({
 		activeSessionId,
 		selectedMachineId,
@@ -255,23 +312,70 @@ export function useMainAppController() {
 	// --- Effects ---
 
 	useEffect(() => {
-		if (sessionsQuery.data?.sessions) {
-			syncSessionSummaries(sessionsQuery.data.sessions);
-
-			// Bootstrap session DEKs and keep runtime E2EE status in sync.
-			const { setSessionE2EEStatus } = useChatStore.getState();
-			for (const session of sessionsQuery.data.sessions) {
-				setSessionE2EEStatus(
-					session.sessionId,
-					bootstrapSessionE2EE(
-						session.sessionId,
-						session.wrappedDek,
-						session.revision,
-					),
-				);
-			}
+		const response =
+			queryClient.getQueryData<SessionsResponse>(SESSIONS_QUERY_KEY) ??
+			sessionsQuery.data;
+		const snapshot = response?.sessions;
+		if (
+			!isSessionProjectionRecoveryPending &&
+			lastAbortedSessionProjectionRecoveryGeneration ===
+				sessionProjectionRecoveryGeneration
+		) {
+			// Every HTTP snapshot in an aborted generation is untrusted. Socket
+			// deltas remain authoritative until a newer generation reaches ready.
+			return;
 		}
-	}, [sessionsQuery.data?.sessions, syncSessionSummaries]);
+		if (!snapshot) {
+			return;
+		}
+
+		if (
+			isSessionProjectionRecoveryPending &&
+			!isSessionProjectionSnapshotReady
+		) {
+			return;
+		}
+		if (
+			!isSessionProjectionRecoveryPending &&
+			lastCommittedSessionsResponseRef.current === response
+		) {
+			return;
+		}
+
+		const coveredMachineIds = resolveCoveredMachineIds(
+			snapshot,
+			response?.coveredMachineIds,
+		);
+		const acceptedSnapshot = syncSessionSummaries(snapshot, coveredMachineIds);
+
+		// Bootstrap session DEKs before releasing buffered socket projection events.
+		const { setSessionE2EEStatus } = useChatStore.getState();
+		for (const session of acceptedSnapshot) {
+			setSessionE2EEStatus(
+				session.sessionId,
+				bootstrapSessionE2EE(
+					session.sessionId,
+					session.wrappedDek,
+					session.revision,
+				),
+			);
+		}
+		lastCommittedSessionsResponseRef.current = response;
+
+		if (isSessionProjectionRecoveryPending) {
+			useTeamStore
+				.getState()
+				.completeSessionProjectionRecovery(sessionProjectionRecoveryGeneration);
+		}
+	}, [
+		isSessionProjectionRecoveryPending,
+		isSessionProjectionSnapshotReady,
+		lastAbortedSessionProjectionRecoveryGeneration,
+		queryClient,
+		sessionProjectionRecoveryGeneration,
+		sessionsQuery.data,
+		syncSessionSummaries,
+	]);
 
 	useEffect(() => {
 		void ensureNotificationPermission({ isAuthenticated });
@@ -295,13 +399,22 @@ export function useMainAppController() {
 	// 清除无效的 activeSessionId（不自动选中）
 	useEffect(() => {
 		if (!activeSessionId) return;
+		if (
+			!isTeamProjectionReady ||
+			isTeamProjectionRefreshing ||
+			isSessionProjectionRecoveryPending
+		) {
+			// Team ownership is unknown while the authoritative leader projection
+			// is loading or refreshing, so the sidebar is not yet evidence of deletion.
+			return;
+		}
 		if (activeSession && !selectedMachineId) {
 			// Delay invalidation until machine context is restored; otherwise a
 			// persisted active session can be cleared before machine selection syncs.
 			return;
 		}
-		const isActiveInList = sessionList.some(
-			(session) => session.sessionId === activeSessionId,
+		const isActiveInList = sidebarSessionList.some((entry) =>
+			sidebarEntryContainsAvailableSession(entry, activeSessionId),
 		);
 		if (!isActiveInList) {
 			chatActions.setActiveSessionId(undefined);
@@ -309,8 +422,11 @@ export function useMainAppController() {
 	}, [
 		activeSession,
 		activeSessionId,
+		isTeamProjectionReady,
+		isTeamProjectionRefreshing,
+		isSessionProjectionRecoveryPending,
 		selectedMachineId,
-		sessionList,
+		sidebarSessionList,
 		chatActions.setActiveSessionId,
 	]);
 
@@ -427,6 +543,7 @@ export function useMainAppController() {
 
 	const handleSelectSession = useCallback(
 		(sessionId: string) => {
+			setActiveAgentTeamId(undefined);
 			const session = useChatStore.getState().sessions[sessionId];
 			if (!session) {
 				chatActions.setActiveSessionId(sessionId);
@@ -440,7 +557,15 @@ export function useMainAppController() {
 
 			chatActions.setActiveSessionId(sessionId);
 		},
-		[activateSession, chatActions.setActiveSessionId],
+		[activateSession, chatActions.setActiveSessionId, setActiveAgentTeamId],
+	);
+
+	const handleSelectAgentTeam = useCallback(
+		(agentTeamId: string) => {
+			setActiveAgentTeamId(agentTeamId);
+			chatActions.setActiveSessionId(undefined);
+		},
+		[chatActions.setActiveSessionId, setActiveAgentTeamId],
 	);
 
 	// --- Derived display state ---
@@ -506,7 +631,11 @@ export function useMainAppController() {
 				createFallbackError(t("errors.sessionsFetchFailed"), "service"),
 			).message;
 		}
-		return appError?.message ?? activeSession?.error?.message;
+		return (
+			teamAppError?.message ??
+			appError?.message ??
+			activeSession?.error?.message
+		);
 	}, [
 		activeSession?.error?.message,
 		appError?.message,
@@ -514,6 +643,7 @@ export function useMainAppController() {
 		backendsQuery.isError,
 		sessionsQuery.error,
 		sessionsQuery.isError,
+		teamAppError?.message,
 		t,
 	]);
 
@@ -629,6 +759,8 @@ export function useMainAppController() {
 	return {
 		activeSession,
 		activeSessionId,
+		activeAgentTeam,
+		activeAgentTeamId,
 		availableBackends,
 		backendLabel,
 		chatMessageListRef,
@@ -656,6 +788,7 @@ export function useMainAppController() {
 		handleRenameSubmit,
 		handleScrollToMessage,
 		handleSelectSession,
+		handleSelectAgentTeam,
 		handleSend,
 		handleSyncHistory,
 		isBulkArchiving,
@@ -670,6 +803,7 @@ export function useMainAppController() {
 		plans: activeSession?.plans,
 		selectedMachineId,
 		sessionList,
+		sidebarSessionList,
 		statusMessage,
 		streamError,
 		subdirectoryLabel,

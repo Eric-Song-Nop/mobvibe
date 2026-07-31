@@ -17,29 +17,29 @@ Requirements for the first agent team release. Each requirement must map to exac
 
 ### MCP Isolation And Capabilities
 
-- [ ] **MCP-01**: CLI 可以为每个 team run 启动或恢复一个 team MCP server，并暴露 `mobvibe_team_*` 工具给该 team 的 leader/member session。
-- [ ] **MCP-02**: Team tools 优先通过 ACP 官方 MCP-over-ACP per-session transport 注入：只在 team `session/new` 的 `tools.mcpServers` 中声明 team MCP server。
-- [ ] **MCP-03**: 普通非 team session 不包含 `mobvibe-team` MCP server declaration，不能看到或调用 team tools。
-- [ ] **MCP-04**: 如果 backend 不支持 native `mcpCapabilities.acp`，系统只能使用仅作用于该 team session 的 stdio/HTTP bridge；不得修改 agent 全局 MCP 配置。
-- [ ] **MCP-05**: 创建 leader/member 或 spawn member 前，系统必须校验 backend 支持 native MCP-over-ACP 或安全 per-session bridge；否则阻止或降级为非自治成员。
-- [ ] **MCP-06**: 系统持久化并展示 MCP readiness phase，例如 server_ready、session_injecting、tools_ready、degraded 和 error。
-- [ ] **MCP-07**: Team MCP tools 必须携带可验证的 team/member caller identity，并按 tool policy 执行 leader-only、用户确认和 workspace 限制。
+- [x] **MCP-01**: CLI 可以为每个 team run 启动或恢复一个 team MCP server，并暴露 `mobvibe_team_*` 工具给该 team 的 leader/member session。
+- [x] **MCP-02**: Team tools 优先通过 ACP 官方 MCP-over-ACP per-session transport 注入：只在 team `session/new` 的 `tools.mcpServers` 中声明 team MCP server。
+- [x] **MCP-03**: 普通非 team session 不包含 `mobvibe-team` MCP server declaration，不能看到或调用 team tools。
+- [x] **MCP-04**: 如果 backend 不支持 native `mcpCapabilities.acp`，系统只能使用仅作用于该 team session 的 stdio/HTTP bridge；不得修改 agent 全局 MCP 配置。
+- [x] **MCP-05**: 创建 leader/member 或 spawn member 前，系统必须校验 backend 支持 native MCP-over-ACP 或安全 per-session bridge；否则阻止或降级为非自治成员。
+- [x] **MCP-06**: 系统持久化并展示 MCP readiness phase，例如 server_ready、session_injecting、tools_ready、degraded 和 error。
+- [x] **MCP-07**: Team MCP tools 必须携带可验证的 team/member caller identity，并按 tool policy 执行 leader-only、用户确认和 workspace 限制。
 
 ### Coordination Runtime
 
-- [ ] **COORD-01**: Agent 可以通过 `mobvibe_team_send_message` 向 leader、指定 member 或全体发送 durable mailbox message。
-- [ ] **COORD-02**: Mailbox message 记录 sender、recipient、read/unread、createdAt、wake status 和 source refs；消息持久化与 wake 结果分离。
-- [ ] **COORD-03**: Agent 可以通过 task tools 创建、列出和更新 durable task board；任务包含 owner、status、blockedBy/blocks 和更新时间。
-- [ ] **COORD-04**: Mailbox 正文、task 正文和 agent 输出不得作为 Gateway-facing 明文字段传输或存储。
+- [x] **COORD-01**: Agent 可以通过 `mobvibe_team_send_message` 向 leader、指定 member 或全体发送 durable mailbox message。
+- [x] **COORD-02**: Mailbox message 记录 sender、recipient、read/unread、createdAt、wake status 和 source refs；消息持久化与 wake 结果分离。
+- [x] **COORD-03**: Agent 可以通过 task tools 创建、列出和更新 durable task board；任务包含 owner、status、blockedBy/blocks 和更新时间。
+- [x] **COORD-04**: Mailbox 正文、task 正文和 agent 输出不得作为 Gateway-facing 明文字段传输或存储。
 
 ### Team Creation And Orchestration
 
-- [ ] **ORCH-01**: 用户可以从 WebUI 创建 team run，并通过 Gateway 将创建请求路由到用户拥有的目标 CLI machine。
-- [ ] **ORCH-02**: CLI 可以创建 leader 普通 ACP session，注入 team MCP server，并在 MCP ready 后把用户目标交给 leader。
-- [ ] **ORCH-03**: Leader 可以请求 spawn member；系统在 capability check、tool policy 和用户确认后创建普通 member ACP session。
-- [ ] **ORCH-04**: 每个 leader/member session 都绑定独立普通 `sessionId`，并保持现有 WAL、E2EE、permission、文件/Git 和历史语义。
-- [ ] **ORCH-05**: 并行或动态创建的成员默认可以使用独立 worktree，系统可以记录并展示成员的 worktree source 和 branch。
-- [ ] **ORCH-06**: 如果目标 backend 不存在、MCP transport 不可用或创建失败，系统可以给出成员级错误并保留已创建成员的可恢复状态。
+- [x] **ORCH-01**: 用户可以从 WebUI 创建 team run，并通过 Gateway 将创建请求路由到用户拥有的目标 CLI machine。
+- [x] **ORCH-02**: CLI 可以创建 leader 普通 ACP session，注入 team MCP server，并在 MCP ready 后把用户目标交给 leader。
+- [x] **ORCH-03**: Leader 可以请求 spawn member；系统在 capability check 和 tool policy 后创建普通 member ACP session；用户确认/权限聚合由 Phase 4 覆盖。
+- [x] **ORCH-04**: 每个 leader/member session 都绑定独立普通 `sessionId`，并保持现有 WAL、E2EE、permission、文件/Git 和历史语义。
+- [x] **ORCH-05**: 并行或动态创建的成员可以继承 team-shared worktree，系统可以记录并展示成员的 worktree source 和 branch；per-member 独立 worktree 策略留给后续 lifecycle/retry 设计。
+- [x] **ORCH-06**: 如果目标 backend 不存在、MCP transport 不可用或创建失败，系统可以给出成员级错误并保留已创建成员的可恢复状态。
 
 ### Lifecycle And Recovery
 
@@ -52,11 +52,11 @@ Requirements for the first agent team release. Each requirement must map to exac
 
 ### WebUI Experience
 
-- [ ] **UI-01**: WebUI 提供 team run 创建入口，用户可以选择 machine、workspace、leader backend、目标任务和 workspace/worktree 策略。
-- [ ] **UI-02**: WebUI 提供 team run 列表或分组视图，普通 session 与 team run 的关系清晰可见。
-- [ ] **UI-03**: Team detail 展示 leader/member 卡片，包括 backend、role、status、MCP phase、session 链接、worktree branch、错误和最后更新时间。
-- [ ] **UI-04**: Team detail 展示 task board 与 mailbox 活动的非内容 projection，例如 counts、owners、status、unread、wake_failed。
-- [ ] **UI-05**: 用户可以从 team detail 点击成员并跳转到对应普通 session，继续使用现有聊天、文件、Git 和权限 UI。
+- [x] **UI-01**: WebUI 提供 team run 创建入口，用户可以选择 machine、workspace、leader backend、目标任务和 workspace/worktree 策略。
+- [x] **UI-02**: WebUI 提供 team run 列表或分组视图，普通 session 与 team run 的关系清晰可见。
+- [x] **UI-03**: Team detail 展示 leader/member 卡片，包括 backend、role、status、MCP phase、session 链接、worktree branch、错误和最后更新时间。
+- [x] **UI-04**: Team detail 展示 task board 与 mailbox 活动的非内容 projection，例如 counts、owners、status、unread、wake_failed。
+- [x] **UI-05**: 用户可以从 team detail 点击成员并跳转到对应普通 session，继续使用现有聊天、文件、Git 和权限 UI。
 - [ ] **UI-06**: Team detail 可以聚合显示成员权限等待状态，并引导用户跳转到原 session 完成权限决策。
 - [ ] **UI-07**: Team UI 在桌面和移动端都能完成创建、观察、跳转、取消、重试和归档的基本流程。
 
@@ -117,34 +117,34 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TEAM-03 | Phase 1 | Complete |
 | TEAM-04 | Phase 1 | Complete |
 | TEAM-05 | Phase 1 | Complete |
-| MCP-01 | Phase 2 | Pending |
-| MCP-02 | Phase 2 | Pending |
-| MCP-03 | Phase 2 | Pending |
-| MCP-04 | Phase 2 | Pending |
-| MCP-05 | Phase 2 | Pending |
-| MCP-06 | Phase 2 | Pending |
-| MCP-07 | Phase 2 | Pending |
-| COORD-01 | Phase 2 | Pending |
-| COORD-02 | Phase 2 | Pending |
-| COORD-03 | Phase 2 | Pending |
-| COORD-04 | Phase 2 | Pending |
-| ORCH-01 | Phase 3 | Pending |
-| ORCH-02 | Phase 3 | Pending |
-| ORCH-03 | Phase 3 | Pending |
-| ORCH-04 | Phase 3 | Pending |
-| ORCH-05 | Phase 3 | Pending |
-| ORCH-06 | Phase 3 | Pending |
+| MCP-01 | Phase 2 | Complete |
+| MCP-02 | Phase 2 | Complete |
+| MCP-03 | Phase 2 | Complete |
+| MCP-04 | Phase 2 | Complete |
+| MCP-05 | Phase 2 | Complete |
+| MCP-06 | Phase 2 | Complete |
+| MCP-07 | Phase 2 | Complete |
+| COORD-01 | Phase 2 | Complete |
+| COORD-02 | Phase 2 | Complete |
+| COORD-03 | Phase 2 | Complete |
+| COORD-04 | Phase 2 | Complete |
+| ORCH-01 | Phase 3 | Complete |
+| ORCH-02 | Phase 3 | Complete |
+| ORCH-03 | Phase 3 | Complete |
+| ORCH-04 | Phase 3 | Complete |
+| ORCH-05 | Phase 3 | Complete |
+| ORCH-06 | Phase 3 | Complete |
 | LIFE-01 | Phase 1 | Complete |
 | LIFE-02 | Phase 4 | Pending |
 | LIFE-03 | Phase 4 | Pending |
 | LIFE-04 | Phase 4 | Pending |
 | LIFE-05 | Phase 4 | Pending |
 | LIFE-06 | Phase 4 | Pending |
-| UI-01 | Phase 3 | Pending |
-| UI-02 | Phase 3 | Pending |
-| UI-03 | Phase 3 | Pending |
-| UI-04 | Phase 3 | Pending |
-| UI-05 | Phase 3 | Pending |
+| UI-01 | Phase 3 | Complete |
+| UI-02 | Phase 3 | Complete |
+| UI-03 | Phase 3 | Complete |
+| UI-04 | Phase 3 | Complete |
+| UI-05 | Phase 3 | Complete |
 | UI-06 | Phase 4 | Pending |
 | UI-07 | Phase 5 | Pending |
 | SEC-01 | Phase 4 | Pending |
@@ -158,4 +158,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 - Unmapped: 0 ✓
 
 ---
-*Requirements updated: 2026-05-12 after AionUI and MCP-over-ACP correction*
+*Requirements updated: 2026-05-14 after Phase 3 verification*

@@ -74,10 +74,22 @@ import {
 } from "../lib/child-process.js";
 import { logger } from "../lib/logger.js";
 import { buildShellCommand, resolveShell } from "../lib/shell.js";
+import type { TeamAcpMcpDeclaration } from "../team/team-capability.js";
+import {
+	registerTeamMcpProtocolHandlers,
+	TeamMcpProtocolAdapter,
+	type TeamMcpProtocolHandlers,
+} from "../team/team-mcp-protocol.js";
 
 type ClientInfo = {
 	name: string;
 	version: string;
+};
+
+type RfdMcpCapabilities = {
+	acp?: boolean;
+	http?: boolean;
+	sse?: boolean;
 };
 
 const MAX_STDERR_LINES = 20;
@@ -393,6 +405,11 @@ const getErrorMessage = (error: unknown) => {
 
 type SessionUpdateListener = (notification: SessionNotification) => void;
 
+export type TeamMcpSessionOptions = {
+	teamMcpDeclaration?: TeamAcpMcpDeclaration;
+	teamMcpHandlers?: TeamMcpProtocolHandlers;
+};
+
 type TerminalOutputSnapshot = {
 	output: string;
 	truncated: boolean;
@@ -479,6 +496,29 @@ const buildConnectionClosedError = (
 
 const normalizeOutputText = (value: string) => value.normalize("NFC");
 
+const readBooleanFlag = (value: unknown, key: keyof RfdMcpCapabilities) => {
+	if (!value || typeof value !== "object") {
+		return false;
+	}
+	const candidate = value as Record<keyof RfdMcpCapabilities, unknown>;
+	return candidate[key] === true;
+};
+
+const mapRfdMcpCapabilities = (
+	agentCapabilities?: AgentCapabilities,
+): RfdMcpCapabilities | undefined => {
+	const mcpCapabilities = agentCapabilities?.mcpCapabilities as unknown;
+	const mapped = {
+		acp: readBooleanFlag(mcpCapabilities, "acp"),
+		http: readBooleanFlag(mcpCapabilities, "http"),
+		sse: readBooleanFlag(mcpCapabilities, "sse"),
+	};
+	if (!mapped.acp && !mapped.http && !mapped.sse) {
+		return undefined;
+	}
+	return mapped;
+};
+
 const isOutputOverLimit = (value: string, limit: number) =>
 	Buffer.byteLength(value, "utf8") > limit;
 
@@ -553,6 +593,7 @@ export class AcpConnection {
 	private metaSanitizationWarnings = 0;
 	private planSanitizationWarnings = 0;
 	private sensitiveAuthOperations = 0;
+	private readonly teamMcpProtocol = new TeamMcpProtocolAdapter();
 
 	constructor(
 		private readonly options: {
@@ -584,6 +625,7 @@ export class AcpConnection {
 	 */
 	getSessionCapabilities(): AgentSessionCapabilities {
 		const auth = this.getAuthenticationCapabilities();
+		const mcp = mapRfdMcpCapabilities(this.agentCapabilities);
 		return {
 			list: this.agentCapabilities?.sessionCapabilities?.list != null,
 			load: this.agentCapabilities?.loadSession === true,
@@ -599,6 +641,7 @@ export class AcpConnection {
 				embeddedContext:
 					this.agentCapabilities?.promptCapabilities?.embeddedContext === true,
 			},
+			...(mcp ? { mcp } : {}),
 			...(auth ? { auth } : {}),
 		};
 	}
@@ -720,6 +763,7 @@ export class AcpConnection {
 		sessionId: string,
 		cwd: string,
 		additionalDirectories?: readonly string[],
+		teamMcp?: TeamMcpSessionOptions,
 	): Promise<LoadSessionResponse> {
 		if (!this.supportsSessionLoad()) {
 			throw new Error("Agent does not support session/load capability");
@@ -737,20 +781,26 @@ export class AcpConnection {
 			);
 		}
 		const connection = await this.ensureReady();
-		const response = this.sanitizeAgentPayload<LoadSessionResponse>(
-			await connection.agent.request(methods.agent.session.load, {
-				sessionId,
-				cwd,
-				mcpServers: [],
-				additionalDirectories:
-					normalizedAdditionalDirectories.length > 0
-						? normalizedAdditionalDirectories
-						: undefined,
-			}),
-			"session/load",
-		);
-		this.bindActiveSession(sessionId, cwd, normalizedAdditionalDirectories);
-		return response;
+		this.configureTeamMcp(teamMcp);
+		try {
+			const response = this.sanitizeAgentPayload<LoadSessionResponse>(
+				await connection.agent.request(methods.agent.session.load, {
+					sessionId,
+					cwd,
+					mcpServers: this.buildMcpServers(teamMcp),
+					additionalDirectories:
+						normalizedAdditionalDirectories.length > 0
+							? normalizedAdditionalDirectories
+							: undefined,
+				}),
+				"session/load",
+			);
+			this.bindActiveSession(sessionId, cwd, normalizedAdditionalDirectories);
+			return response;
+		} catch (error) {
+			this.configureTeamMcp(undefined);
+			throw error;
+		}
 	}
 
 	/** Resume a historical session without replaying its message history. */
@@ -758,6 +808,7 @@ export class AcpConnection {
 		sessionId: string,
 		cwd: string,
 		additionalDirectories?: readonly string[],
+		teamMcp?: TeamMcpSessionOptions,
 	): Promise<ResumeSessionResponse> {
 		if (!this.supportsSessionResume()) {
 			throw new Error("Agent does not support session/resume capability");
@@ -775,20 +826,26 @@ export class AcpConnection {
 			);
 		}
 		const connection = await this.ensureReady();
-		const response = this.sanitizeAgentPayload<ResumeSessionResponse>(
-			await connection.agent.request(methods.agent.session.resume, {
-				sessionId,
-				cwd,
-				mcpServers: [],
-				additionalDirectories:
-					normalizedAdditionalDirectories.length > 0
-						? normalizedAdditionalDirectories
-						: undefined,
-			}),
-			"session/resume",
-		);
-		this.bindActiveSession(sessionId, cwd, normalizedAdditionalDirectories);
-		return response;
+		this.configureTeamMcp(teamMcp);
+		try {
+			const response = this.sanitizeAgentPayload<ResumeSessionResponse>(
+				await connection.agent.request(methods.agent.session.resume, {
+					sessionId,
+					cwd,
+					mcpServers: this.buildMcpServers(teamMcp),
+					additionalDirectories:
+						normalizedAdditionalDirectories.length > 0
+							? normalizedAdditionalDirectories
+							: undefined,
+				}),
+				"session/resume",
+			);
+			this.bindActiveSession(sessionId, cwd, normalizedAdditionalDirectories);
+			return response;
+		} catch (error) {
+			this.configureTeamMcp(undefined);
+			throw error;
+		}
 	}
 
 	/** Close an active session and release its client-owned resources. */
@@ -857,6 +914,16 @@ export class AcpConnection {
 	}
 
 	private updateStatus(state: AcpConnectionState, error?: ErrorDetail) {
+		if (state === "error") {
+			try {
+				this.configureTeamMcp(undefined);
+			} catch (cleanupError) {
+				logger.warn(
+					{ backendId: this.options.backend.id, err: cleanupError },
+					"team_mcp_error_cleanup_failed",
+				);
+			}
+		}
 		this.state = state;
 		this.error = error;
 		this.statusEmitter.emit("status", this.getStatus());
@@ -965,7 +1032,7 @@ export class AcpConnection {
 				ndJsonStream(input, output),
 				() => this.warnPlanUpdateRejected(),
 			);
-			const connection = client({ name: this.options.client.name })
+			const clientApp = client({ name: this.options.client.name })
 				.onRequest(
 					methods.client.session.requestPermission,
 					({ params, requestId, signal }) =>
@@ -994,8 +1061,11 @@ export class AcpConnection {
 				)
 				.onRequest(methods.client.terminal.release, ({ params }) =>
 					this.releaseTerminal(params),
-				)
-				.connect(stream);
+				);
+			const connection = registerTeamMcpProtocolHandlers(
+				clientApp,
+				this.teamMcpProtocol,
+			).connect(stream);
 			attemptConnection = connection;
 			this.connection = connection;
 
@@ -1145,10 +1215,12 @@ export class AcpConnection {
 		}
 	}
 
-	async createSession(options?: {
-		cwd?: string;
-		additionalDirectories?: readonly string[];
-	}): Promise<NewSessionResponse> {
+	async createSession(
+		options?: {
+			cwd?: string;
+			additionalDirectories?: readonly string[];
+		} & TeamMcpSessionOptions,
+	): Promise<NewSessionResponse> {
 		const connection = await this.ensureReady();
 		const cwd = options?.cwd ?? process.cwd();
 		const additionalDirectories = normalizeAdditionalDirectories(
@@ -1163,13 +1235,20 @@ export class AcpConnection {
 				"Agent does not support session additionalDirectories capability",
 			);
 		}
-		const response = await this.createSessionInternal(
-			connection,
-			cwd,
-			additionalDirectories,
-		);
-		this.bindActiveSession(response.sessionId, cwd, additionalDirectories);
-		return response;
+		this.configureTeamMcp(options);
+		try {
+			const response = await this.createSessionInternal(
+				connection,
+				cwd,
+				additionalDirectories,
+				options,
+			);
+			this.bindActiveSession(response.sessionId, cwd, additionalDirectories);
+			return response;
+		} catch (error) {
+			this.configureTeamMcp(undefined);
+			throw error;
+		}
 	}
 
 	async prompt(
@@ -1559,6 +1638,7 @@ export class AcpConnection {
 			return;
 		}
 
+		this.configureTeamMcp(undefined);
 		this.updateStatus("stopped");
 		this.clearActiveSession();
 		this.agentInfo = undefined;
@@ -1699,11 +1779,12 @@ export class AcpConnection {
 		connection: ClientConnection,
 		cwd: string,
 		additionalDirectories: readonly string[],
+		teamMcp?: TeamMcpSessionOptions,
 	): Promise<NewSessionResponse> {
 		const session = this.sanitizeAgentPayload<NewSessionResponse>(
 			await connection.agent.request(methods.agent.session.new, {
 				cwd,
-				mcpServers: [],
+				mcpServers: this.buildMcpServers(teamMcp),
 				additionalDirectories:
 					additionalDirectories.length > 0
 						? [...additionalDirectories]
@@ -1712,6 +1793,31 @@ export class AcpConnection {
 			"session/new",
 		);
 		return session;
+	}
+
+	private configureTeamMcp(options?: TeamMcpSessionOptions): void {
+		const declaration = options?.teamMcpDeclaration;
+		const handlers = options?.teamMcpHandlers;
+		if (!declaration && !handlers) {
+			this.teamMcpProtocol.configure(undefined);
+			return;
+		}
+		if (!declaration || !handlers) {
+			throw RequestError.invalidParams(
+				undefined,
+				"Team MCP declaration and handlers must be configured together",
+			);
+		}
+		this.teamMcpProtocol.configure({ declaration, handlers });
+	}
+
+	private buildMcpServers(
+		options?: TeamMcpSessionOptions,
+	): TeamAcpMcpDeclaration[] {
+		if (!options?.teamMcpDeclaration) {
+			return [];
+		}
+		return [options.teamMcpDeclaration];
 	}
 
 	private emitSessionUpdate(notification: SessionNotification) {

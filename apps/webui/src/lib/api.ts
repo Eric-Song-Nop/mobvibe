@@ -6,10 +6,12 @@ export type {
 	AgentAuthMethod,
 	AgentBackendRpcParams,
 	AgentCapabilitiesRpcResult,
+	AgentTeamListResult,
 	AgentTeamSummary,
 	AuthenticateAgentRpcParams,
 	CreateAgentTeamRpcResult,
 	CreateSessionResponse,
+	CreateSessionWorktreeOptions,
 	DeleteSessionParams,
 	ErrorDetail,
 	FsEntriesResponse,
@@ -18,7 +20,6 @@ export type {
 	GetAgentTeamRpcResult,
 	GitFileStatus,
 	HostFsRootsResponse,
-	ListAgentTeamsRpcResult,
 	MachinesResponse,
 	PermissionDecisionResponse,
 	SessionFsFilePreviewResponse,
@@ -36,11 +37,13 @@ import type {
 	AcpBackendsResponse,
 	AgentBackendRpcParams,
 	AgentCapabilitiesRpcResult,
+	AgentTeamListResult,
 	AuthenticateAgentRpcParams,
 	CancelSessionResponse,
 	ContentBlock,
 	CreateAgentTeamRpcResult,
 	CreateSessionResponse,
+	CreateSessionWorktreeOptions,
 	DeleteSessionParams,
 	DiscoverSessionsResult,
 	ErrorDetail,
@@ -50,7 +53,6 @@ import type {
 	GetAgentTeamRpcResult,
 	GitBranchesForCwdResponse,
 	HostFsRootsResponse,
-	ListAgentTeamsRpcResult,
 	MachinesResponse,
 	PermissionDecisionPayload,
 	PermissionDecisionResponse,
@@ -512,14 +514,13 @@ export type CreateAgentTeamPayload = {
 	workspaceRootCwd: string;
 	leaderBackendId: string;
 	workspaceMode?: TeamWorkspaceMode;
-	worktreeSourceCwd?: string;
-	worktreeBranch?: string;
+	worktree?: CreateSessionWorktreeOptions;
 };
 
 export const fetchAgentTeams = async (
 	machineId?: string,
-): Promise<ListAgentTeamsRpcResult> =>
-	requestJson<ListAgentTeamsRpcResult>(buildAgentTeamsPath(machineId));
+): Promise<AgentTeamListResult> =>
+	requestJson<AgentTeamListResult>(buildAgentTeamsPath(machineId));
 
 export const fetchAgentTeam = async (
 	agentTeamId: string,
@@ -540,8 +541,7 @@ export const createAgentTeam = async (
 			workspaceRootCwd: payload.workspaceRootCwd,
 			leaderBackendId: payload.leaderBackendId,
 			workspaceMode: payload.workspaceMode,
-			worktreeSourceCwd: payload.worktreeSourceCwd,
-			worktreeBranch: payload.worktreeBranch,
+			worktree: payload.worktree,
 		}),
 	});
 

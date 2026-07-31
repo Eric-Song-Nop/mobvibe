@@ -1,9 +1,19 @@
 import type {
 	AgentTeamsChangedPayload,
+	AgentTeamsRefreshRequiredPayload,
 	CliRegistrationInfo,
+	GatewayToWebuiEvents,
 	PermissionDecisionPayload,
 	PermissionRequestPayload,
+	PlaceTeamRelayPeerParams,
+	PlaceTeamRelayPeerResult,
+	ResolveTeamRelayPeerParams,
+	ResolveTeamRelayPeerResult,
+	RpcError,
+	RpcRequest,
 	RpcResponse,
+	SendTeamRelayParams,
+	SendTeamRelayResult,
 	SessionAttachedPayload,
 	SessionDetachedPayload,
 	SessionEvent,
@@ -11,8 +21,16 @@ import type {
 	SessionsChangedPayload,
 	SessionsDiscoveredPayload,
 	SignedAuthToken,
+	TeamRelayReadyAck,
+	TeamRelayReadyPayload,
 } from "@mobvibe/shared";
-import { initCrypto, verifySignedToken } from "@mobvibe/shared";
+import {
+	AppError,
+	createInternalError,
+	initCrypto,
+	TEAM_RELAY_OPERATION_ID_MAX_BYTES,
+	verifySignedToken,
+} from "@mobvibe/shared";
 import type { Server, Socket } from "socket.io";
 import type { GatewayConfig } from "../config.js";
 import { logger } from "../lib/logger.js";
@@ -73,12 +91,90 @@ const getSerializedPayloadBytes = (payload: unknown): number | undefined => {
 	}
 };
 
+const toTeamRelayRpcError = (error: unknown): RpcError => {
+	if (error instanceof AppError) {
+		switch (error.detail.code) {
+			case "REQUEST_VALIDATION_FAILED":
+				return {
+					code: "REQUEST_VALIDATION_FAILED",
+					message: "Invalid Team relay request",
+					retryable: false,
+					scope: "request",
+					status: 400,
+				};
+			case "AUTHORIZATION_FAILED":
+				return {
+					code: "AUTHORIZATION_FAILED",
+					message: "Team relay peer not found",
+					retryable: false,
+					scope: "request",
+					status: 404,
+				};
+			case "CAPABILITY_NOT_SUPPORTED":
+				return {
+					code: "CAPABILITY_NOT_SUPPORTED",
+					message: "Team relay unavailable",
+					retryable: false,
+					scope: "request",
+					status: 409,
+				};
+		}
+	}
+	return { ...createInternalError("request"), status: 500 };
+};
+
+const getTeamRelayRequestId = (request: unknown): string => {
+	if (
+		typeof request === "object" &&
+		request !== null &&
+		!Array.isArray(request) &&
+		"requestId" in request &&
+		typeof request.requestId === "string" &&
+		request.requestId.length > 0 &&
+		!/\p{Cc}/u.test(request.requestId) &&
+		Buffer.byteLength(request.requestId, "utf8") <=
+			TEAM_RELAY_OPERATION_ID_MAX_BYTES
+	) {
+		return request.requestId;
+	}
+	return "invalid-team-relay-request";
+};
+
+const parseTeamRelayRpcRequest = (request: unknown): RpcRequest<unknown> => {
+	const requestRecord =
+		typeof request === "object" && request !== null && !Array.isArray(request)
+			? (request as Record<string, unknown>)
+			: undefined;
+	if (
+		!requestRecord ||
+		Object.keys(requestRecord).length !== 2 ||
+		!Object.hasOwn(requestRecord, "requestId") ||
+		!Object.hasOwn(requestRecord, "params") ||
+		getTeamRelayRequestId(requestRecord) !== requestRecord.requestId
+	) {
+		throw new AppError(
+			{
+				code: "REQUEST_VALIDATION_FAILED",
+				message: "Invalid Team relay request",
+				retryable: false,
+				scope: "request",
+			},
+			400,
+		);
+	}
+	return request as RpcRequest<unknown>;
+};
+
 export type CliHandlersDeps = {
 	io: Server;
 	cliRegistry: CliRegistry;
 	sessionRouter: SessionRouter;
 	teamRouter: TeamRouter;
-	emitToWebui: (event: string, payload: unknown, userId?: string) => void;
+	emitToWebui: (
+		event: keyof GatewayToWebuiEvents,
+		payload: unknown,
+		userId?: string,
+	) => void;
 	getUserAffinity: UserAffinityProvider;
 	config: GatewayConfig;
 	notificationService?: NotificationService;
@@ -89,12 +185,23 @@ export function setupCliHandlers(
 	cliRegistry: CliRegistry,
 	sessionRouter: SessionRouter,
 	teamRouter: TeamRouter,
-	emitToWebui: (event: string, payload: unknown, userId?: string) => void,
+	emitToWebui: (
+		event: keyof GatewayToWebuiEvents,
+		payload: unknown,
+		userId?: string,
+	) => void,
 	getUserAffinity: UserAffinityProvider = () => null,
 	config?: GatewayConfig,
 	notificationService?: NotificationService,
 ) {
 	const cliNamespace = io.of("/cli");
+
+	const isUniqueReadySessionOwner = (
+		record: ReturnType<CliRegistry["getCliBySocketId"]>,
+		sessionId: string,
+	): boolean =>
+		record?.userId !== undefined &&
+		cliRegistry.getCliForSessionByUser(sessionId, record.userId) === record;
 
 	const isActiveCliSession = (
 		record: ReturnType<CliRegistry["getCliBySocketId"]>,
@@ -329,6 +436,39 @@ export function setupCliHandlers(
 			return true;
 		};
 
+		const handleTeamRelayRequest = async <TResult>(
+			event: "team-relay:place" | "team-relay:resolve" | "team-relay:send",
+			rawRequest: unknown,
+			ack: ((response: RpcResponse<TResult>) => void) | undefined,
+			operation: (params: unknown) => Promise<TResult>,
+		): Promise<void> => {
+			if (typeof ack !== "function") {
+				logger.warn({ socketId: socket.id, event }, "team_relay_ack_missing");
+				return;
+			}
+			const requestId = getTeamRelayRequestId(rawRequest);
+			try {
+				const request = parseTeamRelayRpcRequest(rawRequest);
+				const result = await operation(request.params);
+				ack({ requestId, result });
+			} catch (error) {
+				logger.warn(
+					{
+						socketId: socket.id,
+						event,
+						requestId,
+						code:
+							error instanceof AppError ? error.detail.code : "INTERNAL_ERROR",
+					},
+					"team_relay_request_failed",
+				);
+				ack({
+					requestId,
+					error: toTeamRelayRpcError(error),
+				});
+			}
+		};
+
 		const registerCli = async (
 			info: CliRegistrationInfo,
 		): Promise<CliRecord | undefined> => {
@@ -409,6 +549,11 @@ export function setupCliHandlers(
 				socket.emit("cli:registered", {
 					machineId: record.machineId,
 					userId,
+					...(record.teamRelayRegistrationId
+						? {
+								teamRelayRegistrationId: record.teamRelayRegistrationId,
+							}
+						: {}),
 				});
 				logger.info(
 					{
@@ -451,17 +596,109 @@ export function setupCliHandlers(
 			});
 		});
 
+		// This event deliberately bypasses pre-registration buffering. Only the
+		// one-time proof issued for the current socket can activate Team relay.
+		socket.on(
+			"cli:team-relay-ready",
+			(
+				payload: TeamRelayReadyPayload,
+				ack?: (response: TeamRelayReadyAck) => void,
+			) => {
+				const accepted = cliRegistry.markTeamRelayReady(socket.id, payload);
+				const record = cliRegistry.getCliBySocketId(socket.id);
+				if (
+					!accepted ||
+					!record?.teamRelayRegistrationId ||
+					!record.teamRelayKey
+				) {
+					ack?.({ accepted: false });
+					logger.warn({ socketId: socket.id }, "cli_team_relay_ready_rejected");
+					return;
+				}
+				ack?.({
+					accepted: true,
+					registrationId: record.teamRelayRegistrationId,
+					relayKeyId: record.teamRelayKey.keyId,
+				});
+				logger.info(
+					{ socketId: socket.id, machineId: record.machineId },
+					"cli_team_relay_ready",
+				);
+			},
+		);
+
 		// Heartbeat
 		socket.on("cli:heartbeat", () => {
 			// Just acknowledge
 		});
 
+		socket.on(
+			"team-relay:place",
+			(
+				request: RpcRequest<PlaceTeamRelayPeerParams>,
+				ack: (response: RpcResponse<PlaceTeamRelayPeerResult>) => void,
+			) => {
+				withRegisteredCli("team-relay:place", request, (record) => {
+					void handleTeamRelayRequest(
+						"team-relay:place",
+						request,
+						ack,
+						(params) => teamRouter.placeRelayPeer(params, record),
+					);
+				});
+			},
+		);
+
+		socket.on(
+			"team-relay:resolve",
+			(
+				request: RpcRequest<ResolveTeamRelayPeerParams>,
+				ack: (response: RpcResponse<ResolveTeamRelayPeerResult>) => void,
+			) => {
+				withRegisteredCli("team-relay:resolve", request, (record) => {
+					void handleTeamRelayRequest(
+						"team-relay:resolve",
+						request,
+						ack,
+						(params) => teamRouter.resolveRelayPeer(params, record),
+					);
+				});
+			},
+		);
+
+		socket.on(
+			"team-relay:send",
+			(
+				request: RpcRequest<SendTeamRelayParams>,
+				ack: (response: RpcResponse<SendTeamRelayResult>) => void,
+			) => {
+				withRegisteredCli("team-relay:send", request, (record) => {
+					void handleTeamRelayRequest(
+						"team-relay:send",
+						request,
+						ack,
+						(params) => teamRouter.relay(params, record),
+					);
+				});
+			},
+		);
+
 		// Sessions list update (initial sync and heartbeat)
 		socket.on("sessions:list", (sessions: SessionSummary[]) => {
-			withRegisteredCli("sessions:list", sessions, () => {
+			withRegisteredCli("sessions:list", sessions, (record) => {
 				const sanitized = sanitizeSessionMetaEnvelopes(sessions);
 				warnSessionMetaSanitization("sessions:list", socket.id, sanitized);
-				cliRegistry.updateSessions(socket.id, sanitized.values);
+				cliRegistry.updateSessions(socket.id, sanitized.values, {
+					onFirstSnapshotReady: () => {
+						emitToWebui(
+							"agent-teams:refresh-required",
+							{
+								reason: "cli_registered",
+							} satisfies AgentTeamsRefreshRequiredPayload,
+							record.userId,
+						);
+					},
+				});
 				logger.debug(
 					{ socketId: socket.id, sessionCount: sessions.length },
 					"cli_sessions_list",
@@ -586,6 +823,7 @@ export function setupCliHandlers(
 				// Emit sessions:changed to webui (with capabilities even if no metadata changed)
 				if (
 					cliRecord.userId &&
+					cliRecord.sessionSnapshotReady &&
 					(changes.added.length > 0 ||
 						changes.updated.length > 0 ||
 						capabilities)
@@ -594,6 +832,15 @@ export function setupCliHandlers(
 						"sessions:changed",
 						{
 							...changes,
+							machineId: cliRecord.machineId,
+							added: changes.added.map((session) => ({
+								...session,
+								machineId: cliRecord.machineId,
+							})),
+							updated: changes.updated.map((session) => ({
+								...session,
+								machineId: cliRecord.machineId,
+							})),
 							backendCapabilities: payload.backendId
 								? { [payload.backendId]: capabilities }
 								: undefined,
@@ -650,6 +897,9 @@ export function setupCliHandlers(
 					{ sessionId: payload.sessionId, machineId: record.machineId },
 					"session_attached_received",
 				);
+				if (!record.sessionSnapshotReady) {
+					return;
+				}
 				emitToWebui(
 					"session:attached",
 					{ ...payload, machineId: record.machineId },
@@ -669,6 +919,9 @@ export function setupCliHandlers(
 					},
 					"session_detached_received",
 				);
+				if (!record.sessionSnapshotReady) {
+					return;
+				}
 				emitToWebui(
 					"session:detached",
 					{ ...payload, machineId: record.machineId },
@@ -683,22 +936,29 @@ export function setupCliHandlers(
 				const sanitized = sanitizeAcpMetaPayload(payload);
 				warnSessionMetaSanitization("permission:request", socket.id, sanitized);
 				const permission = sanitized.value;
+				if (!isUniqueReadySessionOwner(record, permission.sessionId)) {
+					return;
+				}
+				const canonicalPermission = {
+					...permission,
+					machineId: record.machineId,
+				};
 				logger.info(
 					{
-						sessionId: permission.sessionId,
-						requestId: permission.requestId,
+						sessionId: canonicalPermission.sessionId,
+						requestId: canonicalPermission.requestId,
 					},
 					"permission_request_received",
 				);
-				emitToWebui("permission:request", permission, record.userId);
+				emitToWebui("permission:request", canonicalPermission, record.userId);
 				if (
 					record.userId &&
 					notificationService &&
-					isActiveCliSession(record, permission.sessionId)
+					isActiveCliSession(record, canonicalPermission.sessionId)
 				) {
 					void notificationService.notifyPermissionRequest(
 						record.userId,
-						permission,
+						canonicalPermission,
 					);
 				}
 			});
@@ -707,11 +967,21 @@ export function setupCliHandlers(
 		// Permission result from CLI
 		socket.on("permission:result", (payload: PermissionDecisionPayload) => {
 			withRegisteredCli("permission:result", payload, (record) => {
+				if (!isUniqueReadySessionOwner(record, payload.sessionId)) {
+					return;
+				}
+				const canonicalPayload = {
+					...payload,
+					machineId: record.machineId,
+				};
 				logger.info(
-					{ sessionId: payload.sessionId, requestId: payload.requestId },
+					{
+						sessionId: canonicalPayload.sessionId,
+						requestId: canonicalPayload.requestId,
+					},
 					"permission_result_received",
 				);
-				emitToWebui("permission:result", payload, record.userId);
+				emitToWebui("permission:result", canonicalPayload, record.userId);
 			});
 		});
 
@@ -794,20 +1064,22 @@ export function setupCliHandlers(
 					{ machineId: record.machineId, reason, socketId: socket.id },
 					"cli_disconnected",
 				);
-				for (const session of record.sessions) {
-					// Only emit detached for sessions that were actually attached
-					// (skip discovered sessions that were never attached)
-					if (!session.isAttached) continue;
-					emitToWebui(
-						"session:detached",
-						{
-							sessionId: session.sessionId,
-							machineId: record.machineId,
-							detachedAt: new Date().toISOString(),
-							reason: "cli_disconnect",
-						},
-						cachedUserId,
-					);
+				if (record.sessionSnapshotReady) {
+					for (const session of record.sessions) {
+						// Only emit detached for sessions that were actually attached
+						// (skip discovered sessions that were never attached)
+						if (!session.isAttached) continue;
+						emitToWebui(
+							"session:detached",
+							{
+								sessionId: session.sessionId,
+								machineId: record.machineId,
+								detachedAt: new Date().toISOString(),
+								reason: "cli_disconnect",
+							},
+							cachedUserId,
+						);
+					}
 				}
 
 				// Do not eagerly release affinity here. A reconnect can claim/refresh

@@ -181,6 +181,9 @@ const DURABLE_DATA_TABLES = [
 	"agent_team_mailbox_messages",
 	"agent_team_tasks",
 	"agent_team_summary_refs",
+	"team_relay_operations",
+	"remote_team_session_bindings",
+	"team_runtime_outbox",
 ] as const;
 
 const databaseHasDurableData = (db: Database): boolean => {

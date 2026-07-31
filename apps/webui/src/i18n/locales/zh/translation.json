@@ -72,7 +72,19 @@
 	},
 	"layout": {
 		"resizeMachineSidebar": "调整机器侧边栏宽度",
-		"resizeSessionSidebar": "调整对话侧边栏宽度"
+		"resizeSessionSidebar": "调整对话侧边栏宽度",
+		"sidebarViews": "侧边栏视图"
+	},
+	"agentTeam": {
+		"title": "Agent Teams",
+		"new": "新建 Agent Team",
+		"badge": "Agent Team",
+		"taskBadge": "任务 {{count}}",
+		"mailBadge": "消息 {{count}}",
+		"linked": "已链接",
+		"noSession": "未链接会话",
+		"openMemberSession": "打开 {{name}} 会话",
+		"toggleMembers": "展开或收起 {{title}} 成员"
 	},
 	"session": {
 		"title": "对话",
@@ -102,8 +114,13 @@
 		"historyMayBeStale": "历史可能不是最新的，请重新同步。",
 		"sessionClosed": "会话已结束或被关闭",
 		"createTitle": "新建对话",
+		"createTeamTitle": "创建 Agent Team",
 		"createDescription": "选择后端并设置对话标题与工作目录。",
+		"createTeamDescription": "填写团队目标并选择工作区，Mobvibe 会自动协调团队成员。",
 		"titleLabel": "标题",
+		"teamTitleLabel": "团队标题",
+		"teamTargetLabel": "目标",
+		"teamTargetPlaceholder": "描述希望 Agent Team 完成的任务",
 		"titlePlaceholder": "可选标题",
 		"backendLabel": "后端",
 		"backendEmpty": "暂无可用后端",
@@ -117,10 +134,12 @@
 			"description": "认证流程由 Agent 处理。Mobvibe 不接收您的凭据，也不追踪登录状态。",
 			"checking": "正在检查 Agent 认证选项…",
 			"loadError": "无法加载 Agent 认证选项。请检查所选机器后重试。",
+			"teamLoadError": "无法加载此工作区的 Agent 认证选项，请重试。",
 			"authenticate": "使用 {{name}} 认证",
 			"authenticating": "正在启动 Agent 认证…",
 			"authenticateComplete": "Agent 认证流程已完成，能力信息已刷新。",
 			"actionError": "Agent 认证请求失败或超时。请检查所选机器后重试。",
+			"teamActionError": "Agent 认证请求失败或超时，请重试。",
 			"logout": "从 Agent 退出认证",
 			"logoutImpact": "退出会请求 Agent 结束其认证状态。Mobvibe 不追踪您是否已登录。",
 			"logoutTitle": "结束 Agent 认证状态？",
@@ -190,8 +209,10 @@
 	},
 	"errors": {
 		"selectMachine": "请先选择机器",
+		"agentTeamWorkspaceContextRequired": "请选择一个工作区以创建 Agent Team。",
 		"selectBackend": "请选择后端",
 		"selectDirectory": "请选择工作目录",
+		"createAgentTeamTargetRequired": "创建 Agent Team 前请输入目标",
 		"backendsFetchFailed": "后端列表获取失败",
 		"sessionsFetchFailed": "会话列表获取失败",
 		"sessionNotReady": "会话未就绪，请重新创建对话",

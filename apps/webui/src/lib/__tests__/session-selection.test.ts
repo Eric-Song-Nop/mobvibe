@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	hasCachedSessionHistory,
 	shouldActivateSessionOnSelect,
+	sidebarEntryContainsAvailableSession,
 } from "@/lib/session-selection";
 
 describe("session selection cache policy", () => {
@@ -69,5 +70,37 @@ describe("session selection cache policy", () => {
 				terminalOutputs: {},
 			}),
 		).toBe(false);
+	});
+
+	it("drops a Team member session after its live projection disappears", () => {
+		expect(
+			sidebarEntryContainsAvailableSession(
+				{
+					kind: "agent-team",
+					members: [
+						{
+							sessionId: "remote-session",
+							session: undefined,
+						},
+					],
+				},
+				"remote-session",
+			),
+		).toBe(false);
+
+		expect(
+			sidebarEntryContainsAvailableSession(
+				{
+					kind: "agent-team",
+					members: [
+						{
+							sessionId: "remote-session",
+							session: { sessionId: "remote-session" },
+						},
+					],
+				},
+				"remote-session",
+			),
+		).toBe(true);
 	});
 });

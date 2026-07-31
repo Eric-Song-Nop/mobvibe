@@ -94,6 +94,7 @@ mock.module("node:stream", () => ({
 }));
 
 import type { AcpBackendConfig } from "../../config.js";
+import { buildTeamMcpDeclaration } from "../../team/team-capability.js";
 import {
 	ACP_CLIENT_CAPABILITIES,
 	ACP_FILE_SYSTEM_CAPABILITIES,
@@ -109,6 +110,13 @@ const createMockBackendConfig = (): AcpBackendConfig => ({
 	label: "Test Backend",
 	command: "test-command",
 	args: ["--arg1"],
+});
+
+const createTeamMcpHandlers = () => ({
+	handleConnect: mock(() => {}),
+	handleListTools: mock(() => {}),
+	handleToolCall: mock(() => Promise.resolve({ ok: true })),
+	handleDisconnect: mock(() => {}),
 });
 
 describe("AcpConnection", () => {
@@ -1088,6 +1096,147 @@ describe("AcpConnection", () => {
 			await expect(
 				connection.loadSession("session-1", "/home/user/project"),
 			).rejects.toThrow("Agent does not support session/load capability");
+		});
+
+		it("passes an empty mcpServers array for ordinary non-team session/load", async () => {
+			const request = mock(() =>
+				Promise.resolve({ modes: null, configOptions: null }),
+			);
+			// @ts-expect-error - accessing private properties to test ordinary ACP payload isolation
+			connection.state = "ready";
+			// @ts-expect-error - accessing private properties to test ordinary ACP payload isolation
+			connection.connection = { agent: { request } };
+			// @ts-expect-error - accessing private property for testing
+			connection.agentCapabilities = { loadSession: true };
+
+			await connection.loadSession("session-1", "/home/user/project");
+
+			expect(request).toHaveBeenCalledWith("session/load", {
+				sessionId: "session-1",
+				cwd: "/home/user/project",
+				mcpServers: [],
+			});
+		});
+
+		it("passes a single team MCP declaration for team session/load", async () => {
+			const request = mock(() =>
+				Promise.resolve({ modes: null, configOptions: null }),
+			);
+			// @ts-expect-error - accessing private properties to test team ACP payload isolation
+			connection.state = "ready";
+			// @ts-expect-error - accessing private properties to test team ACP payload isolation
+			connection.connection = { agent: { request } };
+			// @ts-expect-error - accessing private property for testing
+			connection.agentCapabilities = { loadSession: true };
+			const declaration = buildTeamMcpDeclaration({
+				agentTeamId: "team-1",
+				memberId: "member-1",
+			});
+
+			await connection.loadSession(
+				"session-1",
+				"/home/user/project",
+				undefined,
+				{
+					teamMcpDeclaration: declaration,
+					teamMcpHandlers: createTeamMcpHandlers(),
+				},
+			);
+
+			expect(request).toHaveBeenCalledWith("session/load", {
+				sessionId: "session-1",
+				cwd: "/home/user/project",
+				mcpServers: [declaration],
+			});
+		});
+	});
+
+	describe("createSession", () => {
+		it("passes an empty mcpServers array for ordinary non-team session/new", async () => {
+			const request = mock(() =>
+				Promise.resolve({
+					sessionId: "session-1",
+					modes: null,
+					configOptions: null,
+				}),
+			);
+			// @ts-expect-error - accessing private properties to test ordinary ACP payload isolation
+			connection.state = "ready";
+			// @ts-expect-error - accessing private properties to test ordinary ACP payload isolation
+			connection.connection = { agent: { request } };
+
+			await connection.createSession({ cwd: "/home/user/project" });
+
+			expect(request).toHaveBeenCalledWith("session/new", {
+				cwd: "/home/user/project",
+				mcpServers: [],
+			});
+		});
+
+		it("passes a single team MCP declaration for team session/new", async () => {
+			const request = mock(() =>
+				Promise.resolve({
+					sessionId: "session-1",
+					modes: null,
+					configOptions: null,
+				}),
+			);
+			// @ts-expect-error - accessing private properties to test team ACP payload isolation
+			connection.state = "ready";
+			// @ts-expect-error - accessing private properties to test team ACP payload isolation
+			connection.connection = { agent: { request } };
+			const declaration = buildTeamMcpDeclaration({
+				agentTeamId: "team-1",
+				memberId: "member-1",
+			});
+
+			await connection.createSession({
+				cwd: "/home/user/project",
+				teamMcpDeclaration: declaration,
+				teamMcpHandlers: createTeamMcpHandlers(),
+			});
+
+			expect(request).toHaveBeenCalledWith("session/new", {
+				cwd: "/home/user/project",
+				mcpServers: [declaration],
+			});
+		});
+
+		it("releases Team MCP bindings when the ACP connection enters an error state", async () => {
+			const request = mock(() =>
+				Promise.resolve({
+					sessionId: "session-1",
+					modes: null,
+					configOptions: null,
+				}),
+			);
+			const handlers = createTeamMcpHandlers();
+			const declaration = buildTeamMcpDeclaration({
+				agentTeamId: "team-1",
+				memberId: "member-1",
+			});
+			const internal = connection as unknown as {
+				state: "ready";
+				connection: { agent: { request: typeof request } };
+				teamMcpProtocol: {
+					connect(input: { serverId: string }): { connectionId: string };
+				};
+				updateStatus(state: "error"): void;
+			};
+			internal.state = "ready";
+			internal.connection = { agent: { request } };
+			await connection.createSession({
+				cwd: "/home/user/project",
+				teamMcpDeclaration: declaration,
+				teamMcpHandlers: handlers,
+			});
+			internal.teamMcpProtocol.connect({ serverId: declaration.serverId });
+
+			internal.updateStatus("error");
+
+			expect(handlers.handleDisconnect).toHaveBeenCalledWith({
+				serverId: declaration.serverId,
+			});
 		});
 	});
 

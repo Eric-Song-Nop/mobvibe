@@ -25,10 +25,21 @@ import type {
 	AgentSessionCapabilities,
 	FsEntry,
 	FsRoot,
+	GatewaySessionsChangedPayload,
 	SessionFsResourceEntry,
 	SessionSummary,
 	SessionsChangedPayload,
 } from "./session.js";
+import type {
+	PlaceTeamRelayPeerParams,
+	PlaceTeamRelayPeerResult,
+	ResolveTeamRelayPeerParams,
+	ResolveTeamRelayPeerResult,
+	SendTeamRelayParams,
+	SendTeamRelayResult,
+	TeamRelayExecuteRpcParams,
+	TeamRelayPublicKey,
+} from "./team-relay.js";
 
 // Session event types for WAL-based persistence
 
@@ -107,12 +118,22 @@ export type PermissionDecisionPayload = {
 	outcome: PermissionOutcome;
 };
 
+export type GatewayPermissionRequestPayload = PermissionRequestPayload & {
+	machineId: string;
+};
+
+export type GatewayPermissionDecisionPayload = PermissionDecisionPayload & {
+	machineId: string;
+};
+
 // CLI registration info
 export type CliRegistrationInfo = {
 	machineId: string;
 	hostname: string;
 	version?: string;
 	backends?: AcpBackendSummary[];
+	/** Dedicated public identity for mandatory encrypted cross-machine Team relay. */
+	teamRelayKey?: TeamRelayPublicKey;
 	/** Optional wire-protocol features supported by this CLI version. */
 	protocolCapabilities?: {
 		/** The CLI durably deduplicates message sends by messageId. */
@@ -121,6 +142,33 @@ export type CliRegistrationInfo = {
 		messageRevisionPinning?: boolean;
 	};
 };
+
+/** Canonical identity and the one-time proof needed to enable Team relay. */
+export type CliRegisteredInfo = {
+	machineId: string;
+	userId?: string;
+	/**
+	 * Present when the Gateway accepted a Team relay key. Older Gateways may omit
+	 * it; in that case the CLI keeps ordinary sessions online but fails Team
+	 * relay closed.
+	 */
+	teamRelayRegistrationId?: string;
+};
+
+/** Proves that the CLI synchronously bound the current canonical identity. */
+export type TeamRelayReadyPayload = {
+	registrationId: string;
+	relayKeyId: string;
+};
+
+/** Gateway confirmation that the exact current Team relay proof was accepted. */
+export type TeamRelayReadyAck =
+	| { accepted: false }
+	| {
+			accepted: true;
+			registrationId: string;
+			relayKeyId: string;
+	  };
 
 // CLI error payload (sent when auth fails)
 export type CliErrorPayload = {
@@ -138,6 +186,11 @@ export type CliStatusPayload = {
 	userId?: string;
 	/** Per-backend capabilities (sent when available) */
 	backendCapabilities?: Record<string, AgentSessionCapabilities>;
+};
+
+/** Signals that a newly registered CLI may expose a newer Team projection. */
+export type AgentTeamsRefreshRequiredPayload = {
+	reason: "cli_registered";
 };
 
 // Stream error event
@@ -379,6 +432,10 @@ export type SessionDetachedPayload = {
 // All content now flows through session:event with appropriate kind
 export interface CliToGatewayEvents {
 	"cli:register": (info: CliRegistrationInfo) => void;
+	"cli:team-relay-ready": (
+		payload: TeamRelayReadyPayload,
+		ack: (response: TeamRelayReadyAck) => void,
+	) => void;
 	"cli:heartbeat": () => void;
 	"session:event": (event: SessionEvent) => void;
 	"session:attached": (payload: SessionAttachedPayload) => void;
@@ -389,6 +446,18 @@ export interface CliToGatewayEvents {
 	"sessions:changed": (payload: SessionsChangedPayload) => void;
 	"sessions:discovered": (payload: SessionsDiscoveredPayload) => void;
 	"agent-teams:changed": (payload: AgentTeamsChangedPayload) => void;
+	"team-relay:place": (
+		request: RpcRequest<PlaceTeamRelayPeerParams>,
+		ack: (response: RpcResponse<PlaceTeamRelayPeerResult>) => void,
+	) => void;
+	"team-relay:resolve": (
+		request: RpcRequest<ResolveTeamRelayPeerParams>,
+		ack: (response: RpcResponse<ResolveTeamRelayPeerResult>) => void,
+	) => void;
+	"team-relay:send": (
+		request: RpcRequest<SendTeamRelayParams>,
+		ack: (response: RpcResponse<SendTeamRelayResult>) => void,
+	) => void;
 
 	// RPC responses
 	"rpc:response": (response: RpcResponse<unknown>) => void;
@@ -396,7 +465,7 @@ export interface CliToGatewayEvents {
 
 // Gateway -> CLI events
 export interface GatewayToCliEvents {
-	"cli:registered": (info: { machineId: string; userId?: string }) => void;
+	"cli:registered": (info: CliRegisteredInfo) => void;
 	"cli:error": (payload: CliErrorPayload) => void;
 	"events:ack": (payload: EventsAckPayload) => void;
 
@@ -445,6 +514,9 @@ export interface GatewayToCliEvents {
 		request: RpcRequest<ListAgentTeamsRpcParams>,
 	) => void;
 	"rpc:agent-team:get": (request: RpcRequest<GetAgentTeamRpcParams>) => void;
+	"rpc:team-relay:execute": (
+		request: RpcRequest<TeamRelayExecuteRpcParams>,
+	) => void;
 
 	// Rename RPC request
 	"rpc:session:rename": (request: RpcRequest<RenameSessionParams>) => void;
@@ -487,11 +559,14 @@ export interface GatewayToWebuiEvents {
 	"session:event": (event: SessionEvent) => void;
 	"session:attached": (payload: SessionAttachedPayload) => void;
 	"session:detached": (payload: SessionDetachedPayload) => void;
-	"permission:request": (payload: PermissionRequestPayload) => void;
-	"permission:result": (payload: PermissionDecisionPayload) => void;
+	"permission:request": (payload: GatewayPermissionRequestPayload) => void;
+	"permission:result": (payload: GatewayPermissionDecisionPayload) => void;
 	"cli:status": (payload: CliStatusPayload) => void;
-	"sessions:changed": (payload: SessionsChangedPayload) => void;
+	"sessions:changed": (payload: GatewaySessionsChangedPayload) => void;
 	"agent-teams:changed": (payload: AgentTeamsChangedPayload) => void;
+	"agent-teams:refresh-required": (
+		payload: AgentTeamsRefreshRequiredPayload,
+	) => void;
 }
 
 export type AgentTeamRpcResult =
@@ -681,6 +756,8 @@ export type AcpBackendsResponse = {
 
 export type SessionsResponse = {
 	sessions: SessionSummary[];
+	/** Current machine registrations authoritatively represented by this snapshot. */
+	coveredMachineIds: string[];
 };
 
 export type CreateSessionResponse = SessionSummary;

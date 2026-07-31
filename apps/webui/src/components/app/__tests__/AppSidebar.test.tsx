@@ -92,7 +92,7 @@ vi.mock("@/components/session/SessionSidebar", () => ({
 		onArchiveSessionRequest,
 		onArchiveAllSessionsRequest,
 	}: {
-		onCreateSession: (mode: "workspace" | "session") => void;
+		onCreateSession: (mode: "workspace" | "session" | "agent-team") => void;
 		onCloseSessionRequest: (sessionId: string) => void;
 		onDeleteSessionRequest: (sessionId: string) => void;
 		onArchiveSessionRequest: (sessionId: string) => void;
@@ -101,6 +101,9 @@ vi.mock("@/components/session/SessionSidebar", () => ({
 		<div>
 			<button type="button" onClick={() => onCreateSession("session")}>
 				New Session
+			</button>
+			<button type="button" onClick={() => onCreateSession("agent-team")}>
+				New Agent Team
 			</button>
 			<button type="button" onClick={() => onCloseSessionRequest("session-1")}>
 				Close One
@@ -257,6 +260,17 @@ describe("AppSidebar mobile modal flow", () => {
 		expect(
 			screen.queryByRole("button", { name: "Close menu" }),
 		).not.toBeInTheDocument();
+	});
+
+	it("closes the mobile menu when opening Agent Team creation", async () => {
+		const onCreateSession = vi.fn();
+		const user = userEvent.setup();
+		renderSidebar({ onCreateSession });
+
+		await user.click(screen.getAllByText("New Agent Team")[0]!);
+
+		expect(onCreateSession).toHaveBeenCalledWith("agent-team");
+		expect(useUiStore.getState().mobileMenuOpen).toBe(false);
 	});
 
 	it("keeps the register-machine dialog mounted after closing the mobile menu", async () => {

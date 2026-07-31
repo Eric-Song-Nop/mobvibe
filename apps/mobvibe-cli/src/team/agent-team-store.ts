@@ -9,6 +9,10 @@ import type {
 	GetAgentTeamRpcResult,
 	ListAgentTeamsRpcParams,
 	ListAgentTeamsRpcResult,
+	TeamMailboxWakeStatus,
+	TeamMcpPhase,
+	TeamMcpTransport,
+	TeamSourceRef,
 } from "@mobvibe/shared";
 import { runMigrations } from "../wal/migrations.js";
 import { assertGatewayFacingAgentTeamPayload } from "./content-boundary.js";
@@ -22,19 +26,87 @@ import {
 	buildAgentTeamSummary,
 } from "./projection-builder.js";
 
+export type TeamCommandJournalError = {
+	name: string;
+	message: string;
+};
+
+export type TeamCommandJournalClaim =
+	| { status: "claimed"; claimId: string }
+	| { status: "completed"; result: unknown }
+	| { status: "failed"; error: TeamCommandJournalError }
+	| { status: "in_progress" }
+	| { status: "conflict" };
+
+export type AgentTeamMemberExecution = {
+	agentTeamId: string;
+	memberId: string;
+	executionMachineId: string;
+	workerRelayKeyId: string;
+	bootstrapOperationId: string;
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type TeamRuntimeTurnCompletion =
+	| {
+			status: "applied" | "replayed";
+			leaderMemberId: string;
+			notificationMessageId: string;
+	  }
+	| { status: "ignored" };
+
+export type PendingMailboxWakeRecipient = {
+	agentTeamId: string;
+	memberId: string;
+};
+
+type AgentTeamRuntimeInboxRow = {
+	turn_id: string;
+	agent_team_id: string;
+	member_id: string;
+	leader_member_id: string;
+	notification_message_id: string;
+};
+
 export class AgentTeamStore {
 	private db: Database;
+	private closed = false;
 	private stmtInsertTeam: ReturnType<Database["query"]>;
 	private stmtInsertMember: ReturnType<Database["query"]>;
 	private stmtInsertMcpStatus: ReturnType<Database["query"]>;
+	private stmtUpdateTeamRuntimeState: ReturnType<Database["query"]>;
+	private stmtUpdateMemberRuntime: ReturnType<Database["query"]>;
 	private stmtGetTeam: ReturnType<Database["query"]>;
 	private stmtListTeams: ReturnType<Database["query"]>;
 	private stmtListActiveTeams: ReturnType<Database["query"]>;
 	private stmtListMembers: ReturnType<Database["query"]>;
+	private stmtGetMemberForExecution: ReturnType<Database["query"]>;
+	private stmtGetMemberExecution: ReturnType<Database["query"]>;
+	private stmtGetMemberExecutionByBootstrap: ReturnType<Database["query"]>;
+	private stmtListMemberExecutions: ReturnType<Database["query"]>;
+	private stmtInsertMemberExecution: ReturnType<Database["query"]>;
+	private stmtDeleteMemberExecution: ReturnType<Database["query"]>;
 	private stmtListMcpStatuses: ReturnType<Database["query"]>;
 	private stmtListMailboxMessages: ReturnType<Database["query"]>;
 	private stmtListTasks: ReturnType<Database["query"]>;
+	private stmtListLocalTasks: ReturnType<Database["query"]>;
 	private stmtListSummaryRefs: ReturnType<Database["query"]>;
+	private stmtInsertMailboxMessage: ReturnType<Database["query"]>;
+	private stmtUpdateMailboxWake: ReturnType<Database["query"]>;
+	private stmtReadUnreadMailboxMessages: ReturnType<Database["query"]>;
+	private stmtGetMailboxMessage: ReturnType<Database["query"]>;
+	private stmtUpdateMailboxWakeMetadata: ReturnType<Database["query"]>;
+	private stmtTouchTeam: ReturnType<Database["query"]>;
+	private stmtUpdateMcpStatus: ReturnType<Database["query"]>;
+	private stmtInsertToolIntent: ReturnType<Database["query"]>;
+	private stmtGetTeamCommandJournal: ReturnType<Database["query"]>;
+	private stmtInsertTeamCommandClaim: ReturnType<Database["query"]>;
+	private stmtCompleteTeamCommand: ReturnType<Database["query"]>;
+	private stmtFailTeamCommand: ReturnType<Database["query"]>;
+	private stmtInsertTask: ReturnType<Database["query"]>;
+	private stmtGetTask: ReturnType<Database["query"]>;
+	private stmtUpdateTask: ReturnType<Database["query"]>;
 
 	constructor(dbPath: string) {
 		const dir = path.dirname(dbPath);
@@ -70,6 +142,24 @@ export class AgentTeamStore {
         $agentTeamId, $memberId, $transport, $serverId, $phase, $lastErrorJson, $updatedAt
       )
     `);
+		this.stmtUpdateTeamRuntimeState = this.db.query(`
+      UPDATE agent_teams
+      SET lifecycle = COALESCE($lifecycle, lifecycle),
+          updated_at = $updatedAt
+      WHERE agent_team_id = $agentTeamId
+    `);
+		this.stmtUpdateMemberRuntime = this.db.query(`
+      UPDATE agent_team_members
+      SET session_id = COALESCE($sessionId, session_id),
+          lifecycle = COALESCE($lifecycle, lifecycle),
+          health = COALESCE($health, health),
+          error_json = COALESCE($errorJson, error_json),
+          worktree_source_cwd = COALESCE($worktreeSourceCwd, worktree_source_cwd),
+          worktree_branch = COALESCE($worktreeBranch, worktree_branch),
+          updated_at = $updatedAt
+      WHERE member_id = $memberId
+        AND agent_team_id = $agentTeamId
+    `);
 		this.stmtGetTeam = this.db.query(`
       SELECT * FROM agent_teams WHERE agent_team_id = $agentTeamId
     `);
@@ -82,6 +172,47 @@ export class AgentTeamStore {
 		this.stmtListMembers = this.db.query(`
       SELECT * FROM agent_team_members WHERE agent_team_id = $agentTeamId ORDER BY created_at ASC
     `);
+		this.stmtGetMemberForExecution = this.db.query(`
+			SELECT 1
+			FROM agent_team_members
+			WHERE agent_team_id = $agentTeamId
+				AND member_id = $memberId
+			LIMIT 1
+		`);
+		this.stmtGetMemberExecution = this.db.query(`
+			SELECT agent_team_id, member_id, execution_machine_id,
+				worker_relay_key_id, bootstrap_operation_id, created_at, updated_at
+			FROM agent_team_member_executions
+			WHERE agent_team_id = $agentTeamId
+				AND member_id = $memberId
+		`);
+		this.stmtGetMemberExecutionByBootstrap = this.db.query(`
+			SELECT agent_team_id, member_id, execution_machine_id,
+				worker_relay_key_id, bootstrap_operation_id, created_at, updated_at
+			FROM agent_team_member_executions
+			WHERE bootstrap_operation_id = $bootstrapOperationId
+		`);
+		this.stmtListMemberExecutions = this.db.query(`
+			SELECT agent_team_id, member_id, execution_machine_id,
+				worker_relay_key_id, bootstrap_operation_id, created_at, updated_at
+			FROM agent_team_member_executions
+			WHERE agent_team_id = $agentTeamId
+			ORDER BY created_at ASC, member_id ASC
+		`);
+		this.stmtInsertMemberExecution = this.db.query(`
+			INSERT INTO agent_team_member_executions (
+				agent_team_id, member_id, execution_machine_id,
+				worker_relay_key_id, bootstrap_operation_id, created_at, updated_at
+			) VALUES (
+				$agentTeamId, $memberId, $executionMachineId,
+				$workerRelayKeyId, $bootstrapOperationId, $createdAt, $updatedAt
+			)
+		`);
+		this.stmtDeleteMemberExecution = this.db.query(`
+			DELETE FROM agent_team_member_executions
+			WHERE agent_team_id = $agentTeamId
+				AND member_id = $memberId
+		`);
 		this.stmtListMcpStatuses = this.db.query(`
       SELECT * FROM agent_team_mcp_status WHERE agent_team_id = $agentTeamId
     `);
@@ -99,11 +230,150 @@ export class AgentTeamStore {
       WHERE agent_team_id = $agentTeamId
       ORDER BY updated_at ASC
     `);
+		this.stmtListLocalTasks = this.db.query(`
+      SELECT task_id, agent_team_id, owner_member_id, status, body_local_json,
+             blocked_by_json, blocks_json, source_refs_json, created_at, updated_at
+      FROM agent_team_tasks
+      WHERE agent_team_id = $agentTeamId
+      ORDER BY created_at ASC
+    `);
 		this.stmtListSummaryRefs = this.db.query(`
       SELECT summary_ref_id, agent_team_id, source_refs_json, status, created_at, updated_at
       FROM agent_team_summary_refs
       WHERE agent_team_id = $agentTeamId
       ORDER BY updated_at ASC
+    `);
+		this.stmtInsertMailboxMessage = this.db.query(`
+      INSERT INTO agent_team_mailbox_messages (
+        message_id, agent_team_id, from_member_id, to_member_id, body_local_json,
+        source_refs_json, read_at, wake_status, wake_error_json, created_at
+      ) VALUES (
+        $messageId, $agentTeamId, $fromMemberId, $toMemberId, $bodyLocalJson,
+        $sourceRefsJson, $readAt, $wakeStatus, $wakeErrorJson, $createdAt
+      )
+    `);
+		this.stmtUpdateMailboxWake = this.db.query(`
+      UPDATE agent_team_mailbox_messages
+      SET wake_status = $wakeStatus
+      WHERE message_id = $messageId
+    `);
+		this.stmtReadUnreadMailboxMessages = this.db.query(`
+      SELECT message_id, agent_team_id, from_member_id, to_member_id, body_local_json,
+             source_refs_json, read_at, wake_status, wake_error_json, created_at
+      FROM agent_team_mailbox_messages
+      WHERE agent_team_id = $agentTeamId
+        AND to_member_id = $memberId
+        AND read_at IS NULL
+      ORDER BY created_at ASC
+    `);
+		this.stmtGetMailboxMessage = this.db.query(`
+      SELECT message_id, agent_team_id, from_member_id, to_member_id, body_local_json,
+             source_refs_json, read_at, wake_status, wake_error_json, created_at
+      FROM agent_team_mailbox_messages
+      WHERE message_id = $messageId
+    `);
+		this.stmtUpdateMailboxWakeMetadata = this.db.query(`
+      UPDATE agent_team_mailbox_messages
+      SET wake_status = $wakeStatus,
+          read_at = CASE WHEN $wakeStatus = 'failed' THEN NULL ELSE read_at END,
+          wake_error_json = $wakeErrorJson,
+          source_refs_json = $sourceRefsJson
+      WHERE message_id = $messageId
+    `);
+		this.stmtTouchTeam = this.db.query(`
+      UPDATE agent_teams
+      SET updated_at = $updatedAt
+      WHERE agent_team_id = $agentTeamId
+    `);
+		this.stmtUpdateMcpStatus = this.db.query(`
+      INSERT INTO agent_team_mcp_status (
+        agent_team_id, member_id, transport, server_id, phase, last_error_json, updated_at
+      ) VALUES (
+        $agentTeamId, $memberId, $transport, $serverId, $phase, $lastErrorJson, $updatedAt
+      )
+      ON CONFLICT(agent_team_id, member_id) DO UPDATE SET
+        transport = excluded.transport,
+        server_id = excluded.server_id,
+        phase = excluded.phase,
+        last_error_json = excluded.last_error_json,
+        updated_at = excluded.updated_at
+    `);
+		this.stmtInsertToolIntent = this.db.query(`
+      INSERT INTO agent_team_tool_intents (
+        intent_id, agent_team_id, requested_by_member_id, kind, payload_local_json,
+        status, source_refs_json, created_at, updated_at
+      ) VALUES (
+        $intentId, $agentTeamId, $requestedByMemberId, $kind, $payloadLocalJson,
+        $status, $sourceRefsJson, $createdAt, $updatedAt
+      )
+    `);
+		this.stmtGetTeamCommandJournal = this.db.query(`
+			SELECT source_scope, operation_id, payload_digest, status, claim_id,
+				result_local_json, error_local_json
+			FROM agent_team_command_journal
+			WHERE source_scope = $sourceScope
+				AND operation_id = $operationId
+		`);
+		this.stmtInsertTeamCommandClaim = this.db.query(`
+			INSERT OR IGNORE INTO agent_team_command_journal (
+				source_scope, operation_id, agent_team_id, caller_member_id,
+				payload_digest, status, claim_id, result_local_json,
+				error_local_json, claimed_at, completed_at
+			) VALUES (
+				$sourceScope, $operationId, $agentTeamId, $callerMemberId,
+				$payloadDigest, 'in_progress', $claimId, NULL, NULL,
+				$claimedAt, NULL
+			)
+		`);
+		this.stmtCompleteTeamCommand = this.db.query(`
+			UPDATE agent_team_command_journal
+			SET status = 'completed',
+				result_local_json = $resultLocalJson,
+				error_local_json = NULL,
+				completed_at = $completedAt
+			WHERE source_scope = $sourceScope
+				AND operation_id = $operationId
+				AND payload_digest = $payloadDigest
+				AND claim_id = $claimId
+				AND status = 'in_progress'
+		`);
+		this.stmtFailTeamCommand = this.db.query(`
+			UPDATE agent_team_command_journal
+			SET status = 'failed',
+				result_local_json = NULL,
+				error_local_json = $errorLocalJson,
+				completed_at = $completedAt
+			WHERE source_scope = $sourceScope
+				AND operation_id = $operationId
+				AND payload_digest = $payloadDigest
+				AND claim_id = $claimId
+				AND status = 'in_progress'
+		`);
+		this.stmtInsertTask = this.db.query(`
+      INSERT INTO agent_team_tasks (
+        task_id, agent_team_id, owner_member_id, status, body_local_json,
+        blocked_by_json, blocks_json, source_refs_json, created_at, updated_at
+      ) VALUES (
+        $taskId, $agentTeamId, $ownerMemberId, $status, $bodyLocalJson,
+        $blockedByJson, $blocksJson, $sourceRefsJson, $createdAt, $updatedAt
+      )
+    `);
+		this.stmtGetTask = this.db.query(`
+      SELECT task_id, agent_team_id, owner_member_id, status, body_local_json,
+             blocked_by_json, blocks_json, source_refs_json, created_at, updated_at
+      FROM agent_team_tasks
+      WHERE agent_team_id = $agentTeamId AND task_id = $taskId
+    `);
+		this.stmtUpdateTask = this.db.query(`
+      UPDATE agent_team_tasks
+      SET owner_member_id = $ownerMemberId,
+          status = $status,
+          body_local_json = $bodyLocalJson,
+          blocked_by_json = $blockedByJson,
+	          blocks_json = $blocksJson,
+          source_refs_json = $sourceRefsJson,
+          updated_at = $updatedAt
+      WHERE agent_team_id = $agentTeamId AND task_id = $taskId
     `);
 	}
 
@@ -184,8 +454,854 @@ export class AgentTeamStore {
 		return { team: this.projectTeam(row) };
 	}
 
+	addTeamMember(params: {
+		agentTeamId: string;
+		backendId: string;
+		name: string;
+		role?: "leader" | "member";
+	}): { memberId: string } {
+		const now = new Date().toISOString();
+		const memberId = randomUUID();
+		this.db.transaction(() => {
+			this.stmtInsertMember.run({
+				$memberId: memberId,
+				$agentTeamId: params.agentTeamId,
+				$role: params.role ?? "member",
+				$name: params.name,
+				$backendId: params.backendId,
+				$sessionId: null,
+				$lifecycle: "pending",
+				$health: "healthy",
+				$worktreeSourceCwd: null,
+				$worktreeBranch: null,
+				$errorJson: null,
+				$createdAt: now,
+				$updatedAt: now,
+			});
+			this.stmtInsertMcpStatus.run({
+				$agentTeamId: params.agentTeamId,
+				$memberId: memberId,
+				$transport: "acp",
+				$serverId: null,
+				$phase: "not_started",
+				$lastErrorJson: null,
+				$updatedAt: now,
+			});
+		})();
+		return { memberId };
+	}
+
+	listTeamMembers(agentTeamId: string): AgentTeamMemberRow[] {
+		return this.stmtListMembers.all({
+			$agentTeamId: agentTeamId,
+		}) as AgentTeamMemberRow[];
+	}
+
+	bindTeamMemberExecution(params: {
+		agentTeamId: string;
+		memberId: string;
+		executionMachineId: string;
+		workerRelayKeyId: string;
+		bootstrapOperationId: string;
+	}): AgentTeamMemberExecution {
+		return this.db
+			.transaction(() => {
+				const memberExists =
+					this.stmtGetMemberForExecution.get({
+						$agentTeamId: params.agentTeamId,
+						$memberId: params.memberId,
+					}) !== null;
+				if (!memberExists) {
+					throw new Error(
+						`Agent Team member not found: ${params.agentTeamId}/${params.memberId}`,
+					);
+				}
+
+				const existing = this.getTeamMemberExecution(
+					params.agentTeamId,
+					params.memberId,
+				);
+				if (existing) {
+					if (isExactMemberExecution(existing, params)) {
+						return existing;
+					}
+					throw new Error(
+						`Agent Team member execution binding conflict: ${params.memberId}`,
+					);
+				}
+
+				const operationOwner = this.stmtGetMemberExecutionByBootstrap.get({
+					$bootstrapOperationId: params.bootstrapOperationId,
+				}) as AgentTeamMemberExecutionRow | null;
+				if (operationOwner) {
+					throw new Error(
+						`Agent Team bootstrap operation conflict: ${params.bootstrapOperationId}`,
+					);
+				}
+
+				const now = new Date().toISOString();
+				this.stmtInsertMemberExecution.run({
+					$agentTeamId: params.agentTeamId,
+					$memberId: params.memberId,
+					$executionMachineId: params.executionMachineId,
+					$workerRelayKeyId: params.workerRelayKeyId,
+					$bootstrapOperationId: params.bootstrapOperationId,
+					$createdAt: now,
+					$updatedAt: now,
+				});
+				const inserted = this.getTeamMemberExecution(
+					params.agentTeamId,
+					params.memberId,
+				);
+				if (!inserted) {
+					throw new Error(
+						`Agent Team member execution was not persisted: ${params.memberId}`,
+					);
+				}
+				return inserted;
+			})
+			.immediate();
+	}
+
+	getTeamMemberExecution(
+		agentTeamId: string,
+		memberId: string,
+	): AgentTeamMemberExecution | null {
+		const row = this.stmtGetMemberExecution.get({
+			$agentTeamId: agentTeamId,
+			$memberId: memberId,
+		}) as AgentTeamMemberExecutionRow | null;
+		return row ? memberExecutionRowToBinding(row) : null;
+	}
+
+	listTeamMemberExecutions(agentTeamId: string): AgentTeamMemberExecution[] {
+		return (
+			this.stmtListMemberExecutions.all({
+				$agentTeamId: agentTeamId,
+			}) as AgentTeamMemberExecutionRow[]
+		).map(memberExecutionRowToBinding);
+	}
+
+	removeTeamMemberExecution(agentTeamId: string, memberId: string): boolean {
+		const removed = this.stmtDeleteMemberExecution.run({
+			$agentTeamId: agentTeamId,
+			$memberId: memberId,
+		});
+		return removed.changes === 1;
+	}
+
+	listLocalTasks(agentTeamId: string): AgentTeamTaskLocalRow[] {
+		return this.stmtListLocalTasks.all({
+			$agentTeamId: agentTeamId,
+		}) as AgentTeamTaskLocalRow[];
+	}
+
+	createTeamTask(params: {
+		agentTeamId: string;
+		ownerMemberId: string | null;
+		status: string;
+		body: TeamTaskLocalBody;
+		blockedBy: string[];
+	}): AgentTeamTaskLocalRow {
+		const now = new Date().toISOString();
+		const taskId = randomUUID();
+		const sourceRefs: TeamSourceRef[] = [
+			{
+				type: "task",
+				agentTeamId: params.agentTeamId,
+				taskId,
+				ownerMemberId: params.ownerMemberId ?? undefined,
+			},
+		];
+
+		return this.db.transaction(() => {
+			const existingTasks = this.listLocalTasks(params.agentTeamId);
+			assertTaskIdsExist(existingTasks, params.blockedBy);
+			this.stmtInsertTask.run({
+				$taskId: taskId,
+				$agentTeamId: params.agentTeamId,
+				$ownerMemberId: params.ownerMemberId,
+				$status: params.status,
+				$bodyLocalJson: JSON.stringify(params.body),
+				$blockedByJson: JSON.stringify(params.blockedBy),
+				$blocksJson: JSON.stringify([]),
+				$sourceRefsJson: JSON.stringify(sourceRefs),
+				$createdAt: now,
+				$updatedAt: now,
+			});
+			for (const upstreamId of params.blockedBy) {
+				const upstream = this.getLocalTask(params.agentTeamId, upstreamId);
+				if (!upstream) continue;
+				const blocks = appendUnique(
+					parseJsonStringArray(upstream.blocks_json),
+					taskId,
+				);
+				this.updateTaskRow(upstream, { blocks, updatedAt: now });
+			}
+			this.touchTeam(params.agentTeamId, now);
+			return requireTask(this.getLocalTask(params.agentTeamId, taskId), taskId);
+		})();
+	}
+
+	updateTeamTask(params: {
+		agentTeamId: string;
+		taskId: string;
+		ownerMemberId?: string | null;
+		status?: string;
+		body?: Partial<TeamTaskLocalBody>;
+		blockedBy?: string[];
+	}): AgentTeamTaskLocalRow {
+		const now = new Date().toISOString();
+		return this.db.transaction(() => {
+			const current = requireTask(
+				this.getLocalTask(params.agentTeamId, params.taskId),
+				params.taskId,
+			);
+			const body = {
+				...parseTaskBody(current.body_local_json),
+				...params.body,
+			};
+			const oldBlockedBy = parseJsonStringArray(current.blocked_by_json);
+			const nextBlockedBy = params.blockedBy ?? oldBlockedBy;
+			assertTaskIdsExist(
+				this.listLocalTasks(params.agentTeamId),
+				nextBlockedBy,
+			);
+			let nextStatus = params.status ?? current.status;
+			if (!params.status && nextBlockedBy.length > 0) nextStatus = "blocked";
+			if (
+				!params.status &&
+				nextBlockedBy.length === 0 &&
+				current.status === "blocked"
+			) {
+				nextStatus = "todo";
+			}
+
+			let nextBlocks = parseJsonStringArray(current.blocks_json);
+			this.reconcileDependencyEdges({
+				agentTeamId: params.agentTeamId,
+				taskId: params.taskId,
+				oldBlockedBy,
+				nextBlockedBy,
+				now,
+			});
+			if (nextStatus === "completed") {
+				this.unblockDependents(params.agentTeamId, params.taskId, now);
+				nextBlocks = [];
+			}
+
+			this.updateTaskRow(current, {
+				ownerMemberId:
+					params.ownerMemberId === undefined
+						? current.owner_member_id
+						: params.ownerMemberId,
+				status: nextStatus,
+				body,
+				blockedBy: nextBlockedBy,
+				blocks: nextBlocks,
+				updatedAt: now,
+			});
+			this.touchTeam(params.agentTeamId, now);
+			return requireTask(
+				this.getLocalTask(params.agentTeamId, params.taskId),
+				params.taskId,
+			);
+		})();
+	}
+
+	createMailboxMessages(params: {
+		agentTeamId: string;
+		fromMemberId: string;
+		recipients: Array<{ memberId: string; name: string }>;
+		body: { message: string; summary?: string; type?: string };
+	}): Array<{
+		messageId: string;
+		fromMemberId: string;
+		toMemberId: string;
+		toName: string;
+		wakeStatus: "pending";
+		sourceRefs: TeamSourceRef[];
+	}> {
+		const now = new Date().toISOString();
+		const deliveries = params.recipients.map((recipient) => {
+			const messageId = randomUUID();
+			const sourceRefs: TeamSourceRef[] = [
+				{
+					type: "mailbox_message",
+					agentTeamId: params.agentTeamId,
+					messageId,
+					fromMemberId: params.fromMemberId,
+					toMemberId: recipient.memberId,
+				},
+			];
+			return {
+				messageId,
+				fromMemberId: params.fromMemberId,
+				toMemberId: recipient.memberId,
+				toName: recipient.name,
+				wakeStatus: "pending" as const,
+				sourceRefs,
+			};
+		});
+
+		this.db.transaction(() => {
+			for (const delivery of deliveries) {
+				this.stmtInsertMailboxMessage.run({
+					$messageId: delivery.messageId,
+					$agentTeamId: params.agentTeamId,
+					$fromMemberId: params.fromMemberId,
+					$toMemberId: delivery.toMemberId,
+					$bodyLocalJson: JSON.stringify(params.body),
+					$sourceRefsJson: JSON.stringify(delivery.sourceRefs),
+					$readAt: null,
+					$wakeStatus: delivery.wakeStatus,
+					$wakeErrorJson: null,
+					$createdAt: now,
+				});
+			}
+			this.stmtTouchTeam.run({
+				$agentTeamId: params.agentTeamId,
+				$updatedAt: now,
+			});
+		})();
+
+		return deliveries;
+	}
+
+	applyTeamRuntimeTurnCompletion(params: {
+		turnId: string;
+		agentTeamId: string;
+		memberId: string;
+	}): TeamRuntimeTurnCompletion {
+		if (!params.turnId.trim()) {
+			throw new Error("Runtime turn ID must not be blank");
+		}
+
+		return this.db
+			.transaction((): TeamRuntimeTurnCompletion => {
+				const existing = this.db
+					.query(`
+						SELECT turn_id, agent_team_id, member_id, leader_member_id,
+							notification_message_id
+						FROM agent_team_runtime_inbox
+						WHERE turn_id = $turnId
+					`)
+					.get({ $turnId: params.turnId }) as AgentTeamRuntimeInboxRow | null;
+				if (existing) {
+					if (
+						existing.agent_team_id !== params.agentTeamId ||
+						existing.member_id !== params.memberId
+					) {
+						throw new Error("Agent Team runtime turn identity conflict");
+					}
+					return {
+						status: "replayed",
+						leaderMemberId: existing.leader_member_id,
+						notificationMessageId: existing.notification_message_id,
+					};
+				}
+
+				const members = this.stmtListMembers.all({
+					$agentTeamId: params.agentTeamId,
+				}) as AgentTeamMemberRow[];
+				const member = members.find(
+					(candidate) => candidate.member_id === params.memberId,
+				);
+				if (
+					!member ||
+					member.role === "leader" ||
+					member.lifecycle !== "running"
+				) {
+					return { status: "ignored" };
+				}
+				const leader = members.find((candidate) => candidate.role === "leader");
+				if (!leader) {
+					return { status: "ignored" };
+				}
+
+				const appliedAt = new Date().toISOString();
+				const notificationMessageId = randomUUID();
+				this.db
+					.query(`
+						INSERT INTO agent_team_runtime_inbox (
+							turn_id, agent_team_id, member_id, leader_member_id,
+							notification_message_id, applied_at
+						) VALUES (
+							$turnId, $agentTeamId, $memberId, $leaderMemberId,
+							$notificationMessageId, $appliedAt
+						)
+					`)
+					.run({
+						$turnId: params.turnId,
+						$agentTeamId: params.agentTeamId,
+						$memberId: params.memberId,
+						$leaderMemberId: leader.member_id,
+						$notificationMessageId: notificationMessageId,
+						$appliedAt: appliedAt,
+					});
+				const updated = this.stmtUpdateMemberRuntime.run({
+					$agentTeamId: params.agentTeamId,
+					$memberId: params.memberId,
+					$sessionId: null,
+					$lifecycle: "completed",
+					$health: null,
+					$errorJson: null,
+					$worktreeSourceCwd: null,
+					$worktreeBranch: null,
+					$updatedAt: appliedAt,
+				});
+				if (updated.changes !== 1) {
+					throw new Error("Agent Team runtime member transition failed");
+				}
+				const sourceRefs: TeamSourceRef[] = [
+					{
+						type: "mailbox_message",
+						agentTeamId: params.agentTeamId,
+						messageId: notificationMessageId,
+						fromMemberId: params.memberId,
+						toMemberId: leader.member_id,
+					},
+				];
+				this.stmtInsertMailboxMessage.run({
+					$messageId: notificationMessageId,
+					$agentTeamId: params.agentTeamId,
+					$fromMemberId: params.memberId,
+					$toMemberId: leader.member_id,
+					$bodyLocalJson: JSON.stringify({
+						message: "Turn completed",
+						type: "idle_notification",
+					}),
+					$sourceRefsJson: JSON.stringify(sourceRefs),
+					$readAt: null,
+					$wakeStatus: "pending",
+					$wakeErrorJson: null,
+					$createdAt: appliedAt,
+				});
+				this.stmtTouchTeam.run({
+					$agentTeamId: params.agentTeamId,
+					$updatedAt: appliedAt,
+				});
+				return {
+					status: "applied",
+					leaderMemberId: leader.member_id,
+					notificationMessageId,
+				};
+			})
+			.immediate();
+	}
+
+	updateMailboxWake(params: {
+		messageId: string;
+		wakeStatus: TeamMailboxWakeStatus;
+	}): void {
+		this.stmtUpdateMailboxWake.run({
+			$messageId: params.messageId,
+			$wakeStatus: params.wakeStatus,
+		});
+	}
+
+	updateTeamMemberRuntimeState(params: {
+		agentTeamId: string;
+		memberId: string;
+		sessionId?: string;
+		lifecycle?: string;
+	}): void {
+		this.updateTeamMemberRuntime(params);
+	}
+
+	updateTeamRuntimeState(params: {
+		agentTeamId: string;
+		lifecycle?: string;
+	}): void {
+		this.stmtUpdateTeamRuntimeState.run({
+			$agentTeamId: params.agentTeamId,
+			$lifecycle: params.lifecycle ?? null,
+			$updatedAt: new Date().toISOString(),
+		});
+	}
+
+	updateTeamMemberRuntime(params: {
+		agentTeamId: string;
+		memberId: string;
+		sessionId?: string;
+		lifecycle?: string;
+		health?: string;
+		error?: unknown;
+		worktreeSourceCwd?: string;
+		worktreeBranch?: string;
+	}): void {
+		const updatedAt = new Date().toISOString();
+		this.db.transaction(() => {
+			this.stmtUpdateMemberRuntime.run({
+				$agentTeamId: params.agentTeamId,
+				$memberId: params.memberId,
+				$sessionId: params.sessionId ?? null,
+				$lifecycle: params.lifecycle ?? null,
+				$health: params.health ?? null,
+				$errorJson:
+					params.error === undefined ? null : JSON.stringify(params.error),
+				$worktreeSourceCwd: params.worktreeSourceCwd ?? null,
+				$worktreeBranch: params.worktreeBranch ?? null,
+				$updatedAt: updatedAt,
+			});
+			this.stmtTouchTeam.run({
+				$agentTeamId: params.agentTeamId,
+				$updatedAt: updatedAt,
+			});
+		})();
+	}
+
+	readUnreadAndMark(
+		agentTeamId: string,
+		memberId: string,
+	): MailboxWakeMessage[] {
+		const readAt = new Date().toISOString();
+		return this.db.transaction(() => {
+			const rows = this.stmtReadUnreadMailboxMessages.all({
+				$agentTeamId: agentTeamId,
+				$memberId: memberId,
+			}) as AgentTeamMailboxMessageLocalRow[];
+			if (rows.length === 0) {
+				return [];
+			}
+			const placeholders = rows.map(() => "?").join(", ");
+			this.db
+				.query(
+					`UPDATE agent_team_mailbox_messages SET read_at = ? WHERE message_id IN (${placeholders})`,
+				)
+				.run(readAt, ...rows.map((row) => row.message_id));
+			return rows.map(rowToWakeMessage);
+		})();
+	}
+
+	listUnreadForWake(
+		agentTeamId: string,
+		memberId: string,
+	): MailboxWakeMessage[] {
+		return (
+			this.db
+				.query(`
+					SELECT message_id, agent_team_id, from_member_id, to_member_id,
+						body_local_json, source_refs_json, read_at, wake_status,
+						wake_error_json, created_at
+					FROM agent_team_mailbox_messages
+					WHERE agent_team_id = $agentTeamId
+						AND to_member_id = $memberId
+						AND wake_status IN ('pending', 'failed')
+					ORDER BY created_at ASC
+				`)
+				.all({
+					$agentTeamId: agentTeamId,
+					$memberId: memberId,
+				}) as AgentTeamMailboxMessageLocalRow[]
+		).map(rowToWakeMessage);
+	}
+
+	listPendingWakeRecipients(): PendingMailboxWakeRecipient[] {
+		const rows = this.db
+			.query(`
+				SELECT mailbox.agent_team_id, mailbox.to_member_id
+				FROM agent_team_mailbox_messages AS mailbox
+				INNER JOIN agent_team_members AS recipient
+					ON recipient.agent_team_id = mailbox.agent_team_id
+					AND recipient.member_id = mailbox.to_member_id
+				WHERE mailbox.wake_status IN ('pending', 'failed')
+					AND mailbox.to_member_id IS NOT NULL
+					AND recipient.session_id IS NOT NULL
+					AND (
+						COALESCE(
+							json_extract(mailbox.body_local_json, '$.type'),
+							''
+						) <> 'idle_notification'
+						OR NOT EXISTS (
+							SELECT 1
+							FROM agent_team_members AS unsettled
+							WHERE unsettled.agent_team_id = mailbox.agent_team_id
+								AND unsettled.role <> 'leader'
+								AND unsettled.lifecycle IN (
+									'starting',
+									'creating_session',
+									'running'
+								)
+						)
+					)
+				GROUP BY mailbox.agent_team_id, mailbox.to_member_id
+				ORDER BY MIN(mailbox.created_at) ASC
+			`)
+			.all() as Array<{
+			agent_team_id: string;
+			to_member_id: string;
+		}>;
+		return rows.map((row) => ({
+			agentTeamId: row.agent_team_id,
+			memberId: row.to_member_id,
+		}));
+	}
+
+	completeMailboxWake(params: {
+		messageIds: string[];
+		deliveredSessionId: string;
+		sourceRefs: TeamSourceRef[];
+	}): void {
+		if (params.messageIds.length === 0) {
+			return;
+		}
+		const readAt = new Date().toISOString();
+		this.db
+			.transaction(() => {
+				const teamIds = new Set<string>();
+				for (const messageId of params.messageIds) {
+					const row = this.stmtGetMailboxMessage.get({
+						$messageId: messageId,
+					}) as AgentTeamMailboxMessageLocalRow | null;
+					if (!row) {
+						throw new Error(`Mailbox message not found: ${messageId}`);
+					}
+					const existingRefs = parseSourceRefs(row.source_refs_json);
+					const updatedRefs = mergeSourceRefs(
+						existingRefs.map((ref) =>
+							ref.type === "mailbox_message" && ref.messageId === messageId
+								? {
+										...ref,
+										deliveredSessionId: params.deliveredSessionId,
+									}
+								: ref,
+						),
+						params.sourceRefs,
+					);
+					const completed = this.db
+						.query(`
+							UPDATE agent_team_mailbox_messages
+							SET read_at = $readAt,
+								wake_status = 'sent',
+								wake_error_json = NULL,
+								source_refs_json = $sourceRefsJson
+							WHERE message_id = $messageId
+								AND wake_status IN ('pending', 'failed')
+						`)
+						.run({
+							$messageId: messageId,
+							$readAt: readAt,
+							$sourceRefsJson: JSON.stringify(updatedRefs),
+						});
+					if (completed.changes !== 1) {
+						throw new Error(`Mailbox wake was already completed: ${messageId}`);
+					}
+					teamIds.add(row.agent_team_id);
+				}
+				for (const agentTeamId of teamIds) {
+					this.stmtTouchTeam.run({
+						$agentTeamId: agentTeamId,
+						$updatedAt: readAt,
+					});
+				}
+			})
+			.immediate();
+	}
+
+	updateWakeMetadata(params: {
+		messageId: string;
+		wakeStatus: "sent" | "failed";
+		deliveredSessionId?: string;
+		error?: { code: string; message: string };
+		sourceRefs?: TeamSourceRef[];
+	}): void {
+		this.db.transaction(() => {
+			const row = this.stmtGetMailboxMessage.get({
+				$messageId: params.messageId,
+			}) as AgentTeamMailboxMessageLocalRow | null;
+			if (!row) {
+				throw new Error(`Mailbox message not found: ${params.messageId}`);
+			}
+			const existingRefs = parseSourceRefs(row.source_refs_json);
+			const updatedRefs = mergeSourceRefs(
+				existingRefs.map((ref) =>
+					ref.type === "mailbox_message" && ref.messageId === params.messageId
+						? {
+								...ref,
+								deliveredSessionId:
+									params.deliveredSessionId ?? ref.deliveredSessionId,
+							}
+						: ref,
+				),
+				params.sourceRefs ?? [],
+			);
+			this.stmtUpdateMailboxWakeMetadata.run({
+				$messageId: params.messageId,
+				$wakeStatus: params.wakeStatus,
+				$wakeErrorJson: params.error ? JSON.stringify(params.error) : null,
+				$sourceRefsJson: JSON.stringify(updatedRefs),
+			});
+			this.stmtTouchTeam.run({
+				$agentTeamId: row.agent_team_id,
+				$updatedAt: new Date().toISOString(),
+			});
+		})();
+	}
+
+	updateMcpStatus(params: {
+		agentTeamId: string;
+		memberId: string;
+		transport: TeamMcpTransport;
+		serverId?: string;
+		phase: TeamMcpPhase;
+		lastError?: unknown;
+	}): void {
+		this.stmtUpdateMcpStatus.run({
+			$agentTeamId: params.agentTeamId,
+			$memberId: params.memberId,
+			$transport: params.transport,
+			$serverId: params.serverId ?? null,
+			$phase: params.phase,
+			$lastErrorJson: params.lastError
+				? JSON.stringify(params.lastError)
+				: null,
+			$updatedAt: new Date().toISOString(),
+		});
+	}
+
+	createTeamToolIntent(params: {
+		agentTeamId: string;
+		requestedByMemberId: string;
+		kind: TeamToolIntentKind;
+		payload: Record<string, unknown>;
+		sourceRefs: TeamSourceRef[];
+	}): TeamToolIntent {
+		const now = new Date().toISOString();
+		const intent: TeamToolIntent = {
+			intentId: randomUUID(),
+			agentTeamId: params.agentTeamId,
+			requestedByMemberId: params.requestedByMemberId,
+			kind: params.kind,
+			payload: params.payload,
+			status: "requested",
+			sourceRefs: params.sourceRefs,
+			createdAt: now,
+			updatedAt: now,
+		};
+		this.stmtInsertToolIntent.run({
+			$intentId: intent.intentId,
+			$agentTeamId: intent.agentTeamId,
+			$requestedByMemberId: intent.requestedByMemberId,
+			$kind: intent.kind,
+			$payloadLocalJson: JSON.stringify(intent.payload),
+			$status: intent.status,
+			$sourceRefsJson: JSON.stringify(intent.sourceRefs),
+			$createdAt: intent.createdAt,
+			$updatedAt: intent.updatedAt,
+		});
+		return intent;
+	}
+
+	claimTeamCommand(params: {
+		sourceScope: string;
+		operationId: string;
+		agentTeamId: string;
+		callerMemberId: string;
+		payloadDigest: string;
+	}): TeamCommandJournalClaim {
+		const transaction = this.db.transaction((): TeamCommandJournalClaim => {
+			const existing = this.getTeamCommandJournal(
+				params.sourceScope,
+				params.operationId,
+			);
+			if (existing) {
+				return journalRowToClaim(existing, params.payloadDigest);
+			}
+
+			const claimId = randomUUID();
+			const inserted = this.stmtInsertTeamCommandClaim.run({
+				$sourceScope: params.sourceScope,
+				$operationId: params.operationId,
+				$agentTeamId: params.agentTeamId,
+				$callerMemberId: params.callerMemberId,
+				$payloadDigest: params.payloadDigest,
+				$claimId: claimId,
+				$claimedAt: new Date().toISOString(),
+			});
+			if (inserted.changes === 1) {
+				return { status: "claimed", claimId };
+			}
+
+			const raced = this.getTeamCommandJournal(
+				params.sourceScope,
+				params.operationId,
+			);
+			if (!raced) {
+				throw new Error("Team command claim was not persisted");
+			}
+			return journalRowToClaim(raced, params.payloadDigest);
+		});
+		return transaction.immediate();
+	}
+
+	completeTeamCommand(params: {
+		sourceScope: string;
+		operationId: string;
+		payloadDigest: string;
+		claimId: string;
+		result: unknown;
+	}): unknown {
+		const resultLocalJson = serializeLocalJson(
+			params.result,
+			"Team command result",
+		);
+		return this.db
+			.transaction(() => {
+				const updated = this.stmtCompleteTeamCommand.run({
+					$sourceScope: params.sourceScope,
+					$operationId: params.operationId,
+					$payloadDigest: params.payloadDigest,
+					$claimId: params.claimId,
+					$resultLocalJson: resultLocalJson,
+					$completedAt: new Date().toISOString(),
+				});
+				if (updated.changes !== 1) {
+					throw new Error("Team command claim is no longer active");
+				}
+				return JSON.parse(resultLocalJson) as unknown;
+			})
+			.immediate();
+	}
+
+	failTeamCommand(params: {
+		sourceScope: string;
+		operationId: string;
+		payloadDigest: string;
+		claimId: string;
+		error: TeamCommandJournalError;
+	}): void {
+		const errorLocalJson = serializeLocalJson(
+			params.error,
+			"Team command error",
+		);
+		this.db
+			.transaction(() => {
+				const updated = this.stmtFailTeamCommand.run({
+					$sourceScope: params.sourceScope,
+					$operationId: params.operationId,
+					$payloadDigest: params.payloadDigest,
+					$claimId: params.claimId,
+					$errorLocalJson: errorLocalJson,
+					$completedAt: new Date().toISOString(),
+				});
+				if (updated.changes !== 1) {
+					throw new Error("Team command claim is no longer active");
+				}
+			})
+			.immediate();
+	}
+
 	close(): void {
+		if (this.closed) {
+			return;
+		}
+		this.closed = true;
 		this.db.close();
+	}
+
+	isClosed(): boolean {
+		return this.closed;
 	}
 
 	private projectTeam(row: AgentTeamRow) {
@@ -211,4 +1327,361 @@ export class AgentTeamStore {
 		assertGatewayFacingAgentTeamPayload(team);
 		return team;
 	}
+
+	private getLocalTask(
+		agentTeamId: string,
+		taskId: string,
+	): AgentTeamTaskLocalRow | null {
+		return this.stmtGetTask.get({
+			$agentTeamId: agentTeamId,
+			$taskId: taskId,
+		}) as AgentTeamTaskLocalRow | null;
+	}
+
+	private getTeamCommandJournal(
+		sourceScope: string,
+		operationId: string,
+	): TeamCommandJournalRow | null {
+		return this.stmtGetTeamCommandJournal.get({
+			$sourceScope: sourceScope,
+			$operationId: operationId,
+		}) as TeamCommandJournalRow | null;
+	}
+
+	private updateTaskRow(
+		row: AgentTeamTaskLocalRow,
+		updates: {
+			ownerMemberId?: string | null;
+			status?: string;
+			body?: TeamTaskLocalBody;
+			blockedBy?: string[];
+			blocks?: string[];
+			updatedAt: string;
+		},
+	): void {
+		this.stmtUpdateTask.run({
+			$taskId: row.task_id,
+			$agentTeamId: row.agent_team_id,
+			$ownerMemberId: updates.ownerMemberId ?? row.owner_member_id,
+			$status: updates.status ?? row.status,
+			$bodyLocalJson: JSON.stringify(
+				updates.body ?? parseTaskBody(row.body_local_json),
+			),
+			$blockedByJson: JSON.stringify(
+				updates.blockedBy ?? parseJsonStringArray(row.blocked_by_json),
+			),
+			$blocksJson: JSON.stringify(
+				updates.blocks ?? parseJsonStringArray(row.blocks_json),
+			),
+			$sourceRefsJson: row.source_refs_json,
+			$updatedAt: updates.updatedAt,
+		});
+	}
+
+	private reconcileDependencyEdges(params: {
+		agentTeamId: string;
+		taskId: string;
+		oldBlockedBy: string[];
+		nextBlockedBy: string[];
+		now: string;
+	}): void {
+		for (const upstreamId of params.oldBlockedBy) {
+			if (params.nextBlockedBy.includes(upstreamId)) continue;
+			const upstream = this.getLocalTask(params.agentTeamId, upstreamId);
+			if (!upstream) continue;
+			this.updateTaskRow(upstream, {
+				blocks: parseJsonStringArray(upstream.blocks_json).filter(
+					(id) => id !== params.taskId,
+				),
+				updatedAt: params.now,
+			});
+		}
+		for (const upstreamId of params.nextBlockedBy) {
+			if (params.oldBlockedBy.includes(upstreamId)) continue;
+			const upstream = this.getLocalTask(params.agentTeamId, upstreamId);
+			if (!upstream) continue;
+			this.updateTaskRow(upstream, {
+				blocks: appendUnique(
+					parseJsonStringArray(upstream.blocks_json),
+					params.taskId,
+				),
+				updatedAt: params.now,
+			});
+		}
+	}
+
+	private unblockDependents(
+		agentTeamId: string,
+		completedTaskId: string,
+		now: string,
+	): void {
+		for (const task of this.listLocalTasks(agentTeamId)) {
+			const blockedBy = parseJsonStringArray(task.blocked_by_json);
+			if (!blockedBy.includes(completedTaskId)) continue;
+			const nextBlockedBy = blockedBy.filter((id) => id !== completedTaskId);
+			const canAutoTodo = !["completed", "failed", "cancelled"].includes(
+				task.status,
+			);
+			this.updateTaskRow(task, {
+				blockedBy: nextBlockedBy,
+				status:
+					nextBlockedBy.length === 0 && canAutoTodo ? "todo" : task.status,
+				updatedAt: now,
+			});
+		}
+	}
+
+	private touchTeam(agentTeamId: string, updatedAt: string): void {
+		this.stmtTouchTeam.run({
+			$agentTeamId: agentTeamId,
+			$updatedAt: updatedAt,
+		});
+	}
+}
+
+export type TeamToolIntentKind =
+	| "spawn_member"
+	| "rename_team"
+	| "shutdown_team";
+
+export type TeamToolIntent = {
+	intentId: string;
+	agentTeamId: string;
+	requestedByMemberId: string;
+	kind: TeamToolIntentKind;
+	payload: Record<string, unknown>;
+	status: "requested";
+	sourceRefs: TeamSourceRef[];
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type MailboxWakeMessage = {
+	messageId: string;
+	agentTeamId: string;
+	fromMemberId: string;
+	toMemberId?: string;
+	body: { message: string; summary?: string; type?: string };
+	sourceRefs: TeamSourceRef[];
+	readAt?: string;
+	wakeStatus: TeamMailboxWakeStatus;
+	createdAt: string;
+};
+
+export type TeamTaskLocalBody = {
+	title: string;
+	description?: string;
+};
+
+export type AgentTeamTaskLocalRow = AgentTeamTaskRow & {
+	body_local_json: string;
+};
+
+type AgentTeamMailboxMessageLocalRow = AgentTeamMailboxMessageRow & {
+	body_local_json: string;
+	wake_error_json: string | null;
+};
+
+type TeamCommandJournalRow = {
+	source_scope: string;
+	operation_id: string;
+	payload_digest: string;
+	status: string;
+	claim_id: string;
+	result_local_json: string | null;
+	error_local_json: string | null;
+};
+
+type AgentTeamMemberExecutionRow = {
+	agent_team_id: string;
+	member_id: string;
+	execution_machine_id: string;
+	worker_relay_key_id: string;
+	bootstrap_operation_id: string;
+	created_at: string;
+	updated_at: string;
+};
+
+function memberExecutionRowToBinding(
+	row: AgentTeamMemberExecutionRow,
+): AgentTeamMemberExecution {
+	return {
+		agentTeamId: row.agent_team_id,
+		memberId: row.member_id,
+		executionMachineId: row.execution_machine_id,
+		workerRelayKeyId: row.worker_relay_key_id,
+		bootstrapOperationId: row.bootstrap_operation_id,
+		createdAt: row.created_at,
+		updatedAt: row.updated_at,
+	};
+}
+
+function isExactMemberExecution(
+	existing: AgentTeamMemberExecution,
+	params: {
+		executionMachineId: string;
+		workerRelayKeyId: string;
+		bootstrapOperationId: string;
+	},
+): boolean {
+	return (
+		existing.executionMachineId === params.executionMachineId &&
+		existing.workerRelayKeyId === params.workerRelayKeyId &&
+		existing.bootstrapOperationId === params.bootstrapOperationId
+	);
+}
+
+function journalRowToClaim(
+	row: TeamCommandJournalRow,
+	payloadDigest: string,
+): TeamCommandJournalClaim {
+	if (row.payload_digest !== payloadDigest) {
+		return { status: "conflict" };
+	}
+	switch (row.status) {
+		case "in_progress":
+			return { status: "in_progress" };
+		case "completed":
+			if (row.result_local_json === null) {
+				throw new Error("Completed Team command result is missing");
+			}
+			return {
+				status: "completed",
+				result: JSON.parse(row.result_local_json) as unknown,
+			};
+		case "failed":
+			if (row.error_local_json === null) {
+				throw new Error("Failed Team command error is missing");
+			}
+			return {
+				status: "failed",
+				error: parseJournalError(row.error_local_json),
+			};
+		default:
+			throw new Error(`Invalid Team command journal status: ${row.status}`);
+	}
+}
+
+function parseJournalError(value: string): TeamCommandJournalError {
+	const parsed = JSON.parse(value) as unknown;
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new Error("Invalid Team command journal error");
+	}
+	const record = parsed as Record<string, unknown>;
+	if (typeof record.name !== "string" || typeof record.message !== "string") {
+		throw new Error("Invalid Team command journal error");
+	}
+	return { name: record.name, message: record.message };
+}
+
+function serializeLocalJson(value: unknown, label: string): string {
+	const serialized = JSON.stringify(value);
+	if (serialized === undefined) {
+		throw new Error(`${label} is not JSON-serializable`);
+	}
+	return serialized;
+}
+
+function rowToWakeMessage(
+	row: AgentTeamMailboxMessageLocalRow,
+): MailboxWakeMessage {
+	return {
+		messageId: row.message_id,
+		agentTeamId: row.agent_team_id,
+		fromMemberId: row.from_member_id,
+		toMemberId: row.to_member_id ?? undefined,
+		body: parseMailboxBody(row.body_local_json),
+		sourceRefs: parseSourceRefs(row.source_refs_json),
+		readAt: row.read_at ?? undefined,
+		wakeStatus: row.wake_status as TeamMailboxWakeStatus,
+		createdAt: row.created_at,
+	};
+}
+
+function parseMailboxBody(value: string): MailboxWakeMessage["body"] {
+	const parsed = JSON.parse(value) as unknown;
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return { message: "" };
+	}
+	const record = parsed as Record<string, unknown>;
+	return {
+		message: typeof record.message === "string" ? record.message : "",
+		summary: typeof record.summary === "string" ? record.summary : undefined,
+		type: typeof record.type === "string" ? record.type : undefined,
+	};
+}
+
+function parseSourceRefs(value: string | null): TeamSourceRef[] {
+	if (!value) {
+		return [];
+	}
+	const parsed = JSON.parse(value) as unknown;
+	return Array.isArray(parsed) ? (parsed as TeamSourceRef[]) : [];
+}
+
+function mergeSourceRefs(
+	existingRefs: TeamSourceRef[],
+	newRefs: TeamSourceRef[],
+): TeamSourceRef[] {
+	const merged: TeamSourceRef[] = [];
+	const seen = new Set<string>();
+	for (const ref of [...existingRefs, ...newRefs]) {
+		const key = JSON.stringify(ref);
+		if (seen.has(key)) {
+			continue;
+		}
+		seen.add(key);
+		merged.push(ref);
+	}
+	return merged;
+}
+
+function parseTaskBody(value: string): TeamTaskLocalBody {
+	const parsed = JSON.parse(value) as unknown;
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return { title: "" };
+	}
+	const record = parsed as Record<string, unknown>;
+	return {
+		title: typeof record.title === "string" ? record.title : "",
+		description:
+			typeof record.description === "string" ? record.description : undefined,
+	};
+}
+
+function parseJsonStringArray(value: string | null): string[] {
+	if (!value) return [];
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		return Array.isArray(parsed)
+			? parsed.filter((item): item is string => typeof item === "string")
+			: [];
+	} catch {
+		return [];
+	}
+}
+
+function appendUnique(values: string[], value: string): string[] {
+	return values.includes(value) ? values : [...values, value];
+}
+
+function assertTaskIdsExist(
+	rows: AgentTeamTaskLocalRow[],
+	taskIds: string[],
+): void {
+	const known = new Set(rows.map((row) => row.task_id));
+	const missing = taskIds.find((taskId) => !known.has(taskId));
+	if (missing) {
+		throw new Error(`Unknown task dependency: ${missing}`);
+	}
+}
+
+function requireTask(
+	row: AgentTeamTaskLocalRow | null,
+	taskId: string,
+): AgentTeamTaskLocalRow {
+	if (!row) {
+		throw new Error(`Task not found: ${taskId}`);
+	}
+	return row;
 }

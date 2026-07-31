@@ -1,17 +1,26 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	type QueryClient,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import type { AgentSessionCapabilities } from "@/lib/acp";
 import {
 	type AcpBackendSummary,
 	type AcpBackendsResponse,
+	type AgentTeamListResult,
 	discoverSessions,
 	fetchAcpBackends,
+	fetchAgentTeams,
 	fetchSessions,
 	type SessionsResponse,
 } from "@/lib/api";
+import { useTeamStore } from "@/lib/team-store";
 
 export interface UseSessionQueriesReturn {
 	sessionsQuery: ReturnType<typeof useQuery<SessionsResponse>>;
 	backendsQuery: ReturnType<typeof useQuery<AcpBackendsResponse>>;
+	agentTeamsQuery: ReturnType<typeof useQuery<AgentTeamListResult>>;
 	availableBackends: AcpBackendSummary[];
 	discoverSessionsMutation: ReturnType<typeof useDiscoverSessionsMutation>;
 }
@@ -31,6 +40,51 @@ export type DiscoverSessionsMutationResult = {
 const queryKeys = {
 	sessions: ["sessions"] as const,
 	backends: ["acp-backends"] as const,
+	agentTeams: ["agent-teams"] as const,
+};
+
+export const refreshSessionQueriesAfterReconnect = async (
+	queryClient: QueryClient,
+): Promise<void> => {
+	const refreshGeneration = useTeamStore
+		.getState()
+		.beginSessionProjectionRecovery();
+	const teamRefresh = queryClient.invalidateQueries(
+		{
+			queryKey: queryKeys.agentTeams,
+		},
+		{
+			throwOnError: true,
+		},
+	);
+	void queryClient.invalidateQueries({ queryKey: queryKeys.backends });
+
+	try {
+		await teamRefresh;
+		if (
+			useTeamStore.getState().sessionProjectionRecoveryGeneration !==
+			refreshGeneration
+		) {
+			return;
+		}
+		await queryClient.invalidateQueries(
+			{ queryKey: queryKeys.sessions },
+			{ throwOnError: true },
+		);
+		const teamState = useTeamStore.getState();
+		if (teamState.sessionProjectionRecoveryGeneration !== refreshGeneration) {
+			return;
+		}
+		teamState.markSessionProjectionSnapshotReady(refreshGeneration);
+		teamState.setAppError(undefined);
+	} catch (error) {
+		const teamState = useTeamStore.getState();
+		if (teamState.sessionProjectionRecoveryGeneration !== refreshGeneration) {
+			return;
+		}
+		teamState.abortSessionProjectionRecovery(refreshGeneration);
+		throw error;
+	}
 };
 
 const normalizeBackendIds = (
@@ -161,12 +215,35 @@ export function useSessionQueries(): UseSessionQueriesReturn {
 		staleTime: 5 * 60_000,
 	});
 
+	const agentTeamsQuery = useQuery({
+		queryKey: queryKeys.agentTeams,
+		queryFn: async () => {
+			const epoch = useTeamStore.getState().beginAgentTeamProjectionSync();
+			try {
+				const result = await fetchAgentTeams();
+				useTeamStore
+					.getState()
+					.completeAgentTeamProjectionSync(
+						epoch,
+						result.teams,
+						result.coveredLeaderMachineIds,
+					);
+				return result;
+			} catch (error) {
+				useTeamStore.getState().failAgentTeamProjectionSync(epoch);
+				throw error;
+			}
+		},
+		staleTime: Number.POSITIVE_INFINITY,
+	});
+
 	const availableBackends = backendsQuery.data?.backends ?? [];
 	const discoverSessionsMutation = useDiscoverSessionsMutation();
 
 	return {
 		sessionsQuery,
 		backendsQuery,
+		agentTeamsQuery,
 		availableBackends,
 		discoverSessionsMutation,
 	};

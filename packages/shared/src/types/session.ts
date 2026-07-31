@@ -54,6 +54,11 @@ export type SessionSummary = {
 	availableCommands?: AvailableCommand[];
 	/** Machine ID that owns this session (populated by gateway) */
 	machineId?: string;
+	/**
+	 * Pure classification marker for a session owned by an Agent Team.
+	 * This carries no Team identity or state; canonical Team facts remain leader-owned.
+	 */
+	agentTeamOwned?: true;
 	/** Current WAL revision for this session */
 	revision?: number;
 	/** Base64-encoded sealed DEK for E2EE (crypto_box_seal) */
@@ -72,6 +77,13 @@ export type SessionSummary = {
 
 /** Sessions changed event payload for incremental sync */
 export type SessionsChangedPayload = {
+	/**
+	 * Canonical source machine for this delta.
+	 *
+	 * CLI ingress may omit or spoof this value; the Gateway replaces it with
+	 * the registered machine before forwarding the payload to WebUI.
+	 */
+	machineId?: string;
 	/** Newly added sessions */
 	added: SessionSummary[];
 	/** Updated sessions */
@@ -80,6 +92,11 @@ export type SessionsChangedPayload = {
 	removed: string[];
 	/** Per-backend capabilities from discovery */
 	backendCapabilities?: Record<string, AgentSessionCapabilities>;
+};
+
+/** Gateway-to-WebUI session delta with an authenticated source machine. */
+export type GatewaySessionsChangedPayload = SessionsChangedPayload & {
+	machineId: string;
 };
 
 // StopReason is now re-exported from SDK via acp.ts
@@ -134,8 +151,8 @@ export type AgentPromptCapabilities = {
 
 export type AgentMcpCapabilities = {
 	acp?: boolean;
-	stdio?: boolean;
-	perSessionBridge?: boolean;
+	http?: boolean;
+	sse?: boolean;
 };
 
 /** A stable, Agent-managed ACP authentication method. */

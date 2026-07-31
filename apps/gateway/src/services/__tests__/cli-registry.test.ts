@@ -2,6 +2,7 @@ import type {
 	CliRegistrationInfo,
 	SessionSummary,
 	SessionsChangedPayload,
+	TeamRelayPublicKey,
 } from "@mobvibe/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CliRegistry } from "../cli-registry.js";
@@ -27,6 +28,15 @@ const createMockRegistrationInfo = (
 	backends: [{ backendId: "backend-1", backendLabel: "Claude Code" }],
 	...overrides,
 });
+
+const createMockRelayKey = (seed: number): TeamRelayPublicKey => {
+	const publicKey = Buffer.alloc(32, seed).toString("base64");
+	return {
+		version: 1,
+		keyId: `x25519:${publicKey}`,
+		publicKey,
+	};
+};
 
 const createMockSessionSummary = (
 	overrides: Partial<SessionSummary> = {},
@@ -58,6 +68,7 @@ describe("CliRegistry", () => {
 			expect(record.hostname).toBe("test-host");
 			expect(record.socket).toBe(socket);
 			expect(record.sessions).toEqual([]);
+			expect(record.sessionSnapshotReady).toBe(false);
 			expect(registry.getCliBySocketId("socket-1")).toBe(record);
 		});
 
@@ -84,6 +95,39 @@ describe("CliRegistry", () => {
 			expect(registry.getCliBySocketId("socket-1")).toBeUndefined();
 			expect(registry.getCliBySocketId("socket-2")).toBe(newRecord);
 			expect(socket1.disconnect).toHaveBeenCalledWith(true);
+		});
+
+		it("uses an empty full snapshot as the barrier and resets readiness on replacement", () => {
+			const socket1 = createMockSocket("socket-1");
+			const socket2 = createMockSocket("socket-2");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			const firstRecord = registry.register(socket1, info, {
+				userId: "user-1",
+				deviceId: "device-1",
+			});
+			const listener = vi.fn();
+			registry.onSessionsChanged(listener);
+
+			registry.updateSessions(socket1.id, []);
+
+			expect(firstRecord.sessionSnapshotReady).toBe(true);
+			expect(listener).toHaveBeenCalledWith(
+				"machine-1",
+				{
+					machineId: "machine-1",
+					added: [],
+					updated: [],
+					removed: [],
+				},
+				"user-1",
+			);
+
+			const replacement = registry.register(socket2, info, {
+				userId: "user-1",
+				deviceId: "device-2",
+			});
+
+			expect(replacement.sessionSnapshotReady).toBe(false);
 		});
 
 		it("unregisters and emits status event", () => {
@@ -122,6 +166,102 @@ describe("CliRegistry", () => {
 
 			registry.unregister("socket-1");
 			expect(registry.getClisForUser("user-1")).toHaveLength(0);
+		});
+
+		it("requires the current socket, registration token, and relay key before marking relay ready", () => {
+			const socket = createMockSocket("socket-1");
+			const relayKey = createMockRelayKey(1);
+			const record = registry.register(
+				socket,
+				createMockRegistrationInfo({
+					machineId: "machine-1",
+					teamRelayKey: relayKey,
+				}),
+				{ userId: "user-1", deviceId: "device-1" },
+			);
+
+			expect(record.teamRelayReady).toBe(false);
+			expect(record.teamRelayRegistrationId).toEqual(expect.any(String));
+			expect(
+				registry.markTeamRelayReady("unknown-socket", {
+					registrationId: record.teamRelayRegistrationId,
+					relayKeyId: relayKey.keyId,
+				}),
+			).toBe(false);
+			expect(
+				registry.markTeamRelayReady(socket.id, {
+					registrationId: "stale-registration",
+					relayKeyId: relayKey.keyId,
+				}),
+			).toBe(false);
+			expect(
+				registry.markTeamRelayReady(socket.id, {
+					registrationId: record.teamRelayRegistrationId,
+					relayKeyId: createMockRelayKey(2).keyId,
+				}),
+			).toBe(false);
+			expect(record.teamRelayReady).toBe(false);
+
+			expect(
+				registry.markTeamRelayReady(socket.id, {
+					registrationId: record.teamRelayRegistrationId,
+					relayKeyId: relayKey.keyId,
+				}),
+			).toBe(true);
+			expect(record.teamRelayReady).toBe(true);
+			expect(
+				registry.markTeamRelayReady(socket.id, {
+					registrationId: record.teamRelayRegistrationId,
+					relayKeyId: relayKey.keyId,
+				}),
+			).toBe(true);
+		});
+
+		it("rotates relay registration tokens and rejects stale reconnect generations", () => {
+			const relayKey = createMockRelayKey(1);
+			const firstSocket = createMockSocket("socket-1");
+			const firstRecord = registry.register(
+				firstSocket,
+				createMockRegistrationInfo({
+					machineId: "machine-1",
+					teamRelayKey: relayKey,
+				}),
+				{ userId: "user-1", deviceId: "device-1" },
+			);
+			const firstRegistrationId = firstRecord.teamRelayRegistrationId;
+			const secondSocket = createMockSocket("socket-2");
+			const secondRecord = registry.register(
+				secondSocket,
+				createMockRegistrationInfo({
+					machineId: "machine-1",
+					teamRelayKey: relayKey,
+				}),
+				{ userId: "user-1", deviceId: "device-1" },
+			);
+
+			expect(secondRecord.teamRelayRegistrationId).not.toBe(
+				firstRegistrationId,
+			);
+			expect(secondRecord.teamRelayReady).toBe(false);
+			expect(
+				registry.markTeamRelayReady(firstSocket.id, {
+					registrationId: firstRegistrationId,
+					relayKeyId: relayKey.keyId,
+				}),
+			).toBe(false);
+			expect(
+				registry.markTeamRelayReady(secondSocket.id, {
+					registrationId: firstRegistrationId,
+					relayKeyId: relayKey.keyId,
+				}),
+			).toBe(false);
+			expect(secondRecord.teamRelayReady).toBe(false);
+			expect(
+				registry.markTeamRelayReady(secondSocket.id, {
+					registrationId: secondRecord.teamRelayRegistrationId,
+					relayKeyId: relayKey.keyId,
+				}),
+			).toBe(true);
 		});
 	});
 
@@ -176,6 +316,7 @@ describe("CliRegistry", () => {
 			expect(listener).toHaveBeenCalledWith(
 				"machine-1",
 				{
+					machineId: "machine-1",
 					added: [{ ...session, machineId: "machine-1" }],
 					updated: [],
 					removed: [],
@@ -240,6 +381,7 @@ describe("CliRegistry", () => {
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
 			const authInfo = { userId: "user-1", deviceId: "device-123" };
 			registry.register(socket, info, authInfo);
+			registry.updateSessions(socket.id, []);
 
 			const listener = vi.fn();
 			registry.onSessionsChanged(listener);
@@ -262,8 +404,12 @@ describe("CliRegistry", () => {
 				"machine-1",
 				expect.objectContaining({
 					added: expect.arrayContaining([
-						expect.objectContaining({ sessionId: "session-1" }),
+						expect.objectContaining({
+							sessionId: "session-1",
+							machineId: "machine-1",
+						}),
 					]),
+					machineId: "machine-1",
 				}),
 				"user-1",
 			);
@@ -322,9 +468,11 @@ describe("CliRegistry", () => {
 						expect.objectContaining({
 							sessionId: "session-1",
 							backendId: "codex-acp",
+							machineId: "machine-1",
 						}),
 					]),
 					removed: [],
+					machineId: "machine-1",
 				}),
 				undefined,
 			);
@@ -380,6 +528,41 @@ describe("CliRegistry", () => {
 	});
 
 	describe("updateSessionsIncremental", () => {
+		it("updates registry state without emitting before the first full snapshot", () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			const record = registry.register(socket, info, {
+				userId: "user-1",
+				deviceId: "device-1",
+			});
+			const listener = vi.fn();
+			registry.onSessionsChanged(listener);
+
+			registry.updateSessionsIncremental(socket.id, {
+				added: [
+					createMockSessionSummary({ sessionId: "incremental-before-ready" }),
+				],
+				updated: [],
+				removed: [],
+			});
+			registry.addDiscoveredSessionsForMachine(
+				record.machineId,
+				[
+					createMockSessionSummary({
+						sessionId: "discovered-before-ready",
+					}),
+				],
+				record.userId,
+			);
+
+			expect(record.sessionSnapshotReady).toBe(false);
+			expect(record.sessions.map((session) => session.sessionId)).toEqual([
+				"incremental-before-ready",
+				"discovered-before-ready",
+			]);
+			expect(listener).not.toHaveBeenCalled();
+		});
+
 		it("removes sessions from record.sessions", () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
@@ -514,8 +697,14 @@ describe("CliRegistry", () => {
 			registry.register(socket, info);
 
 			const payload: SessionsChangedPayload = {
+				machineId: "spoofed-top-level",
 				added: [createMockSessionSummary({ sessionId: "session-1" })],
-				updated: [createMockSessionSummary({ sessionId: "session-2" })],
+				updated: [
+					createMockSessionSummary({
+						sessionId: "session-2",
+						machineId: "spoofed-summary",
+					}),
+				],
 				removed: [],
 			};
 
@@ -524,8 +713,44 @@ describe("CliRegistry", () => {
 				payload,
 			);
 
+			expect(enhancedPayload?.machineId).toBe("machine-1");
 			expect(enhancedPayload?.added[0].machineId).toBe("machine-1");
 			expect(enhancedPayload?.updated[0].machineId).toBe("machine-1");
+		});
+
+		it("canonicalizes full snapshot storage and emission to the registered machine", () => {
+			const socket = createMockSocket("socket-1");
+			registry.register(
+				socket,
+				createMockRegistrationInfo({ machineId: "machine-1" }),
+				{ userId: "user-1", deviceId: "device-1" },
+			);
+			const listener = vi.fn();
+			registry.onSessionsChanged(listener);
+
+			registry.updateSessions(socket.id, [
+				createMockSessionSummary({
+					sessionId: "session-1",
+					machineId: "spoofed-machine",
+				}),
+			]);
+
+			expect(registry.getCliBySocketId(socket.id)?.sessions[0]?.machineId).toBe(
+				"machine-1",
+			);
+			expect(listener).toHaveBeenCalledWith(
+				"machine-1",
+				expect.objectContaining({
+					machineId: "machine-1",
+					added: [
+						expect.objectContaining({
+							sessionId: "session-1",
+							machineId: "machine-1",
+						}),
+					],
+				}),
+				"user-1",
+			);
 		});
 
 		it("emits sessions:changed event with userId", () => {
@@ -535,6 +760,7 @@ describe("CliRegistry", () => {
 			const changeListener = vi.fn();
 
 			registry.register(socket, info, authInfo);
+			registry.updateSessions(socket.id, []);
 			registry.onSessionsChanged(changeListener);
 
 			const payload: SessionsChangedPayload = {
@@ -661,6 +887,7 @@ describe("CliRegistry", () => {
 			const socket = createMockSocket("socket-1");
 			const info = createMockRegistrationInfo({ machineId: "machine-1" });
 			registry.register(socket, info);
+			registry.updateSessions(socket.id, []);
 
 			const listener = vi.fn();
 			const unsubscribe = registry.onSessionsChanged(listener);
@@ -749,6 +976,176 @@ describe("CliRegistry", () => {
 	});
 
 	describe("getSessionsForUser", () => {
+		it("routes a session only when exactly one ready current machine owns it", () => {
+			const readySocket = createMockSocket("ready-socket");
+			const duplicateSocket = createMockSocket("duplicate-socket");
+			const unreadySocket = createMockSocket("unready-socket");
+			registry.register(
+				readySocket,
+				createMockRegistrationInfo({ machineId: "machine-ready" }),
+				{ userId: "user-1", deviceId: "device-ready" },
+			);
+			registry.register(
+				duplicateSocket,
+				createMockRegistrationInfo({ machineId: "machine-duplicate" }),
+				{ userId: "user-1", deviceId: "device-duplicate" },
+			);
+			registry.register(
+				unreadySocket,
+				createMockRegistrationInfo({ machineId: "machine-unready" }),
+				{ userId: "user-1", deviceId: "device-unready" },
+			);
+			registry.updateSessions(readySocket.id, [
+				createMockSessionSummary({ sessionId: "unique-ready" }),
+				createMockSessionSummary({ sessionId: "duplicate" }),
+			]);
+			registry.updateSessions(duplicateSocket.id, [
+				createMockSessionSummary({ sessionId: "duplicate" }),
+			]);
+			registry.updateSessionsIncremental(unreadySocket.id, {
+				added: [createMockSessionSummary({ sessionId: "unready-only" })],
+				updated: [],
+				removed: [],
+			});
+
+			expect(
+				registry.getCliForSessionByUser("unique-ready", "user-1")?.machineId,
+			).toBe("machine-ready");
+			expect(
+				registry.getCliForSessionByUser("duplicate", "user-1"),
+			).toBeUndefined();
+			expect(
+				registry.getCliForSessionByUser("unready-only", "user-1"),
+			).toBeUndefined();
+		});
+
+		it("quarantines cross-machine duplicate IDs from ready HTTP snapshots", () => {
+			const firstSocket = createMockSocket("first-socket");
+			const secondSocket = createMockSocket("second-socket");
+			registry.register(
+				firstSocket,
+				createMockRegistrationInfo({ machineId: "machine-1" }),
+				{ userId: "user-1", deviceId: "device-1" },
+			);
+			registry.register(
+				secondSocket,
+				createMockRegistrationInfo({ machineId: "machine-2" }),
+				{ userId: "user-1", deviceId: "device-2" },
+			);
+			registry.updateSessions(firstSocket.id, [
+				createMockSessionSummary({ sessionId: "unique-1" }),
+				createMockSessionSummary({ sessionId: "duplicate" }),
+			]);
+			registry.updateSessions(secondSocket.id, [
+				createMockSessionSummary({ sessionId: "unique-2" }),
+				createMockSessionSummary({ sessionId: "duplicate" }),
+			]);
+
+			expect(
+				registry
+					.getReadySessionsForUser("user-1")
+					.map((session) => session.sessionId)
+					.sort(),
+			).toEqual(["unique-1", "unique-2"]);
+			expect(registry.getReadySessionIdCollisionsForUser("user-1")).toEqual([
+				"duplicate",
+			]);
+		});
+
+		it("exposes only sessions from registrations with a complete snapshot", () => {
+			const readySocket = createMockSocket("ready-socket");
+			const unreadySocket = createMockSocket("unready-socket");
+			registry.register(
+				readySocket,
+				createMockRegistrationInfo({ machineId: "machine-ready" }),
+				{ userId: "user-1", deviceId: "device-ready" },
+			);
+			registry.register(
+				unreadySocket,
+				createMockRegistrationInfo({ machineId: "machine-unready" }),
+				{ userId: "user-1", deviceId: "device-unready" },
+			);
+			const readySession = createMockSessionSummary({
+				sessionId: "ready-session",
+			});
+			const prematureSession = createMockSessionSummary({
+				sessionId: "premature-session",
+			});
+
+			registry.updateSessions(readySocket.id, [readySession]);
+			registry.updateSessionsIncremental(unreadySocket.id, {
+				added: [prematureSession],
+				updated: [],
+				removed: [],
+			});
+
+			expect(registry.getReadySessionsForUser("user-1")).toEqual([
+				{
+					...readySession,
+					machineId: "machine-ready",
+				},
+			]);
+		});
+
+		it("withholds a replacement until its first full snapshot arrives", () => {
+			const originalSocket = createMockSocket("original-socket");
+			const replacementSocket = createMockSocket("replacement-socket");
+			const registration = createMockRegistrationInfo({
+				machineId: "machine-1",
+			});
+			registry.register(originalSocket, registration, {
+				userId: "user-1",
+				deviceId: "device-original",
+			});
+			registry.updateSessions(originalSocket.id, [
+				createMockSessionSummary({ sessionId: "original-session" }),
+			]);
+
+			registry.register(replacementSocket, registration, {
+				userId: "user-1",
+				deviceId: "device-replacement",
+			});
+
+			expect(registry.getReadySessionsForUser("user-1")).toEqual([]);
+
+			const replacementSession = createMockSessionSummary({
+				sessionId: "replacement-session",
+			});
+			registry.updateSessions(replacementSocket.id, [replacementSession]);
+
+			expect(registry.getReadySessionsForUser("user-1")).toEqual([
+				{
+					...replacementSession,
+					machineId: "machine-1",
+				},
+			]);
+		});
+
+		it("preserves CLI Team ownership while only adding the machine ID", () => {
+			const socket = createMockSocket("socket-1");
+			const info = createMockRegistrationInfo({ machineId: "machine-1" });
+			registry.register(socket, info, {
+				userId: "user-1",
+				deviceId: "device-1",
+			});
+			const cliSession = createMockSessionSummary({
+				sessionId: "team-worker-session",
+				agentTeamOwned: true,
+			});
+
+			registry.updateSessions(socket.id, [cliSession]);
+
+			expect(registry.getCliBySocketId(socket.id)?.sessions).toEqual([
+				{ ...cliSession, machineId: "machine-1" },
+			]);
+			expect(registry.getSessionsForUser("user-1")).toEqual([
+				{
+					...cliSession,
+					machineId: "machine-1",
+				},
+			]);
+		});
+
 		it("returns sessions only for authenticated user's machines", () => {
 			const socket1 = createMockSocket("socket-1");
 			const socket2 = createMockSocket("socket-2");

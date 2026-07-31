@@ -250,6 +250,64 @@ describe("CliCryptoService", () => {
 		expect(decoded.length).toBeGreaterThan(0);
 	});
 
+	describe("Team relay encryption", () => {
+		test("exposes a stable relay identity that is domain-separated from content encryption", () => {
+			const sameSecret = new CliCryptoService(masterSecret);
+			const differentSecret = new CliCryptoService(generateMasterSecret());
+			const contentKey = deriveContentKeyPair(masterSecret);
+
+			expect(service.getTeamRelayPublicKey()).toEqual(
+				sameSecret.getTeamRelayPublicKey(),
+			);
+			expect(service.getTeamRelayPublicKey()).not.toEqual(
+				differentSecret.getTeamRelayPublicKey(),
+			);
+			expect(
+				base64ToUint8(service.getTeamRelayPublicKey().publicKey),
+			).not.toEqual(contentKey.publicKey);
+			expect(service.getTeamRelayPublicKey().keyId).not.toContain(
+				Buffer.from(masterSecret).toString("base64"),
+			);
+		});
+
+		test("always encrypts cross-machine Team relay payloads even when session E2EE is disabled", () => {
+			const source = new CliCryptoService(generateMasterSecret(), {
+				contentEncryptionEnabled: false,
+			});
+			const target = new CliCryptoService(generateMasterSecret(), {
+				contentEncryptionEnabled: false,
+			});
+			const original = {
+				operationId: "operation-1",
+				message: "leader-local secret",
+			};
+
+			const encrypted = source.encryptTeamRelay(
+				original,
+				target.getTeamRelayPublicKey(),
+			);
+
+			expect(encrypted.version).toBe(1);
+			expect(isEncryptedPayload(encrypted.payload)).toBe(true);
+			expect(JSON.stringify(encrypted)).not.toContain(original.message);
+			expect(target.decryptTeamRelay<typeof original>(encrypted)).toEqual(
+				original,
+			);
+		});
+
+		test("rejects a relay envelope on a different machine", () => {
+			const source = new CliCryptoService(generateMasterSecret());
+			const target = new CliCryptoService(generateMasterSecret());
+			const wrongTarget = new CliCryptoService(generateMasterSecret());
+			const encrypted = source.encryptTeamRelay(
+				{ operationId: "operation-2" },
+				target.getTeamRelayPublicKey(),
+			);
+
+			expect(() => wrongTarget.decryptTeamRelay(encrypted)).toThrow();
+		});
+	});
+
 	describe("bidirectional encryption", () => {
 		test("decryptPayloadForSession decrypts encrypted data", () => {
 			const { dek } = service.initSessionDek("session-decrypt");

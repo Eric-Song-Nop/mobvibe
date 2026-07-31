@@ -243,6 +243,8 @@ export type ChatSession = {
 	availableCommands?: AvailableCommand[];
 	/** Machine ID that owns this session */
 	machineId?: string;
+	/** Classification only; canonical Team facts remain on the leader machine. */
+	agentTeamOwned?: true;
 	isAttached?: boolean;
 	attachedAt?: string;
 	detachedAt?: string;
@@ -388,7 +390,11 @@ type ChatState = {
 			isTitlePinned?: boolean;
 		},
 	) => void;
-	syncSessions: (summaries: SessionSummary[]) => void;
+	syncSessions: (
+		summaries: SessionSummary[],
+		coveredMachineIds: string[],
+		protectedSessionIds?: string[],
+	) => void;
 	removeSession: (sessionId: string) => void;
 	renameSession: (sessionId: string, title: string) => void;
 	setInput: (sessionId: string, value: string) => void;
@@ -765,6 +771,7 @@ const createSessionState = (
 		createdAt?: string;
 		updatedAt?: string;
 		machineId?: string;
+		agentTeamOwned?: true;
 		isCreating?: boolean;
 		worktreeSourceCwd?: string;
 		worktreeBranch?: string;
@@ -802,6 +809,7 @@ const createSessionState = (
 	configOptions: options?.configOptions,
 	availableCommands: options?.availableCommands,
 	machineId: options?.machineId,
+	agentTeamOwned: options?.agentTeamOwned,
 	isCreating: options?.isCreating,
 	isAttached: false,
 	attachedAt: undefined,
@@ -853,6 +861,54 @@ const selectNewestValidTimestamp = (
 	return selected;
 };
 
+const createDetachedSessionRuntimeFields = (
+	session: ChatSession,
+	detachedAt: string,
+	detachedReason: ChatSession["detachedReason"],
+): Pick<
+	ChatSession,
+	| "messages"
+	| "isAttached"
+	| "detachedAt"
+	| "detachedReason"
+	| "sending"
+	| "canceling"
+	| "streamingMessageId"
+	| "streamingMessageRole"
+	| "streamingThoughtId"
+> => {
+	const messages =
+		session.streamingMessageId || session.streamingThoughtId
+			? session.messages.map((message) => {
+					if (
+						message.id === session.streamingMessageId &&
+						isTextMessage(message)
+					) {
+						return { ...message, isStreaming: false };
+					}
+					if (
+						message.id === session.streamingThoughtId &&
+						message.kind === "thought"
+					) {
+						return { ...message, isStreaming: false };
+					}
+					return message;
+				})
+			: session.messages;
+
+	return {
+		messages,
+		isAttached: false,
+		detachedAt,
+		detachedReason,
+		sending: false,
+		canceling: false,
+		streamingMessageId: undefined,
+		streamingMessageRole: undefined,
+		streamingThoughtId: undefined,
+	};
+};
+
 const mergeSessionFromSummary = (
 	existing: ChatSession,
 	summary: {
@@ -875,6 +931,7 @@ const mergeSessionFromSummary = (
 		availableCommands?: ChatSession["availableCommands"];
 		_meta?: ChatSession["_meta"];
 		machineId?: string;
+		agentTeamOwned?: true;
 		worktreeSourceCwd?: string | null;
 		worktreeBranch?: string | null;
 		workspaceRootCwd?: string | null;
@@ -891,17 +948,28 @@ const mergeSessionFromSummary = (
 	const baseSession = shouldResetForAttachedRevision
 		? resetSessionContentForRevision(existing, summary.revision!)
 		: existing;
-	const attachedFields = isAttached
-		? {
-				isAttached: true as const,
-				attachedAt: baseSession.attachedAt ?? new Date().toISOString(),
-				detachedAt: undefined,
-				detachedReason: undefined,
-				...(summary.revision !== undefined && baseSession.revision === undefined
-					? { revision: summary.revision, lastAppliedSeq: 0 }
-					: {}),
-			}
-		: {};
+	const attachmentFields =
+		summary.isAttached === true
+			? {
+					isAttached: true as const,
+					attachedAt: baseSession.attachedAt ?? new Date().toISOString(),
+					detachedAt: undefined,
+					detachedReason: undefined,
+					...(summary.revision !== undefined &&
+					baseSession.revision === undefined
+						? { revision: summary.revision, lastAppliedSeq: 0 }
+						: {}),
+				}
+			: summary.isAttached === false
+				? createDetachedSessionRuntimeFields(
+						baseSession,
+						baseSession.detachedAt ?? new Date().toISOString(),
+						baseSession.detachedReason &&
+							baseSession.detachedReason !== "gateway_disconnect"
+							? baseSession.detachedReason
+							: "unknown",
+					)
+				: {};
 	const replacesConfigState = summary.configOptions !== undefined;
 
 	return {
@@ -939,12 +1007,13 @@ const mergeSessionFromSummary = (
 			? { _meta: summary._meta }
 			: {}),
 		machineId: summary.machineId ?? baseSession.machineId,
+		agentTeamOwned: summary.agentTeamOwned,
 		isCreating: false,
 		isTitlePinned: summary.isTitlePinned ?? baseSession.isTitlePinned,
 		worktreeSourceCwd:
 			summary.worktreeSourceCwd ?? baseSession.worktreeSourceCwd,
 		worktreeBranch: summary.worktreeBranch ?? baseSession.worktreeBranch,
-		...attachedFields,
+		...attachmentFields,
 	};
 };
 
@@ -1202,39 +1271,17 @@ export const useChatStore = create<ChatState>()(
 					const session =
 						state.sessions[payload.sessionId] ??
 						createSessionState(payload.sessionId);
-					const messages =
-						session.streamingMessageId || session.streamingThoughtId
-							? session.messages.map((message: ChatMessage) => {
-									if (
-										message.id === session.streamingMessageId &&
-										isTextMessage(message)
-									) {
-										return { ...message, isStreaming: false };
-									}
-									if (
-										message.id === session.streamingThoughtId &&
-										message.kind === "thought"
-									) {
-										return { ...message, isStreaming: false };
-									}
-									return message;
-								})
-							: session.messages;
 					return {
 						sessions: {
 							...state.sessions,
 							[payload.sessionId]: {
 								...session,
-								messages,
-								isAttached: false,
-								detachedAt: payload.detachedAt,
-								detachedReason: payload.reason,
+								...createDetachedSessionRuntimeFields(
+									session,
+									payload.detachedAt,
+									payload.reason,
+								),
 								machineId: payload.machineId ?? session.machineId,
-								sending: false,
-								canceling: false,
-								streamingMessageId: undefined,
-								streamingMessageRole: undefined,
-								streamingThoughtId: undefined,
 							},
 						},
 					};
@@ -1249,48 +1296,38 @@ export const useChatStore = create<ChatState>()(
 						delete nextSessions[removedId];
 					}
 
-					for (const added of payload.added) {
-						const existing = nextSessions[added.sessionId];
+					for (const summary of [...payload.added, ...payload.updated]) {
+						const existing = nextSessions[summary.sessionId];
 						if (existing) {
-							nextSessions[added.sessionId] = mergeSessionFromSummary(
+							nextSessions[summary.sessionId] = mergeSessionFromSummary(
 								existing,
-								added,
+								summary,
 							);
 						} else {
-							nextSessions[added.sessionId] = mergeSessionFromSummary(
-								createSessionState(added.sessionId, {
-									title: added.title,
-									backendId: added.backendId,
-									backendLabel: added.backendLabel,
-									cwd: added.cwd,
-									additionalDirectories: added.additionalDirectories,
-									agentName: added.agentName,
-									modelId: added.modelId,
-									modelName: added.modelName,
-									modeId: added.modeId,
-									modeName: added.modeName,
-									availableModes: added.availableModes,
-									availableModels: added.availableModels,
-									configOptions: added.configOptions,
-									availableCommands: added.availableCommands,
-									createdAt: added.createdAt,
-									updatedAt: added.updatedAt,
-									machineId: added.machineId,
-									worktreeSourceCwd: added.worktreeSourceCwd,
-									worktreeBranch: added.worktreeBranch,
-									workspaceRootCwd: added.workspaceRootCwd,
+							nextSessions[summary.sessionId] = mergeSessionFromSummary(
+								createSessionState(summary.sessionId, {
+									title: summary.title,
+									backendId: summary.backendId,
+									backendLabel: summary.backendLabel,
+									cwd: summary.cwd,
+									additionalDirectories: summary.additionalDirectories,
+									agentName: summary.agentName,
+									modelId: summary.modelId,
+									modelName: summary.modelName,
+									modeId: summary.modeId,
+									modeName: summary.modeName,
+									availableModes: summary.availableModes,
+									availableModels: summary.availableModels,
+									configOptions: summary.configOptions,
+									availableCommands: summary.availableCommands,
+									createdAt: summary.createdAt,
+									updatedAt: summary.updatedAt,
+									machineId: summary.machineId,
+									worktreeSourceCwd: summary.worktreeSourceCwd,
+									worktreeBranch: summary.worktreeBranch,
+									workspaceRootCwd: summary.workspaceRootCwd,
 								}),
-								added,
-							);
-						}
-					}
-
-					for (const updated of payload.updated) {
-						const existing = nextSessions[updated.sessionId];
-						if (existing) {
-							nextSessions[updated.sessionId] = mergeSessionFromSummary(
-								existing,
-								updated,
+								summary,
 							);
 						}
 					}
@@ -1380,16 +1417,31 @@ export const useChatStore = create<ChatState>()(
 						},
 					};
 				}),
-			syncSessions: (summaries) =>
+			syncSessions: (summaries, coveredMachineIds, protectedSessionIds = []) =>
 				set((state: ChatState) => {
 					const nextSessions: Record<string, ChatSession> = {
 						...state.sessions,
 					};
+					const coveredMachines = new Set(
+						coveredMachineIds.filter((machineId) => machineId.length > 0),
+					);
+					const protectedSessions = new Set(protectedSessionIds);
 					const serverIds = new Set<string>();
 					summaries.forEach((summary) => {
+						if (!summary.machineId || !coveredMachines.has(summary.machineId)) {
+							return;
+						}
+						const current = nextSessions[summary.sessionId];
+						if (
+							current !== undefined &&
+							current.machineId !== undefined &&
+							current.machineId !== summary.machineId
+						) {
+							return;
+						}
 						serverIds.add(summary.sessionId);
 						const existing =
-							nextSessions[summary.sessionId] ??
+							current ??
 							createSessionState(summary.sessionId, {
 								title: summary.title,
 								backendId: summary.backendId,
@@ -1401,6 +1453,7 @@ export const useChatStore = create<ChatState>()(
 								configOptions: summary.configOptions,
 								availableCommands: summary.availableCommands,
 								machineId: summary.machineId,
+								agentTeamOwned: summary.agentTeamOwned,
 								worktreeSourceCwd: summary.worktreeSourceCwd,
 								worktreeBranch: summary.worktreeBranch,
 								workspaceRootCwd: summary.workspaceRootCwd,
@@ -1413,7 +1466,14 @@ export const useChatStore = create<ChatState>()(
 					});
 
 					Object.keys(nextSessions).forEach((sessionId) => {
-						if (!serverIds.has(sessionId)) {
+						if (serverIds.has(sessionId) || protectedSessions.has(sessionId)) {
+							return;
+						}
+						const sessionMachineId = nextSessions[sessionId]?.machineId;
+						if (
+							sessionMachineId !== undefined &&
+							coveredMachines.has(sessionMachineId)
+						) {
 							delete nextSessions[sessionId];
 						}
 					});

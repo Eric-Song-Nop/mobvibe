@@ -1,14 +1,33 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import type { AgentTeamSummary, SessionEvent } from "@mobvibe/shared";
+import type {
+	AgentTeamSummary,
+	CliRegisteredInfo,
+	SessionEvent,
+	TeamRelayCiphertext,
+	TeamRelayExecuteRpcParams,
+	TeamRelayPublicKey,
+} from "@mobvibe/shared";
 import type { CliConfig } from "../../config.js";
 
 const socketHandlers = new Map<string, (...args: Array<unknown>) => void>();
+const volatileEmitMock = mock((..._args: Array<unknown>) => {});
+const directVolatileEmitMock = mock((..._args: Array<unknown>) => {});
+const timeoutMock = mock((_timeoutMs: number) => ({
+	volatile: {
+		emit: volatileEmitMock,
+	},
+}));
 
 const socketMock = {
 	on: mock((event: string, handler: (...args: Array<unknown>) => void) => {
 		socketHandlers.set(event, handler);
 	}),
 	emit: mock(() => {}),
+	timeout: timeoutMock,
+	volatile: {
+		emit: directVolatileEmitMock,
+	},
+	connected: true,
 	connect: mock(() => {}),
 	disconnect: mock(() => {}),
 	io: {
@@ -40,27 +59,97 @@ const createdTeam: AgentTeamSummary = {
 	updatedAt: "2026-05-13T00:00:00.000Z",
 };
 
-const agentTeamStoreMock = {
-	createAgentTeam: mock(() => ({ team: createdTeam })),
-	listAgentTeams: mock(() => ({ teams: [createdTeam] })),
-	getAgentTeam: mock(() => ({ team: createdTeam })),
-	close: mock(() => {}),
+const createRelayKey = (seed: number): TeamRelayPublicKey => {
+	const publicKey = Buffer.alloc(32, seed).toString("base64");
+	return {
+		version: 1,
+		keyId: `x25519:${publicKey}`,
+		publicKey,
+	};
+};
+
+const createRelayCiphertext = (
+	recipientKeyId: string,
+	seed: number,
+): TeamRelayCiphertext => ({
+	version: 1,
+	recipientKeyId,
+	wrappedDek: Buffer.alloc(80, seed).toString("base64"),
+	payload: {
+		t: "encrypted",
+		c: Buffer.alloc(64, seed).toString("base64"),
+	},
+});
+
+const createRegisteredInfo = (
+	machineId: string,
+	teamRelayRegistrationId = "team-relay-registration-1",
+): CliRegisteredInfo => ({
+	machineId,
+	teamRelayRegistrationId,
+});
+
+const getLastSocketEmission = (event: string): unknown[] => {
+	const call = [...socketMock.emit.mock.calls]
+		.reverse()
+		.find((candidate) => (candidate as unknown[])[0] === event);
+	if (!call) {
+		throw new Error(`Missing ${event} emission`);
+	}
+	return call as unknown[];
+};
+
+const getLastTeamRelayEmission = (event: string): unknown[] => {
+	const call = [...volatileEmitMock.mock.calls]
+		.reverse()
+		.find((candidate) => (candidate as unknown[])[0] === event);
+	if (!call) {
+		throw new Error(`Missing volatile ${event} emission`);
+	}
+	return call as unknown[];
+};
+
+const invokeTimeoutAck = (
+	emission: unknown[],
+	error: Error | null,
+	response?: unknown,
+): void => {
+	const ack = emission[2];
+	if (typeof ack !== "function") {
+		throw new Error("Missing timeout acknowledgment callback");
+	}
+	ack(error, response);
+};
+
+const flushMicrotasks = async (): Promise<void> => {
+	await Promise.resolve();
+	await Promise.resolve();
+};
+
+const waitForTimers = async (delayMs = 10): Promise<void> => {
+	await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+	await flushMicrotasks();
 };
 
 mock.module("socket.io-client", () => ({
 	io: mock((_url: string, _options: unknown) => socketMock),
 }));
 
+const loggerMock = {
+	info: mock(() => {}),
+	debug: mock(() => {}),
+	warn: mock(() => {}),
+	error: mock(() => {}),
+};
+
 mock.module("../../lib/logger.js", () => ({
-	logger: {
-		info: mock(() => {}),
-		debug: mock(() => {}),
-		warn: mock(() => {}),
-		error: mock(() => {}),
-	},
+	logger: loggerMock,
 }));
 
 const { SocketClient } = await import("../socket-client.js");
+const { TeamRelayRemoteError } = await import(
+	"../../team/team-relay-protocol.js"
+);
 
 const createConfig = (): CliConfig => ({
 	gatewayUrl: "http://localhost:3005",
@@ -120,6 +209,14 @@ const createSessionEvent = (
 describe("SocketClient restore semantics", () => {
 	let client: InstanceType<typeof SocketClient>;
 	let sessionEventListener: ((event: SessionEvent) => void) | undefined;
+	let agentTeamChangedListener:
+		| ((payload: {
+				added: AgentTeamSummary[];
+				updated: AgentTeamSummary[];
+				removed: string[];
+				machineId?: string;
+		  }) => void)
+		| undefined;
 	let promptConnection: {
 		prompt: ReturnType<typeof mock>;
 		getSessionCapabilities: ReturnType<typeof mock>;
@@ -161,12 +258,18 @@ describe("SocketClient restore semantics", () => {
 		bulkArchiveSessions: ReturnType<typeof mock>;
 		touchSession: ReturnType<typeof mock>;
 		recordTurnEnd: ReturnType<typeof mock>;
+		createAgentTeamRun: ReturnType<typeof mock>;
+		listAgentTeams: ReturnType<typeof mock>;
+		getAgentTeam: ReturnType<typeof mock>;
 		onSessionsChanged: ReturnType<typeof mock>;
 		onSessionAttached: ReturnType<typeof mock>;
 		onSessionDetached: ReturnType<typeof mock>;
 		onPermissionRequest: ReturnType<typeof mock>;
 		onPermissionResult: ReturnType<typeof mock>;
 		onSessionEvent: ReturnType<typeof mock>;
+		onAgentTeamChanged: ReturnType<typeof mock>;
+		bindTeamRelayMachineIdentity: ReturnType<typeof mock>;
+		setTeamRelayTransportReady: ReturnType<typeof mock>;
 	};
 	let cryptoService: {
 		authKeyPair: { publicKey: Uint8Array; secretKey: Uint8Array };
@@ -174,20 +277,45 @@ describe("SocketClient restore semantics", () => {
 		encryptEvent: ReturnType<typeof mock>;
 		decryptRpcPayload: ReturnType<typeof mock>;
 		getWrappedDek: ReturnType<typeof mock>;
+		getTeamRelayPublicKey: ReturnType<typeof mock>;
 	};
+	let teamRelayRequestHandler: ReturnType<typeof mock>;
 
 	beforeEach(() => {
 		socketHandlers.clear();
 		socketMock.on.mockClear();
 		socketMock.emit.mockClear();
+		directVolatileEmitMock.mockClear();
+		volatileEmitMock.mockClear();
+		volatileEmitMock.mockImplementation((event, payload, ack) => {
+			if (
+				event === "cli:team-relay-ready" &&
+				typeof payload === "object" &&
+				payload !== null &&
+				typeof ack === "function"
+			) {
+				const proof = payload as {
+					registrationId: string;
+					relayKeyId: string;
+				};
+				ack(null, {
+					accepted: true,
+					registrationId: proof.registrationId,
+					relayKeyId: proof.relayKeyId,
+				});
+			}
+		});
+		timeoutMock.mockClear();
+		socketMock.connected = true;
 		socketMock.connect.mockClear();
 		socketMock.disconnect.mockClear();
-		agentTeamStoreMock.createAgentTeam.mockClear();
-		agentTeamStoreMock.listAgentTeams.mockClear();
-		agentTeamStoreMock.getAgentTeam.mockClear();
-		agentTeamStoreMock.close.mockClear();
 		socketMock.io.opts.extraHeaders = {};
+		loggerMock.info.mockClear();
+		loggerMock.debug.mockClear();
+		loggerMock.warn.mockClear();
+		loggerMock.error.mockClear();
 		sessionEventListener = undefined;
+		agentTeamChangedListener = undefined;
 		promptConnection = {
 			prompt: mock(() => Promise.resolve({ stopReason: "end_turn" })),
 			getSessionCapabilities: mock(() => ({
@@ -264,6 +392,14 @@ describe("SocketClient restore semantics", () => {
 			bulkArchiveSessions: mock(() => Promise.resolve({ archivedCount: 1 })),
 			touchSession: mock(() => {}),
 			recordTurnEnd: mock(() => {}),
+			createAgentTeamRun: mock(() =>
+				Promise.resolve({
+					team: createdTeam,
+					leaderSession: { sessionId: "leader-session-1" },
+				}),
+			),
+			listAgentTeams: mock(() => ({ teams: [createdTeam] })),
+			getAgentTeam: mock(() => ({ team: createdTeam })),
 			onSessionsChanged: mock(() => () => {}),
 			onSessionAttached: mock(() => () => {}),
 			onSessionDetached: mock(() => () => {}),
@@ -275,6 +411,14 @@ describe("SocketClient restore semantics", () => {
 					sessionEventListener = undefined;
 				};
 			}),
+			onAgentTeamChanged: mock((listener) => {
+				agentTeamChangedListener = listener;
+				return () => {
+					agentTeamChangedListener = undefined;
+				};
+			}),
+			bindTeamRelayMachineIdentity: mock(() => {}),
+			setTeamRelayTransportReady: mock(() => true),
 		};
 
 		cryptoService = {
@@ -289,15 +433,39 @@ describe("SocketClient restore semantics", () => {
 			})),
 			decryptRpcPayload: mock((_sessionId: string, data: unknown) => data),
 			getWrappedDek: mock(() => null),
+			getTeamRelayPublicKey: mock(() => createRelayKey(1)),
 		};
+		teamRelayRequestHandler = mock((params: TeamRelayExecuteRpcParams) =>
+			Promise.resolve({
+				operationId: params.operationId,
+				ciphertext: createRelayCiphertext(params.sourceRelayKey.keyId, 4),
+			}),
+		);
 
 		client = new SocketClient({
 			config: createConfig(),
 			sessionManager: sessionManager as never,
 			cryptoService: cryptoService as never,
-			agentTeamStore: agentTeamStoreMock as never,
-		});
+			teamRelayRequestHandler,
+		} as never);
 	});
+
+	const registerTeamRelay = async (
+		machineId = "machine-1",
+		registrationId = "team-relay-registration-1",
+	) => {
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: { machineId: string }) => Promise<void>)
+			| undefined;
+		if (!connectHandler || !registeredHandler) {
+			throw new Error("socket registration handlers not registered");
+		}
+		await connectHandler();
+		await registeredHandler(createRegisteredInfo(machineId, registrationId));
+	};
 
 	afterEach(() => {
 		client.disconnect();
@@ -392,6 +560,1146 @@ describe("SocketClient restore semantics", () => {
 		});
 	});
 
+	test("registers a Team relay public key whether content E2EE is disabled or enabled", async () => {
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		if (!connectHandler) {
+			throw new Error("connect handler not registered");
+		}
+
+		for (const contentEncryptionEnabled of [false, true]) {
+			cryptoService.contentEncryptionEnabled = contentEncryptionEnabled;
+			socketMock.emit.mockClear();
+
+			await connectHandler();
+
+			expect(cryptoService.getTeamRelayPublicKey).toHaveBeenCalled();
+			expect(getLastSocketEmission("cli:register")[1]).toEqual(
+				expect.objectContaining({
+					machineId: "machine-1",
+					teamRelayKey: createRelayKey(1),
+				}),
+			);
+		}
+	});
+
+	test("retries the current Team relay proof and opens outbound only after Gateway ACK", async () => {
+		volatileEmitMock.mockImplementation(() => {});
+		(
+			client as unknown as {
+				teamRelayRegistrationAckTimeoutMs: number;
+			}
+		).teamRelayRegistrationAckTimeoutMs = 5;
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: CliRegisteredInfo) => Promise<void>)
+			| undefined;
+		if (!connectHandler || !registeredHandler) {
+			throw new Error("socket registration handlers not registered");
+		}
+
+		await connectHandler();
+		await registeredHandler(
+			createRegisteredInfo(
+				"user-1:machine-1",
+				"team-relay-registration-generation-1",
+			),
+		);
+
+		expect(sessionManager.setTeamRelayTransportReady).not.toHaveBeenCalledWith(
+			true,
+		);
+		expect(timeoutMock).toHaveBeenCalledWith(5);
+		const firstProof = getLastTeamRelayEmission("cli:team-relay-ready");
+		invokeTimeoutAck(firstProof, new Error("operation has timed out"));
+		await flushMicrotasks();
+
+		expect(
+			volatileEmitMock.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "cli:team-relay-ready",
+			),
+		).toHaveLength(2);
+		const secondProof = getLastTeamRelayEmission("cli:team-relay-ready");
+		invokeTimeoutAck(secondProof, null, {
+			accepted: true,
+			registrationId: "team-relay-registration-generation-1",
+			relayKeyId: createRelayKey(1).keyId,
+		});
+		await flushMicrotasks();
+
+		expect(sessionManager.setTeamRelayTransportReady).toHaveBeenCalledWith(
+			true,
+		);
+	});
+
+	test("keeps retrying Team relay proof after initial transport exhaustion and recovers without reconnect", async () => {
+		volatileEmitMock.mockImplementation(() => {});
+		Object.assign(client as object, {
+			teamRelayRegistrationAckTimeoutMs: 5,
+			teamRelayRegistrationRetryBaseDelayMs: 1,
+			teamRelayRegistrationRetryMaxDelayMs: 1,
+		});
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: CliRegisteredInfo) => Promise<void>)
+			| undefined;
+		if (!connectHandler || !registeredHandler) {
+			throw new Error("socket registration handlers not registered");
+		}
+
+		await connectHandler();
+		await registeredHandler(
+			createRegisteredInfo("user-1:machine-1", "team-relay-registration-retry"),
+		);
+
+		for (let attempt = 1; attempt <= 3; attempt += 1) {
+			const proof = getLastTeamRelayEmission("cli:team-relay-ready");
+			expect(
+				volatileEmitMock.mock.calls.filter(
+					(call) => (call as unknown[])[0] === "cli:team-relay-ready",
+				),
+			).toHaveLength(attempt);
+			invokeTimeoutAck(proof, new Error("operation has timed out"));
+			await flushMicrotasks();
+		}
+
+		await waitForTimers();
+		const retryProof = getLastTeamRelayEmission("cli:team-relay-ready");
+		expect(
+			volatileEmitMock.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "cli:team-relay-ready",
+			),
+		).toHaveLength(4);
+		invokeTimeoutAck(retryProof, new Error("operation has timed out"));
+		await waitForTimers();
+
+		const secondRetryProof = getLastTeamRelayEmission("cli:team-relay-ready");
+		expect(
+			volatileEmitMock.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "cli:team-relay-ready",
+			),
+		).toHaveLength(5);
+		invokeTimeoutAck(secondRetryProof, null, {
+			accepted: true,
+			registrationId: "team-relay-registration-retry",
+			relayKeyId: createRelayKey(1).keyId,
+		});
+		await flushMicrotasks();
+
+		expect(sessionManager.setTeamRelayTransportReady).toHaveBeenCalledWith(
+			true,
+		);
+		expect(socketMock.disconnect).not.toHaveBeenCalled();
+		expect(socketMock.connect).not.toHaveBeenCalled();
+	});
+
+	test("does not retry an explicitly rejected Team relay proof", async () => {
+		volatileEmitMock.mockImplementation(() => {});
+		Object.assign(client as object, {
+			teamRelayRegistrationRetryBaseDelayMs: 1,
+			teamRelayRegistrationRetryMaxDelayMs: 1,
+		});
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: CliRegisteredInfo) => Promise<void>)
+			| undefined;
+		if (!connectHandler || !registeredHandler) {
+			throw new Error("socket registration handlers not registered");
+		}
+
+		await connectHandler();
+		await registeredHandler(
+			createRegisteredInfo(
+				"user-1:machine-1",
+				"team-relay-registration-rejected",
+			),
+		);
+		const proof = getLastTeamRelayEmission("cli:team-relay-ready");
+		invokeTimeoutAck(proof, null, { accepted: false });
+		await waitForTimers();
+
+		expect(
+			volatileEmitMock.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "cli:team-relay-ready",
+			),
+		).toHaveLength(1);
+		expect(sessionManager.setTeamRelayTransportReady).not.toHaveBeenCalledWith(
+			true,
+		);
+	});
+
+	test("does not retry a malformed Team relay proof acknowledgment", async () => {
+		volatileEmitMock.mockImplementation(() => {});
+		Object.assign(client as object, {
+			teamRelayRegistrationRetryBaseDelayMs: 1,
+			teamRelayRegistrationRetryMaxDelayMs: 1,
+		});
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: CliRegisteredInfo) => Promise<void>)
+			| undefined;
+		if (!connectHandler || !registeredHandler) {
+			throw new Error("socket registration handlers not registered");
+		}
+
+		await connectHandler();
+		await registeredHandler(
+			createRegisteredInfo(
+				"user-1:machine-1",
+				"team-relay-registration-malformed",
+			),
+		);
+		const proof = getLastTeamRelayEmission("cli:team-relay-ready");
+		invokeTimeoutAck(proof, null, {
+			accepted: true,
+			registrationId: "team-relay-registration-malformed",
+		});
+		await waitForTimers();
+
+		expect(
+			volatileEmitMock.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "cli:team-relay-ready",
+			),
+		).toHaveLength(1);
+		expect(sessionManager.setTeamRelayTransportReady).not.toHaveBeenCalledWith(
+			true,
+		);
+	});
+
+	test("does not retry a mismatched Team relay proof acknowledgment", async () => {
+		volatileEmitMock.mockImplementation(() => {});
+		Object.assign(client as object, {
+			teamRelayRegistrationRetryBaseDelayMs: 1,
+			teamRelayRegistrationRetryMaxDelayMs: 1,
+		});
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: CliRegisteredInfo) => Promise<void>)
+			| undefined;
+		if (!connectHandler || !registeredHandler) {
+			throw new Error("socket registration handlers not registered");
+		}
+
+		await connectHandler();
+		await registeredHandler(
+			createRegisteredInfo(
+				"user-1:machine-1",
+				"team-relay-registration-current",
+			),
+		);
+		const proof = getLastTeamRelayEmission("cli:team-relay-ready");
+		invokeTimeoutAck(proof, null, {
+			accepted: true,
+			registrationId: "team-relay-registration-other",
+			relayKeyId: createRelayKey(1).keyId,
+		});
+		await waitForTimers();
+
+		expect(
+			volatileEmitMock.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "cli:team-relay-ready",
+			),
+		).toHaveLength(1);
+		expect(sessionManager.setTeamRelayTransportReady).not.toHaveBeenCalledWith(
+			true,
+		);
+	});
+
+	test("cancels an exhausted Team relay proof retry when the client shuts down", async () => {
+		volatileEmitMock.mockImplementation(() => {});
+		Object.assign(client as object, {
+			teamRelayRegistrationRetryBaseDelayMs: 20,
+			teamRelayRegistrationRetryMaxDelayMs: 20,
+		});
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: CliRegisteredInfo) => Promise<void>)
+			| undefined;
+		if (!connectHandler || !registeredHandler) {
+			throw new Error("socket registration handlers not registered");
+		}
+
+		await connectHandler();
+		await registeredHandler(
+			createRegisteredInfo(
+				"user-1:machine-1",
+				"team-relay-registration-shutdown",
+			),
+		);
+		for (let attempt = 1; attempt <= 3; attempt += 1) {
+			const proof = getLastTeamRelayEmission("cli:team-relay-ready");
+			invokeTimeoutAck(proof, new Error("operation has timed out"));
+			await flushMicrotasks();
+		}
+		expect(
+			(
+				client as unknown as {
+					teamRelayRegistrationRetryTimer?: unknown;
+				}
+			).teamRelayRegistrationRetryTimer,
+		).toBeDefined();
+
+		client.disconnect();
+		expect(
+			(
+				client as unknown as {
+					teamRelayRegistrationRetryTimer?: unknown;
+				}
+			).teamRelayRegistrationRetryTimer,
+		).toBeUndefined();
+		await waitForTimers(30);
+
+		expect(
+			volatileEmitMock.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "cli:team-relay-ready",
+			),
+		).toHaveLength(3);
+		expect(sessionManager.setTeamRelayTransportReady).not.toHaveBeenCalledWith(
+			true,
+		);
+	});
+
+	test("replaces an exhausted Team relay retry when a new connection generation starts", async () => {
+		volatileEmitMock.mockImplementation(() => {});
+		Object.assign(client as object, {
+			teamRelayRegistrationRetryBaseDelayMs: 20,
+			teamRelayRegistrationRetryMaxDelayMs: 20,
+		});
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: CliRegisteredInfo) => Promise<void>)
+			| undefined;
+		if (!connectHandler || !registeredHandler) {
+			throw new Error("socket registration handlers not registered");
+		}
+
+		await connectHandler();
+		await registeredHandler(
+			createRegisteredInfo("user-1:machine-1", "team-relay-registration-old"),
+		);
+		for (let attempt = 1; attempt <= 3; attempt += 1) {
+			const proof = getLastTeamRelayEmission("cli:team-relay-ready");
+			invokeTimeoutAck(proof, new Error("operation has timed out"));
+			await flushMicrotasks();
+		}
+		expect(
+			(
+				client as unknown as {
+					teamRelayRegistrationRetryTimer?: unknown;
+				}
+			).teamRelayRegistrationRetryTimer,
+		).toBeDefined();
+
+		await connectHandler();
+		expect(
+			(
+				client as unknown as {
+					teamRelayRegistrationRetryTimer?: unknown;
+				}
+			).teamRelayRegistrationRetryTimer,
+		).toBeUndefined();
+		await registeredHandler(
+			createRegisteredInfo(
+				"user-1:machine-1",
+				"team-relay-registration-current",
+			),
+		);
+		const currentProof = getLastTeamRelayEmission("cli:team-relay-ready");
+		await waitForTimers(30);
+		expect(
+			volatileEmitMock.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "cli:team-relay-ready",
+			),
+		).toHaveLength(4);
+
+		invokeTimeoutAck(currentProof, null, {
+			accepted: true,
+			registrationId: "team-relay-registration-current",
+			relayKeyId: createRelayKey(1).keyId,
+		});
+		await flushMicrotasks();
+		expect(
+			sessionManager.setTeamRelayTransportReady.mock.calls.filter(
+				(call) => (call as unknown[])[0] === true,
+			),
+		).toHaveLength(1);
+	});
+
+	test("does not let a stale Team relay proof ACK reopen a reconnect generation", async () => {
+		volatileEmitMock.mockImplementation(() => {});
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: CliRegisteredInfo) => Promise<void>)
+			| undefined;
+		const disconnectHandler = socketHandlers.get("disconnect");
+		if (!connectHandler || !registeredHandler || !disconnectHandler) {
+			throw new Error("socket lifecycle handlers not registered");
+		}
+
+		await connectHandler();
+		await registeredHandler(
+			createRegisteredInfo("user-1:machine-1", "team-relay-registration-stale"),
+		);
+		const staleProof = getLastTeamRelayEmission("cli:team-relay-ready");
+		disconnectHandler("transport close");
+
+		await connectHandler();
+		await registeredHandler(
+			createRegisteredInfo(
+				"user-1:machine-1",
+				"team-relay-registration-current",
+			),
+		);
+		const currentProof = getLastTeamRelayEmission("cli:team-relay-ready");
+		invokeTimeoutAck(staleProof, null, {
+			accepted: true,
+			registrationId: "team-relay-registration-stale",
+			relayKeyId: createRelayKey(1).keyId,
+		});
+		await flushMicrotasks();
+		expect(
+			sessionManager.setTeamRelayTransportReady.mock.calls.filter(
+				(call) => (call as unknown[])[0] === true,
+			),
+		).toHaveLength(0);
+
+		invokeTimeoutAck(currentProof, null, {
+			accepted: true,
+			registrationId: "team-relay-registration-current",
+			relayKeyId: createRelayKey(1).keyId,
+		});
+		await flushMicrotasks();
+		expect(
+			sessionManager.setTeamRelayTransportReady.mock.calls.filter(
+				(call) => (call as unknown[])[0] === true,
+			),
+		).toHaveLength(1);
+	});
+
+	test("opens Team relay only after the current canonical CLI registration", async () => {
+		(
+			client as unknown as {
+				teamRelayAckTimeoutMs: number;
+			}
+		).teamRelayAckTimeoutMs = 5;
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: { machineId: string }) => Promise<void>)
+			| undefined;
+		const disconnectHandler = socketHandlers.get("disconnect");
+		if (!connectHandler || !registeredHandler || !disconnectHandler) {
+			throw new Error("socket lifecycle handlers not registered");
+		}
+		const relayEmissionCount = () =>
+			volatileEmitMock.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "team-relay:place",
+			).length;
+		const readyCallCount = () =>
+			sessionManager.setTeamRelayTransportReady.mock.calls.filter(
+				(call) => (call as unknown[])[0] === true,
+			).length;
+
+		await expect(
+			client.placeTeamRelayPeer({ backendId: "backend-1" }),
+		).rejects.toThrow("Team relay transport is not registered");
+		expect(relayEmissionCount()).toBe(0);
+
+		await connectHandler();
+		expect(readyCallCount()).toBe(0);
+		await expect(
+			client.placeTeamRelayPeer({ backendId: "backend-1" }),
+		).rejects.toThrow("Team relay transport is not registered");
+		expect(relayEmissionCount()).toBe(0);
+
+		await registeredHandler(
+			createRegisteredInfo(
+				"user-1:machine-1",
+				"team-relay-registration-generation-1",
+			),
+		);
+		expect(sessionManager.bindTeamRelayMachineIdentity).toHaveBeenCalledWith(
+			"user-1:machine-1",
+		);
+		expect(
+			getLastTeamRelayEmission("cli:team-relay-ready").slice(0, 2),
+		).toEqual([
+			"cli:team-relay-ready",
+			{
+				registrationId: "team-relay-registration-generation-1",
+				relayKeyId: createRelayKey(1).keyId,
+			},
+		]);
+		expect(readyCallCount()).toBe(1);
+
+		await registeredHandler(
+			createRegisteredInfo(
+				"user-1:machine-1",
+				"team-relay-registration-generation-1",
+			),
+		);
+		expect(readyCallCount()).toBe(1);
+
+		disconnectHandler("transport close");
+		expect(sessionManager.setTeamRelayTransportReady).toHaveBeenLastCalledWith(
+			false,
+		);
+		await connectHandler();
+		expect(readyCallCount()).toBe(1);
+		await registeredHandler(
+			createRegisteredInfo(
+				"user-1:machine-1",
+				"team-relay-registration-generation-2",
+			),
+		);
+		expect(readyCallCount()).toBe(2);
+		const readyEmissions = volatileEmitMock.mock.calls.filter(
+			(call) => (call as unknown[])[0] === "cli:team-relay-ready",
+		);
+		expect(readyEmissions).toHaveLength(2);
+		expect((readyEmissions[1] as unknown[])[1]).toEqual({
+			registrationId: "team-relay-registration-generation-2",
+			relayKeyId: createRelayKey(1).keyId,
+		});
+	});
+
+	test("fails Team relay fast when the underlying Socket.IO transport is not connected", async () => {
+		await registerTeamRelay();
+		volatileEmitMock.mockClear();
+		socketMock.connected = false;
+
+		await expect(
+			client.placeTeamRelayPeer({ backendId: "backend-1" }),
+		).rejects.toThrow("Team relay transport is not registered");
+		expect(
+			volatileEmitMock.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "team-relay:place",
+			),
+		).toHaveLength(0);
+	});
+
+	test("accepts inbound relay after identity binding while outbound waits for WAL replay", async () => {
+		const replayPage = Array.from({ length: 100 }, (_, index) =>
+			createSessionEvent({ seq: index + 1 }),
+		);
+		sessionManager.getUnackedEventsPage.mockImplementation(
+			(_sessionId: string, _revision: number, afterSeq: number) =>
+				afterSeq === 0 ? replayPage : [],
+		);
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: { machineId: string }) => Promise<void>)
+			| undefined;
+		const inboundHandler = socketHandlers.get("rpc:team-relay:execute");
+		if (!connectHandler || !registeredHandler || !inboundHandler) {
+			throw new Error("Team relay lifecycle handlers not registered");
+		}
+
+		await connectHandler();
+		const registration = registeredHandler({
+			...createRegisteredInfo(
+				"user-1:machine-1",
+				"team-relay-registration-during-replay",
+			),
+		});
+		expect(sessionManager.bindTeamRelayMachineIdentity).toHaveBeenCalledWith(
+			"user-1:machine-1",
+		);
+		expect(
+			getLastTeamRelayEmission("cli:team-relay-ready").slice(0, 2),
+		).toEqual([
+			"cli:team-relay-ready",
+			{
+				registrationId: "team-relay-registration-during-replay",
+				relayKeyId: createRelayKey(1).keyId,
+			},
+		]);
+		expect(sessionManager.setTeamRelayTransportReady).not.toHaveBeenCalledWith(
+			true,
+		);
+
+		const sourceRelayKey = createRelayKey(2);
+		const params: TeamRelayExecuteRpcParams = {
+			operationId: "operation-during-replay",
+			sourceMachineId: "user-1:source-machine",
+			sourceRelayKey,
+			ciphertext: createRelayCiphertext(createRelayKey(1).keyId, 3),
+		};
+		await inboundHandler({
+			requestId: "execute-during-replay",
+			params,
+		});
+		expect(teamRelayRequestHandler).toHaveBeenCalledWith(params);
+		await expect(
+			client.placeTeamRelayPeer({ backendId: "backend-1" }),
+		).rejects.toThrow("Team relay transport is not registered");
+
+		await registration;
+		expect(sessionManager.setTeamRelayTransportReady).toHaveBeenCalledWith(
+			true,
+		);
+	});
+
+	test("keeps ordinary CLI recovery alive when canonical Team relay binding fails", async () => {
+		sessionManager.bindTeamRelayMachineIdentity.mockImplementation(() => {
+			throw new Error("canonical identity conflict");
+		});
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: { machineId: string }) => Promise<void>)
+			| undefined;
+		const inboundHandler = socketHandlers.get("rpc:team-relay:execute");
+		if (!connectHandler || !registeredHandler || !inboundHandler) {
+			throw new Error("Team relay lifecycle handlers not registered");
+		}
+
+		await connectHandler();
+		await registeredHandler(createRegisteredInfo("user-1:conflicting-machine"));
+
+		expect(client.isConnected()).toBe(true);
+		expect(socketMock.disconnect).not.toHaveBeenCalled();
+		expect(sessionManager.getUnackedEventsPage).toHaveBeenCalled();
+		expect(sessionManager.setTeamRelayTransportReady).not.toHaveBeenCalledWith(
+			true,
+		);
+		expect(
+			volatileEmitMock.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "cli:team-relay-ready",
+			),
+		).toHaveLength(0);
+		await expect(
+			client.placeTeamRelayPeer({ backendId: "backend-1" }),
+		).rejects.toThrow("Team relay transport is not registered");
+
+		const sourceRelayKey = createRelayKey(2);
+		await inboundHandler({
+			requestId: "execute-after-bind-failure",
+			params: {
+				operationId: "operation-after-bind-failure",
+				sourceMachineId: "user-1:source-machine",
+				sourceRelayKey,
+				ciphertext: createRelayCiphertext(createRelayKey(1).keyId, 3),
+			},
+		});
+		expect(teamRelayRequestHandler).not.toHaveBeenCalled();
+	});
+
+	test("keeps ordinary CLI recovery alive when the Gateway omits a Team relay proof", async () => {
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: { machineId: string }) => Promise<void>)
+			| undefined;
+		if (!connectHandler || !registeredHandler) {
+			throw new Error("socket registration handlers not registered");
+		}
+
+		await connectHandler();
+		await registeredHandler({ machineId: "user-1:machine-1" });
+
+		expect(client.isConnected()).toBe(true);
+		expect(socketMock.disconnect).not.toHaveBeenCalled();
+		expect(sessionManager.getUnackedEventsPage).toHaveBeenCalled();
+		expect(sessionManager.setTeamRelayTransportReady).not.toHaveBeenCalledWith(
+			true,
+		);
+		expect(
+			volatileEmitMock.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "cli:team-relay-ready",
+			),
+		).toHaveLength(0);
+		await expect(
+			client.placeTeamRelayPeer({ backendId: "backend-1" }),
+		).rejects.toThrow("Team relay transport is not registered");
+	});
+
+	test("keeps inbound Team relay open when SessionManager rejects outbound readiness", async () => {
+		sessionManager.setTeamRelayTransportReady.mockImplementation(
+			(ready: boolean) => !ready,
+		);
+
+		await registerTeamRelay("user-1:machine-1");
+
+		expect(client.isConnected()).toBe(true);
+		expect(socketMock.disconnect).not.toHaveBeenCalled();
+		await expect(
+			client.placeTeamRelayPeer({ backendId: "backend-1" }),
+		).rejects.toThrow("Team relay transport is not registered");
+
+		const inboundHandler = socketHandlers.get("rpc:team-relay:execute");
+		if (!inboundHandler) {
+			throw new Error("Team relay execute handler not registered");
+		}
+		const sourceRelayKey = createRelayKey(2);
+		const params: TeamRelayExecuteRpcParams = {
+			operationId: "operation-after-outbound-rejection",
+			sourceMachineId: "user-1:source-machine",
+			sourceRelayKey,
+			ciphertext: createRelayCiphertext(createRelayKey(1).keyId, 3),
+		};
+		await inboundHandler({
+			requestId: "execute-after-outbound-rejection",
+			params,
+		});
+		expect(teamRelayRequestHandler).toHaveBeenCalledWith(params);
+	});
+
+	test("drops pending Team relay requests immediately across disconnect generations", async () => {
+		(
+			client as unknown as {
+				teamRelayAckTimeoutMs: number;
+			}
+		).teamRelayAckTimeoutMs = 10;
+		await registerTeamRelay("user-1:machine-1");
+		const disconnectHandler = socketHandlers.get("disconnect");
+		if (!disconnectHandler) {
+			throw new Error("disconnect handler not registered");
+		}
+
+		const placement = client.placeTeamRelayPeer({ backendId: "backend-1" });
+		const relayEmission = getLastTeamRelayEmission("team-relay:place");
+		expect(
+			socketMock.emit.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "team-relay:place",
+			),
+		).toHaveLength(0);
+		expect(
+			volatileEmitMock.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "team-relay:place",
+			),
+		).toHaveLength(1);
+
+		disconnectHandler("transport close");
+		await expect(placement).rejects.toThrow(
+			"Team relay transport became unavailable",
+		);
+		invokeTimeoutAck(relayEmission, null, {
+			requestId: (relayEmission[1] as { requestId: string }).requestId,
+			result: {
+				targetMachineId: "user-1:machine-2",
+				relayKey: createRelayKey(2),
+			},
+		});
+
+		await registerTeamRelay(
+			"user-1:machine-1",
+			"team-relay-registration-generation-2",
+		);
+		expect(
+			volatileEmitMock.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "team-relay:place",
+			),
+		).toHaveLength(1);
+	});
+
+	test("places and resolves Team relay peers through strictly bound acknowledgments", async () => {
+		await registerTeamRelay();
+		const targetRelayKey = createRelayKey(2);
+		const placement = client.placeTeamRelayPeer({ backendId: "backend-1" });
+		const placeEmission = getLastTeamRelayEmission("team-relay:place");
+		const placeRequest = placeEmission[1] as {
+			requestId: string;
+			params: unknown;
+		};
+		expect(Object.keys(placeRequest).sort()).toEqual(["params", "requestId"]);
+		expect(placeRequest.params).toEqual({ backendId: "backend-1" });
+		invokeTimeoutAck(placeEmission, null, {
+			requestId: placeRequest.requestId,
+			result: {
+				targetMachineId: "machine-2",
+				relayKey: targetRelayKey,
+			},
+		});
+		await expect(placement).resolves.toEqual({
+			targetMachineId: "machine-2",
+			relayKey: targetRelayKey,
+		});
+
+		const resolution = client.resolveTeamRelayPeer({
+			targetMachineId: "machine-2",
+		});
+		const resolveEmission = getLastTeamRelayEmission("team-relay:resolve");
+		const resolveRequest = resolveEmission[1] as {
+			requestId: string;
+			params: unknown;
+		};
+		invokeTimeoutAck(resolveEmission, null, {
+			requestId: resolveRequest.requestId,
+			result: {
+				targetMachineId: "machine-2",
+				relayKey: targetRelayKey,
+			},
+		});
+		await expect(resolution).resolves.toEqual({
+			targetMachineId: "machine-2",
+			relayKey: targetRelayKey,
+		});
+	});
+
+	test("binds Team relay send acknowledgments to request, operation, target, and local recipient key", async () => {
+		await registerTeamRelay();
+		const targetRelayKey = createRelayKey(2);
+		const outboundCiphertext = createRelayCiphertext(targetRelayKey.keyId, 3);
+		const returnedCiphertext = createRelayCiphertext(
+			createRelayKey(1).keyId,
+			4,
+		);
+		const send = client.sendTeamRelay({
+			operationId: "operation-stable",
+			targetMachineId: "machine-2",
+			ciphertext: outboundCiphertext,
+		});
+		const emission = getLastTeamRelayEmission("team-relay:send");
+		const request = emission[1] as {
+			requestId: string;
+			params: {
+				operationId: string;
+				targetMachineId: string;
+				ciphertext: TeamRelayCiphertext;
+			};
+		};
+		invokeTimeoutAck(emission, null, {
+			requestId: request.requestId,
+			result: {
+				operationId: "operation-stable",
+				targetMachineId: "machine-2",
+				ciphertext: returnedCiphertext,
+			},
+		});
+
+		await expect(send).resolves.toEqual({
+			operationId: "operation-stable",
+			targetMachineId: "machine-2",
+			ciphertext: returnedCiphertext,
+		});
+		expect(request.params).toEqual({
+			operationId: "operation-stable",
+			targetMachineId: "machine-2",
+			ciphertext: outboundCiphertext,
+		});
+	});
+
+	test("rejects malformed or mismatched Team relay send acknowledgments without retrying or rewriting", async () => {
+		await registerTeamRelay();
+		const targetRelayKey = createRelayKey(2);
+		const outboundCiphertext = createRelayCiphertext(targetRelayKey.keyId, 3);
+		const returnedCiphertext = createRelayCiphertext(
+			createRelayKey(1).keyId,
+			4,
+		);
+		const invalidResponses = [
+			(requestId: string) => ({
+				requestId: `${requestId}-spoofed`,
+				result: {
+					operationId: "operation-stable",
+					targetMachineId: "machine-2",
+					ciphertext: returnedCiphertext,
+				},
+			}),
+			(requestId: string) => ({
+				requestId,
+				result: {
+					operationId: "operation-spoofed",
+					targetMachineId: "machine-2",
+					ciphertext: returnedCiphertext,
+				},
+			}),
+			(requestId: string) => ({
+				requestId,
+				result: {
+					operationId: "operation-stable",
+					targetMachineId: "machine-spoofed",
+					ciphertext: returnedCiphertext,
+				},
+			}),
+			(requestId: string) => ({
+				requestId,
+				result: {
+					operationId: "operation-stable",
+					targetMachineId: "machine-2",
+					ciphertext: createRelayCiphertext(createRelayKey(9).keyId, 5),
+				},
+			}),
+			(requestId: string) => ({
+				requestId,
+				result: {
+					operationId: "operation-stable",
+					targetMachineId: "machine-2",
+					ciphertext: returnedCiphertext,
+				},
+				extra: "must-fail",
+			}),
+		];
+
+		for (const createInvalidResponse of invalidResponses) {
+			volatileEmitMock.mockClear();
+			const pending = client.sendTeamRelay({
+				operationId: "operation-stable",
+				targetMachineId: "machine-2",
+				ciphertext: outboundCiphertext,
+			});
+			const rejection = pending.then(
+				() => undefined,
+				(error: unknown) => error,
+			);
+			const emission = getLastTeamRelayEmission("team-relay:send");
+			const request = emission[1] as {
+				requestId: string;
+				params: { operationId: string };
+			};
+
+			invokeTimeoutAck(
+				emission,
+				null,
+				createInvalidResponse(request.requestId),
+			);
+
+			expect(await rejection).toBeInstanceOf(Error);
+			expect(request.params.operationId).toBe("operation-stable");
+			expect(
+				volatileEmitMock.mock.calls.filter(
+					(call) => (call as unknown[])[0] === "team-relay:send",
+				),
+			).toHaveLength(1);
+		}
+	});
+
+	test("preserves validated Team relay RpcError retry semantics", async () => {
+		await registerTeamRelay();
+		const validError = {
+			code: "AUTHORIZATION_FAILED",
+			message: "Team relay peer not found",
+			retryable: false,
+			scope: "request",
+			status: 404,
+		};
+		const pending = client.placeTeamRelayPeer({ backendId: "backend-1" });
+		const rejection = pending.then(
+			() => undefined,
+			(caught: unknown) => caught,
+		);
+		const emission = getLastTeamRelayEmission("team-relay:place");
+		const request = emission[1] as { requestId: string };
+		invokeTimeoutAck(emission, null, {
+			requestId: request.requestId,
+			error: validError,
+		});
+
+		const error = await rejection;
+		expect(error).toBeInstanceOf(TeamRelayRemoteError);
+		expect((error as InstanceType<typeof TeamRelayRemoteError>).detail).toEqual(
+			{
+				code: "AUTHORIZATION_FAILED",
+				message: "Team relay peer not found",
+				retryable: false,
+				scope: "request",
+			},
+		);
+	});
+
+	test("rejects malformed Team relay RpcError acknowledgments generically", async () => {
+		await registerTeamRelay();
+		const validError = {
+			code: "AUTHORIZATION_FAILED",
+			message: "Team relay peer not found",
+			retryable: false,
+			scope: "request",
+			status: 404,
+		};
+		const cases = [
+			[{ ...validError, code: "x".repeat(65) }, "Invalid Team relay response"],
+			[
+				{ ...validError, message: "x".repeat(1025) },
+				"Invalid Team relay response",
+			],
+			[{ ...validError, retryable: "false" }, "Invalid Team relay response"],
+			[{ ...validError, scope: "private" }, "Invalid Team relay response"],
+			[{ ...validError, status: 200 }, "Invalid Team relay response"],
+			[
+				{ ...validError, detail: "must-not-be-accepted" },
+				"Invalid Team relay response",
+			],
+		] as const;
+
+		for (const [error, expectedMessage] of cases) {
+			volatileEmitMock.mockClear();
+			const pending = client.placeTeamRelayPeer({ backendId: "backend-1" });
+			const rejection = pending.then(
+				() => undefined,
+				(caught: unknown) => caught,
+			);
+			const emission = getLastTeamRelayEmission("team-relay:place");
+			const request = emission[1] as { requestId: string };
+
+			invokeTimeoutAck(emission, null, {
+				requestId: request.requestId,
+				error,
+			});
+
+			expect(await rejection).toEqual(
+				expect.objectContaining({ message: expectedMessage }),
+			);
+			expect(
+				volatileEmitMock.mock.calls.filter(
+					(call) => (call as unknown[])[0] === "team-relay:place",
+				),
+			).toHaveLength(1);
+		}
+	});
+
+	test("uses native timeout ACK cleanup without retrying or changing operationId", async () => {
+		await registerTeamRelay();
+		(
+			client as unknown as {
+				teamRelayAckTimeoutMs: number;
+			}
+		).teamRelayAckTimeoutMs = 5;
+		timeoutMock.mockClear();
+		volatileEmitMock.mockClear();
+		const targetRelayKey = createRelayKey(2);
+		const pending = client.sendTeamRelay({
+			operationId: "operation-timeout-stable",
+			targetMachineId: "machine-2",
+			ciphertext: createRelayCiphertext(targetRelayKey.keyId, 3),
+		});
+		const emission = getLastTeamRelayEmission("team-relay:send");
+		const request = emission[1] as {
+			requestId: string;
+			params: { operationId: string };
+		};
+		const state = client as unknown as {
+			pendingTeamRelayRequests: Map<string, unknown>;
+		};
+
+		expect(timeoutMock).toHaveBeenCalledWith(5);
+		expect(state.pendingTeamRelayRequests.size).toBe(1);
+		invokeTimeoutAck(emission, new Error("operation has timed out"));
+		await expect(pending).rejects.toThrow("Team relay request timed out");
+		expect(state.pendingTeamRelayRequests.size).toBe(0);
+		expect(request.params.operationId).toBe("operation-timeout-stable");
+		expect(
+			volatileEmitMock.mock.calls.filter(
+				(call) => (call as unknown[])[0] === "team-relay:send",
+			),
+		).toHaveLength(1);
+		invokeTimeoutAck(emission, null, {
+			requestId: request.requestId,
+			result: {
+				operationId: "operation-timeout-stable",
+				targetMachineId: "machine-2",
+				ciphertext: createRelayCiphertext(createRelayKey(1).keyId, 4),
+			},
+		});
+		expect(state.pendingTeamRelayRequests.size).toBe(0);
+	});
+
+	test("strictly parses inbound Team relay execute RPCs before dispatch", async () => {
+		await registerTeamRelay();
+		const sourceRelayKey = createRelayKey(2);
+		const request: TeamRelayExecuteRpcParams = {
+			operationId: "operation-execute",
+			sourceMachineId: "machine-source",
+			sourceRelayKey,
+			ciphertext: createRelayCiphertext(createRelayKey(1).keyId, 3),
+		};
+		const handler = socketHandlers.get("rpc:team-relay:execute");
+		if (!handler) {
+			throw new Error("Team relay execute handler not registered");
+		}
+
+		await handler({
+			requestId: "execute-request-1",
+			params: request,
+		});
+
+		expect(teamRelayRequestHandler).toHaveBeenCalledWith(request);
+		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+			requestId: "execute-request-1",
+			result: {
+				operationId: "operation-execute",
+				ciphertext: createRelayCiphertext(sourceRelayKey.keyId, 4),
+			},
+		});
+	});
+
+	test("fails invalid or sensitive Team relay execute requests generically", async () => {
+		await registerTeamRelay();
+		const handler = socketHandlers.get("rpc:team-relay:execute");
+		if (!handler) {
+			throw new Error("Team relay execute handler not registered");
+		}
+		const sourceRelayKey = createRelayKey(2);
+		const params: TeamRelayExecuteRpcParams = {
+			operationId: "operation-sensitive",
+			sourceMachineId: "machine-source",
+			sourceRelayKey,
+			ciphertext: createRelayCiphertext(createRelayKey(1).keyId, 3),
+		};
+
+		await handler({
+			requestId: "execute-invalid",
+			params: { ...params, agentTeamId: "must-not-cross-wire" },
+		});
+		expect(teamRelayRequestHandler).not.toHaveBeenCalled();
+
+		teamRelayRequestHandler.mockImplementationOnce(() =>
+			Promise.reject(new Error("ENOENT /Users/alice/private/team.json")),
+		);
+		await handler({
+			requestId: "execute-sensitive",
+			params,
+		});
+
+		for (const requestId of ["execute-invalid", "execute-sensitive"]) {
+			expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
+				requestId,
+				error: {
+					code: "INTERNAL_ERROR",
+					message: "Internal server error",
+					retryable: true,
+					scope: "request",
+					status: 500,
+				},
+			});
+		}
+		expect(JSON.stringify(socketMock.emit.mock.calls)).not.toContain("ENOENT");
+		expect(JSON.stringify(socketMock.emit.mock.calls)).not.toContain(
+			"/Users/alice",
+		);
+		const serializedLogs = JSON.stringify([
+			...loggerMock.warn.mock.calls,
+			...loggerMock.error.mock.calls,
+		]);
+		expect(serializedLogs).not.toContain("agentTeamId");
+		expect(serializedLogs).not.toContain("must-not-cross-wire");
+		expect(serializedLogs).not.toContain(params.ciphertext.wrappedDek);
+		expect(serializedLogs).not.toContain("ENOENT");
+		expect(serializedLogs).not.toContain("/Users/alice");
+	});
+
 	test("replays unacked events after reconnect using the durable revision", async () => {
 		(client as unknown as { reconnectAttempts: number }).reconnectAttempts = 1;
 
@@ -402,7 +1710,7 @@ describe("SocketClient restore semantics", () => {
 			socketHandlers.get("cli:registered") as
 				| ((info: { machineId: string }) => Promise<void>)
 				| undefined
-		)?.({ machineId: "machine-1" });
+		)?.(createRegisteredInfo("machine-1"));
 
 		expect(sessionManager.listUnackedSessionRevisions).toHaveBeenCalled();
 		expect(sessionManager.getUnackedEventsPage).toHaveBeenCalledWith(
@@ -446,7 +1754,7 @@ describe("SocketClient restore semantics", () => {
 			socketHandlers.get("cli:registered") as
 				| ((info: { machineId: string }) => Promise<void>)
 				| undefined
-		)?.({ machineId: "machine-1" });
+		)?.(createRegisteredInfo("machine-1"));
 
 		expect(cryptoService.encryptEvent).not.toHaveBeenCalled();
 		expect(socketMock.emit).not.toHaveBeenCalledWith(
@@ -475,7 +1783,7 @@ describe("SocketClient restore semantics", () => {
 			socketHandlers.get("cli:registered") as
 				| ((info: { machineId: string }) => Promise<void>)
 				| undefined
-		)?.({ machineId: "machine-1" });
+		)?.(createRegisteredInfo("machine-1"));
 
 		expect(cryptoService.encryptEvent).not.toHaveBeenCalled();
 		sessionEventListener?.(createSessionEvent({ seq: 5 }));
@@ -500,7 +1808,7 @@ describe("SocketClient restore semantics", () => {
 			socketHandlers.get("cli:registered") as
 				| ((info: { machineId: string }) => Promise<void>)
 				| undefined
-		)?.({ machineId: "machine-1" });
+		)?.(createRegisteredInfo("machine-1"));
 		sessionManager.getUnackedEventsPage.mockClear();
 		socketMock.emit.mockClear();
 
@@ -510,7 +1818,7 @@ describe("SocketClient restore semantics", () => {
 			socketHandlers.get("cli:registered") as
 				| ((info: { machineId: string }) => Promise<void>)
 				| undefined
-		)?.({ machineId: "machine-1" });
+		)?.(createRegisteredInfo("machine-1"));
 
 		expect(sessionManager.getUnackedEventsPage).toHaveBeenCalledWith(
 			"session-1",
@@ -544,7 +1852,7 @@ describe("SocketClient restore semantics", () => {
 			socketHandlers.get("cli:registered") as
 				| ((info: { machineId: string }) => Promise<void>)
 				| undefined
-		)?.({ machineId: "machine-1" });
+		)?.(createRegisteredInfo("machine-1"));
 
 		expect(sessionManager.getUnackedEventsPage).toHaveBeenCalledWith(
 			"session-1",
@@ -582,7 +1890,7 @@ describe("SocketClient restore semantics", () => {
 			),
 		).toHaveLength(0);
 
-		await registeredHandler({ machineId: "machine-1" });
+		await registeredHandler(createRegisteredInfo("machine-1"));
 
 		const emittedSeqs = socketMock.emit.mock.calls
 			.filter((call) => (call as unknown[])[0] === "session:event")
@@ -613,7 +1921,7 @@ describe("SocketClient restore semantics", () => {
 			code: "REGISTRATION_ERROR",
 			message: "registration failed",
 		});
-		await registeredHandler({ machineId: "machine-1" });
+		await registeredHandler(createRegisteredInfo("machine-1"));
 
 		expect(client.isConnected()).toBe(false);
 		expect(
@@ -643,7 +1951,7 @@ describe("SocketClient restore semantics", () => {
 		await connectHandler();
 		sessionEventListener(createSessionEvent({ seq: 2 }));
 		disconnectHandler("transport close");
-		await registeredHandler({ machineId: "machine-1" });
+		await registeredHandler(createRegisteredInfo("machine-1"));
 
 		expect(
 			socketMock.emit.mock.calls.filter(
@@ -674,7 +1982,7 @@ describe("SocketClient restore semantics", () => {
 			throw new Error("cli:registered handler not registered");
 		}
 
-		const registration = registeredHandler({ machineId: "machine-1" });
+		const registration = registeredHandler(createRegisteredInfo("machine-1"));
 		const replayedCount = () =>
 			socketMock.emit.mock.calls.filter(
 				(call) => (call as unknown[])[0] === "session:event",
@@ -724,7 +2032,7 @@ describe("SocketClient restore semantics", () => {
 			throw new Error("replay handlers not registered");
 		}
 
-		const registration = registeredHandler({ machineId: "machine-1" });
+		const registration = registeredHandler(createRegisteredInfo("machine-1"));
 		sessionEventListener(
 			createSessionEvent({ seq: 150, kind: "agent_thought_chunk" }),
 		);
@@ -771,7 +2079,9 @@ describe("SocketClient restore semantics", () => {
 		}
 
 		await connectHandler();
-		const staleRegistration = registeredHandler({ machineId: "machine-1" });
+		const staleRegistration = registeredHandler(
+			createRegisteredInfo("machine-1"),
+		);
 		sessionEventListener?.(createSessionEvent({ seq: 206 }));
 		disconnectHandler("transport close");
 		await connectHandler();
@@ -781,6 +2091,54 @@ describe("SocketClient restore semantics", () => {
 			(call) => (call as unknown[])[0] === "session:event",
 		).length;
 		expect(replayedCount).toBe(100);
+	});
+
+	test("does not let a stale WAL generation reopen Team relay after reconnect", async () => {
+		const backlog = Array.from({ length: 205 }, (_, index) =>
+			createSessionEvent({ seq: index + 1 }),
+		);
+		sessionManager.getUnackedEventsPage.mockImplementation(
+			(
+				_sessionId: string,
+				_revision: number,
+				afterSeq: number,
+				limit: number,
+			) => backlog.filter((event) => event.seq > afterSeq).slice(0, limit),
+		);
+		const connectHandler = socketHandlers.get("connect") as
+			| (() => Promise<void>)
+			| undefined;
+		const disconnectHandler = socketHandlers.get("disconnect");
+		const registeredHandler = socketHandlers.get("cli:registered") as
+			| ((info: CliRegisteredInfo) => Promise<void>)
+			| undefined;
+		if (!connectHandler || !disconnectHandler || !registeredHandler) {
+			throw new Error("socket lifecycle handlers not registered");
+		}
+
+		await connectHandler();
+		const staleRegistration = registeredHandler(
+			createRegisteredInfo("machine-1", "team-relay-registration-stale"),
+		);
+		disconnectHandler("transport close");
+		await connectHandler();
+		const currentRegistration = registeredHandler(
+			createRegisteredInfo("machine-1", "team-relay-registration-current"),
+		);
+		await Promise.all([staleRegistration, currentRegistration]);
+
+		const readyCalls =
+			sessionManager.setTeamRelayTransportReady.mock.calls.filter(
+				(call) => (call as unknown[])[0] === true,
+			);
+		expect(readyCalls).toHaveLength(1);
+		const state = client as unknown as {
+			walReplayGeneration: number;
+			teamRelayRegisteredGeneration?: number;
+			teamRelayReadyGeneration?: number;
+		};
+		expect(state.teamRelayRegisteredGeneration).toBe(state.walReplayGeneration);
+		expect(state.teamRelayReadyGeneration).toBe(state.walReplayGeneration);
 	});
 
 	test("reconnects for durable replay when the live-event replay buffer fills", async () => {
@@ -806,7 +2164,7 @@ describe("SocketClient restore semantics", () => {
 		}
 
 		await connectHandler();
-		const registration = registeredHandler({ machineId: "machine-1" });
+		const registration = registeredHandler(createRegisteredInfo("machine-1"));
 		for (let index = 0; index <= 1000; index += 1) {
 			sessionEventListener(createSessionEvent({ seq: 206 + index }));
 		}
@@ -847,7 +2205,7 @@ describe("SocketClient restore semantics", () => {
 		}
 
 		await connectHandler();
-		const registration = registeredHandler({ machineId: "machine-1" });
+		const registration = registeredHandler(createRegisteredInfo("machine-1"));
 		const largeText = "x".repeat(5 * 1024 * 1024);
 		sessionEventListener(
 			createSessionEvent({ seq: 206, payload: { text: largeText } }),
@@ -900,7 +2258,7 @@ describe("SocketClient restore semantics", () => {
 		}
 
 		await connectHandler();
-		const registration = registeredHandler({ machineId: "machine-1" });
+		const registration = registeredHandler(createRegisteredInfo("machine-1"));
 		const cyclicPayload: { self?: unknown } = {};
 		cyclicPayload.self = cyclicPayload;
 		sessionEventListener(
@@ -954,7 +2312,7 @@ describe("SocketClient restore semantics", () => {
 		});
 
 		await connectHandler();
-		const registration = registeredHandler({ machineId: "machine-1" });
+		const registration = registeredHandler(createRegisteredInfo("machine-1"));
 		sessionEventListener(createSessionEvent({ seq: 102 }));
 		await registration;
 
@@ -1010,7 +2368,7 @@ describe("SocketClient restore semantics", () => {
 			socketHandlers.get("cli:registered") as
 				| ((info: { machineId: string }) => Promise<void>)
 				| undefined
-		)?.({ machineId: "machine-1" });
+		)?.(createRegisteredInfo("machine-1"));
 
 		expect(sessionManager.getUnackedEventsPage).not.toHaveBeenCalled();
 	});
@@ -2317,7 +3675,7 @@ describe("SocketClient restore semantics", () => {
 		expect(socketMock.emit).toHaveBeenCalledWith("session:event", event);
 	});
 
-	test("handles rpc:agent-team:create and emits changed projection", async () => {
+	test("handles rpc:agent-team:create through SessionManager and emits changed projection", async () => {
 		const handler = socketHandlers.get("rpc:agent-team:create");
 		if (!handler) {
 			throw new Error("rpc:agent-team:create handler not registered");
@@ -2333,7 +3691,7 @@ describe("SocketClient restore semantics", () => {
 			},
 		});
 
-		expect(agentTeamStoreMock.createAgentTeam).toHaveBeenCalledWith({
+		expect(sessionManager.createAgentTeamRun).toHaveBeenCalledWith({
 			machineId: "machine-1",
 			backendId: "backend-1",
 			workspaceRootCwd: "/tmp/project",
@@ -2341,7 +3699,10 @@ describe("SocketClient restore semantics", () => {
 		});
 		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
 			requestId: "team-create-1",
-			result: { team: createdTeam },
+			result: {
+				team: createdTeam,
+				leaderSession: { sessionId: "leader-session-1" },
+			},
 		});
 		expect(socketMock.emit).toHaveBeenCalledWith("agent-teams:changed", {
 			added: [createdTeam],
@@ -2349,6 +3710,57 @@ describe("SocketClient restore semantics", () => {
 			removed: [],
 			machineId: "machine-1",
 		});
+	});
+
+	test("relays SessionManager Agent Team changed events", () => {
+		(client as unknown as { connected: boolean }).connected = true;
+		if (!agentTeamChangedListener) {
+			throw new Error("agent team changed listener not registered");
+		}
+
+		agentTeamChangedListener({
+			added: [],
+			updated: [createdTeam],
+			removed: [],
+			machineId: "machine-1",
+		});
+
+		expect(socketMock.emit).toHaveBeenCalledWith("agent-teams:changed", {
+			added: [],
+			updated: [createdTeam],
+			removed: [],
+			machineId: "machine-1",
+		});
+	});
+
+	test("emits updated Agent Team projection without mailbox plaintext", () => {
+		const updatedTeam: AgentTeamSummary = {
+			...createdTeam,
+			sourceRefs: [
+				{
+					type: "mailbox_message",
+					agentTeamId: "team-1",
+					messageId: "message-1",
+					fromMemberId: "member-1",
+					toMemberId: "member-2",
+				},
+			],
+		};
+
+		client.emitUpdatedAgentTeamProjection(updatedTeam);
+
+		expect(socketMock.emit).toHaveBeenCalledWith("agent-teams:changed", {
+			added: [],
+			updated: [updatedTeam],
+			removed: [],
+			machineId: "machine-1",
+		});
+		expect(JSON.stringify(socketMock.emit.mock.calls)).not.toContain(
+			"plaintext mailbox body",
+		);
+		expect(JSON.stringify(socketMock.emit.mock.calls)).not.toContain(
+			"body_local_json",
+		);
 	});
 
 	test("handles rpc:agent-teams:list with requested machine context", async () => {
@@ -2362,7 +3774,7 @@ describe("SocketClient restore semantics", () => {
 			params: { machineId: "machine-1" },
 		});
 
-		expect(agentTeamStoreMock.listAgentTeams).toHaveBeenCalledWith({
+		expect(sessionManager.listAgentTeams).toHaveBeenCalledWith({
 			machineId: "machine-1",
 		});
 		expect(socketMock.emit).toHaveBeenCalledWith("rpc:response", {
@@ -2372,7 +3784,7 @@ describe("SocketClient restore semantics", () => {
 	});
 
 	test("handles rpc:agent-team:get not found as typed empty result", async () => {
-		agentTeamStoreMock.getAgentTeam.mockReturnValueOnce({} as never);
+		sessionManager.getAgentTeam.mockReturnValueOnce({} as never);
 		const handler = socketHandlers.get("rpc:agent-team:get");
 		if (!handler) {
 			throw new Error("rpc:agent-team:get handler not registered");
@@ -2383,7 +3795,7 @@ describe("SocketClient restore semantics", () => {
 			params: { agentTeamId: "missing-team", machineId: "machine-1" },
 		});
 
-		expect(agentTeamStoreMock.getAgentTeam).toHaveBeenCalledWith({
+		expect(sessionManager.getAgentTeam).toHaveBeenCalledWith({
 			agentTeamId: "missing-team",
 			machineId: "machine-1",
 		});

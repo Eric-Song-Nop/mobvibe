@@ -5,6 +5,19 @@ type SessionSelectionTarget = Pick<
 	"isAttached" | "isLoading" | "messages" | "terminalOutputs"
 >;
 
+type SidebarSessionAvailabilityEntry =
+	| {
+			kind: "session";
+			session: { sessionId: string };
+	  }
+	| {
+			kind: "agent-team";
+			members: ReadonlyArray<{
+				sessionId?: string;
+				session?: { sessionId: string };
+			}>;
+	  };
+
 export const hasCachedSessionHistory = (
 	session: Pick<ChatSession, "messages" | "terminalOutputs">,
 ): boolean =>
@@ -19,4 +32,16 @@ export const shouldActivateSessionOnSelect = (
 	}
 
 	return !hasCachedSessionHistory(session);
+};
+
+export const sidebarEntryContainsAvailableSession = (
+	entry: SidebarSessionAvailabilityEntry,
+	sessionId: string,
+): boolean => {
+	if (entry.kind === "session") {
+		return entry.session.sessionId === sessionId;
+	}
+	return entry.members.some(
+		(member) => member.session?.sessionId === sessionId,
+	);
 };
